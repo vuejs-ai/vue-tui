@@ -1,0 +1,20 @@
+{
+  "name": "@vue-tui/example-flappy-bird",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "vite build && node dist/game.mjs"
+  },
+  "dependencies": {
+    "@vue-tui/runtime": "workspace:*",
+    "chalk": "^5.3.0",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^6",
+    "vite": "catalog:"
+  }
+}
