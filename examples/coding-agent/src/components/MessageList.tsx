@@ -13,10 +13,12 @@ export default defineComponent({
       if (msg.role === "user") {
         return (
           <Box>
-            <Text bold color="green">
-              {"You: "}
+            <Text>
+              <Text bold color="green">
+                {"You: "}
+              </Text>
+              {msg.content}
             </Text>
-            <Text>{msg.content}</Text>
           </Box>
         );
       }
@@ -25,7 +27,14 @@ export default defineComponent({
         if (msg.tool_calls) {
           const parts: any[] = [];
           if (msg.content) {
-            parts.push(<Text>{msg.content}</Text>);
+            parts.push(
+              <Text>
+                <Text bold color="cyan">
+                  {"Agent: "}
+                </Text>
+                {msg.content}
+              </Text>,
+            );
           }
           for (const tc of msg.tool_calls) {
             const parsed = JSON.parse(tc.function.arguments);
@@ -39,7 +48,12 @@ export default defineComponent({
         }
         return (
           <Box>
-            <Text>{msg.content}</Text>
+            <Text>
+              <Text bold color="cyan">
+                {"Agent: "}
+              </Text>
+              {msg.content}
+            </Text>
           </Box>
         );
       }
