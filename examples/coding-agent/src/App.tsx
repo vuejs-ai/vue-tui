@@ -26,13 +26,19 @@ export default defineComponent(() => {
     state.value = "streaming";
     streamingText.value = "";
 
+    // Persist user message to Static immediately
+    completedMessages.value = [
+      ...completedMessages.value,
+      { role: "user" as const, content: text },
+    ];
+
     try {
       const updated = await runAgentLoop(text, messages, {
         onToken(token) {
           streamingText.value += token;
         },
         onToolCall(command) {
-          // Flush current streaming text as a completed message before showing tool
+          // Flush streaming text before tool call
           if (streamingText.value) {
             completedMessages.value = [
               ...completedMessages.value,
@@ -43,11 +49,27 @@ export default defineComponent(() => {
           pendingCommand.value = command;
         },
         onToolResult(output) {
-          // Flush the tool call and result as completed messages
+          // Persist the tool call (bordered box) and its output
+          completedMessages.value = [
+            ...completedMessages.value,
+            {
+              role: "assistant",
+              tool_calls: [
+                {
+                  id: "",
+                  type: "function",
+                  function: {
+                    name: "bash",
+                    arguments: JSON.stringify({ command: pendingCommand.value }),
+                  },
+                },
+              ],
+            },
+            { role: "tool", content: output },
+          ];
           pendingCommand.value = "";
         },
         onComplete() {
-          // Final streaming text becomes a completed message
           if (streamingText.value) {
             completedMessages.value = [
               ...completedMessages.value,
