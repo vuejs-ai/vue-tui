@@ -17,6 +17,8 @@ import {
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
+import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
+import { createDevOverlayWrapper } from "./overlay.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
@@ -91,6 +93,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({ onCommit: () => scheduledCommit() }),
   );
+  if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
+    initHmrBridge();
+    root = createDevOverlayWrapper(root, rootProps ?? undefined);
+    rootProps = undefined;
+  }
   const baseApp = renderer.createApp(root, rootProps ?? undefined);
   const originalMount = baseApp.mount.bind(baseApp);
   const originalUnmount = baseApp.unmount.bind(baseApp);
@@ -161,6 +168,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.provide(AppContextKey, appContext);
     baseApp.provide(FocusContextKey, focusContext);
     baseApp.provide(StdinContextKey, stdinController);
+    if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
+      baseApp.provide(DevStateKey, devState);
+    }
 
     let proxy: ComponentPublicInstance;
     try {
