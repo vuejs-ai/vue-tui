@@ -18,7 +18,8 @@
   },
   "scripts": {
     "build": "vp pack",
-    "dev": "vp pack --watch"
+    "dev": "vp pack --watch",
+    "prepublishOnly": "vp run build"
   },
   "dependencies": {
     "vite": "catalog:"
