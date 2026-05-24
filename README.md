@@ -50,6 +50,15 @@ useInput((input) => {
 </template>
 ```
 
+## Examples
+
+| Example                                       | Description                                                 |
+| --------------------------------------------- | ----------------------------------------------------------- |
+| [`basic-template`](./examples/basic-template) | Vue SFC with `<template>` syntax                            |
+| [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                             |
+| [`coding-agent`](./examples/coding-agent)     | AI coding agent with LLM streaming and interactive UI       |
+| [`flappy-bird`](./examples/flappy-bird)       | Physics-based terminal game with reactive state and borders |
+
 ## Getting Started
 
 ```bash
@@ -129,14 +138,6 @@ test("counter responds to + and - keys", async () => {
   expect(lastFrame()).toContain("Count: 0");
 });
 ```
-
-## Examples
-
-| Example                                       | Description                                        |
-| --------------------------------------------- | -------------------------------------------------- |
-| [`basic-template`](./examples/basic-template) | Vue SFC with `<template>` syntax                   |
-| [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                    |
-| [`flappy-bird`](./examples/flappy-bird)       | Physics-based game with reactive state and borders |
 
 ## Development
 
