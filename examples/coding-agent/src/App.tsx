@@ -1,6 +1,6 @@
 import { shallowRef, defineComponent } from "vue";
 import { Box, Text, Static, useInput, useExit } from "@vue-tui/runtime";
-import { runAgentLoop, type Message } from "./agent";
+import { runAgentLoop, type Message, type ToolCall } from "./agent";
 import MessageList from "./components/MessageList";
 
 type AppState = "idle" | "streaming" | "approving";
@@ -37,8 +37,7 @@ export default defineComponent(() => {
         onToken(token) {
           streamingText.value += token;
         },
-        onToolCall(command) {
-          // Flush streaming text before tool call
+        onToolCall(tc: ToolCall, command: string) {
           if (streamingText.value) {
             completedMessages.value = [
               ...completedMessages.value,
@@ -48,24 +47,11 @@ export default defineComponent(() => {
           }
           pendingCommand.value = command;
         },
-        onToolResult(output) {
-          // Persist the tool call (bordered box) and its output
+        onToolResult(tc: ToolCall, output: string) {
           completedMessages.value = [
             ...completedMessages.value,
-            {
-              role: "assistant",
-              tool_calls: [
-                {
-                  id: "",
-                  type: "function",
-                  function: {
-                    name: "bash",
-                    arguments: JSON.stringify({ command: pendingCommand.value }),
-                  },
-                },
-              ],
-            },
-            { role: "tool", content: output },
+            { role: "assistant", tool_calls: [tc] },
+            { role: "tool", tool_call_id: tc.id, content: output },
           ];
           pendingCommand.value = "";
         },
@@ -92,10 +78,12 @@ export default defineComponent(() => {
       messages.length = 0;
       messages.push(...updated);
     } catch (err: any) {
-      completedMessages.value = [
-        ...completedMessages.value,
-        { role: "assistant", content: `Error: ${err.message}` },
-      ];
+      const errParts: Message[] = [];
+      if (streamingText.value) {
+        errParts.push({ role: "assistant", content: streamingText.value });
+      }
+      errParts.push({ role: "assistant", content: `Error: ${err.message}` });
+      completedMessages.value = [...completedMessages.value, ...errParts];
     }
 
     streamingText.value = "";

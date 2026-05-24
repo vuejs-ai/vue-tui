@@ -16,8 +16,8 @@ export interface ToolCall {
 
 export interface AgentOptions {
   onToken: (token: string) => void;
-  onToolCall: (command: string) => void;
-  onToolResult: (output: string) => void;
+  onToolCall: (tc: ToolCall, command: string) => void;
+  onToolResult: (tc: ToolCall, output: string) => void;
   onComplete: () => void;
   autoApprove: boolean;
   requestApproval: (command: string) => Promise<boolean>;
@@ -100,8 +100,7 @@ export async function runAgentLoop(
     });
 
     let contentBuffer = "";
-    let toolCalls: ToolCall[] = [];
-    const toolCallArgs: Map<number, string> = new Map();
+    const toolCallMap = new Map<number, ToolCall>();
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
@@ -114,32 +113,24 @@ export async function runAgentLoop(
 
       if (delta.tool_calls) {
         for (const tc of delta.tool_calls) {
-          if (tc.id) {
-            toolCalls.push({
-              id: tc.id,
-              type: "function",
-              function: { name: tc.function?.name ?? "", arguments: "" },
-            });
-          }
-          if (tc.function?.arguments) {
-            const existing = toolCallArgs.get(tc.index) ?? "";
-            toolCallArgs.set(tc.index, existing + tc.function.arguments);
-          }
+          const existing = toolCallMap.get(tc.index) ?? {
+            id: "",
+            type: "function" as const,
+            function: { name: "", arguments: "" },
+          };
+          if (tc.id) existing.id = tc.id;
+          if (tc.function?.name) existing.function.name = tc.function.name;
+          if (tc.function?.arguments) existing.function.arguments += tc.function.arguments;
+          toolCallMap.set(tc.index, existing);
         }
       }
     }
 
-    // Finalize accumulated tool call arguments
-    for (const [index, args] of toolCallArgs) {
-      if (toolCalls[index]) {
-        toolCalls[index].function.arguments = args;
-      }
-    }
+    const toolCalls = [...toolCallMap.entries()].sort(([a], [b]) => a - b).map(([, tc]) => tc);
 
-    // Append the full assistant message to history
     const assistantMsg: Message = {
       role: "assistant",
-      content: contentBuffer || undefined,
+      content: contentBuffer || (toolCalls.length > 0 ? undefined : ""),
       tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
     };
     messages = [...messages, assistantMsg];
@@ -150,26 +141,33 @@ export async function runAgentLoop(
       return messages;
     }
 
-    // Execute each tool call
     for (const tc of assistantMsg.tool_calls) {
-      const parsed = JSON.parse(tc.function.arguments);
-      const command: string = parsed.command;
+      let command: string;
+      try {
+        const parsed = JSON.parse(tc.function.arguments);
+        command = parsed.command ?? "";
+      } catch {
+        const errMsg = `Failed to parse tool arguments: ${tc.function.arguments}`;
+        options.onToolCall(tc, errMsg);
+        options.onToolResult(tc, errMsg);
+        messages = [...messages, { role: "tool", tool_call_id: tc.id, content: errMsg }];
+        continue;
+      }
 
-      options.onToolCall(command);
+      options.onToolCall(tc, command);
 
       if (!options.autoApprove) {
         const approved = await options.requestApproval(command);
         if (!approved) {
-          messages = [
-            ...messages,
-            { role: "tool", tool_call_id: tc.id, content: "(skipped by user)" },
-          ];
+          const skipped = "(skipped by user)";
+          options.onToolResult(tc, skipped);
+          messages = [...messages, { role: "tool", tool_call_id: tc.id, content: skipped }];
           continue;
         }
       }
 
       const output = await executeBash(command);
-      options.onToolResult(output);
+      options.onToolResult(tc, output);
       messages = [...messages, { role: "tool", tool_call_id: tc.id, content: output }];
     }
     // Loop back to call the API again with updated messages
