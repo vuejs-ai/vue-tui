@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/runtime",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Vue-idiomatic terminal renderer in the spirit of React Ink.",
   "license": "MIT",
   "files": [

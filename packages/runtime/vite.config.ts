@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vueJsx()],
   pack: {
     entry: ["src/index.ts", "src/internal.ts"],
-    dts: { tsgo: true },
+    dts: true,
     exports: true,
   },
   lint: {

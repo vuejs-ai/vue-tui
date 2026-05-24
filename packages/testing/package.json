@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/testing",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Test harness for @vue-tui/runtime.",
   "license": "MIT",
   "files": [

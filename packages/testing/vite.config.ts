@@ -4,7 +4,7 @@ import vueJsx from "@vitejs/plugin-vue-jsx";
 export default defineConfig({
   plugins: [vueJsx()],
   pack: {
-    dts: { tsgo: true },
+    dts: true,
     exports: true,
   },
   lint: {
