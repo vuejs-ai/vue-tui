@@ -1,5 +1,7 @@
 # vue-tui
 
+> **Early stage** — under active development. Bug reports welcome, but not recommended for production use yet.
+
 Vue for the terminal. Build interactive CLI apps with components, flexbox, and HMR.
 
 - **Vue SFC & JSX** — write terminal UIs with `<template>`, TSX, or both
