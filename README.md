@@ -39,56 +39,21 @@ export default defineComponent({
 </template>
 ```
 
-## Install
-
-```bash
-npm install @vue-tui/runtime vue
-npm install -D @vue-tui/cli @vitejs/plugin-vue vite
-```
-
 ## Getting Started
 
-**`src/main.ts`**
-
-```ts
-import { createApp } from "@vue-tui/runtime";
-import App from "./App.vue";
-
-createApp(App).mount();
+```bash
+npx tiged vuejs-ai/vue-tui-starter my-app
+cd my-app
+npm install
+npm run dev
 ```
 
-**`vite.config.ts`**
+That's it — edit `src/App.vue` and see changes instantly with HMR.
 
-```ts
-import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-
-export default defineConfig({
-  plugins: [vue()],
-  build: {
-    target: "node22",
-    lib: {
-      entry: "src/main.ts",
-      formats: ["es"],
-      fileName: () => "app.mjs",
-    },
-    rollupOptions: {
-      external: (id) => !id.startsWith(".") && !id.startsWith("/") && !id.startsWith("\0"),
-    },
-  },
-});
-```
-
-Run in development with HMR:
+To build and run:
 
 ```bash
-npx vue-tui dev
-```
-
-Build and run:
-
-```bash
-npx vite build && node dist/app.mjs
+npm run preview
 ```
 
 ## Components
