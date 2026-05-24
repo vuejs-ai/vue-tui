@@ -1,5 +1,5 @@
 {
-  "name": "@vue-tui/example-hmr-demo",
+  "name": "@vue-tui/example-basic-template",
   "version": "0.0.0",
   "private": true,
   "type": "module",
