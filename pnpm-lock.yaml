@@ -84,6 +84,16 @@ importers:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
         version: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
 
+  packages/cli:
+    dependencies:
+      vite:
+        specifier: npm:@voidzero-dev/vite-plus-core@latest
+        version: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.8.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)'
+    devDependencies:
+      vite-plus:
+        specifier: 'catalog:'
+        version: 0.1.22(@types/node@25.8.0)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.8.0)(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0))(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)
+
   packages/runtime:
     dependencies:
       '@vue/runtime-core':
