@@ -151,6 +151,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedWriter = writer;
 
     function commit() {
+      writer.clear();
       flushStatic(tuiRoot, stdout);
       const w = stdout.columns ?? 80;
       tuiRoot.yoga.setWidth(w);
