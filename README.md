@@ -26,22 +26,15 @@ createApp(App).mount();
 
 ```vue
 <!-- src/App.vue -->
-<script lang="ts">
-import { shallowRef, defineComponent } from "vue";
+<script setup lang="ts">
+import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 
-export default defineComponent({
-  components: { Box, Text },
-  setup() {
-    const count = shallowRef(0);
+const count = shallowRef(0);
 
-    useInput((input) => {
-      if (input === "+") count.value++;
-      if (input === "-") count.value--;
-    });
-
-    return { count };
-  },
+useInput((input) => {
+  if (input === "+") count.value++;
+  if (input === "-") count.value--;
 });
 </script>
 

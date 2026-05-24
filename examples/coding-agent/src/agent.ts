@@ -23,10 +23,16 @@ export interface AgentOptions {
   requestApproval: (command: string) => Promise<boolean>;
 }
 
-const client = new OpenAI({
-  apiKey: process.env["DEEPSEEK_API_KEY"],
-  baseURL: "https://api.deepseek.com",
-});
+let client: OpenAI | undefined;
+function getClient(): OpenAI {
+  if (!client) {
+    client = new OpenAI({
+      apiKey: process.env["DEEPSEEK_API_KEY"],
+      baseURL: "https://api.deepseek.com",
+    });
+  }
+  return client;
+}
 
 const BASH_TOOL = {
   type: "function" as const,
@@ -83,7 +89,7 @@ export async function runAgentLoop(
   messages = [...messages, { role: "user", content: userMessage }];
 
   while (true) {
-    const stream = await client.chat.completions.create({
+    const stream = await getClient().chat.completions.create({
       model: "deepseek-v4-pro",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
