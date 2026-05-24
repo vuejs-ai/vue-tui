@@ -1,0 +1,21 @@
+{
+  "name": "@vue-tui/example-hmr-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vue-tui dev",
+    "build": "vite build",
+    "start": "vite build && node dist/game.mjs"
+  },
+  "dependencies": {
+    "@vue-tui/cli": "workspace:*",
+    "@vue-tui/runtime": "workspace:*",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^6",
+    "vite": "catalog:"
+  }
+}

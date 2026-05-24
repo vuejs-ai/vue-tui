@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import type { Logger } from "./logger.ts";
 
 export interface ProcessManagerOptions {
@@ -9,7 +8,8 @@ export interface ProcessManagerOptions {
   onExit?: (code: number | null) => void;
 }
 
-const loaderPath = fileURLToPath(new URL("./hmr-loader.mjs", import.meta.url));
+const loaderUrl = new URL("./hmr-loader.mjs", import.meta.url).href;
+const loaderBootstrap = `data:text/javascript,import{register}from"node:module";register(${JSON.stringify(loaderUrl)})`;
 
 export function createProcessManager(options: ProcessManagerOptions) {
   let child: ChildProcess | null = null;
@@ -17,7 +17,7 @@ export function createProcessManager(options: ProcessManagerOptions) {
 
   function doSpawn() {
     options.logger.mode = "silent";
-    child = spawn("node", ["--import", loaderPath, currentBundlePath], {
+    child = spawn("node", ["--import", loaderBootstrap, currentBundlePath], {
       stdio: "inherit",
       env: {
         ...process.env,
