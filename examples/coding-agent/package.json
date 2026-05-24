@@ -1,0 +1,22 @@
+{
+  "name": "@vue-tui/example-coding-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vue-tui dev",
+    "build": "vite build",
+    "preview": "vite build && node dist/agent.mjs"
+  },
+  "dependencies": {
+    "@vue-tui/cli": "workspace:*",
+    "@vue-tui/runtime": "workspace:*",
+    "openai": "^4.98.0",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "vite": "catalog:"
+  }
+}
