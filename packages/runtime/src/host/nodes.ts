@@ -1,0 +1,159 @@
+import type { AppContext } from "../context.ts";
+import type { Node as YogaNode } from "yoga-layout";
+
+export type YogaNodeRef = YogaNode;
+
+export interface BoxProps {
+  [k: string]: unknown;
+}
+
+export interface TextProps {
+  color?: unknown;
+  backgroundColor?: unknown;
+  dimColor?: boolean;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  inverse?: boolean;
+  wrap?: "wrap" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
+}
+
+interface NodeBase {
+  parent: TuiContainer | null;
+}
+
+export interface TuiRoot extends NodeBase {
+  type: "root";
+  parent: null;
+  children: TuiNode[];
+  yoga: YogaNodeRef;
+  appContext: AppContext;
+}
+
+export interface TuiBox extends NodeBase {
+  type: "box";
+  children: TuiNode[];
+  yoga: YogaNodeRef;
+  props: BoxProps;
+  paintDirty: boolean;
+}
+
+export interface TuiText extends NodeBase {
+  type: "text";
+  children: TuiInlineNode[];
+  yoga: YogaNodeRef;
+  props: TextProps;
+  measuredCache?: string;
+}
+
+export interface TuiVirtualText extends NodeBase {
+  type: "virtual-text";
+  parent: TuiText | TuiVirtualText | null;
+  children: TuiInlineNode[];
+  props: TextProps;
+}
+
+export interface TuiTextLeaf extends NodeBase {
+  type: "text-leaf";
+  parent: TuiText | TuiVirtualText | null;
+  value: string;
+}
+
+/** Placeholder comment node used by Vue's renderer for v-if / null renders. */
+export interface TuiComment extends NodeBase {
+  type: "comment";
+  value: string;
+}
+
+export interface TuiStatic extends NodeBase {
+  type: "static";
+  children: TuiNode[];
+  yoga: YogaNodeRef;
+  writtenCount: number;
+}
+
+export interface TuiTransform extends NodeBase {
+  type: "transform";
+  children: TuiNode[];
+  transform: (line: string, lineIndex: number) => string;
+}
+
+export type TuiInlineNode = TuiVirtualText | TuiTextLeaf;
+export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiTransform | TuiText | TuiVirtualText;
+export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
+
+// Constructors take the bare minimum and leave yoga binding to yoga.ts.
+// The `yoga` field is set to a sentinel and replaced by `attachYoga(node)`.
+const UNATTACHED_YOGA = Symbol("vue-tui:yoga-unattached") as unknown as YogaNodeRef;
+
+export function createRoot(appContext: AppContext): TuiRoot {
+  return {
+    type: "root",
+    parent: null,
+    children: [],
+    yoga: UNATTACHED_YOGA,
+    appContext,
+  };
+}
+
+export function createBox(): TuiBox {
+  return {
+    type: "box",
+    parent: null,
+    children: [],
+    yoga: UNATTACHED_YOGA,
+    props: {},
+    paintDirty: true,
+  };
+}
+
+export function createText(): TuiText {
+  return {
+    type: "text",
+    parent: null,
+    children: [],
+    yoga: UNATTACHED_YOGA,
+    props: {},
+  };
+}
+
+export function createVirtualText(): TuiVirtualText {
+  return {
+    type: "virtual-text",
+    parent: null,
+    children: [],
+    props: {},
+  };
+}
+
+export function createTextLeaf(value: string): TuiTextLeaf {
+  return { type: "text-leaf", parent: null, value };
+}
+
+export function createStatic(): TuiStatic {
+  return {
+    type: "static",
+    parent: null,
+    children: [],
+    yoga: UNATTACHED_YOGA,
+    writtenCount: 0,
+  };
+}
+
+export function createTransform(fn: (line: string, lineIndex: number) => string): TuiTransform {
+  return {
+    type: "transform",
+    parent: null,
+    children: [],
+    transform: fn,
+  };
+}
+
+export function createComment(value: string): TuiComment {
+  return { type: "comment", parent: null, value };
+}
+
+export function isContainer(node: TuiNode): node is TuiContainer {
+  return node.type !== "text-leaf" && node.type !== "comment";
+}
