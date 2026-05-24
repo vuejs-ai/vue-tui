@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vue-tui dev",
     "build": "vite build",
-    "start": "vite build && node dist/game.mjs"
+    "preview": "vite build && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/cli": "workspace:*",
