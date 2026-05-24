@@ -1,21 +1,14 @@
-<script lang="ts">
-import { shallowRef, defineComponent } from "vue";
+<script setup lang="ts">
+import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 import Counter from "./Counter.vue";
 import Clock from "./Clock.vue";
 
-export default defineComponent({
-  components: { Box, Text, Counter, Clock },
-  setup() {
-    const showClock = shallowRef(true);
+const showClock = shallowRef(true);
 
-    useInput((input) => {
-      if (input === "c") showClock.value = !showClock.value;
-      if (input === "q") process.exit(0);
-    });
-
-    return { showClock };
-  },
+useInput((input) => {
+  if (input === "c") showClock.value = !showClock.value;
+  if (input === "q") process.exit(0);
 });
 </script>
 

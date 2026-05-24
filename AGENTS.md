@@ -3,6 +3,7 @@
 - AGENTS.md is the source of truth. CLAUDE.md is a symlink to it.
 - Always use Vue's `shallowRef` over `ref` by default. Using `ref` requires a solid justification and a code comment explaining why deep reactivity is needed.
 - Always use `defineComponent()` to define components. Never use bare `{ setup() {} }` objects — they lack component scope, so `inject`, `watch`, and `onScopeDispose` won't work correctly.
+- Vue SFCs must use `<script setup>` unless there's an explicit reason not to.
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
 
 <!--VITE PLUS START-->
