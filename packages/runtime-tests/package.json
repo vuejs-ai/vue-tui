@@ -1,0 +1,19 @@
+{
+  "name": "@vue-tui/runtime-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vp test",
+    "check": "vp check"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/testing": "workspace:*",
+    "typescript": "^6.0.3",
+    "vite-plus": "^0.1.20",
+    "vue": "^3.4.0"
+  }
+}
