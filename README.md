@@ -8,9 +8,24 @@ Vue for the terminal. Build interactive CLI apps with components, flexbox, and H
 - **Hot module replacement** — instant feedback while developing
 - **First-class testing** — render components, simulate input, assert frames
 
+## Packages
+
+- **[`@vue-tui/runtime`](./packages/runtime)** — The core framework. A custom Vue 3 renderer that targets the terminal instead of the DOM. Provides components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useExit`, etc.), and a yoga-based flexbox layout engine.
+- **[`@vue-tui/cli`](./packages/cli)** — Development tool. Run `vue-tui dev` to start your app with Vite-powered HMR — edit a `.vue` file and see the terminal update instantly.
+- **[`@vue-tui/testing`](./packages/testing)** — Test harness. Render components in an isolated fake terminal, simulate keyboard input, and assert on visual output frame by frame.
+
 ## Quick Example
 
+```ts
+// src/main.ts
+import { createApp } from "@vue-tui/runtime";
+import App from "./App.vue";
+
+createApp(App).mount();
+```
+
 ```vue
+<!-- src/App.vue -->
 <script lang="ts">
 import { shallowRef, defineComponent } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -34,6 +49,7 @@ export default defineComponent({
   <Box>
     <Text>Count: </Text>
     <Text bold color="green">{{ count }}</Text>
+    <!-- try changing this color -->
     <Text dimColor> (+/- to change)</Text>
   </Box>
 </template>
@@ -48,7 +64,7 @@ npm install
 npm run dev
 ```
 
-That's it — edit `src/App.vue` and see changes instantly with HMR.
+That's it — try changing the color or text in `App.vue` and watch the terminal update instantly while keeping your component state.
 
 To build and run:
 
@@ -126,14 +142,6 @@ test("counter responds to + and - keys", async () => {
 | [`basic-template`](./examples/basic-template) | Vue SFC with `<template>` syntax                   |
 | [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                    |
 | [`flappy-bird`](./examples/flappy-bird)       | Physics-based game with reactive state and borders |
-
-## Packages
-
-| Package                                  | Description                                                   |
-| ---------------------------------------- | ------------------------------------------------------------- |
-| [`@vue-tui/runtime`](./packages/runtime) | Core renderer — components, hooks, layout engine              |
-| [`@vue-tui/testing`](./packages/testing) | Test harness — `render()`, frame assertions, input simulation |
-| [`@vue-tui/cli`](./packages/cli)         | Dev tool — `vue-tui dev` with Vite HMR                        |
 
 ## Development
 
