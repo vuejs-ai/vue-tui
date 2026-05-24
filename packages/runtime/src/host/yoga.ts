@@ -43,6 +43,11 @@ function hasYoga(node: TuiNode): node is YogaCarrier {
 
 export function attachYoga(node: YogaCarrier): void {
   node.yoga = createYogaNode();
+  // Static nodes are painted via a separate channel (paintIsolated), so they
+  // must not occupy space in the dynamic frame's yoga layout.
+  if (node.type === "static") {
+    (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);
+  }
 }
 
 export function detachYoga(node: YogaCarrier): void {

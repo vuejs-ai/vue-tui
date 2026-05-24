@@ -130,3 +130,28 @@ test("Static flush clears the dynamic frame first (non-debug mode)", async () =>
 
   app.unmount();
 });
+
+test("Static items do not add blank lines to the dynamic frame", async () => {
+  const items = ref<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => <Text>{item}</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toBe("[live]");
+
+  items.value = ["a", "b", "c"];
+  await nextTick();
+
+  // The dynamic frame should ONLY contain [live], no blank lines from Static
+  const frame = lastFrame()!;
+  expect(frame).toBe("[live]");
+});
