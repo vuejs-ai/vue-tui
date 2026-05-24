@@ -9,7 +9,22 @@ export interface ProcessManagerOptions {
 }
 
 const loaderUrl = new URL("./hmr-loader.mjs", import.meta.url).href;
-const loaderBootstrap = `data:text/javascript,import{register}from"node:module";register(${JSON.stringify(loaderUrl)})`;
+
+// Bootstrap script: register HMR loader hooks + silence Vite/Vue console noise
+const loaderBootstrap = `data:text/javascript,${encodeURIComponent(`
+import{register}from"node:module";
+register(${JSON.stringify(loaderUrl)});
+
+// Intercept all console methods to suppress Vite HMR client and Vue warn noise
+for (const method of ["log", "info", "warn", "error", "debug"]) {
+  const orig = console[method];
+  console[method] = (...args) => {
+    const first = typeof args[0] === "string" ? args[0] : "";
+    if (first.includes("[vite]") || first.includes("[Vue warn]")) return;
+    orig.apply(console, args);
+  };
+}
+`)}`;
 
 export function createProcessManager(options: ProcessManagerOptions) {
   let child: ChildProcess | null = null;

@@ -17,6 +17,7 @@ export async function dev(entry?: string) {
 
   const server = await createServer({
     plugins: [vueTuiDevPlugin({ entry })],
+    logLevel: "silent",
   });
 
   await server.listen();
@@ -55,8 +56,16 @@ export async function dev(entry?: string) {
 
   pm.spawn();
 
+  // Ignore reload requests during startup — the initial WS connection
+  // may trigger vite:beforeFullReload before the app is ready
+  let acceptReloads = false;
+  setTimeout(() => {
+    acceptReloads = true;
+  }, 3000);
+
   // Listen for full reload requests from child
   server.hot.on("vue-tui:request-reload", async () => {
+    if (!acceptReloads) return;
     const newPath = await extractBundle(clientEnv.memoryFiles, outDir);
     pm.setBundlePath(newPath);
     pm.restart();
