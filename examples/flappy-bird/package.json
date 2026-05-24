@@ -1,11 +1,11 @@
 {
-  "name": "@vue-tui/example-basic",
+  "name": "@vue-tui/example-flappy-bird",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "start": "vite build && node dist/game.mjs"
+    "preview": "vite build && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
