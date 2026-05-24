@@ -1,6 +1,6 @@
 # vue-tui
 
-Vue-idiomatic terminal UI — a monorepo providing `@vue-tui/runtime` (terminal renderer) and `@vue-tui/testing` (test harness).
+Terminal UI framework built on Vue and Vite. Components, layout, focus, HMR, and testing out of the box.
 
 ## Packages
 
