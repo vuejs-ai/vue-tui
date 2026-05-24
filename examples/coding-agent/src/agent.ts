@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import OpenAI from "openai";
 
 export interface Message {
   role: "user" | "assistant" | "tool";
@@ -21,6 +22,11 @@ export interface AgentOptions {
   autoApprove: boolean;
   requestApproval: (command: string) => Promise<boolean>;
 }
+
+const client = new OpenAI({
+  apiKey: process.env["DEEPSEEK_API_KEY"],
+  baseURL: "https://api.deepseek.com",
+});
 
 const BASH_TOOL = {
   type: "function" as const,
@@ -67,4 +73,99 @@ export function executeBash(command: string): Promise<string> {
       },
     );
   });
+}
+
+export async function runAgentLoop(
+  userMessage: string,
+  messages: Message[],
+  options: AgentOptions,
+): Promise<Message[]> {
+  messages = [...messages, { role: "user", content: userMessage }];
+
+  while (true) {
+    const stream = await client.chat.completions.create({
+      model: "deepseek-v4-pro",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...(messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[]),
+      ],
+      tools: [BASH_TOOL],
+      stream: true,
+    });
+
+    let contentBuffer = "";
+    let toolCalls: ToolCall[] = [];
+    const toolCallArgs: Map<number, string> = new Map();
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      if (!delta) continue;
+
+      if (delta.content) {
+        contentBuffer += delta.content;
+        options.onToken(delta.content);
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          if (tc.id) {
+            toolCalls.push({
+              id: tc.id,
+              type: "function",
+              function: { name: tc.function?.name ?? "", arguments: "" },
+            });
+          }
+          if (tc.function?.arguments) {
+            const existing = toolCallArgs.get(tc.index) ?? "";
+            toolCallArgs.set(tc.index, existing + tc.function.arguments);
+          }
+        }
+      }
+    }
+
+    // Finalize accumulated tool call arguments
+    for (const [index, args] of toolCallArgs) {
+      if (toolCalls[index]) {
+        toolCalls[index].function.arguments = args;
+      }
+    }
+
+    // Append the full assistant message to history
+    const assistantMsg: Message = {
+      role: "assistant",
+      content: contentBuffer || undefined,
+      tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+    };
+    messages = [...messages, assistantMsg];
+
+    // If no tool calls, we're done
+    if (!assistantMsg.tool_calls) {
+      options.onComplete();
+      return messages;
+    }
+
+    // Execute each tool call
+    for (const tc of assistantMsg.tool_calls) {
+      const parsed = JSON.parse(tc.function.arguments);
+      const command: string = parsed.command;
+
+      options.onToolCall(command);
+
+      if (!options.autoApprove) {
+        const approved = await options.requestApproval(command);
+        if (!approved) {
+          messages = [
+            ...messages,
+            { role: "tool", tool_call_id: tc.id, content: "(skipped by user)" },
+          ];
+          continue;
+        }
+      }
+
+      const output = await executeBash(command);
+      options.onToolResult(output);
+      messages = [...messages, { role: "tool", tool_call_id: tc.id, content: output }];
+    }
+    // Loop back to call the API again with updated messages
+  }
 }
