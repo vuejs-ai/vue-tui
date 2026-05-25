@@ -128,24 +128,41 @@ function drawBorder(
 
   const borderColor = props["borderColor"] as string | undefined;
   const bgColor = props["backgroundColor"] as string | undefined;
-  const colorProps: TextProps = {};
-  if (borderColor) colorProps.color = borderColor;
-  if (bgColor) colorProps.backgroundColor = bgColor;
-  const colorize = (s: string) => (borderColor || bgColor ? applyChalk(s, colorProps) : s);
+  const dimAll = !!props["borderDimColor"];
+
+  function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
+    const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
+    const edgeColor = (props[`border${capEdge}Color`] as string | undefined) ?? borderColor;
+    const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) || dimAll;
+    const edgeBg =
+      (props[`border${capEdge}BackgroundColor`] as string | undefined) ??
+      (props["borderBackgroundColor"] as string | undefined) ??
+      bgColor;
+    const p: TextProps = {};
+    if (edgeColor) p.color = edgeColor;
+    if (edgeBg) p.backgroundColor = edgeBg;
+    if (edgeDim) p.dimColor = true;
+    return Object.keys(p).length > 0 ? applyChalk(s, p) : s;
+  }
 
   if (top) {
     const tl = left ? chars.topLeft : chars.top;
     const tr = right ? chars.topRight : chars.top;
-    output.write(x, y, [colorize(tl + chars.top.repeat(w - 2) + tr)], transformers);
+    output.write(x, y, [colorizeEdge(tl + chars.top.repeat(w - 2) + tr, "top")], transformers);
   }
   if (bottom) {
     const bl = left ? chars.bottomLeft : chars.bottom;
     const br = right ? chars.bottomRight : chars.bottom;
-    output.write(x, y + h - 1, [colorize(bl + chars.bottom.repeat(w - 2) + br)], transformers);
+    output.write(
+      x,
+      y + h - 1,
+      [colorizeEdge(bl + chars.bottom.repeat(w - 2) + br, "bottom")],
+      transformers,
+    );
   }
   for (let i = 1; i < h - 1; i++) {
-    if (left) output.write(x, y + i, [colorize(chars.left)], transformers);
-    if (right) output.write(x + w - 1, y + i, [colorize(chars.right)], transformers);
+    if (left) output.write(x, y + i, [colorizeEdge(chars.left, "left")], transformers);
+    if (right) output.write(x + w - 1, y + i, [colorizeEdge(chars.right, "right")], transformers);
   }
 }
 

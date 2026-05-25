@@ -45,6 +45,15 @@ const STYLE_PROPS = new Set([
   "borderBottomColor",
   "borderLeftColor",
   "borderRightColor",
+  "borderTopDimColor",
+  "borderBottomDimColor",
+  "borderLeftDimColor",
+  "borderRightDimColor",
+  "borderBackgroundColor",
+  "borderTopBackgroundColor",
+  "borderBottomBackgroundColor",
+  "borderLeftBackgroundColor",
+  "borderRightBackgroundColor",
   // Per-edge toggles are dual: yoga uses them to size border space, paint
   // uses them to decide which edges to draw.
   "borderTop",
