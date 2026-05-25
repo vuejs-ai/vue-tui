@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [vueJsx()],
   test: {
     // chalk disables color in non-TTY envs; force it on so ANSI style bugs don't hide from tests
-    env: { FORCE_COLOR: "1" },
+    env: { FORCE_COLOR: "3" },
   },
   lint: {
     options: { typeAware: true, typeCheck: true },
