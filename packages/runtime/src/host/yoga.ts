@@ -59,6 +59,14 @@ export function attachYoga(node: YogaCarrier): void {
     (node.yoga as YogaNode).setFlexWrap(Yoga.WRAP_NO_WRAP);
     (node.yoga as YogaNode).setFlexGrow(0);
   }
+  // Text nodes match Ink's <ink-text> defaults: row direction, shrinkable.
+  // Although text nodes rarely have yoga-carrying children, this ensures
+  // consistent layout behavior matching Ink.
+  if (node.type === "text") {
+    (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+    (node.yoga as YogaNode).setFlexShrink(1);
+    (node.yoga as YogaNode).setFlexGrow(0);
+  }
 }
 
 export function detachYoga(node: YogaCarrier): void {
