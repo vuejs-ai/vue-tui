@@ -93,11 +93,25 @@ class Output {
         return l;
       });
 
-      // Apply active clip rect
-      const clip = clips.at(-1);
-      if (clip) {
+      // Apply active clip rect — intersect ALL clips in the stack so nested
+      // overflow:hidden boxes correctly constrain children.
+      if (clips.length > 0) {
+        const clip = clips.reduce<ClipRect>(
+          (acc, c) => ({
+            x1: acc.x1 != null && c.x1 != null ? Math.max(acc.x1, c.x1) : (acc.x1 ?? c.x1),
+            x2: acc.x2 != null && c.x2 != null ? Math.min(acc.x2, c.x2) : (acc.x2 ?? c.x2),
+            y1: acc.y1 != null && c.y1 != null ? Math.max(acc.y1, c.y1) : (acc.y1 ?? c.y1),
+            y2: acc.y2 != null && c.y2 != null ? Math.min(acc.y2, c.y2) : (acc.y2 ?? c.y2),
+          }),
+          { x1: undefined, x2: undefined, y1: undefined, y2: undefined },
+        );
+
         const clipH = typeof clip.x1 === "number" && typeof clip.x2 === "number";
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
+
+        // If the intersection is empty, skip the write entirely
+        if (clipH && clip.x1! >= clip.x2!) continue;
+        if (clipV && clip.y1! >= clip.y2!) continue;
 
         // Skip entirely out-of-bounds writes
         if (clipV) {
