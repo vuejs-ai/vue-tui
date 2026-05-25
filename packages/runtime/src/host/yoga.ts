@@ -48,6 +48,17 @@ export function attachYoga(node: YogaCarrier): void {
   if (node.type === "static") {
     (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);
   }
+  // Box nodes match Ink's defaults: row direction, shrinkable, no wrap.
+  // These are set at the yoga level so they work regardless of whether props
+  // are passed through Vue's reactive system (which may include undefined
+  // overrides or border defaults). User-provided props override these via
+  // patchProp which runs after attachYoga.
+  if (node.type === "box") {
+    (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+    (node.yoga as YogaNode).setFlexShrink(1);
+    (node.yoga as YogaNode).setFlexWrap(Yoga.WRAP_NO_WRAP);
+    (node.yoga as YogaNode).setFlexGrow(0);
+  }
 }
 
 export function detachYoga(node: YogaCarrier): void {

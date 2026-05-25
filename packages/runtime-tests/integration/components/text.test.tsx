@@ -173,7 +173,7 @@ test("remeasure text when text nodes are changed", async () => {
   const add = shallowRef(false);
   const { lastFrame } = await render(
     defineComponent(() => () => (
-      <Box>
+      <Box flexDirection="column">
         <Text>abc{add.value ? <Text>x</Text> : null}</Text>
       </Box>
     )),

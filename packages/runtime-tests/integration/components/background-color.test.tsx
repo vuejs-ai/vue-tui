@@ -114,10 +114,9 @@ test("Multiple Text elements inherit same background", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`
-    "[43m[43mHello [49m[43m[49m
-    [43m[43mWorld[49m[43m [49m"
-  `);
+  expect(lastFrame()).toMatchInlineSnapshot(
+    `"[43m[43mHello [49m[43m[49m[43m[43mWorld[49m[43m[49m"`,
+  );
 });
 
 test("Mixed text with and without background inheritance", async () => {
@@ -131,11 +130,9 @@ test("Mixed text with and without background inheritance", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`
-    "[42m[42mInherited [49m[42m[49m
-    [42mNo BG     [49m
-    [42m[41mRed BG[49m[42m    [49m"
-  `);
+  expect(lastFrame()).toMatchInlineSnapshot(
+    `"[42m[42mInherited [49m[42m[49m[42mNo BG [49m[42m[41mRed BG[49m[42m[49m"`,
+  );
 });
 
 test("Complex nested structure with background inheritance", async () => {
@@ -153,11 +150,9 @@ test("Complex nested structure with background inheritance", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`
-    "[43m[43mOuter: [49m[43m [49m
-    [44m[44mInner: [49m[44m [49m
-    [44m[41mExplicit[49m[44m[49m"
-  `);
+  expect(lastFrame()).toMatchInlineSnapshot(
+    `"[43m[43mOuter: [49m[43m[49m[44m[44mInner: [49m[44m[49m[44m[41mExplicit[49m[44m[49m"`,
+  );
 });
 
 test("Box background with standard color", async () => {
@@ -246,7 +241,7 @@ test("Box background fills entire area with standard color", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41m[41mHello[49m[41m     [49m
+    "[41m[41mHello[49m[41m[49m     [49m
     [41m          [49m
     [41m          [49m"
   `);
@@ -317,7 +312,7 @@ test("Box background with border fills content area", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "[46m╭────────╮[49m
-    [46m│[49m[46m[46mHi[49m[46m      [49m[46m│[49m
+    [46m│[49m[46m[46mHi[49m[46m[49m      [49m[46m│[49m
     [46m│[49m[46m        [49m[46m│[49m
     [46m│[49m[46m        [49m[46m│[49m
     [46m╰────────╯[49m"
@@ -335,7 +330,7 @@ test("Box background with padding fills entire padded area", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "[45m          [49m
-    [45m [45m[45mHi[49m[45m      [49m [49m
+    [45m [45m[45mHi[49m[45m[49m       [49m
     [45m          [49m
     [45m          [49m
     [45m          [49m"
@@ -358,8 +353,8 @@ test("Box background with center alignment fills entire area", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[44m          [49m
-    [44m[44mHi[49m[44m        [49m
+    "[44m    [44m[44mHi[49m[44m[49m    [49m
+    [44m          [49m
     [44m          [49m"
   `);
 });
@@ -422,8 +417,8 @@ test("Box backgroundColor fills full width on every line when text wraps", async
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41m[41mHello [49m[41m    [49m
-    [41m[41mWorld!![49m[41m   [49m"
+    "[41m[41mHello [49m[41m [49m   [49m
+    [41m[41mWorld!![49m[41m[49m   [49m"
   `);
 });
 

@@ -187,7 +187,7 @@ test("single node - box with horizontal alignment", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "╭──────────────────╮
-    │Hello World       │
+    │   Hello World    │
     ╰──────────────────╯"
   `);
 });
@@ -204,15 +204,15 @@ test("single node - box with vertical alignment", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "╭───────────╮
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
     │Hello World│
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
     │           │
     │           │
     │           │
@@ -377,7 +377,7 @@ test("multiple nodes - box with horizontal alignment", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "╭──────────────────╮
-    │Hello World       │
+    │   Hello World    │
     ╰──────────────────╯"
   `);
 });
@@ -394,15 +394,15 @@ test("multiple nodes - box with vertical alignment", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "╭───────────╮
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
+    │           │
     │Hello World│
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
-    │           │
     │           │
     │           │
     │           │
@@ -486,11 +486,11 @@ test("nested boxes", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`
     "╭──────────────────────────────────────╮
     │                                      │
-    │ ╭──────────────────────────────────╮ │
-    │ │                                  │ │
-    │ │ Hello World                      │ │
-    │ │                                  │ │
-    │ ╰──────────────────────────────────╯ │
+    │ ╭─────────────╮                      │
+    │ │             │                      │
+    │ │ Hello World │                      │
+    │ │             │                      │
+    │ ╰─────────────╯                      │
     │                                      │
     ╰──────────────────────────────────────╯"
   `);
@@ -515,17 +515,11 @@ test("nested boxes - fit-content box with wide characters on flex-direction row"
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "╭────────────╮
-    │╭──────────╮│
-    ││ミスター  ││
-    │╰──────────╯│
-    │╭──────────╮│
-    ││スポック  ││
-    │╰──────────╯│
-    │╭──────────╮│
-    ││カーク船長││
-    │╰──────────╯│
-    ╰────────────╯"
+    "╭────────────────────────────────╮
+    │╭────────╮╭────────╮╭──────────╮│
+    ││ミスター││スポック││カーク船長││
+    │╰────────╯╰────────╯╰──────────╯│
+    ╰────────────────────────────────╯"
   `);
 });
 
@@ -548,17 +542,11 @@ test("nested boxes - fit-content box with emojis on flex-direction row", async (
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "╭────╮
-    │╭──╮│
-    ││🦾││
-    │╰──╯│
-    │╭──╮│
-    ││🌏││
-    │╰──╯│
-    │╭──╮│
-    ││😋││
-    │╰──╯│
-    ╰────╯"
+    "╭────────────╮
+    │╭──╮╭──╮╭──╮│
+    ││🦾││🌏││😋││
+    │╰──╯╰──╯╰──╯│
+    ╰────────────╯"
   `);
 });
 
