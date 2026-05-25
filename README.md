@@ -151,6 +151,12 @@ vp run -r build       # build all packages
 vue-tui dev           # start an example with HMR
 ```
 
+## Caveats
+
+- vue-tui enables [raw mode](https://en.wikipedia.org/wiki/Terminal_mode) by default so the terminal won't echo keystrokes into your UI.
+- Ctrl+C still exits — `exitOnCtrlC` defaults to `true`.
+- For pure-output tools that don't need input suppression, pass `rawMode: false` to `mount()`.
+
 ## Credits
 
 vue-tui started as a Vue port of [Ink](https://github.com/vadimdemedes/ink), the library that proved terminal UIs could be built with the same component patterns we use on the web. The component model, yoga-based layout, focus system, rendering pipeline — all of it originates in Ink's design, adapted to follow Vue's philosophy and conventions. Thank you to [Vadim Demedes](https://github.com/vadimdemedes), [Sindre Sorhus](https://github.com/sindresorhus), and the [Ink contributors](https://github.com/vadimdemedes/ink/graphs/contributors) for creating such a solid foundation.

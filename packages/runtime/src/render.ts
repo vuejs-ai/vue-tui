@@ -26,6 +26,7 @@ export interface MountOptions {
   stderr?: NodeJS.WriteStream;
   debug?: boolean;
   exitOnCtrlC?: boolean;
+  rawMode?: boolean;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -55,6 +56,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedExitListener: (() => void) | null = null;
   let mountedFocusListener: (() => void) | null = null;
   let mountedDebug = false;
+  let mountedRawMode = false;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -85,6 +87,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (mountedFocusListener) {
       mountedFocusListener();
     }
+    if (mountedRawMode && mountedAppContext) {
+      mountedAppContext.setRawMode(false);
+      mountedRawMode = false;
+    }
     if (mountedStdinController) {
       mountedStdinController.dispose();
     }
@@ -110,6 +116,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stderr = options.stderr ?? process.stderr;
     const debug = options.debug ?? false;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
+    const rawMode = options.rawMode ?? true;
     mountedDebug = debug;
 
     const appContext: AppContext = {
@@ -188,6 +195,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.config.errorHandler = (err) => {
       appContext.exit(err instanceof Error ? err : new Error(String(err)));
     };
+
+    if (rawMode && appContext.isRawModeSupported) {
+      appContext.setRawMode(true);
+      mountedRawMode = true;
+    }
 
     // Built-in Tab / Shift+Tab / Escape focus navigation (matches Ink).
     // Placed AFTER mount so a sync mount failure doesn't leak the listener.
