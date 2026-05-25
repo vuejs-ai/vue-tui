@@ -65,3 +65,93 @@ test("unmount() after exit() is idempotent", async () => {
 
   expect(() => unmount()).not.toThrow();
 });
+
+test("exit() called multiple times is idempotent", async () => {
+  // Mirrors Ink's "exit normally without unmount() or exit()" pattern:
+  // verifies that calling exit() twice does not throw or reject again.
+  let exitFn!: () => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>x</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+  exitFn();
+  exitFn(); // second call — must not throw or create a new promise
+  await waitUntilExit();
+});
+
+test("waitUntilExit() resolves after exit() with result value", async () => {
+  // Mirrors Ink's "exit on exit() with result value" — vue-tui's exit()
+  // resolves cleanly (no value); just verifies the promise resolves.
+  let exitFn!: () => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello from vue-tui</Text>;
+  });
+
+  const { lastFrame, waitUntilExit } = await render(App);
+  expect(lastFrame()).toContain("hello from vue-tui");
+
+  exitFn();
+  await expect(waitUntilExit()).resolves.toBeUndefined();
+});
+
+test("onScopeDispose fires when exit(error) is called", async () => {
+  // Mirrors Ink's "exit with thrown error" fixture — verifies teardown hooks
+  // still run even when the exit is error-driven.
+  let exitFn!: (err?: Error) => void;
+  let disposed = false;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    onScopeDispose(() => {
+      disposed = true;
+    });
+    return () => <Text>running</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+  exitFn(new Error("errored"));
+  await waitUntilExit().catch(() => {});
+  expect(disposed).toBe(true);
+});
+
+// --- Ink subprocess-fixture tests (not portable to render-based testing) ---
+// The following Ink tests drive real TTY subprocesses via node-pty and cannot
+// be translated to in-process render() calls. The covered behaviors are
+// exercised indirectly by the render-based tests above.
+
+test.todo(
+  "exit normally without unmount() or exit() — covered by 'unmount() resolves waitUntilExit'",
+);
+
+test.todo(
+  "exit when app finishes execution — subprocess fixture; covered by exit()/unmount() tests",
+);
+
+test.todo(
+  "exit on exit() with raw mode — subprocess fixture; raw-mode cleanup covered by error-handling tests",
+);
+
+test.todo(
+  "exit on exit() with raw mode with error — subprocess fixture; raw-mode cleanup covered by error-handling tests",
+);
+
+test.todo(
+  "exit on unmount() with raw mode — subprocess fixture; raw-mode cleanup covered by error-handling tests",
+);
+
+test.todo(
+  "don't exit while raw mode is active — requires node-pty TTY subprocess; not portable to render-based testing",
+);
+
+test.todo(
+  "exit when DEV is set — subprocess fixture with DEV env var; not portable to render-based testing",
+);
+
+test.todo(
+  "exit on exit() with error and static output — subprocess fixture; static output behavior covered by static.test.tsx",
+);
