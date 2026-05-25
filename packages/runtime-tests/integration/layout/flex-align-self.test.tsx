@@ -21,7 +21,7 @@ test("row - align multiple text nodes to center", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="row" height={3}>
-        <Box alignSelf="center">
+        <Box alignSelf="center" flexDirection="row">
           <Text>A</Text>
           <Text>B</Text>
         </Box>
@@ -50,7 +50,7 @@ test("row - align multiple text nodes to bottom", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="row" height={3}>
-        <Box alignSelf="flex-end">
+        <Box alignSelf="flex-end" flexDirection="row">
           <Text>A</Text>
           <Text>B</Text>
         </Box>
