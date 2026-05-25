@@ -115,8 +115,8 @@ test("Multiple Text elements inherit same background", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[43m[43mHello[49m[43m[49m
-    [43m[43mWorld[49m[43m[49m"
+    "[43m[43mHello [49m[43m[49m
+    [43m[43mWorld[49m[43m [49m"
   `);
 });
 
@@ -132,9 +132,9 @@ test("Mixed text with and without background inheritance", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[42m[42mInherited[49m[42m[49m
-    [42mNo BG    [49m
-    [42m[41mRed BG[49m[42m   [49m"
+    "[42m[42mInherited [49m[42m[49m
+    [42mNo BG     [49m
+    [42m[41mRed BG[49m[42m    [49m"
   `);
 });
 
@@ -154,8 +154,8 @@ test("Complex nested structure with background inheritance", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[43m[43mOuter:[49m[43m  [49m
-    [44m[44mInner:[49m[44m  [49m
+    "[43m[43mOuter: [49m[43m [49m
+    [44m[44mInner: [49m[44m [49m
     [44m[41mExplicit[49m[44m[49m"
   `);
 });
@@ -422,7 +422,7 @@ test("Box backgroundColor fills full width on every line when text wraps", async
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41m[41mHello[49m[41m     [49m
+    "[41m[41mHello [49m[41m    [49m
     [41m[41mWorld!![49m[41m   [49m"
   `);
 });
@@ -437,7 +437,7 @@ test("Text-only backgroundColor colors text content but does not fill Box width"
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41mHello[49m
+    "[41mHello [49m
     [41mWorld!![49m"
   `);
 });

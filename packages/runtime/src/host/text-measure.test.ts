@@ -26,7 +26,7 @@ test("flattenLeaves recurses into virtual-text", () => {
 });
 
 test("wrapText splits on width", () => {
-  expect(wrapText("hello world", 5, "wrap")).toEqual(["hello", "world"]);
+  expect(wrapText("hello world", 5, "wrap")).toEqual(["hello", " ", "world"]);
 });
 
 test("wrapText truncate-end cuts with ellipsis", () => {

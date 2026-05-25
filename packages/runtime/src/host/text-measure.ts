@@ -21,7 +21,7 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   if (width <= 0) return [""];
 
   if (mode === "wrap") {
-    return wrapAnsi(text, width, { hard: true, trim: true, wordWrap: true }).split("\n");
+    return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
   }
 
   if (mode === "hard") {
