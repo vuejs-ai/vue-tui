@@ -12,6 +12,7 @@
     "@vitejs/plugin-vue-jsx": "catalog:",
     "@vue-tui/runtime": "workspace:*",
     "@vue-tui/testing": "workspace:*",
+    "chalk": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "^0.1.20",
     "vue": "^3.4.0"

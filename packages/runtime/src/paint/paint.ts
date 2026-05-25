@@ -91,7 +91,10 @@ function placeLine(grid: string[][], x: number, y: number, line: string): void {
 }
 
 function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextProps = {}): string {
-  const merged: TextProps = { ...acc, ...node.props };
+  const defined = Object.fromEntries(
+    Object.entries(node.props).filter(([, v]) => v !== undefined),
+  );
+  const merged: TextProps = { ...acc, ...defined };
   let out = "";
   for (const child of node.children) {
     if (child.type === "text-leaf") {
@@ -120,28 +123,31 @@ function drawBorder(
   if (!chars) return;
   if (w < 2 || h < 2) return;
 
-  // Per-edge toggles default to true when borderStyle is set.
   const top = props["borderTop"] !== false;
   const bottom = props["borderBottom"] !== false;
   const left = props["borderLeft"] !== false;
   const right = props["borderRight"] !== false;
 
-  // Corners require both adjacent edges to be enabled; otherwise the
-  // adjacent edge character is used as a "stub" so the visible edge still
-  // terminates cleanly.
+  const borderColor = props["borderColor"] as string | undefined;
+  const bgColor = props["backgroundColor"] as string | undefined;
+  const colorProps: TextProps = {};
+  if (borderColor) colorProps.color = borderColor;
+  if (bgColor) colorProps.backgroundColor = bgColor;
+  const colorize = (s: string) => (borderColor || bgColor ? applyChalk(s, colorProps) : s);
+
   if (top) {
     const tl = left ? chars.topLeft : chars.top;
     const tr = right ? chars.topRight : chars.top;
-    output.write(x, y, [tl + chars.top.repeat(w - 2) + tr], transformers);
+    output.write(x, y, [colorize(tl + chars.top.repeat(w - 2) + tr)], transformers);
   }
   if (bottom) {
     const bl = left ? chars.bottomLeft : chars.bottom;
     const br = right ? chars.bottomRight : chars.bottom;
-    output.write(x, y + h - 1, [bl + chars.bottom.repeat(w - 2) + br], transformers);
+    output.write(x, y + h - 1, [colorize(bl + chars.bottom.repeat(w - 2) + br)], transformers);
   }
   for (let i = 1; i < h - 1; i++) {
-    if (left) output.write(x, y + i, [chars.left], transformers);
-    if (right) output.write(x + w - 1, y + i, [chars.right], transformers);
+    if (left) output.write(x, y + i, [colorize(chars.left)], transformers);
+    if (right) output.write(x + w - 1, y + i, [colorize(chars.right)], transformers);
   }
 }
 
@@ -175,6 +181,7 @@ function paintNode(
   x0: number,
   y0: number,
   transformers: Transformer[],
+  inheritedBg?: string,
 ): void {
   switch (node.type) {
     case "root": {
@@ -187,18 +194,20 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
+      const bg = (node.props["backgroundColor"] as string | undefined) ?? inheritedBg;
       if (node.props["backgroundColor"]) {
         fillBackground(output, x, y, w, h, node.props["backgroundColor"], transformers);
       }
       if (node.props["borderStyle"]) {
         drawBorder(output, x, y, w, h, node.props, transformers);
       }
-      for (const child of node.children) paintNode(child, output, x, y, transformers);
+      for (const child of node.children) paintNode(child, output, x, y, transformers, bg);
       return;
     }
     case "text": {
       const layout = node.yoga.getComputedLayout();
-      const text = renderTextWithInlineStyles(node);
+      const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
+      const text = renderTextWithInlineStyles(node, bgProps);
       const wrapped = wrapText(
         text,
         Math.max(1, Math.floor(layout.width)),
@@ -214,7 +223,7 @@ function paintNode(
     }
     case "transform": {
       const next = [...transformers, node.transform];
-      for (const child of node.children) paintNode(child, output, x0, y0, next);
+      for (const child of node.children) paintNode(child, output, x0, y0, next, inheritedBg);
       return;
     }
     case "virtual-text":
