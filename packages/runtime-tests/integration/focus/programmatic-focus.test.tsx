@@ -1,7 +1,7 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, ref, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useFocus } from "@vue-tui/runtime";
+import { Box, Text, useFocus, useFocusManager } from "@vue-tui/runtime";
 
 test("focus(id) programmatically focuses another component", async () => {
   let focusFn!: (id: string) => void;
@@ -106,4 +106,120 @@ test("flipping isActive to false on focused item blurs it", async () => {
   active.value = false;
   await nextTick();
   expect(lastFrame()).toContain("unfocused");
+});
+
+// ---------------------------------------------------------------------------
+// Ink-ported: programmatic focus, unregister, focusNext/focusPrevious
+// ---------------------------------------------------------------------------
+
+const FocusItem = defineComponent({
+  props: {
+    label: { type: String, required: true as const },
+    autoFocus: { type: Boolean, default: false },
+    disabled: { type: Boolean, default: false },
+  },
+  setup(props) {
+    const { isFocused } = useFocus({
+      autoFocus: props.autoFocus,
+      isActive: () => !props.disabled,
+    });
+    return () => (
+      <Text>
+        {props.label}
+        {isFocused.value ? " ✔" : ""}
+      </Text>
+    );
+  },
+});
+
+test("reset focus when focused component unregisters", async () => {
+  const showFirst = shallowRef(true);
+
+  const App = defineComponent(() => {
+    return () => (
+      <Box flexDirection="column">
+        {showFirst.value ? <FocusItem label="First" autoFocus /> : null}
+        <FocusItem label="Second" autoFocus />
+        <FocusItem label="Third" autoFocus />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  showFirst.value = false;
+  await nextTick();
+
+  expect(lastFrame()).not.toMatch(/✔/);
+});
+
+test("focus first component after focused component unregisters", async () => {
+  const showFirst = shallowRef(true);
+
+  const App = defineComponent(() => {
+    return () => (
+      <Box flexDirection="column">
+        {showFirst.value ? <FocusItem label="First" autoFocus /> : null}
+        <FocusItem label="Second" autoFocus />
+        <FocusItem label="Third" autoFocus />
+      </Box>
+    );
+  });
+
+  const { lastFrame, stdin } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  showFirst.value = false;
+  await nextTick();
+  expect(lastFrame()).not.toMatch(/✔/);
+
+  await stdin.write("\t");
+  expect(lastFrame()).toMatch(/Second ✔/);
+});
+
+test("manually focus next component via focusNext()", async () => {
+  let doFocusNext!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doFocusNext = manager.focusNext;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" autoFocus />
+        <FocusItem label="Second" autoFocus />
+        <FocusItem label="Third" autoFocus />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  doFocusNext();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Second ✔/);
+});
+
+test("manually focus previous component via focusPrevious()", async () => {
+  let doFocusPrevious!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doFocusPrevious = manager.focusPrevious;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" autoFocus />
+        <FocusItem label="Second" autoFocus />
+        <FocusItem label="Third" autoFocus />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  doFocusPrevious();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Third ✔/);
 });
