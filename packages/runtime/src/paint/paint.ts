@@ -217,10 +217,9 @@ function paintNode(
       const wrapped = wrapText(text, cellWidth, node.props.wrap ?? "wrap");
       if (inheritedBg) {
         for (let i = 0; i < wrapped.length; i++) {
-          const lineW = stringWidth(wrapped[i]!);
-          if (lineW < cellWidth) {
-            wrapped[i] = wrapped[i]! + applyChalk(" ".repeat(cellWidth - lineW), bgProps);
-          }
+          const pad = cellWidth - stringWidth(wrapped[i]!);
+          const padStr = pad > 0 ? " ".repeat(pad) : "";
+          wrapped[i] = applyChalk(wrapped[i]! + padStr, bgProps);
         }
       }
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
