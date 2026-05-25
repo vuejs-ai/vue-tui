@@ -115,8 +115,7 @@ test('set flex basis with flexDirection="column" container', async () => {
     )),
     { columns: 100 },
   );
-  // Ink: "A\n\n\nB\n\n" — trailing newlines trimmed by lastFrame({ trimLines: true })
-  expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB");
+  expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB\n\n");
 });
 
 test('set flex basis in percent with flexDirection="column" container', async () => {
@@ -131,6 +130,5 @@ test('set flex basis in percent with flexDirection="column" container', async ()
     )),
     { columns: 100 },
   );
-  // Ink: "A\n\n\nB\n\n" — trailing newlines trimmed by lastFrame({ trimLines: true })
-  expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB");
+  expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB\n\n");
 });
