@@ -31,7 +31,7 @@ export interface RenderResult {
   };
   terminal: Terminal;
   unmount(this: void): void;
-  waitUntilExit(this: void): Promise<void>;
+  waitUntilExit(this: void): Promise<unknown>;
 }
 
 function trimFrame(raw: string): string {

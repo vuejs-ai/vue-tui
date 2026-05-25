@@ -2,7 +2,7 @@ import type { InjectionKey, ShallowRef } from "vue";
 import type { EventEmitter } from "node:events";
 
 export interface AppContext {
-  exit: (error?: Error) => void;
+  exit: (errorOrResult?: unknown) => void;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   stdin: NodeJS.ReadStream;

@@ -82,10 +82,9 @@ test("exit() called multiple times is idempotent", async () => {
   await waitUntilExit();
 });
 
-test("waitUntilExit() resolves after exit() with result value", async () => {
-  // Mirrors Ink's "exit on exit() with result value" — vue-tui's exit()
-  // resolves cleanly (no value); just verifies the promise resolves.
-  let exitFn!: () => void;
+test("waitUntilExit() resolves with result value passed to exit()", async () => {
+  // Mirrors Ink's "exit on exit() with result value"
+  let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
     exitFn = useExit();
@@ -95,6 +94,34 @@ test("waitUntilExit() resolves after exit() with result value", async () => {
   const { lastFrame, waitUntilExit } = await render(App);
   expect(lastFrame()).toContain("hello from vue-tui");
 
+  exitFn("hello from ink");
+  await expect(waitUntilExit()).resolves.toBe("hello from ink");
+});
+
+test("waitUntilExit() resolves with object result value", async () => {
+  // Mirrors Ink's "exit on exit() with object result"
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+  const resultObj = { message: "hello from ink object" };
+  exitFn(resultObj);
+  await expect(waitUntilExit()).resolves.toBe(resultObj);
+});
+
+test("waitUntilExit() resolves with undefined when exit() called with no args", async () => {
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
   exitFn();
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });

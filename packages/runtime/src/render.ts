@@ -31,7 +31,7 @@ export interface MountOptions {
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
   mount(options?: MountOptions): ComponentPublicInstance;
-  waitUntilExit(): Promise<void>;
+  waitUntilExit(): Promise<unknown>;
 }
 
 type RootProps = Record<string, unknown>;
@@ -39,9 +39,9 @@ type RootProps = Record<string, unknown>;
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
-  let exitResolve!: () => void;
+  let exitResolve!: (result?: unknown) => void;
   let exitReject!: (e: Error) => void;
-  const exitPromise = new Promise<void>((res, rej) => {
+  const exitPromise = new Promise<unknown>((res, rej) => {
     exitResolve = res;
     exitReject = rej;
   });
@@ -120,14 +120,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedDebug = debug;
 
     const appContext: AppContext = {
-      exit(err?: Error) {
-        if (err) exitReject(err);
+      exit(errorOrResult?: unknown) {
         // Defer teardown to a microtask: exit() is frequently called from
         // inside the Vue update cycle (useInput handler, setup(), errorHandler)
         // and unmounting synchronously would tear Vue down mid-flush.
         queueMicrotask(() => {
           teardown();
-          exitResolve();
+          if (errorOrResult instanceof Error) {
+            exitReject(errorOrResult);
+          } else {
+            exitResolve(errorOrResult);
+          }
         });
       },
       stdout,
@@ -238,7 +241,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     exitResolve();
   };
 
-  app.waitUntilExit = function waitUntilExit(): Promise<void> {
+  app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
     return exitPromise;
   };
 
