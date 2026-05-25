@@ -25,6 +25,7 @@
     "vite": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "vite-plus": "catalog:"
   }
 }

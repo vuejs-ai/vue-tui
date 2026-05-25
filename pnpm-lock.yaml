@@ -7,7 +7,7 @@ settings:
 catalogs:
   default:
     '@types/node':
-      specifier: ^24
+      specifier: ^24.12.4
       version: 24.12.4
     '@vitejs/plugin-vue-jsx':
       specifier: ^5.1.5
@@ -129,11 +129,14 @@ importers:
     dependencies:
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3)'
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.12.4
       vite-plus:
         specifier: 'catalog:'
-        version: 0.1.22(@types/node@25.9.1)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3))(typescript@6.0.3)
+        version: 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3))(typescript@6.0.3)
 
   packages/runtime:
     dependencies:
@@ -2163,7 +2166,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 24.12.4
+      '@types/node': 25.9.1
       form-data: 4.0.5
 
   '@types/node@18.19.130':
@@ -2344,11 +2347,11 @@ snapshots:
       - utf-8-validate
       - yaml
 
-  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0))':
+  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3))(typescript@6.0.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/chai': 5.2.3
-      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@24.12.4)(typescript@6.0.3)
       es-module-lexer: 1.7.0
       obug: 2.1.1
       pixelmatch: 7.2.0
@@ -2358,10 +2361,10 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 1.2.2
       tinyglobby: 0.2.16
-      vite: 8.0.13(@types/node@25.8.0)
+      vite: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3)'
       ws: 8.21.0
     optionalDependencies:
-      '@types/node': 25.8.0
+      '@types/node': 24.12.4
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@tsdown/css'
@@ -2384,11 +2387,11 @@ snapshots:
       - utf-8-validate
       - yaml
 
-  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@25.9.1)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3))(typescript@6.0.3)':
+  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0))':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/chai': 5.2.3
-      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.9.1)(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)
       es-module-lexer: 1.7.0
       obug: 2.1.1
       pixelmatch: 7.2.0
@@ -2398,10 +2401,10 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 1.2.2
       tinyglobby: 0.2.16
-      vite: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3)'
+      vite: 8.0.13(@types/node@25.8.0)
       ws: 8.21.0
     optionalDependencies:
-      '@types/node': 25.9.1
+      '@types/node': 25.8.0
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@tsdown/css'
@@ -3053,12 +3056,12 @@ snapshots:
       - vite
       - yaml
 
-  vite-plus@0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0)):
+  vite-plus@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3))(typescript@6.0.3):
     dependencies:
       '@oxc-project/types': 0.129.0
       '@oxlint/plugins': 1.61.0
-      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)
-      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0))
+      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@24.12.4)(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(typescript@6.0.3))(typescript@6.0.3)
       oxfmt: 0.48.0
       oxlint: 1.63.0(oxlint-tsgolint@0.22.1)
       oxlint-tsgolint: 0.22.1
@@ -3102,12 +3105,12 @@ snapshots:
       - vite
       - yaml
 
-  vite-plus@0.1.22(@types/node@25.9.1)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3))(typescript@6.0.3):
+  vite-plus@0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0)):
     dependencies:
       '@oxc-project/types': 0.129.0
       '@oxlint/plugins': 1.61.0
-      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.9.1)(typescript@6.0.3)
-      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@25.9.1)(@voidzero-dev/vite-plus-core@0.1.22(@types/node@25.9.1)(typescript@6.0.3))(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@25.8.0)(typescript@6.0.3)(vite@8.0.13(@types/node@25.8.0))
       oxfmt: 0.48.0
       oxlint: 1.63.0(oxlint-tsgolint@0.22.1)
       oxlint-tsgolint: 0.22.1

@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import type { EventEmitter } from "node:events";
 import type { Logger } from "./logger.ts";
 
 export interface ProcessManagerOptions {
@@ -27,8 +26,12 @@ for (const method of ["log", "info", "warn", "error", "debug"]) {
 }
 `)}`;
 
+// @types/node@25 removed .on() from the ChildProcess class declaration
+// even though it extends EventEmitter at runtime. This wrapper restores it.
+type Process = ChildProcess & NodeJS.EventEmitter;
+
 export function createProcessManager(options: ProcessManagerOptions) {
-  let child: ChildProcess | null = null;
+  let child: Process | null = null;
   let currentBundlePath = options.bundlePath;
 
   function doSpawn() {
@@ -41,22 +44,22 @@ export function createProcessManager(options: ProcessManagerOptions) {
         VUE_TUI_DEV: "1",
         VUE_TUI_HMR_PORT: String(options.hmrPort),
       },
-    });
+    }) as Process;
     child = proc;
 
-    (proc as unknown as EventEmitter).on("exit", (code: number | null) => {
+    proc.on("exit", (code: number | null) => {
       options.logger.mode = "stdout";
       child = null;
       options.onExit?.(code);
     });
   }
 
-  function waitForExit(proc: ChildProcess, timeout: number): Promise<void> {
+  function waitForExit(proc: Process, timeout: number): Promise<void> {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         resolve();
       }, timeout);
-      (proc as unknown as EventEmitter).on("exit", () => {
+      proc.on("exit", () => {
         clearTimeout(timer);
         resolve();
       });
