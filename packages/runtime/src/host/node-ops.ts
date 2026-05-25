@@ -60,6 +60,9 @@ const STYLE_PROPS = new Set([
   "borderBottom",
   "borderLeft",
   "borderRight",
+  // Overflow is a yoga prop (setOverflow) but also needed by the paint pass
+  // to set up clip rects for overflow: hidden containers.
+  "overflow",
 ]);
 
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {

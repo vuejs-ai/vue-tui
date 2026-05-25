@@ -1,4 +1,5 @@
 import stringWidth from "string-width";
+import sliceAnsi from "slice-ansi";
 import cliBoxes from "cli-boxes";
 import { applyChalk } from "./text-style.ts";
 import Yoga from "yoga-layout";
@@ -16,17 +17,36 @@ import { attachYoga, detachYoga } from "../host/yoga.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
+interface ClipRect {
+  x1: number | undefined;
+  x2: number | undefined;
+  y1: number | undefined;
+  y2: number | undefined;
+}
+
 interface WriteOp {
+  type: "write";
   x: number;
   y: number;
   lines: string[];
   transformers: Transformer[];
 }
 
+interface ClipOp {
+  type: "clip";
+  clip: ClipRect;
+}
+
+interface UnclipOp {
+  type: "unclip";
+}
+
+type Op = WriteOp | ClipOp | UnclipOp;
+
 class Output {
   readonly width: number;
   readonly height: number;
-  private ops: WriteOp[] = [];
+  private ops: Op[] = [];
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -34,7 +54,15 @@ class Output {
   }
 
   write(x: number, y: number, lines: string[], transformers: Transformer[]): void {
-    this.ops.push({ x, y, lines, transformers });
+    this.ops.push({ type: "write", x, y, lines, transformers });
+  }
+
+  clip(rect: ClipRect): void {
+    this.ops.push({ type: "clip", clip: rect });
+  }
+
+  unclip(): void {
+    this.ops.push({ type: "unclip" });
   }
 
   get(): string {
@@ -42,11 +70,69 @@ class Output {
     const grid: string[][] = Array.from({ length: this.height }, () =>
       Array.from({ length: this.width }, () => " "),
     );
+    const clips: ClipRect[] = [];
+
     for (const op of this.ops) {
-      for (let lineIdx = 0; lineIdx < op.lines.length; lineIdx++) {
-        let line = op.lines[lineIdx]!;
-        for (const tf of op.transformers) line = tf(line, lineIdx);
-        placeLine(grid, op.x, op.y + lineIdx, line);
+      if (op.type === "clip") {
+        clips.push(op.clip);
+        continue;
+      }
+      if (op.type === "unclip") {
+        clips.pop();
+        continue;
+      }
+
+      // op.type === "write"
+      let { x, y } = op;
+      let lines = op.lines;
+
+      // Apply transformers
+      lines = lines.map((line, idx) => {
+        let l = line;
+        for (const tf of op.transformers) l = tf(l, idx);
+        return l;
+      });
+
+      // Apply active clip rect
+      const clip = clips.at(-1);
+      if (clip) {
+        const clipH = typeof clip.x1 === "number" && typeof clip.x2 === "number";
+        const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
+
+        // Skip entirely out-of-bounds writes
+        if (clipV) {
+          const height = lines.length;
+          if (y + height <= clip.y1! || y >= clip.y2!) continue;
+        }
+        if (clipH) {
+          // Quick check: if write is entirely to the right of clip or entirely
+          // to the left, skip it
+          if (x >= clip.x2!) continue;
+        }
+
+        // Vertical clipping: slice lines array
+        if (clipV) {
+          const from = y < clip.y1! ? clip.y1! - y : 0;
+          const height = lines.length;
+          const to = y + height > clip.y2! ? clip.y2! - y : height;
+          lines = lines.slice(from, to);
+          if (y < clip.y1!) y = clip.y1!;
+        }
+
+        // Horizontal clipping: slice each line
+        if (clipH) {
+          lines = lines.map((line) => {
+            const lineWidth = stringWidth(line);
+            const from = x < clip.x1! ? clip.x1! - x : 0;
+            const to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
+            return sliceAnsi(line, from, to);
+          });
+          if (x < clip.x1!) x = clip.x1!;
+        }
+      }
+
+      for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        placeLine(grid, x, y + lineIdx, lines[lineIdx]!);
       }
     }
     return grid.map((row) => row.join("").trimEnd()).join("\n");
@@ -221,7 +307,28 @@ function paintNode(
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
         fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, bg, transformers);
       }
+
+      // Overflow clipping: when overflow is "hidden", clip children to the box
+      // content area (inside borders). Matches Ink's clip/unclip approach.
+      let clipped = false;
+      const overflow = node.props["overflow"] as string | undefined;
+      if (overflow === "hidden") {
+        const borderLeft = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
+        const borderRight = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
+        const borderTop = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
+        const borderBottom = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
+        output.clip({
+          x1: x + borderLeft,
+          x2: x + w - borderRight,
+          y1: y + borderTop,
+          y2: y + h - borderBottom,
+        });
+        clipped = true;
+      }
+
       for (const child of node.children) paintNode(child, output, x, y, transformers, bg);
+
+      if (clipped) output.unclip();
       return;
     }
     case "text": {

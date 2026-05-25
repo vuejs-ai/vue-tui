@@ -70,7 +70,7 @@ test("overflow - multiple boxes inside overflow container", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box paddingBottom={1}>
-        <Box width={4} height={1} overflow="hidden">
+        <Box width={4} height={1} overflow="hidden" flexDirection="row">
           <Box width={2} height={2} flexShrink={0}>
             <Text>TL{"\n"}BL</Text>
           </Box>
@@ -89,7 +89,7 @@ test("overflow - multiple boxes inside overflow container with border", async ()
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box paddingBottom={1}>
-        <Box width={6} height={3} overflow="hidden" borderStyle="round">
+        <Box width={6} height={3} overflow="hidden" borderStyle="round" flexDirection="row">
           <Box width={2} height={2} flexShrink={0}>
             <Text>TL{"\n"}BL</Text>
           </Box>
