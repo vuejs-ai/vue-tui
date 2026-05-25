@@ -1,10 +1,10 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useFocus } from "@vue-tui/runtime";
 
 test("swapping focusable components never disables raw mode", async () => {
-  const showA = ref(true);
+  const showA = shallowRef(true);
 
   const Item = defineComponent(() => {
     useFocus();

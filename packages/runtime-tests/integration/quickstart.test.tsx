@@ -1,11 +1,11 @@
-import { defineComponent, ref } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 
 test("README quickstart code runs to a Count: 0 frame", async () => {
   const Counter = defineComponent(() => {
-    const count = ref(0);
+    const count = shallowRef(0);
     useInput((input) => {
       if (input === "+") count.value++;
       if (input === "-") count.value--;

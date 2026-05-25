@@ -1,10 +1,10 @@
-import { defineComponent, nextTick, ref, watch } from "vue";
+import { defineComponent, nextTick, shallowRef, watch } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
 test("multiple mutations in one tick produce at most 1 new frame", async () => {
-  const count = ref(0);
+  const count = shallowRef(0);
   const App = defineComponent(() => {
     return () => <Text>{String(count.value)}</Text>;
   });
@@ -23,7 +23,7 @@ test("multiple mutations in one tick produce at most 1 new frame", async () => {
 });
 
 test("post-flush watch sees the same value the commit paints", async () => {
-  const count = ref(0);
+  const count = shallowRef(0);
   let observed = 0;
 
   const App = defineComponent(() => {

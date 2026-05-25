@@ -1,11 +1,11 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, Static, createApp } from "@vue-tui/runtime";
 
 test("Static appends new items above the dynamic frame", async () => {
-  const items = ref<string[]>([]);
+  const items = shallowRef<string[]>([]);
 
   const App = defineComponent(() => {
     return () => (
@@ -34,8 +34,8 @@ test("Static appends new items above the dynamic frame", async () => {
 });
 
 test("Static preserves prior items when new ones are added", async () => {
-  const logs = ref<string[]>([]);
-  const status = ref("idle");
+  const logs = shallowRef<string[]>([]);
+  const status = shallowRef("idle");
 
   const App = defineComponent(() => {
     return () => (
@@ -89,7 +89,7 @@ test("Static flush clears the dynamic frame first (non-debug mode)", async () =>
     },
   });
 
-  const items = ref<string[]>([]);
+  const items = shallowRef<string[]>([]);
   const App = defineComponent(() => () => (
     <Box>
       <Static items={items.value}>
@@ -177,7 +177,7 @@ test.todo(
 );
 
 test("Static items do not add blank lines to the dynamic frame", async () => {
-  const items = ref<string[]>([]);
+  const items = shallowRef<string[]>([]);
 
   const App = defineComponent(() => () => (
     <Box flexDirection="column">

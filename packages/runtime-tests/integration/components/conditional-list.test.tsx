@@ -1,10 +1,10 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
 test("v-if toggle preserves sibling order", async () => {
-  const show = ref(true);
+  const show = shallowRef(true);
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">
@@ -37,7 +37,7 @@ test("v-if toggle preserves sibling order", async () => {
 });
 
 test("keyed v-for reorder renders in new order", async () => {
-  const items = ref([1, 2, 3]);
+  const items = shallowRef([1, 2, 3]);
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">
@@ -63,7 +63,7 @@ test("keyed v-for reorder renders in new order", async () => {
 });
 
 test("repeated list shuffles don't crash", async () => {
-  const items = ref([1, 2, 3, 4, 5]);
+  const items = shallowRef([1, 2, 3, 4, 5]);
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">

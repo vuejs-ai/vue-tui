@@ -1,4 +1,4 @@
-import { defineComponent, ref } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput, useStdout, type Key } from "@vue-tui/runtime";
@@ -29,7 +29,7 @@ test("useInput receives arrow keys", async () => {
 
 test("useInput respects isActive ref", async () => {
   const calls: string[] = [];
-  const active = ref(false);
+  const active = shallowRef(false);
   const App = defineComponent(() => {
     useInput((input) => calls.push(input), { isActive: active });
     return () => <Text>x</Text>;
@@ -192,7 +192,7 @@ test("useInput - ignore input if not active (isActive: false)", async () => {
 
 test("useInput - ignore input if not active (isActive ref toggled)", async () => {
   const calls: string[] = [];
-  const active = ref(false);
+  const active = shallowRef(false);
   const App = defineComponent(() => {
     useInput((input) => calls.push(input), { isActive: active });
     return () => <Text>x</Text>;

@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
@@ -41,7 +41,7 @@ test("borderBottom:false suppresses bottom edge", async () => {
 });
 
 test("reactive borderTop:false update removes top edge", async () => {
-  const showTop = ref(true);
+  const showTop = shallowRef(true);
   const App = defineComponent(() => {
     return () => <Box borderStyle="single" borderTop={showTop.value} width={6} height={3} />;
   });

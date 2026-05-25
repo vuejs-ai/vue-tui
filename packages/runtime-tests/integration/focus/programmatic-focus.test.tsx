@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, ref, shallowRef } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useFocus, useFocusManager } from "@vue-tui/runtime";
@@ -41,7 +41,7 @@ test("focus(id) programmatically focuses another component", async () => {
 });
 
 test("isActive=false prevents component from receiving focus", async () => {
-  const active = ref(false);
+  const active = shallowRef(false);
 
   const Item = defineComponent({
     props: { id: { type: String, required: true } },
@@ -76,7 +76,7 @@ test("isActive=false prevents component from receiving focus", async () => {
 });
 
 test("autoFocus + isActive=false does not focus at mount", async () => {
-  const active = ref(false);
+  const active = shallowRef(false);
 
   const App = defineComponent(() => {
     const { isFocused } = useFocus({ id: "item", autoFocus: true, isActive: active });
@@ -93,7 +93,7 @@ test("autoFocus + isActive=false does not focus at mount", async () => {
 });
 
 test("flipping isActive to false on focused item blurs it", async () => {
-  const active = ref(true);
+  const active = shallowRef(true);
 
   const App = defineComponent(() => {
     const { isFocused } = useFocus({ id: "item", autoFocus: true, isActive: active });

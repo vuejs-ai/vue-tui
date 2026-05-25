@@ -1,4 +1,4 @@
-import { nextTick, ref } from "vue";
+import { nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "../src/index.ts";
 import { Text } from "@vue-tui/runtime";
@@ -9,7 +9,7 @@ test("lastFrame captures rendered output", async () => {
 });
 
 test("frames accumulate on reactive updates", async () => {
-  const message = ref("first");
+  const message = shallowRef("first");
   const { lastFrame, frames } = await render(() => <Text>{message.value}</Text>);
   const initialCount = frames.length;
   expect(lastFrame()).toContain("first");

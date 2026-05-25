@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -33,7 +33,7 @@ test("100 render/unmount cycles leak zero yoga nodes", async () => {
 });
 
 test("raw mode stays on when one of two useInput components unmounts", async () => {
-  const showB = ref(true);
+  const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
     useInput(() => {});

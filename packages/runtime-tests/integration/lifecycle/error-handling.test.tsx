@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, ref } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useExit } from "@vue-tui/runtime";
@@ -11,7 +11,7 @@ test("setup() throw rejects render()", async () => {
 });
 
 test("render-time throw does not prevent unmount", async () => {
-  const trigger = ref(false);
+  const trigger = shallowRef(false);
   const App = defineComponent(() => {
     return () => {
       if (trigger.value) throw new Error("render boom");
