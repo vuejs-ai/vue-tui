@@ -185,7 +185,7 @@ test.skip("remeasure text when text nodes are changed — null child crashes yog
   expect(lastFrame()).toBe("abcx");
 });
 
-test.skip("text with content 'constructor' wraps correctly — bug in text node lookup", async () => {
+test("text with content 'constructor' wraps correctly", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Text>constructor</Text>),
     { columns: 100 },

@@ -224,7 +224,7 @@ function toJustify(v: string): Justify {
 }
 
 export function isYogaProp(key: string): boolean {
-  return key in YOGA_PROP_SETTERS;
+  return Object.hasOwn(YOGA_PROP_SETTERS, key);
 }
 
 const RESETTABLE_PROPS = new Set([
