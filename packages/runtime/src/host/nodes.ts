@@ -76,6 +76,7 @@ export interface TuiStatic extends NodeBase {
 export interface TuiTransform extends NodeBase {
   type: "transform";
   children: TuiNode[];
+  yoga: YogaNodeRef;
   transform: (line: string, lineIndex: number) => string;
 }
 
@@ -146,6 +147,7 @@ export function createTransform(fn: (line: string, lineIndex: number) => string)
     type: "transform",
     parent: null,
     children: [],
+    yoga: UNATTACHED_YOGA,
     transform: fn,
   };
 }

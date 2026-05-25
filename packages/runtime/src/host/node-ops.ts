@@ -90,8 +90,11 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         attachYoga(n);
         return n;
       }
-      case "transform":
-        return createTransform((line) => line); // overwritten by patchProp
+      case "transform": {
+        const n = createTransform((line) => line); // overwritten by patchProp
+        attachYoga(n);
+        return n;
+      }
       default:
         throw new Error(`Unknown vue-tui element type: ${type}`);
     }
@@ -165,7 +168,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         freeSubtreeYoga(child);
       }
     }
-    if (node.type === "box" || node.type === "text" || node.type === "static") {
+    if (
+      node.type === "box" ||
+      node.type === "text" ||
+      node.type === "static" ||
+      node.type === "transform"
+    ) {
       detachYoga(node);
     }
   }

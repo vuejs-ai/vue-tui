@@ -46,9 +46,8 @@ test("squash multiple text nodes — <Transform> inside <Text>", async () => {
   expect(lastFrame()).toBe("[0: {0: hello world}]");
 });
 
-test.todo(
-  "transform with multiple lines — transform nodes are not yoga carriers; root yoga height does not account for multi-line text under a transform node",
-);
+// Resolved: Transform nodes are now yoga carriers, so multi-line text
+// under a Transform node is properly laid out. See transform-yoga.test.tsx.
 
 test("squash multiple nested text nodes — <Transform> inside <Text>", async () => {
   const { lastFrame } = await render(

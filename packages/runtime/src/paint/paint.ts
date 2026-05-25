@@ -394,8 +394,11 @@ function paintNode(
       return;
     }
     case "transform": {
+      const layout = node.yoga.getComputedLayout();
+      const x = x0 + layout.left;
+      const y = y0 + layout.top;
       const next = [...transformers, node.transform];
-      for (const child of node.children) paintNode(child, output, x0, y0, next, inheritedBg);
+      for (const child of node.children) paintNode(child, output, x, y, next, inheritedBg);
       return;
     }
     case "virtual-text":

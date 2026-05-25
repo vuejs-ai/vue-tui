@@ -1,8 +1,16 @@
 import Yoga from "yoga-layout";
 import type { Node as YogaNode, Align, FlexDirection, Justify, Wrap } from "yoga-layout";
-import type { TuiBox, TuiContainer, TuiNode, TuiRoot, TuiStatic, TuiText } from "./nodes.ts";
+import type {
+  TuiBox,
+  TuiContainer,
+  TuiNode,
+  TuiRoot,
+  TuiStatic,
+  TuiText,
+  TuiTransform,
+} from "./nodes.ts";
 
-type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
+type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;
 
 // --- yoga node lifecycle seam --------------------------------------------
 
@@ -37,7 +45,11 @@ export const yogaNodeTracker = {
 
 function hasYoga(node: TuiNode): node is YogaCarrier {
   return (
-    node.type === "root" || node.type === "box" || node.type === "text" || node.type === "static"
+    node.type === "root" ||
+    node.type === "box" ||
+    node.type === "text" ||
+    node.type === "static" ||
+    node.type === "transform"
   );
 }
 
@@ -67,6 +79,14 @@ export function attachYoga(node: YogaCarrier): void {
     (node.yoga as YogaNode).setFlexShrink(1);
     (node.yoga as YogaNode).setFlexGrow(0);
   }
+  // Transform nodes match Ink's Transform which renders as ink-text:
+  // flexShrink=1, flexDirection='row'. This makes transform a yoga carrier
+  // so it participates in layout (multi-line text gets proper height).
+  if (node.type === "transform") {
+    (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+    (node.yoga as YogaNode).setFlexShrink(1);
+    (node.yoga as YogaNode).setFlexGrow(0);
+  }
 }
 
 export function detachYoga(node: YogaCarrier): void {
@@ -74,24 +94,41 @@ export function detachYoga(node: YogaCarrier): void {
 }
 
 // Returns the yoga index a child should occupy when added to `parent`.
-// Skips any siblings that don't carry a yoga node (virtual-text, transform).
+// Skips any siblings that don't carry a yoga node or that were excluded
+// from the yoga tree (e.g., transform nodes inside text parents).
 function yogaIndexFor(parent: TuiContainer, child: TuiNode): number {
+  const isTextParent = parent.type === "text" || parent.type === "virtual-text";
   let yIdx = 0;
   for (const sibling of parent.children) {
     if (sibling === child) return yIdx;
-    if (hasYoga(sibling)) yIdx++;
+    if (hasYoga(sibling)) {
+      // Transform nodes inside text parents are not in the yoga tree.
+      if (isTextParent && sibling.type === "transform") continue;
+      yIdx++;
+    }
   }
   return yIdx;
 }
 
 export function insertYogaChild(parent: TuiContainer, child: TuiNode, _domIndex: number): void {
   if (!hasYoga(parent) || !hasYoga(child)) return;
+  // Transform nodes inside a Text parent are inline: they participate in
+  // renderTextWithInlineStyles, not in yoga layout. Skip inserting them
+  // into the yoga tree to avoid corrupting text measurement.
+  // (VirtualText parents are already excluded by the hasYoga check above.)
+  if (child.type === "transform" && parent.type === "text") {
+    return;
+  }
   const yIdx = yogaIndexFor(parent, child);
   (parent.yoga as YogaNode).insertChild(child.yoga as YogaNode, yIdx);
 }
 
 export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
   if (!hasYoga(parent) || !hasYoga(child)) return;
+  // Transform nodes inside a text parent were never inserted into yoga.
+  if (child.type === "transform" && parent.type === "text") {
+    return;
+  }
   (parent.yoga as YogaNode).removeChild(child.yoga as YogaNode);
 }
 
