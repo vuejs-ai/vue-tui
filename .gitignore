@@ -29,3 +29,4 @@ dist-ssr
 # Superpowers
 docs/superpowers/
 tmp/
+docs/known-yoga-bugs.md
