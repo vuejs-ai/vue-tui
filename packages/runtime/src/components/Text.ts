@@ -25,8 +25,12 @@ export const Text = defineComponent({
   setup(props, { slots }) {
     return () => {
       const insideText = isInsideText();
-      const elementType = insideText ? "virtual-text" : "text";
-      return h(elementType, props as never, slots.default?.());
+      if (insideText) {
+        return h("virtual-text", props as never, slots.default?.());
+      }
+      // Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when
+      // they overflow their container (e.g. in no-wrap flex rows).
+      return h("text", { ...props, flexShrink: 1 } as never, slots.default?.());
     };
   },
 });

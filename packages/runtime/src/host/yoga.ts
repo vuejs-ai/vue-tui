@@ -261,6 +261,19 @@ export function bindTextMeasure(text: TuiText): void {
   text.yoga.setMeasureFunc((availableWidth) => {
     const raw = flattenLeaves(text);
     text.measuredCache = raw;
+    const natural = measureText(raw, Infinity, text.props.wrap ?? "wrap");
+
+    // Text fits into container, no need to wrap.
+    if (natural.width <= availableWidth) return natural;
+
+    // When <Box> is shrinking child nodes, yoga asks if we can fit this text
+    // node in a sub-1px space. Return the natural size to tell yoga "no, I
+    // need my full width". This matches Ink's behavior and prevents text from
+    // wrapping to infinite height when given fractional widths.
+    if (natural.width >= 1 && availableWidth > 0 && availableWidth < 1) {
+      return natural;
+    }
+
     return measureText(raw, availableWidth, text.props.wrap ?? "wrap");
   });
 }
