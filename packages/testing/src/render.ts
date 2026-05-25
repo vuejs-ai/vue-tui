@@ -92,7 +92,7 @@ export async function render(
   return {
     lastFrame: (opts?: LastFrameOptions) => {
       const f = frames.at(-1);
-      if (!f) return undefined;
+      if (f === undefined) return undefined;
       if (opts?.raw) return f;
       if (opts?.trimLines)
         return f

@@ -15,8 +15,11 @@ catalogs:
     chalk:
       specifier: ^5.6.2
       version: 5.6.2
+    strip-ansi:
+      specifier: ^7.2.0
+      version: 7.2.0
     vite-plus:
-      specifier: latest
+      specifier: ^0.1.22
       version: 0.1.22
 
 overrides:
@@ -192,6 +195,9 @@ importers:
       chalk:
         specifier: 'catalog:'
         version: 5.6.2
+      strip-ansi:
+        specifier: 'catalog:'
+        version: 7.2.0
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
