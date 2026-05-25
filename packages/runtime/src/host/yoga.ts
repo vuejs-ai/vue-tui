@@ -155,8 +155,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
 
   margin: (n, v) => n.setMargin(Yoga.EDGE_ALL, v as number),
   marginX: (n, v) => {
-    n.setMargin(Yoga.EDGE_LEFT, v as number);
-    n.setMargin(Yoga.EDGE_RIGHT, v as number);
+    n.setMargin(Yoga.EDGE_START, v as number);
+    n.setMargin(Yoga.EDGE_END, v as number);
   },
   marginY: (n, v) => {
     n.setMargin(Yoga.EDGE_TOP, v as number);
@@ -164,8 +164,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   },
   marginTop: (n, v) => n.setMargin(Yoga.EDGE_TOP, v as number),
   marginBottom: (n, v) => n.setMargin(Yoga.EDGE_BOTTOM, v as number),
-  marginLeft: (n, v) => n.setMargin(Yoga.EDGE_LEFT, v as number),
-  marginRight: (n, v) => n.setMargin(Yoga.EDGE_RIGHT, v as number),
+  marginLeft: (n, v) => n.setMargin(Yoga.EDGE_START, v as number),
+  marginRight: (n, v) => n.setMargin(Yoga.EDGE_END, v as number),
 
   padding: (n, v) => n.setPadding(Yoga.EDGE_ALL, v as number),
   paddingX: (n, v) => {
