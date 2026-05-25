@@ -191,15 +191,17 @@ function placeLine(grid: string[][], x: number, y: number, line: string): void {
 }
 
 function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextProps = {}): string {
+  if (!node.children || node.children.length === 0) return "";
   const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
   const merged: TextProps = { ...acc, ...defined };
   let out = "";
   for (const child of node.children) {
     if (child.type === "text-leaf") {
       out += applyChalk(child.value, merged);
-    } else {
+    } else if (child.type === "virtual-text") {
       out += renderTextWithInlineStyles(child, merged);
     }
+    // Skip comments inserted by Vue for null/undefined renders
   }
   return out;
 }

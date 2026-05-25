@@ -264,6 +264,11 @@ export function bindTextMeasure(text: TuiText): void {
   text.yoga.setMeasureFunc((availableWidth) => {
     const raw = flattenLeaves(text);
     text.measuredCache = raw;
+
+    // Empty text (no children or all-null children) — return zero dimensions
+    // so yoga doesn't crash trying to measure an empty string.
+    if (raw === "") return { width: 0, height: 0 };
+
     const natural = measureText(raw, Infinity, text.props.wrap ?? "wrap");
 
     // Text fits into container, no need to wrap.

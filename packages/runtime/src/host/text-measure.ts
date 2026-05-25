@@ -4,13 +4,15 @@ import wrapAnsi from "wrap-ansi";
 import type { TextProps, TuiText, TuiVirtualText } from "./nodes.ts";
 
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
+  if (!node.children || node.children.length === 0) return "";
   let out = "";
   for (const child of node.children) {
     if (child.type === "text-leaf") {
       out += child.value;
-    } else {
+    } else if (child.type === "virtual-text") {
       out += flattenLeaves(child);
     }
+    // Skip comments inserted by Vue for null/undefined renders
   }
   return out;
 }

@@ -24,7 +24,7 @@ test("CJK wide characters render without corruption", async () => {
 
 // --- Ink text tests ---
 
-test.skip("<Text> with undefined children — crashes yoga measure", async () => {
+test("<Text> with undefined children", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Text />),
     { columns: 100 },
@@ -32,7 +32,7 @@ test.skip("<Text> with undefined children — crashes yoga measure", async () =>
   expect(lastFrame()).toBe("");
 });
 
-test.skip("<Text> with null children — crashes yoga measure", async () => {
+test("<Text> with null children", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Text>{null}</Text>),
     { columns: 100 },
@@ -169,7 +169,7 @@ test("remeasure text when text is changed", async () => {
   expect(lastFrame()).toBe("abcx");
 });
 
-test.skip("remeasure text when text nodes are changed — null child crashes yoga", async () => {
+test("remeasure text when text nodes are changed", async () => {
   const add = shallowRef(false);
   const { lastFrame } = await render(
     defineComponent(() => () => (
