@@ -5,7 +5,14 @@ type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
 type FlexWrap = "nowrap" | "wrap" | "wrap-reverse";
 type Align = "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
 type AlignSelf = "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
-type AlignContent = Align | "space-between" | "space-around" | "space-evenly";
+type AlignContent =
+  | "flex-start"
+  | "center"
+  | "flex-end"
+  | "stretch"
+  | "space-between"
+  | "space-around"
+  | "space-evenly";
 type Justify =
   | "flex-start"
   | "center"

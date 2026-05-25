@@ -139,7 +139,10 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   borderRight: (n, v) => n.setBorder(Yoga.EDGE_RIGHT, v ? 1 : 0),
 
   display: (n, v) => n.setDisplay(v === "none" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
-  overflow: (n, v) => n.setOverflow(v === "hidden" ? Yoga.OVERFLOW_HIDDEN : Yoga.OVERFLOW_VISIBLE),
+  // Ink does NOT call setOverflow on yoga — it only clips visually in paint.
+  // Calling setOverflow(HIDDEN) would prevent nodes from expanding beyond
+  // their bounds during layout, which differs from Ink's behavior.
+  overflow: (_n, _v) => {},
   // Yoga does not support per-axis overflow; these are accepted silently.
   overflowX: (_n, _v) => {},
   overflowY: (_n, _v) => {},
