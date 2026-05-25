@@ -67,6 +67,16 @@ const STYLE_PROPS = new Set([
   "overflowY",
 ]);
 
+/** Walk up the DOM tree to check if we're inside a text or virtual-text context. */
+function isInsideTextContext(node: TuiContainer): boolean {
+  let current: TuiContainer | null = node;
+  while (current) {
+    if (current.type === "text" || current.type === "virtual-text") return true;
+    current = current.parent;
+  }
+  return false;
+}
+
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
   const { onCommit } = options;
 
@@ -131,6 +141,21 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       throw new Error(`Cannot insert into ${parent.type}`);
     }
     const parentC = parent as TuiContainer;
+
+    // Dev warning: <Box> inside <Text> is invalid (matches Ink's validation).
+    // Inserting a box into a text context corrupts the yoga WASM layout engine.
+    if (
+      process.env["NODE_ENV"] !== "production" &&
+      child.type === "box" &&
+      isInsideTextContext(parentC)
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[vue-tui] A <Box> cannot be nested inside a <Text> component. " +
+          "Wrap it in a sibling <Box> instead.",
+      );
+      return; // Skip insertion to prevent WASM crash
+    }
 
     // Move semantics: if the child is already mounted (Vue's keyed reorder
     // emits insert(existingChild, parent, newAnchor) without a prior remove),

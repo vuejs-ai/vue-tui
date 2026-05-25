@@ -94,6 +94,5 @@ test.todo(
   "fail when text node is not within <Text> component — vue-tui silently allows text-leaf inside box; validation not yet implemented",
 );
 
-test.todo(
-  "fail when <Box> is inside <Text> component — causes WASM table index out of bounds crash; yoga does not safely reject this nesting",
-);
+// Resolved: <Box> inside <Text> now emits a dev warning and skips insertion
+// to prevent WASM crash. See box-in-text-validation.test.tsx.
