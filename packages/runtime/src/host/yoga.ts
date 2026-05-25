@@ -79,8 +79,10 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
 // --- prop application ----------------------------------------------------
 
 const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
-  width: (n, v) => n.setWidth(v as number | "auto" | `${number}%`),
-  height: (n, v) => n.setHeight(v as number | "auto" | `${number}%`),
+  width: (n, v) =>
+    v === undefined ? n.setWidth("auto") : n.setWidth(v as number | "auto" | `${number}%`),
+  height: (n, v) =>
+    v === undefined ? n.setHeight("auto") : n.setHeight(v as number | "auto" | `${number}%`),
   minWidth: (n, v) => n.setMinWidth(v as number | `${number}%`),
   minHeight: (n, v) => n.setMinHeight(v as number | `${number}%`),
   flexGrow: (n, v) => n.setFlexGrow(v as number),
@@ -141,6 +143,33 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Yoga does not support per-axis overflow; these are accepted silently.
   overflowX: (_n, _v) => {},
   overflowY: (_n, _v) => {},
+  maxWidth: (n, v) =>
+    v === undefined ? n.setMaxWidth(NaN as never) : n.setMaxWidth(v as number | `${number}%`),
+  maxHeight: (n, v) =>
+    v === undefined ? n.setMaxHeight(NaN as never) : n.setMaxHeight(v as number | `${number}%`),
+  aspectRatio: (n, v) =>
+    v === undefined ? n.setAspectRatio(undefined as never) : n.setAspectRatio(v as number),
+  alignContent: (n, v) =>
+    v === undefined
+      ? n.setAlignContent(Yoga.ALIGN_FLEX_START)
+      : n.setAlignContent(toAlign(v as string)),
+  position: (n, v) => n.setPositionType(toPosition(v as string)),
+  top: (n, v) =>
+    v === undefined
+      ? n.setPosition(Yoga.EDGE_TOP, NaN as never)
+      : n.setPosition(Yoga.EDGE_TOP, v as number | `${number}%`),
+  right: (n, v) =>
+    v === undefined
+      ? n.setPosition(Yoga.EDGE_RIGHT, NaN as never)
+      : n.setPosition(Yoga.EDGE_RIGHT, v as number | `${number}%`),
+  bottom: (n, v) =>
+    v === undefined
+      ? n.setPosition(Yoga.EDGE_BOTTOM, NaN as never)
+      : n.setPosition(Yoga.EDGE_BOTTOM, v as number | `${number}%`),
+  left: (n, v) =>
+    v === undefined
+      ? n.setPosition(Yoga.EDGE_LEFT, NaN as never)
+      : n.setPosition(Yoga.EDGE_LEFT, v as number | `${number}%`),
 };
 
 function toFlexDirection(v: string): FlexDirection {
@@ -167,7 +196,14 @@ function toAlign(v: string): Align {
     center: Yoga.ALIGN_CENTER,
     "flex-end": Yoga.ALIGN_FLEX_END,
     stretch: Yoga.ALIGN_STRETCH,
+    baseline: Yoga.ALIGN_BASELINE,
   }[v]!;
+}
+
+function toPosition(v: string | undefined): number {
+  if (!v || v === "relative") return Yoga.POSITION_TYPE_RELATIVE;
+  if (v === "absolute") return Yoga.POSITION_TYPE_ABSOLUTE;
+  return Yoga.POSITION_TYPE_STATIC;
 }
 
 function toJustify(v: string): Justify {
@@ -185,6 +221,19 @@ export function isYogaProp(key: string): boolean {
   return key in YOGA_PROP_SETTERS;
 }
 
+const RESETTABLE_PROPS = new Set([
+  "width",
+  "height",
+  "maxWidth",
+  "maxHeight",
+  "aspectRatio",
+  "alignContent",
+  "top",
+  "right",
+  "bottom",
+  "left",
+]);
+
 export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): void {
   const setter = YOGA_PROP_SETTERS[key];
   if (!setter) return;
@@ -197,7 +246,7 @@ export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): v
   // Exception: borderStyle is the one prop with intentional undefined
   // semantics — undefined means "no border", which the setter implements
   // by zeroing all four edge widths.
-  if (value === undefined && key !== "borderStyle") return;
+  if (value === undefined && key !== "borderStyle" && !RESETTABLE_PROPS.has(key)) return;
   setter(node.yoga as YogaNode, value);
 }
 

@@ -3,7 +3,7 @@ import { defineComponent, h, type PropType } from "vue";
 type Spacing = number;
 type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
 type FlexWrap = "nowrap" | "wrap" | "wrap-reverse";
-type Align = "flex-start" | "center" | "flex-end" | "stretch";
+type Align = "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
 type AlignSelf = "auto" | "flex-start" | "center" | "flex-end";
 type Justify =
   | "flex-start"
@@ -41,6 +41,15 @@ export const Box = defineComponent({
     height: [Number, String],
     minWidth: [Number, String],
     minHeight: [Number, String],
+    maxWidth: [Number, String],
+    maxHeight: [Number, String],
+    aspectRatio: Number,
+    alignContent: String as PropType<Align>,
+    position: String as PropType<"absolute" | "relative" | "static">,
+    top: [Number, String],
+    right: [Number, String],
+    bottom: [Number, String],
+    left: [Number, String],
 
     margin: Number as PropType<Spacing>,
     marginX: Number,
