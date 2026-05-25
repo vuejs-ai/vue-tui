@@ -200,6 +200,23 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
       out += applyChalk(child.value, merged);
     } else if (child.type === "virtual-text") {
       out += renderTextWithInlineStyles(child, merged);
+    } else if (child.type === "transform") {
+      // Recurse into the transform's children, then apply the transform function.
+      // This mirrors Ink's squashTextNodes behavior for <Transform> inside <Text>.
+      // Only apply the transform when there is actual text content — Ink skips
+      // transforms on empty text to avoid wrapping empty strings.
+      let innerText = "";
+      for (const grandchild of child.children) {
+        if (grandchild.type === "text-leaf") {
+          innerText += applyChalk(grandchild.value, merged);
+        } else if (grandchild.type === "virtual-text" || grandchild.type === "text") {
+          innerText += renderTextWithInlineStyles(grandchild, merged);
+        }
+      }
+      if (innerText.length > 0 && child.transform) {
+        innerText = child.transform(innerText, 0);
+      }
+      out += innerText;
     }
     // Skip comments inserted by Vue for null/undefined renders
   }
@@ -356,6 +373,9 @@ function paintNode(
       const layout = node.yoga.getComputedLayout();
       const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
       const text = renderTextWithInlineStyles(node, bgProps);
+      // Skip writing empty text — avoids applying line transformers to empty
+      // content, which matches Ink's behavior of not writing empty text nodes.
+      if (text === "") return;
       const cellWidth = Math.max(1, Math.floor(layout.width));
       const wrapped = wrapText(text, cellWidth, node.props.wrap ?? "wrap");
       if (inheritedBg) {

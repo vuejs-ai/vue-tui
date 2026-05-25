@@ -79,7 +79,7 @@ export interface TuiTransform extends NodeBase {
   transform: (line: string, lineIndex: number) => string;
 }
 
-export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment;
+export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment | TuiTransform;
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiTransform | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 

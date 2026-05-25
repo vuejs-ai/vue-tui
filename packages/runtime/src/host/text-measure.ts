@@ -11,6 +11,19 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
       out += child.value;
     } else if (child.type === "virtual-text") {
       out += flattenLeaves(child);
+    } else if (child.type === "transform") {
+      // Recurse into transform's children for measurement (transforms are
+      // applied at paint time, not measurement time).
+      let innerText = "";
+      for (const grandchild of child.children) {
+        if (grandchild.type === "text-leaf") {
+          innerText += grandchild.value;
+        } else if (grandchild.type === "virtual-text" || grandchild.type === "text") {
+          innerText += flattenLeaves(grandchild);
+        }
+      }
+      if (child.transform) innerText = child.transform(innerText, 0);
+      out += innerText;
     }
     // Skip comments inserted by Vue for null/undefined renders
   }

@@ -14,24 +14,74 @@ test("Transform uppercases descendant text", async () => {
 
 // --- Ink transform tests ---
 
-// NOTE: Tests that use <Transform> inside <Text> (i.e. a transform node as a
-// child of a text node) are marked todo. vue-tui's renderTextWithInlineStyles
-// only handles text-leaf and virtual-text children; transform nodes nested
-// inside a text node are not supported in the current paint pass.
+test("transform children — <Transform> inside <Text>", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string, idx: number) => `[${idx}: ${s}]`}>
+        <Text>
+          <Transform transform={(s: string, idx: number) => `{${idx}: ${s}}`}>
+            <Text>test</Text>
+          </Transform>
+        </Text>
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[0: {0: test}]");
+});
 
-test.todo("transform children — <Transform> inside <Text> not supported in paint pass");
-
-test.todo("squash multiple text nodes — <Transform> inside <Text> not supported in paint pass");
+test("squash multiple text nodes — <Transform> inside <Text>", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string, idx: number) => `[${idx}: ${s}]`}>
+        <Text>
+          <Transform transform={(s: string, idx: number) => `{${idx}: ${s}}`}>
+            <Text>hello world</Text>
+          </Transform>
+        </Text>
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[0: {0: hello world}]");
+});
 
 test.todo(
   "transform with multiple lines — transform nodes are not yoga carriers; root yoga height does not account for multi-line text under a transform node",
 );
 
-test.todo(
-  "squash multiple nested text nodes — <Transform> inside <Text> not supported in paint pass",
-);
+test("squash multiple nested text nodes — <Transform> inside <Text>", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string, idx: number) => `[${idx}: ${s}]`}>
+        <Text>
+          <Transform transform={(s: string, idx: number) => `{${idx}: ${s}}`}>
+            hello
+            <Text> world</Text>
+          </Transform>
+        </Text>
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[0: {0: hello world}]");
+});
 
-test.todo("squash empty <Text> nodes — <Transform> inside <Text> not supported in paint pass");
+test("squash empty <Text> nodes — <Transform> inside <Text>", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string) => `[${s}]`}>
+        <Text>
+          <Transform transform={(s: string) => `{${s}}`}>
+            <Text>{[]}</Text>
+          </Transform>
+        </Text>
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("");
+});
 
 test("<Transform> with undefined children", async () => {
   const { lastFrame } = await render(
