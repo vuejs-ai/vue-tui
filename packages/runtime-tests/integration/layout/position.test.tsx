@@ -71,7 +71,7 @@ test("relative position offsets visual position while keeping flow", async () =>
     )),
     { columns: 100 },
   );
-  expect(lastFrame({ trimLines: true })).toBe(" BA  ");
+  expect(lastFrame({ trimLines: true })).toBe(" BA");
 });
 
 test("static position ignores offsets", async () => {

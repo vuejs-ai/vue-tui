@@ -30,7 +30,7 @@ test("set width in percent", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame({ trimLines: true })).toBe("A    B    ");
+  expect(lastFrame({ trimLines: true })).toBe("A    B");
 });
 
 test("set min width", async () => {

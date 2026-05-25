@@ -49,7 +49,7 @@ class Output {
         placeLine(grid, op.x, op.y + lineIdx, line);
       }
     }
-    return grid.map((row) => row.join("")).join("\n");
+    return grid.map((row) => row.join("").trimEnd()).join("\n");
   }
 }
 
