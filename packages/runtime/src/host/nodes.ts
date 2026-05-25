@@ -16,7 +16,7 @@ export interface TextProps {
   underline?: boolean;
   strikethrough?: boolean;
   inverse?: boolean;
-  wrap?: "wrap" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
+  wrap?: "wrap" | "hard" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
 }
 
 interface NodeBase {

@@ -1,7 +1,13 @@
 import { defineComponent, getCurrentInstance, h, type PropType } from "vue";
 
 type Color = string | [number, number, number];
-type WrapMode = "wrap" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
+type WrapMode =
+  | "wrap"
+  | "hard"
+  | "truncate"
+  | "truncate-end"
+  | "truncate-middle"
+  | "truncate-start";
 
 export const Text = defineComponent({
   name: "Text",

@@ -24,6 +24,10 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     return wrapAnsi(text, width, { hard: true, trim: true, wordWrap: true }).split("\n");
   }
 
+  if (mode === "hard") {
+    return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
+  }
+
   // truncate variants: collapse newlines, then slice from the appropriate side.
   const single = text.replace(/\n/g, " ");
   if (stringWidth(single) <= width) return [single];
