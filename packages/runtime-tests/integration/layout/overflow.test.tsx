@@ -3,35 +3,414 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
-// overflowX tests — directional overflow not yet supported
-test.todo("overflowX - single text node in a box inside overflow container");
-test.todo("overflowX - single text node inside overflow container with border");
-test.todo("overflowX - single text node in a box with border inside overflow container");
-test.todo("overflowX - multiple text nodes in a box inside overflow container");
-test.todo("overflowX - multiple text nodes in a box inside overflow container with border");
-test.todo("overflowX - multiple text nodes in a box with border inside overflow container");
-test.todo("overflowX - multiple boxes inside overflow container");
-test.todo("overflowX - multiple boxes inside overflow container with border");
-test.todo("overflowX - box before left edge of overflow container");
-test.todo("overflowX - box before left edge of overflow container with border");
-test.todo("overflowX - box intersecting with left edge of overflow container");
-test.todo("overflowX - box intersecting with left edge of overflow container with border");
-test.todo("overflowX - box after right edge of overflow container");
-test.todo("overflowX - box intersecting with right edge of overflow container");
+/** Build a round-border box string like boxen(text, { borderStyle: "round" }) */
+function box(text: string): string {
+  const lines = text.split("\n");
+  const width = Math.max(...lines.map((l) => l.length));
+  const top = `╭${"─".repeat(width)}╮`;
+  const bottom = `╰${"─".repeat(width)}╯`;
+  const middle = lines.map((l) => `│${l.padEnd(width)}│`).join("\n");
+  return `${top}\n${middle}\n${bottom}`;
+}
 
-// overflowY tests — directional overflow not yet supported
-test.todo("overflowY - single text node inside overflow container");
-test.todo("overflowY - single text node inside overflow container with border");
-test.todo("overflowY - multiple boxes inside overflow container");
-test.todo("overflowY - multiple boxes inside overflow container with border");
-test.todo("overflowY - box above top edge of overflow container");
-test.todo("overflowY - box above top edge of overflow container with border");
-test.todo("overflowY - box intersecting with top edge of overflow container");
-test.todo("overflowY - box intersecting with top edge of overflow container with border");
-test.todo("overflowY - box below bottom edge of overflow container");
-test.todo("overflowY - box below bottom edge of overflow container with border");
-test.todo("overflowY - box intersecting with bottom edge of overflow container");
-test.todo("overflowY - box intersecting with bottom edge of overflow container with border");
+/** Clip each line to at most `columns` visible characters and trim trailing whitespace */
+function clipX(text: string, columns: number): string {
+  return text
+    .split("\n")
+    .map((line) => line.slice(0, columns).trim())
+    .join("\n");
+}
+
+// --- overflowX tests ---
+
+test("overflowX - single text node in a box inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box width={16} flexShrink={0}>
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Hello");
+});
+
+test("overflowX - single text node inside overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden" borderStyle="round">
+        <Box width={16} flexShrink={0}>
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Hell"));
+});
+
+test("overflowX - single text node in a box with border inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box width={16} flexShrink={0} borderStyle="round">
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(clipX(box("Hello"), 6));
+});
+
+test("overflowX - multiple text nodes in a box inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden" flexDirection="row">
+        <Box width={12} flexShrink={0} flexDirection="row">
+          <Text>Hello </Text>
+          <Text>World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Hello");
+});
+
+test("overflowX - multiple text nodes in a box inside overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={8} overflowX="hidden" borderStyle="round" flexDirection="row">
+        <Box width={12} flexShrink={0} flexDirection="row">
+          <Text>Hello </Text>
+          <Text>World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Hello "));
+});
+
+test("overflowX - multiple text nodes in a box with border inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={8} overflowX="hidden" flexDirection="row">
+        <Box width={12} flexShrink={0} borderStyle="round" flexDirection="row">
+          <Text>Hello </Text>
+          <Text>World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(clipX(box("HelloWo\n"), 8));
+});
+
+test("overflowX - multiple boxes inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden" flexDirection="row">
+        <Box width={6} flexShrink={0}>
+          <Text>Hello </Text>
+        </Box>
+        <Box width={6} flexShrink={0}>
+          <Text>World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Hello");
+});
+
+test("overflowX - multiple boxes inside overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={8} overflowX="hidden" borderStyle="round" flexDirection="row">
+        <Box width={6} flexShrink={0}>
+          <Text>Hello </Text>
+        </Box>
+        <Box width={6} flexShrink={0}>
+          <Text>World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Hello "));
+});
+
+test("overflowX - box before left edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box marginLeft={-12} width={6} flexShrink={0}>
+          <Text>Hello</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("");
+});
+
+test("overflowX - box before left edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden" borderStyle="round">
+        <Box marginLeft={-12} width={6} flexShrink={0}>
+          <Text>Hello</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box(" ".repeat(4)));
+});
+
+test("overflowX - box intersecting with left edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box marginLeft={-3} width={12} flexShrink={0}>
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("lo Wor");
+});
+
+test("overflowX - box intersecting with left edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={8} overflowX="hidden" borderStyle="round">
+        <Box marginLeft={-3} width={12} flexShrink={0}>
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("lo Wor"));
+});
+
+test("overflowX - box after right edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box marginLeft={6} width={6} flexShrink={0}>
+          <Text>Hello</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("");
+});
+
+test("overflowX - box intersecting with right edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6} overflowX="hidden">
+        <Box marginLeft={3} width={6} flexShrink={0}>
+          <Text>Hello</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("   Hel");
+});
+
+// --- overflowY tests ---
+
+test("overflowY - single text node inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} overflowY="hidden">
+        <Text>Hello{"\n"}World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Hello");
+});
+
+test("overflowY - single text node inside overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={20} height={3} overflowY="hidden" borderStyle="round">
+        <Text>Hello{"\n"}World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Hello".padEnd(18, " ")));
+});
+
+test("overflowY - multiple boxes inside overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={2} overflowY="hidden" flexDirection="column">
+        <Box flexShrink={0}>
+          <Text>Line #1</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #2</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #3</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #4</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Line #1\nLine #2");
+});
+
+test("overflowY - multiple boxes inside overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={9} height={4} overflowY="hidden" flexDirection="column" borderStyle="round">
+        <Box flexShrink={0}>
+          <Text>Line #1</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #2</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #3</Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text>Line #4</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Line #1\nLine #2"));
+});
+
+test("overflowY - box above top edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} overflowY="hidden">
+        <Box marginTop={-2} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("");
+});
+
+test("overflowY - box above top edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7} height={3} overflowY="hidden" borderStyle="round">
+        <Box marginTop={-3} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box(" ".repeat(5)));
+});
+
+test("overflowY - box intersecting with top edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} overflowY="hidden">
+        <Box marginTop={-1} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("World");
+});
+
+test("overflowY - box intersecting with top edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7} height={3} overflowY="hidden" borderStyle="round">
+        <Box marginTop={-1} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("World"));
+});
+
+test("overflowY - box below bottom edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} overflowY="hidden">
+        <Box marginTop={1} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("");
+});
+
+test("overflowY - box below bottom edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7} height={3} overflowY="hidden" borderStyle="round">
+        <Box marginTop={2} height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box(" ".repeat(5)));
+});
+
+test("overflowY - box intersecting with bottom edge of overflow container", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} overflowY="hidden">
+        <Box height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("Hello");
+});
+
+test("overflowY - box intersecting with bottom edge of overflow container with border", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7} height={3} overflowY="hidden" borderStyle="round">
+        <Box height={2} flexShrink={0}>
+          <Text>Hello{"\n"}World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe(box("Hello"));
+});
 
 // unified overflow tests
 test("overflow - single text node inside overflow container", async () => {

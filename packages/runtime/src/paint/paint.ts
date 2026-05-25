@@ -324,20 +324,25 @@ function paintNode(
         fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, bg, transformers);
       }
 
-      // Overflow clipping: when overflow is "hidden", clip children to the box
-      // content area (inside borders). Matches Ink's clip/unclip approach.
+      // Overflow clipping: clip children to the box content area (inside
+      // borders) when overflow/overflowX/overflowY is "hidden". Matches Ink's
+      // per-axis clip/unclip approach.
       let clipped = false;
       const overflow = node.props["overflow"] as string | undefined;
-      if (overflow === "hidden") {
-        const borderLeft = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
-        const borderRight = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
-        const borderTop = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
-        const borderBottom = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
+      const clipH =
+        overflow === "hidden" || (node.props["overflowX"] as string | undefined) === "hidden";
+      const clipV =
+        overflow === "hidden" || (node.props["overflowY"] as string | undefined) === "hidden";
+      if (clipH || clipV) {
+        const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
+        const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
+        const bt = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
+        const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
         output.clip({
-          x1: x + borderLeft,
-          x2: x + w - borderRight,
-          y1: y + borderTop,
-          y2: y + h - borderBottom,
+          x1: clipH ? x + bl : undefined,
+          x2: clipH ? x + w - br : undefined,
+          y1: clipV ? y + bt : undefined,
+          y2: clipV ? y + h - bb : undefined,
         });
         clipped = true;
       }
