@@ -192,3 +192,143 @@ test.skip("text with content 'constructor' wraps correctly — bug in text node 
   );
   expect(lastFrame()).toBe("constructor");
 });
+
+// --- Ink text/wrapping tests ---
+
+test("text", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => <Text>Hello World</Text>),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("text with variable", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => <Text>Count: {1}</Text>),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Count: 1");
+});
+
+test("multiple text nodes", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        {"Hello"}
+        {" World"}
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("text with component", async () => {
+  const World = defineComponent(() => () => <Text>World</Text>);
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        Hello <World />
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("wrap text", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7}>
+        <Text wrap="wrap">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello\nWorld");
+});
+
+test("don't wrap text if there is enough space", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="wrap">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("hard wrap text", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7}>
+        <Text wrap="hard">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello W\norld");
+});
+
+test("hard wrap with long word", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={5}>
+        <Text wrap="hard">aaaaaaaaaa</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("aaaaa\naaaaa");
+});
+
+test("don't hard wrap text if there is enough space", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="hard">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("truncate text in the end", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7}>
+        <Text wrap="truncate">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello …");
+});
+
+test("truncate text in the middle", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7}>
+        <Text wrap="truncate-middle">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hel…rld");
+});
+
+test("truncate text in the beginning", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={7}>
+        <Text wrap="truncate-start">Hello World</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("… World");
+});

@@ -25,7 +25,9 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   }
 
   if (mode === "hard") {
-    return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
+    // `wordWrap: false` ensures breaks happen at the exact character boundary,
+    // not at word boundaries. This is what Ink's "hard" wrap mode does.
+    return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");
   }
 
   // truncate variants: collapse newlines, then slice from the appropriate side.
