@@ -8,7 +8,7 @@ const alignContentCases = [
   ["center", "\n\nAB\nCD\n\n"],
   ["flex-end", "\n\n\n\nAB\nCD"],
   ["space-between", "AB\n\n\n\n\nCD"],
-  ["space-around", "\nAB\n\nCD\n\n"],
+  ["space-around", "\nAB\n\n\nCD\n"],
   ["space-evenly", "\nAB\n\nCD\n\n"],
   ["stretch", "AB\n\n\nCD\n\n"],
 ] as const;
