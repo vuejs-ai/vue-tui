@@ -68,7 +68,7 @@ export async function dev(entry?: string) {
     if (!acceptReloads) return;
     const newPath = await extractBundle(clientEnv.memoryFiles, outDir);
     pm.setBundlePath(newPath);
-    pm.restart();
+    void pm.restart();
   });
 
   // Re-spawn after crash on next successful bundle update

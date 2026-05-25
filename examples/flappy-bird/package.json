@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "preview": "vite build && node dist/game.mjs"
+    "build": "vp build",
+    "preview": "vp build && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",

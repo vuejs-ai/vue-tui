@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vue-tui dev",
-    "build": "vite build",
-    "preview": "vite build && node dist/agent.mjs"
+    "build": "vp build",
+    "preview": "vp build && node dist/agent.mjs"
   },
   "dependencies": {
     "@vue-tui/cli": "workspace:*",

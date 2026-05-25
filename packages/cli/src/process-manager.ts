@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import type { EventEmitter } from "node:events";
 import type { Logger } from "./logger.ts";
 
 export interface ProcessManagerOptions {
@@ -33,7 +34,7 @@ export function createProcessManager(options: ProcessManagerOptions) {
   function doSpawn() {
     process.stdout.write("\x1b[2J\x1b[H");
     options.logger.mode = "silent";
-    child = spawn("node", ["--import", loaderBootstrap, currentBundlePath], {
+    const proc = spawn("node", ["--import", loaderBootstrap, currentBundlePath], {
       stdio: "inherit",
       env: {
         ...process.env,
@@ -41,8 +42,9 @@ export function createProcessManager(options: ProcessManagerOptions) {
         VUE_TUI_HMR_PORT: String(options.hmrPort),
       },
     });
+    child = proc;
 
-    child.on("exit", (code) => {
+    (proc as unknown as EventEmitter).on("exit", (code: number | null) => {
       options.logger.mode = "stdout";
       child = null;
       options.onExit?.(code);
@@ -54,7 +56,7 @@ export function createProcessManager(options: ProcessManagerOptions) {
       const timer = setTimeout(() => {
         resolve();
       }, timeout);
-      proc.on("exit", () => {
+      (proc as unknown as EventEmitter).on("exit", () => {
         clearTimeout(timer);
         resolve();
       });
