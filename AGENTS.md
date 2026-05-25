@@ -5,6 +5,7 @@
 - Always use `defineComponent()` to define components. Never use bare `{ setup() {} }` objects — they lack component scope, so `inject`, `watch`, and `onScopeDispose` won't work correctly.
 - Vue SFCs must use `<script setup>` unless there's an explicit reason not to.
 - Bug fixes must follow test-first: write a failing test that reproduces the bug, then fix the code and verify the test passes.
+- Tests must simulate real user conditions. Non-TTY environments disable chalk colors — use `FORCE_COLOR` env var so ANSI output is always exercised. A bug invisible in tests but visible in a real terminal is a testing gap, not a minor issue.
 - When debugging color/ANSI output in non-TTY environments (e.g. Claude Code shell), use `FORCE_COLOR=3` env var to force chalk to output ANSI codes.
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
 

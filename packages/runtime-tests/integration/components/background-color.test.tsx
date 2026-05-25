@@ -1,18 +1,8 @@
-import chalk from "chalk";
-import { afterEach, beforeEach, expect, test } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
 const BG_BLUE = "\x1b[44m";
-
-let prevLevel: typeof chalk.level;
-beforeEach(() => {
-  prevLevel = chalk.level;
-  chalk.level = 1;
-});
-afterEach(() => {
-  chalk.level = prevLevel;
-});
 
 test("Box backgroundColor produces ANSI background codes", async () => {
   const { frames } = await render(
