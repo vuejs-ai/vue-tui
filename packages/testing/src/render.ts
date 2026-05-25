@@ -18,8 +18,13 @@ export interface Terminal {
   rawMode: RawModeState;
 }
 
+export interface LastFrameOptions {
+  raw?: boolean;
+  trimLines?: boolean;
+}
+
 export interface RenderResult {
-  lastFrame(this: void, opts?: { raw?: boolean }): string | undefined;
+  lastFrame(this: void, opts?: LastFrameOptions): string | undefined;
   frames: string[];
   stdin: {
     write(data: string): Promise<void>;
@@ -53,7 +58,10 @@ export async function render(
 
   const frames: string[] = [];
   stdout.on("data", (chunk) => {
-    frames.push(chunk.toString());
+    let raw = chunk.toString();
+    // Debug-mode frame writer appends "\n"; strip it so frame height matches yoga layout
+    if (raw.endsWith("\n")) raw = raw.slice(0, -1);
+    frames.push(raw);
   });
 
   const app: TuiApp = createApp(component, options.props ?? undefined);
@@ -82,10 +90,16 @@ export async function render(
   };
 
   return {
-    lastFrame: (opts?: { raw?: boolean }) => {
+    lastFrame: (opts?: LastFrameOptions) => {
       const f = frames.at(-1);
       if (!f) return undefined;
-      return opts?.raw ? f : trimFrame(f);
+      if (opts?.raw) return f;
+      if (opts?.trimLines)
+        return f
+          .split("\n")
+          .map((l) => l.trimEnd())
+          .join("\n");
+      return trimFrame(f);
     },
     frames,
     stdin: {

@@ -197,6 +197,9 @@ function toAlign(v: string): Align {
     "flex-end": Yoga.ALIGN_FLEX_END,
     stretch: Yoga.ALIGN_STRETCH,
     baseline: Yoga.ALIGN_BASELINE,
+    "space-between": Yoga.ALIGN_SPACE_BETWEEN,
+    "space-around": Yoga.ALIGN_SPACE_AROUND,
+    "space-evenly": Yoga.ALIGN_SPACE_EVENLY,
   }[v]!;
 }
 

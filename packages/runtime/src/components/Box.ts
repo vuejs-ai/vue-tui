@@ -4,7 +4,8 @@ type Spacing = number;
 type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
 type FlexWrap = "nowrap" | "wrap" | "wrap-reverse";
 type Align = "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
-type AlignSelf = "auto" | "flex-start" | "center" | "flex-end";
+type AlignSelf = "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
+type AlignContent = Align | "space-between" | "space-around" | "space-evenly";
 type Justify =
   | "flex-start"
   | "center"
@@ -44,7 +45,7 @@ export const Box = defineComponent({
     maxWidth: [Number, String],
     maxHeight: [Number, String],
     aspectRatio: Number,
-    alignContent: String as PropType<Align>,
+    alignContent: String as PropType<AlignContent>,
     position: String as PropType<"absolute" | "relative" | "static">,
     top: [Number, String],
     right: [Number, String],
