@@ -49,7 +49,7 @@ class Output {
         placeLine(grid, op.x, op.y + lineIdx, line);
       }
     }
-    return grid.map((row) => row.join("").trimEnd()).join("\n");
+    return grid.map((row) => row.join("")).join("\n");
   }
 }
 
@@ -91,9 +91,7 @@ function placeLine(grid: string[][], x: number, y: number, line: string): void {
 }
 
 function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextProps = {}): string {
-  const defined = Object.fromEntries(
-    Object.entries(node.props).filter(([, v]) => v !== undefined),
-  );
+  const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
   const merged: TextProps = { ...acc, ...defined };
   let out = "";
   for (const child of node.children) {
