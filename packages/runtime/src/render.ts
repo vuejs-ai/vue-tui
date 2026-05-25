@@ -170,7 +170,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       writer.write(frame);
     }
 
-    const scheduler = createCommitScheduler(commit);
+    const scheduler = createCommitScheduler(commit, { immediate: debug });
     scheduledCommit = scheduler.schedule;
 
     // Internal provides — set before the actual mount so components can inject

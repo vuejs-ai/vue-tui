@@ -111,6 +111,8 @@ test("Static flush clears the dynamic frame first (non-debug mode)", async () =>
   stdout.chunks.length = 0;
   items.value = ["STATIC_ITEM"];
   await nextTick();
+  // Wait for the render throttle trailing timer (~32ms) to fire in production mode.
+  await new Promise((r) => setTimeout(r, 50));
 
   // Collect everything written during this render cycle
   const renderOutput = stdout.chunks.join("");
