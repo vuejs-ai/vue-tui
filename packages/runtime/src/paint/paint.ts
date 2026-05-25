@@ -195,11 +195,16 @@ function paintNode(
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
       const bg = (node.props["backgroundColor"] as string | undefined) ?? inheritedBg;
-      if (node.props["backgroundColor"]) {
-        fillBackground(output, x, y, w, h, node.props["backgroundColor"], transformers);
-      }
       if (node.props["borderStyle"]) {
         drawBorder(output, x, y, w, h, node.props, transformers);
+      }
+      if (bg) {
+        const hasBorder = !!node.props["borderStyle"];
+        const bt = hasBorder && node.props["borderTop"] !== false ? 1 : 0;
+        const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
+        const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
+        const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
+        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, bg, transformers);
       }
       for (const child of node.children) paintNode(child, output, x, y, transformers, bg);
       return;
@@ -208,11 +213,16 @@ function paintNode(
       const layout = node.yoga.getComputedLayout();
       const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
       const text = renderTextWithInlineStyles(node, bgProps);
-      const wrapped = wrapText(
-        text,
-        Math.max(1, Math.floor(layout.width)),
-        node.props.wrap ?? "wrap",
-      );
+      const cellWidth = Math.max(1, Math.floor(layout.width));
+      const wrapped = wrapText(text, cellWidth, node.props.wrap ?? "wrap");
+      if (inheritedBg) {
+        for (let i = 0; i < wrapped.length; i++) {
+          const lineW = stringWidth(wrapped[i]!);
+          if (lineW < cellWidth) {
+            wrapped[i] = wrapped[i]! + applyChalk(" ".repeat(cellWidth - lineW), bgProps);
+          }
+        }
+      }
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
       return;
     }
