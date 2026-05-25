@@ -22,6 +22,10 @@ export function applyColor(
     const n = +color.slice(5, -1);
     return bg ? c.bgAnsi256(n) : c.ansi256(n);
   }
+  if (color.startsWith("ansi256(")) {
+    const n = +color.slice(8, -1);
+    return bg ? c.bgAnsi256(n) : c.ansi256(n);
+  }
   const key = bg ? bgKey(color) : color;
   const fn = (c as never as Record<string, ChalkInstance>)[key];
   return fn ?? c;

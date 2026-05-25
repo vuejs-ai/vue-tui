@@ -42,6 +42,14 @@ test("unknown color name falls back to no color", () => {
   }
 });
 
+test("ansi256 foreground color applies chalk.ansi256", () => {
+  expect(applyChalk("x", { color: "ansi256(194)" })).toBe(chalk.ansi256(194)("x"));
+});
+
+test("ansi256 background color applies chalk.bgAnsi256", () => {
+  expect(applyChalk("x", { backgroundColor: "ansi256(194)" })).toBe(chalk.bgAnsi256(194)("x"));
+});
+
 test("multiple modifiers chain", () => {
   const prev = chalk.level;
   chalk.level = 1;
