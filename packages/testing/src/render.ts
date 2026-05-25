@@ -19,7 +19,7 @@ export interface Terminal {
 }
 
 export interface RenderResult {
-  lastFrame(this: void): string | undefined;
+  lastFrame(this: void, opts?: { raw?: boolean }): string | undefined;
   frames: string[];
   stdin: {
     write(data: string): Promise<void>;
@@ -53,7 +53,7 @@ export async function render(
 
   const frames: string[] = [];
   stdout.on("data", (chunk) => {
-    frames.push(trimFrame(chunk.toString()));
+    frames.push(chunk.toString());
   });
 
   const app: TuiApp = createApp(component, options.props ?? undefined);
@@ -82,7 +82,11 @@ export async function render(
   };
 
   return {
-    lastFrame: () => frames.at(-1),
+    lastFrame: (opts?: { raw?: boolean }) => {
+      const f = frames.at(-1);
+      if (!f) return undefined;
+      return opts?.raw ? f : trimFrame(f);
+    },
     frames,
     stdin: {
       async write(data: string): Promise<void> {
