@@ -222,16 +222,144 @@ test("useStdout - write to stdout", async () => {
   expect(allOutput).toContain("Hello from vue-tui to stdout");
 });
 
-// --- todo: modifier+arrow keys not yet testable via render API ---
-test.todo("useInput - handle meta + up arrow");
-test.todo("useInput - handle meta + down arrow");
-test.todo("useInput - handle meta + left arrow");
-test.todo("useInput - handle meta + right arrow");
-test.todo("useInput - handle ctrl + up arrow");
-test.todo("useInput - handle ctrl + down arrow");
-test.todo("useInput - handle ctrl + left arrow");
-test.todo("useInput - handle ctrl + right arrow");
-test.todo("useInput - handle home");
-test.todo("useInput - handle end");
-test.todo("useInput - handle page up");
-test.todo("useInput - handle page down");
+// --- modifier+arrow keys, home, end, page up/down ---
+
+test("useInput - handle meta + up arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b\x1b[A");
+  expect(calls[0]?.key.upArrow).toBe(true);
+  expect(calls[0]?.key.meta).toBe(true);
+});
+
+test("useInput - handle meta + down arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b\x1b[B");
+  expect(calls[0]?.key.downArrow).toBe(true);
+  expect(calls[0]?.key.meta).toBe(true);
+});
+
+test("useInput - handle meta + left arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b\x1b[D");
+  expect(calls[0]?.key.leftArrow).toBe(true);
+  expect(calls[0]?.key.meta).toBe(true);
+});
+
+test("useInput - handle meta + right arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b\x1b[C");
+  expect(calls[0]?.key.rightArrow).toBe(true);
+  expect(calls[0]?.key.meta).toBe(true);
+});
+
+test("useInput - handle ctrl + up arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[1;5A");
+  expect(calls[0]?.key.upArrow).toBe(true);
+  expect(calls[0]?.key.ctrl).toBe(true);
+});
+
+test("useInput - handle ctrl + down arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[1;5B");
+  expect(calls[0]?.key.downArrow).toBe(true);
+  expect(calls[0]?.key.ctrl).toBe(true);
+});
+
+test("useInput - handle ctrl + left arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[1;5D");
+  expect(calls[0]?.key.leftArrow).toBe(true);
+  expect(calls[0]?.key.ctrl).toBe(true);
+});
+
+test("useInput - handle ctrl + right arrow", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[1;5C");
+  expect(calls[0]?.key.rightArrow).toBe(true);
+  expect(calls[0]?.key.ctrl).toBe(true);
+});
+
+test("useInput - handle home", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[H");
+  expect(calls[0]?.key.home).toBe(true);
+});
+
+test("useInput - handle end", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[F");
+  expect(calls[0]?.key.end).toBe(true);
+});
+
+test("useInput - handle page up", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[5~");
+  expect(calls[0]?.key.pageUp).toBe(true);
+});
+
+test("useInput - handle page down", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App);
+  await stdin.write("\x1b[6~");
+  expect(calls[0]?.key.pageDown).toBe(true);
+});
