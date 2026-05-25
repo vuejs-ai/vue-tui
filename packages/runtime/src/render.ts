@@ -74,6 +74,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Vue's unmount may throw on double-unmount; swallow for idempotency.
     }
     if (mountedWriter && !mountedDebug) mountedWriter.done();
+    // Show cursor on unmount (matching Ink).
+    if (!mountedDebug && mountedAppContext) {
+      mountedAppContext.stdout.write("\x1b[?25h");
+    }
     if (mountedRoot) detachYoga(mountedRoot);
     if (mountedResizeHandler && mountedAppContext) {
       mountedAppContext.stdout.off("resize", mountedResizeHandler);
@@ -202,6 +206,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (rawMode && appContext.isRawModeSupported) {
       appContext.setRawMode(true);
       mountedRawMode = true;
+    }
+
+    // Hide cursor on mount (matching Ink). Only in production mode — in
+    // debug/test mode the stream may not be a real TTY.
+    if (!debug) {
+      stdout.write("\x1b[?25l");
     }
 
     // Built-in Tab / Shift+Tab / Escape focus navigation (matches Ink).
