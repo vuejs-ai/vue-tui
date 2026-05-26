@@ -23,6 +23,7 @@
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
+    "@alcalzone/ansi-tokenize": "catalog:",
     "@vue/runtime-core": "^3.4.0",
     "chalk": "^5.3.0",
     "cli-boxes": "^3.0.0",
