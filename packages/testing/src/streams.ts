@@ -34,5 +34,7 @@ export function makeFakeStdin(): { stream: NodeJS.ReadStream; rawMode: RawModeSt
       return this;
     },
   });
+  (s as any).ref = () => {};
+  (s as any).unref = () => {};
   return { stream: s, rawMode };
 }

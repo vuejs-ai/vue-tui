@@ -26,5 +26,7 @@ export function makeFakeStdin(): { stream: NodeJS.ReadStream } {
       return this;
     },
   });
+  (s as any).ref = () => {};
+  (s as any).unref = () => {};
   return { stream: s };
 }

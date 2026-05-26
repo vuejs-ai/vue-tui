@@ -116,7 +116,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedDebug = false;
   let mountedInteractive = true;
-  let mountedRawMode = false;
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
@@ -189,10 +188,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       process.off("beforeExit", mountedBeforeExitHandler);
       mountedBeforeExitHandler = null;
     }
-    if (mountedRawMode && mountedAppContext) {
-      mountedAppContext.setRawMode(false);
-      mountedRawMode = false;
-    }
     if (mountedStdinController) {
       mountedStdinController.dispose();
     }
@@ -249,7 +244,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stderr = options.stderr ?? process.stderr;
     const debug = options.debug ?? false;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
-    const rawMode = options.rawMode ?? true;
     const onRender = options.onRender;
     const maxFps = options.maxFps;
     const isScreenReaderEnabled =
@@ -463,11 +457,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.config.errorHandler = (err) => {
       appContext.exit(err instanceof Error ? err : new Error(String(err)));
     };
-
-    if (rawMode && appContext.isRawModeSupported) {
-      appContext.setRawMode(true);
-      mountedRawMode = true;
-    }
 
     // Hide cursor on mount (matching Ink). Only in interactive mode — in
     // debug/test mode or non-interactive the stream may not be a real TTY.
@@ -691,6 +680,7 @@ function createStdinController(
 ): StdinController {
   const { appCtx, focusContext } = opts;
   const emitter = new EventEmitter();
+  emitter.setMaxListeners(Infinity);
   const inputParser = createInputParser();
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
   const FLUSH_DELAY = 20; // ms, matching Ink
@@ -774,9 +764,6 @@ function createStdinController(
     }
   }
 
-  stdin.on("readable", handleReadable);
-  stdin.on("data", handleData);
-
   // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
   const focusInputListener = (data: string) => {
     if (data === "\t") focusContext.focusNext();
@@ -788,7 +775,13 @@ function createStdinController(
 
   return {
     stdin,
-    setRawMode: appCtx.setRawMode,
+    setRawMode(mode: boolean) {
+      if (mode) {
+        this.acquireRawMode();
+      } else {
+        this.releaseRawMode();
+      }
+    },
     isRawModeSupported: appCtx.isRawModeSupported,
     internal_eventEmitter: emitter,
     internal_exitOnCtrlC: opts.exitOnCtrlC,
@@ -797,7 +790,11 @@ function createStdinController(
       const state = getRawModeState(stdin);
       if (state.refs === 0) {
         state.prevRaw = (stdin as { isRaw?: boolean }).isRaw ?? false;
+        if (typeof stdin.ref === "function") stdin.ref();
+        if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
         appCtx.setRawMode(true);
+        stdin.on("readable", handleReadable);
+        stdin.on("data", handleData);
       }
       state.refs++;
       localRefs++;
@@ -830,6 +827,9 @@ function createStdinController(
           if (state.refs > 0 || state.prevRaw === null) return;
           appCtx.setRawMode(state.prevRaw);
           state.prevRaw = null;
+          stdin.off("readable", handleReadable);
+          stdin.off("data", handleData);
+          if (typeof stdin.unref === "function") stdin.unref();
           inputParser.reset();
         });
       }
