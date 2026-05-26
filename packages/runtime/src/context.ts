@@ -36,6 +36,7 @@ export interface StdinContext {
   internal_exitOnCtrlC: boolean;
   acquireRawMode: () => void;
   releaseRawMode: () => void;
+  setBracketedPasteMode: (enabled: boolean) => void;
 }
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");

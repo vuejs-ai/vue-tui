@@ -9,6 +9,7 @@ export { Transform } from "./components/Transform.ts";
 
 export { useExit } from "./composables/useExit.ts";
 export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";
+export { usePaste, type UsePasteOptions } from "./composables/usePaste.ts";
 export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";
 export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin } from "./composables/useStdin.ts";

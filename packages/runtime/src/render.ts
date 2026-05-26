@@ -421,6 +421,7 @@ function createStdinController(
   const inputParser = createInputParser();
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
   const FLUSH_DELAY = 20; // ms, matching Ink
+  let bracketedPasteModeCount = 0;
 
   function clearPendingFlush() {
     if (pendingFlushTimer !== undefined) {
@@ -528,6 +529,20 @@ function createStdinController(
       state.refs++;
       localRefs++;
     },
+    setBracketedPasteMode(enabled: boolean) {
+      if (enabled) {
+        if (bracketedPasteModeCount === 0 && appCtx.stdout.isTTY) {
+          appCtx.stdout.write("\x1b[?2004h");
+        }
+        bracketedPasteModeCount++;
+      } else {
+        if (bracketedPasteModeCount === 0) return;
+        bracketedPasteModeCount--;
+        if (bracketedPasteModeCount === 0 && appCtx.stdout.isTTY) {
+          appCtx.stdout.write("\x1b[?2004l");
+        }
+      }
+    },
     releaseRawMode() {
       if (!appCtx.isRawModeSupported) return;
       if (localRefs === 0) return;
@@ -551,6 +566,10 @@ function createStdinController(
       stdin.off("readable", handleReadable);
       stdin.off("data", handleData);
       emitter.off("input", focusInputListener);
+      if (bracketedPasteModeCount > 0 && appCtx.stdout.isTTY) {
+        appCtx.stdout.write("\x1b[?2004l");
+      }
+      bracketedPasteModeCount = 0;
       if (localRefs > 0 && appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         state.refs = Math.max(0, state.refs - localRefs);
