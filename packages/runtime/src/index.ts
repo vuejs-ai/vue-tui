@@ -18,6 +18,7 @@ export { useStdout } from "./composables/useStdout.ts";
 export { useStderr } from "./composables/useStderr.ts";
 export { useTerminalSize } from "./composables/useTerminalSize.ts";
 export { useCursor } from "./composables/useCursor.ts";
+export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
   type AnimationOptions,

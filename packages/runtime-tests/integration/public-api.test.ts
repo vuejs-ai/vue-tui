@@ -19,6 +19,7 @@ test("public API exposes documented members", () => {
     "useStderr",
     "useTerminalSize",
     "useCursor",
+    "useIsScreenReaderEnabled",
   ]) {
     expect(api).toHaveProperty(k);
   }

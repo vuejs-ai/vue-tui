@@ -75,6 +75,13 @@ export interface MountOptions {
    * Ignored in debug mode (commits are immediate).
    */
   maxFps?: number;
+  /**
+   * Enable screen reader mode. When enabled, the commit scheduler bypasses
+   * throttling (immediate commits) so every frame is flushed without delay.
+   *
+   * @default true when `process.env["INK_SCREEN_READER"] === "true"`, otherwise false
+   */
+  isScreenReaderEnabled?: boolean;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -215,6 +222,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const rawMode = options.rawMode ?? true;
     const onRender = options.onRender;
     const maxFps = options.maxFps;
+    const isScreenReaderEnabled =
+      options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
     mountedDebug = debug;
 
     // Interactive mode detection — matches Ink's logic:
@@ -298,6 +307,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stdin,
       debug,
       interactive,
+      isScreenReaderEnabled,
       isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
       setRawMode(mode: boolean) {
         if (
@@ -391,8 +401,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (onRender) onRender({ renderTime: performance.now() - start });
     }
 
-    const schedulerOptions: { immediate: boolean; throttleMs?: number } = { immediate: debug };
-    if (maxFps != null && !debug) {
+    const schedulerOptions: { immediate: boolean; throttleMs?: number } = {
+      immediate: debug || isScreenReaderEnabled,
+    };
+    if (maxFps != null && !debug && !isScreenReaderEnabled) {
       schedulerOptions.throttleMs = Math.round(1000 / maxFps);
     }
     const scheduler = createCommitScheduler(commit, schedulerOptions);

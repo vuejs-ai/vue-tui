@@ -157,6 +157,7 @@ function createNoOpAppContext(): AppContext {
     stdin: process.stdin,
     debug: false,
     interactive: false,
+    isScreenReaderEnabled: false,
     isRawModeSupported: false,
     setRawMode: () => {},
     writeToStdout: () => {},
