@@ -13,7 +13,9 @@
     "@vue-tui/runtime": "workspace:*",
     "@vue-tui/testing": "workspace:*",
     "chalk": "catalog:",
+    "node-pty": "catalog:",
     "strip-ansi": "catalog:",
+    "tsx": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "^0.1.22",
     "vue": "^3.5.34"
