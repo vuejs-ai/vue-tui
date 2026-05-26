@@ -18,6 +18,7 @@ test("public API exposes documented members", () => {
     "useStdout",
     "useStderr",
     "useTerminalSize",
+    "useCursor",
   ]) {
     expect(api).toHaveProperty(k);
   }
