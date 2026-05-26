@@ -32,6 +32,7 @@ export interface RenderResult {
   terminal: Terminal;
   unmount(this: void): void;
   waitUntilExit(this: void): Promise<unknown>;
+  waitUntilRenderFlush(this: void): Promise<void>;
 }
 
 function trimFrame(raw: string): string {
@@ -132,5 +133,6 @@ export async function render(
     terminal,
     unmount: app.unmount.bind(app),
     waitUntilExit: app.waitUntilExit.bind(app),
+    waitUntilRenderFlush: app.waitUntilRenderFlush.bind(app),
   };
 }

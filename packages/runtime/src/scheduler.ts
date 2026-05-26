@@ -3,21 +3,26 @@ import { queuePostFlushCb } from "@vue/runtime-core";
 export interface CommitScheduler {
   schedule: () => void;
   flush: () => Promise<void>;
+  /** Returns true when a trailing-edge commit is pending. */
+  hasPending: () => boolean;
 }
 
 export interface CommitSchedulerOptions {
   /** Disable time-based throttle (used in tests / debug mode). */
   immediate?: boolean;
+  /** Override throttle interval in ms. Takes precedence over the default 32ms. */
+  throttleMs?: number;
 }
 
-/** Minimum interval between commits in production (~30fps). */
-const THROTTLE_MS = 32;
+/** Default minimum interval between commits (~30fps). */
+const DEFAULT_THROTTLE_MS = 32;
 
 export function createCommitScheduler(
   commit: () => void,
   options: CommitSchedulerOptions = {},
 ): CommitScheduler {
   const immediate = options.immediate ?? false;
+  const throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS;
   let scheduled = false;
   let resolveFlush: (() => void) | null = null;
 
@@ -26,11 +31,11 @@ export function createCommitScheduler(
   // are collapsed into a single trailing call at the end of the window.
   let lastCommitTime = 0;
   let trailingTimer: ReturnType<typeof setTimeout> | null = null;
-  let hasPending = false;
+  let hasPendingFlag = false;
 
   function doCommit() {
     scheduled = false;
-    hasPending = false;
+    hasPendingFlag = false;
     lastCommitTime = Date.now();
     try {
       commit();
@@ -53,7 +58,7 @@ export function createCommitScheduler(
       // passed since last commit (leading edge). Otherwise mark pending
       // and let the trailing timer handle it.
       const elapsed = Date.now() - lastCommitTime;
-      if (elapsed >= THROTTLE_MS) {
+      if (elapsed >= throttleMs) {
         // Leading edge: fire immediately
         if (trailingTimer) {
           clearTimeout(trailingTimer);
@@ -62,23 +67,27 @@ export function createCommitScheduler(
         doCommit();
       } else {
         // Within throttle window: schedule trailing edge
-        hasPending = true;
+        hasPendingFlag = true;
         if (!trailingTimer) {
           trailingTimer = setTimeout(() => {
             trailingTimer = null;
-            if (hasPending) doCommit();
-          }, THROTTLE_MS - elapsed);
+            if (hasPendingFlag) doCommit();
+          }, throttleMs - elapsed);
         }
       }
     });
   }
 
   function flush(): Promise<void> {
-    if (!scheduled && !hasPending) return Promise.resolve();
+    if (!scheduled && !hasPendingFlag) return Promise.resolve();
     return new Promise<void>((resolve) => {
       resolveFlush = resolve;
     });
   }
 
-  return { schedule, flush };
+  function hasPending(): boolean {
+    return hasPendingFlag;
+  }
+
+  return { schedule, flush, hasPending };
 }

@@ -12,6 +12,7 @@ import {
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
 import isInCi from "is-in-ci";
+import patchConsoleFn from "patch-console";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
@@ -53,11 +54,33 @@ export interface MountOptions {
    * @default true (false if in CI or `stdout.isTTY` is falsy)
    */
   interactive?: boolean;
+  /**
+   * Patch `console.*` methods to route output through the TUI frame
+   * coordinator (writeToStdout / writeToStderr) so that console.log
+   * calls don't corrupt the rendered UI.
+   *
+   * Automatically disabled in debug mode.
+   *
+   * @default true
+   */
+  patchConsole?: boolean;
+  /**
+   * Callback invoked after each render commit with timing information.
+   */
+  onRender?: (info: { renderTime: number }) => void;
+  /**
+   * Maximum frames per second. Controls the throttle interval used by the
+   * commit scheduler. When not set, the default ~30fps (32ms) is used.
+   *
+   * Ignored in debug mode (commits are immediate).
+   */
+  maxFps?: number;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
   mount(options?: MountOptions): ComponentPublicInstance;
   waitUntilExit(): Promise<unknown>;
+  waitUntilRenderFlush(): Promise<void>;
 }
 
 type RootProps = Record<string, unknown>;
@@ -87,6 +110,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedInteractive = true;
   let mountedRawMode = false;
   let mountedGetLastOutput: (() => string) | null = null;
+  let mountedRestoreConsole: (() => void) | null = null;
+  let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -98,6 +123,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (teardownStarted) return;
     teardownStarted = true;
     scheduledCommit = () => {};
+    // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
+    if (mountedRestoreConsole) {
+      mountedRestoreConsole();
+      mountedRestoreConsole = null;
+    }
     try {
       originalUnmount();
     } catch {
@@ -183,6 +213,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const debug = options.debug ?? false;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
     const rawMode = options.rawMode ?? true;
+    const onRender = options.onRender;
+    const maxFps = options.maxFps;
     mountedDebug = debug;
 
     // Interactive mode detection — matches Ink's logic:
@@ -307,6 +339,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedWriter = writer;
 
     function commit() {
+      const start = onRender ? performance.now() : 0;
+
       // Detect <Static> identity changes (mount, unmount, key-driven remount).
       // Fire onStaticChange BEFORE flushing static output so accumulated
       // fullStaticOutput from a previous instance is cleared first.
@@ -338,6 +372,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const frame = paint(tuiRoot);
         frameState.lastOutput = frame;
         frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+        if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
 
@@ -353,9 +388,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
       writer.write(frame);
+      if (onRender) onRender({ renderTime: performance.now() - start });
     }
 
-    const scheduler = createCommitScheduler(commit, { immediate: debug });
+    const schedulerOptions: { immediate: boolean; throttleMs?: number } = { immediate: debug };
+    if (maxFps != null && !debug) {
+      schedulerOptions.throttleMs = Math.round(1000 / maxFps);
+    }
+    const scheduler = createCommitScheduler(commit, schedulerOptions);
+    mountedScheduler = scheduler;
     scheduledCommit = scheduler.schedule;
 
     // Internal provides — set before the actual mount so components can inject
@@ -406,6 +447,28 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     process.on("exit", exitListener);
     mountedExitListener = exitListener;
 
+    // Patch console.log/warn/error etc. to route through writeToStdout /
+    // writeToStderr so console output doesn't corrupt the rendered frame.
+    // Disabled in debug mode (matching Ink).
+    if (options.patchConsole !== false && !debug) {
+      try {
+        mountedRestoreConsole = patchConsoleFn((stream, data) => {
+          if (stream === "stdout") {
+            appContext.writeToStdout(data);
+          }
+          if (stream === "stderr") {
+            // Filter Vue internal warnings
+            if (!data.startsWith("[Vue warn]")) {
+              appContext.writeToStderr(data);
+            }
+          }
+        });
+      } catch {
+        // patch-console uses console.Console which may not be available in
+        // some environments (e.g., vitest workers). Degrade gracefully.
+      }
+    }
+
     return proxy;
   };
 
@@ -416,6 +479,25 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
     return exitPromise;
+  };
+
+  app.waitUntilRenderFlush = async function waitUntilRenderFlush(): Promise<void> {
+    // Flush any pending throttled render
+    if (mountedScheduler?.hasPending()) {
+      await mountedScheduler.flush();
+    }
+    // Wait for stdout write barrier — ensures the written frame is
+    // flushed to the underlying stream.
+    const stream = mountedAppContext?.stdout ?? process.stdout;
+    await new Promise<void>((resolve) => {
+      // PassThrough (test fakes) may not support the write callback form;
+      // fall back to setImmediate so we still yield the event loop.
+      try {
+        stream.write("", () => resolve());
+      } catch {
+        setImmediate(resolve);
+      }
+    });
   };
 
   return app;

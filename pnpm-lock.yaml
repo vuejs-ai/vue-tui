@@ -21,6 +21,9 @@ catalogs:
     is-in-ci:
       specifier: ^1.0.0
       version: 1.0.0
+    patch-console:
+      specifier: ^2.0.0
+      version: 2.0.0
     strip-ansi:
       specifier: ^7.2.0
       version: 7.2.0
@@ -164,6 +167,9 @@ importers:
       log-update:
         specifier: ^6.0.0
         version: 6.1.0
+      patch-console:
+        specifier: 'catalog:'
+        version: 2.0.0
       slice-ansi:
         specifier: ^7.1.0
         version: 7.1.2
@@ -1550,6 +1556,10 @@ packages:
       oxlint-tsgolint:
         optional: true
 
+  patch-console@2.0.0:
+    resolution: {integrity: sha512-0YNdUceMdaQwoKce1gatDScmMo5pu/tfABfnzEqeG0gtTmd7mh/WcwgUjtAeOU7N8nFFlbQBnFK2gXW5fGvmMA==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -2924,6 +2934,8 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.63.0
       '@oxlint/binding-win32-x64-msvc': 1.63.0
       oxlint-tsgolint: 0.22.1
+
+  patch-console@2.0.0: {}
 
   picocolors@1.1.1: {}
 
