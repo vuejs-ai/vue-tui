@@ -69,10 +69,16 @@ interface MountOptions {
   stderr?: NodeJS.WriteStream; // default: process.stderr
   debug?: boolean; // default: false
   exitOnCtrlC?: boolean; // default: true
+  rawMode?: boolean; // default: true when interactive
+  interactive?: boolean; // default: true (false if in CI or !stdout.isTTY)
+  patchConsole?: boolean; // default: true (disabled in debug mode)
+  maxFps?: number; // default: ~30fps (32ms)
+  onRender?: (info: { renderTime: number }) => void;
+  isScreenReaderEnabled?: boolean; // default: false (true when INK_SCREEN_READER=true)
 }
 ```
 
-All fields optional with per-field fallback. Matches Ink's `RenderOptions` shape.
+All fields optional with per-field fallback.
 
 ### Components
 
@@ -80,7 +86,7 @@ All fields optional with per-field fallback. Matches Ink's `RenderOptions` shape
 
 ### Composables
 
-`useExit`, `useInput`, `useFocus`, `useFocusManager`, `useStdin`, `useStdout`, `useStderr`, `useTerminalSize`.
+`useExit`, `useInput`, `useFocus`, `useFocusManager`, `useStdin`, `useStdout`, `useStderr`, `useTerminalSize` / `useWindowSize`, `useCursor`, `useAnimation`, `useBoxMetrics` / `measureElement`, `usePaste`, `useIsScreenReaderEnabled`.
 
 Tab / Shift+Tab / Escape are handled automatically when any component uses `useFocus`. `useFocus` returns `{ isFocused, focus }` and manages raw mode. `useFocusManager` exposes `activeId` in addition to `focusNext` / `focusPrevious` / `focus` / `enableFocus` / `disableFocus`.
 

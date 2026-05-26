@@ -16,7 +16,7 @@ export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin } from "./composables/useStdin.ts";
 export { useStdout } from "./composables/useStdout.ts";
 export { useStderr } from "./composables/useStderr.ts";
-export { useTerminalSize } from "./composables/useTerminalSize.ts";
+export { useTerminalSize, useWindowSize } from "./composables/useTerminalSize.ts";
 export { useCursor } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {

@@ -32,6 +32,7 @@
     "patch-console": "catalog:",
     "slice-ansi": "^7.1.0",
     "string-width": "^7.2.0",
+    "terminal-size": "catalog:",
     "wrap-ansi": "^9.0.0",
     "yoga-layout": "^3.1.0"
   },
