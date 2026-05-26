@@ -113,6 +113,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
   let mountedExitListener: (() => void) | null = null;
+  let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedDebug = false;
   let mountedInteractive = true;
   let mountedRawMode = false;
@@ -124,6 +125,31 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // real work after mount swaps in scheduler.schedule. One renderer per app
   // even though it's not used until mount.
   let scheduledCommit: () => void = () => {};
+
+  // Pending exit state — stored so resolveExit() can flush stdout before
+  // settling the exit promise.
+  let pendingExitError: unknown = undefined;
+  let pendingExitResult: unknown = undefined;
+
+  function resolveExit() {
+    const stdout = mountedAppContext?.stdout ?? process.stdout;
+    const canWrite = stdout && !stdout.destroyed && !(stdout as any).writableEnded;
+    const hasWritableState = (stdout as any)._writableState !== undefined;
+
+    const finish = () => {
+      if (pendingExitError instanceof Error) {
+        exitReject(pendingExitError);
+      } else {
+        exitResolve(pendingExitResult);
+      }
+    };
+
+    if (canWrite && hasWritableState) {
+      stdout.write("", () => finish());
+    } else {
+      setImmediate(() => finish());
+    }
+  }
 
   let teardownStarted = false;
   function teardown() {
@@ -158,6 +184,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     if (mountedExitListener) {
       process.off("exit", mountedExitListener);
+    }
+    if (mountedBeforeExitHandler) {
+      process.off("beforeExit", mountedBeforeExitHandler);
+      mountedBeforeExitHandler = null;
     }
     if (mountedRawMode && mountedAppContext) {
       mountedAppContext.setRawMode(false);
@@ -296,10 +326,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         queueMicrotask(() => {
           teardown();
           if (errorOrResult instanceof Error) {
-            exitReject(errorOrResult);
+            pendingExitError = errorOrResult;
           } else {
-            exitResolve(errorOrResult);
+            pendingExitResult = errorOrResult;
           }
+          resolveExit();
         });
       },
       stdout,
@@ -486,10 +517,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   app.unmount = function unmount(): void {
     teardown();
-    exitResolve();
+    resolveExit();
   };
 
   app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
+    if (!mountedBeforeExitHandler) {
+      mountedBeforeExitHandler = () => {
+        app.unmount();
+      };
+      process.once("beforeExit", mountedBeforeExitHandler);
+    }
     return exitPromise;
   };
 

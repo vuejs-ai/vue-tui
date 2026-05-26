@@ -77,10 +77,16 @@ export async function render(
     earlyError = e as Error;
   });
 
-  // Flush the Vue queue. Chain: onErrorCaptured → nextTick → exit → queueMicrotask → reject
+  // Flush the Vue queue. Chain: onErrorCaptured → nextTick → exit → queueMicrotask
+  // → teardown → resolveExit() → stdout.write("", callback) → reject.
+  // The stdout write barrier fires via process.nextTick (inside stream internals),
+  // so we need setImmediate (runs after all process.nextTick callbacks), then one
+  // more microtask yield so the .catch() handler on exitPromise can set earlyError.
   await nextTick();
   await nextTick();
   await Promise.resolve();
+  await Promise.resolve();
+  await new Promise<void>((r) => setImmediate(r));
   await Promise.resolve();
 
   if (earlyError) {
