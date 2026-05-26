@@ -1,6 +1,12 @@
 import stringWidth from "string-width";
 import sliceAnsi from "slice-ansi";
 import cliBoxes from "cli-boxes";
+import {
+  type StyledChar,
+  styledCharsFromTokens,
+  styledCharsToString,
+  tokenize,
+} from "@alcalzone/ansi-tokenize";
 import { applyChalk } from "./text-style.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -43,10 +49,48 @@ interface UnclipOp {
 
 type Op = WriteOp | ClipOp | UnclipOp;
 
+class OutputCaches {
+  private widths = new Map<string, number>();
+  private blockWidths = new Map<string, number>();
+  private styledCharsCache = new Map<string, StyledChar[]>();
+
+  getStyledChars(line: string): StyledChar[] {
+    let cached = this.styledCharsCache.get(line);
+    if (cached === undefined) {
+      cached = styledCharsFromTokens(tokenize(line));
+      this.styledCharsCache.set(line, cached);
+    }
+    return cached;
+  }
+
+  getStringWidth(text: string): number {
+    let cached = this.widths.get(text);
+    if (cached === undefined) {
+      cached = stringWidth(text);
+      this.widths.set(text, cached);
+    }
+    return cached;
+  }
+
+  getWidestLine(text: string): number {
+    let cached = this.blockWidths.get(text);
+    if (cached === undefined) {
+      let lineWidth = 0;
+      for (const line of text.split("\n")) {
+        lineWidth = Math.max(lineWidth, this.getStringWidth(line));
+      }
+      cached = lineWidth;
+      this.blockWidths.set(text, cached);
+    }
+    return cached;
+  }
+}
+
 class Output {
   readonly width: number;
   readonly height: number;
   private ops: Op[] = [];
+  private readonly caches: OutputCaches = new OutputCaches();
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -65,11 +109,17 @@ class Output {
     this.ops.push({ type: "unclip" });
   }
 
-  get(): string {
-    // Build a sparse grid of cells, write each op left-to-right.
-    const grid: string[][] = Array.from({ length: this.height }, () =>
-      Array.from({ length: this.width }, () => " "),
-    );
+  get(): { output: string; height: number } {
+    // Initialize output grid with StyledChar cells
+    const output: StyledChar[][] = [];
+    for (let y = 0; y < this.height; y++) {
+      const row: StyledChar[] = [];
+      for (let x = 0; x < this.width; x++) {
+        row.push({ type: "char", value: " ", fullWidth: false, styles: [] });
+      }
+      output.push(row);
+    }
+
     const clips: ClipRect[] = [];
 
     for (const op of this.ops) {
@@ -83,48 +133,39 @@ class Output {
       }
 
       // op.type === "write"
+      const { transformers } = op;
       let { x, y } = op;
       let lines = op.lines;
 
-      // Apply transformers
-      lines = lines.map((line, idx) => {
-        let l = line;
-        for (const tf of op.transformers) l = tf(l, idx);
-        return l;
-      });
+      // Only the most recent clip applies (top-only, matching Ink behavior)
+      const clip = clips.at(-1);
 
-      // Apply active clip rect — intersect ALL clips in the stack so nested
-      // overflow:hidden boxes correctly constrain children.
-      if (clips.length > 0) {
-        const clip = clips.reduce<ClipRect>(
-          (acc, c) => ({
-            x1: acc.x1 != null && c.x1 != null ? Math.max(acc.x1, c.x1) : (acc.x1 ?? c.x1),
-            x2: acc.x2 != null && c.x2 != null ? Math.min(acc.x2, c.x2) : (acc.x2 ?? c.x2),
-            y1: acc.y1 != null && c.y1 != null ? Math.max(acc.y1, c.y1) : (acc.y1 ?? c.y1),
-            y2: acc.y2 != null && c.y2 != null ? Math.min(acc.y2, c.y2) : (acc.y2 ?? c.y2),
-          }),
-          { x1: undefined, x2: undefined, y1: undefined, y2: undefined },
-        );
-
+      if (clip) {
         const clipH = typeof clip.x1 === "number" && typeof clip.x2 === "number";
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
 
-        // If the intersection is empty, skip the write entirely
-        if (clipH && clip.x1! >= clip.x2!) continue;
-        if (clipV && clip.y1! >= clip.y2!) continue;
+        // If text is positioned outside of clipping area altogether, skip
+        if (clipH) {
+          const text = lines.join("\n");
+          const width = this.caches.getWidestLine(text);
+          if (x + width < clip.x1! || x > clip.x2!) continue;
+        }
 
-        // Skip entirely out-of-bounds writes
         if (clipV) {
           const height = lines.length;
-          if (y + height <= clip.y1! || y >= clip.y2!) continue;
-        }
-        if (clipH) {
-          // Quick check: if write is entirely to the right of clip or entirely
-          // to the left, skip it
-          if (x >= clip.x2!) continue;
+          if (y + height < clip.y1! || y > clip.y2!) continue;
         }
 
-        // Vertical clipping: slice lines array
+        if (clipH) {
+          lines = lines.map((line) => {
+            const from = x < clip.x1! ? clip.x1! - x : 0;
+            const lineWidth = this.caches.getStringWidth(line);
+            const to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
+            return sliceAnsi(line, from, to);
+          });
+          if (x < clip.x1!) x = clip.x1!;
+        }
+
         if (clipV) {
           const from = y < clip.y1! ? clip.y1! - y : 0;
           const height = lines.length;
@@ -132,61 +173,88 @@ class Output {
           lines = lines.slice(from, to);
           if (y < clip.y1!) y = clip.y1!;
         }
+      }
 
-        // Horizontal clipping: slice each line
-        if (clipH) {
-          lines = lines.map((line) => {
-            const lineWidth = stringWidth(line);
-            const from = x < clip.x1! ? clip.x1! - x : 0;
-            const to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
-            return sliceAnsi(line, from, to);
-          });
-          if (x < clip.x1!) x = clip.x1!;
+      let offsetY = 0;
+
+      for (let [index, line] of lines.entries()) {
+        const currentLine = output[y + offsetY];
+
+        // Line can be missing if text is taller than pre-initialized output
+        if (!currentLine) {
+          continue;
         }
-      }
 
-      for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-        placeLine(grid, x, y + lineIdx, lines[lineIdx]!);
-      }
-    }
-    return grid.map((row) => row.join("").trimEnd()).join("\n");
-  }
-}
+        for (const transformer of transformers) {
+          line = transformer(line, index);
+        }
 
-function placeLine(grid: string[][], x: number, y: number, line: string): void {
-  if (y < 0 || y >= grid.length) return;
-  const row = grid[y]!;
-  // We walk the line as visual cells. ANSI sequences are kept attached to the
-  // cell that follows them; emoji/wide chars consume two cells.
-  let col = x;
-  let i = 0;
-  let pendingAnsi = "";
-  while (i < line.length && col < row.length) {
-    const ch = line[i]!;
-    // ANSI CSI sequence: ESC[...m — accumulate as a prefix for the next cell.
-    if (ch === "\x1b" && line[i + 1] === "[") {
-      const end = line.indexOf("m", i);
-      if (end >= 0) {
-        pendingAnsi += line.slice(i, end + 1);
-        i = end + 1;
-        continue;
+        const characters = this.caches.getStyledChars(line);
+        let offsetX = x;
+
+        // Nothing to write (e.g. line was clipped away)
+        if (characters.length === 0) {
+          offsetY++;
+          continue;
+        }
+
+        const spaceCell: StyledChar = {
+          type: "char",
+          value: " ",
+          fullWidth: false,
+          styles: [],
+        };
+
+        // Wide characters (e.g. CJK) occupy two cells: a leading cell with
+        // the character and a trailing placeholder with value ''. When an
+        // overlapping write lands in the middle of a wide character, the
+        // boundary cells need cleanup so the terminal never renders a
+        // half-visible wide character.
+        if (
+          currentLine[offsetX]?.value === "" &&
+          offsetX > 0 &&
+          this.caches.getStringWidth(currentLine[offsetX - 1]?.value ?? "") > 1
+        ) {
+          currentLine[offsetX - 1] = spaceCell;
+        }
+
+        for (const character of characters) {
+          currentLine[offsetX] = character;
+
+          // Determine printed width using string-width to align with measurement
+          const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
+
+          // For multi-column characters, clear following cells to avoid stray spaces/artifacts
+          if (characterWidth > 1) {
+            for (let i = 1; i < characterWidth; i++) {
+              currentLine[offsetX + i] = {
+                type: "char",
+                value: "",
+                fullWidth: false,
+                styles: character.styles,
+              };
+            }
+          }
+
+          offsetX += characterWidth;
+        }
+
+        if (currentLine[offsetX]?.value === "") {
+          currentLine[offsetX] = spaceCell;
+        }
+
+        offsetY++;
       }
     }
-    const segment = ch;
-    const w = stringWidth(segment);
-    if (col >= 0 && col < row.length) {
-      row[col] = pendingAnsi + segment;
-      pendingAnsi = "";
-    }
-    if (w === 2 && col + 1 < row.length) row[col + 1] = "";
-    col += Math.max(1, w);
-    i++;
-  }
-  // If the line ended with a trailing escape (e.g. reset), attach it to the
-  // last written cell so it's not lost.
-  if (pendingAnsi && col > x) {
-    const lastCol = Math.min(col - 1, row.length - 1);
-    if (lastCol >= 0) row[lastCol] = (row[lastCol] ?? "") + pendingAnsi;
+
+    const generatedOutput = output
+      .map((line) => {
+        const lineWithoutEmptyItems = line.filter((item) => item !== undefined);
+        return styledCharsToString(lineWithoutEmptyItems).trimEnd();
+      })
+      .join("\n");
+
+    return { output: generatedOutput, height: output.length };
   }
 }
 
@@ -304,9 +372,9 @@ export function paint(root: TuiNode): string {
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(layout.width));
   const height = Math.max(1, Math.floor(layout.height));
-  const output = new Output(width, height);
-  paintNode(root, output, 0, 0, []);
-  return output.get();
+  const out = new Output(width, height);
+  paintNode(root, out, 0, 0, []);
+  return out.get().output;
 }
 
 function paintNode(

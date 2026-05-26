@@ -63,7 +63,7 @@ test("Text inherits parent Box background color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[42m[42mHello World[49m[42m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[42mHello World[49m"`);
 });
 
 test("Text explicit background color overrides inherited", async () => {
@@ -75,7 +75,7 @@ test("Text explicit background color overrides inherited", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[41m[44mHello World[49m[41m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[44mHello World[49m"`);
 });
 
 test("Nested Box background inheritance", async () => {
@@ -89,7 +89,7 @@ test("Nested Box background inheritance", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[44m[44mHello World[49m[44m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[44mHello World[49m"`);
 });
 
 test("Text without parent Box background has no inheritance", async () => {
@@ -114,9 +114,7 @@ test("Multiple Text elements inherit same background", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(
-    `"[43m[43mHello [49m[43m[49m[43m[43mWorld[49m[43m[49m"`,
-  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[43mHello World[49m"`);
 });
 
 test("Mixed text with and without background inheritance", async () => {
@@ -130,9 +128,7 @@ test("Mixed text with and without background inheritance", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(
-    `"[42m[42mInherited [49m[42m[49m[42mNo BG [49m[42m[41mRed BG[49m[42m[49m"`,
-  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[42mInherited No BG [41mRed BG[49m"`);
 });
 
 test("Complex nested structure with background inheritance", async () => {
@@ -150,9 +146,7 @@ test("Complex nested structure with background inheritance", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(
-    `"[43m[43mOuter: [49m[43m[49m[44m[44mInner: [49m[44m[49m[44m[41mExplicit[49m[44m[49m"`,
-  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[43mOuter: [44mInner: [41mExplicit[49m"`);
 });
 
 test("Box background with standard color", async () => {
@@ -164,7 +158,7 @@ test("Box background with standard color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[41m[41mHello[49m[41m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[41mHello[49m"`);
 });
 
 test("Box background with hex color", async () => {
@@ -176,9 +170,7 @@ test("Box background with hex color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(
-    `"[48;2;255;0;0m[48;2;255;0;0mHello[49m[48;2;255;0;0m[49m"`,
-  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[48;2;255;0;0mHello[49m"`);
 });
 
 test("Box background with rgb color", async () => {
@@ -190,9 +182,7 @@ test("Box background with rgb color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(
-    `"[48;2;255;0;0m[48;2;255;0;0mHello[49m[48;2;255;0;0m[49m"`,
-  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[48;2;255;0;0mHello[49m"`);
 });
 
 test("Box background with ansi256 color", async () => {
@@ -204,7 +194,7 @@ test("Box background with ansi256 color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[48;5;9m[48;5;9mHello[49m[48;5;9m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[48;5;9mHello[49m"`);
 });
 
 test("Box background with wide characters", async () => {
@@ -216,7 +206,7 @@ test("Box background with wide characters", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[43m[43mこんにちは[49m[43m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[43mこんにちは[49m"`);
 });
 
 test("Box background with emojis", async () => {
@@ -228,7 +218,7 @@ test("Box background with emojis", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[41m[41m🎉🎊[49m[41m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[41m🎉🎊[49m"`);
 });
 
 test("Box background fills entire area with standard color", async () => {
@@ -241,7 +231,7 @@ test("Box background fills entire area with standard color", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41m[41mHello[49m[41m[49m     [49m
+    "[41mHello     [49m
     [41m          [49m
     [41m          [49m"
   `);
@@ -312,9 +302,9 @@ test("Box background with border fills content area", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "[46m╭────────╮[49m
-    [46m│[49m[46m[46mHi[49m[46m[49m      [49m[46m│[49m
-    [46m│[49m[46m        [49m[46m│[49m
-    [46m│[49m[46m        [49m[46m│[49m
+    [46m│Hi      │[49m
+    [46m│        │[49m
+    [46m│        │[49m
     [46m╰────────╯[49m"
   `);
 });
@@ -330,7 +320,7 @@ test("Box background with padding fills entire padded area", async () => {
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "[45m          [49m
-    [45m [45m[45mHi[49m[45m[49m       [49m
+    [45m Hi       [49m
     [45m          [49m
     [45m          [49m
     [45m          [49m"
@@ -353,7 +343,7 @@ test("Box background with center alignment fills entire area", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[44m    [44m[44mHi[49m[44m[49m    [49m
+    "[44m    Hi    [49m
     [44m          [49m
     [44m          [49m"
   `);
@@ -376,8 +366,8 @@ test("Box background with column layout fills entire area", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[42m[42mLine 1[49m[42m    [49m
-    [42m[42mLine 2[49m[42m    [49m
+    "[42mLine 1    [49m
+    [42mLine 2    [49m
     [42m          [49m
     [42m          [49m
     [42m          [49m"
@@ -400,7 +390,7 @@ test("Box background updates on rerender", async () => {
 
   bgColor.value = "green";
   await nextTick();
-  expect(lastFrame()).toMatchInlineSnapshot(`"[42m[42mHello[49m[42m[49m"`);
+  expect(lastFrame()).toMatchInlineSnapshot(`"[42mHello[49m"`);
 
   bgColor.value = undefined;
   await nextTick();
@@ -417,8 +407,8 @@ test("Box backgroundColor fills full width on every line when text wraps", async
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[41m[41mHello [49m[41m [49m   [49m
-    [41m[41mWorld!![49m[41m[49m   [49m"
+    "[41mHello     [49m
+    [41mWorld!!   [49m"
   `);
 });
 
