@@ -1,8 +1,25 @@
 import { inject, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
-import { parseKey, type Key } from "../io/key-parser.ts";
+import { parseKeypress, nonAlphanumericKeys } from "../io/parse-keypress.ts";
 
-export type { Key };
+export interface Key {
+  upArrow: boolean;
+  downArrow: boolean;
+  leftArrow: boolean;
+  rightArrow: boolean;
+  pageDown: boolean;
+  pageUp: boolean;
+  home: boolean;
+  end: boolean;
+  return: boolean;
+  escape: boolean;
+  ctrl: boolean;
+  shift: boolean;
+  tab: boolean;
+  backspace: boolean;
+  delete: boolean;
+  meta: boolean;
+}
 
 export interface UseInputOptions {
   isActive?: MaybeRefOrGetter<boolean>;
@@ -18,8 +35,53 @@ export function useInput(
 
   let attached = false;
 
-  function listener(chunk: string) {
-    const { input, key } = parseKey(chunk);
+  function listener(data: string) {
+    const keypress = parseKeypress(data);
+
+    const key: Key = {
+      upArrow: keypress.name === "up",
+      downArrow: keypress.name === "down",
+      leftArrow: keypress.name === "left",
+      rightArrow: keypress.name === "right",
+      pageDown: keypress.name === "pagedown",
+      pageUp: keypress.name === "pageup",
+      home: keypress.name === "home",
+      end: keypress.name === "end",
+      return: keypress.name === "return",
+      escape: keypress.name === "escape",
+      ctrl: keypress.ctrl,
+      shift: keypress.shift,
+      tab: keypress.name === "tab",
+      backspace: keypress.name === "backspace",
+      delete: keypress.name === "delete",
+      meta: keypress.meta,
+    };
+
+    let input: string;
+    if (keypress.ctrl) {
+      input = keypress.name ?? "";
+    } else {
+      input = keypress.sequence;
+    }
+
+    if (nonAlphanumericKeys.includes(keypress.name)) {
+      input = "";
+    }
+
+    // Strip escape prefix from incomplete sequences
+    if (input.startsWith("\x1b")) {
+      input = input.slice(1);
+    }
+
+    if (input.length === 1 && /[A-Z]/.test(input)) {
+      key.shift = true;
+    }
+
+    // exitOnCtrlC skip: don't call user handler for Ctrl+C when intercepted
+    if (input === "c" && key.ctrl && stdin?.internal_exitOnCtrlC) {
+      return;
+    }
+
     handler(input, key);
   }
 
@@ -27,13 +89,13 @@ export function useInput(
     if (attached) return;
     attached = true;
     stdin!.acquireRawMode();
-    stdin!.internal_eventEmitter.on("data", listener);
+    stdin!.internal_eventEmitter.on("input", listener);
   }
 
   function detach() {
     if (!attached) return;
     attached = false;
-    stdin!.internal_eventEmitter.off("data", listener);
+    stdin!.internal_eventEmitter.off("input", listener);
     stdin!.releaseRawMode();
   }
 

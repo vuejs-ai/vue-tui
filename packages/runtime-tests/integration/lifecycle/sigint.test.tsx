@@ -1,25 +1,33 @@
 import { defineComponent } from "vue";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text } from "@vue-tui/runtime";
+import { Text, useInput } from "@vue-tui/runtime";
 
-test("exitOnCtrlC registers a SIGINT handler that unmount removes", async () => {
-  const before = process.listenerCount("SIGINT");
+test("exitOnCtrlC intercepts \\x03 and exits the app", async () => {
+  const handler = vi.fn();
+  const App = defineComponent(() => {
+    useInput(handler);
+    return () => <Text>x</Text>;
+  });
+  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
 
-  const App = defineComponent(() => () => <Text>x</Text>);
-  const { unmount } = await render(App, { exitOnCtrlC: true });
-
-  expect(process.listenerCount("SIGINT")).toBe(before + 1);
-  unmount();
-  expect(process.listenerCount("SIGINT")).toBe(before);
+  await stdin.write("\x03");
+  // \x03 is intercepted before reaching useInput handlers
+  expect(handler).not.toHaveBeenCalled();
+  await expect(waitUntilExit()).resolves.toBeUndefined();
 });
 
-test("exitOnCtrlC=false registers no SIGINT handler", async () => {
-  const before = process.listenerCount("SIGINT");
+test("exitOnCtrlC=false does not intercept \\x03", async () => {
+  const calls: Array<{ input: string }> = [];
+  const App = defineComponent(() => {
+    useInput((input) => calls.push({ input }));
+    return () => <Text>x</Text>;
+  });
+  const { stdin, unmount } = await render(App, { exitOnCtrlC: false });
 
-  const App = defineComponent(() => () => <Text>x</Text>);
-  const { unmount } = await render(App, { exitOnCtrlC: false });
-
-  expect(process.listenerCount("SIGINT")).toBe(before);
+  await stdin.write("\x03");
+  // With exitOnCtrlC=false, Ctrl+C reaches the useInput handler
+  expect(calls.length).toBe(1);
+  expect(calls[0]?.input).toBe("c");
   unmount();
 });

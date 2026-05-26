@@ -121,6 +121,12 @@ export async function render(
       async write(data: string): Promise<void> {
         stdin.emit("data", data);
         await nextTick();
+        // The input parser may hold a bare escape (\x1b) as "pending" for
+        // up to 20ms, waiting to see if it's the start of an escape sequence.
+        // Wait long enough for the pending-flush timer to fire so tests that
+        // send a bare escape don't silently lose the event.
+        await new Promise((r) => setTimeout(r, 30));
+        await nextTick();
       },
     },
     terminal,

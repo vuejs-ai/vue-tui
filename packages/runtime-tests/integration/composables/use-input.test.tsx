@@ -1,5 +1,5 @@
 import { defineComponent, shallowRef } from "vue";
-import { expect, test } from "vite-plus/test";
+import { expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput, useStdout, type Key } from "@vue-tui/runtime";
 
@@ -362,4 +362,19 @@ test("useInput - handle page down", async () => {
   const { stdin } = await render(App);
   await stdin.write("\x1b[6~");
   expect(calls[0]?.key.pageDown).toBe(true);
+});
+
+// --- exitOnCtrlC ---
+
+test("exitOnCtrlC intercepts \\x03 in raw mode", async () => {
+  const handler = vi.fn();
+  const App = defineComponent(() => {
+    useInput(handler);
+    return () => <Text>running</Text>;
+  });
+  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+  await stdin.write("\x03");
+  // Should exit without calling user handler
+  expect(handler).not.toHaveBeenCalled();
+  await expect(waitUntilExit()).resolves.toBeUndefined();
 });

@@ -33,6 +33,7 @@ export interface StdinContext {
   setRawMode: (mode: boolean) => void;
   isRawModeSupported: boolean;
   internal_eventEmitter: EventEmitter;
+  internal_exitOnCtrlC: boolean;
   acquireRawMode: () => void;
   releaseRawMode: () => void;
 }

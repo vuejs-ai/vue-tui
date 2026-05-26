@@ -11,6 +11,7 @@ import {
 } from "vue";
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
+import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
@@ -65,10 +66,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedWriter: ReturnType<typeof createFrameWriter> | null = null;
   let mountedStdinController: StdinController | null = null;
   let mountedAppContext: AppContext | null = null;
-  let mountedSigintHandler: (() => void) | null = null;
   let mountedResizeHandler: (() => void) | null = null;
   let mountedExitListener: (() => void) | null = null;
-  let mountedFocusListener: (() => void) | null = null;
   let mountedDebug = false;
   let mountedRawMode = false;
 
@@ -96,14 +95,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (mountedResizeHandler && mountedAppContext) {
       mountedAppContext.stdout.off("resize", mountedResizeHandler);
     }
-    if (mountedSigintHandler) {
-      process.off("SIGINT", mountedSigintHandler);
-    }
     if (mountedExitListener) {
       process.off("exit", mountedExitListener);
-    }
-    if (mountedFocusListener) {
-      mountedFocusListener();
     }
     if (mountedRawMode && mountedAppContext) {
       mountedAppContext.setRawMode(false);
@@ -198,7 +191,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedAppContext = appContext;
 
     const focusContext: FocusContext = createFocusController();
-    const stdinController = createStdinController(stdin, appContext);
+    const stdinController = createStdinController(stdin, {
+      exitOnCtrlC,
+      appCtx: appContext,
+      focusContext,
+    });
     mountedStdinController = stdinController;
 
     const tuiRoot = createRoot(appContext);
@@ -255,26 +252,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stdout.write("\x1b[?25l");
     }
 
-    // Built-in Tab / Shift+Tab / Escape focus navigation (matches Ink).
-    // Placed AFTER mount so a sync mount failure doesn't leak the listener.
-    const focusInputListener = (chunk: Buffer | string) => {
-      const data = chunk.toString();
-      if (data === "\t") focusContext.focusNext();
-      else if (data === "\x1b[Z") focusContext.focusPrevious();
-      else if (data === "\x1b") focusContext.blur();
-    };
-    stdin.on("data", focusInputListener);
-    mountedFocusListener = () => stdin.off("data", focusInputListener);
-
     const onResize = () => scheduler.schedule();
     stdout.on("resize", onResize);
     mountedResizeHandler = onResize;
-
-    if (exitOnCtrlC) {
-      const handler = () => appContext.exit();
-      process.once("SIGINT", handler);
-      mountedSigintHandler = handler;
-    }
 
     // Auto-cleanup on process exit (process.exit, event-loop drain, uncaught
     // exception — anything that fires Node's 'exit' event). teardown() is
@@ -426,12 +406,109 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
   return state;
 }
 
-function createStdinController(stdin: NodeJS.ReadStream, appCtx: AppContext): StdinController {
+interface CreateStdinControllerOptions {
+  exitOnCtrlC: boolean;
+  appCtx: AppContext;
+  focusContext: FocusContext;
+}
+
+function createStdinController(
+  stdin: NodeJS.ReadStream,
+  opts: CreateStdinControllerOptions,
+): StdinController {
+  const { appCtx, focusContext } = opts;
   const emitter = new EventEmitter();
-  const listener = (chunk: Buffer | string) => {
-    emitter.emit("data", chunk.toString());
+  const inputParser = createInputParser();
+  let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  const FLUSH_DELAY = 20; // ms, matching Ink
+
+  function clearPendingFlush() {
+    if (pendingFlushTimer !== undefined) {
+      clearTimeout(pendingFlushTimer);
+      pendingFlushTimer = undefined;
+    }
+  }
+
+  function emitInput(input: string) {
+    // exitOnCtrlC: intercept \x03 BEFORE dispatching to useInput
+    if (input === "\x03" && opts.exitOnCtrlC) {
+      appCtx.exit();
+      return;
+    }
+    // Esc resets focus when focus is enabled
+    if (input === "\x1b" && focusContext.enabled) {
+      focusContext.blur();
+    }
+    emitter.emit("input", input);
+  }
+
+  function schedulePendingFlush() {
+    clearPendingFlush();
+    pendingFlushTimer = setTimeout(() => {
+      pendingFlushTimer = undefined;
+      const pending = inputParser.flushPendingEscape();
+      if (pending) emitInput(pending);
+    }, FLUSH_DELAY);
+  }
+
+  // Use 'readable' event + stdin.read() loop instead of 'data'
+  function handleReadable() {
+    clearPendingFlush();
+    let chunk: string | null;
+    while ((chunk = stdin.read() as string | null) !== null) {
+      const events: InputEvent[] = inputParser.push(
+        typeof chunk === "string" ? chunk : String(chunk),
+      );
+      for (const event of events) {
+        if (typeof event === "string") {
+          emitInput(event);
+        } else {
+          // Paste event: if paste listeners exist, emit there; else fall through to input
+          if (emitter.listenerCount("paste") > 0) {
+            emitter.emit("paste", event.paste);
+          } else {
+            emitInput(event.paste);
+          }
+        }
+      }
+    }
+    if (inputParser.hasPendingEscape()) {
+      schedulePendingFlush();
+    }
+  }
+
+  // Also handle "data" events for compatibility with test fake stdin streams
+  // that emit "data" directly (PassThrough streams in non-flowing mode don't
+  // fire "readable" when data is pushed via emit).
+  function handleData(chunk: Buffer | string) {
+    clearPendingFlush();
+    const data = typeof chunk === "string" ? chunk : chunk.toString();
+    const events: InputEvent[] = inputParser.push(data);
+    for (const event of events) {
+      if (typeof event === "string") {
+        emitInput(event);
+      } else {
+        if (emitter.listenerCount("paste") > 0) {
+          emitter.emit("paste", event.paste);
+        } else {
+          emitInput(event.paste);
+        }
+      }
+    }
+    if (inputParser.hasPendingEscape()) {
+      schedulePendingFlush();
+    }
+  }
+
+  stdin.on("readable", handleReadable);
+  stdin.on("data", handleData);
+
+  // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
+  const focusInputListener = (data: string) => {
+    if (data === "\t") focusContext.focusNext();
+    else if (data === "\x1b[Z") focusContext.focusPrevious();
   };
-  stdin.on("data", listener);
+  emitter.on("input", focusInputListener);
 
   let localRefs = 0;
 
@@ -440,6 +517,7 @@ function createStdinController(stdin: NodeJS.ReadStream, appCtx: AppContext): St
     setRawMode: appCtx.setRawMode,
     isRawModeSupported: appCtx.isRawModeSupported,
     internal_eventEmitter: emitter,
+    internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
       if (!appCtx.isRawModeSupported) return;
       const state = getRawModeState(stdin);
@@ -464,11 +542,15 @@ function createStdinController(stdin: NodeJS.ReadStream, appCtx: AppContext): St
           if (state.refs > 0 || state.prevRaw === null) return;
           appCtx.setRawMode(state.prevRaw);
           state.prevRaw = null;
+          inputParser.reset();
         });
       }
     },
     dispose() {
-      stdin.off("data", listener);
+      clearPendingFlush();
+      stdin.off("readable", handleReadable);
+      stdin.off("data", handleData);
+      emitter.off("input", focusInputListener);
       if (localRefs > 0 && appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         state.refs = Math.max(0, state.refs - localRefs);
@@ -476,6 +558,7 @@ function createStdinController(stdin: NodeJS.ReadStream, appCtx: AppContext): St
         if (state.refs === 0 && state.prevRaw !== null) {
           appCtx.setRawMode(state.prevRaw);
           state.prevRaw = null;
+          inputParser.reset();
         }
       }
     },
