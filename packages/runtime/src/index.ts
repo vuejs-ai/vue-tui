@@ -19,6 +19,11 @@ export { useStderr } from "./composables/useStderr.ts";
 export { useTerminalSize } from "./composables/useTerminalSize.ts";
 export { useCursor } from "./composables/useCursor.ts";
 export {
+  useAnimation,
+  type AnimationOptions,
+  type AnimationResult,
+} from "./composables/useAnimation.ts";
+export {
   useBoxMetrics,
   measureElement,
   type BoxMetrics,
