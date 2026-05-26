@@ -19,7 +19,7 @@ catalog:
   is-in-ci: ^1.0.0
   patch-console: ^2.0.0
   strip-ansi: ^7.2.0
-  node-pty: ^1.0.0
+  node-pty: 1.2.0-beta.13
   terminal-size: ^4.0.1
   tsx: ^4.22.0
 overrides:

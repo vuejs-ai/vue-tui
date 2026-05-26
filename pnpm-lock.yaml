@@ -25,8 +25,8 @@ catalogs:
       specifier: ^1.0.0
       version: 1.0.0
     node-pty:
-      specifier: ^1.0.0
-      version: 1.1.0
+      specifier: 1.2.0-beta.13
+      version: 1.2.0-beta.13
     patch-console:
       specifier: ^2.0.0
       version: 2.0.0
@@ -236,7 +236,7 @@ importers:
         version: 5.6.2
       node-pty:
         specifier: 'catalog:'
-        version: 1.1.0
+        version: 1.2.0-beta.13
       strip-ansi:
         specifier: 'catalog:'
         version: 7.2.0
@@ -1690,8 +1690,8 @@ packages:
       encoding:
         optional: true
 
-  node-pty@1.1.0:
-    resolution: {integrity: sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==}
+  node-pty@1.2.0-beta.13:
+    resolution: {integrity: sha512-ZbbJ7aJdmvRA53bw30D6YSJJKqo1IXTojD0kJeHZ/xZIxr7p1DCmvOmrOnjUo/rn1z4MDwKQGpx0C7K+cRKETw==}
 
   node-releases@2.0.46:
     resolution: {integrity: sha512-GYVXHE2KnrzAfsAjl4uP++evGFCrAU1jta4ubEjIG7YWt/64Gqv66a30yKwWczVjA6j3bM4nBwH7Pk1JmDHaxQ==}
@@ -3136,7 +3136,7 @@ snapshots:
     dependencies:
       whatwg-url: 5.0.0
 
-  node-pty@1.1.0:
+  node-pty@1.2.0-beta.13:
     dependencies:
       node-addon-api: 7.1.1
 

@@ -1,8 +1,7 @@
-import { test, expect } from "vite-plus/test";
+import { test as it, expect } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import term from "./helpers/term.ts";
-
 const countOccurrences = (text: string, searchValue: string): number => {
   if (searchValue === "") return 0;
   return text.split(searchValue).length - 1;
@@ -10,7 +9,7 @@ const countOccurrences = (text: string, searchValue: string): number => {
 
 const getIssue450ControlSequenceCounts = (output: string) => ({
   clearTerminalCount: countOccurrences(output, ansiEscapes.clearTerminal),
-  eraseLineCount: (output.match(/\x1b\[\d*K/g) || []).length,
+  eraseLineCount: (output.match(/\[\d*K/g) || []).length,
 });
 
 const runIssue450Fixture = async (fixture: string, rows = 6) => {
@@ -32,7 +31,7 @@ const runIssue450FixtureBeforeMarker = async (fixture: string, marker: string, r
   return markerIndex >= 0 ? output.slice(0, markerIndex) : output;
 };
 
-test.sequential("do not erase screen (content fits viewport)", async () => {
+it("do not erase screen (content fits viewport)", async () => {
   const ps = term("erase", ["4"]);
   await ps.waitForExit();
   expect(ps.output).not.toContain(ansiEscapes.clearTerminal);
@@ -42,7 +41,7 @@ test.sequential("do not erase screen (content fits viewport)", async () => {
   }
 });
 
-test.sequential("do not erase screen where <Static> is taller than viewport", async () => {
+it("do not erase screen where <Static> is taller than viewport", async () => {
   const ps = term("erase-with-static", ["4"]);
   await ps.waitForExit();
   expect(ps.output).not.toContain(ansiEscapes.clearTerminal);
@@ -52,7 +51,7 @@ test.sequential("do not erase screen where <Static> is taller than viewport", as
   }
 });
 
-test.sequential("erase screen (content overflows viewport)", async () => {
+it("erase screen (content overflows viewport)", async () => {
   const ps = term("erase", ["3"]);
   await ps.waitForExit();
   expect(ps.output).toContain(ansiEscapes.clearTerminal);
@@ -62,7 +61,7 @@ test.sequential("erase screen (content overflows viewport)", async () => {
   }
 });
 
-test.sequential("erase screen where <Static> exists but interactive part is taller than viewport", async () => {
+it("erase screen where <Static> exists but interactive part is taller than viewport", async () => {
   const ps = term("erase", ["3"]);
   await ps.waitForExit();
   expect(ps.output).toContain(ansiEscapes.clearTerminal);
@@ -72,7 +71,7 @@ test.sequential("erase screen where <Static> exists but interactive part is tall
   }
 });
 
-test.sequential("erase screen where state changes", async () => {
+it("erase screen where state changes", async () => {
   const ps = term("erase-with-state-change", ["4"]);
   await ps.waitForExit();
 
@@ -98,7 +97,7 @@ test.sequential("erase screen where state changes", async () => {
   }
 });
 
-test.sequential("erase screen where state changes in small viewport", async () => {
+it("erase screen where state changes in small viewport", async () => {
   const ps = term("erase-with-state-change", ["3"]);
   await ps.waitForExit();
 
@@ -110,7 +109,7 @@ test.sequential("erase screen where state changes in small viewport", async () =
   }
 });
 
-test.sequential("fullscreen mode should not add extra newline at the bottom", async () => {
+it("fullscreen mode should not add extra newline at the bottom", async () => {
   const ps = term("fullscreen-no-extra-newline", ["5"]);
   await ps.waitForExit();
 
@@ -129,7 +128,7 @@ test.sequential("fullscreen mode should not add extra newline at the bottom", as
   expect(lines[4]).toContain("Bottom line");
 });
 
-test.sequential("#442: full terminal-size box should not add an extra scroll line", async () => {
+it("#442: full terminal-size box should not add an extra scroll line", async () => {
   const rows = 5;
   const ps = term("issue-442-full-height", [String(rows)]);
   await ps.waitForExit();
@@ -145,7 +144,7 @@ test.sequential("#442: full terminal-size box should not add an extra scroll lin
 
 // ── Issue #450 tests ────────────────────────────────────────────────
 
-test.sequential("#450: full-height rerenders should not repeatedly clear terminal", async () => {
+it("#450: full-height rerenders should not repeatedly clear terminal", async () => {
   const { output, clearTerminalCount, eraseLineCount } = await runIssue450FixtureWithCounts(
     "issue-450-full-height-rerender",
   );
@@ -155,7 +154,7 @@ test.sequential("#450: full-height rerenders should not repeatedly clear termina
   expect(eraseLineCount).toBeGreaterThan(0);
 });
 
-test.sequential("#450: initial overflowing frame should not clear terminal", async () => {
+it("#450: initial overflowing frame should not clear terminal", async () => {
   const renderedMarker = "__INITIAL_OVERFLOW_FRAME_RENDERED__";
   const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
     "issue-450-initial-overflow",
@@ -166,7 +165,7 @@ test.sequential("#450: initial overflowing frame should not clear terminal", asy
   expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
 });
 
-test.sequential("#450: initial full-height frame should not clear terminal", async () => {
+it("#450: initial full-height frame should not clear terminal", async () => {
   const renderedMarker = "__INITIAL_FULLSCREEN_FRAME_RENDERED__";
   const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
     "issue-450-initial-fullscreen",
@@ -177,7 +176,7 @@ test.sequential("#450: initial full-height frame should not clear terminal", asy
   expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
 });
 
-test.sequential("#450: grow from rows - 1 to full-height should not clear before unmount", async () => {
+it("#450: grow from rows - 1 to full-height should not clear before unmount", async () => {
   const renderedMarker = "__GROW_TO_FULLSCREEN_RERENDER_COMPLETED__";
   const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
     "issue-450-grow-to-fullscreen-rerender",
@@ -189,7 +188,7 @@ test.sequential("#450: grow from rows - 1 to full-height should not clear before
   expect(clearTerminalCount).toBe(0);
 });
 
-test.sequential("#450: shrink from full-height to rows - 1 should clear exactly once", async () => {
+it("#450: shrink from full-height to rows - 1 should clear exactly once", async () => {
   const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
     "issue-450-shrink-from-fullscreen-rerender",
   );
@@ -200,7 +199,7 @@ test.sequential("#450: shrink from full-height to rows - 1 should clear exactly 
 
 // ── Animation exit tests ────────────────────────────────────────────
 
-test.sequential("useAnimation can drive non-interactive process exit", async () => {
+it("useAnimation can drive non-interactive process exit", async () => {
   const ps = term("use-animation-non-interactive-exit");
   await ps.waitForExit();
   const plainOutput = stripAnsi(ps.output);
@@ -208,7 +207,7 @@ test.sequential("useAnimation can drive non-interactive process exit", async () 
   expect(plainOutput).toContain("exited");
 });
 
-test.sequential("useAnimation can drive explicitly non-interactive process exit", async () => {
+it("useAnimation can drive explicitly non-interactive process exit", async () => {
   const ps = term("use-animation-interactive-false-exit");
   await ps.waitForExit();
   const plainOutput = stripAnsi(ps.output);

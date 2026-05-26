@@ -1,7 +1,11 @@
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import path from "node:path";
 import url from "node:url";
+
+const require = createRequire(import.meta.url);
+
+const { spawn } = require("node-pty") as typeof import("node-pty");
 
 const fixturesDir = url.fileURLToPath(new URL("../fixtures", import.meta.url));
 
@@ -21,33 +25,26 @@ export const run = async (fixture: string, props?: RunProps): Promise<string> =>
   }
 
   return new Promise<string>((resolve, reject) => {
-    const forceTty = url.fileURLToPath(new URL("./force-tty.cjs", import.meta.url));
-    const child = spawn("node", ["--require", forceTty, "--import=tsx", path.join(fixturesDir, `${fixture}.tsx`)], {
+    const term = spawn("node", ["--import=tsx", path.join(fixturesDir, `${fixture}.tsx`)], {
+      name: "xterm-color",
+      cols: typeof props?.columns === "number" ? props.columns : 100,
       cwd: fixturesDir,
       env,
-      stdio: ["pipe", "pipe", "pipe"],
     });
 
     let output = "";
-    child.stdout!.on("data", (data: Buffer) => {
-      output += data.toString();
+
+    term.onData((data) => {
+      output += data;
     });
-    child.stderr!.on("data", (data: Buffer) => {
-      const text = data.toString();
-      // Filter Vue slot warnings from fixtures using tsx jsx transform
-      if (!text.includes("[Vue warn]: Non-function value encountered for default slot")) {
-        output += text;
-      }
-    });
-    child.on("exit", (exitCode) => {
+
+    term.onExit(({ exitCode }) => {
       if (exitCode === 0) {
         resolve(output);
         return;
       }
+
       reject(new Error(`Process exited with non-zero code: ${exitCode}\n${output}`));
-    });
-    child.on("error", (err) => {
-      reject(err);
     });
   });
 };
