@@ -13,13 +13,14 @@ import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
 import isInCi from "is-in-ci";
 import patchConsoleFn from "patch-console";
+import ansiEscapes from "ansi-escapes";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { paint, paintIsolated } from "./paint/paint.ts";
-import { flushStatic, findStatics } from "./paint/static-channel.ts";
+import { findStatics } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import {
   AppContextKey,
@@ -82,6 +83,14 @@ export interface MountOptions {
    * @default true when `process.env["INK_SCREEN_READER"] === "true"`, otherwise false
    */
   isScreenReaderEnabled?: boolean;
+  /**
+   * Enable incremental rendering. When enabled, the frame writer uses
+   * line-diffing to minimize terminal writes — only changed lines are
+   * rewritten instead of erasing and repainting the entire frame.
+   *
+   * @default false
+   */
+  incrementalRendering?: boolean;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -91,6 +100,28 @@ export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
 }
 
 type RootProps = Record<string, unknown>;
+
+function shouldClearTerminalForFrame(opts: {
+  isTty: boolean;
+  viewportRows: number;
+  previousOutputHeight: number;
+  nextOutputHeight: number;
+  isUnmounting: boolean;
+}): boolean {
+  if (!opts.isTty) return false;
+  const hadPreviousFrame = opts.previousOutputHeight > 0;
+  const wasFullscreen = opts.previousOutputHeight >= opts.viewportRows;
+  const wasOverflowing = opts.previousOutputHeight > opts.viewportRows;
+  const isOverflowing = opts.nextOutputHeight > opts.viewportRows;
+  const isLeavingFullscreen = wasFullscreen && opts.nextOutputHeight < opts.viewportRows;
+  const shouldClearOnUnmount = opts.isUnmounting && wasFullscreen;
+  return (
+    wasOverflowing ||
+    (isOverflowing && hadPreviousFrame) ||
+    isLeavingFullscreen ||
+    shouldClearOnUnmount
+  );
+}
 
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
@@ -263,24 +294,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // outputHeight is its line count (used for erase-lines on resize and
     // screen-reader mode in future tasks), fullStaticOutput is the
     // accumulated <Static> content.
-    const frameState = { lastOutput: "", outputHeight: 0, fullStaticOutput: "" };
+    const frameState = {
+      lastOutput: "",
+      lastOutputToRender: "" as string | undefined,
+      outputHeight: 0,
+      fullStaticOutput: "",
+    };
     let cursorPosition: CursorPosition | undefined;
     mountedGetLastOutput = () => frameState.lastOutput;
 
     function restoreLastOutput() {
       if (!interactive) return;
-      // Re-write the last frame through the frame writer (log-update) so
-      // the cursor returns to the correct position after external writes.
-      writer.write(frameState.lastOutput);
-      // Cursor position handling (for Phase 5's useCursor integration):
-      // If cursor position is set, move cursor there and show it;
-      // otherwise hide it.
-      if (cursorPosition) {
-        stdout.write(`\x1b[${cursorPosition.y + 1};${cursorPosition.x + 1}H`);
-        stdout.write("\x1b[?25h");
-      } else {
-        stdout.write("\x1b[?25l");
-      }
+      // Clear() resets log-update's cursor state, so replay the latest cursor
+      // intent before restoring output after external stdout/stderr writes.
+      writer.setCursorPosition(cursorPosition);
+      writer.write(frameState.lastOutputToRender ?? frameState.lastOutput + "\n");
     }
 
     function writeToStdout(data: string) {
@@ -370,8 +398,48 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       frameState.fullStaticOutput = "";
     };
 
-    const writer = createFrameWriter(stdout, { debug });
+    const writer = createFrameWriter(stdout, {
+      debug,
+      incremental: options.incrementalRendering,
+    });
     mountedWriter = writer;
+
+    function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
+      const hasStaticOutput = staticOutput !== "";
+      const isTty = !!stdout.isTTY;
+      const viewportRows = isTty ? (stdout.rows ?? 24) : 24;
+
+      // Fullscreen: output fills or exceeds terminal height — no trailing newline.
+      // Only apply when writing to a real TTY — piped output always gets trailing newlines.
+      const isFullscreen = isTty && outputHeight >= viewportRows;
+      const outputToRender = isFullscreen ? output : output + "\n";
+
+      const shouldClear = shouldClearTerminalForFrame({
+        isTty,
+        viewportRows,
+        previousOutputHeight: frameState.outputHeight,
+        nextOutputHeight: outputHeight,
+        isUnmounting: teardownStarted,
+      });
+
+      if (shouldClear) {
+        // Direct write: clearTerminal + accumulated static + raw output
+        stdout.write(ansiEscapes.clearTerminal + frameState.fullStaticOutput + output);
+        // Sync log-update state so next render computes correct erase
+        writer.sync(outputToRender);
+      } else if (hasStaticOutput) {
+        // Clear frame -> write static -> re-render frame via log-update
+        writer.clear();
+        stdout.write(staticOutput);
+        writer.write(outputToRender);
+      } else {
+        writer.write(outputToRender);
+      }
+
+      frameState.lastOutput = output;
+      frameState.lastOutputToRender = outputToRender;
+      frameState.outputHeight = outputHeight;
+    }
 
     function commit() {
       const start = onRender ? performance.now() : 0;
@@ -386,43 +454,64 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
+      // Capture static output as a string (for both interactive and non-interactive paths)
+      const w = stdout.columns ?? 80;
+      let staticOutput = "";
+      for (const stat of findStatics(tuiRoot)) {
+        const fresh = stat.children.slice(stat.writtenCount);
+        if (fresh.length === 0) continue;
+        const staticFrame = paintIsolated(fresh, w, stat);
+        if (staticFrame.length > 0) {
+          staticOutput += staticFrame + "\n";
+        }
+        stat.writtenCount = stat.children.length;
+      }
+      const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
+      if (hasStaticOutput) {
+        frameState.fullStaticOutput += staticOutput;
+      }
+
       if (!interactive && !debug) {
         // Non-interactive: write static output immediately, defer dynamic frame.
-        // We inline the static flush logic so we can both capture and write it.
-        const w = stdout.columns ?? 80;
-        for (const stat of findStatics(tuiRoot)) {
-          const fresh = stat.children.slice(stat.writtenCount);
-          if (fresh.length === 0) continue;
-          const staticFrame = paintIsolated(fresh, w, stat);
-          if (staticFrame.length > 0) {
-            const output = staticFrame + "\n";
-            frameState.fullStaticOutput += output;
-            stdout.write(output);
-          }
-          stat.writtenCount = stat.children.length;
+        if (hasStaticOutput) {
+          stdout.write(staticOutput);
         }
 
         tuiRoot.yoga.setWidth(w);
         tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
         const frame = paint(tuiRoot);
         frameState.lastOutput = frame;
+        frameState.lastOutputToRender = frame + "\n";
         frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
         if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
 
-      writer.clear();
-      flushStatic(tuiRoot, stdout);
-      const w = stdout.columns ?? 80;
       tuiRoot.yoga.setWidth(w);
       tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
       const frame = paint(tuiRoot);
+      const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
-      // Track last output for writeToStdout/writeToStderr frame coordination
-      frameState.lastOutput = frame;
-      frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+      if (debug) {
+        // Debug mode: write static output directly to stdout, then frame
+        // through the frame writer (which appends "\n" in debug mode).
+        // Clear the writer first so the frame is always emitted even when
+        // the dynamic content is unchanged (static output was written above
+        // as a separate chunk, so the test harness sees it separately).
+        if (hasStaticOutput) {
+          writer.clear();
+          stdout.write(staticOutput);
+        }
+        frameState.lastOutput = frame;
+        frameState.lastOutputToRender = frame;
+        frameState.outputHeight = outputHeight;
+        writer.write(frame);
+        if (onRender) onRender({ renderTime: performance.now() - start });
+        return;
+      }
 
-      writer.write(frame);
+      // Interactive path
+      renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
       if (onRender) onRender({ renderTime: performance.now() - start });
     }
 
