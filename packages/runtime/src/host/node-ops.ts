@@ -10,6 +10,7 @@ import {
   isContainer,
   type TuiContainer,
   type TuiNode,
+  type TuiRoot,
 } from "./nodes.ts";
 import {
   attachYoga,
@@ -66,6 +67,16 @@ const STYLE_PROPS = new Set([
   "overflowX",
   "overflowY",
 ]);
+
+/** Walk up the DOM tree to find the root node. */
+function findRoot(node: TuiNode): TuiRoot | null {
+  let current: TuiNode | null = node;
+  while (current) {
+    if (current.type === "root") return current;
+    current = current.parent;
+  }
+  return null;
+}
 
 /** Walk up the DOM tree to check if we're inside a text or virtual-text context. */
 function isInsideTextContext(node: TuiContainer): boolean {
@@ -172,12 +183,30 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     parentC.children.splice(idx < 0 ? parentC.children.length : idx, 0, child as never);
     child.parent = parentC as never;
     insertYogaChild(parentC, child, idx);
+
+    // Track static node identity on the root (mirrors Ink's reconciler).
+    if (child.type === "static") {
+      const root = findRoot(child);
+      if (root) root.staticNode = child;
+    }
+
     onCommit();
   }
 
   function remove(child: TuiNode): void {
     const parent = child.parent;
     if (!parent) return;
+
+    // Track static node removal: clear root.staticNode only if it still
+    // points at this node. On key-driven remounts, insert() already
+    // registered the new instance before the old one is removed.
+    if (child.type === "static") {
+      const root = findRoot(child);
+      if (root && root.staticNode === child) {
+        root.staticNode = undefined;
+      }
+    }
+
     const idx = parent.children.indexOf(child as never);
     if (idx >= 0) parent.children.splice(idx, 1);
     removeYogaChild(parent, child);

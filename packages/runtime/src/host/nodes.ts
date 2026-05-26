@@ -29,6 +29,12 @@ export interface TuiRoot extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   appContext: AppContext;
+  /** Currently mounted <Static> node (if any). Updated on insert/remove. */
+  staticNode?: TuiStatic;
+  /** Previous commit's staticNode — used to detect identity changes. */
+  previousStaticNode?: TuiStatic;
+  /** Callback invoked when the <Static> identity changes (mount/unmount/remount). */
+  onStaticChange?: () => void;
 }
 
 export interface TuiBox extends NodeBase {
@@ -70,6 +76,7 @@ export interface TuiStatic extends NodeBase {
   type: "static";
   children: TuiNode[];
   yoga: YogaNodeRef;
+  props: BoxProps;
   writtenCount: number;
 }
 
@@ -138,6 +145,7 @@ export function createStatic(): TuiStatic {
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    props: {},
     writtenCount: 0,
   };
 }

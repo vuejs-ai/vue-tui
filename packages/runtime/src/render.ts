@@ -297,10 +297,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     tuiRoot.yoga.setWidth(stdout.columns ?? 80);
     mountedRoot = tuiRoot;
 
+    // Reset accumulated static output when the <Static> identity changes
+    // (unmount, remount via key change) so stale items are not replayed.
+    tuiRoot.onStaticChange = () => {
+      frameState.fullStaticOutput = "";
+    };
+
     const writer = createFrameWriter(stdout, { debug });
     mountedWriter = writer;
 
     function commit() {
+      // Detect <Static> identity changes (mount, unmount, key-driven remount).
+      // Fire onStaticChange BEFORE flushing static output so accumulated
+      // fullStaticOutput from a previous instance is cleared first.
+      if (tuiRoot.staticNode !== tuiRoot.previousStaticNode) {
+        tuiRoot.previousStaticNode = tuiRoot.staticNode;
+        if (typeof tuiRoot.onStaticChange === "function") {
+          tuiRoot.onStaticChange();
+        }
+      }
+
       if (!interactive && !debug) {
         // Non-interactive: write static output immediately, defer dynamic frame.
         // We inline the static flush logic so we can both capture and write it.
@@ -308,7 +324,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         for (const stat of findStatics(tuiRoot)) {
           const fresh = stat.children.slice(stat.writtenCount);
           if (fresh.length === 0) continue;
-          const staticFrame = paintIsolated(fresh, w);
+          const staticFrame = paintIsolated(fresh, w, stat);
           if (staticFrame.length > 0) {
             const output = staticFrame + "\n";
             frameState.fullStaticOutput += output;

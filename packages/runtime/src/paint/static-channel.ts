@@ -14,7 +14,7 @@ export function flushStatic(root: TuiNode, stream: NodeJS.WriteStream): void {
   for (const stat of findStatics(root)) {
     const fresh = stat.children.slice(stat.writtenCount);
     if (fresh.length === 0) continue;
-    const frame = paintIsolated(fresh, stream.columns ?? 80);
+    const frame = paintIsolated(fresh, stream.columns ?? 80, stat);
     if (frame.length > 0) stream.write(frame + "\n");
     stat.writtenCount = stat.children.length;
   }

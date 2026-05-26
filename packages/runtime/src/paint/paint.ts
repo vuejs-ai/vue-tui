@@ -20,7 +20,12 @@ import type {
 } from "../host/nodes.ts";
 import { createRoot as createIsoRoot } from "../host/nodes.ts";
 import { wrapText } from "../host/text-measure.ts";
-import { attachYoga, detachYoga } from "../host/yoga.ts";
+import {
+  attachYoga,
+  detachYoga,
+  isYogaProp as isYogaPropFn,
+  applyYogaProp as applyYogaPropFn,
+} from "../host/yoga.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -485,10 +490,33 @@ export function paintContainer(container: TuiContainer): string {
   throw new Error("paintContainer currently only supports root");
 }
 
-export function paintIsolated(nodes: TuiNode[], width: number): string {
+export function paintIsolated(
+  nodes: TuiNode[],
+  width: number,
+  staticNode?: import("../host/nodes.ts").TuiStatic,
+): string {
   const iso = createIsoRoot({} as never);
   attachYoga(iso);
   iso.yoga.setWidth(width);
+
+  // Apply the static node's yoga props (padding, flexDirection, etc.) to the
+  // iso root so the isolated layout reflects the Static wrapper's style.
+  if (staticNode) {
+    for (const [key, value] of Object.entries(staticNode.props)) {
+      if (isYogaPropFn(key)) {
+        applyYogaPropFn(iso, key, value);
+      }
+    }
+    // Static component defaults: position: absolute, flexDirection: column.
+    // These are set via the component's render function as Vue props, but for
+    // the iso root we need to mirror the yoga state that was on the real
+    // static node. Copy the key yoga settings that define layout direction.
+    // The static node's own yoga state already has these applied, but the iso
+    // root is fresh — we need to explicitly set flexDirection for correct layout.
+    if (!("flexDirection" in staticNode.props)) {
+      iso.yoga.setFlexDirection(Yoga.FLEX_DIRECTION_COLUMN);
+    }
+  }
 
   // Track which nodes we successfully added to iso's yoga tree so we can
   // remove them afterwards. Nodes that are already parented in another yoga
