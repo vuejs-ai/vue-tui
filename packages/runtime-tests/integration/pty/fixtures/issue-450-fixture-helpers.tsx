@@ -102,11 +102,7 @@ type InitialFixtureOptions = {
 };
 
 const Issue450InitialFixtureComponent = defineComponent(
-  (props: {
-    renderedMarker: string;
-    lineCount: number;
-    linePrefix: string;
-  }) => {
+  (props: { renderedMarker: string; lineCount: number; linePrefix: string }) => {
     const exit = useExit();
 
     onMounted(() => {

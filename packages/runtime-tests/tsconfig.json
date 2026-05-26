@@ -17,5 +17,6 @@
     "skipLibCheck": true,
     "jsx": "preserve",
     "jsxImportSource": "vue"
-  }
+  },
+  "exclude": ["integration/pty/fixtures"]
 }
