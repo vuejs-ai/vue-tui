@@ -1,7 +1,7 @@
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useExit } from "@vue-tui/runtime";
+import { Box, Text, useExit } from "@vue-tui/runtime";
 
 test("setup() throw rejects render()", async () => {
   const Boom = defineComponent(() => {
@@ -77,22 +77,17 @@ test.todo(
 );
 
 // --- Ink error validation tests ---
-// In Ink these tests use React error boundaries to validate that:
-// 1. Raw text strings inside <Box> (not inside <Text>) throw an error
-// 2. A <Box> nested inside <Text> throws an error
-//
-// In vue-tui:
-// - Raw text-leaf nodes inside <Box> are silently allowed (no validation yet)
-// - <Box> inside <Text> causes a WASM yoga crash (table index out of bounds)
-// All three are marked todo until the runtime adds proper validation.
 
-test.todo(
-  "fail when text nodes are not within <Text> component — vue-tui silently allows text-leaf inside box; validation not yet implemented",
-);
+test("fail when Box nested inside Text", async () => {
+  const App = defineComponent(() => () => (
+    <Text>
+      <Box />
+    </Text>
+  ));
+  await expect(render(App)).rejects.toThrow("can’t be nested inside <Text>");
+});
 
-test.todo(
-  "fail when text node is not within <Text> component — vue-tui silently allows text-leaf inside box; validation not yet implemented",
-);
-
-// Resolved: <Box> inside <Text> now emits a dev warning and skips insertion
-// to prevent WASM crash. See box-in-text-validation.test.tsx.
+test("fail when text string not within Text component", async () => {
+  const App = defineComponent(() => () => <Box>bare text</Box>);
+  await expect(render(App)).rejects.toThrow("must be rendered inside <Text>");
+});

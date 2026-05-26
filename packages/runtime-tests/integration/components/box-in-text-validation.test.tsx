@@ -1,20 +1,14 @@
 import { defineComponent } from "vue";
-import { expect, test, vi } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
-test("<Box> inside <Text> emits a dev warning", async () => {
-  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+test("<Box> inside <Text> throws an error", async () => {
+  const App = defineComponent(() => () => (
+    <Text>
+      <Box />
+    </Text>
+  ));
 
-  await render(
-    defineComponent(() => () => (
-      <Text>
-        <Box>invalid</Box>
-      </Text>
-    )),
-  );
-
-  expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("<Box>"));
-
-  warnSpy.mockRestore();
+  await expect(render(App)).rejects.toThrow("can’t be nested inside <Text>");
 });

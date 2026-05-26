@@ -142,19 +142,20 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     const parentC = parent as TuiContainer;
 
-    // Dev warning: <Box> inside <Text> is invalid (matches Ink's validation).
-    // Inserting a box into a text context corrupts the yoga WASM layout engine.
+    // <Box> inside <Text> is invalid (matches Ink's validation).
+    if (child.type === "box" && isInsideTextContext(parentC)) {
+      throw new Error("<Box> can’t be nested inside <Text> component");
+    }
+
+    // Text-leaf nodes must live inside a <Text> context.
+    // Skip empty text-leaves — Vue uses them as fragment anchors.
     if (
-      process.env["NODE_ENV"] !== "production" &&
-      child.type === "box" &&
-      isInsideTextContext(parentC)
+      child.type === "text-leaf" &&
+      child.value !== "" &&
+      (parentC.type === "box" || parentC.type === "root" || parentC.type === "static") &&
+      !isInsideTextContext(parentC)
     ) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[vue-tui] A <Box> cannot be nested inside a <Text> component. " +
-          "Wrap it in a sibling <Box> instead.",
-      );
-      return; // Skip insertion to prevent WASM crash
+      throw new Error(`Text string "${child.value}" must be rendered inside <Text> component`);
     }
 
     // Move semantics: if the child is already mounted (Vue's keyed reorder
