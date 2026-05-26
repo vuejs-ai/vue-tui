@@ -69,7 +69,22 @@ export async function render(
 
   trackApp(app);
 
+  // Attach early-error detector BEFORE flushing, so the rejection handler is
+  // in place when the error boundary's nextTick → exit() → microtask fires.
+  let earlyError: Error | undefined;
+  app.waitUntilExit().catch((e) => {
+    earlyError = e as Error;
+  });
+
+  // Flush the Vue queue. Chain: onErrorCaptured → nextTick → exit → queueMicrotask → reject
   await nextTick();
+  await nextTick();
+  await Promise.resolve();
+  await Promise.resolve();
+
+  if (earlyError) {
+    throw earlyError;
+  }
 
   const terminal: Terminal = {
     get columns() {

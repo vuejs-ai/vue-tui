@@ -23,12 +23,12 @@ test("render-time throw does not prevent unmount", async () => {
   expect(lastFrame()).toContain("ok");
 
   trigger.value = true;
-  try {
-    await nextTick();
-  } catch {
-    // swallow the render error
-  }
+  // Error boundary catches the render error and routes through exit()
+  await nextTick();
+  await nextTick();
+  await Promise.resolve();
 
+  // After exit(), teardown has run. unmount() should be idempotent/no-throw.
   expect(() => unmount()).not.toThrow();
 });
 
@@ -51,30 +51,57 @@ test("useExit() called with error rejects waitUntilExit", async () => {
   await expect(waitUntilExit()).rejects.toBe(err);
 });
 
-// --- Tests that cannot be ported due to vue-tui runtime limitations ---
+// --- Error boundary tests (previously blocked by yoga WASM crashes) ---
 
-test.todo(
-  "nested component setup error rejects waitUntilExit — " +
-    "errorHandler is installed AFTER mount, so errors during initial mount " +
-    "propagate synchronously instead of routing through exit(err). " +
-    "Additionally, throwing during mount corrupts the WASM yoga tree, " +
-    "making teardown unreliable. Requires runtime-level pre-mount error handling.",
-);
+test("nested component setup error rejects waitUntilExit", async () => {
+  const err = new Error("setup boom nested");
+  const Child = defineComponent(() => {
+    throw err;
+  });
+  const App = defineComponent(() => () => <Child />);
+  await expect(render(App)).rejects.toThrow("setup boom nested");
+});
 
-test.todo(
-  "does not emit unhandledRejection when render exits with an error and waitUntilExit is unused — " +
-    "in vue-tui, setup errors thrown during mount surface via render() rejection " +
-    "and may also produce unhandledRejection events from Vue's internal promise chains " +
-    "before our exitPromise.catch() guard takes effect. Requires engine-level fix.",
-);
+test("does not emit unhandledRejection when render exits with an error and waitUntilExit is unused", async () => {
+  const unhandledErrors: Error[] = [];
+  const handler = (reason: unknown) => {
+    unhandledErrors.push(reason as Error);
+  };
+  process.on("unhandledRejection", handler);
 
-test.todo(
-  "error in component triggered after mount routes through errorHandler — " +
-    "render-function throws during a reactive re-render (post-mount) cause " +
-    "yoga WASM table index out-of-bounds crashes that corrupt the layout engine. " +
-    "The errorHandler is called but the process state is unrecoverable. " +
-    "Requires WASM error isolation or render-phase error recovery in the runtime.",
-);
+  try {
+    const Boom = defineComponent(() => {
+      throw new Error("no-listener boom");
+    });
+    await render(Boom).catch(() => {});
+    // Give a tick for any stray rejections to surface
+    await new Promise((r) => setTimeout(r, 10));
+    expect(unhandledErrors).toHaveLength(0);
+  } finally {
+    process.off("unhandledRejection", handler);
+  }
+});
+
+test("error in component triggered after mount routes through exit", async () => {
+  const trigger = shallowRef(false);
+  const App = defineComponent(() => {
+    return () => {
+      if (trigger.value) throw new Error("post-mount boom");
+      return <Text>ok</Text>;
+    };
+  });
+
+  const { waitUntilExit, lastFrame } = await render(App);
+  expect(lastFrame()).toContain("ok");
+
+  trigger.value = true;
+  // Flush the render + error boundary nextTick + exit microtask
+  await nextTick();
+  await nextTick();
+  await Promise.resolve();
+
+  await expect(waitUntilExit()).rejects.toThrow("post-mount boom");
+});
 
 // --- Ink error validation tests ---
 

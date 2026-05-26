@@ -1,5 +1,14 @@
 import Yoga from "yoga-layout";
-import { type Component, type ComponentPublicInstance, type App as VueApp, shallowRef } from "vue";
+import {
+  type Component,
+  type ComponentPublicInstance,
+  type App as VueApp,
+  defineComponent,
+  h,
+  nextTick,
+  onErrorCaptured,
+  shallowRef,
+} from "vue";
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -19,6 +28,7 @@ import {
 } from "./context.ts";
 import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
+import { ErrorOverview } from "./components/ErrorOverview.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
@@ -46,6 +56,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     exitReject = rej;
   });
   exitPromise.catch(() => {});
+
+  // Exit-with-error function, wired after mount sets up appContext.
+  // Used by the error boundary to route errors through exit().
+  let exitWithError: (e: Error) => void = () => {};
 
   let mountedRoot: TuiRoot | null = null;
   let mountedWriter: ReturnType<typeof createFrameWriter> | null = null;
@@ -108,7 +122,38 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     root = createDevOverlayWrapper(root, rootProps ?? undefined);
     rootProps = undefined;
   }
-  const baseApp = renderer.createApp(root, rootProps ?? undefined);
+
+  // Internal error boundary wrapper: catches all descendant errors (setup,
+  // render, lifecycle) via onErrorCaptured, renders an ErrorOverview frame,
+  // then routes the error through exit(). This prevents yoga WASM corruption
+  // that would occur if errors propagated uncaught during Vue's render phase.
+  const userRoot = root;
+  const userRootProps = rootProps;
+  const ErrorBoundaryRoot = defineComponent({
+    name: "InternalErrorBoundary",
+    setup() {
+      const error = shallowRef<Error | null>(null);
+
+      onErrorCaptured((err) => {
+        const e = err instanceof Error ? err : new Error(String(err));
+        error.value = e;
+        // Flush the ErrorOverview frame, then exit
+        void nextTick(() => {
+          exitWithError(e);
+        });
+        return false; // stop propagation
+      });
+
+      return () => {
+        if (error.value) {
+          return h(ErrorOverview, { error: error.value });
+        }
+        return h(userRoot, userRootProps ?? undefined);
+      };
+    },
+  });
+
+  const baseApp = renderer.createApp(ErrorBoundaryRoot);
   const originalMount = baseApp.mount.bind(baseApp);
   const originalUnmount = baseApp.unmount.bind(baseApp);
 
@@ -187,18 +232,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(DevStateKey, devState);
     }
 
-    let proxy: ComponentPublicInstance;
-    try {
-      proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
-    } catch (mountError) {
-      stdinController.dispose();
-      detachYoga(tuiRoot);
-      throw mountError;
-    }
+    // Wire exit-with-error for the error boundary (must be set before mount).
+    exitWithError = (e: Error) => appContext.exit(e);
 
-    // errorHandler installed AFTER mount so sync mount errors still throw normally.
-    // Async errors (Vue's flushJobs scheduler) get routed through appContext.exit
-    // instead of surfacing as unhandled rejections.
+    const proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+
+    // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
+    // async errors in Vue's internal scheduler). The error boundary returns
+    // false to stop propagation, so caught errors won't reach here.
     baseApp.config.errorHandler = (err) => {
       appContext.exit(err instanceof Error ? err : new Error(String(err)));
     };
