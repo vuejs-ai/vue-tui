@@ -25,6 +25,7 @@
   "dependencies": {
     "@alcalzone/ansi-tokenize": "catalog:",
     "@vue/runtime-core": "^3.4.0",
+    "ansi-escapes": "catalog:",
     "chalk": "^5.3.0",
     "cli-boxes": "^3.0.0",
     "is-in-ci": "catalog:",
