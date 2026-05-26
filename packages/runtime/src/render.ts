@@ -862,13 +862,13 @@ function createStdinController(
 
   let localRefs = 0;
 
-  return {
+  const controller: StdinController = {
     stdin,
     setRawMode(mode: boolean) {
       if (mode) {
-        this.acquireRawMode();
+        controller.acquireRawMode();
       } else {
-        this.releaseRawMode();
+        controller.releaseRawMode();
       }
     },
     isRawModeSupported: appCtx.isRawModeSupported,
@@ -944,4 +944,6 @@ function createStdinController(
       }
     },
   };
+
+  return controller;
 }
