@@ -1,4 +1,5 @@
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
+export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
 export { Box } from "./components/Box.ts";
 export { Text } from "./components/Text.ts";
