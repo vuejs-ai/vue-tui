@@ -1,4 +1,5 @@
-import { defineComponent, getCurrentInstance, h, type PropType } from "vue";
+import { defineComponent, getCurrentInstance, h, inject, type PropType } from "vue";
+import { AppContextKey } from "../context.ts";
 
 type Color = string | [number, number, number];
 type WrapMode =
@@ -21,16 +22,34 @@ export const Text = defineComponent({
     strikethrough: Boolean,
     inverse: Boolean,
     wrap: { type: String as PropType<WrapMode>, default: "wrap" },
+    "aria-label": String,
+    "aria-hidden": Boolean,
   },
   setup(props, { slots }) {
+    const appCtx = inject(AppContextKey, null);
+
     return () => {
+      const isScreenReaderEnabled = appCtx?.isScreenReaderEnabled ?? false;
+
+      // When screen reader is enabled and aria-hidden is set, render nothing.
+      if (isScreenReaderEnabled && props["aria-hidden"]) {
+        return null;
+      }
+
+      const ariaLabel = props["aria-label"];
+      const children = isScreenReaderEnabled && ariaLabel ? ariaLabel : slots.default?.();
+
+      if (children === undefined || children === null) {
+        return null;
+      }
+
       const insideText = isInsideText();
       if (insideText) {
-        return h("virtual-text", props as never, slots.default?.());
+        return h("virtual-text", props as never, children);
       }
       // Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when
       // they overflow their container (e.g. in no-wrap flex rows).
-      return h("text", { ...props, flexShrink: 1 } as never, slots.default?.());
+      return h("text", { ...props, flexShrink: 1 } as never, children);
     };
   },
 });

@@ -43,6 +43,10 @@ export interface TuiBox extends NodeBase {
   yoga: YogaNodeRef;
   props: BoxProps;
   paintDirty: boolean;
+  internal_accessibility?: {
+    role?: string;
+    state?: Record<string, boolean>;
+  };
 }
 
 export interface TuiText extends NodeBase {

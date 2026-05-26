@@ -1,7 +1,7 @@
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
-export { Box } from "./components/Box.ts";
+export { Box, type AriaRole, type AriaState } from "./components/Box.ts";
 export { Text } from "./components/Text.ts";
 export { Newline } from "./components/Newline.ts";
 export { Spacer } from "./components/Spacer.ts";
@@ -30,4 +30,5 @@ export {
   type BoxMetrics,
   type UseBoxMetricsResult,
 } from "./composables/useBoxMetrics.ts";
+export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";

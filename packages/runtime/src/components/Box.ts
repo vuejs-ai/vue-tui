@@ -1,4 +1,5 @@
-import { defineComponent, h, type PropType } from "vue";
+import { defineComponent, h, inject, type PropType } from "vue";
+import { AppContextKey } from "../context.ts";
 
 type Spacing = number;
 type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
@@ -29,6 +30,38 @@ type BorderStyle =
   | "doubleSingle"
   | "classic"
   | "arrow";
+
+export type AriaRole =
+  | "button"
+  | "checkbox"
+  | "combobox"
+  | "list"
+  | "listbox"
+  | "listitem"
+  | "menu"
+  | "menuitem"
+  | "option"
+  | "progressbar"
+  | "radio"
+  | "radiogroup"
+  | "tab"
+  | "tablist"
+  | "table"
+  | "textbox"
+  | "timer"
+  | "toolbar";
+
+export interface AriaState {
+  busy?: boolean;
+  checked?: boolean;
+  disabled?: boolean;
+  expanded?: boolean;
+  multiline?: boolean;
+  multiselectable?: boolean;
+  readonly?: boolean;
+  required?: boolean;
+  selected?: boolean;
+}
 
 export const Box = defineComponent({
   name: "Box",
@@ -100,8 +133,27 @@ export const Box = defineComponent({
     overflowX: String as PropType<"visible" | "hidden">,
     overflowY: String as PropType<"visible" | "hidden">,
     display: String as PropType<"flex" | "none">,
+
+    "aria-label": String,
+    "aria-hidden": Boolean,
+    "aria-role": String as PropType<AriaRole>,
+    "aria-state": Object as PropType<AriaState>,
   },
   setup(props, { slots }) {
-    return () => h("box", props as never, slots.default?.());
+    const appCtx = inject(AppContextKey, null);
+
+    return () => {
+      const isScreenReaderEnabled = appCtx?.isScreenReaderEnabled ?? false;
+
+      // When screen reader is enabled and aria-hidden is set, render nothing.
+      if (isScreenReaderEnabled && props["aria-hidden"]) {
+        return null;
+      }
+
+      const ariaLabel = props["aria-label"];
+      const label = ariaLabel ? h("text", null, ariaLabel) : undefined;
+
+      return h("box", props as never, isScreenReaderEnabled && label ? [label] : slots.default?.());
+    };
   },
 });

@@ -282,6 +282,25 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         }
       } else if (STYLE_PROPS.has(key)) {
         (el as { props: Record<string, unknown> }).props[key] = next;
+      } else if (key === "aria-role" || key === "ariaRole") {
+        if (el.type === "box") {
+          el.internal_accessibility ??= {};
+          el.internal_accessibility.role = next as string;
+        }
+      } else if (key === "aria-state" || key === "ariaState") {
+        if (el.type === "box") {
+          el.internal_accessibility ??= {};
+          el.internal_accessibility.state = next as Record<string, boolean>;
+        }
+      } else if (
+        key === "aria-label" ||
+        key === "ariaLabel" ||
+        key === "aria-hidden" ||
+        key === "ariaHidden" ||
+        key === "accessibilityLabel"
+      ) {
+        // Handled at the Vue component level (Box.ts / Text.ts / Transform.ts),
+        // not stored on the DOM node. Silently ignore so we don't warn.
       } else if (key === "key" || key === "ref" || key.startsWith("on")) {
         // Reserved by Vue / event keys, ignore.
       } else if (process.env["NODE_ENV"] !== "production") {
