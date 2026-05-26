@@ -1,6 +1,6 @@
 import process from "node:process";
 import { Box, Text, createApp, useExit } from "@vue-tui/runtime";
-import { defineComponent, onMounted, onScopeDispose } from "vue";
+import { defineComponent, h, onMounted, onScopeDispose } from "vue";
 
 const Fullscreen = defineComponent(() => {
   const exit = useExit();
@@ -17,14 +17,11 @@ const Fullscreen = defineComponent(() => {
 
   const rows = Number(process.argv[2]) || 5;
 
-  return () => (
-    <Box height={rows} flexDirection="column">
-      <Box flexGrow={1}>
-        <Text>Full-screen: top</Text>
-      </Box>
-      <Text>Bottom line (should be usable)</Text>
-    </Box>
-  );
+  return () =>
+    h(Box, { height: rows, flexDirection: "column" }, () => [
+      h(Box, { flexGrow: 1 }, () => h(Text, null, () => "Full-screen: top")),
+      h(Text, null, () => "Bottom line (should be usable)"),
+    ]);
 });
 
 process.stdout.rows = Number(process.argv[2]) || 5;

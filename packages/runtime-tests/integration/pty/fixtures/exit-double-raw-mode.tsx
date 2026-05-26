@@ -1,6 +1,6 @@
 import process from "node:process";
 import { createApp, Text, useStdin } from "@vue-tui/runtime";
-import { defineComponent, onMounted } from "vue";
+import { defineComponent, h, onMounted } from "vue";
 
 const App = defineComponent(() => {
   const { setRawMode } = useStdin();
@@ -12,12 +12,11 @@ const App = defineComponent(() => {
       setRawMode(false);
       setRawMode(true);
 
-      // Start the test
-      process.stdout.write("s");
+      process.stdout.write("__READY__");
     }, 500);
   });
 
-  return () => <Text>Hello World</Text>;
+  return () => h(Text, null, "Hello World");
 });
 
 const app = createApp(App);

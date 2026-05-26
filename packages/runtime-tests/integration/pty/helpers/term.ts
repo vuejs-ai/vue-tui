@@ -30,9 +30,14 @@ const term = (fixture: string, args: string[] = []) => {
     FORCE_COLOR: "3",
   };
 
+  // First arg is often the desired rows count for viewport tests
+  const rowsArg = args.length > 0 ? Number(args[0]) : NaN;
+  const rows = Number.isFinite(rowsArg) && rowsArg > 0 ? rowsArg : 24;
+
   const ps = spawn("node", ["--import=tsx", path.join(fixturesDir, `${fixture}.tsx`), ...args], {
     name: "xterm-color",
     cols: 100,
+    rows,
     cwd: fixturesDir,
     env,
   });

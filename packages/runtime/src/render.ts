@@ -882,7 +882,6 @@ function createStdinController(
         if (typeof stdin.ref === "function") stdin.ref();
         if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
         appCtx.setRawMode(true);
-        stdin.on("readable", handleReadable);
         stdin.on("data", handleData);
       }
       state.refs++;
@@ -939,6 +938,7 @@ function createStdinController(
         if (state.refs === 0 && state.prevRaw !== null) {
           appCtx.setRawMode(state.prevRaw);
           state.prevRaw = null;
+          if (typeof stdin.unref === "function") stdin.unref();
           inputParser.reset();
         }
       }

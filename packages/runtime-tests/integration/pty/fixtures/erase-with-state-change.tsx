@@ -1,6 +1,6 @@
 import process from "node:process";
 import { Box, Text, createApp } from "@vue-tui/runtime";
-import { defineComponent, onMounted, onScopeDispose, shallowRef } from "vue";
+import { defineComponent, h, onMounted, onScopeDispose, shallowRef } from "vue";
 
 const Erase = defineComponent(() => {
   const show = shallowRef(true);
@@ -15,17 +15,12 @@ const Erase = defineComponent(() => {
     });
   });
 
-  return () => (
-    <Box flexDirection="column">
-      {show.value ? (
-        <>
-          <Text>A</Text>
-          <Text>B</Text>
-          <Text>C</Text>
-        </>
-      ) : null}
-    </Box>
-  );
+  return () =>
+    h(Box, { flexDirection: "column" }, () =>
+      show.value
+        ? [h(Text, null, () => "A"), h(Text, null, () => "B"), h(Text, null, () => "C")]
+        : [],
+    );
 });
 
 process.stdout.rows = Number(process.argv[2]);

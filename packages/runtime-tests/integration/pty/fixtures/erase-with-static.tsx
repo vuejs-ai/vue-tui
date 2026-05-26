@@ -1,21 +1,21 @@
 import process from "node:process";
 import { Box, Static, Text, createApp } from "@vue-tui/runtime";
-import { defineComponent } from "vue";
+import { Fragment, defineComponent, h } from "vue";
 
 const EraseWithStatic = defineComponent(() => {
-  return () => (
-    <>
-      <Static items={["A", "B", "C"]}>
-        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-      </Static>
-
-      <Box flexDirection="column">
-        <Text>D</Text>
-        <Text>E</Text>
-        <Text>F</Text>
-      </Box>
-    </>
-  );
+  return () =>
+    h(Fragment, [
+      h(
+        Static,
+        { items: ["A", "B", "C"] },
+        { default: ({ item }: { item: string }) => h(Text, { key: item }, () => item) },
+      ),
+      h(Box, { flexDirection: "column" }, () => [
+        h(Text, null, () => "D"),
+        h(Text, null, () => "E"),
+        h(Text, null, () => "F"),
+      ]),
+    ]);
 });
 
 process.stdout.rows = Number(process.argv[2]);

@@ -1,6 +1,6 @@
 import process from "node:process";
 import { Box, Static, Text, createApp, useExit } from "@vue-tui/runtime";
-import { defineComponent, onMounted, onScopeDispose, shallowRef, watch } from "vue";
+import { Fragment, defineComponent, h, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type RerenderFixtureOptions = {
   readonly completionMarker?: string;
@@ -22,7 +22,6 @@ const Issue450RerenderFixtureComponent = defineComponent(
     const frameCount = shallowRef(0);
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    // Mirror React useEffect: whenever frameCount changes, schedule next action
     watch(
       frameCount,
       (count) => {
@@ -53,22 +52,22 @@ const Issue450RerenderFixtureComponent = defineComponent(
     return () => {
       const targetHeight = props.heightForFrame(props.rows, frameCount.value);
 
-      return (
-        <>
-          {props.includeStaticLine ? (
-            <Static items={["#450 static line"]}>
-              {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-            </Static>
-          ) : null}
-          <Box height={targetHeight} flexDirection="column">
-            <Text>#450 top</Text>
-            <Box flexGrow={1}>
-              <Text>{`frame ${frameCount.value}`}</Text>
-            </Box>
-            <Text>#450 bottom</Text>
-          </Box>
-        </>
-      );
+      return h(Fragment, [
+        props.includeStaticLine
+          ? h(
+              Static,
+              { items: ["#450 static line"] },
+              {
+                default: ({ item }: { item: string }) => h(Text, { key: item }, () => item),
+              },
+            )
+          : null,
+        h(Box, { height: targetHeight, flexDirection: "column" }, () => [
+          h(Text, null, () => "#450 top"),
+          h(Box, { flexGrow: 1 }, () => h(Text, null, () => `frame ${frameCount.value}`)),
+          h(Text, null, () => "#450 bottom"),
+        ]),
+      ]);
     };
   },
   { props: ["completionMarker", "frameLimit", "includeStaticLine", "heightForFrame", "rows"] },
@@ -117,12 +116,12 @@ const Issue450InitialFixtureComponent = defineComponent(
     });
 
     return () => {
-      const lines = [];
+      const lines: ReturnType<typeof h>[] = [];
       for (let lineNumber = 1; lineNumber <= props.lineCount; lineNumber++) {
-        lines.push(<Text key={lineNumber}>{`${props.linePrefix} line ${lineNumber}`}</Text>);
+        lines.push(h(Text, { key: lineNumber }, () => `${props.linePrefix} line ${lineNumber}`));
       }
 
-      return <Box flexDirection="column">{lines}</Box>;
+      return h(Box, { flexDirection: "column" }, () => lines);
     };
   },
   { props: ["renderedMarker", "lineCount", "linePrefix"] },

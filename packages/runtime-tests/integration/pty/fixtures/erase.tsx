@@ -1,15 +1,14 @@
 import process from "node:process";
 import { Box, Text, createApp } from "@vue-tui/runtime";
-import { defineComponent } from "vue";
+import { defineComponent, h } from "vue";
 
 const Erase = defineComponent(() => {
-  return () => (
-    <Box flexDirection="column">
-      <Text>A</Text>
-      <Text>B</Text>
-      <Text>C</Text>
-    </Box>
-  );
+  return () =>
+    h(Box, { flexDirection: "column" }, () => [
+      h(Text, null, () => "A"),
+      h(Text, null, () => "B"),
+      h(Text, null, () => "C"),
+    ]);
 });
 
 process.stdout.rows = Number(process.argv[2]);
