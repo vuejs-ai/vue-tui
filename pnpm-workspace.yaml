@@ -15,6 +15,7 @@ catalog:
   vite-plus: ^0.1.22
   "@vitejs/plugin-vue-jsx": ^5.1.5
   chalk: ^5.6.2
+  is-in-ci: ^1.0.0
   strip-ansi: ^7.2.0
 overrides:
   vite: "catalog:"

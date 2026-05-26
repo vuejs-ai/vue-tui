@@ -1,14 +1,24 @@
 import type { InjectionKey, ShallowRef } from "vue";
 import type { EventEmitter } from "node:events";
 
+export interface CursorPosition {
+  x: number;
+  y: number;
+}
+
 export interface AppContext {
   exit: (errorOrResult?: unknown) => void;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   stdin: NodeJS.ReadStream;
   debug: boolean;
+  interactive: boolean;
   isRawModeSupported: boolean;
   setRawMode: (mode: boolean) => void;
+  writeToStdout: (data: string) => void;
+  writeToStderr: (data: string) => void;
+  cursorPosition: CursorPosition | undefined;
+  setCursorPosition: (pos: CursorPosition | undefined) => void;
 }
 
 export interface FocusContext {

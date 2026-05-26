@@ -18,6 +18,9 @@ catalogs:
     chalk:
       specifier: ^5.6.2
       version: 5.6.2
+    is-in-ci:
+      specifier: ^1.0.0
+      version: 1.0.0
     strip-ansi:
       specifier: ^7.2.0
       version: 7.2.0
@@ -155,6 +158,9 @@ importers:
       cli-boxes:
         specifier: ^3.0.0
         version: 3.0.0
+      is-in-ci:
+        specifier: 'catalog:'
+        version: 1.0.0
       log-update:
         specifier: ^6.0.0
         version: 6.1.0
@@ -1357,6 +1363,11 @@ packages:
   is-fullwidth-code-point@5.1.0:
     resolution: {integrity: sha512-5XHYaSyiqADb4RnZ1Bdad6cPp8Toise4TzEjcOYDHZkTCbKgiUl7WTUCpNWHuxmDt91wnsZBc9xinNzopv3JMQ==}
     engines: {node: '>=18'}
+
+  is-in-ci@1.0.0:
+    resolution: {integrity: sha512-eUuAjybVTHMYWm/U+vBO1sY/JOCgoPCXRxzdju0K+K0BiGW0SChEL1MLC0PoCIR1OlPo5YAp8HuQoUlsWEICwg==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2740,6 +2751,8 @@ snapshots:
   is-fullwidth-code-point@5.1.0:
     dependencies:
       get-east-asian-width: 1.6.0
+
+  is-in-ci@1.0.0: {}
 
   js-tokens@4.0.0: {}
 

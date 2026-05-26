@@ -11,19 +11,21 @@ import {
 } from "vue";
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
+import isInCi from "is-in-ci";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
-import { paint } from "./paint/paint.ts";
-import { flushStatic } from "./paint/static-channel.ts";
+import { paint, paintIsolated } from "./paint/paint.ts";
+import { flushStatic, findStatics } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import {
   AppContextKey,
   FocusContextKey,
   StdinContextKey,
   type AppContext,
+  type CursorPosition,
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
@@ -38,6 +40,19 @@ export interface MountOptions {
   debug?: boolean;
   exitOnCtrlC?: boolean;
   rawMode?: boolean;
+  /**
+   * Override automatic interactive mode detection.
+   *
+   * By default, vue-tui detects whether the environment is interactive based
+   * on CI detection (via `is-in-ci`) and `stdout.isTTY`. Most users should
+   * not need to set this.
+   *
+   * When non-interactive, vue-tui disables ANSI erase sequences, cursor
+   * manipulation, resize handling, writing only the final frame at unmount.
+   *
+   * @default true (false if in CI or `stdout.isTTY` is falsy)
+   */
+  interactive?: boolean;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -69,7 +84,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedResizeHandler: (() => void) | null = null;
   let mountedExitListener: (() => void) | null = null;
   let mountedDebug = false;
+  let mountedInteractive = true;
   let mountedRawMode = false;
+  let mountedGetLastOutput: (() => string) | null = null;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -86,9 +103,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     } catch {
       // Vue's unmount may throw on double-unmount; swallow for idempotency.
     }
-    if (mountedWriter && !mountedDebug) mountedWriter.done();
-    // Show cursor on unmount (matching Ink).
-    if (!mountedDebug && mountedAppContext) {
+    if (!mountedDebug && !mountedInteractive && mountedAppContext) {
+      // Non-interactive: write the deferred last frame at unmount (matching Ink).
+      const lastFrame = mountedGetLastOutput?.() ?? "";
+      if (lastFrame) {
+        mountedAppContext.stdout.write(lastFrame + "\n");
+      }
+    }
+    if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
+    // Show cursor on unmount (matching Ink). Only in interactive mode.
+    if (!mountedDebug && mountedInteractive && mountedAppContext) {
       mountedAppContext.stdout.write("\x1b[?25h");
     }
     if (mountedRoot) detachYoga(mountedRoot);
@@ -161,6 +185,68 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const rawMode = options.rawMode ?? true;
     mountedDebug = debug;
 
+    // Interactive mode detection — matches Ink's logic:
+    // CI detection takes precedence: even a TTY stdout in CI defaults to
+    // non-interactive. Using Boolean(isTTY) (rather than an 'in' guard)
+    // correctly handles piped streams where the property is absent.
+    const interactive = options.interactive ?? (!isInCi && Boolean(stdout.isTTY));
+    mountedInteractive = interactive;
+
+    // Frame coordination state — tracks the last rendered output so
+    // writeToStdout/writeToStderr can clear and restore the active frame.
+    // Frame state: lastOutput is the most recent rendered frame string,
+    // outputHeight is its line count (used for erase-lines on resize and
+    // screen-reader mode in future tasks), fullStaticOutput is the
+    // accumulated <Static> content.
+    const frameState = { lastOutput: "", outputHeight: 0, fullStaticOutput: "" };
+    let cursorPosition: CursorPosition | undefined;
+    mountedGetLastOutput = () => frameState.lastOutput;
+
+    function restoreLastOutput() {
+      if (!interactive) return;
+      // Re-write the last frame through the frame writer (log-update) so
+      // the cursor returns to the correct position after external writes.
+      writer.write(frameState.lastOutput);
+      // Cursor position handling (for Phase 5's useCursor integration):
+      // If cursor position is set, move cursor there and show it;
+      // otherwise hide it.
+      if (cursorPosition) {
+        stdout.write(`\x1b[${cursorPosition.y + 1};${cursorPosition.x + 1}H`);
+        stdout.write("\x1b[?25h");
+      } else {
+        stdout.write("\x1b[?25l");
+      }
+    }
+
+    function writeToStdout(data: string) {
+      if (debug) {
+        stdout.write(data + frameState.fullStaticOutput + frameState.lastOutput);
+        return;
+      }
+      if (!interactive) {
+        stdout.write(data);
+        return;
+      }
+      writer.clear();
+      stdout.write(data);
+      restoreLastOutput();
+    }
+
+    function writeToStderr(data: string) {
+      if (debug) {
+        stderr.write(data);
+        stdout.write(frameState.fullStaticOutput + frameState.lastOutput);
+        return;
+      }
+      if (!interactive) {
+        stderr.write(data);
+        return;
+      }
+      writer.clear();
+      stderr.write(data);
+      restoreLastOutput();
+    }
+
     const appContext: AppContext = {
       exit(errorOrResult?: unknown) {
         // Defer teardown to a microtask: exit() is frequently called from
@@ -179,6 +265,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stderr,
       stdin,
       debug,
+      interactive,
       isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
       setRawMode(mode: boolean) {
         if (
@@ -186,6 +273,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         ) {
           (stdin as { setRawMode: (mode: boolean) => unknown }).setRawMode(mode);
         }
+      },
+      writeToStdout,
+      writeToStderr,
+      cursorPosition: undefined,
+      setCursorPosition(pos: CursorPosition | undefined) {
+        cursorPosition = pos;
+        appContext.cursorPosition = pos;
       },
     };
     mountedAppContext = appContext;
@@ -207,12 +301,41 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedWriter = writer;
 
     function commit() {
+      if (!interactive && !debug) {
+        // Non-interactive: write static output immediately, defer dynamic frame.
+        // We inline the static flush logic so we can both capture and write it.
+        const w = stdout.columns ?? 80;
+        for (const stat of findStatics(tuiRoot)) {
+          const fresh = stat.children.slice(stat.writtenCount);
+          if (fresh.length === 0) continue;
+          const staticFrame = paintIsolated(fresh, w);
+          if (staticFrame.length > 0) {
+            const output = staticFrame + "\n";
+            frameState.fullStaticOutput += output;
+            stdout.write(output);
+          }
+          stat.writtenCount = stat.children.length;
+        }
+
+        tuiRoot.yoga.setWidth(w);
+        tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
+        const frame = paint(tuiRoot);
+        frameState.lastOutput = frame;
+        frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+        return;
+      }
+
       writer.clear();
       flushStatic(tuiRoot, stdout);
       const w = stdout.columns ?? 80;
       tuiRoot.yoga.setWidth(w);
       tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
       const frame = paint(tuiRoot);
+
+      // Track last output for writeToStdout/writeToStderr frame coordination
+      frameState.lastOutput = frame;
+      frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
       writer.write(frame);
     }
 
@@ -246,15 +369,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedRawMode = true;
     }
 
-    // Hide cursor on mount (matching Ink). Only in production mode — in
-    // debug/test mode the stream may not be a real TTY.
-    if (!debug) {
+    // Hide cursor on mount (matching Ink). Only in interactive mode — in
+    // debug/test mode or non-interactive the stream may not be a real TTY.
+    if (!debug && interactive) {
       stdout.write("\x1b[?25l");
     }
 
-    const onResize = () => scheduler.schedule();
-    stdout.on("resize", onResize);
-    mountedResizeHandler = onResize;
+    // Only listen for resize in interactive mode (matching Ink).
+    if (interactive) {
+      const onResize = () => scheduler.schedule();
+      stdout.on("resize", onResize);
+      mountedResizeHandler = onResize;
+    }
 
     // Auto-cleanup on process exit (process.exit, event-loop drain, uncaught
     // exception — anything that fires Node's 'exit' event). teardown() is
