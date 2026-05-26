@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vp test",
+    "pty-test": "vp test run --config vitest.pty.config.ts --passWithNoTests",
     "check": "vp check"
   },
   "devDependencies": {
