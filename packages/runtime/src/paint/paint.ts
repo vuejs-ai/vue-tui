@@ -8,6 +8,7 @@ import {
   tokenize,
 } from "@alcalzone/ansi-tokenize";
 import { applyChalk } from "./text-style.ts";
+import { sanitizeAnsi } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
   TuiNode,
@@ -288,7 +289,7 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
     }
     // Skip comments inserted by Vue for null/undefined renders
   }
-  return out;
+  return sanitizeAnsi(out);
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
