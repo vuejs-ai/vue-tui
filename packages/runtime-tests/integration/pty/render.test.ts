@@ -3,6 +3,35 @@ import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import term from "./helpers/term.ts";
 
+const countOccurrences = (text: string, searchValue: string): number => {
+  if (searchValue === "") return 0;
+  return text.split(searchValue).length - 1;
+};
+
+const getIssue450ControlSequenceCounts = (output: string) => ({
+  clearTerminalCount: countOccurrences(output, ansiEscapes.clearTerminal),
+  eraseLineCount: (output.match(/\x1b\[\d*K/g) || []).length,
+});
+
+const runIssue450Fixture = async (fixture: string, rows = 6) => {
+  const ps = term(fixture, [String(rows)]);
+  await ps.waitForExit();
+  return ps.output;
+};
+
+const runIssue450FixtureWithCounts = async (fixture: string, rows = 6) => {
+  const output = await runIssue450Fixture(fixture, rows);
+  const { clearTerminalCount, eraseLineCount } = getIssue450ControlSequenceCounts(output);
+  return { output, clearTerminalCount, eraseLineCount };
+};
+
+const runIssue450FixtureBeforeMarker = async (fixture: string, marker: string, rows = 6) => {
+  const output = await runIssue450Fixture(fixture, rows);
+  const markerIndex = output.indexOf(marker);
+  expect(markerIndex).toBeGreaterThanOrEqual(0);
+  return markerIndex >= 0 ? output.slice(0, markerIndex) : output;
+};
+
 test.sequential("do not erase screen (content fits viewport)", async () => {
   const ps = term("erase", ["4"]);
   await ps.waitForExit();
@@ -119,3 +148,81 @@ test.sequential(
     expect(lines.at(-1)).toContain("#442 bottom");
   },
 );
+
+// ── Issue #450 tests ────────────────────────────────────────────────
+
+test.sequential("#450: full-height rerenders should not repeatedly clear terminal", async () => {
+  const { output, clearTerminalCount, eraseLineCount } =
+    await runIssue450FixtureWithCounts("issue-450-full-height-rerender");
+
+  expect(output).toContain("frame 8");
+  expect(clearTerminalCount).toBeLessThanOrEqual(1);
+  expect(eraseLineCount).toBeGreaterThan(0);
+});
+
+test.sequential("#450: initial overflowing frame should not clear terminal", async () => {
+  const renderedMarker = "__INITIAL_OVERFLOW_FRAME_RENDERED__";
+  const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
+    "issue-450-initial-overflow",
+    renderedMarker,
+    3,
+  );
+
+  expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
+});
+
+test.sequential("#450: initial full-height frame should not clear terminal", async () => {
+  const renderedMarker = "__INITIAL_FULLSCREEN_FRAME_RENDERED__";
+  const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
+    "issue-450-initial-fullscreen",
+    renderedMarker,
+    3,
+  );
+
+  expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
+});
+
+test.sequential(
+  "#450: grow from rows - 1 to full-height should not clear before unmount",
+  async () => {
+    const renderedMarker = "__GROW_TO_FULLSCREEN_RERENDER_COMPLETED__";
+    const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
+      "issue-450-grow-to-fullscreen-rerender",
+      renderedMarker,
+    );
+    const { clearTerminalCount } = getIssue450ControlSequenceCounts(outputBeforeMarker);
+
+    expect(outputBeforeMarker).toContain("frame 8");
+    expect(clearTerminalCount).toBe(0);
+  },
+);
+
+test.sequential(
+  "#450: shrink from full-height to rows - 1 should clear exactly once",
+  async () => {
+    const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
+      "issue-450-shrink-from-fullscreen-rerender",
+    );
+
+    expect(output).toContain("frame 8");
+    expect(clearTerminalCount).toBe(1);
+  },
+);
+
+// ── Animation exit tests ────────────────────────────────────────────
+
+test.sequential("useAnimation can drive non-interactive process exit", async () => {
+  const ps = term("use-animation-non-interactive-exit");
+  await ps.waitForExit();
+  const plainOutput = stripAnsi(ps.output);
+
+  expect(plainOutput).toContain("exited");
+});
+
+test.sequential("useAnimation can drive explicitly non-interactive process exit", async () => {
+  const ps = term("use-animation-interactive-false-exit");
+  await ps.waitForExit();
+  const plainOutput = stripAnsi(ps.output);
+
+  expect(plainOutput).toContain("exited");
+});
