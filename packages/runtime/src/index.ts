@@ -17,4 +17,10 @@ export { useStdin } from "./composables/useStdin.ts";
 export { useStdout } from "./composables/useStdout.ts";
 export { useStderr } from "./composables/useStderr.ts";
 export { useTerminalSize } from "./composables/useTerminalSize.ts";
+export {
+  useBoxMetrics,
+  measureElement,
+  type BoxMetrics,
+  type UseBoxMetricsResult,
+} from "./composables/useBoxMetrics.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
