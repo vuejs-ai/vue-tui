@@ -465,7 +465,7 @@ function paintNode(
       const layout = node.yoga.getComputedLayout();
       const x = x0 + layout.left;
       const y = y0 + layout.top;
-      const next = [...transformers, node.transform];
+      const next = [node.transform, ...transformers];
       for (const child of node.children) paintNode(child, output, x, y, next, inheritedBg);
       return;
     }

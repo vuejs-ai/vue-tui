@@ -97,3 +97,21 @@ test("<Transform> with null children", async () => {
   );
   expect(lastFrame()).toBe("");
 });
+
+test("nested transforms apply inner-first: outer wraps inner result", async () => {
+  const outer = (s: string) => `(${s})`;
+  const inner = (s: string) => `{${s}}`;
+
+  const App = defineComponent(() => () => (
+    <Transform transform={outer}>
+      <Transform transform={inner}>
+        <Text>x</Text>
+      </Transform>
+    </Transform>
+  ));
+  const { lastFrame } = await render(App, { columns: 100 });
+  // With prepend [node.transform, ...transformers]:
+  // Inner: transformers = [inner, outer]
+  // Apply left-to-right: inner("x") = "{x}", then outer("{x}") = "({x})"
+  expect(lastFrame()).toBe("({x})");
+});
