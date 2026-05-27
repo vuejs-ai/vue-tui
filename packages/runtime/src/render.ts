@@ -15,6 +15,7 @@ import isInCi from "is-in-ci";
 import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
+import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
@@ -101,6 +102,14 @@ export interface MountOptions {
    * @default false
    */
   alternateScreen?: boolean;
+  /**
+   * Configure kitty keyboard protocol support for enhanced keyboard input.
+   * Enables additional modifiers (super, hyper, capsLock, numLock) and
+   * disambiguated key events in terminals that support the protocol.
+   *
+   * @see https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+   */
+  kittyKeyboard?: KittyKeyboardOptions;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -162,6 +171,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedCommit: (() => void) | null = null;
   let mountedAlternateScreen = false;
+  let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -230,6 +240,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       originalUnmount();
     } catch {
       // Vue's unmount may throw on double-unmount; swallow for idempotency.
+    }
+    if (mountedKittyController) {
+      mountedKittyController.dispose();
+      mountedKittyController = null;
     }
     if (!mountedDebug && !mountedInteractive && mountedAppContext) {
       // Non-interactive: write the deferred last frame at unmount (matching Ink).
@@ -424,6 +438,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       focusContext,
     });
     mountedStdinController = stdinController;
+
+    const kittyController = createKittyKeyboardController(stdin, stdout);
+    kittyController.init(options.kittyKeyboard, interactive);
+    mountedKittyController = kittyController;
 
     const tuiRoot = createRoot(appContext);
     attachYoga(tuiRoot);
