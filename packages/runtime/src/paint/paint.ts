@@ -29,6 +29,19 @@ import {
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
+function safeSliceEnd(text: string, maxCols: number): string {
+  if (maxCols <= 0) return "";
+  let end = maxCols;
+  let sliced = sliceAnsi(text, 0, end);
+  let w = stringWidth(sliced);
+  while (w > maxCols && end > 0) {
+    end--;
+    sliced = sliceAnsi(text, 0, end);
+    w = stringWidth(sliced);
+  }
+  return sliced;
+}
+
 interface ClipRect {
   x1: number | undefined;
   x2: number | undefined;
@@ -354,18 +367,15 @@ function drawBorder(
     const tl = left ? chars.topLeft : chars.top;
     const tr = right ? chars.topRight : chars.top;
     const fill = Math.max(0, w - stringWidth(tl) - stringWidth(tr));
-    output.write(x, y, [colorizeEdge(tl + chars.top.repeat(fill) + tr, "top")], transformers);
+    const raw = tl + chars.top.repeat(fill) + tr;
+    output.write(x, y, [colorizeEdge(safeSliceEnd(raw, w), "top")], transformers);
   }
   if (bottom) {
     const bl = left ? chars.bottomLeft : chars.bottom;
     const br = right ? chars.bottomRight : chars.bottom;
     const fill = Math.max(0, w - stringWidth(bl) - stringWidth(br));
-    output.write(
-      x,
-      y + h - 1,
-      [colorizeEdge(bl + chars.bottom.repeat(fill) + br, "bottom")],
-      transformers,
-    );
+    const raw = bl + chars.bottom.repeat(fill) + br;
+    output.write(x, y + h - 1, [colorizeEdge(safeSliceEnd(raw, w), "bottom")], transformers);
   }
   for (let i = 1; i < h - 1; i++) {
     if (left) output.write(x, y + i, [colorizeEdge(chars.left, "left")], transformers);
