@@ -19,6 +19,11 @@ export interface Key {
   backspace: boolean;
   delete: boolean;
   meta: boolean;
+  super: boolean;
+  hyper: boolean;
+  capsLock: boolean;
+  numLock: boolean;
+  eventType?: "press" | "repeat" | "release";
 }
 
 export interface UseInputOptions {
@@ -37,6 +42,7 @@ export function useInput(
 
   function listener(data: string) {
     const keypress = parseKeypress(data);
+    if (keypress.ignore) return;
 
     const key: Key = {
       upArrow: keypress.name === "up",
@@ -55,20 +61,32 @@ export function useInput(
       backspace: keypress.name === "backspace",
       delete: keypress.name === "delete",
       meta: keypress.meta,
+      super: keypress.super ?? false,
+      hyper: keypress.hyper ?? false,
+      capsLock: keypress.capsLock ?? false,
+      numLock: keypress.numLock ?? false,
+      eventType: keypress.eventType,
     };
 
     let input: string;
-    if (keypress.ctrl) {
+    if (keypress.isKittyProtocol) {
+      if (keypress.isPrintable) {
+        input = keypress.text ?? keypress.name;
+      } else if (keypress.ctrl && keypress.name.length === 1) {
+        input = keypress.name;
+      } else {
+        input = "";
+      }
+    } else if (keypress.ctrl) {
       input = keypress.name ?? "";
     } else {
       input = keypress.sequence;
     }
 
-    if (nonAlphanumericKeys.includes(keypress.name)) {
+    if (!keypress.isKittyProtocol && nonAlphanumericKeys.includes(keypress.name)) {
       input = "";
     }
 
-    // Strip escape prefix from incomplete sequences
     if (input.startsWith("\x1b")) {
       input = input.slice(1);
     }
@@ -77,8 +95,10 @@ export function useInput(
       key.shift = true;
     }
 
-    // exitOnCtrlC skip: don't call user handler for Ctrl+C when intercepted
+    // exitOnCtrlC: intercept kitty Ctrl+C (\x1b[3;5u). Legacy \x03 is caught
+    // by emitInput in createStdinController and never reaches useInput.
     if (input === "c" && key.ctrl && stdin?.internal_exitOnCtrlC) {
+      app!.exit();
       return;
     }
 
