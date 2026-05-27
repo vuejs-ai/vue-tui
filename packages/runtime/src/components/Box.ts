@@ -134,10 +134,10 @@ export const Box = defineComponent({
     overflowY: String as PropType<"visible" | "hidden">,
     display: String as PropType<"flex" | "none">,
 
-    "aria-label": String,
-    "aria-hidden": Boolean,
-    "aria-role": String as PropType<AriaRole>,
-    "aria-state": Object as PropType<AriaState>,
+    ariaLabel: String,
+    ariaHidden: Boolean,
+    ariaRole: String as PropType<AriaRole>,
+    ariaState: Object as PropType<AriaState>,
   },
   setup(props, { slots }) {
     const appCtx = inject(AppContextKey, null);
@@ -146,11 +146,11 @@ export const Box = defineComponent({
       const isScreenReaderEnabled = appCtx?.isScreenReaderEnabled ?? false;
 
       // When screen reader is enabled and aria-hidden is set, render nothing.
-      if (isScreenReaderEnabled && props["aria-hidden"]) {
+      if (isScreenReaderEnabled && props.ariaHidden) {
         return null;
       }
 
-      const ariaLabel = props["aria-label"];
+      const ariaLabel = props.ariaLabel;
       const label = ariaLabel ? h("text", null, ariaLabel) : undefined;
 
       return h("box", props as never, isScreenReaderEnabled && label ? [label] : slots.default?.());

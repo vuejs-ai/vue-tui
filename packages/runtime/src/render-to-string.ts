@@ -7,6 +7,7 @@ import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { paint, paintIsolated } from "./paint/paint.ts";
+import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics } from "./paint/static-channel.ts";
 import {
   AppContextKey,
@@ -24,6 +25,13 @@ export interface RenderToStringOptions {
    * @default 80
    */
   columns?: number;
+  /**
+   * Enable screen reader mode. When enabled, the output is plain text
+   * suitable for screen readers (no ANSI styling, with role/state annotations).
+   *
+   * @default false
+   */
+  isScreenReaderEnabled?: boolean;
 }
 
 /**
@@ -48,9 +56,10 @@ export interface RenderToStringOptions {
  */
 export function renderToString(component: Component, options?: RenderToStringOptions): string {
   const columns = options?.columns ?? 80;
+  const isScreenReaderEnabled = options?.isScreenReaderEnabled ?? false;
 
   // Create a standalone root node --- no stdout, stdin, or terminal bindings.
-  const appContext = createNoOpAppContext();
+  const appContext = createNoOpAppContext(isScreenReaderEnabled);
   const root = createRoot(appContext);
   attachYoga(root);
   root.yoga.setWidth(columns);
@@ -105,7 +114,9 @@ export function renderToString(component: Component, options?: RenderToStringOpt
     root.yoga.calculateLayout(columns, undefined, Yoga.DIRECTION_LTR);
 
     // Render the dynamic frame to a string.
-    const output = paint(root);
+    const output = isScreenReaderEnabled
+      ? renderScreenReaderOutput(root, { skipStaticElements: true })
+      : paint(root);
 
     // Tear down: unmount the tree so Vue cleans up child nodes and runs
     // effect cleanup functions. Child yoga nodes are freed by the node-ops
@@ -120,6 +131,11 @@ export function renderToString(component: Component, options?: RenderToStringOpt
     if (uncaughtError !== undefined) {
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
       throw uncaughtError instanceof Error ? uncaughtError : new Error(String(uncaughtError));
+    }
+
+    // Screen reader mode returns plain text directly — no static channel.
+    if (isScreenReaderEnabled) {
+      return output;
     }
 
     // The static channel appends a trailing newline for terminal rendering
@@ -149,7 +165,7 @@ export function renderToString(component: Component, options?: RenderToStringOpt
   }
 }
 
-function createNoOpAppContext(): AppContext {
+function createNoOpAppContext(isScreenReaderEnabled = false): AppContext {
   return {
     exit: () => {},
     stdout: process.stdout,
@@ -157,7 +173,7 @@ function createNoOpAppContext(): AppContext {
     stdin: process.stdin,
     debug: false,
     interactive: false,
-    isScreenReaderEnabled: false,
+    isScreenReaderEnabled,
     isRawModeSupported: false,
     setRawMode: () => {},
     writeToStdout: () => {},

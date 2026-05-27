@@ -22,8 +22,8 @@ export const Text = defineComponent({
     strikethrough: Boolean,
     inverse: Boolean,
     wrap: { type: String as PropType<WrapMode>, default: "wrap" },
-    "aria-label": String,
-    "aria-hidden": Boolean,
+    ariaLabel: String,
+    ariaHidden: Boolean,
   },
   setup(props, { slots }) {
     const appCtx = inject(AppContextKey, null);
@@ -32,11 +32,11 @@ export const Text = defineComponent({
       const isScreenReaderEnabled = appCtx?.isScreenReaderEnabled ?? false;
 
       // When screen reader is enabled and aria-hidden is set, render nothing.
-      if (isScreenReaderEnabled && props["aria-hidden"]) {
+      if (isScreenReaderEnabled && props.ariaHidden) {
         return null;
       }
 
-      const ariaLabel = props["aria-label"];
+      const ariaLabel = props.ariaLabel;
       const children = isScreenReaderEnabled && ariaLabel ? ariaLabel : slots.default?.();
 
       if (children === undefined || children === null) {
