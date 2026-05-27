@@ -91,6 +91,16 @@ export interface MountOptions {
    * @default false
    */
   incrementalRendering?: boolean;
+  /**
+   * Render in the terminal's alternate screen buffer. When enabled, the
+   * terminal switches to a clean buffer on mount and restores the original
+   * content on unmount — no rendering artifacts are left behind.
+   *
+   * Requires interactive mode and a TTY stdout. Silently ignored otherwise.
+   *
+   * @default false
+   */
+  alternateScreen?: boolean;
 }
 
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
@@ -151,6 +161,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedCommit: (() => void) | null = null;
+  let mountedAlternateScreen = false;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -179,6 +190,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stdout.write("", () => finish());
     } else {
       setImmediate(() => finish());
+    }
+  }
+
+  function writeBestEffort(stream: NodeJS.WriteStream, data: string) {
+    try {
+      stream.write(data);
+    } catch {
+      // Stream may already be destroyed during shutdown.
     }
   }
 
@@ -220,8 +239,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     }
     if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
-    // Show cursor on unmount (matching Ink). Only in interactive mode.
-    if (!mountedDebug && mountedInteractive && mountedAppContext) {
+    if (mountedAlternateScreen && mountedAppContext) {
+      writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen);
+      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h");
+      mountedAlternateScreen = false;
+    } else if (!mountedDebug && mountedInteractive && mountedAppContext) {
       mountedAppContext.stdout.write("\x1b[?25h");
     }
     if (mountedRoot) detachYoga(mountedRoot);
@@ -555,6 +577,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Wire exit-with-error for the error boundary (must be set before mount).
     exitWithError = (e: Error) => appContext.exit(e);
 
+    // Alternate screen: enter BEFORE rendering starts (matching Ink ink.tsx:428).
+    // Requires alternateScreen option + interactive + isTTY.
+    const alternateScreen =
+      Boolean(options.alternateScreen) && interactive && Boolean(stdout.isTTY);
+    if (alternateScreen) {
+      writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen);
+      writeBestEffort(stdout, "\x1b[?25l");
+    }
+    mountedAlternateScreen = alternateScreen;
+
     const proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
 
     // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
@@ -566,7 +598,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Hide cursor on mount (matching Ink). Only in interactive mode — in
     // debug/test mode or non-interactive the stream may not be a real TTY.
-    if (!debug && interactive) {
+    if (!debug && interactive && !mountedAlternateScreen) {
       stdout.write("\x1b[?25l");
     }
 
