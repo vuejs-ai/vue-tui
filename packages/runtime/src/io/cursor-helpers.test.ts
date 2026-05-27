@@ -10,13 +10,25 @@ import {
 } from "./cursor-helpers.ts";
 
 describe("cursor-helpers", () => {
-  test("cursorPositionChanged detects different positions", () => {
-    expect(cursorPositionChanged({ x: 0, y: 0 }, { x: 1, y: 0 })).toBe(true);
-    expect(cursorPositionChanged({ x: 0, y: 0 }, { x: 0, y: 1 })).toBe(true);
-    expect(cursorPositionChanged({ x: 0, y: 0 }, { x: 0, y: 0 })).toBe(false);
+  test("cursorPositionChanged - both undefined returns false", () => {
     expect(cursorPositionChanged(undefined, undefined)).toBe(false);
-    expect(cursorPositionChanged({ x: 0, y: 0 }, undefined)).toBe(true);
+  });
+
+  test("cursorPositionChanged - same position returns false", () => {
+    expect(cursorPositionChanged({ x: 1, y: 2 }, { x: 1, y: 2 })).toBe(false);
+  });
+
+  test("cursorPositionChanged - different x returns true", () => {
+    expect(cursorPositionChanged({ x: 1, y: 2 }, { x: 3, y: 2 })).toBe(true);
+  });
+
+  test("cursorPositionChanged - different y returns true", () => {
+    expect(cursorPositionChanged({ x: 1, y: 2 }, { x: 1, y: 3 })).toBe(true);
+  });
+
+  test("cursorPositionChanged - undefined vs defined returns true", () => {
     expect(cursorPositionChanged(undefined, { x: 0, y: 0 })).toBe(true);
+    expect(cursorPositionChanged({ x: 0, y: 0 }, undefined)).toBe(true);
   });
 
   test("buildCursorSuffix returns empty for undefined position", () => {
@@ -37,6 +49,14 @@ describe("cursor-helpers", () => {
     expect(result).toContain("\x1b[?25h"); // still shows cursor
   });
 
+  test("buildCursorSuffix - cursor at first line of single-line output", () => {
+    const result = buildCursorSuffix(1, { x: 4, y: 0 });
+    // moveUp = 1 - 0 = 1
+    expect(result).toContain("\x1b[1A"); // cursorUp(1)
+    expect(result).toContain("\x1b[5G"); // cursorTo(4) — 1-indexed column
+    expect(result).toContain("\x1b[?25h"); // show cursor
+  });
+
   test("buildReturnToBottom returns empty for undefined position", () => {
     expect(buildReturnToBottom(5, undefined)).toBe("");
   });
@@ -48,6 +68,13 @@ describe("cursor-helpers", () => {
     expect(result).toContain("\x1b[1G"); // cursorTo(0) — 1-indexed column 1
   });
 
+  test("buildReturnToBottom - no cursorDown when cursor already at bottom", () => {
+    const result = buildReturnToBottom(4, { x: 0, y: 3 });
+    // down = 4 - 1 - 3 = 0, so no cursorDown
+    expect(result).not.toContain("B"); // no cursorDown
+    expect(result).toContain("\x1b[1G"); // cursorTo(0)
+  });
+
   test("buildReturnToBottomPrefix returns empty when cursor was not shown", () => {
     expect(buildReturnToBottomPrefix(false, 5, { x: 0, y: 0 })).toBe("");
   });
@@ -56,6 +83,11 @@ describe("cursor-helpers", () => {
     const result = buildReturnToBottomPrefix(true, 5, { x: 0, y: 2 });
     expect(result).toContain(hideCursorEscape);
     expect(result).toContain("\x1b[2B"); // cursorDown(2): 5-1-2
+  });
+
+  test("buildReturnToBottomPrefix - with undefined previousCursorPosition still hides cursor", () => {
+    const result = buildReturnToBottomPrefix(true, 4, undefined);
+    expect(result).toBe(hideCursorEscape + buildReturnToBottom(4, undefined));
   });
 
   test("buildCursorOnlySequence combines hide + return + reposition", () => {
