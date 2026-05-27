@@ -389,7 +389,10 @@ Replace the entire `listener` function body in `packages/runtime/src/composables
       key.shift = true;
     }
 
+    // exitOnCtrlC: intercept kitty Ctrl+C (\x1b[3;5u). Legacy \x03 is caught
+    // by emitInput in createStdinController and never reaches useInput.
     if (input === "c" && key.ctrl && stdin?.internal_exitOnCtrlC) {
+      app!.exit();
       return;
     }
 
@@ -1208,10 +1211,21 @@ const KittyInput = defineComponent({
   },
 });
 
-const app = createApp(KittyInput, { test: process.argv[2] });
-app.mount();
-await app.waitUntilExit();
-console.log("exited");
+const testName = process.argv[2];
+
+// kittyCtrlCExit: exitOnCtrlC=true (default), kitty Ctrl+C should trigger exit
+// The useInput handler should NOT be called because the exitOnCtrlC guard fires first
+if (testName === "kittyCtrlCExit") {
+  const app = createApp(KittyInput, { test: testName });
+  app.mount({ exitOnCtrlC: true });
+  await app.waitUntilExit();
+  console.log("exited");
+} else {
+  const app = createApp(KittyInput, { test: testName });
+  app.mount({ exitOnCtrlC: false });
+  await app.waitUntilExit();
+  console.log("exited");
+}
 ```
 
 - [ ] **Step 2: Commit**
@@ -1376,6 +1390,16 @@ it("useInput - kitty protocol return key produces carriage return input", async 
 it("useInput - kitty protocol ctrl+letter via codepoint 1-26 produces input", async () => {
   const ps = term("use-input-kitty", ["ctrlLetter"]);
   ps.write(kittyKey(1, 5)); // ctrl+a (codepoint 1, modifier 5)
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
+
+// --- Kitty Ctrl+C with exitOnCtrlC ---
+
+it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
+  // Default exitOnCtrlC=true, kitty Ctrl+C should exit the app
+  const ps = term("use-input-kitty", ["kittyCtrlCExit"]);
+  ps.write(kittyKey(3, 5)); // codepoint 3, modifier 5 = ctrl(4)+1
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
