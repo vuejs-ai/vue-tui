@@ -44,6 +44,8 @@ export type KittyKeyboardOptions = {
 export function resolveFlags(flags: KittyFlagName[]): number;
 ```
 
+**Parser support note**: The current parse-keypress.ts parser fully supports `disambiguateEscapeCodes` (the default and most useful flag). The `reportEventTypes` flag is also supported (press/repeat/release). The `reportAlternateKeys`, `reportAllKeysAsEscapeCodes`, and `reportAssociatedText` flags are accepted in the options but the parser may not handle all edge forms they produce (e.g., colon-separated alternate key fields). These flags are exposed for forward compatibility but users should treat them as experimental until parser coverage is verified.
+
 #### Query/Response Matching
 
 Functions for detecting terminal responses to the `\x1b[?u` capability query:
@@ -106,13 +108,14 @@ kittyController.init(options.kittyKeyboard, interactive);
 mountedKittyController = kittyController;
 ```
 
-**teardown()** — before existing cleanup:
+**teardown()** — after Vue unmount, before terminal restoration:
 
 ```ts
+// In teardown(), after originalUnmount() and before writer.done() / cursor restore:
 mountedKittyController?.dispose();
 ```
 
-Order matters: disable kitty protocol before restoring cursor and unmounting Vue, matching Ink's teardown sequence.
+Order matches Ink: final render → restore console → React/Vue unmount → cancel kitty detection → disable kitty protocol → exit alt screen → restore cursor → done.
 
 ### Modified: `packages/runtime/src/composables/useInput.ts`
 
@@ -172,6 +175,7 @@ The key change: when kitty protocol is active, non-printable keys (capslock, med
 Re-export from package entry point:
 - `KittyKeyboardOptions` type
 - `KittyFlagName` type
+- `kittyFlags` constant (matching Ink's exports)
 
 ## Escape Sequences Reference
 
@@ -285,7 +289,7 @@ Tests useInput with kitty protocol sequences through the full PTY pipeline. Uses
 - Return → `input='\r'`
 - Ctrl+letter via codepoint 1-26 → `input='a'`, `key.ctrl=true`
 
-### File 3: `packages/runtime-tests/integration/kitty-lifecycle.test.ts` (~13 integration tests)
+### File 3: `packages/runtime-tests/integration/kitty-lifecycle.test.ts` (~22 integration tests)
 
 Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout streams to verify escape sequences written.
 
@@ -306,9 +310,27 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - Timeout preserves query prefix without digits (`\x1b[?` alone)
 - Ignores response without digits (`\x1b[?u` — missing flags)
 
-**Invalid response handling (2 tests):**
+**Opt-in behavior (2 tests):**
+- No-op when `kittyKeyboard` is absent from mount options (no sequences written)
+- No-op when `kittyKeyboard: { mode: 'disabled' }` (no sequences written)
+
+**Custom flags (2 tests):**
+- Enabled mode with custom flags writes correct bitmask (e.g., `flags: ['disambiguateEscapeCodes', 'reportEventTypes']` → `\x1b[>3u`)
+- Auto mode with custom flags passes them through to enable sequence
+
+**Invalid response handling (3 tests):**
 - Preserves invalid query-like escape sequence (wrong terminator)
 - Non-query bytes interleaved with response are re-emitted
+- Response `\x1b[?0u` (zero flags) — still treated as valid support confirmation
+
+**Split response (1 test):**
+- Query response split across two stdin data chunks — bytes reassembled correctly
+
+**Late response after timeout (1 test):**
+- Terminal responds after 200ms timeout — response bytes discarded, protocol not enabled
+
+**End-to-end byte delivery (1 test):**
+- User input during detection window is delivered to useInput exactly once after detection completes
 
 ## Implementation Notes
 
@@ -316,6 +338,7 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - The `isKittyProtocol`, `isPrintable`, `text`, `super`, `hyper`, `capsLock`, `numLock`, `eventType` fields are already set by `parseKittyKeypress()` in parse-keypress.ts. No changes needed to the parser.
 - Auto-detect's stdin `data` listener is temporary (removed after detection completes or times out). It runs during the brief init window and is cleaned up before the main input pipeline processes events, so there's no conflict.
 - The `stdin.unshift()` call to re-emit non-query bytes pushes them back to the front of the readable stream. This works because the kitty controller's listener is removed during cleanup, and the re-emitted bytes are picked up by the normal input pipeline (createStdinController's handleData) on the next read.
+- **Risk**: attaching a `data` listener puts stdin into flowing mode. If user input arrives during the 200ms detection window, it goes into the response buffer but is NOT query-response data. The `stripKittyQueryResponsesAndTrailingPartial` function preserves these non-query bytes, and `unshift()` re-emits them. An end-to-end test must verify that user bytes sent during detection are delivered to useInput exactly once.
 
 ## Files Changed
 
@@ -324,7 +347,7 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 | `packages/runtime/src/io/kitty-keyboard.ts` | **New** — types, constants, query matchers, lifecycle controller |
 | `packages/runtime/src/render.ts` | Add `kittyKeyboard` to MountOptions, wire controller in mount/teardown |
 | `packages/runtime/src/composables/useInput.ts` | Extend Key interface, add kitty-aware input logic |
-| `packages/runtime/src/index.ts` | Re-export KittyKeyboardOptions, KittyFlagName |
+| `packages/runtime/src/index.ts` | Re-export KittyKeyboardOptions, KittyFlagName, kittyFlags |
 | `packages/runtime/tests/io/parse-keypress-kitty.test.ts` | **New** — 55 unit tests |
 | `packages/runtime-tests/integration/pty/input-kitty.test.ts` | **New** — 17 integration tests |
-| `packages/runtime-tests/integration/kitty-lifecycle.test.ts` | **New** — 13 integration tests |
+| `packages/runtime-tests/integration/kitty-lifecycle.test.ts` | **New** — 22 integration tests |
