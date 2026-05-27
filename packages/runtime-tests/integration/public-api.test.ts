@@ -27,10 +27,14 @@ test("public API exposes documented members", () => {
     "useAnimation",
     "useBoxMetrics",
     "measureElement",
+    "measureText",
     "usePaste",
     // Rendering
     "renderToString",
     "renderScreenReaderOutput",
+    // Kitty keyboard
+    "kittyFlags",
+    "kittyModifiers",
   ]) {
     expect(api).toHaveProperty(k);
   }
