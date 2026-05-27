@@ -145,3 +145,46 @@ test("onScopeDispose fires when exit(error) is called", async () => {
   await waitUntilExit().catch(() => {});
   expect(disposed).toBe(true);
 });
+
+test("exit(error) followed by exit(value) still rejects", async () => {
+  // Edge case: when exit is called with an error first, a subsequent exit()
+  // call with a plain value should not override the rejection. The error
+  // should take precedence because teardown runs only once.
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+
+  const boom = new Error("first-error");
+  exitFn(boom);
+  exitFn("second-value");
+
+  await expect(waitUntilExit()).rejects.toThrow("first-error");
+});
+
+test("exit(value) resolves even when called rapidly twice", async () => {
+  // Verifies rapid duplicate exit() calls don't crash or hang.
+  // Both calls queue microtasks; teardown() is idempotent so
+  // the app shuts down cleanly regardless.
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+
+  exitFn("first");
+  exitFn("second");
+
+  // Should resolve without throwing or hanging; second value wins because
+  // both exit() calls queue microtasks that overwrite pendingExitResult
+  // before the write barrier fires.
+  const result = await waitUntilExit();
+  expect(result).toBe("second");
+});
