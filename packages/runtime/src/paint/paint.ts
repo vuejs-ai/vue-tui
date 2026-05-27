@@ -160,38 +160,15 @@ class Output {
       const clip = clips.at(-1);
 
       if (clip) {
-        const clipH = typeof clip.x1 === "number" && typeof clip.x2 === "number";
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
 
-        // If text is positioned outside of clipping area altogether, skip
-        if (clipH) {
-          const text = lines.join("\n");
-          const width = this.caches.getWidestLine(text);
-          if (x + width < clip.x1! || x > clip.x2!) continue;
-        }
-
+        // Vertical early skip — safe because transforms don't change line count
         if (clipV) {
           const height = lines.length;
           if (y + height < clip.y1! || y > clip.y2!) continue;
         }
 
-        if (clipH) {
-          lines = lines.map((line) => {
-            const from = x < clip.x1! ? clip.x1! - x : 0;
-            const lineWidth = this.caches.getStringWidth(line);
-            let to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
-            let sliced = sliceAnsi(line, from, to);
-            let slicedWidth = this.caches.getStringWidth(sliced);
-            while (slicedWidth > to - from && to > from) {
-              to--;
-              sliced = sliceAnsi(line, from, to);
-              slicedWidth = this.caches.getStringWidth(sliced);
-            }
-            return sliced;
-          });
-          if (x < clip.x1!) x = clip.x1!;
-        }
-
+        // Vertical clip
         if (clipV) {
           const from = y < clip.y1! ? clip.y1! - y : 0;
           const height = lines.length;
@@ -200,6 +177,14 @@ class Output {
           if (y < clip.y1!) y = clip.y1!;
         }
       }
+
+      const clipH =
+        clip && typeof clip.x1 === "number" && typeof clip.x2 === "number"
+          ? { x1: clip.x1, x2: clip.x2 }
+          : null;
+
+      // Safe early skip: entire write starts at or past right clip edge
+      if (clipH && x >= clipH.x2) continue;
 
       let offsetY = 0;
 
@@ -211,12 +196,33 @@ class Output {
           continue;
         }
 
+        // Apply transforms BEFORE horizontal clipping
         for (const transformer of transformers) {
           line = transformer(line, index);
         }
 
+        // Horizontal clip (per-line, after transform)
+        let lineX = x;
+        if (clipH) {
+          const lineWidth = this.caches.getStringWidth(line);
+          // Skip line entirely if outside horizontal clip
+          if (lineX + lineWidth < clipH.x1 || lineX > clipH.x2) {
+            offsetY++;
+            continue;
+          }
+          const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
+          const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
+          if (from > 0) {
+            const leftPrefix = sliceAnsi(line, 0, from);
+            const leftRemovedWidth = this.caches.getStringWidth(leftPrefix);
+            lineX = lineX + leftRemovedWidth;
+          }
+          const maxWidth = clipH.x2 - lineX;
+          line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);
+        }
+
         const characters = this.caches.getStyledChars(line);
-        let offsetX = x;
+        let offsetX = lineX;
 
         // Nothing to write (e.g. line was clipped away)
         if (characters.length === 0) {
