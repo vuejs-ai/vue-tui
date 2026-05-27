@@ -7,6 +7,8 @@ const metaKeyCodeRe = /^(?:\x1b)([a-zA-Z0-9])$/;
 
 const fnKeyRe = /^(?:\x1b+)(O|N|\[|\[\[)(?:(\d+)(?:;(\d+))?([~^$])|(?:1;)?(\d+)?([a-zA-Z]))/;
 
+const kittyQueryResponseRe = /^\x1b\[\?\d+u$/;
+
 const keyName: Record<string, string> = {
   /* xterm/gnome ESC O letter */
   OP: "f1",
@@ -131,6 +133,7 @@ export interface Keypress {
    * Only set by the kitty protocol parser.
    */
   isPrintable?: boolean;
+  ignore?: boolean;
 }
 
 // Kitty keyboard protocol modifier bits.
@@ -419,6 +422,10 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
     s = String(s);
   } else if (!s) {
     s = "";
+  }
+
+  if (kittyQueryResponseRe.test(s)) {
+    return { name: "", ctrl: false, meta: false, shift: false, sequence: s, raw: s, ignore: true };
   }
 
   // Try kitty keyboard protocol parsers first
