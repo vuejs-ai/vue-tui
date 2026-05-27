@@ -32,6 +32,40 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
 
 export type WrapMode = NonNullable<TextProps["wrap"]>;
 
+/**
+ * Slice `text` from the start so the result is at most `maxCols` columns wide.
+ * `slice-ansi` can overshoot when a wide character straddles the boundary, so
+ * we reduce the slice position until the result fits.
+ */
+function safeSliceEnd(text: string, maxCols: number): string {
+  if (maxCols <= 0) return "";
+  let sliced = sliceAnsi(text, 0, maxCols);
+  let w = stringWidth(sliced);
+  while (w > maxCols && maxCols > 0) {
+    maxCols--;
+    sliced = sliceAnsi(text, 0, maxCols);
+    w = stringWidth(sliced);
+  }
+  return sliced;
+}
+
+/**
+ * Slice `text` from the end so the result is at most `maxCols` columns wide.
+ */
+function safeSliceStart(text: string, maxCols: number): string {
+  if (maxCols <= 0) return "";
+  const totalWidth = stringWidth(text);
+  let start = totalWidth - maxCols;
+  let sliced = sliceAnsi(text, start);
+  let w = stringWidth(sliced);
+  while (w > maxCols && start < totalWidth) {
+    start++;
+    sliced = sliceAnsi(text, start);
+    w = stringWidth(sliced);
+  }
+  return sliced;
+}
+
 export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): string[] {
   if (width <= 0) return [""];
 
@@ -54,13 +88,14 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   switch (mode) {
     case "truncate":
     case "truncate-end":
-      return [sliceAnsi(single, 0, room) + ellipsis];
+      return [safeSliceEnd(single, room) + ellipsis];
     case "truncate-start":
-      return [ellipsis + sliceAnsi(single, stringWidth(single) - room)];
+      return [ellipsis + safeSliceStart(single, room)];
     case "truncate-middle": {
       const half = Math.floor(room / 2);
-      const left = sliceAnsi(single, 0, half);
-      const right = sliceAnsi(single, stringWidth(single) - (room - half));
+      const left = safeSliceEnd(single, half);
+      const rightCols = room - stringWidth(left);
+      const right = safeSliceStart(single, rightCols);
       return [left + ellipsis + right];
     }
   }
