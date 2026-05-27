@@ -1,6 +1,7 @@
+import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("onRender callback is called with renderTime on each commit", async () => {
@@ -71,8 +72,47 @@ test("onRender is called on subsequent state updates", async () => {
 });
 
 test("no onRender callback when option is not provided", async () => {
-  // Just verify the app works fine without onRender
   const App = defineComponent(() => () => <Text>no callback</Text>);
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+
+  const writes: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    writes.push(chunk.toString());
+  });
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    debug: true,
+    exitOnCtrlC: false,
+  });
+
+  // Two ticks: first flushes Vue scheduler, second flushes commit scheduler.
+  await nextTick();
+  await nextTick();
+
+  expect(writes.some((w) => w.includes("no callback"))).toBe(true);
+  app.unmount();
+});
+
+test("onRender fires on input-triggered state update", async () => {
+  // Mirrors the third assertion in Ink's "outputs renderTime when onRender is passed":
+  // after an initial render and a manual rerender, a useInput-driven state
+  // update should also fire onRender with a valid renderTime.
+  const renderTimes: number[] = [];
+  const received = shallowRef("init");
+
+  const App = defineComponent(() => {
+    useInput((input) => {
+      received.value = input;
+    });
+    return () => <Text>{received.value}</Text>;
+  });
 
   const app = createApp(App);
   const stdout = makeFakeWritable({ columns: 80 });
@@ -85,10 +125,24 @@ test("no onRender callback when option is not provided", async () => {
     stderr,
     debug: true,
     exitOnCtrlC: false,
+    onRender: (info) => {
+      renderTimes.push(info.renderTime);
+    },
   });
 
   await nextTick();
   await nextTick();
+  const initialCount = renderTimes.length;
+  expect(initialCount).toBeGreaterThanOrEqual(1);
+  expect(renderTimes[0]).toBeGreaterThanOrEqual(0);
+
+  // Simulate stdin input → useInput → state update → re-render
+  stdin.emit("data", "a");
+  await nextTick();
+  await nextTick();
+
+  expect(renderTimes.length).toBeGreaterThan(initialCount);
+  expect(renderTimes.at(-1)).toBeGreaterThanOrEqual(0);
 
   app.unmount();
 });
