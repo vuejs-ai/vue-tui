@@ -9,17 +9,15 @@ const UserInput = defineComponent({
   setup(props) {
     const exit = useExit();
     let rapidDownArrowCount = 0;
+    let rapidTimeout: ReturnType<typeof setTimeout> | undefined;
 
     onMounted(() => {
       if (props.test === "rapidArrowsEnter") {
-        const timeout = setTimeout(() => {
+        rapidTimeout = setTimeout(() => {
           throw new Error(
             `Expected 3 down arrows and enter, received ${rapidDownArrowCount} down arrow events`,
           );
         }, 6000);
-
-        // Clear on unmount would go here, but this fixture exits before that matters
-        void timeout;
       }
 
       process.stdout.write("__READY__");
@@ -34,6 +32,7 @@ const UserInput = defineComponent({
 
         if (key.return) {
           if (rapidDownArrowCount === 3) {
+            clearTimeout(rapidTimeout);
             exit();
             return;
           }

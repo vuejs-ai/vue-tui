@@ -138,9 +138,3 @@ test("does not crash when focusing previous on unmounted children", async () => 
   // Nothing rendered
   expect(lastFrame()?.trim() ?? "").toBe("");
 });
-
-// Concurrent-mode tests from Ink are React-specific and do not apply to vue-tui.
-test.todo("focus component renders in concurrent mode — React-specific, N/A in vue-tui");
-test.todo(
-  "focus component with autoFocus renders in concurrent mode — React-specific, N/A in vue-tui",
-);

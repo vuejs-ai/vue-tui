@@ -51,13 +51,6 @@ it("do not erase screen where <Static> is taller than viewport", async () => {
   }
 });
 
-// Vue produces a single frame for static content; clearTerminal only triggers
-// when previousOutputHeight > viewportRows (requires 2+ frames). Ink's React
-// reconciler may produce multiple initial frames, triggering the clear.
-it.todo("erase screen (content overflows viewport)");
-
-it.todo("erase screen where <Static> exists but interactive part is taller than viewport");
-
 it("erase screen where state changes", async () => {
   const ps = term("erase-with-state-change", ["4"]);
   await ps.waitForExit();

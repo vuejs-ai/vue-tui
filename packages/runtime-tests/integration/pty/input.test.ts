@@ -153,9 +153,12 @@ it("useInput - handle right arrow", async () => {
   expect(ps.output).toContain("exited");
 });
 
-// PTY splits rapid escape sequences across data events; the input parser's
-// 20ms pending-escape timer delays processing, causing the fixture to time out.
-it.todo("useInput - handles rapid arrows and enter in one chunk");
+it("useInput - handles rapid arrows and enter in one chunk", async () => {
+  const ps = term("use-input", ["rapidArrowsEnter"]);
+  ps.write("[B[B[B\r");
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
 
 it("useInput - handle meta + up arrow", async () => {
   const ps = term("use-input", ["upArrowMeta"]);
