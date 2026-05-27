@@ -1,4 +1,4 @@
-import { defineComponent, onMounted, onScopeDispose, shallowRef } from "vue";
+import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
 import {
@@ -174,7 +174,53 @@ describe("renderToString", () => {
     expect(output).toBe("Hello World");
   });
 
+  test("renders empty fragment", () => {
+    const App = defineComponent(() => () => <></>);
+    const output = renderToString(App);
+    expect(output).toBe("");
+  });
+
+  test("renders null children", () => {
+    const App = defineComponent(() => () => <Text>{null}</Text>);
+    const output = renderToString(App);
+    expect(output).toBe("");
+  });
+
   // ── Layout ─────────────────────────────────────────────
+
+  test("renders margin", () => {
+    const App = defineComponent(() => () => (
+      <Box marginLeft={2}>
+        <Text>Margined</Text>
+      </Box>
+    ));
+    const output = renderToString(App);
+    expect(output).toBe("  Margined");
+  });
+
+  test("renders box with fixed width and height", () => {
+    const App = defineComponent(() => () => (
+      <Box width={10} height={3}>
+        <Text>Hi</Text>
+      </Box>
+    ));
+    const output = renderToString(App);
+    const lines = output.split("\n");
+    expect(lines.length).toBe(3);
+  });
+
+  test("renders box with border", () => {
+    const App = defineComponent(() => () => (
+      <Box borderStyle="single" width={20}>
+        <Text>Bordered</Text>
+      </Box>
+    ));
+    const output = renderToString(App, { columns: 20 });
+    // Border characters should be present (single border uses box-drawing chars)
+    expect(output).toContain("Bordered");
+    expect(output).toContain("│");
+    expect(output).toContain("─");
+  });
 
   test("renders box with flex direction row", () => {
     const App = defineComponent(() => () => (
@@ -269,6 +315,16 @@ describe("renderToString", () => {
     expect(lines[1]).toBe("A".repeat(20));
   });
 
+  test("custom columns option", () => {
+    const longText = "A".repeat(50);
+    const App = defineComponent(() => () => <Text>{longText}</Text>);
+    const output = renderToString(App, { columns: 30 });
+    const lines = output.split("\n");
+    expect(lines.length).toBe(2);
+    expect(lines[0]).toBe("A".repeat(30));
+    expect(lines[1]).toBe("A".repeat(20));
+  });
+
   // ── Components ─────────────────────────────────────────
 
   test("renders Transform component", () => {
@@ -295,6 +351,31 @@ describe("renderToString", () => {
     expect(output).toBe("A\nB\nC\nDynamic");
   });
 
+  test("render static-only output has no trailing newline", () => {
+    const items = ["A", "B"];
+    const App = defineComponent(() => () => (
+      <Static items={items}>
+        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+      </Static>
+    ));
+    const output = renderToString(App);
+    expect(output).toBe("A\nB");
+  });
+
+  test("render static + dynamic output has exactly one newline between parts", () => {
+    const items = ["A", "B"];
+    const App = defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Static items={items}>
+          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+        </Static>
+        <Text>Dynamic</Text>
+      </Box>
+    ));
+    const output = renderToString(App);
+    expect(output).toBe("A\nB\nDynamic");
+  });
+
   // ── Effect behavior ────────────────────────────────────
 
   test("captures initial render before onMounted state updates", () => {
@@ -307,6 +388,20 @@ describe("renderToString", () => {
     });
     const output = renderToString(App);
     expect(output).toBe("Initial");
+  });
+
+  test("watchSyncEffect state updates are reflected in output", () => {
+    const App = defineComponent(() => {
+      const text = shallowRef("Initial");
+      // watchSyncEffect runs synchronously during setup, analogous to
+      // React's useLayoutEffect — state updates are flushed before paint.
+      watchSyncEffect(() => {
+        text.value = "Sync Updated";
+      });
+      return () => <Text>{text.value}</Text>;
+    });
+    const output = renderToString(App);
+    expect(output).toBe("Sync Updated");
   });
 
   test("runs onScopeDispose cleanup on teardown", () => {
@@ -348,5 +443,25 @@ describe("renderToString", () => {
     const output2 = renderToString(Second);
     expect(output1).toBe("First");
     expect(output2).toBe("Second");
+  });
+
+  // ── Deeply nested tree ────────────────────────────────
+
+  test("renders deeply nested component tree", () => {
+    const App = defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box paddingLeft={1}>
+          <Box>
+            <Text bold>
+              {"Nested "}
+              <Text color="green">deep</Text>
+            </Text>
+          </Box>
+        </Box>
+      </Box>
+    ));
+    const output = renderToString(App);
+    expect(output).toContain("Nested");
+    expect(output).toContain("deep");
   });
 });
