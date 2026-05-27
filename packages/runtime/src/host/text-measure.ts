@@ -63,7 +63,7 @@ function safeSliceStart(text: string, maxCols: number): string {
     sliced = sliceAnsi(text, start);
     w = stringWidth(sliced);
   }
-  return sliced;
+  return w <= maxCols ? sliced : "";
 }
 
 export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): string[] {
