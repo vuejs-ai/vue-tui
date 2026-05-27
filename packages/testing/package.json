@@ -1,7 +1,7 @@
 {
   "name": "@vue-tui/testing",
   "version": "0.0.1",
-  "description": "Test harness for @vue-tui/runtime.",
+  "description": "Test utilities for Vue terminal components. Render and assert vue-tui output.",
   "license": "MIT",
   "files": [
     "dist"

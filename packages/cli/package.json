@@ -1,6 +1,7 @@
 {
   "name": "@vue-tui/cli",
   "version": "0.0.1",
+  "description": "Scaffold and develop Vue 3 terminal apps with Yoga flexbox layout.",
   "bin": {
     "vue-tui": "./dist/index.mjs"
   },
