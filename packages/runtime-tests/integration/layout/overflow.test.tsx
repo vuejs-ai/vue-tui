@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, measureText } from "@vue-tui/runtime";
+import { Box, Text, Transform, measureText } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
 
 /** Build a round-border box string like boxen(text, { borderStyle: "round" }) */
@@ -655,5 +655,58 @@ describe("absolute overlay wide glyph clipping", () => {
     for (const line of frame.split("\n")) {
       expect(lineWidth(line)).toBeLessThanOrEqual(8);
     }
+  });
+
+  test("transform returning wide char in clipped box is clipped", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Text>abc</Text>
+          <Box position="absolute" left={3}>
+            <Transform transform={() => "中"}>
+              <Text>x</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toBe("abc");
+  });
+});
+
+describe("left-edge wide glyph clipping", () => {
+  test("text after clipped left-edge wide char is correctly positioned", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box marginLeft={-1} flexShrink={0}>
+            <Text>中x</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    const stripped = stripAnsi(frame);
+    // "中" (width 2) starts at col -1, straddling the left edge → clipped entirely
+    // "x" should start at col 1 (not col 0)
+    expect(stripped.startsWith(" x")).toBe(true);
+  });
+
+  test("wide chars clipped on both edges simultaneously", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={2} height={1} overflow="hidden">
+          <Box marginLeft={-1} width={6} flexShrink={0}>
+            <Text>中中中</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(lineWidth(frame)).toBeLessThanOrEqual(2);
   });
 });
