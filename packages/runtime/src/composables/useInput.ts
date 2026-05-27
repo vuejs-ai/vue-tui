@@ -70,7 +70,9 @@ export function useInput(
 
     let input: string;
     if (keypress.isKittyProtocol) {
-      if (keypress.isPrintable) {
+      if (keypress.eventType === "release") {
+        input = "";
+      } else if (keypress.isPrintable) {
         input = keypress.text ?? keypress.name;
       } else if (keypress.ctrl && keypress.name.length === 1) {
         input = keypress.name;

@@ -99,6 +99,11 @@ const KittyInput = defineComponent({
         return;
       }
 
+      if (props.test === "releaseEmpty" && input === "" && key.eventType === "release") {
+        exit();
+        return;
+      }
+
       if (props.test === "queryResponse") {
         throw new Error("Query response should not reach handler");
       }
