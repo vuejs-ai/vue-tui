@@ -226,6 +226,12 @@ describe("kitty protocol - text and unicode", () => {
     expect(result.isKittyProtocol).toBe(true);
   });
 
+  test("text-as-codepoints with supplementary unicode", () => {
+    const result = parseKeypress(kittyKey(97, 1, 1, [128_512]));
+    expect(result.text).toBe("\u{1F600}");
+    expect(result.isKittyProtocol).toBe(true);
+  });
+
   test("text defaults to character from codepoint", () => {
     const result = parseKeypress(kittyKey(97));
     expect(result.text).toBe("a");
