@@ -188,7 +188,7 @@ Re-export from package entry point:
 
 ## Test Suite
 
-### File 1: `packages/runtime/tests/io/parse-keypress-kitty.test.ts` (~55 unit tests)
+### File 1: `packages/runtime/src/io/parse-keypress-kitty.test.ts` (~55 unit tests)
 
 Tests kitty parsing in isolation — no rendering, no Vue. Each test calls `parseKeypress()` directly with a CSI u sequence and asserts the returned keypress object.
 
@@ -327,7 +327,7 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - Query response split across two stdin data chunks — bytes reassembled correctly
 
 **Late response after timeout (1 test):**
-- Terminal responds after 200ms timeout — response bytes discarded, protocol not enabled
+- Terminal responds after 200ms timeout — protocol not enabled (late response bytes flow to normal input pipeline as an unknown escape sequence, which is harmless since `\x1b[?1u` does not match the kitty CSI u parser regex)
 
 **End-to-end byte delivery (1 test):**
 - User input during detection window is delivered to useInput exactly once after detection completes
@@ -336,8 +336,8 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 
 - The kitty-keyboard.ts `kittyModifiers` constant already exists in parse-keypress.ts. The new module only needs the flag constants and lifecycle logic; it imports nothing from parse-keypress.ts.
 - The `isKittyProtocol`, `isPrintable`, `text`, `super`, `hyper`, `capsLock`, `numLock`, `eventType` fields are already set by `parseKittyKeypress()` in parse-keypress.ts. No changes needed to the parser.
-- Auto-detect's stdin `data` listener is temporary (removed after detection completes or times out). It runs during the brief init window and is cleaned up before the main input pipeline processes events, so there's no conflict.
-- The `stdin.unshift()` call to re-emit non-query bytes pushes them back to the front of the readable stream. This works because the kitty controller's listener is removed during cleanup, and the re-emitted bytes are picked up by the normal input pipeline (createStdinController's handleData) on the next read.
+- Auto-detect's stdin `data` listener is temporary (removed after detection completes or times out). It runs during the brief init window. See the race condition note below for the overlap scenario with useInput's listener.
+- The `stdin.unshift()` call to re-emit non-query bytes pushes them back to the front of the readable stream. After the kitty detection listener is removed, the re-emitted bytes are picked up by the normal input pipeline (createStdinController's handleData) on the next read.
 - **Known race condition (matches Ink)**: The detection `data` listener and useInput's `data` listener can briefly coexist if a component mounts and calls `acquireRawMode()` within the 200ms detection window. In this scenario: (a) query response bytes could leak to useInput (they'd be treated as unknown escape sequences), (b) user input bytes could be delivered twice (once by each listener, plus once more after unshift). This same race exists in Ink's implementation. In practice, most terminals respond to the query synchronously or within a few ms, so detection completes before useInput effects fire. The mitigation is ordering: `kittyController.init()` runs before `originalMount()`, so detection starts before Vue components mount. An end-to-end test must verify that user bytes sent during detection are delivered to useInput exactly once. If the race proves problematic in practice, the fix is to integrate detection into the stdin controller's input pipeline (filter query responses inline rather than using a separate listener).
 
 ## Files Changed
@@ -348,6 +348,6 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 | `packages/runtime/src/render.ts` | Add `kittyKeyboard` to MountOptions, wire controller in mount/teardown |
 | `packages/runtime/src/composables/useInput.ts` | Extend Key interface, add kitty-aware input logic |
 | `packages/runtime/src/index.ts` | Re-export KittyKeyboardOptions, KittyFlagName, kittyFlags |
-| `packages/runtime/tests/io/parse-keypress-kitty.test.ts` | **New** — 55 unit tests |
+| `packages/runtime/src/io/parse-keypress-kitty.test.ts` | **New** — 55 unit tests |
 | `packages/runtime-tests/integration/pty/input-kitty.test.ts` | **New** — 17 integration tests |
 | `packages/runtime-tests/integration/kitty-lifecycle.test.ts` | **New** — 22 integration tests |
