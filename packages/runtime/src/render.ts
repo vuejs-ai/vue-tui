@@ -191,7 +191,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // teardownStarted=true makes shouldClearTerminalForFrame see isUnmounting,
     // so fullscreen apps get clearTerminal on exit.
     if (mountedInteractive && !mountedDebug && mountedCommit) {
-      mountedCommit();
+      const skipFinalRender = mountedScheduler?.hasPending();
+      if (!skipFinalRender) {
+        try {
+          mountedCommit();
+        } catch {
+          // Final render is best-effort; don't block teardown cleanup.
+        }
+      }
     }
 
     scheduledCommit = () => {};
