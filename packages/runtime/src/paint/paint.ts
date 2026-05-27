@@ -166,8 +166,15 @@ class Output {
           lines = lines.map((line) => {
             const from = x < clip.x1! ? clip.x1! - x : 0;
             const lineWidth = this.caches.getStringWidth(line);
-            const to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
-            return sliceAnsi(line, from, to);
+            let to = x + lineWidth > clip.x2! ? clip.x2! - x : lineWidth;
+            let sliced = sliceAnsi(line, from, to);
+            let slicedWidth = this.caches.getStringWidth(sliced);
+            while (slicedWidth > to - from && to > from) {
+              to--;
+              sliced = sliceAnsi(line, from, to);
+              slicedWidth = this.caches.getStringWidth(sliced);
+            }
+            return sliced;
           });
           if (x < clip.x1!) x = clip.x1!;
         }
@@ -225,12 +232,17 @@ class Output {
         }
 
         for (const character of characters) {
-          currentLine[offsetX] = character;
+          if (offsetX >= this.width) break;
 
-          // Determine printed width using string-width to align with measurement
           const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
 
-          // For multi-column characters, clear following cells to avoid stray spaces/artifacts
+          if (offsetX + characterWidth > this.width) {
+            offsetX += characterWidth;
+            continue;
+          }
+
+          currentLine[offsetX] = character;
+
           if (characterWidth > 1) {
             for (let i = 1; i < characterWidth; i++) {
               currentLine[offsetX + i] = {
@@ -341,15 +353,17 @@ function drawBorder(
   if (top) {
     const tl = left ? chars.topLeft : chars.top;
     const tr = right ? chars.topRight : chars.top;
-    output.write(x, y, [colorizeEdge(tl + chars.top.repeat(w - 2) + tr, "top")], transformers);
+    const fill = Math.max(0, w - stringWidth(tl) - stringWidth(tr));
+    output.write(x, y, [colorizeEdge(tl + chars.top.repeat(fill) + tr, "top")], transformers);
   }
   if (bottom) {
     const bl = left ? chars.bottomLeft : chars.bottom;
     const br = right ? chars.bottomRight : chars.bottom;
+    const fill = Math.max(0, w - stringWidth(bl) - stringWidth(br));
     output.write(
       x,
       y + h - 1,
-      [colorizeEdge(bl + chars.bottom.repeat(w - 2) + br, "bottom")],
+      [colorizeEdge(bl + chars.bottom.repeat(fill) + br, "bottom")],
       transformers,
     );
   }
