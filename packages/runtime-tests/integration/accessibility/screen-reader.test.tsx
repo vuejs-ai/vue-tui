@@ -480,6 +480,96 @@ describe("screen reader enabled mode", () => {
     expect(output).toBe("list: listitem: Item 1\nlistitem: Item 2");
   });
 
+  test("render text for screen readers with aria-hidden", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-hidden>
+          <Text>Not visible to screen readers</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("");
+  });
+
+  test("render select input for screen readers", () => {
+    const items = ["Red", "Green", "Blue"];
+    const selectedIndex = 1;
+
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="list" flexDirection="column">
+          <Text>Select a color:</Text>
+          {items.map((item, index) => (
+            <Box
+              key={item}
+              aria-label={`${index + 1}. ${item}`}
+              aria-role="listitem"
+              aria-state={{ selected: index === selectedIndex }}
+            >
+              <Text>{item}</Text>
+            </Box>
+          ))}
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe(
+      "list: Select a color:\nlistitem: 1. Red\nlistitem: (selected) 2. Green\nlistitem: 3. Blue",
+    );
+  });
+
+  test("render with aria-state.multiline", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="textbox" aria-state={{ multiline: true }}>
+          <Text>Hello</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("textbox: (multiline) Hello");
+  });
+
+  test("render with aria-state.readonly", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="textbox" aria-state={{ readonly: true }}>
+          <Text>Hello</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("textbox: (readonly) Hello");
+  });
+
+  test("render with aria-state.required", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="textbox" aria-state={{ required: true }}>
+          <Text>Name</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("textbox: (required) Name");
+  });
+
+  test("render nested multi-line text", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="row">
+          <Box flexDirection="column">
+            <Text>Line 1</Text>
+            <Text>Line 2</Text>
+          </Box>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Line 1\nLine 2");
+  });
+
   test("render listbox with multiselectable options", () => {
     const output = renderToString(
       defineComponent(() => () => (
