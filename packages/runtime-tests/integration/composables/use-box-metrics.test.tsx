@@ -309,11 +309,7 @@ describe("measureElement", () => {
 });
 
 describe("useBoxMetrics - resize and dynamic layout", () => {
-  // In Ink, useBoxMetrics subscribes to root layout commits, so resize triggers
-  // re-measurement automatically. vue-tui's useBoxMetrics uses watchPostEffect
-  // which only re-runs when ref.value changes. Resize doesn't change the ref.
-  // TODO: add layout-commit listener to useBoxMetrics for full Ink parity.
-  test.skip("updates when terminal is resized", async () => {
+  test("updates when terminal is resized", async () => {
     const App = defineComponent(() => {
       const boxRef = ref(null);
       const { width } = useBoxMetrics(boxRef);
@@ -333,12 +329,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     expect(lastFrame()).toContain("Width: 60");
   });
 
-  // Same layout-commit limitation as "updates when terminal is resized": after
-  // switching the tracked ref, a resize should re-measure the NEW element. But
-  // because useBoxMetrics only re-runs when ref.value changes, a resize that
-  // doesn't change the ref won't trigger re-measurement.
-  // TODO: add layout-commit listener to useBoxMetrics for full Ink parity.
-  test.skip("uses latest tracked ref when terminal is resized", async () => {
+  test("uses latest tracked ref when terminal is resized", async () => {
     const trackSecond = shallowRef(false);
     const App = defineComponent(() => {
       const firstRef = ref(null);
@@ -457,13 +448,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     expect(lastFrame()).toContain("Tracked width: 40");
   });
 
-  // Ink's useBoxMetrics subscribes to a root layout listener (addLayoutListener)
-  // so that sibling content changes that affect yoga layout are picked up even
-  // when the tracked ref does not change. vue-tui's useBoxMetrics uses
-  // watchPostEffect which only re-runs when ref.value changes. Sibling content
-  // changes do not change the ref, so metrics are not automatically re-measured.
-  // TODO: add layout-commit listener to useBoxMetrics for full Ink parity.
-  test.skip("updates when sibling content changes", async () => {
+  test("updates when sibling content changes", async () => {
     const siblingText = shallowRef("short");
     const App = defineComponent(() => {
       const boxRef = ref(null);
@@ -487,10 +472,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     expect(lastFrame()).toContain("Height: 3");
   });
 
-  // Same limitation as above: watchPostEffect only re-runs when ref.value changes.
-  // The tracked component's ref doesn't change when sibling content changes.
-  // TODO: add layout-commit listener to useBoxMetrics for full Ink parity.
-  test.skip("updates when sibling content changes but tracked component does not re-render", async () => {
+  test("updates when sibling content changes but tracked component does not re-render", async () => {
     const siblingText = shallowRef("line 1");
 
     const TrackedBox = defineComponent(() => {

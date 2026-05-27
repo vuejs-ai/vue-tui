@@ -35,6 +35,8 @@ export interface TuiRoot extends NodeBase {
   previousStaticNode?: TuiStatic;
   /** Callback invoked when the <Static> identity changes (mount/unmount/remount). */
   onStaticChange?: () => void;
+  /** Listeners invoked after every layout calculation (yoga.calculateLayout). */
+  layoutListeners: Set<() => void>;
 }
 
 export interface TuiBox extends NodeBase {
@@ -106,7 +108,26 @@ export function createRoot(appContext: AppContext): TuiRoot {
     children: [],
     yoga: UNATTACHED_YOGA,
     appContext,
+    layoutListeners: new Set(),
   };
+}
+
+/**
+ * Register a callback to be invoked after every layout calculation.
+ * Returns an unsubscribe function.
+ */
+export function addLayoutListener(root: TuiRoot, listener: () => void): () => void {
+  root.layoutListeners.add(listener);
+  return () => {
+    root.layoutListeners.delete(listener);
+  };
+}
+
+/** Invoke all registered layout listeners. Called after `yoga.calculateLayout`. */
+export function emitLayoutListeners(root: TuiRoot): void {
+  for (const listener of root.layoutListeners) {
+    listener();
+  }
 }
 
 export function createBox(): TuiBox {

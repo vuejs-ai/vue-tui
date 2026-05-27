@@ -1,5 +1,6 @@
 import { nextTick, shallowRef, watchPostEffect, type Ref, type ShallowRef } from "vue";
 import type { Node as YogaNode } from "yoga-layout";
+import { addLayoutListener, type TuiNode, type TuiRoot } from "../host/nodes.ts";
 
 // Yoga's `right`/`bottom` are omitted: always `0` for flow layout and
 // unintuitive for absolute positioning. Matches Ink's BoxMetrics type.
@@ -45,6 +46,28 @@ function resolveYogaNode(value: unknown): { yoga: YogaNode } | null {
   return null;
 }
 
+/** Resolve a ref value to its underlying TUI node (for tree traversal). */
+function resolveTuiNode(value: unknown): TuiNode | null {
+  if (!value) return null;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.type === "string") return obj as unknown as TuiNode;
+  // Vue component instance — root host element is on $el
+  if (obj.$el && typeof (obj.$el as Record<string, unknown>).type === "string") {
+    return obj.$el as unknown as TuiNode;
+  }
+  return null;
+}
+
+/** Walk up the DOM tree to find the root node. */
+function findRootNode(node: TuiNode | null): TuiRoot | null {
+  let current: TuiNode | null = node;
+  while (current) {
+    if (current.type === "root") return current;
+    current = current.parent;
+  }
+  return null;
+}
+
 /**
  * Imperative function that reads yoga computed dimensions from a TUI node.
  *
@@ -68,6 +91,10 @@ export function measureElement(node: unknown): { width: number; height: number }
  * Reactive composable that returns computed layout metrics for a tracked box element.
  * Updates after each render commit when yoga layout has been calculated.
  *
+ * Subscribes to the root node's layout listener so metrics update on terminal
+ * resize and sibling layout changes, even when the tracked ref doesn't change.
+ * Matches Ink's useBoxMetrics architecture.
+ *
  * Returns `{ width, height, left, top, hasMeasured }` where all values are
  * reactive refs. `hasMeasured` starts `false` and becomes `true` after the
  * first layout pass.
@@ -90,22 +117,51 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsResult {
   const top = shallowRef(0);
   const hasMeasured = shallowRef(false);
 
-  function measure() {
+  function updateMetrics() {
     const node = resolveYogaNode(ref.value);
-    if (!node) return;
-    width.value = node.yoga.getComputedWidth();
-    height.value = node.yoga.getComputedHeight();
-    left.value = node.yoga.getComputedLeft();
-    top.value = node.yoga.getComputedTop();
-    hasMeasured.value = true;
+    if (!node) {
+      // Reset to zeros when detached
+      const changed =
+        width.value !== 0 || height.value !== 0 || left.value !== 0 || top.value !== 0;
+      if (changed) {
+        width.value = 0;
+        height.value = 0;
+        left.value = 0;
+        top.value = 0;
+      }
+      if (hasMeasured.value) hasMeasured.value = false;
+      return;
+    }
+
+    const w = node.yoga.getComputedWidth();
+    const h = node.yoga.getComputedHeight();
+    const l = node.yoga.getComputedLeft();
+    const t = node.yoga.getComputedTop();
+
+    // Only update refs if values actually changed (avoids unnecessary re-renders)
+    if (width.value !== w) width.value = w;
+    if (height.value !== h) height.value = h;
+    if (left.value !== l) left.value = l;
+    if (top.value !== t) top.value = t;
+    if (!hasMeasured.value) hasMeasured.value = true;
   }
 
-  function reset() {
-    width.value = 0;
-    height.value = 0;
-    left.value = 0;
-    top.value = 0;
-    hasMeasured.value = false;
+  // Track the current layout listener unsubscribe function so we can
+  // re-subscribe when the ref changes (and the root node might differ).
+  let removeLayoutListener: (() => void) | undefined;
+
+  function subscribeToLayout() {
+    // Clean up previous subscription
+    if (removeLayoutListener) {
+      removeLayoutListener();
+      removeLayoutListener = undefined;
+    }
+
+    const tuiNode = resolveTuiNode(ref.value);
+    const root = findRootNode(tuiNode);
+    if (!root) return;
+
+    removeLayoutListener = addLayoutListener(root, updateMetrics);
   }
 
   // Re-measure after each render commit. watchPostEffect triggers when the
@@ -113,15 +169,43 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsResult {
   // inside the commit scheduler's queuePostFlushCb, which may run after this
   // watcher in the same flush cycle. We use nextTick to defer the read so
   // that it runs after the scheduler's commit has called calculateLayout.
-  watchPostEffect(() => {
+  //
+  // This also re-subscribes to the layout listener in case the ref moved
+  // to a different node (and thus potentially a different root).
+  watchPostEffect((onCleanup) => {
     // Access ref.value to track the dependency — when the ref changes,
     // this effect re-runs and schedules a new measurement.
     const node = resolveYogaNode(ref.value);
     if (!node) {
-      reset();
+      // Detached: reset metrics and clean up listener
+      const changed =
+        width.value !== 0 || height.value !== 0 || left.value !== 0 || top.value !== 0;
+      if (changed) {
+        width.value = 0;
+        height.value = 0;
+        left.value = 0;
+        top.value = 0;
+      }
+      if (hasMeasured.value) hasMeasured.value = false;
+      if (removeLayoutListener) {
+        removeLayoutListener();
+        removeLayoutListener = undefined;
+      }
       return;
     }
-    void nextTick(measure);
+
+    // Subscribe (or re-subscribe) to layout listener
+    subscribeToLayout();
+
+    // Defer the initial read to after calculateLayout runs
+    void nextTick(updateMetrics);
+
+    onCleanup(() => {
+      if (removeLayoutListener) {
+        removeLayoutListener();
+        removeLayoutListener = undefined;
+      }
+    });
   });
 
   return { width, height, left, top, hasMeasured };

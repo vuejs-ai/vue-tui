@@ -16,7 +16,7 @@ import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
-import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
+import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
@@ -535,6 +535,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
         tuiRoot.yoga.setWidth(w);
         tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
+        emitLayoutListeners(tuiRoot);
         const frame = paint(tuiRoot);
         frameState.lastOutput = frame;
         frameState.lastOutputToRender = frame + "\n";
@@ -545,6 +546,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       tuiRoot.yoga.setWidth(w);
       tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
+      emitLayoutListeners(tuiRoot);
       const frame = paint(tuiRoot);
       const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
