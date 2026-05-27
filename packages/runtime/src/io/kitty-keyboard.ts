@@ -12,6 +12,17 @@ export const kittyFlags = {
 
 export type KittyFlagName = keyof typeof kittyFlags;
 
+export const kittyModifiers = {
+  shift: 1,
+  alt: 2,
+  ctrl: 4,
+  super: 8,
+  hyper: 16,
+  meta: 32,
+  capsLock: 64,
+  numLock: 128,
+} as const;
+
 export type KittyKeyboardOptions = {
   mode?: "auto" | "enabled" | "disabled";
   flags?: KittyFlagName[];

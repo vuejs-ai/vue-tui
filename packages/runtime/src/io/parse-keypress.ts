@@ -1,6 +1,8 @@
 // Ported from Ink's parse-keypress.ts
 // @see https://github.com/vadimdemedes/ink
 
+import { kittyModifiers } from "./kitty-keyboard.ts";
+
 const textDecoder = new TextDecoder();
 
 const metaKeyCodeRe = /^(?:\x1b)([a-zA-Z0-9])$/;
@@ -135,19 +137,6 @@ export interface Keypress {
   isPrintable?: boolean;
   ignore?: boolean;
 }
-
-// Kitty keyboard protocol modifier bits.
-// The actual modifier value in CSI sequences is (modifiers - 1).
-const kittyModifiers = {
-  shift: 1,
-  alt: 2,
-  ctrl: 4,
-  super: 8,
-  hyper: 16,
-  meta: 32,
-  capsLock: 64,
-  numLock: 128,
-} as const;
 
 // Kitty keyboard protocol: CSI codepoint ; modifiers [: eventType] [; text-as-codepoints] u
 const kittyKeyRe = /^\x1b\[(\d+)(?:;(\d+)(?::(\d+))?(?:;([\d:]+))?)?u$/;
