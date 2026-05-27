@@ -150,6 +150,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
+  let mountedCommit: (() => void) | null = null;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -185,6 +186,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   function teardown() {
     if (teardownStarted) return;
     teardownStarted = true;
+
+    // Final render before unmount (matching Ink ink.tsx:755-761).
+    // teardownStarted=true makes shouldClearTerminalForFrame see isUnmounting,
+    // so fullscreen apps get clearTerminal on exit.
+    if (mountedInteractive && !mountedDebug && mountedCommit) {
+      mountedCommit();
+    }
+
     scheduledCommit = () => {};
     // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
     if (mountedRestoreConsole) {
@@ -523,6 +532,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     const scheduler = createCommitScheduler(commit, schedulerOptions);
     mountedScheduler = scheduler;
+    mountedCommit = commit;
     scheduledCommit = scheduler.schedule;
 
     // Internal provides — set before the actual mount so components can inject
