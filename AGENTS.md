@@ -8,6 +8,7 @@
 - Tests must simulate real user conditions. Non-TTY environments disable chalk colors — use `FORCE_COLOR` env var so ANSI output is always exercised. A bug invisible in tests but visible in a real terminal is a testing gap, not a minor issue.
 - When debugging color/ANSI output in non-TTY environments (e.g. Claude Code shell), use `FORCE_COLOR=3` env var to force chalk to output ANSI codes.
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
+- Never commit anything under `docs/`. That directory is for local working notes and specs — it must stay out of git.
 
 <!--VITE PLUS START-->
 
