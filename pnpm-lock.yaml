@@ -117,9 +117,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.12.4
-      '@vitejs/plugin-vue-jsx':
-        specifier: 'catalog:'
-        version: 5.1.5(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
+      '@vitejs/plugin-vue':
+        specifier: ^6
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
         version: '@voidzero-dev/vite-plus-core@0.1.22(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'

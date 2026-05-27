@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vitejs/plugin-vue": "^6",
     "vite": "catalog:"
   }
 }

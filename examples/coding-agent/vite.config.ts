@@ -1,11 +1,11 @@
 import { defineConfig } from "vite";
-import vueJsx from "@vitejs/plugin-vue-jsx";
+import vue from "@vitejs/plugin-vue";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
-  plugins: [vueJsx()],
+  plugins: [vue()],
   build: {
     target: "node22",
     outDir: "dist",
