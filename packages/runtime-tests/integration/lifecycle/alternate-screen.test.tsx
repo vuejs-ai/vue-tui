@@ -119,3 +119,116 @@ test("alternate screen - ignored when isTTY is false even if interactive is true
   expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
   expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
 });
+
+test("alternate screen - enters on mount and exits on unmount", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    alternateScreen: true,
+    interactive: true,
+    exitOnCtrlC: false,
+  });
+  await nextTick();
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+
+  const chunks = stdout.chunks;
+  const enterIndex = chunks.findIndex((w) => w.includes(ansiEscapes.enterAlternativeScreen));
+  const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
+
+  expect(enterIndex).not.toBe(-1);
+  expect(exitIndex).not.toBe(-1);
+  expect(enterIndex).toBeLessThan(exitIndex);
+  expect(enterIndex).toBe(0);
+  expect(chunks[0]).toContain(ansiEscapes.enterAlternativeScreen);
+});
+
+test("alternate screen - content is rendered between enter and exit", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    alternateScreen: true,
+    interactive: true,
+    exitOnCtrlC: false,
+  });
+  await nextTick();
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+
+  const chunks = stdout.chunks;
+  const enterIndex = chunks.findIndex((w) => w.includes(ansiEscapes.enterAlternativeScreen));
+  const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
+
+  expect(enterIndex).not.toBe(-1);
+  expect(exitIndex).not.toBe(-1);
+  expect(enterIndex).toBeLessThan(exitIndex);
+
+  const contentBetween = chunks.slice(enterIndex + 1, exitIndex).some((w) => w.includes("Hello"));
+  expect(contentBetween).toBe(true);
+});
+
+test("alternate screen - unmount() exits the alternate screen", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    alternateScreen: true,
+    interactive: true,
+    exitOnCtrlC: false,
+  });
+  await nextTick();
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+
+  const chunks = stdout.chunks;
+  const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
+  expect(exitIndex).not.toBe(-1);
+});
+
+test("alternate screen - cursor restored after exit", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+  const showCursorEscape = "\x1b[?25h";
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    alternateScreen: true,
+    interactive: true,
+    exitOnCtrlC: false,
+  });
+  await nextTick();
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+
+  const output = stdout.chunks.join("");
+  const exitIndex = output.lastIndexOf(ansiEscapes.exitAlternativeScreen);
+  const showCursorIndex = output.lastIndexOf(showCursorEscape);
+
+  expect(exitIndex).not.toBe(-1);
+  expect(showCursorIndex).toBeGreaterThan(exitIndex);
+});
