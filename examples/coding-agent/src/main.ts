@@ -1,5 +1,5 @@
 import { createApp } from "@vue-tui/runtime";
-import App from "./App";
+import App from "./App.vue";
 
 if (!process.env["DEEPSEEK_API_KEY"]) {
   console.error("Error: DEEPSEEK_API_KEY environment variable is required.");
