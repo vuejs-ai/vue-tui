@@ -1392,9 +1392,11 @@ it("useInput - query response is silently ignored, next real key works", async (
 });
 ```
 
-- [ ] **Step 2: Run PTY tests**
+- [ ] **Step 2: Build runtime and run PTY tests**
 
-Run: `cd packages/runtime-tests && pnpm pty-test`
+PTY fixtures resolve `@vue-tui/runtime` through package exports to `dist/`, so the runtime must be built first.
+
+Run: `vp run -r build && cd packages/runtime-tests && pnpm pty-test`
 Expected: All kitty PTY tests PASS (plus existing tests remain passing)
 
 - [ ] **Step 3: Commit**
