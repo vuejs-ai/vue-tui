@@ -83,11 +83,11 @@ useInput((input) => {
 
 ## Packages
 
-| Package | Description |
-| ------- | ----------- |
+| Package                                                              | Description                                                                                                                                                                                |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useExit`, etc.), and yoga-based flexbox layout |
-| [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli) | Development tool — `vue-tui dev` starts your app with Vite-powered HMR |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame |
+| [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli)         | Development tool — `vue-tui dev` starts your app with Vite-powered HMR                                                                                                                     |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                           |
 
 ## Examples
 
