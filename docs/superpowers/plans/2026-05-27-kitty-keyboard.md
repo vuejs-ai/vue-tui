@@ -1813,7 +1813,7 @@ Append to `packages/runtime-tests/integration/kitty-lifecycle.test.ts` — these
 ```ts
 // --- Render-level integration tests ---
 
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp } from "@vue-tui/runtime";
 import { defineComponent } from "vue";
 
 const Dummy = defineComponent(() => () => null);
