@@ -77,6 +77,7 @@ useInput((input) => {
 - [Composables (Hooks)](#composables-hooks)
 - [Testing](#testing)
 - [Development](#development)
+- [Contributing](#contributing)
 - [Credits](#credits)
 - [License](#license)
 
@@ -171,6 +172,10 @@ vp run -r test        # run tests across all packages
 vp run -r build       # build all packages
 vue-tui dev           # start an example with HMR
 ```
+
+## Contributing
+
+Contributions welcome! vue-tui is evolving fast — please open an issue before starting large changes. If you use AI tools, disclose it in your PR and make sure you've reviewed and tested everything before submitting.
 
 ## Credits
 
