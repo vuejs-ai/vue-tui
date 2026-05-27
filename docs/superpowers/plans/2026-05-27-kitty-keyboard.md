@@ -1194,9 +1194,11 @@ const KittyInput = defineComponent({
       }
 
       if (props.test === "queryThenKey") {
-        // First non-query key after the query response was silently swallowed
-        exit();
-        return;
+        if (input === "a") {
+          exit();
+          return;
+        }
+        throw new Error(`queryThenKey: expected input="a", got input="${input}"`);
       }
 
       throw new Error(`Unexpected input for test "${props.test}": input="${input}"`);
