@@ -87,6 +87,8 @@ interface KittyKeyboardController {
 7. Cleanup: remove listener, clear timeout, strip query responses from buffer, re-emit remaining bytes via `stdin.unshift(Uint8Array.from(remaining))`.
 8. Guard: don't enable if already disposed (handles unmount-during-detection race).
 
+**Raw mode ownership**: The controller does NOT acquire or release raw mode. It attaches a temporary `data` listener to stdin for detection, matching Ink's approach. Raw mode is managed exclusively by `createStdinController` / `useInput`. In practice, if useInput hasn't enabled raw mode yet, the terminal query response may be buffered by the kernel's line discipline and detection times out — this is acceptable because `mode: 'auto'` gracefully degrades to "no kitty support" on timeout. Forced mode (`mode: 'enabled'`) bypasses detection entirely.
+
 **dispose():**
 1. Cancel in-progress detection (call stored cleanup function).
 2. If protocol was enabled, write `\x1b[<u` to stdout (disable sequence).
