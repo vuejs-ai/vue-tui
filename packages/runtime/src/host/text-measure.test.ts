@@ -235,6 +235,11 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
   expect(stripAnsi(lines[0]!)).toBe("あい 漢字テスト けこ");
 });
 
+test("ZWJ emoji truncation does not exceed requested width", () => {
+  const result = wrapText("👩‍💻abc", 2, "truncate-start");
+  expect(stringWidth(result[0]!)).toBeLessThanOrEqual(2);
+});
+
 test("clipped empty write does not corrupt existing wide characters", () => {
   // When a write is clipped to an empty string, the boundary cleanup
   // must not run, otherwise it would destroy a wide character that
