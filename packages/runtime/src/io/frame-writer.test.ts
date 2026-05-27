@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
 import { createFrameWriter } from "./frame-writer.ts";
+import { showCursorEscape, hideCursorEscape } from "./cursor-helpers.ts";
 import logUpdate from "./log-update.ts";
 
 // ---------------------------------------------------------------------------
@@ -49,9 +50,6 @@ function createStdout(): FakeStdout {
   stdout.get = () => calls[calls.length - 1]![0] as string;
   return stdout;
 }
-
-const showCursorEscape = "[?25h";
-const hideCursorEscape = "[?25l";
 
 // ---------------------------------------------------------------------------
 // Debug mode (existing test)
@@ -637,4 +635,141 @@ test("incremental rendering - render to empty string (full clear vs early exit)"
   // Rendering empty string again should be skipped (identical output)
   render("\n");
   expect(stdout.write.callCount).toBe(2);
+});
+
+// ---------------------------------------------------------------------------
+// createFrameWriter() integration tests
+//
+// Unlike the logUpdate tests above (which pass showCursor: true),
+// createFrameWriter does NOT set showCursor — so logUpdate will emit a
+// hideCursor escape on the first render.  Assertions here use `stdout.get()`
+// (last written chunk) and relative call-count deltas rather than absolute
+// counts to stay independent of that detail.
+// ---------------------------------------------------------------------------
+
+describe("createFrameWriter - standard mode", () => {
+  test("write renders output and skips identical frames", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, {});
+
+    writer.write("Hello\n");
+    const countAfterFirst = stdout.write.callCount;
+    // The last write must contain the frame content
+    expect(stdout.get().includes("Hello")).toBe(true);
+
+    // Identical frame is skipped at the wrapper level
+    writer.write("Hello\n");
+    expect(stdout.write.callCount).toBe(countAfterFirst);
+
+    // Different frame is rendered
+    writer.write("World\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterFirst);
+    expect(stdout.get().includes("World")).toBe(true);
+  });
+
+  test("clear() resets dedup so the same frame renders again", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, {});
+
+    writer.write("Hello\n");
+    const countAfterFirst = stdout.write.callCount;
+
+    writer.clear();
+    const countAfterClear = stdout.write.callCount;
+    expect(countAfterClear).toBeGreaterThanOrEqual(countAfterFirst);
+
+    // After clear(), the same content should render again
+    writer.write("Hello\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterClear);
+    expect(stdout.get().includes("Hello")).toBe(true);
+  });
+
+  test("done() persists output and resets for next render", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, {});
+
+    writer.write("Line 1\nLine 2\n");
+    writer.done();
+    const countAfterDone = stdout.write.callCount;
+
+    // After done(), writing new content should work
+    writer.write("New content\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterDone);
+    expect(stdout.get().includes("New content")).toBe(true);
+  });
+});
+
+describe("createFrameWriter - incremental mode", () => {
+  test("write renders output and updates incrementally", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental: true });
+
+    writer.write("Line 1\nLine 2\nLine 3\n");
+    const countAfterFirst = stdout.write.callCount;
+
+    writer.write("Line 1\nUpdated\nLine 3\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterFirst);
+
+    const lastWritten = stdout.get();
+    expect(lastWritten.includes("Updated")).toBe(true);
+    // Incremental: unchanged lines are not re-sent
+    expect(lastWritten.includes("Line 1")).toBe(false);
+    expect(lastWritten.includes("Line 3")).toBe(false);
+  });
+
+  test("write skips identical frames", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental: true });
+
+    writer.write("Hello\n");
+    const countAfterFirst = stdout.write.callCount;
+
+    writer.write("Hello\n");
+    // Dedup at the wrapper level prevents even reaching logUpdate
+    expect(stdout.write.callCount).toBe(countAfterFirst);
+  });
+});
+
+describe("createFrameWriter - clear/done behavior", () => {
+  test("clear() erases output and allows re-render of same content", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental: true });
+
+    writer.write("Line 1\nLine 2\n");
+    const countAfterWrite = stdout.write.callCount;
+
+    writer.clear();
+    const countAfterClear = stdout.write.callCount;
+    // clear() triggers an erase write
+    expect(countAfterClear).toBeGreaterThan(countAfterWrite);
+
+    // Same content should render again after clear()
+    writer.write("Line 1\nLine 2\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterClear);
+  });
+
+  test("done() preserves output and resets dedup state", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental: true });
+
+    writer.write("First\n");
+    writer.done();
+    const countAfterDone = stdout.write.callCount;
+
+    // After done(), a new frame goes through
+    writer.write("Second\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterDone);
+    expect(stdout.get().includes("Second")).toBe(true);
+  });
+
+  test("willRender returns false for identical frames", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, {});
+
+    writer.write("Hello\n");
+    // willRender delegates to logUpdate; identical content returns false
+    expect(writer.willRender("Hello\n")).toBe(false);
+    // Different content returns true
+    expect(writer.willRender("World\n")).toBe(true);
+  });
 });
