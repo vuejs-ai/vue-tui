@@ -32,3 +32,4 @@ export {
 } from "./composables/useBoxMetrics.ts";
 export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
+export { kittyFlags, type KittyKeyboardOptions, type KittyFlagName } from "./io/kitty-keyboard.ts";

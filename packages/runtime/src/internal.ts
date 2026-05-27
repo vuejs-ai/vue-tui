@@ -11,3 +11,11 @@ export {
 } from "./host/nodes.ts";
 export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
 export type { AppContext } from "./context.ts";
+export {
+  createKittyKeyboardController,
+  matchKittyQueryResponse,
+  hasCompleteKittyQueryResponse,
+  stripKittyQueryResponsesAndTrailingPartial,
+  resolveFlags,
+  type KittyKeyboardController,
+} from "./io/kitty-keyboard.ts";
