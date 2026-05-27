@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { renderToString, Box, Text, Transform } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
@@ -340,5 +340,165 @@ describe("integration: aria props via render", () => {
     expect(lastFrame()).toContain("Item 1");
     expect(lastFrame()).toContain("Item 2");
     expect(lastFrame()).toContain("content");
+  });
+});
+
+describe("screen reader enabled mode", () => {
+  test("render aria-label on Text in screen-reader mode replaces children", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Text aria-label="Screen-reader only">visible text</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Screen-reader only");
+  });
+
+  test("render aria-label on Box in screen-reader mode replaces children", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-label="Screen-reader only">
+          <Text>Not visible to screen readers</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Screen-reader only");
+  });
+
+  test("omit ANSI styling in screen-reader output", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Text bold color="green" inverse underline>
+            Styled content
+          </Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Styled content");
+  });
+
+  test("render multiple Text components", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column">
+          <Text>Hello</Text>
+          <Text>World</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Hello\nWorld");
+  });
+
+  test("render nested Box components with Text", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column">
+          <Text>Hello</Text>
+          <Box>
+            <Text>World</Text>
+          </Box>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Hello\nWorld");
+  });
+
+  test("render component that returns null", () => {
+    const NullComponent: FunctionalComponent = () => null;
+    NullComponent.displayName = "NullComponent";
+
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column">
+          <Text>Hello</Text>
+          <NullComponent />
+          <Text>World</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Hello\nWorld");
+  });
+
+  test("render with aria-state.busy", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-state={{ busy: true }}>
+          <Text>Loading</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("(busy) Loading");
+  });
+
+  test("render with aria-state.disabled", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="button" aria-state={{ disabled: true }}>
+          <Text>Submit</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("button: (disabled) Submit");
+  });
+
+  test("render with aria-state.expanded", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="combobox" aria-state={{ expanded: true }}>
+          <Text>Select</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("combobox: (expanded) Select");
+  });
+
+  test("render multi-line text with roles", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column" aria-role="list">
+          <Box aria-role="listitem">
+            <Text>Item 1</Text>
+          </Box>
+          <Box aria-role="listitem">
+            <Text>Item 2</Text>
+          </Box>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("list: listitem: Item 1\nlistitem: Item 2");
+  });
+
+  test("render listbox with multiselectable options", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column" aria-role="listbox" aria-state={{ multiselectable: true }}>
+          <Box aria-role="option" aria-state={{ selected: true }}>
+            <Text>Option 1</Text>
+          </Box>
+          <Box aria-role="option" aria-state={{ selected: false }}>
+            <Text>Option 2</Text>
+          </Box>
+          <Box aria-role="option" aria-state={{ selected: true }}>
+            <Text>Option 3</Text>
+          </Box>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe(
+      "listbox: (multiselectable) option: (selected) Option 1\noption: Option 2\noption: (selected) Option 3",
+    );
   });
 });
