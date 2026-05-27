@@ -66,8 +66,8 @@ it("useInput - handle kitty protocol repeat event", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - handle kitty protocol release event", async () => {
-  const ps = term("use-input-kitty", ["release"]);
+it("useInput - release event produces empty input", async () => {
+  const ps = term("use-input-kitty", ["releaseEmpty"]);
   ps.write(kittyKey(97, 1, 3));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
