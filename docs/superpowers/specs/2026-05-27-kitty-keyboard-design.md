@@ -94,6 +94,25 @@ interface KittyKeyboardController {
 2. If protocol was enabled, write `\x1b[<u` to stdout (disable sequence).
 3. Set enabled = false.
 
+### Modified: `packages/runtime/src/io/parse-keypress.ts`
+
+Add a guard at the top of `parseKeypress()` to recognize and swallow kitty query responses (`\x1b[?<digits>u`). These are terminal capability responses, not user input — they should never reach useInput handlers.
+
+```ts
+const kittyQueryResponseRe = /^\x1b\[\?\d+u$/;
+
+export function parseKeypress(s: string): Keypress {
+  // Swallow kitty protocol query responses — these are terminal capability
+  // replies, not user keypresses. Return a no-op keypress that useInput ignores.
+  if (kittyQueryResponseRe.test(s)) {
+    return { name: '', sequence: s, raw: s, ctrl: false, shift: false, meta: false };
+  }
+  // ... rest of existing logic
+}
+```
+
+This handles both scenarios where query responses can reach the parser: (1) late responses arriving after the detection timeout, and (2) responses during the dual-listener race window. The empty `name` and empty `input` result means useInput's handler is called with `input=''` and no key flags set — effectively a no-op.
+
 ### Modified: `packages/runtime/src/render.ts`
 
 **MountOptions** — add field:
@@ -190,7 +209,7 @@ Re-export from package entry point:
 
 ## Test Suite
 
-### File 1: `packages/runtime/src/io/parse-keypress-kitty.test.ts` (~55 unit tests)
+### File 1: `packages/runtime/src/io/parse-keypress-kitty.test.ts` (~57 unit tests)
 
 Tests kitty parsing in isolation — no rendering, no Vue. Each test calls `parseKeypress()` directly with a CSI u sequence and asserts the returned keypress object.
 
@@ -243,6 +262,10 @@ Helper function `kittyKey(codepoint, modifiers?, eventType?, textCodepoints?)` c
 - Surrogate codepoint → safe empty keypress
 - Invalid text codepoint → replaced with '?'
 - Malformed modifier 0 → does not set all flags
+
+**Query response filtering (2 tests):**
+- `\x1b[?1u` (kitty query response) returns no-op keypress with empty name
+- `\x1b[?31u` (multi-digit query response) also returns no-op
 
 **Legacy fallback (2 tests):**
 - Non-kitty sequences fall back to legacy parsing
@@ -347,9 +370,10 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 | File | Change |
 |------|--------|
 | `packages/runtime/src/io/kitty-keyboard.ts` | **New** — types, constants, query matchers, lifecycle controller |
+| `packages/runtime/src/io/parse-keypress.ts` | Add query response filter (`\x1b[?<digits>u` → no-op keypress) |
 | `packages/runtime/src/render.ts` | Add `kittyKeyboard` to MountOptions, wire controller in mount/teardown |
 | `packages/runtime/src/composables/useInput.ts` | Extend Key interface, add kitty-aware input logic |
 | `packages/runtime/src/index.ts` | Re-export KittyKeyboardOptions, KittyFlagName, kittyFlags |
-| `packages/runtime/src/io/parse-keypress-kitty.test.ts` | **New** — 55 unit tests |
+| `packages/runtime/src/io/parse-keypress-kitty.test.ts` | **New** — 57 unit tests |
 | `packages/runtime-tests/integration/pty/input-kitty.test.ts` | **New** — 17 integration tests |
 | `packages/runtime-tests/integration/kitty-lifecycle.test.ts` | **New** — 22 integration tests |
