@@ -2,21 +2,39 @@
 
 > **Early stage** — under active development. Bug reports welcome, but not recommended for production use yet.
 
-Vue for the terminal. Build interactive CLI apps with components, flexbox, and HMR.
+The Vue framework for terminal UIs.
+Build with components, develop with HMR, test with confidence.
 
-- **Vue SFC & JSX** — write terminal UIs with `<template>`, TSX, or both
+<p align="center">
+  <a href="https://npmx.dev/@vue-tui/runtime"><code>@vue-tui/runtime</code></a> · <a href="https://npmx.dev/@vue-tui/cli"><code>@vue-tui/cli</code></a> · <a href="https://npmx.dev/@vue-tui/testing"><code>@vue-tui/testing</code></a>
+</p>
+
+- **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
-- **Focus system** — built-in focus management with Tab navigation
-- **Hot module replacement** — instant feedback while developing
-- **First-class testing** — render components, simulate input, assert frames
+- **Dev toolkit** — **HMR** in the terminal, plus build and preview out of the box
+- **Input & focus** — keyboard handling, focus management, Tab navigation, Kitty keyboard protocol
+- **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 
-## Packages
+<p align="center">
+  <a href="./examples/flappy-bird"><em>Flappy Bird</em></a> — one of the <a href="#examples">examples</a> included in the repo
+  <br /><br />
+  <a href="./examples/flappy-bird">
+    <img src=".github/assets/flappy-bird-demo.gif" alt="Flappy Bird built with vue-tui" width="690" />
+  </a>
+</p>
 
-- **[`@vue-tui/runtime`](./packages/runtime)** — The core framework. A custom Vue 3 renderer that targets the terminal instead of the DOM. Provides components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useExit`, etc.), and a yoga-based flexbox layout engine.
-- **[`@vue-tui/cli`](./packages/cli)** — Development tool. Run `vue-tui dev` to start your app with Vite-powered HMR — edit a `.vue` file and see the terminal update instantly.
-- **[`@vue-tui/testing`](./packages/testing)** — Test harness. Render components in an isolated fake terminal, simulate keyboard input, and assert on visual output frame by frame.
+## Quick Start
 
-## Quick Example
+```bash
+npx tiged vuejs-ai/vue-tui-starter my-app
+cd my-app
+npm install
+npm run dev
+```
+
+Edit `App.vue` and watch the terminal update instantly.
+
+## Example
 
 ```ts
 // src/main.ts
@@ -44,11 +62,31 @@ useInput((input) => {
   <Box>
     <Text>Count: </Text>
     <Text bold color="green">{{ count }}</Text>
-    <!-- try changing this color -->
     <Text dimColor> (+/- to change)</Text>
   </Box>
 </template>
 ```
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Example](#example)
+- [Packages](#packages)
+- [Examples](#examples)
+- [Components](#components)
+- [Composables (Hooks)](#composables-hooks)
+- [Testing](#testing)
+- [Development](#development)
+- [Credits](#credits)
+- [License](#license)
+
+## Packages
+
+| Package | Description |
+| ------- | ----------- |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useExit`, etc.), and yoga-based flexbox layout |
+| [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli) | Development tool — `vue-tui dev` starts your app with Vite-powered HMR |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame |
 
 ## Examples
 
@@ -58,23 +96,6 @@ useInput((input) => {
 | [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                             |
 | [`coding-agent`](./examples/coding-agent)     | AI coding agent with LLM streaming and interactive UI       |
 | [`flappy-bird`](./examples/flappy-bird)       | Physics-based terminal game with reactive state and borders |
-
-## Getting Started
-
-```bash
-npx tiged vuejs-ai/vue-tui-starter my-app
-cd my-app
-npm install
-npm run dev
-```
-
-That's it — try changing the color or text in `App.vue` and watch the terminal update instantly while keeping your component state.
-
-To build and run:
-
-```bash
-npm run preview
-```
 
 ## Components
 
@@ -87,9 +108,9 @@ npm run preview
 | [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
 
-## Hooks
+## Composables (Hooks)
 
-| Hook                       | Description                                                                           |
+| Composable                 | Description                                                                           |
 | -------------------------- | ------------------------------------------------------------------------------------- |
 | `useInput(handler, opts?)` | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection |
 | `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                                |
@@ -109,14 +130,14 @@ npm install -D @vue-tui/testing
 ```
 
 ```tsx
-import { defineComponent, ref } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { expect, test } from "vitest";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 
 test("counter responds to + and - keys", async () => {
   const Counter = defineComponent(() => {
-    const count = ref(0);
+    const count = shallowRef(0);
     useInput((input) => {
       if (input === "+") count.value++;
       if (input === "-") count.value--;
@@ -151,15 +172,9 @@ vp run -r build       # build all packages
 vue-tui dev           # start an example with HMR
 ```
 
-## Caveats
-
-- vue-tui enables [raw mode](https://en.wikipedia.org/wiki/Terminal_mode) by default so the terminal won't echo keystrokes into your UI.
-- Ctrl+C still exits — `exitOnCtrlC` defaults to `true`.
-- For pure-output tools that don't need input suppression, pass `rawMode: false` to `mount()`.
-
 ## Credits
 
-vue-tui started as a Vue port of [Ink](https://github.com/vadimdemedes/ink), the library that proved terminal UIs could be built with the same component patterns we use on the web. The component model, yoga-based layout, focus system, rendering pipeline — all of it originates in Ink's design, adapted to follow Vue's philosophy and conventions. Thank you to [Vadim Demedes](https://github.com/vadimdemedes), [Sindre Sorhus](https://github.com/sindresorhus), and the [Ink contributors](https://github.com/vadimdemedes/ink/graphs/contributors) for creating such a solid foundation.
+vue-tui is built on the ideas pioneered by [Ink](https://github.com/vadimdemedes/ink) — component model, yoga-based layout, focus system, and rendering pipeline — adapted to Vue's philosophy. Thanks to [Vadim Demedes](https://github.com/vadimdemedes), [Sindre Sorhus](https://github.com/sindresorhus), and the [Ink contributors](https://github.com/vadimdemedes/ink/graphs/contributors).
 
 ## License
 
