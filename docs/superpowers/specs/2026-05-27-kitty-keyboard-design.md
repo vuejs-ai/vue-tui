@@ -2,7 +2,7 @@
 
 ## Summary
 
-Add full kitty keyboard protocol support to vue-tui, matching Ink's implementation. This covers three layers: protocol lifecycle (enable/disable/auto-detect), useInput Key interface extension, and comprehensive test backfill.
+Add kitty keyboard protocol support to vue-tui, matching Ink's implementation. This covers three layers: protocol lifecycle (enable/disable/auto-detect), useInput Key interface extension, and comprehensive test backfill. Parser support covers the default `disambiguateEscapeCodes` and `reportEventTypes` flags; advanced flags are accepted but experimental.
 
 The kitty keyboard protocol is an opt-in terminal enhancement that provides disambiguated key events, additional modifiers (super, hyper, capsLock, numLock), event types (press/repeat/release), and text-as-codepoints fields. vue-tui already has the parsing layer (parse-keypress.ts) but lacks the terminal handshake and useInput integration.
 
@@ -12,7 +12,7 @@ Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
 
 | Layer | Status | Details |
 |-------|--------|---------|
-| Parsing (parse-keypress.ts) | Complete | Decodes CSI u sequences, kitty modifiers, event types, text-as-codepoints |
+| Parsing (parse-keypress.ts) | Complete for default flags | Decodes CSI u sequences, kitty modifiers, event types, text-as-codepoints. Advanced flag forms (alternate keys, associated text edge cases) not fully covered. |
 | useInput Key interface | Partial | Exposes ctrl/shift/meta but not super/hyper/capsLock/numLock/eventType |
 | Protocol lifecycle | Missing | No enable/disable sequences, no auto-detect, no MountOptions field |
 | Tests | 1 of ~85 | Only Ctrl+C via kitty codepoint-3 form exists |
@@ -52,7 +52,7 @@ Functions for detecting terminal responses to the `\x1b[?u` capability query:
 
 - `matchKittyQueryResponse(buffer, startIndex)` — detects `\x1b[?<digits>u` pattern in a byte buffer. Returns `{state: 'complete', endIndex}` or `{state: 'partial'}` or `undefined`.
 - `hasCompleteKittyQueryResponse(buffer)` — scans entire buffer for any complete response.
-- `stripKittyQueryResponsesAndTrailingPartial(buffer)` — removes complete responses and trailing partial sequences, returns remaining bytes to re-emit to the input pipeline.
+- `stripKittyQueryResponsesAndTrailingPartial(buffer)` — removes complete responses and trailing partial sequences, returns remaining bytes to re-emit to the input pipeline. A "partial" sequence is `\x1b[?` followed by at least one digit but no terminator (`\x1b[?1` without `u`). The prefix `\x1b[?` alone (no digits) is NOT considered partial — it's not a query response at all and is preserved in the output.
 
 These operate on `number[]` byte buffers because terminal responses can arrive as raw bytes (Uint8Array) and may be interleaved with user input.
 
@@ -338,7 +338,7 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - The `isKittyProtocol`, `isPrintable`, `text`, `super`, `hyper`, `capsLock`, `numLock`, `eventType` fields are already set by `parseKittyKeypress()` in parse-keypress.ts. No changes needed to the parser.
 - Auto-detect's stdin `data` listener is temporary (removed after detection completes or times out). It runs during the brief init window and is cleaned up before the main input pipeline processes events, so there's no conflict.
 - The `stdin.unshift()` call to re-emit non-query bytes pushes them back to the front of the readable stream. This works because the kitty controller's listener is removed during cleanup, and the re-emitted bytes are picked up by the normal input pipeline (createStdinController's handleData) on the next read.
-- **Risk**: attaching a `data` listener puts stdin into flowing mode. If user input arrives during the 200ms detection window, it goes into the response buffer but is NOT query-response data. The `stripKittyQueryResponsesAndTrailingPartial` function preserves these non-query bytes, and `unshift()` re-emits them. An end-to-end test must verify that user bytes sent during detection are delivered to useInput exactly once.
+- **Known race condition (matches Ink)**: The detection `data` listener and useInput's `data` listener can briefly coexist if a component mounts and calls `acquireRawMode()` within the 200ms detection window. In this scenario: (a) query response bytes could leak to useInput (they'd be treated as unknown escape sequences), (b) user input bytes could be delivered twice (once by each listener, plus once more after unshift). This same race exists in Ink's implementation. In practice, most terminals respond to the query synchronously or within a few ms, so detection completes before useInput effects fire. The mitigation is ordering: `kittyController.init()` runs before `originalMount()`, so detection starts before Vue components mount. An end-to-end test must verify that user bytes sent during detection are delivered to useInput exactly once. If the race proves problematic in practice, the fix is to integrate detection into the stdin controller's input pipeline (filter query responses inline rather than using a separate listener).
 
 ## Files Changed
 
