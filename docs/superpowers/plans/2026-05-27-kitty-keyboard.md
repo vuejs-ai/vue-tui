@@ -471,7 +471,7 @@ In the `teardown()` function, after `originalUnmount()` call and before `if (!mo
     }
 ```
 
-- [ ] **Step 6: Add exports to index.ts**
+- [ ] **Step 6: Add public exports to index.ts**
 
 In `packages/runtime/src/index.ts`, add:
 
@@ -483,6 +483,21 @@ export {
 } from "./io/kitty-keyboard.ts";
 ```
 
+- [ ] **Step 6b: Add internal exports to internal.ts**
+
+In `packages/runtime/src/internal.ts`, add (used by lifecycle integration tests):
+
+```ts
+export {
+  createKittyKeyboardController,
+  matchKittyQueryResponse,
+  hasCompleteKittyQueryResponse,
+  stripKittyQueryResponsesAndTrailingPartial,
+  resolveFlags,
+  type KittyKeyboardController,
+} from "./io/kitty-keyboard.ts";
+```
+
 - [ ] **Step 7: Run type check**
 
 Run: `vp check`
@@ -491,7 +506,7 @@ Expected: PASS (no type errors)
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/runtime/src/render.ts packages/runtime/src/index.ts
+git add packages/runtime/src/render.ts packages/runtime/src/index.ts packages/runtime/src/internal.ts
 git commit -m "feat: wire kitty keyboard controller into mount/teardown and add exports"
 ```
 
@@ -1144,7 +1159,7 @@ const KittyInput = defineComponent({
         return;
       }
 
-      if (props.test === "capslock-empty" && input === "" && key.capsLock) {
+      if (props.test === "capslock-empty" && input === "") {
         exit();
         return;
       }
@@ -1176,6 +1191,12 @@ const KittyInput = defineComponent({
 
       if (props.test === "queryResponse") {
         throw new Error("Query response should not reach handler");
+      }
+
+      if (props.test === "queryThenKey") {
+        // First non-query key after the query response was silently swallowed
+        exit();
+        return;
       }
 
       throw new Error(`Unexpected input for test "${props.test}": input="${input}"`);
@@ -1356,6 +1377,17 @@ it("useInput - kitty protocol ctrl+letter via codepoint 1-26 produces input", as
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
+
+// --- Query response suppression ---
+
+it("useInput - query response is silently ignored, next real key works", async () => {
+  const ps = term("use-input-kitty", ["queryThenKey"]);
+  // Send query response followed by a real key — query is swallowed, real key exits
+  ps.write("\x1b[?1u");
+  ps.write("a");
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
 ```
 
 - [ ] **Step 2: Run PTY tests**
@@ -1389,7 +1421,7 @@ import {
   hasCompleteKittyQueryResponse,
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
-} from "@vue-tui/runtime/io/kitty-keyboard";
+} from "@vue-tui/runtime/internal";
 
 const textEncoder = new TextEncoder();
 
@@ -1774,26 +1806,69 @@ describe("kitty lifecycle - auto-detection", () => {
 });
 ```
 
-- [ ] **Step 2: Add the kitty-keyboard module export path**
+- [ ] **Step 2: Add render-level lifecycle tests**
 
-The tests import from `@vue-tui/runtime/io/kitty-keyboard`. Check if the package exports map supports subpath imports. If not, change the import to a relative path:
+Append to `packages/runtime-tests/integration/kitty-lifecycle.test.ts` — these test the full `createApp().mount({ kittyKeyboard })` path, not just the controller:
 
 ```ts
-import {
-  createKittyKeyboardController,
-  matchKittyQueryResponse,
-  hasCompleteKittyQueryResponse,
-  stripKittyQueryResponsesAndTrailingPartial,
-  resolveFlags,
-} from "../../packages/runtime/src/io/kitty-keyboard.ts";
-```
+// --- Render-level integration tests ---
 
-Adjust the import path to work with the test runner. The integration tests in `packages/runtime-tests` import from `@vue-tui/runtime` which is a workspace dependency. The internal `io/kitty-keyboard` module may need a direct relative import or a subpath export in `package.json`.
+import { createApp, Text } from "@vue-tui/runtime";
+import { defineComponent } from "vue";
+
+const Dummy = defineComponent(() => () => null);
+
+describe("kitty lifecycle - mount/unmount integration", () => {
+  test("mount with kittyKeyboard enabled writes enable sequence", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+
+    const app = createApp(Dummy);
+    app.mount({
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      kittyKeyboard: { mode: "enabled" },
+    });
+
+    expect(written).toContain("\x1b[>1u");
+    app.unmount();
+  });
+
+  test("unmount writes disable sequence", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+
+    const app = createApp(Dummy);
+    app.mount({
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      kittyKeyboard: { mode: "enabled" },
+    });
+
+    app.unmount();
+    expect(written).toContain("\x1b[<u");
+  });
+
+  test("mount without kittyKeyboard does not write sequences", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+
+    const app = createApp(Dummy);
+    app.mount({
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+    });
+
+    expect(written.filter((s) => s.includes("\x1b[>"))).toHaveLength(0);
+    app.unmount();
+  });
+});
+```
 
 - [ ] **Step 3: Run integration tests**
 
 Run: `cd packages/runtime-tests && vp test run integration/kitty-lifecycle.test.ts`
-Expected: All ~22 tests PASS
+Expected: All tests PASS
 
 - [ ] **Step 4: Commit**
 
