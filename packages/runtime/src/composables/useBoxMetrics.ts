@@ -100,6 +100,14 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsResult {
     hasMeasured.value = true;
   }
 
+  function reset() {
+    width.value = 0;
+    height.value = 0;
+    left.value = 0;
+    top.value = 0;
+    hasMeasured.value = false;
+  }
+
   // Re-measure after each render commit. watchPostEffect triggers when the
   // ref changes (component mount / unmount). The yoga layout is calculated
   // inside the commit scheduler's queuePostFlushCb, which may run after this
@@ -109,7 +117,10 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsResult {
     // Access ref.value to track the dependency — when the ref changes,
     // this effect re-runs and schedules a new measurement.
     const node = resolveYogaNode(ref.value);
-    if (!node) return;
+    if (!node) {
+      reset();
+      return;
+    }
     void nextTick(measure);
   });
 
