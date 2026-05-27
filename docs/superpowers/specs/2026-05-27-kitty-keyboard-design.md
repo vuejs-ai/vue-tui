@@ -102,16 +102,24 @@ Add a guard at the top of `parseKeypress()` to recognize and swallow kitty query
 const kittyQueryResponseRe = /^\x1b\[\?\d+u$/;
 
 export function parseKeypress(s: string): Keypress {
-  // Swallow kitty protocol query responses — these are terminal capability
-  // replies, not user keypresses. Return a no-op keypress that useInput ignores.
   if (kittyQueryResponseRe.test(s)) {
-    return { name: '', sequence: s, raw: s, ctrl: false, shift: false, meta: false };
+    return { name: '', sequence: s, raw: s, ctrl: false, shift: false, meta: false, ignore: true };
   }
   // ... rest of existing logic
 }
 ```
 
-This handles both scenarios where query responses can reach the parser: (1) late responses arriving after the detection timeout, and (2) responses during the dual-listener race window. The empty `name` and empty `input` result means useInput's handler is called with `input=''` and no key flags set — effectively a no-op.
+The `ignore: true` flag tells useInput to skip this keypress entirely — the user handler is NOT called. This handles both scenarios: (1) late responses after detection timeout, (2) responses during the dual-listener race window.
+
+**useInput** must check for `ignore` before calling the handler:
+
+```ts
+function listener(data: string) {
+  const keypress = parseKeypress(data);
+  if (keypress.ignore) return;
+  // ... rest of existing logic
+}
+```
 
 ### Modified: `packages/runtime/src/render.ts`
 
@@ -354,8 +362,8 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 **Late response after timeout (1 test):**
 - Terminal responds after 200ms timeout — protocol not enabled (late response bytes flow to normal input pipeline as an unknown escape sequence, which is harmless since `\x1b[?1u` does not match the kitty CSI u parser regex)
 
-**End-to-end byte delivery (1 test):**
-- User input during detection window is delivered to useInput exactly once after detection completes
+**Query response suppression in useInput (1 test):**
+- `\x1b[?1u` arriving at useInput (late response or race) produces zero handler calls (ignore flag)
 
 ## Implementation Notes
 
@@ -363,14 +371,14 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - The `isKittyProtocol`, `isPrintable`, `text`, `super`, `hyper`, `capsLock`, `numLock`, `eventType` fields are already set by `parseKittyKeypress()` in parse-keypress.ts. No changes needed to the parser.
 - Auto-detect's stdin `data` listener is temporary (removed after detection completes or times out). It runs during the brief init window. See the race condition note below for the overlap scenario with useInput's listener.
 - The `stdin.unshift()` call to re-emit non-query bytes pushes them back to the front of the readable stream. After the kitty detection listener is removed, the re-emitted bytes are picked up by the normal input pipeline (createStdinController's handleData) on the next read.
-- **Known race condition (matches Ink)**: The detection `data` listener and useInput's `data` listener can briefly coexist if a component mounts and calls `acquireRawMode()` within the 200ms detection window. In this scenario: (a) query response bytes could leak to useInput (they'd be treated as unknown escape sequences), (b) user input bytes could be delivered twice (once by each listener, plus once more after unshift). This same race exists in Ink's implementation. In practice, most terminals respond to the query synchronously or within a few ms, so detection completes before useInput effects fire. The mitigation is ordering: `kittyController.init()` runs before `originalMount()`, so detection starts before Vue components mount. An end-to-end test must verify that user bytes sent during detection are delivered to useInput exactly once. If the race proves problematic in practice, the fix is to integrate detection into the stdin controller's input pipeline (filter query responses inline rather than using a separate listener).
+- **Known race condition (matches Ink)**: The detection `data` listener and useInput's `data` listener can briefly coexist if a component mounts and calls `acquireRawMode()` within the 200ms detection window. In this scenario: (a) query response bytes are filtered by the `ignore` flag in parseKeypress, so they never reach user handlers, (b) user input bytes arriving during detection may be delivered twice — once by useInput's listener and once after `unshift()`. This same race exists in Ink's implementation. In practice, most terminals respond to the query synchronously or within a few ms, so detection completes before useInput effects fire. The mitigation is ordering: `kittyController.init()` runs before `originalMount()`, so detection starts before Vue components mount. If the dual-delivery race proves problematic in practice, the fix is to integrate detection into the stdin controller's input pipeline (single listener, no duplication).
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
 | `packages/runtime/src/io/kitty-keyboard.ts` | **New** — types, constants, query matchers, lifecycle controller |
-| `packages/runtime/src/io/parse-keypress.ts` | Add query response filter (`\x1b[?<digits>u` → no-op keypress) |
+| `packages/runtime/src/io/parse-keypress.ts` | Add query response filter (`\x1b[?<digits>u` → keypress with `ignore: true`) |
 | `packages/runtime/src/render.ts` | Add `kittyKeyboard` to MountOptions, wire controller in mount/teardown |
 | `packages/runtime/src/composables/useInput.ts` | Extend Key interface, add kitty-aware input logic |
 | `packages/runtime/src/index.ts` | Re-export KittyKeyboardOptions, KittyFlagName, kittyFlags |
