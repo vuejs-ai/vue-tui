@@ -86,6 +86,69 @@ describe("useBoxMetrics", () => {
 });
 
 describe("measureElement", () => {
+  test("measure element (integration)", async () => {
+    const measuredWidth = shallowRef(0);
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      watchPostEffect(() => {
+        void nextTick(() => {
+          const m = measureElement(boxRef.value);
+          measuredWidth.value = m.width;
+        });
+      });
+      return () => (
+        <Box ref={boxRef}>
+          <Text>Width: {measuredWidth.value}</Text>
+        </Box>
+      );
+    });
+    // Default columns = 100, box fills terminal width
+    await render(App);
+    await nextTick();
+    expect(measuredWidth.value).toBe(100);
+  });
+
+  test("calculate layout while rendering is throttled (rerender pattern)", async () => {
+    // Mirrors Ink's test: initial render is null, then rerender with the
+    // real component to simulate throttled rendering. The measurement should
+    // still resolve correctly after the deferred render.
+    const measuredWidth = shallowRef(0);
+    const show = shallowRef(false);
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      // Track both show (to know when to measure) and boxRef (for the element).
+      // watchPostEffect only re-runs when its tracked dependencies change.
+      // We need to explicitly read show.value so the effect re-runs when the
+      // component toggles from null to the real Box tree.
+      watchPostEffect(() => {
+        const _show = show.value;
+        void _show;
+        void nextTick(() => {
+          const m = measureElement(boxRef.value);
+          measuredWidth.value = m.width;
+        });
+      });
+      return () =>
+        show.value ? (
+          <Box ref={boxRef}>
+            <Text>Width: {measuredWidth.value}</Text>
+          </Box>
+        ) : null;
+    });
+    await render(App, { columns: 100 });
+    await nextTick();
+    // Nothing rendered yet
+    expect(measuredWidth.value).toBe(0);
+
+    // "Rerender" by toggling the show flag — the effect re-runs because
+    // show.value changed, then the nextTick reads yoga after layout.
+    show.value = true;
+    await nextTick();
+    await nextTick();
+    await nextTick();
+    expect(measuredWidth.value).toBe(100);
+  });
+
   test("returns { width: 0, height: 0 } for null", () => {
     expect(measureElement(null)).toEqual({ width: 0, height: 0 });
   });
@@ -268,6 +331,92 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     await terminal.resize(60, 100);
     await nextTick();
     expect(lastFrame()).toContain("Width: 60");
+  });
+
+  // Same layout-commit limitation as "updates when terminal is resized": after
+  // switching the tracked ref, a resize should re-measure the NEW element. But
+  // because useBoxMetrics only re-runs when ref.value changes, a resize that
+  // doesn't change the ref won't trigger re-measurement.
+  // TODO: add layout-commit listener to useBoxMetrics for full Ink parity.
+  test.skip("uses latest tracked ref when terminal is resized", async () => {
+    const trackSecond = shallowRef(false);
+    const App = defineComponent(() => {
+      const firstRef = ref(null);
+      const secondRef = ref(null);
+      const trackedRef = ref<unknown>(null);
+
+      watchEffect(() => {
+        trackedRef.value = trackSecond.value ? secondRef.value : firstRef.value;
+      });
+
+      const { height } = useBoxMetrics(trackedRef);
+      useTerminalSize();
+
+      return () => (
+        <Box flexDirection="column">
+          <Box ref={firstRef}>
+            <Text>short</Text>
+          </Box>
+          <Box ref={secondRef}>
+            <Text>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789</Text>
+          </Box>
+          <Text>Tracked height: {height.value}</Text>
+        </Box>
+      );
+    });
+    const { lastFrame, terminal } = await render(App, { columns: 100 });
+    await nextTick();
+    expect(lastFrame()).toContain("Tracked height: 1");
+
+    // Switch to tracking secondRef
+    trackSecond.value = true;
+    await nextTick();
+    await nextTick();
+    expect(lastFrame()).toContain("Tracked height: 1");
+
+    // Resize to 20 columns — the 62-char text wraps to 4 lines
+    await terminal.resize(20, 100);
+    await nextTick();
+    await nextTick();
+    expect(lastFrame()).toContain("Tracked height: 4");
+  });
+
+  // In vue-tui, useBoxMetrics uses watchPostEffect (auto-disposed on scope
+  // teardown) instead of manually subscribing to resize. This test verifies
+  // the effect stops running after unmount — the vue-tui equivalent of Ink's
+  // "removes resize listener on unmount" test.
+  test("removes reactive effect on unmount", async () => {
+    let measureCount = 0;
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      const { width } = useBoxMetrics(boxRef);
+      watchEffect(() => {
+        // Track width reads to count how often measurement triggers re-renders
+        void width.value;
+        measureCount++;
+      });
+      return () => (
+        <Box ref={boxRef}>
+          <Text>Hello</Text>
+        </Box>
+      );
+    });
+    const { unmount } = await render(App);
+    await nextTick();
+    await nextTick();
+
+    const countAfterMount = measureCount;
+    expect(countAfterMount).toBeGreaterThan(0);
+
+    unmount();
+    await nextTick();
+    await nextTick();
+
+    // After unmount, no further measurement effects should fire
+    const countAfterUnmount = measureCount;
+    await nextTick();
+    await nextTick();
+    expect(measureCount).toBe(countAfterUnmount);
   });
 
   test("uses latest tracked ref after switching", async () => {
