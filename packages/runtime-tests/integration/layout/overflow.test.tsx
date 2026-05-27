@@ -1,7 +1,8 @@
 import { defineComponent } from "vue";
-import { expect, test } from "vite-plus/test";
+import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { Box, Text, measureText } from "@vue-tui/runtime";
+import stripAnsi from "strip-ansi";
 
 /** Build a round-border box string like boxen(text, { borderStyle: "round" }) */
 function box(text: string): string {
@@ -580,4 +581,79 @@ test("out of bounds writes do not crash", async () => {
     { columns: 10 },
   );
   expect(lastFrame({ trimLines: true })).toBeDefined();
+});
+
+// --- absolute overlay wide glyph clipping (issue #10) ---
+
+function lineWidth(text: string): number {
+  return measureText(stripAnsi(text), 9999).width;
+}
+
+describe("absolute overlay wide glyph clipping", () => {
+  test("wide char at right edge of clipped box is omitted", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Text>abc</Text>
+          <Box position="absolute" left={3}>
+            <Text>中</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toBe("abc");
+  });
+
+  test("wide emoji at right edge of clipped box is omitted", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Text>abc</Text>
+          <Box position="absolute" left={3}>
+            <Text>🍔</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toBe("abc");
+  });
+
+  test("wide char fully inside clipped box is preserved", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Text>a</Text>
+          <Box position="absolute" left={2}>
+            <Text>中</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toContain("中");
+    expect(lineWidth(frame)).toBeLessThanOrEqual(4);
+  });
+
+  test("output does not exceed terminal columns with absolute wide char", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={8} height={1} overflow="hidden">
+          <Text>hello</Text>
+          <Box position="absolute" left={7}>
+            <Text>你好</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 8 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    for (const line of frame.split("\n")) {
+      expect(lineWidth(line)).toBeLessThanOrEqual(8);
+    }
+  });
 });
