@@ -10,6 +10,10 @@
 
 **Reference:** Ink source at `/tmp/ink` — port the patterns, adapt to Vue idioms.
 
+**Accepted limitations (per design spec):**
+- Auto-detect's temporary stdin `data` listener can briefly coexist with useInput's listener during the 200ms detection window. User bytes during this window may be delivered twice. This matches Ink's behavior and is documented in the spec. In practice, terminals respond synchronously or within a few ms, so the race rarely fires.
+- Kitty Ctrl+C (`\x1b[3;5u`) exit interception happens in `useInput`, not in the stdin controller. This matches Ink — without `useInput`, stdin isn't in raw mode, so kitty sequences don't arrive.
+
 ---
 
 ### Task 1: Create kitty-keyboard.ts — types, constants, query/response matching
