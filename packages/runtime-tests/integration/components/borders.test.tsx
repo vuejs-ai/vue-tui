@@ -1,7 +1,8 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { Box, Text, measureText } from "@vue-tui/runtime";
+import stripAnsi from "strip-ansi";
 
 // single node — full width box
 test("single node - full width box", async () => {
@@ -951,6 +952,25 @@ test("custom border style", async () => {
     →Content                                                                                           ←
     ↗↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↖"
   `);
+});
+
+// arrow border on narrow box does not overflow
+test("arrow border on narrow box does not overflow", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="arrow" width={3} height={3}>
+        <Text>x</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  for (const line of frame.split("\n")) {
+    expect(measureText(stripAnsi(line), 9999).width).toBeLessThanOrEqual(3);
+  }
+  const stripped = stripAnsi(frame);
+  expect(stripped.split("\n")[0]).toContain("↘");
+  expect(stripped.split("\n")[2]).toContain("↗");
 });
 
 // dim border color
