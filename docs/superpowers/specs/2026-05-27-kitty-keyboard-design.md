@@ -109,7 +109,7 @@ export function parseKeypress(s: string): Keypress {
 }
 ```
 
-The `ignore: true` flag tells useInput to skip this keypress entirely — the user handler is NOT called. This handles both scenarios: (1) late responses after detection timeout, (2) responses during the dual-listener race window.
+The `ignore: true` flag tells useInput to skip this keypress entirely — the user handler is NOT called. The `Keypress` type must be extended with `ignore?: boolean`. This handles both scenarios: (1) late responses after detection timeout, (2) responses during the dual-listener race window.
 
 **useInput** must check for `ignore` before calling the handler:
 
@@ -225,7 +225,7 @@ Helper function `kittyKey(codepoint, modifiers?, eventType?, textCodepoints?)` c
 
 **Basic character + modifier parsing (11 tests):**
 - Simple character 'a' (`\x1b[97u`)
-- Uppercase with shift (`\x1b[65;2u`)
+- Uppercase with shift (`\x1b[65;2u`) — note: strict kitty spec says lowercase codepoint (97), but some terminals send uppercase (65). Matches Ink's test.
 - Ctrl modifier (`\x1b[97;5u`)
 - Alt/option modifier (`\x1b[97;3u`)
 - Super modifier (`\x1b[97;9u`)
@@ -360,7 +360,7 @@ Tests the protocol enable/disable/auto-detect flow. Uses fake stdin/stdout strea
 - Query response split across two stdin data chunks — bytes reassembled correctly
 
 **Late response after timeout (1 test):**
-- Terminal responds after 200ms timeout — protocol not enabled (late response bytes flow to normal input pipeline as an unknown escape sequence, which is harmless since `\x1b[?1u` does not match the kitty CSI u parser regex)
+- Terminal responds after 200ms timeout — protocol not enabled (late response bytes flow to normal input pipeline where parseKeypress marks them with `ignore: true`, producing zero useInput handler calls)
 
 **Query response suppression in useInput (1 test):**
 - `\x1b[?1u` arriving at useInput (late response or race) produces zero handler calls (ignore flag)
