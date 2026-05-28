@@ -227,6 +227,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // so fullscreen apps get clearTerminal on exit.
     scheduledCommit = () => {};
     mountedScheduler?.cancel();
+    // Prevent post-unmount app.clear() from writing to a torn-down stream.
+    mountedClear = null;
     const stdout = mountedAppContext?.stdout;
     const stdoutWritable = stdout && !stdout.destroyed && !stdout.writableEnded;
     if (mountedInteractive && !mountedDebug && mountedCommit && stdoutWritable) {

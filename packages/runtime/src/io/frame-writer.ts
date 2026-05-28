@@ -40,6 +40,12 @@ export function createFrameWriter(
       if (log) log.clear();
     },
     sync(frame: string) {
+      // Keep this writer's dedup baseline aligned with log-update's internal
+      // previousOutput. Without this, a later write() of `frame` is skipped by
+      // log-update (state synced) while a write() of the *pre-sync* lastFrame
+      // passes this layer's dedup but is dropped by log-update — desyncing the
+      // two dedup layers and dropping a legitimately-changed frame.
+      lastFrame = frame;
       if (log) log.sync(frame);
     },
     setCursorPosition(pos) {

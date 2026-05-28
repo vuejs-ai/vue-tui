@@ -26,7 +26,16 @@ export function createCommitScheduler(
   const immediate = options.immediate ?? false;
   const throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS;
   let scheduled = false;
-  let resolveFlush: (() => void) | null = null;
+  // Multiple concurrent flush() callers can be waiting on the same pending
+  // commit; settle all of them rather than overwriting a single resolver.
+  let flushResolvers: (() => void)[] = [];
+
+  function drainFlushResolvers() {
+    if (flushResolvers.length === 0) return;
+    const resolvers = flushResolvers;
+    flushResolvers = [];
+    for (const resolve of resolvers) resolve();
+  }
 
   // Throttle state (production only): leading+trailing pattern.
   // The leading call fires immediately, subsequent calls within the window
@@ -42,9 +51,7 @@ export function createCommitScheduler(
     try {
       commit();
     } finally {
-      const r = resolveFlush;
-      resolveFlush = null;
-      r?.();
+      drainFlushResolvers();
     }
   }
 
@@ -52,6 +59,11 @@ export function createCommitScheduler(
     if (scheduled) return;
     scheduled = true;
     queuePostFlushCb(() => {
+      // cancel() (teardown) may run between scheduling and this callback
+      // firing. The callback is a captured closure, so cancel() can't unqueue
+      // it — bail here so it doesn't commit on a torn-down tree or re-arm a
+      // trailing timer that nothing will cancel.
+      if (!scheduled) return;
       if (immediate) {
         doCommit();
         return;
@@ -83,7 +95,7 @@ export function createCommitScheduler(
   function flush(): Promise<void> {
     if (!scheduled && !hasPendingFlag) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      resolveFlush = resolve;
+      flushResolvers.push(resolve);
     });
   }
 
@@ -98,11 +110,9 @@ export function createCommitScheduler(
     }
     hasPendingFlag = false;
     scheduled = false;
-    // Resolve any waiter blocked on flush() — the pending commit will never
-    // fire now, so leaving resolveFlush unsettled would hang waitUntilRenderFlush.
-    const r = resolveFlush;
-    resolveFlush = null;
-    r?.();
+    // Resolve any waiters blocked on flush() — the pending commit will never
+    // fire now, so leaving them unsettled would hang waitUntilRenderFlush.
+    drainFlushResolvers();
   }
 
   return { schedule, flush, hasPending, cancel };
