@@ -13,10 +13,12 @@ import {
   AppContextKey,
   FocusContextKey,
   StdinContextKey,
+  AnimationSchedulerKey,
   type AppContext,
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
+import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -94,6 +96,7 @@ export function renderToString(component: Component, options?: RenderToStringOpt
   app.provide(AppContextKey, appContext);
   app.provide(FocusContextKey, createNoOpFocusContext());
   app.provide(StdinContextKey, createNoOpStdinContext());
+  app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
 
   // Capture the first uncaught error so we can re-throw after cleanup.
   // Vue's error handling catches component errors internally; for a
