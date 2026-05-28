@@ -3,7 +3,7 @@ import { defineComponent, nextTick, shallowRef, watchEffect } from "vue";
 import type { ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useAnimation, createApp } from "@vue-tui/runtime";
+import { Text, useAnimation, createApp, renderToString } from "@vue-tui/runtime";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -967,5 +967,14 @@ describe("useAnimation", () => {
     expect(frameVal).toBeGreaterThanOrEqual(1);
 
     unmount();
+  });
+
+  test("renderToString renders frame 0 without throwing or leaking timers", () => {
+    const App = defineComponent(() => {
+      const { frame } = useAnimation({ interval: 50 });
+      return () => <Text>{`frame:${frame.value}`}</Text>;
+    });
+    const output = renderToString(App);
+    expect(output).toContain("frame:0");
   });
 });
