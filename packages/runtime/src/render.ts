@@ -23,6 +23,7 @@ import { createCommitScheduler } from "./scheduler.ts";
 import { paint, paintIsolated } from "./paint/paint.ts";
 import { findStatics } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
+import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import {
   AppContextKey,
   FocusContextKey,
@@ -116,6 +117,7 @@ export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
   mount(options?: MountOptions): ComponentPublicInstance;
   waitUntilExit(): Promise<unknown>;
   waitUntilRenderFlush(): Promise<void>;
+  clear(): void;
 }
 
 type RootProps = Record<string, unknown>;
@@ -171,6 +173,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedCommit: (() => void) | null = null;
   let mountedAlternateScreen = false;
+  let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
 
   // The renderer's onCommit closure is wired at createApp time but only does
@@ -204,6 +207,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   }
 
   function writeBestEffort(stream: NodeJS.WriteStream, data: string) {
+    if (stream.destroyed || stream.writableEnded) return;
     try {
       stream.write(data);
     } catch {
@@ -216,21 +220,22 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (teardownStarted) return;
     teardownStarted = true;
 
-    // Final render before unmount (matching Ink ink.tsx:755-761).
+    // Cancel any pending trailing-edge timer first, then do a final
+    // synchronous commit so the latest state is always flushed before
+    // unmount (matching Ink ink.tsx:755-761).
     // teardownStarted=true makes shouldClearTerminalForFrame see isUnmounting,
     // so fullscreen apps get clearTerminal on exit.
-    if (mountedInteractive && !mountedDebug && mountedCommit) {
-      const skipFinalRender = mountedScheduler?.hasPending();
-      if (!skipFinalRender) {
-        try {
-          mountedCommit();
-        } catch {
-          // Final render is best-effort; don't block teardown cleanup.
-        }
+    scheduledCommit = () => {};
+    mountedScheduler?.cancel();
+    const stdout = mountedAppContext?.stdout;
+    const stdoutWritable = stdout && !stdout.destroyed && !stdout.writableEnded;
+    if (mountedInteractive && !mountedDebug && mountedCommit && stdoutWritable) {
+      try {
+        mountedCommit();
+      } catch {
+        // Final render is best-effort; don't block teardown cleanup.
       }
     }
-
-    scheduledCommit = () => {};
     // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
     if (mountedRestoreConsole) {
       mountedRestoreConsole();
@@ -249,7 +254,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Non-interactive: write the deferred last frame at unmount (matching Ink).
       const lastFrame = mountedGetLastOutput?.() ?? "";
       if (lastFrame) {
-        mountedAppContext.stdout.write(lastFrame + "\n");
+        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
       }
     }
     if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
@@ -258,7 +263,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h");
       mountedAlternateScreen = false;
     } else if (!mountedDebug && mountedInteractive && mountedAppContext) {
-      mountedAppContext.stdout.write("\x1b[?25h");
+      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h");
     }
     if (mountedRoot) detachYoga(mountedRoot);
     if (mountedResizeHandler && mountedAppContext) {
@@ -459,6 +464,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       incremental: options.incrementalRendering,
     });
     mountedWriter = writer;
+    mountedClear = () => {
+      if (!interactive || debug) return;
+      writer.clear();
+      writer.sync(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+    };
+    const synchronize = shouldSynchronize(stdout, interactive);
 
     function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
       const hasStaticOutput = staticOutput !== "";
@@ -480,16 +491,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       if (shouldClear) {
         // Direct write: clearTerminal + accumulated static + raw output
-        stdout.write(ansiEscapes.clearTerminal + frameState.fullStaticOutput + output);
+        const content = ansiEscapes.clearTerminal + frameState.fullStaticOutput + output;
+        stdout.write(synchronize ? bsu + content + esu : content);
         // Sync log-update state so next render computes correct erase
         writer.sync(outputToRender);
       } else if (hasStaticOutput) {
         // Clear frame -> write static -> re-render frame via log-update
+        if (synchronize) stdout.write(bsu);
         writer.clear();
         stdout.write(staticOutput);
-        writer.write(outputToRender);
+        writer.write(synchronize ? outputToRender + esu : outputToRender);
       } else {
-        writer.write(outputToRender);
+        writer.write(synchronize ? bsu + outputToRender + esu : outputToRender);
       }
 
       frameState.lastOutput = output;
@@ -694,6 +707,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setImmediate(resolve);
       }
     });
+  };
+
+  app.clear = function clear(): void {
+    mountedClear?.();
   };
 
   return app;

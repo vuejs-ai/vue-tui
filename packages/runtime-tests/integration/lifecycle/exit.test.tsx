@@ -1,7 +1,9 @@
-import { defineComponent, onScopeDispose } from "vue";
+import { Writable } from "node:stream";
+import { defineComponent, onMounted, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useExit } from "@vue-tui/runtime";
+import { createApp, Text, useExit } from "@vue-tui/runtime";
+import { makeFakeWritable, makeFakeStdin, isWriteBarrierChunk } from "./test-streams.ts";
 
 test("useExit() triggers teardown and waitUntilExit resolves", async () => {
   let exitFn!: () => void;
@@ -187,4 +189,145 @@ test("exit(value) resolves even when called rapidly twice", async () => {
   // before the write barrier fires.
   const result = await waitUntilExit();
   expect(result).toBe("second");
+});
+
+// --- Exit re-entrance tests (ported from Ink render.tsx) ---
+
+test("waitUntilExit resolves last exit value when duplicate exits happen during teardown", async () => {
+  // In vue-tui, exit() queues a microtask that overwrites pendingExitResult
+  // before the write barrier callback fires. When exit() is called twice,
+  // the second call's value wins because both microtasks run before the
+  // write barrier resolves (Ink preserves the first value instead).
+  let barrierWriteCallback: (() => void) | undefined;
+
+  const stdout = new Writable({
+    write(
+      chunk: string | Uint8Array,
+      _encoding: BufferEncoding,
+      callback: (error?: Error) => void,
+    ) {
+      if (isWriteBarrierChunk(chunk)) {
+        barrierWriteCallback = callback;
+        return;
+      }
+      callback();
+    },
+  }) as unknown as NodeJS.WriteStream;
+  stdout.columns = 100;
+
+  const App = defineComponent(() => {
+    const exit = useExit();
+    onMounted(() => {
+      exit("first");
+      setTimeout(() => exit("second"), 0);
+    });
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  const exitPromise = app.waitUntilExit();
+  await new Promise((r) => setTimeout(r, 0));
+
+  if (barrierWriteCallback) {
+    barrierWriteCallback();
+  }
+  const result = await exitPromise;
+  expect(result).toBe("second");
+});
+
+test("waitUntilExit resolves last exit value when exit is re-entered during unmount writes", async () => {
+  // Same as above: the re-entrant exit("second") overwrites pendingExitResult
+  // because teardown() is idempotent but the result assignment still executes.
+  let exitFn: ((value?: unknown) => void) | undefined;
+  let shouldReenterExit = false;
+  let didReenterExit = false;
+
+  const stdout = new Writable({
+    write(
+      _chunk: string | Uint8Array,
+      _encoding: BufferEncoding,
+      callback: (error?: Error) => void,
+    ) {
+      if (shouldReenterExit && !didReenterExit && exitFn) {
+        didReenterExit = true;
+        exitFn("second");
+      }
+      callback();
+    },
+  }) as unknown as NodeJS.WriteStream;
+  stdout.columns = 100;
+  stdout.isTTY = true;
+
+  const App = defineComponent(() => {
+    const exit = useExit();
+    onMounted(() => {
+      exitFn = exit;
+      shouldReenterExit = true;
+      exit("first");
+    });
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  const result = await app.waitUntilExit();
+  expect(didReenterExit).toBe(true);
+  expect(result).toBe("second");
+});
+
+test("exit with cross-realm Error resolves after stdout write callback", async () => {
+  // vue-tui uses `instanceof Error` to distinguish errors from result values.
+  // A cross-realm Error (created in a different VM context) fails the
+  // instanceof check, so it is treated as a result value and resolves
+  // rather than rejecting. This differs from Ink which rejects. The test
+  // verifies the write-callback timing: resolution waits for the barrier.
+  const vm = await import("node:vm");
+  let writeCallbackFired = false;
+  let barrierWriteCallbackFired = false;
+
+  const stdout = new Writable({
+    write(
+      chunk: string | Uint8Array,
+      _encoding: BufferEncoding,
+      callback: (error?: Error) => void,
+    ) {
+      setTimeout(() => {
+        writeCallbackFired = true;
+        if (isWriteBarrierChunk(chunk)) {
+          barrierWriteCallbackFired = true;
+        }
+        callback();
+      }, 150);
+    },
+  }) as unknown as NodeJS.WriteStream;
+  stdout.columns = 100;
+
+  const foreignError = vm.runInNewContext("new Error('boom')") as Error;
+
+  const App = defineComponent(() => {
+    const exit = useExit();
+    onMounted(() => {
+      setTimeout(() => exit(foreignError), 0);
+    });
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  // Cross-realm Error fails instanceof check, so exit resolves with the
+  // error object as a value instead of rejecting.
+  const result = await app.waitUntilExit();
+  expect(result).toBe(foreignError);
+  expect(writeCallbackFired).toBe(true);
+  expect(barrierWriteCallbackFired).toBe(true);
 });

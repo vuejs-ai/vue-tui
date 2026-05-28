@@ -115,3 +115,15 @@ test("nested transforms apply inner-first: outer wraps inner result", async () =
   // Apply left-to-right: inner("x") = "{x}", then outer("{x}") = "({x})"
   expect(lastFrame()).toBe("({x})");
 });
+
+test("transform with multiple lines", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string, idx: number) => `[${idx}: ${s}]`}>
+        <Text>{"hello world\ngoodbye world"}</Text>
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[0: hello world]\n[1: goodbye world]");
+});

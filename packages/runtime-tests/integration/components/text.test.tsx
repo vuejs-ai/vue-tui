@@ -1,9 +1,10 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { renderToString, Box, Text } from "@vue-tui/runtime";
 import chalk from "chalk";
 import stripAnsi from "strip-ansi";
+import ansiEscapes from "ansi-escapes";
 
 test("nested Text renders inline without independent layout", async () => {
   const { lastFrame } = await render(() => (
@@ -557,4 +558,121 @@ test("strip standalone C1 control characters from text output", async () => {
   expect(frame).not.toContain("\x85");
   expect(frame).not.toContain("\x8e");
   expect(stripAnsi(frame)).toBe("ABC");
+});
+
+// --- Component edge case tests (ported from Ink components.tsx) ---
+
+test("ignore empty text node", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box>
+          <Text>Hello World</Text>
+        </Box>
+        <Text>{""}</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("Hello World");
+});
+
+test("render a single empty text node", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => <Text>{""}</Text>),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("");
+});
+
+test("number", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => <Text>{1}</Text>),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("1");
+});
+
+test("do not wrap text with BEL-terminated OSC hyperlinks", async () => {
+  const hyperlink = "\x1b]8;;https://example.com\x07Click here\x1b]8;;\x07";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="wrap">{hyperlink}</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(stripAnsi(output)).toBe("Click here");
+});
+
+test("do not wrap text with ST-terminated OSC hyperlinks", async () => {
+  const hyperlink = "\x1b]8;;https://example.com\x1b\\Click here\x1b]8;;\x1b\\";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="wrap">{hyperlink}</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(stripAnsi(output)).toBe("Click here");
+});
+
+// Feature gap: non-hyperlink OSC title sequences are consumed into the OSC payload
+test.skip("do not wrap text with non-hyperlink OSC sequences", async () => {
+  const text = "\x1b]0;My Title\x07Some text";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="wrap">{text}</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(stripAnsi(output)).toBe("Some text");
+});
+
+test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
+  const hyperlink = "\x1b]8;;https://example.com\x07abcdefghij\x1b]8;;\x07";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={5}>
+        <Text wrap="wrap">{hyperlink}</Text>
+      </Box>
+    )),
+    { columns: 5 },
+  );
+  expect(stripAnsi(output)).toBe("abcde\nfghij");
+});
+
+// Feature gap: ST-terminated OSC sequences not handled correctly in wrap-ansi path
+test.skip("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
+  const hyperlink = "\x1b]8;;https://example.com\x1b\\abcdefghij\x1b]8;;\x1b\\";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={5}>
+        <Text wrap="wrap">{hyperlink}</Text>
+      </Box>
+    )),
+    { columns: 5 },
+  );
+  expect(stripAnsi(output)).toBe("abcde\nfghij");
+});
+
+test("ensure wrap-ansi doesn't trim leading whitespace", async () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text color="red">{" ERROR "}</Text>),
+    { columns: 100 },
+  );
+  expect(output).toBe(chalk.red(" ERROR "));
+});
+
+test("link ansi escapes are closed properly", async () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text>{ansiEscapes.link("Example", "https://example.com")}</Text>),
+    { columns: 100 },
+  );
+  expect(output).toContain("Example");
+  expect(output).toContain("example.com");
 });
