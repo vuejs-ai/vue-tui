@@ -314,7 +314,7 @@ export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): v
 
 // --- text measure binding ------------------------------------------------
 
-import { flattenLeaves, measureText } from "./text-measure.ts";
+import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 
 export function bindTextMeasure(text: TuiText): void {
   text.yoga.setMeasureFunc((availableWidth) => {
@@ -325,7 +325,7 @@ export function bindTextMeasure(text: TuiText): void {
     // so yoga doesn't crash trying to measure an empty string.
     if (raw === "") return { width: 0, height: 0 };
 
-    const natural = measureText(raw, Infinity, text.props.wrap ?? "wrap");
+    const natural = measureTextNatural(raw);
 
     // Text fits into container, no need to wrap.
     if (natural.width <= availableWidth) return natural;
@@ -338,7 +338,8 @@ export function bindTextMeasure(text: TuiText): void {
       return natural;
     }
 
-    return measureText(raw, availableWidth, text.props.wrap ?? "wrap");
+    const wrapped = wrapText(raw, availableWidth, text.props.wrap ?? "wrap");
+    return measureTextNatural(wrapped.join("\n"));
   });
 }
 

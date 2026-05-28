@@ -38,4 +38,4 @@ export {
   type KittyKeyboardOptions,
   type KittyFlagName,
 } from "./io/kitty-keyboard.ts";
-export { measureText } from "./host/text-measure.ts";
+export { measureText, measureTextNatural } from "./host/text-measure.ts";
