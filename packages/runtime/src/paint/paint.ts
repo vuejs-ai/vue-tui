@@ -408,6 +408,12 @@ function paintNode(
   transformers: Transformer[],
   inheritedBg?: string,
 ): void {
+  // display:none — yoga collapses the node to zero size but still reports a
+  // layout; skip painting the subtree entirely (matches Ink's renderNodeToOutput
+  // early-return) so hidden content never leaks onto visible siblings.
+  const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
+  if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) return;
+
   switch (node.type) {
     case "root": {
       for (const child of node.children) paintNode(child, output, x0, y0, transformers);
