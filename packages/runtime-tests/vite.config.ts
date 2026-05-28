@@ -11,7 +11,7 @@ export default defineConfig({
   },
   lint: {
     options: { typeAware: true, typeCheck: true },
-    exclude: ["integration/pty/fixtures/**"],
+    ignorePatterns: ["integration/pty/fixtures/**"],
   },
   fmt: {},
 });
