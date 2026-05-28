@@ -21,6 +21,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
+    "check:type": "tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
   "dependencies": {

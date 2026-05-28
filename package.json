@@ -7,6 +7,7 @@
   "scripts": {
     "check:fmt": "vp fmt --check",
     "check:lint": "vp lint",
+    "check:type": "vp run -r check:type",
     "check:fixtures": "vp run -r check:fixtures",
     "test": "vp run -r test",
     "build": "vp run -r build",
