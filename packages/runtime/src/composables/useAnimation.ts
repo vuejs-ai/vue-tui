@@ -2,13 +2,17 @@ import {
   shallowRef,
   watch,
   toValue,
+  inject,
   onScopeDispose,
   type MaybeRefOrGetter,
   type ShallowRef,
 } from "vue";
-
-const DEFAULT_INTERVAL = 100;
-const MAX_TIMER_INTERVAL = 2_147_483_647;
+import {
+  createAnimationScheduler,
+  normalizeInterval,
+  type AnimationScheduler,
+} from "../animation-scheduler.ts";
+import { AnimationSchedulerKey } from "../context.ts";
 
 export interface AnimationOptions {
   /**
@@ -51,11 +55,6 @@ export interface AnimationResult {
   readonly reset: () => void;
 }
 
-function normalizeInterval(interval: number | undefined): number {
-  if (interval === undefined || !Number.isFinite(interval)) return DEFAULT_INTERVAL;
-  return Math.min(Math.max(1, Math.round(interval)), MAX_TIMER_INTERVAL);
-}
-
 /**
  * A composable that drives animations. Returns a frame counter, elapsed time,
  * frame delta, and a reset function.
@@ -78,14 +77,18 @@ export function useAnimation(options: AnimationOptions = {}): AnimationResult {
   const time = shallowRef(0);
   const delta = shallowRef(0);
 
-  let timer: ReturnType<typeof setInterval> | undefined;
+  const interval = normalizeInterval(options.interval);
+  // Fall back to a local standalone scheduler when used outside a vue-tui
+  // render tree (graceful degradation, not a silent break).
+  const scheduler: AnimationScheduler =
+    inject(AnimationSchedulerKey, null) ?? createAnimationScheduler();
+
+  let handle: { startTime: number; unsubscribe: () => void } | undefined;
   let startTime = 0;
   let lastTickTime = 0;
-  const currentInterval = normalizeInterval(options.interval);
 
-  function tick() {
-    const now = performance.now();
-    frame.value++;
+  function tick(now: number) {
+    frame.value = Math.floor((now - startTime) / interval);
     time.value = now - startTime;
     delta.value = now - lastTickTime;
     lastTickTime = now;
@@ -93,24 +96,23 @@ export function useAnimation(options: AnimationOptions = {}): AnimationResult {
 
   function start() {
     stop();
-    startTime = performance.now();
-    lastTickTime = startTime;
     frame.value = 0;
     time.value = 0;
     delta.value = 0;
-    timer = setInterval(tick, currentInterval);
+    handle = scheduler.subscribe(tick, interval);
+    startTime = handle.startTime;
+    lastTickTime = handle.startTime;
   }
 
   function stop() {
-    if (timer !== undefined) {
-      clearInterval(timer);
-      timer = undefined;
+    if (handle) {
+      handle.unsubscribe();
+      handle = undefined;
     }
   }
 
   function reset() {
-    const wasActive = timer !== undefined;
-    stop();
+    const wasActive = handle !== undefined;
     frame.value = 0;
     time.value = 0;
     delta.value = 0;
