@@ -1,6 +1,7 @@
 import { defineComponent, h, type PropType } from "vue";
+import type { WithChildren } from "./with-children.ts";
 
-export const Static = defineComponent({
+const StaticImpl = defineComponent({
   name: "Static",
   props: {
     items: { type: Array as PropType<unknown[]>, required: true },
@@ -22,3 +23,5 @@ export const Static = defineComponent({
     };
   },
 });
+
+export const Static = StaticImpl as WithChildren<typeof StaticImpl>;

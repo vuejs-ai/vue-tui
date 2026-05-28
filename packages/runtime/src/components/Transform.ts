@@ -1,9 +1,10 @@
 import { defineComponent, h, inject, type PropType } from "vue";
 import { AppContextKey } from "../context.ts";
+import type { WithChildren } from "./with-children.ts";
 
 type TransformFn = (line: string, lineIndex: number) => string;
 
-export const Transform = defineComponent({
+const TransformImpl = defineComponent({
   name: "Transform",
   props: {
     transform: { type: Function as PropType<TransformFn>, required: true },
@@ -25,3 +26,5 @@ export const Transform = defineComponent({
     };
   },
 });
+
+export const Transform = TransformImpl as WithChildren<typeof TransformImpl>;

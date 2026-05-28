@@ -1,5 +1,6 @@
 import { defineComponent, h, inject, type PropType } from "vue";
 import { AppContextKey } from "../context.ts";
+import type { WithChildren } from "./with-children.ts";
 
 type Spacing = number;
 type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
@@ -63,7 +64,7 @@ export interface AriaState {
   selected?: boolean;
 }
 
-export const Box = defineComponent({
+const BoxImpl = defineComponent({
   name: "Box",
   props: {
     flexDirection: String as PropType<FlexDirection>,
@@ -157,3 +158,5 @@ export const Box = defineComponent({
     };
   },
 });
+
+export const Box = BoxImpl as WithChildren<typeof BoxImpl>;
