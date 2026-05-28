@@ -1082,6 +1082,117 @@ test("dim right border color", async () => {
   `);
 });
 
+// --- borderBackgroundColor tests (ported from Ink border-backgrounds.tsx) ---
+
+test("border with background color", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="single" borderColor="white" borderBackgroundColor="blue">
+        <Box width={4}>
+          <Text>Test</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  expect(frame).toContain("┌");
+  expect(frame).toContain("┐");
+  expect(frame).toContain("└");
+  expect(frame).toContain("┘");
+  expect(frame).toContain("Test");
+  // Blue background: ESC[44m
+  expect(frame).toContain("[44m");
+});
+
+test("border with different background colors per side", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle="single"
+        borderTopBackgroundColor="red"
+        borderBottomBackgroundColor="blue"
+        borderLeftBackgroundColor="green"
+        borderRightBackgroundColor="yellow"
+      >
+        <Box width={4}>
+          <Text>Test</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  expect(frame).toContain("┌");
+  expect(frame).toContain("Test");
+  // red=41, green=42, yellow=43, blue=44
+  expect(frame).toContain("[41m");
+  expect(frame).toContain("[42m");
+  expect(frame).toContain("[43m");
+  expect(frame).toContain("[44m");
+});
+
+test("border background color fallback to general borderBackgroundColor", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="single" borderBackgroundColor="magenta" borderTopBackgroundColor="cyan">
+        <Box width={4}>
+          <Text>Test</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  // cyan=46, magenta=45
+  expect(frame).toContain("[46m");
+  expect(frame).toContain("[45m");
+});
+
+test("vertical border background does not bleed into content rows", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="classic" borderBackgroundColor="cyan" alignSelf="flex-start" width={12}>
+        <Text>Text longer than the Box width, so will definitely wrap.</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  const bgCyanPattern = "\\[46m";
+  const bgResetPattern = "\\[49m";
+  const tableBorderChar = "|";
+  const tableBorderPattern = bgCyanPattern + tableBorderChar + bgResetPattern;
+  const contentRowPattern = new RegExp(`^${tableBorderPattern}.*${tableBorderPattern}$`);
+  const tableRows = frame.split("\n");
+  const contentRows = tableRows.slice(1, -1);
+  for (const contentRow of contentRows) {
+    expect(contentRow).toMatch(contentRowPattern);
+  }
+});
+
+test("foreground, background and dim combine correctly", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderTopDimColor
+        borderStyle="single"
+        borderTopColor="red"
+        borderTopBackgroundColor="cyan"
+        alignSelf="flex-start"
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  // red FG=31, cyan BG=46, dim=2
+  expect(frame).toContain("[31m");
+  expect(frame).toContain("[46m");
+  expect(frame).toContain("[2m");
+});
+
 // borderDimColor should not dim styled child Text touching left edge
 test("borderDimColor does not dim styled child Text touching left edge", async () => {
   const { lastFrame } = await render(

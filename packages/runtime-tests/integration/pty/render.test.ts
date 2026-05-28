@@ -197,6 +197,47 @@ it("#450: shrink from full-height to rows - 1 should clear exactly once", async 
   expect(clearTerminalCount).toBe(1);
 });
 
+it("#450 control: rows - 1 rerenders should avoid clearTerminal", async () => {
+  const { clearTerminalCount, eraseLineCount } = await runIssue450FixtureWithCounts(
+    "issue-450-height-minus-one-rerender",
+  );
+  expect(clearTerminalCount).toBe(0);
+  expect(eraseLineCount).toBeGreaterThan(0);
+});
+
+it("#450: full-height rerenders should not clear before unmount", async () => {
+  const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
+    "issue-450-full-height-rerender-with-marker",
+    "__FULL_HEIGHT_RERENDER_COMPLETED__",
+  );
+  const { clearTerminalCount } = getIssue450ControlSequenceCounts(outputBeforeMarker);
+  expect(clearTerminalCount).toBe(0);
+});
+
+it("#450: shrink from overflow to rows - 1 should clear exactly once", async () => {
+  const { clearTerminalCount } = await runIssue450FixtureWithCounts(
+    "issue-450-shrink-from-overflow-rerender",
+  );
+  expect(clearTerminalCount).toBe(1);
+});
+
+it("#450: <Static> with shrink from full-height should clear exactly once", async () => {
+  const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
+    "issue-450-static-shrink-from-fullscreen-rerender",
+  );
+  expect(output).toContain("#450 static line");
+  expect(clearTerminalCount).toBe(1);
+});
+
+it("#450: full-height rerenders with <Static> should not repeatedly clear terminal", async () => {
+  const { output, clearTerminalCount, eraseLineCount } = await runIssue450FixtureWithCounts(
+    "issue-450-full-height-with-static-rerender",
+  );
+  expect(output).toContain("#450 static line");
+  expect(clearTerminalCount).toBeLessThanOrEqual(1);
+  expect(eraseLineCount).toBeGreaterThan(0);
+});
+
 // ── Animation exit tests ────────────────────────────────────────────
 
 it("useAnimation can drive non-interactive process exit", async () => {

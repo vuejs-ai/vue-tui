@@ -30,6 +30,9 @@ catalogs:
     patch-console:
       specifier: ^2.0.0
       version: 2.0.0
+    string-width:
+      specifier: ^7.2.0
+      version: 7.2.0
     strip-ansi:
       specifier: ^7.2.0
       version: 7.2.0
@@ -234,9 +237,15 @@ importers:
       chalk:
         specifier: 'catalog:'
         version: 5.6.2
+      is-in-ci:
+        specifier: 'catalog:'
+        version: 1.0.0
       node-pty:
         specifier: 'catalog:'
         version: 1.2.0-beta.13
+      string-width:
+        specifier: 'catalog:'
+        version: 7.2.0
       strip-ansi:
         specifier: 'catalog:'
         version: 7.2.0

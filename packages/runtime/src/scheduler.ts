@@ -5,6 +5,8 @@ export interface CommitScheduler {
   flush: () => Promise<void>;
   /** Returns true when a trailing-edge commit is pending. */
   hasPending: () => boolean;
+  /** Cancel any pending trailing-edge timer. */
+  cancel: () => void;
 }
 
 export interface CommitSchedulerOptions {
@@ -89,5 +91,14 @@ export function createCommitScheduler(
     return hasPendingFlag;
   }
 
-  return { schedule, flush, hasPending };
+  function cancel() {
+    if (trailingTimer) {
+      clearTimeout(trailingTimer);
+      trailingTimer = null;
+    }
+    hasPendingFlag = false;
+    scheduled = false;
+  }
+
+  return { schedule, flush, hasPending, cancel };
 }
