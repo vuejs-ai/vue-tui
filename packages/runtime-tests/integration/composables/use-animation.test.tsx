@@ -1,23 +1,11 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef, watchEffect } from "vue";
 import type { ShallowRef } from "vue";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
+import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useAnimation, createApp } from "@vue-tui/runtime";
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/**
- * Only fake setInterval / clearInterval / performance so that render()'s
- * internal setImmediate / setTimeout / nextTick still resolve on real clocks.
- */
-const FAKE_TIMER_OPTS = {
-  toFake: ["setInterval", "clearInterval", "performance"] as (
-    | "setInterval"
-    | "clearInterval"
-    | "performance"
-  )[],
-};
 
 describe("useAnimation", () => {
   // ---------------------------------------------------------------
@@ -517,752 +505,123 @@ describe("useAnimation", () => {
     unmount();
   });
 
-  // -- Fake timer tests --
-  // These use vi.useFakeTimers with selective faking so that render()'s
-  // internal setImmediate / setTimeout / nextTick still resolve on real clocks.
-  // IMPORTANT: After vi.advanceTimersByTime(), read refs directly via .value
-  // because Vue's scheduler microtasks don't flush during timer advancement.
-
-  describe("with fake timers", () => {
-    // Captured refs for direct reading (avoids watchEffect flush timing issues)
-    let frameRef: Readonly<ShallowRef<number>>;
-    let timeRef: Readonly<ShallowRef<number>>;
-    let deltaRef: Readonly<ShallowRef<number>>;
-    let resetFn: () => void;
-
-    beforeEach(() => {
-      vi.useFakeTimers(FAKE_TIMER_OPTS);
-    });
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    test("clamps zero interval to 1ms", async () => {
+  // -- Behavior over real time (migrated from fake-timer tests) --
+  // Timer-precision and exact-frame assertions now live in the scheduler
+  // unit tests (packages/runtime-tests/unit/animation-scheduler.test.ts).
+  // These verify observable end-to-end behavior only, using real timers.
+  describe("behavior over real time", () => {
+    test("frame increments over time", async () => {
+      let frame!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 0 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        frame = useAnimation({ interval: 50 }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
       });
       const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(5);
-      expect(frameRef.value).toBe(5);
+      await delay(220);
+      expect(frame.value).toBeGreaterThanOrEqual(3);
       unmount();
     });
 
-    test("clamps negative interval to 1ms", async () => {
+    test("two same-interval animations stay in sync", async () => {
+      let f1!: Readonly<ShallowRef<number>>;
+      let f2!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: -10 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        f1 = useAnimation({ interval: 50 }).frame;
+        f2 = useAnimation({ interval: 50 }).frame;
+        return () => <Text>{`${f1.value},${f2.value}`}</Text>;
       });
       const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(5);
-      expect(frameRef.value).toBe(5);
+      await delay(180);
+      expect(f1.value).toBe(f2.value);
+      expect(f1.value).toBeGreaterThanOrEqual(1);
       unmount();
     });
 
-    test("frame catches up when timer is delayed", async () => {
+    test("different intervals advance at different rates", async () => {
+      let fast!: Readonly<ShallowRef<number>>;
+      let slow!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        fast = useAnimation({ interval: 30 }).frame;
+        slow = useAnimation({ interval: 120 }).frame;
+        return () => <Text>{`${fast.value},${slow.value}`}</Text>;
       });
       const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(220);
-      // At interval=50, 220ms => ticks at 50,100,150,200 => frame=4
-      expect(frameRef.value).toBe(4);
+      await delay(300);
+      expect(fast.value).toBeGreaterThan(slow.value);
       unmount();
     });
 
-    test("defaults to 100ms interval (fake timers)", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation();
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(250);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      unmount();
-    });
-
-    test("NaN interval treated as default (fake timers)", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: NaN });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(250);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      unmount();
-    });
-
-    test("Infinity interval treated as default (fake timers)", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: Number.POSITIVE_INFINITY });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(250);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      unmount();
-    });
-
-    test("pausing animation stops ticks before the next frame", async () => {
+    test("pause via isActive freezes the frame", async () => {
       const active = shallowRef(true);
+      let frame!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 8, isActive: active });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        frame = useAnimation({ interval: 30, isActive: () => active.value }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
       });
       const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(25);
-      const pausedFrame = frameRef.value;
-      expect(pausedFrame).toBeGreaterThanOrEqual(1);
-
-      // The watch on isActive uses flush: 'sync', so stop() is called immediately
+      await delay(150);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
       active.value = false;
-
-      vi.advanceTimersByTime(25);
-      expect(frameRef.value).toBe(pausedFrame);
-
-      unmount();
-    });
-
-    test("changing interval via remount unsubscribes stale ticks", async () => {
-      const makeApp = (interval: number) =>
-        defineComponent(() => {
-          const anim = useAnimation({ interval });
-          frameRef = anim.frame;
-          return () => <Text>{String(anim.frame.value)}</Text>;
-        });
-
-      const first = await render(makeApp(8));
-      vi.advanceTimersByTime(25);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      first.unmount();
-
-      const second = await render(makeApp(200));
-      expect(frameRef.value).toBe(0);
-
-      vi.advanceTimersByTime(17);
-      expect(frameRef.value).toBe(0);
-
-      second.unmount();
-    });
-
-    test("newly mounted animations do not inherit elapsed time", async () => {
-      const showSecond = shallowRef(false);
-      let firstFrameRef!: Readonly<ShallowRef<number>>;
-      let secondFrameRef!: Readonly<ShallowRef<number>>;
-
-      const FirstAnim = defineComponent(() => {
-        const anim = useAnimation({ interval: 20 });
-        firstFrameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-
-      const SecondAnim = defineComponent(() => {
-        const anim = useAnimation({ interval: 20 });
-        secondFrameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-
-      const App = defineComponent(() => {
-        return () => (
-          <>
-            <FirstAnim />
-            <Text>,</Text>
-            {showSecond.value ? <SecondAnim /> : <Text>-</Text>}
-          </>
-        );
-      });
-
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(25);
-      expect(firstFrameRef.value).toBe(1);
-
-      // Mount the second animation after some time has passed
-      showSecond.value = true;
       await nextTick();
-
-      vi.advanceTimersByTime(40);
-      expect(firstFrameRef.value).toBeGreaterThanOrEqual(2);
-      expect(secondFrameRef.value).toBeGreaterThanOrEqual(1);
-      expect(firstFrameRef.value - secondFrameRef.value).toBe(1);
-
+      const frozen = frame.value;
+      await delay(150);
+      expect(frame.value).toBe(frozen);
       unmount();
     });
 
-    test("newly activated animations do not inherit elapsed time", async () => {
-      const isSecondActive = shallowRef(false);
-      let firstFrameRef!: Readonly<ShallowRef<number>>;
-      let secondFrameRef!: Readonly<ShallowRef<number>>;
-
-      const FirstAnim = defineComponent(() => {
-        const anim = useAnimation({ interval: 20 });
-        firstFrameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-
-      const SecondAnim = defineComponent(() => {
-        const anim = useAnimation({ interval: 20, isActive: isSecondActive });
-        secondFrameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-
-      const App = defineComponent(() => {
-        return () => (
-          <>
-            <FirstAnim />
-            <Text>,</Text>
-            <SecondAnim />
-          </>
-        );
-      });
-
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(25);
-      expect(firstFrameRef.value).toBe(1);
-      expect(secondFrameRef.value).toBe(0);
-
-      // Activate second animation — the sync watcher will call start() immediately
-      isSecondActive.value = true;
-
-      vi.advanceTimersByTime(40);
-      expect(firstFrameRef.value).toBeGreaterThanOrEqual(2);
-      expect(secondFrameRef.value).toBeGreaterThanOrEqual(1);
-      expect(firstFrameRef.value - secondFrameRef.value).toBe(1);
-
-      unmount();
-    });
-
-    test("remounting with same interval starts fresh at frame 0", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 20 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-
-      const r1 = await render(App);
-      vi.advanceTimersByTime(50);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      r1.unmount();
-
-      const r2 = await render(App);
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(50);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      r2.unmount();
-    });
-
-    test("time increases with each tick", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        timeRef = anim.time;
-        return () => <Text>{String(Math.round(anim.time.value))}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(timeRef.value).toBe(0);
-
-      vi.advanceTimersByTime(60);
-      const timeAfterOne = timeRef.value;
-      expect(timeAfterOne).toBeGreaterThanOrEqual(50);
-
-      vi.advanceTimersByTime(60);
-      expect(timeRef.value).toBeGreaterThan(timeAfterOne);
-
-      unmount();
-    });
-
-    test("delta approximates interval on each tick", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        deltaRef = anim.delta;
-        return () => <Text>{String(Math.round(anim.delta.value))}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(deltaRef.value).toBe(0);
-
-      vi.advanceTimersByTime(55);
-      expect(Math.round(deltaRef.value)).toBeGreaterThanOrEqual(40);
-
-      vi.advanceTimersByTime(55);
-      expect(Math.round(deltaRef.value)).toBeGreaterThanOrEqual(40);
-
-      unmount();
-    });
-
-    test("reset() resets frame, time, and delta to 0 (fake timers)", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        frameRef = anim.frame;
-        timeRef = anim.time;
-        deltaRef = anim.delta;
-        resetFn = anim.reset;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(200);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      expect(Math.round(timeRef.value)).toBeGreaterThanOrEqual(100);
-
-      resetFn();
-      expect(frameRef.value).toBe(0);
-      expect(timeRef.value).toBe(0);
-      expect(deltaRef.value).toBe(0);
-
-      // Confirm it advances again after reset
-      vi.advanceTimersByTime(100);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      expect(Math.round(timeRef.value)).toBeGreaterThanOrEqual(50);
-      expect(Math.round(deltaRef.value)).toBeGreaterThanOrEqual(40);
-      expect(Math.round(timeRef.value)).toBeLessThan(200);
-
-      unmount();
-    });
-
-    test("reset is a stable function reference", async () => {
-      let capturedReset: (() => void) | undefined;
-
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        capturedReset = anim.reset;
-        return () => <Text>x</Text>;
-      });
-
-      const { unmount } = await render(App);
-      const firstReset = capturedReset!;
-      firstReset();
-      firstReset();
-      expect(capturedReset).toBe(firstReset);
-      unmount();
-    });
-
-    test("reset() while paused takes effect when animation is resumed", async () => {
+    test("reactivating isActive resets the frame to 0 then advances", async () => {
       const active = shallowRef(true);
-
+      let frame!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50, isActive: active });
-        frameRef = anim.frame;
-        resetFn = anim.reset;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        frame = useAnimation({ interval: 30, isActive: () => active.value }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
       });
       const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(200);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-
-      // Pause (sync watcher stops the timer)
+      await delay(150);
       active.value = false;
-
-      // Reset while paused
-      resetFn();
-      expect(frameRef.value).toBe(0);
-
-      // Resume (sync watcher calls start() which resets to 0)
+      await nextTick();
       active.value = true;
-      expect(frameRef.value).toBe(0);
-
-      // Should advance again
-      vi.advanceTimersByTime(100);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-
+      await nextTick();
+      expect(frame.value).toBe(0);
+      await delay(150);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
       unmount();
     });
 
-    test("unmount before first tick cleans up without error", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      unmount();
-
-      vi.advanceTimersByTime(200);
-      expect(frameRef.value).toBe(0);
-    });
-
-    test("frame resets to 0 on each resume across multiple cycles", async () => {
+    test("reset() while paused zeroes refs and stays at 0", async () => {
       const active = shallowRef(true);
+      let frame!: Readonly<ShallowRef<number>>;
+      let reset!: () => void;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50, isActive: active });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        const anim = useAnimation({ interval: 30, isActive: () => active.value });
+        frame = anim.frame;
+        reset = anim.reset;
+        return () => <Text>{String(frame.value)}</Text>;
       });
       const { unmount } = await render(App);
-
-      // Cycle 1
-      vi.advanceTimersByTime(120);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
+      await delay(120);
       active.value = false;
-      active.value = true;
-      expect(frameRef.value).toBe(0);
-
-      // Cycle 2
-      vi.advanceTimersByTime(120);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      active.value = false;
-      active.value = true;
-      expect(frameRef.value).toBe(0);
-
-      // Cycle 3
-      vi.advanceTimersByTime(120);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      active.value = false;
-      active.value = true;
-      expect(frameRef.value).toBe(0);
-
-      unmount();
-    });
-
-    test("isActive false from mount never starts a timer or advances the frame", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 50, isActive: false });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(500);
-      expect(frameRef.value).toBe(0);
-
-      unmount();
-    });
-
-    test("time and delta reset to 0 when remounted with different interval", async () => {
-      const makeApp = (interval: number) =>
-        defineComponent(() => {
-          const anim = useAnimation({ interval });
-          frameRef = anim.frame;
-          timeRef = anim.time;
-          deltaRef = anim.delta;
-          return () => <Text>{String(anim.frame.value)}</Text>;
-        });
-
-      const first = await render(makeApp(50));
-      vi.advanceTimersByTime(200);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-      expect(Math.round(timeRef.value)).toBeGreaterThanOrEqual(50);
-      first.unmount();
-
-      const second = await render(makeApp(200));
-      expect(frameRef.value).toBe(0);
-      expect(timeRef.value).toBe(0);
-      expect(deltaRef.value).toBe(0);
-
-      second.unmount();
-    });
-
-    test("animation advances regardless of interactive flag", async () => {
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 8 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(25);
-      expect(frameRef.value).toBeGreaterThanOrEqual(1);
-
-      unmount();
-    });
-
-    test("multiple animations with the same interval share one timer", async () => {
-      // vue-tui uses independent setInterval per animation (no shared timer).
-      // Adapted: verify both animations create timers and both tick correctly.
-      const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-
-      let frame1Ref!: Readonly<ShallowRef<number>>;
-      let frame2Ref!: Readonly<ShallowRef<number>>;
-
-      const App = defineComponent(() => {
-        const anim1 = useAnimation({ interval: 50 });
-        const anim2 = useAnimation({ interval: 50 });
-        frame1Ref = anim1.frame;
-        frame2Ref = anim2.frame;
-        return () => (
-          <Text>
-            {String(anim1.frame.value)},{String(anim2.frame.value)}
-          </Text>
-        );
-      });
-      const { unmount } = await render(App);
-
-      // Both animations should have created timers
-      expect(setIntervalSpy).toHaveBeenCalled();
-      const intervalCalls = setIntervalSpy.mock.calls.filter((call) => call[1] === 50);
-      expect(intervalCalls.length).toBe(2);
-
-      vi.advanceTimersByTime(100);
-      // Both frames should have advanced equally
-      expect(frame1Ref.value).toBe(frame2Ref.value);
-      expect(frame1Ref.value).toBeGreaterThanOrEqual(1);
-
-      unmount();
-      setIntervalSpy.mockRestore();
-    });
-
-    test("animations with different intervals still use the shared timer", async () => {
-      // vue-tui uses independent timers per animation. Adapted: verify that
-      // animations with different intervals tick at their correct individual rates.
-      let fastFrameRef!: Readonly<ShallowRef<number>>;
-      let slowFrameRef!: Readonly<ShallowRef<number>>;
-
-      const App = defineComponent(() => {
-        const fast = useAnimation({ interval: 50 });
-        const slow = useAnimation({ interval: 80 });
-        fastFrameRef = fast.frame;
-        slowFrameRef = slow.frame;
-        return () => (
-          <Text>
-            {String(fast.frame.value)},{String(slow.frame.value)}
-          </Text>
-        );
-      });
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(170);
-      // At 170ms: fast (50ms interval) = 3 frames, slow (80ms interval) = 2 frames
-      expect(fastFrameRef.value).toBeGreaterThan(slowFrameRef.value);
-      expect(fastFrameRef.value).toBeGreaterThanOrEqual(1);
-
-      unmount();
-    });
-
-    test("resets frame when interval changes", async () => {
-      // vue-tui's interval is not reactive, so we simulate interval change
-      // by forcing a remount via a key change.
-      const interval = shallowRef(50);
-      let currentFrameRef!: Readonly<ShallowRef<number>>;
-
-      const AnimWithInterval = defineComponent(
-        (props: { interval: number }) => {
-          const anim = useAnimation({ interval: props.interval });
-          currentFrameRef = anim.frame;
-          return () => <Text>{String(anim.frame.value)}</Text>;
-        },
-        { props: ["interval"] },
-      );
-
-      const App = defineComponent(() => {
-        // Use interval as key so changing it forces a full remount
-        return () => <AnimWithInterval key={interval.value} interval={interval.value} />;
-      });
-
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(130);
-      const frameBefore = currentFrameRef.value;
-      expect(frameBefore).toBeGreaterThanOrEqual(1);
-
-      // Change interval — key change forces remount, new useAnimation starts fresh
-      interval.value = 200;
       await nextTick();
-      // After remount, frame should reset to 0
-      expect(currentFrameRef.value).toBe(0);
-
-      unmount();
-    });
-
-    test("time and delta reset to 0 when interval changes", async () => {
-      // Simulates interval change via key-based remount (vue-tui interval is not reactive).
-      const interval = shallowRef(50);
-      let currentFrameRef!: Readonly<ShallowRef<number>>;
-      let currentTimeRef!: Readonly<ShallowRef<number>>;
-      let currentDeltaRef!: Readonly<ShallowRef<number>>;
-
-      const AnimWithInterval = defineComponent(
-        (props: { interval: number }) => {
-          const anim = useAnimation({ interval: props.interval });
-          currentFrameRef = anim.frame;
-          currentTimeRef = anim.time;
-          currentDeltaRef = anim.delta;
-          return () => <Text>{String(anim.frame.value)}</Text>;
-        },
-        { props: ["interval"] },
-      );
-
-      const App = defineComponent(() => {
-        return () => <AnimWithInterval key={interval.value} interval={interval.value} />;
-      });
-
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(200);
-      expect(currentFrameRef.value).toBeGreaterThanOrEqual(1);
-      expect(Math.round(currentTimeRef.value)).toBeGreaterThanOrEqual(50);
-
-      // Change interval — key change forces remount, all values reset to 0
-      interval.value = 200;
+      reset();
       await nextTick();
-      expect(currentFrameRef.value).toBe(0);
-      expect(currentTimeRef.value).toBe(0);
-      expect(currentDeltaRef.value).toBe(0);
-
+      expect(frame.value).toBe(0);
+      await delay(120);
+      expect(frame.value).toBe(0);
       unmount();
     });
 
-    test("maxFps does not speed up animation state", async () => {
-      // The animation state is driven by setInterval, not the render scheduler.
-      // maxFps only throttles the commit scheduler. Verify that the frame counter
-      // still increments based on interval timing alone.
+    test("all-inactive animations never advance", async () => {
+      let f1!: Readonly<ShallowRef<number>>;
+      let f2!: Readonly<ShallowRef<number>>;
       const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 8 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
+        f1 = useAnimation({ interval: 30, isActive: () => false }).frame;
+        f2 = useAnimation({ interval: 30, isActive: () => false }).frame;
+        return () => <Text>{`${f1.value},${f2.value}`}</Text>;
       });
       const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(25);
-      // At interval=8, 25ms => frames at 8,16,24 => frame=3
-      expect(frameRef.value).toBe(3);
-
-      unmount();
-    });
-
-    test("maxFps 0 does not affect animation cadence", async () => {
-      // The animation composable uses its own setInterval, so maxFps=0
-      // (no render throttling) should not change animation frame advancement.
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 8 });
-        frameRef = anim.frame;
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      expect(frameRef.value).toBe(0);
-      vi.advanceTimersByTime(25);
-      // At interval=8, 25ms => frames at 8,16,24 => frame=3
-      expect(frameRef.value).toBe(3);
-
-      unmount();
-    });
-
-    test("changing interval unsubscribes stale ticks before reset", async () => {
-      // Simulates interval change via key-based remount.
-      // After changing to a longer interval, the old short-interval ticks
-      // should no longer fire.
-      const interval = shallowRef(8);
-      let currentFrameRef!: Readonly<ShallowRef<number>>;
-
-      const AnimWithInterval = defineComponent(
-        (props: { interval: number }) => {
-          const anim = useAnimation({ interval: props.interval });
-          currentFrameRef = anim.frame;
-          return () => <Text>{String(anim.frame.value)}</Text>;
-        },
-        { props: ["interval"] },
-      );
-
-      const App = defineComponent(() => {
-        return () => <AnimWithInterval key={interval.value} interval={interval.value} />;
-      });
-
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(25);
-      expect(currentFrameRef.value).toBeGreaterThanOrEqual(1);
-
-      // Switch to a much longer interval — key change forces remount
-      interval.value = 200;
-      await nextTick();
-
-      // Frame should reset to 0 after remount
-      expect(currentFrameRef.value).toBe(0);
-
-      // 17ms is too short for a 200ms interval — frame should stay at 0
-      vi.advanceTimersByTime(17);
-      expect(currentFrameRef.value).toBe(0);
-
-      unmount();
-    });
-
-    test("wall clock changes do not move animations backwards (fake timers)", async () => {
-      // With fake timers, performance.now() is controlled by the fake clock.
-      // Verify that even if we read frames after advancing time, the frame
-      // counter never decreases.
-      const frames: number[] = [];
-
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 8 });
-        frameRef = anim.frame;
-        watchEffect(() => {
-          frames.push(anim.frame.value);
-        });
-        return () => <Text>{String(anim.frame.value)}</Text>;
-      });
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(25);
-      const frameBeforeJump = frameRef.value;
-      expect(frameBeforeJump).toBeGreaterThanOrEqual(1);
-
-      // Continue advancing — frames should never go backwards
-      vi.advanceTimersByTime(25);
-      expect(frameRef.value).toBeGreaterThanOrEqual(frameBeforeJump);
-
-      unmount();
-
-      // Verify monotonic sequence
-      for (let i = 1; i < frames.length; i++) {
-        expect(frames[i]).toBeGreaterThanOrEqual(frames[i - 1]!);
-      }
-    });
-
-    test("rerendering with the same interval does not reset the frame", async () => {
-      // Trigger a re-render via an unrelated reactive change. The animation
-      // frame should not reset because the interval hasn't changed.
-      const unrelatedState = shallowRef(0);
-
-      const App = defineComponent(() => {
-        const anim = useAnimation({ interval: 20 });
-        frameRef = anim.frame;
-        // Read unrelatedState in the render to force re-render when it changes
-        return () => (
-          <Text>
-            {String(anim.frame.value)}-{String(unrelatedState.value)}
-          </Text>
-        );
-      });
-      const { unmount } = await render(App);
-
-      vi.advanceTimersByTime(50);
-      const frameBeforeRerender = frameRef.value;
-      expect(frameBeforeRerender).toBeGreaterThanOrEqual(1);
-
-      // Trigger a re-render via unrelated state change
-      unrelatedState.value = 1;
-      await nextTick();
-
-      // Frame should NOT have been reset
-      expect(frameRef.value).toBe(frameBeforeRerender);
-
+      await delay(150);
+      expect(f1.value).toBe(0);
+      expect(f2.value).toBe(0);
       unmount();
     });
   });
