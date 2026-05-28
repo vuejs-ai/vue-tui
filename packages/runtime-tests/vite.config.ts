@@ -10,8 +10,6 @@ export default defineConfig({
     exclude: ["integration/pty/**", "node_modules/**"],
   },
   lint: {
-    options: { typeAware: true, typeCheck: true },
     ignorePatterns: ["integration/pty/fixtures/**"],
   },
-  fmt: {},
 });

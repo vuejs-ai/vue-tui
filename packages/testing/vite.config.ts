@@ -7,8 +7,4 @@ export default defineConfig({
     dts: true,
     exports: true,
   },
-  lint: {
-    options: { typeAware: true, typeCheck: true },
-  },
-  fmt: {},
 });
