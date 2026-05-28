@@ -5,6 +5,9 @@
   "description": "Vue 3 terminal UI framework. Build AI agent interfaces and TUI apps with Yoga flexbox.",
   "type": "module",
   "scripts": {
+    "check": "vp check",
+    "check:fmt": "vp fmt --check",
+    "check:lint": "vp lint",
     "ready": "vp check && vp run -r test && vp run -r build && cd packages/runtime-tests && pnpm typecheck:fixtures && pnpm pty-test",
     "dev": "vp run website#dev",
     "prepare": "vp config"
