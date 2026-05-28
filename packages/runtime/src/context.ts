@@ -1,5 +1,6 @@
 import type { InjectionKey, ShallowRef } from "vue";
 import type { EventEmitter } from "node:events";
+import type { AnimationScheduler } from "./animation-scheduler.ts";
 
 export interface CursorPosition {
   x: number;
@@ -53,3 +54,4 @@ export interface StdinContext {
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
 export const FocusContextKey: InjectionKey<FocusContext> = Symbol("vue-tui:focus");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");
+export const AnimationSchedulerKey: InjectionKey<AnimationScheduler> = Symbol("vue-tui:animation");
