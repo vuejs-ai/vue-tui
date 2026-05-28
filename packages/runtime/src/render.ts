@@ -20,6 +20,7 @@ import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./h
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
+import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { paint, paintIsolated } from "./paint/paint.ts";
 import { findStatics } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
@@ -27,6 +28,7 @@ import {
   AppContextKey,
   FocusContextKey,
   StdinContextKey,
+  AnimationSchedulerKey,
   type AppContext,
   type CursorPosition,
   type FocusContext,
@@ -169,6 +171,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
+  let mountedAnimationScheduler: ReturnType<typeof createAnimationScheduler> | null = null;
   let mountedCommit: (() => void) | null = null;
   let mountedAlternateScreen = false;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
@@ -241,6 +244,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     } catch {
       // Vue's unmount may throw on double-unmount; swallow for idempotency.
     }
+    // Dispose the animation scheduler after Vue unmount: each useAnimation's
+    // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
+    mountedAnimationScheduler?.dispose();
+    mountedAnimationScheduler = null;
     if (mountedKittyController) {
       mountedKittyController.dispose();
       mountedKittyController = null;
@@ -590,6 +597,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.provide(AppContextKey, appContext);
     baseApp.provide(FocusContextKey, focusContext);
     baseApp.provide(StdinContextKey, stdinController);
+    const animationScheduler = createAnimationScheduler();
+    mountedAnimationScheduler = animationScheduler;
+    baseApp.provide(AnimationSchedulerKey, animationScheduler);
     if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
       baseApp.provide(DevStateKey, devState);
     }
