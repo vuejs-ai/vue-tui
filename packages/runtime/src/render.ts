@@ -703,8 +703,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   };
 
   app.waitUntilRenderFlush = async function waitUntilRenderFlush(): Promise<void> {
-    // Flush any pending throttled render
-    if (mountedScheduler?.hasPending()) {
+    // Flush any pending OR scheduled render. Gating on hasPending() alone
+    // misses the window after schedule() queues a commit but before the
+    // post-flush callback sets hasPendingFlag, letting this resolve early.
+    // flush() resolves immediately when nothing is scheduled or pending, so
+    // delegating unconditionally is safe and closes that window.
+    if (mountedScheduler) {
       await mountedScheduler.flush();
     }
     // Wait for stdout write barrier — ensures the written frame is
