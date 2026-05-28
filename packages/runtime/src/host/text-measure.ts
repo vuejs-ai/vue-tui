@@ -1,3 +1,4 @@
+import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
@@ -50,23 +51,6 @@ export function safeSliceEnd(text: string, maxCols: number): string {
   return sliced;
 }
 
-/**
- * Slice `text` from the end so the result is at most `maxCols` columns wide.
- */
-function safeSliceStart(text: string, maxCols: number): string {
-  if (maxCols <= 0) return "";
-  const totalWidth = stringWidth(text);
-  let start = totalWidth - maxCols;
-  let sliced = sliceAnsi(text, start);
-  let w = stringWidth(sliced);
-  while (w > maxCols && start < totalWidth) {
-    start++;
-    sliced = sliceAnsi(text, start);
-    w = stringWidth(sliced);
-  }
-  return w <= maxCols ? sliced : "";
-}
-
 export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): string[] {
   if (width <= 0) return [""];
 
@@ -80,26 +64,11 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");
   }
 
-  // truncate variants: collapse newlines, then slice from the appropriate side.
-  const single = text.replace(/\n/g, " ");
-  if (stringWidth(single) <= width) return [single];
-
-  const ellipsis = "…";
-  const room = Math.max(0, width - stringWidth(ellipsis));
-  switch (mode) {
-    case "truncate":
-    case "truncate-end":
-      return [safeSliceEnd(single, room) + ellipsis];
-    case "truncate-start":
-      return [ellipsis + safeSliceStart(single, room)];
-    case "truncate-middle": {
-      const half = Math.floor(room / 2);
-      const left = safeSliceEnd(single, half);
-      const rightCols = room - stringWidth(left);
-      const right = safeSliceStart(single, rightCols);
-      return [left + ellipsis + right];
-    }
-  }
+  // truncate variants — delegate to cli-truncate (grapheme-aware, ellipsis
+  // within budget, preserves \n). Matches Ink's wrapText truncate path.
+  const position =
+    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
+  return cliTruncate(text, width, { position }).split("\n");
 }
 
 export function measureText(
