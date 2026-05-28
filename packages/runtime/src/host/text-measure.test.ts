@@ -2,7 +2,7 @@ import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
 import { createText, createTextLeaf, createVirtualText } from "./nodes.ts";
-import { flattenLeaves, wrapText } from "./text-measure.ts";
+import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
 import { Box } from "../components/Box.ts";
 import { Text } from "../components/Text.ts";
@@ -265,6 +265,12 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
 test("ZWJ emoji truncation does not exceed requested width", () => {
   const result = wrapText("👩‍💻abc", 2, "truncate-start");
   expect(stringWidth(result[0]!)).toBeLessThanOrEqual(2);
+});
+
+test("measureTextNatural uses widest line and raw line count", () => {
+  expect(measureTextNatural("x\nyhello")).toEqual({ width: 6, height: 2 });
+  expect(measureTextNatural("中文\nx")).toEqual({ width: 4, height: 2 });
+  expect(measureTextNatural("")).toEqual({ width: 0, height: 1 });
 });
 
 test("clipped empty write does not corrupt existing wide characters", () => {

@@ -66,6 +66,13 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
 
   // truncate variants — delegate to cli-truncate (grapheme-aware, ellipsis
   // within budget, preserves \n). Matches Ink's wrapText truncate path.
+  //
+  // Optimisation: if every line already fits within `width`, return lines
+  // as-is. This avoids cliTruncate treating the whole multi-line string as
+  // a single run when no truncation is actually needed (which would collapse
+  // perfectly-fitting multi-line text to one truncated line).
+  const lines = text.split("\n");
+  if (lines.every((l) => stringWidth(l) <= width)) return lines;
   const position =
     mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
   return cliTruncate(text, width, { position }).split("\n");
@@ -81,4 +88,15 @@ export function measureText(
     width: wrapped.reduce((max, line) => Math.max(max, stringWidth(line)), 0),
     height: wrapped.length,
   };
+}
+
+/**
+ * Natural (unwrapped) dimensions of `text`, mode-independent. Mirrors Ink's
+ * measure-text.js: width = widest line, height = number of \n-separated lines.
+ */
+export function measureTextNatural(text: string): { width: number; height: number } {
+  const lines = text.split("\n");
+  let width = 0;
+  for (const line of lines) width = Math.max(width, stringWidth(line));
+  return { width, height: lines.length };
 }
