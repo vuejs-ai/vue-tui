@@ -1,5 +1,6 @@
 import { defineComponent, getCurrentInstance, h, inject, type PropType } from "vue";
 import { AppContextKey } from "../context.ts";
+import type { WithChildren } from "./with-children.ts";
 
 type Color = string | [number, number, number];
 type WrapMode =
@@ -10,7 +11,7 @@ type WrapMode =
   | "truncate-middle"
   | "truncate-start";
 
-export const Text = defineComponent({
+const TextImpl = defineComponent({
   name: "Text",
   props: {
     color: [String, Array] as PropType<Color>,
@@ -53,6 +54,8 @@ export const Text = defineComponent({
     };
   },
 });
+
+export const Text = TextImpl as WithChildren<typeof TextImpl>;
 
 function isInsideText(): boolean {
   let parent = getCurrentInstance()?.parent;
