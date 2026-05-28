@@ -490,19 +490,29 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       });
 
       if (shouldClear) {
-        // Direct write: clearTerminal + accumulated static + raw output
-        const content = ansiEscapes.clearTerminal + frameState.fullStaticOutput + output;
-        stdout.write(synchronize ? bsu + content + esu : content);
+        // Direct write: clearTerminal + accumulated static + raw output.
+        // BSU/ESU wrap the actual stream writes (not embedded in the frame
+        // string) so synchronization survives log-update's line diffing.
+        if (synchronize) stdout.write(bsu);
+        stdout.write(ansiEscapes.clearTerminal + frameState.fullStaticOutput + output);
         // Sync log-update state so next render computes correct erase
         writer.sync(outputToRender);
+        if (synchronize) stdout.write(esu);
       } else if (hasStaticOutput) {
         // Clear frame -> write static -> re-render frame via log-update
         if (synchronize) stdout.write(bsu);
         writer.clear();
         stdout.write(staticOutput);
-        writer.write(synchronize ? outputToRender + esu : outputToRender);
+        writer.write(outputToRender);
+        if (synchronize) stdout.write(esu);
+      } else if (synchronize && writer.willRender(outputToRender)) {
+        // Only emit BSU/ESU when log-update will actually write, so unchanged
+        // frames don't produce empty synchronized-update pairs.
+        stdout.write(bsu);
+        writer.write(outputToRender);
+        stdout.write(esu);
       } else {
-        writer.write(synchronize ? bsu + outputToRender + esu : outputToRender);
+        writer.write(outputToRender);
       }
 
       frameState.lastOutput = output;
