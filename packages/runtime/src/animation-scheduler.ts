@@ -45,7 +45,10 @@ export function createAnimationScheduler(): AnimationScheduler {
     }
     if (earliest === Number.POSITIVE_INFINITY) return;
     scheduledDueTime = earliest;
-    const delay = Math.max(0, earliest - performance.now());
+    // Round up: setTimeout truncates fractional delays, which would fire the
+    // timer before `earliest`. onTick then skips (now < nextDueTime) and
+    // reschedules a ~0ms delay, busy-looping until the clock catches up.
+    const delay = Math.ceil(Math.max(0, earliest - performance.now()));
     timer = setTimeout(onTick, delay);
   }
 
