@@ -98,6 +98,11 @@ export function createCommitScheduler(
     }
     hasPendingFlag = false;
     scheduled = false;
+    // Resolve any waiter blocked on flush() — the pending commit will never
+    // fire now, so leaving resolveFlush unsettled would hang waitUntilRenderFlush.
+    const r = resolveFlush;
+    resolveFlush = null;
+    r?.();
   }
 
   return { schedule, flush, hasPending, cancel };
