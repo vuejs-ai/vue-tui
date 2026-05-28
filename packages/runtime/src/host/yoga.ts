@@ -9,6 +9,7 @@ import type {
   TuiText,
   TuiTransform,
 } from "./nodes.ts";
+import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;
 
@@ -313,8 +314,6 @@ export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): v
 }
 
 // --- text measure binding ------------------------------------------------
-
-import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 
 export function bindTextMeasure(text: TuiText): void {
   text.yoga.setMeasureFunc((availableWidth) => {
