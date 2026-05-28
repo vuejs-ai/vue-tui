@@ -40,4 +40,24 @@ describe("grapheme-aware clipping (issue #21)", () => {
     const frame = stripAnsi(lastFrame({ trimLines: true })!);
     expect(frame.startsWith(" x")).toBe(true);
   });
+
+  // absolute-non-edge class (R2-000045): an absolutely-positioned ZWJ emoji is
+  // kept whole, matching Ink (verified via ink-testing-library:
+  // ["coabc", "ct👨‍👩‍👧‍👦"]).
+  test("absolutely-positioned ZWJ emoji is not split", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={7} height={2}>
+          <Text>coabc</Text>
+          <Box position="absolute" marginTop={1}>
+            <Text>ct👨‍👩‍👧‍👦</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const lines = stripAnsi(lastFrame({ trimLines: true })!).split("\n");
+    expect(lines[0]).toBe("coabc");
+    expect(lines[1]).toBe("ct👨‍👩‍👧‍👦");
+  });
 });
