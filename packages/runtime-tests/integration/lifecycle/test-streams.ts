@@ -1,4 +1,5 @@
 import { PassThrough, Writable } from "node:stream";
+import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
 
 export interface FakeWritableOptions {
   columns?: number;
@@ -80,7 +81,5 @@ export function captureWrites(stdout: NodeJS.WriteStream): string[] {
 }
 
 export function getContentWrites(writes: string[]): string[] {
-  return writes.filter(
-    (w) => w !== "" && !w.startsWith("\x1b[?25") && w !== "\x1b[?2026h" && w !== "\x1b[?2026l",
-  );
+  return writes.filter((w) => w !== "" && !w.startsWith("\x1b[?25") && w !== bsu && w !== esu);
 }

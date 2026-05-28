@@ -69,6 +69,31 @@ test("debug mode writes complete frames terminated by newline", () => {
   expect(writes).toEqual(["hello\n", "world\n"]);
 });
 
+test("sync() updates the dedup baseline so a later changed frame is not dropped", () => {
+  // Regression: sync() previously updated log-update's previousOutput but not
+  // the frame-writer's own lastFrame. After a sync() (e.g. the clearTerminal
+  // path), re-rendering the pre-sync frame was silently dropped by the stale
+  // lastFrame dedup even though the terminal showed different content.
+  const writes: string[] = [];
+  const stream = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stream, { columns: 80, rows: 24, isTTY: true });
+  stream.on("data", (chunk) => writes.push(chunk.toString()));
+
+  const writer = createFrameWriter(stream, {});
+  writer.write("A\n"); // lastFrame = "A\n"
+  const countAfterA = writes.length;
+
+  // Simulate the shouldClear path: terminal is repainted to "B" out-of-band
+  // and the writer is synced to that new baseline.
+  writer.sync("B\n");
+
+  // Re-render "A": content differs from what the terminal now shows ("B"),
+  // so it MUST be emitted, not skipped by a stale lastFrame === "A\n".
+  writer.write("A\n");
+  expect(writes.length).toBeGreaterThan(countAfterA);
+  expect(writes.some((w) => w.includes("A"))).toBe(true);
+});
+
 // ---------------------------------------------------------------------------
 // Standard rendering
 // ---------------------------------------------------------------------------
