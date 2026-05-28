@@ -37,13 +37,14 @@ export type WrapMode = NonNullable<TextProps["wrap"]>;
  * `slice-ansi` can overshoot when a wide character straddles the boundary, so
  * we reduce the slice position until the result fits.
  */
-function safeSliceEnd(text: string, maxCols: number): string {
+export function safeSliceEnd(text: string, maxCols: number): string {
   if (maxCols <= 0) return "";
-  let sliced = sliceAnsi(text, 0, maxCols);
+  let end = maxCols;
+  let sliced = sliceAnsi(text, 0, end);
   let w = stringWidth(sliced);
-  while (w > maxCols && maxCols > 0) {
-    maxCols--;
-    sliced = sliceAnsi(text, 0, maxCols);
+  while (w > maxCols && end > 0) {
+    end--;
+    sliced = sliceAnsi(text, 0, end);
     w = stringWidth(sliced);
   }
   return sliced;

@@ -19,7 +19,7 @@ import type {
   BoxProps,
 } from "../host/nodes.ts";
 import { createRoot as createIsoRoot } from "../host/nodes.ts";
-import { wrapText } from "../host/text-measure.ts";
+import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import {
   attachYoga,
   detachYoga,
@@ -28,19 +28,6 @@ import {
 } from "../host/yoga.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
-
-function safeSliceEnd(text: string, maxCols: number): string {
-  if (maxCols <= 0) return "";
-  let end = maxCols;
-  let sliced = sliceAnsi(text, 0, end);
-  let w = stringWidth(sliced);
-  while (w > maxCols && end > 0) {
-    end--;
-    sliced = sliceAnsi(text, 0, end);
-    w = stringWidth(sliced);
-  }
-  return sliced;
-}
 
 interface ClipRect {
   x1: number | undefined;
