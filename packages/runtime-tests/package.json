@@ -7,6 +7,7 @@
     "test": "vp run test:integration && vp run test:pty",
     "test:integration": "vp test",
     "test:pty": "vp test run --config vitest.pty.config.ts --passWithNoTests",
+    "check:type": "tsc --noEmit",
     "check:fixtures": "tsc -p integration/pty/fixtures/tsconfig.json --noEmit"
   },
   "devDependencies": {
