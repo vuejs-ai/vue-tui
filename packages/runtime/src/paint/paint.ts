@@ -200,9 +200,14 @@ class Output {
           const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
           const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
           if (from > 0) {
-            const leftPrefix = sliceAnsi(line, 0, from);
-            const leftRemovedWidth = this.caches.getStringWidth(leftPrefix);
-            lineX = lineX + leftRemovedWidth;
+            // Advance lineX by however many columns slice-ansi actually drops
+            // from the left. slice-ansi@9 is grapheme-aware: a wide grapheme
+            // straddling the clip edge is dropped whole, so the retained
+            // content starts at `lineX + droppedWidth` (which may exceed
+            // `from`). Measuring the kept-prefix width would under-count here
+            // and misplace the following text.
+            const droppedWidth = lineWidth - this.caches.getStringWidth(sliceAnsi(line, from));
+            lineX = lineX + droppedWidth;
           }
           const maxWidth = clipH.x2 - lineX;
           line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);

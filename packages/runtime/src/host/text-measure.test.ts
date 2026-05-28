@@ -44,6 +44,33 @@ test("wrapText truncate-end cuts with ellipsis", () => {
   expect(wrapText("abcdefgh", 5, "truncate-end")).toEqual(["abcd…"]);
 });
 
+test("truncate keeps ZWJ emoji whole", () => {
+  const [line] = wrapText("👨‍👩‍👧‍👦abcdefgh", 5, "truncate");
+  expect(line).toContain("👨‍👩‍👧‍👦");
+  expect(stringWidth(line!)).toBeLessThanOrEqual(5);
+});
+
+test("truncate keeps combining marks attached", () => {
+  const [line] = wrapText("áb́ćdefghij", 5, "truncate");
+  expect(stringWidth(line!)).toBeLessThanOrEqual(5);
+  expect(line).not.toMatch(/́$/);
+});
+
+test("truncate preserves newlines (no collapse to one line)", () => {
+  const lines = wrapText("x\nyhello", 24, "truncate");
+  expect(lines.length).toBe(2);
+  expect(lines[0]).toBe("x");
+  expect(lines[1]).toBe("yhello");
+});
+
+test("truncate of multi-line text that overflows collapses to one truncated line (matches Ink)", () => {
+  // Ink's wrapText does cliTruncate(text, maxWidth, {position}) on the whole
+  // string; when truncation happens, trailing lines are dropped. We match that
+  // exactly — do NOT change this to per-line truncation (it would diverge from Ink).
+  const lines = wrapText("abcdef\nghijkl", 5, "truncate");
+  expect(lines).toEqual(["abcd…"]);
+});
+
 // --- Text-width parity tests ported from Ink ---
 
 test("wide characters do not add extra space inside fixed-width Box", () => {
