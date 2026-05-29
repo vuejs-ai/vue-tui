@@ -103,7 +103,20 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
       .filter(Boolean)
       .join(separator);
   } else if (node.type === "transform") {
-    // Transform nodes: render children, then no transform is applied in screen reader mode
+    // Transform nodes: CONCATENATE children with "" (not newline-join), matching
+    // Ink's squashTextNodes (squash-text-nodes.ts:42, `text += nodeText`). In Ink
+    // a <Transform> is an `ink-text` node, so the SR path squashes it via
+    // squashTextNodes which concatenates child text with "".
+    //
+    // The transform's OWN fn is intentionally NOT applied here. Verified
+    // empirically against Ink 7.0.4: squashTextNodes only applies the
+    // internal_transform of *child* nodes (squash-text-nodes.ts:34-39), never of
+    // the top-level node it is handed. When a <Transform> is a direct child of a
+    // <Box>, the SR renderer calls squashTextNodes(transformNode) directly, so
+    // the transform node's own internal_transform is skipped — yielding the bare
+    // concatenated children. A nested <Transform> inside a <Text> DOES get its
+    // transform applied (see squashTextContent above), because there it is a
+    // *child* being squashed by its parent text node.
     const children = node.children;
     output = children
       .map((childNode) =>
@@ -113,7 +126,7 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
         }),
       )
       .filter(Boolean)
-      .join("\n");
+      .join("");
   }
 
   // Add accessibility annotations

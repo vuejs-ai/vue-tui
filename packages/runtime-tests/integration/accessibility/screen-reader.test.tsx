@@ -401,6 +401,31 @@ describe("Transform accessibility", () => {
     expect(output).toBe("ab[1]");
   });
 
+  // G23: a <Transform> directly under a <Box> in screen-reader mode must
+  // CONCATENATE its children with "" (not newline-join them). This matches Ink:
+  // a <Transform> is an `ink-text` node, so the SR path squashes it via
+  // squashTextNodes (squash-text-nodes.ts), which concatenates child text with
+  // "". Verified empirically against Ink 7.0.4: the transform node's OWN
+  // internal_transform is NOT applied when it is the top-level node handed to
+  // squashTextNodes (squash only applies the internal_transform of *child*
+  // nodes, line 34-39) — so a Transform directly under a Box yields the bare
+  // concatenated children, no wrapping.
+  test("<Transform> under <Box> concatenates children with no newline in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Transform transform={(s: string) => `[${s}]`}>
+            <Text>a</Text>
+            <Text>b</Text>
+          </Transform>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // Children are concatenated ("ab"), NOT newline-joined ("a\nb").
+    expect(output).toBe("ab");
+  });
+
   test("renders children normally when screen reader is disabled", () => {
     const output = renderToString(
       defineComponent(() => () => (
