@@ -62,3 +62,9 @@ does.)_
   (remove the kitty-path exit so only `\x03` exits). Not auto-changed — removing a working
   Ctrl+C-exits behavior to match an Ink limitation needs a human call. Tracked as G07 in
   [[parity-ledger]] (status `candidate`).
+- **Multiple `<Static>` nodes supported (G24)** — vue-tui's `findStatics(root)` collects and
+  renders EVERY `<Static>` in the tree; Ink maintains a single `staticNode` (only the
+  most-recent `<Static>` renders). So vue-tui supports multiple `<Static>` regions, which
+  Ink does not — matching Ink would REMOVE that capability. Flagged for the maintainer:
+  keep vue-tui's multi-Static support (promote to allowlist) or restrict to Ink's single
+  staticNode. Not auto-changed. Tracked as G24 in [[parity-ledger]] (status `candidate`).
