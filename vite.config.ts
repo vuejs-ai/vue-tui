@@ -20,12 +20,13 @@ export default defineConfig({
   run: {
     cache: false,
     // `ci` is the parallel verification graph used by .github/workflows/ci.yml.
-    // The task runner fans out independent branches concurrently; the wall-clock
-    // critical path is build -> test:pty. fmt and lint have no build dependency,
-    // so they run immediately alongside build. check:type and the test suites
-    // need the built dist (@vue-tui/runtime exposes no "types" export — its
-    // consumers resolve types and runtime from dist/*.d.mts), so they depend on
-    // build. The serial `ready` script in package.json stays for simple local use.
+    // The task runner fans out independent branches concurrently. Only fmt has
+    // no build dependency, so it starts immediately; lint, check:type, and the
+    // test suites all depend on build because they need the built dist
+    // (@vue-tui/runtime exposes no "types" export — consumers, and the
+    // type-aware lint rules, resolve its types and runtime from dist/*.d.mts).
+    // So the wall-clock critical path is build -> test:pty. The serial `ready`
+    // script in package.json mirrors this order (build before lint) for local use.
     tasks: {
       "ci:build": { command: "vp run build" },
       "ci:fmt": { command: "vp run check:fmt" },

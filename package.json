@@ -10,7 +10,7 @@
     "check:type": "vp run -r check:type",
     "test": "vp run -r test",
     "build": "vp run -r build",
-    "ready": "vp run check:fmt && vp run check:lint && vp run build && vp run check:type && vp run test",
+    "ready": "vp run check:fmt && vp run build && vp run check:lint && vp run check:type && vp run test",
     "prepare": "vp config"
   },
   "devDependencies": {
