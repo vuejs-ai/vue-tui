@@ -291,6 +291,22 @@ describe("Text aria props", () => {
 });
 
 describe("Transform accessibility", () => {
+  // G21 follow-up, finding 2: squashTextContent must pass the transform's
+  // positional sibling index (not hardcoded 0) so SR output matches paint.
+  test("nested <Transform> as 2nd child of <Text> gets index 1 in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Text>
+          a<Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
+        </Text>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // Transform is the 2nd child (index 1) of the Text node — must receive 1,
+    // not 0, matching paint.ts and Ink squash-text-nodes.ts:13,38 behavior.
+    expect(output).toBe("ab[1]");
+  });
+
   test("renders children normally when screen reader is disabled", () => {
     const output = renderToString(
       defineComponent(() => () => (

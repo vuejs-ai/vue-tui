@@ -7,7 +7,12 @@ import type { TextProps, TuiText, TuiVirtualText } from "./nodes.ts";
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   if (!node.children || node.children.length === 0) return "";
   let out = "";
-  for (const child of node.children) {
+  // `index` is the child's POSITIONAL index among ALL siblings — the plain loop
+  // counter over node.children, matching Ink squash-text-nodes.ts:13,38 (index
+  // is the loop position over node.childNodes). Must use the SAME index basis as
+  // paint.ts renderTextWithInlineStyles so measurement and paint agree on what a
+  // nested <Transform> receives as its second argument.
+  node.children.forEach((child, index) => {
     if (child.type === "text-leaf") {
       out += child.value;
     } else if (child.type === "virtual-text") {
@@ -23,11 +28,15 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
           innerText += flattenLeaves(grandchild);
         }
       }
-      if (child.transform) innerText = child.transform(innerText, 0);
+      // Only apply the transform when there is actual text content — matches
+      // paint.ts `innerText.length > 0` guard and Ink squash-text-nodes.ts:34
+      // (`nodeText.length > 0`). Without this guard, a transform that adds chars
+      // to empty text inflates measured width relative to what paint renders.
+      if (innerText.length > 0 && child.transform) innerText = child.transform(innerText, index);
       out += innerText;
     }
     // Skip comments inserted by Vue for null/undefined renders
-  }
+  });
   return out;
 }
 

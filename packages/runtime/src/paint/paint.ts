@@ -292,7 +292,12 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
   const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
   const merged: TextProps = { ...acc, ...defined };
   let out = "";
-  for (const child of node.children) {
+  // `index` is the child's POSITIONAL index among ALL siblings (text-leaves,
+  // virtual-text, transforms, comments alike) — it is the plain loop counter,
+  // matching Ink squash-text-nodes.ts:13,38 where `internal_transform(text,
+  // index)` receives the loop index over `node.childNodes`. A nested <Transform>
+  // that is the Nth child therefore gets `index = N`, not a hardcoded 0.
+  node.children.forEach((child, index) => {
     if (child.type === "text-leaf") {
       out += applyChalk(child.value, merged);
     } else if (child.type === "virtual-text") {
@@ -311,12 +316,12 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
         }
       }
       if (innerText.length > 0 && child.transform) {
-        innerText = child.transform(innerText, 0);
+        innerText = child.transform(innerText, index);
       }
       out += innerText;
     }
     // Skip comments inserted by Vue for null/undefined renders
-  }
+  });
   return sanitizeAnsi(out);
 }
 

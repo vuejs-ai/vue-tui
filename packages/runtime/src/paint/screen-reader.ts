@@ -7,7 +7,11 @@ import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts"
  */
 function squashTextContent(node: TuiText | TuiVirtualText): string {
   let text = "";
-  for (const child of node.children) {
+  // Use forEach so `index` is the child's POSITIONAL index among ALL siblings —
+  // matching paint.ts renderTextWithInlineStyles and Ink squash-text-nodes.ts:13,38
+  // (index is the plain loop counter over node.childNodes). A nested <Transform>
+  // must receive its sibling position, not a hardcoded 0.
+  node.children.forEach((child, index) => {
     if (child.type === "text-leaf") {
       text += child.value;
     } else if (child.type === "virtual-text") {
@@ -23,12 +27,12 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
         }
       }
       if (innerText.length > 0 && child.transform) {
-        innerText = child.transform(innerText, 0);
+        innerText = child.transform(innerText, index);
       }
       text += innerText;
     }
     // Skip comments
-  }
+  });
   return text;
 }
 
