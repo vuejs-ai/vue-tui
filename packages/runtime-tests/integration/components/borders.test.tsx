@@ -1269,6 +1269,40 @@ test("G15: side rails appear on the first content row when borderTop=false", asy
   expect(lines[0]).toMatch(/^│.*│$/);
 });
 
+// G13 — custom BoxStyle border object (Ink parity)
+// Ink allows borderStyle to be a BoxStyle object with custom glyph characters.
+// vue-tui must resolve it directly instead of looking it up in cliBoxes.
+test("G13: custom border object renders correct glyphs", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle={{
+          topLeft: "A",
+          top: "B",
+          topRight: "C",
+          right: "D",
+          bottomRight: "E",
+          bottom: "F",
+          bottomLeft: "G",
+          left: "H",
+        }}
+        alignSelf="flex-start"
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = stripAnsi(lastFrame()!);
+  const lines = frame.split("\n");
+  // Top row: A + B...B + C
+  expect(lines[0]).toMatch(/^AB+C$/);
+  // Content row: H + text + D
+  expect(lines[1]).toMatch(/^H.*D$/);
+  // Bottom row: G + F...F + E
+  expect(lines[2]).toMatch(/^GF+E$/);
+});
+
 // borderDimColor should not dim styled child Text touching left edge
 test("borderDimColor does not dim styled child Text touching left edge", async ({ expect }) => {
   const { lastFrame } = await render(
