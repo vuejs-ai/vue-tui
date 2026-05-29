@@ -151,6 +151,13 @@ function shouldClearTerminalForFrame(opts: {
   );
 }
 
+// Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
+// that owns its renderer. Mirrors Ink's WeakMap<NodeJS.WriteStream, Ink> in
+// instances.ts. Keyed weakly so closed/GC'd streams don't leak memory.
+// Only the app that successfully wired a renderer (mountedAsOwner=true) owns
+// the entry and removes it on teardown; a "no-op" second mount never touches it.
+const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
+
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
@@ -183,6 +190,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAlternateScreen = false;
   let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
+  // Tracks whether this app is the owner of the liveInstances entry for its
+  // stdout. A second mount that hits the guard sets this to false so teardown()
+  // does not evict the first app's entry.
+  let mountedAsOwner = false;
+  // Set to true when mount() hit the instance-reuse guard and returned early.
+  // unmount()/teardown()/resolveExit() must be complete no-ops in that case —
+  // they must not touch the owner's stream or WeakMap entry.
+  let skippedMount = false;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -195,6 +210,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let pendingExitResult: unknown = undefined;
 
   function resolveExit() {
+    // Skipped mount: no stream was ever wired; resolve the exit promise directly
+    // without any write-barrier so the owner's stdout is never touched.
+    if (skippedMount) {
+      if (pendingExitError instanceof Error) {
+        exitReject(pendingExitError);
+      } else {
+        exitResolve(pendingExitResult);
+      }
+      return;
+    }
     const stdout = mountedAppContext?.stdout ?? process.stdout;
     const canWrite = stdout && !stdout.destroyed && !(stdout as any).writableEnded;
     const hasWritableState = (stdout as any)._writableState !== undefined;
@@ -225,8 +250,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   let teardownStarted = false;
   function teardown() {
+    // Skipped mount: this app never wired a renderer, so teardown is a
+    // complete no-op — do not touch any stream or the owner's WeakMap entry.
+    if (skippedMount) return;
     if (teardownStarted) return;
     teardownStarted = true;
+
+    // Remove this app from the live-instances registry so a subsequent mount()
+    // on the same stdout works normally. Only the owning app removes its entry;
+    // a no-op second mount (mountedAsOwner=false) must NOT evict the first
+    // app's entry.
+    if (mountedAsOwner && mountedAppContext) {
+      liveInstances.delete(mountedAppContext.stdout);
+      mountedAsOwner = false;
+    }
 
     // Cancel any pending trailing-edge timer first, then do a final
     // synchronous commit so the latest state is always flushed before
@@ -345,6 +382,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stdin = options.stdin ?? process.stdin;
     const stderr = options.stderr ?? process.stderr;
     const debug = options.debug ?? false;
+
+    // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
+    // already rendering to this stdout, warn on stderr and skip wiring a second
+    // competing renderer. The second mount is a deliberate no-op: the caller
+    // must unmount() the first app before mounting on the same stream.
+    // We write the warning directly to native process.stderr so an existing
+    // alternate-screen renderer cannot swallow it via patchConsole.
+    if (liveInstances.has(stdout)) {
+      process.stderr.write(
+        "Warning: createApp()/mount() was called again for the same stdout before the previous Vue TUI instance was unmounted. Reusing stdout across multiple mount() calls is unsupported. Call unmount() first.\n",
+      );
+      // Mark this app as skipped so unmount()/teardown()/resolveExit() are
+      // complete no-ops — they must never touch the owner's stream or WeakMap entry.
+      skippedMount = true;
+      return {} as ComponentPublicInstance;
+    }
+
+    // Register this app as the owner of the stdout entry.
+    liveInstances.set(stdout, app);
+    mountedAsOwner = true;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
     const onRender = options.onRender;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
