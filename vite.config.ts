@@ -29,7 +29,11 @@ export default defineConfig({
     tasks: {
       "ci:build": { command: "vp run build" },
       "ci:fmt": { command: "vp run check:fmt" },
-      "ci:lint": { command: "vp run check:lint" },
+      // lint depends on build: type-aware rules (e.g. no-implied-eval) on the
+      // PTY fixtures need @vue-tui/runtime's built types resolved, or they
+      // misfire on a fresh checkout. build is already on the critical path, so
+      // this doesn't change overall wall-clock.
+      "ci:lint": { command: "vp run check:lint", dependsOn: ["ci:build"] },
       "ci:type": { command: "vp run check:type", dependsOn: ["ci:build"] },
       "ci:test:integration": {
         command: "vp run -r test:integration",
