@@ -51,4 +51,14 @@ _(The loop appends here when it finds a difference it suspects is intentional bu
 not yet on the allowlist. A human promotes entries up into the allowlist — the loop never
 does.)_
 
-- _(none yet)_
+- **Kitty-protocol Ctrl+C exits the app (G07)** — Ink does NOT exit on a kitty-encoded
+  Ctrl+C (`\x1b[99;5u`): `use-input.ts:245-247` only `return`s (suppresses the user
+  handler), and Ink's real exit path (`App.tsx:244-246`) fires only on the literal `\x03`
+  byte, which kitty never produces. vue-tui's `useInput.ts:100-105` calls `app.exit()`
+  directly on `input==='c' && key.ctrl`, so Ctrl+C exits under BOTH legacy and kitty
+  protocols. **This is arguably better UX than Ink** (Ctrl+C reliably exits) and looks
+  like a kitty-era oversight in Ink rather than a deliberate choice. Flagged for the
+  maintainer to decide: keep vue-tui's behavior (promote to the allowlist) or match Ink
+  (remove the kitty-path exit so only `\x03` exits). Not auto-changed — removing a working
+  Ctrl+C-exits behavior to match an Ink limitation needs a human call. Tracked as G07 in
+  [[parity-ledger]] (status `candidate`).
