@@ -7,6 +7,10 @@
 - Bug fixes must follow test-first: write a failing test that reproduces the bug, then fix the code and verify the test passes.
 - Tests must simulate real user conditions. Non-TTY environments disable chalk colors — use `FORCE_COLOR` env var so ANSI output is always exercised. A bug invisible in tests but visible in a real terminal is a testing gap, not a minor issue.
 - When debugging color/ANSI output in non-TTY environments (e.g. Claude Code shell), use `FORCE_COLOR=3` env var to force chalk to output ANSI codes.
+- The **PTY suite** (`vitest.pty.config.ts`) runs tests **concurrently** (`sequence.concurrent: true`). Each test spawns its own isolated subprocess/app, so they don't share state. Never assert on wall-clock-dependent behavior there (e.g. exact render/commit counts that rely on the renderer's ~32ms throttle): trigger the event so it renders synchronously and assert immediately after, or it flakes under CPU contention. `it.sequential` does NOT fix cross-fork CPU contention — fix the timing dependency instead.
+- Two test patterns are **incompatible with concurrent execution** and must run sequentially (this is why the main `vite.config.ts` suite is **not** concurrent):
+  - **Inline/file snapshots** (`toMatchInlineSnapshot`): the module-level `expect` loses snapshot test context under concurrency. _Fixable_ — destructure the context-local `expect`: `test.concurrent("name", async ({ expect }) => { expect(x).toMatchInlineSnapshot() })`.
+  - **Fake timers** (`vi.useFakeTimers` / `advanceTimersByTime`): these mutate the **process-global** timer functions, so a concurrent test calling `useRealTimers()` yanks the mocked API out from under another mid-`advanceTimersByTime` ("timers not mocked"). _Not fixable_ with context — these tests must stay sequential.
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
 - Never commit anything under `docs/`. That directory is for local working notes and specs — it must stay out of git.
 
