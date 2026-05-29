@@ -12,12 +12,13 @@ export default defineConfig({
     // wall-clock bottleneck). testTimeout stays generous (15s vs ~2s slowest
     // test) to absorb CPU contention on smaller CI runners.
     pool: "forks",
+    // Files parallelize across forked workers (~3x faster than serial — the PTY
+    // suite is the CI bottleneck). Tests within a file run SERIALLY: many of
+    // these assert timing-sensitive render/commit counts driven by the ~32ms
+    // commit throttle, and in-file concurrency starves them of wall-clock on a
+    // 4-core CI runner (it passes on higher-core dev machines, which is the
+    // trap). File-level parallelism is the proven, stable win.
     fileParallelism: true,
-    // Tests run concurrently by default. Each spawns its own isolated PTY
-    // subprocess (or in-process app) with no shared state, and rendering is no
-    // longer wall-clock-dependent (resize renders synchronously), so exact
-    // render-count assertions stay deterministic even under CPU contention.
-    sequence: { concurrent: true },
     testTimeout: 15000,
     env: { FORCE_COLOR: "3" },
   },
