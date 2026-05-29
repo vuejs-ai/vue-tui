@@ -223,3 +223,55 @@ test("manually focus previous component via focusPrevious()", async () => {
   await nextTick();
   expect(lastFrame()).toMatch(/Third ✔/);
 });
+
+// Ink parity (use-focus.ts: id via useMemo([customId]), add/remove effect keyed on
+// [id]): changing the id prop must re-register the component under the new id.
+// Focus is driven purely by focus(id) here (no Tab) so the assertions reflect
+// id-addressed focus, not position-based Tab cycling.
+test("useFocus reacts to id prop changes (Ink parity)", async () => {
+  const dynId = shallowRef("alpha");
+  let focusFn!: (id: string) => void;
+
+  const Other = defineComponent(() => {
+    const { isFocused } = useFocus({ id: "other", autoFocus: true });
+    return () => <Text>O:{isFocused.value ? "1" : "0"}</Text>;
+  });
+  const Dynamic = defineComponent(() => {
+    const { isFocused, focus } = useFocus({ id: () => dynId.value });
+    focusFn = focus;
+    return () => <Text>D:{isFocused.value ? "1" : "0"}</Text>;
+  });
+
+  const { lastFrame } = await render(() => (
+    <Box flexDirection="column">
+      <Other />
+      <Dynamic />
+    </Box>
+  ));
+
+  // Other autoFocuses at mount; Dynamic is not focused.
+  expect(lastFrame()).toContain("O:1");
+  expect(lastFrame()).toContain("D:0");
+
+  // Focus Dynamic by its current id.
+  focusFn("alpha");
+  await nextTick();
+  expect(lastFrame()).toContain("D:1");
+
+  // Change the id → Dynamic must re-register under "beta".
+  dynId.value = "beta";
+  await nextTick();
+
+  // Focusing by the NEW id focuses it.
+  focusFn("beta");
+  await nextTick();
+  expect(lastFrame()).toContain("D:1");
+
+  // Move focus away by a known id, then the OLD id must NOT refocus Dynamic.
+  focusFn("other");
+  await nextTick();
+  expect(lastFrame()).toContain("D:0");
+  focusFn("alpha");
+  await nextTick();
+  expect(lastFrame()).toContain("D:0");
+});

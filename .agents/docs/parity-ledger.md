@@ -28,24 +28,24 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 
 `status` ∈ `todo · in-progress · pr-open · merged · blocked`. Priority: correctness/behavior first, omissions next.
 
-| id  | area                            | summary                                                                                                                 | priority | status  | branch                 | PR  |
-| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------- | --- |
-| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                    | P1       | todo    | —                      | —   |
-| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders' | P1       | todo    | —                      | —   |
-| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo    | —                      | —   |
-| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | pr-open | `fix/parity-border-bg` | #30 |
-| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo    | —                      | —   |
-| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo    | —                      | —   |
-| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo    | —                      | —   |
-| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | todo    | —                      | —   |
-| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo    | —                      | —   |
-| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo    | —                      | —   |
-| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo    | —                      | —   |
-| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                | P2       | todo    | —                      | —   |
-| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                    | P3       | todo    | —                      | —   |
-| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                           | P3       | todo    | —                      | —   |
-| G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                | P2       | todo    | —                      | —   |
-| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                      | P3       | todo    | —                      | —   |
+| id  | area                            | summary                                                                                                                 | priority | status  | branch                   | PR  |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------ | --- |
+| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                    | P1       | todo    | —                        | —   |
+| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders' | P1       | todo    | —                        | —   |
+| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo    | —                        | —   |
+| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | merged  | `fix/parity-border-bg`   | #30 |
+| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo    | —                        | —   |
+| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo    | —                        | —   |
+| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo    | —                        | —   |
+| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | pr-open | `fix/parity-usefocus-id` | #31 |
+| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo    | —                        | —   |
+| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo    | —                        | —   |
+| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo    | —                        | —   |
+| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                | P2       | todo    | —                        | —   |
+| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                    | P3       | todo    | —                        | —   |
+| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                           | P3       | todo    | —                        | —   |
+| G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                | P2       | todo    | —                        | —   |
+| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                      | P3       | todo    | —                        | —   |
 
 ## Gap details
 
