@@ -245,7 +245,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     return (p.children[i + 1] as TuiNode | undefined) ?? null;
   }
 
-  function patchProp(el: TuiNode, key: string, _prev: unknown, next: unknown): void {
+  function patchProp(el: TuiNode, key: string, prev: unknown, next: unknown): void {
     if (el.type === "transform") {
       if (key === "transform" && typeof next === "function") {
         el.transform = next as (line: string, idx: number) => string;
@@ -262,7 +262,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     if (el.type === "box" || el.type === "text" || el.type === "static" || el.type === "root") {
       if (isYogaProp(key)) {
-        applyYogaProp(el, key, next);
+        applyYogaProp(el, key, next, prev);
         // Some yoga props also need to be stored in el.props for the paint pass.
         if (STYLE_PROPS.has(key)) {
           (el as { props: Record<string, unknown> }).props[key] = next;
