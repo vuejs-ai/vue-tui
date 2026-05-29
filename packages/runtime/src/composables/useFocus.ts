@@ -35,7 +35,11 @@ export function useFocus(options: UseFocusOptions = {}): {
   let rawModeAcquired = false;
 
   function acquireRaw() {
-    if (!rawModeAcquired && stdin) {
+    // Guard on isRawModeSupported before acquiring — mirrors Ink's use-focus.ts
+    // (`if (!isRawModeSupported || !isActive) return;`). acquireRawMode() throws
+    // on an unsupported stdin (see render.ts), so without this guard useFocus
+    // would throw on a non-TTY. Focus should degrade to a no-op there instead.
+    if (!rawModeAcquired && stdin?.isRawModeSupported) {
       stdin.acquireRawMode();
       rawModeAcquired = true;
     }
