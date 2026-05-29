@@ -23,10 +23,11 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
   - _"Box background with border fills content area"_: inline snapshot updated — border rows (`╭───╮`/`╰───╯`) no longer carry bg; inner rows keep it.
   - _"Box backgroundColor survives border rendering"_: unchanged, still passes (the inner fill keeps the bg).
   - Added _"Box backgroundColor does not bleed onto border glyphs (Ink parity)"_ as the failing-first reproduction.
+- **2026-05-29 — G06 REFUTED (false positive from the audit):** the audit claimed `<Transform>`'s fn gets a hardcoded index `0` "instead of the childNode index". Re-verification against Ink `output.ts:230-239` shows Ink's index is the **line index** (transformers apply per output line: `transformer(line, index)`), not a child index — the audit misread it. vue-tui **already** applies per-line line indices for multi-line (block) transforms via the yoga-carrier path: the existing tests `transform with multiple lines` → `[0: hello world]\n[1: goodbye world]` and transform-yoga `[0: hello]\n[1: world]` pass on unmodified code. `paint.ts:314`'s `transform(innerText, 0)` is only the inline `<Transform>`-inside-`<Text>` path, whose content is a single logical line where `0` matches Ink (all inline tests assert `[0: …]`). No observable gap; not fixed.
 
 ## Confirmed gaps
 
-`status` ∈ `todo · in-progress · pr-open · merged · blocked`. Priority: correctness/behavior first, omissions next.
+`status` ∈ `todo · in-progress · pr-open · merged · blocked · refuted`. Priority: correctness/behavior first, omissions next.
 
 | id  | area                            | summary                                                                                                                 | priority | status  | branch                   | PR  |
 | --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------ | --- |
@@ -35,9 +36,9 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 | G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo    | —                        | —   |
 | G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | merged  | `fix/parity-border-bg`   | #30 |
 | G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo    | —                        | —   |
-| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo    | —                        | —   |
+| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | refuted | —                        | —   |
 | G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo    | —                        | —   |
-| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | pr-open | `fix/parity-usefocus-id` | #31 |
+| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | merged  | `fix/parity-usefocus-id` | #31 |
 | G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo    | —                        | —   |
 | G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo    | —                        | —   |
 | G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo    | —                        | —   |
