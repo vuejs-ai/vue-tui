@@ -481,6 +481,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
 
     function writeToStdout(data: string) {
+      // Mirror Ink ink.tsx:673: return early after teardown so a late write
+      // (e.g. a stray useStdout().write after unmount) cannot run
+      // clear()/write/restore on an already-torn-down renderer.
+      if (teardownStarted) return;
       if (debug) {
         stdout.write(data + frameState.fullStaticOutput + frameState.lastOutput);
         return;
@@ -500,6 +504,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
 
     function writeToStderr(data: string) {
+      // Mirror Ink ink.tsx:702: return early after teardown so a late write
+      // cannot corrupt the restored terminal state.
+      if (teardownStarted) return;
       if (debug) {
         stderr.write(data);
         stdout.write(frameState.fullStaticOutput + frameState.lastOutput);
