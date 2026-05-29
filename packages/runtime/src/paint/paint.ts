@@ -335,7 +335,13 @@ function drawBorder(
   if (!style) return;
   const chars = (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[style];
   if (!chars) return;
-  if (w < 2 || h < 2) return;
+  // No blanket min-size guard here — each edge is drawn independently when it is
+  // visible and its run length is ≥ 1. This matches Ink's render-border.ts which
+  // has no such guard and draws every edge on its own, so a 1-cell-tall box with
+  // only side rails still renders │X│ (G05), and a 1-cell-wide box with only
+  // top/bottom still renders the top/bottom glyph. Guard individual repeat()
+  // counts with Math.max(0, …) so a degenerate dimension doesn't throw.
+  if (w < 1 || h < 1) return;
 
   const top = props["borderTop"] !== false;
   const bottom = props["borderBottom"] !== false;
@@ -375,9 +381,17 @@ function drawBorder(
     const raw = bl + chars.bottom.repeat(fill) + br;
     output.write(x, y + h - 1, [colorizeEdge(safeSliceEnd(raw, w), "bottom")], transformers);
   }
-  for (let i = 1; i < h - 1; i++) {
-    if (left) output.write(x, y + i, [colorizeEdge(chars.left, "left")], transformers);
-    if (right) output.write(x + w - 1, y + i, [colorizeEdge(chars.right, "right")], transformers);
+
+  // Ink parity (render-border.ts:133): vertical sides start at y + offsetY where
+  // offsetY = showTopBorder ? 1 : 0. Without this, the loop starting at i=1
+  // always skips row 0, shifting rails one row down when borderTop=false (G15).
+  // The run length equals h minus the visible top/bottom rows, clamped ≥ 0.
+  const offsetY = top ? 1 : 0;
+  const verticalRun = Math.max(0, h - (top ? 1 : 0) - (bottom ? 1 : 0));
+  for (let i = 0; i < verticalRun; i++) {
+    if (left) output.write(x, y + offsetY + i, [colorizeEdge(chars.left, "left")], transformers);
+    if (right)
+      output.write(x + w - 1, y + offsetY + i, [colorizeEdge(chars.right, "right")], transformers);
   }
 }
 

@@ -676,8 +676,9 @@ test("render border edge changes after update when borderStyle is unchanged", as
 
   showTop.value = false;
   await nextTick();
+  // G15 fix: with borderTop=false, side rails now start at row 0 (Ink parity)
   expect(lastFrame()).toMatchInlineSnapshot(`
-    " Content
+    "│Content│
     ╰───────╯"
   `);
 
@@ -704,9 +705,10 @@ test("hide top border", async ({ expect }) => {
     )),
     { columns: 100 },
   );
+  // G15 fix: side rails now start at row 0 when borderTop=false (Ink parity)
   expect(lastFrame()).toMatchInlineSnapshot(`
     "Above
-     Content
+    │Content│
     ╰───────╯
     Below"
   `);
@@ -726,10 +728,11 @@ test("hide bottom border", async ({ expect }) => {
     )),
     { columns: 100 },
   );
+  // G15 fix: side rails now span the full content height when borderBottom=false (Ink parity)
   expect(lastFrame()).toMatchInlineSnapshot(`
     "Above
     ╭───────╮
-     Content
+    │Content│
     Below"
   `);
 });
@@ -748,9 +751,11 @@ test("hide top and bottom borders", async ({ expect }) => {
     )),
     { columns: 100 },
   );
+  // G05+G15 fix: side rails now render even at h=1 when both top and bottom are
+  // hidden — the per-edge geometry draws them at the single content row (Ink parity)
   expect(lastFrame()).toMatchInlineSnapshot(`
     "Above
-     Content
+    │Content│
     Below"
   `);
 });
@@ -1197,6 +1202,71 @@ test("foreground, background and dim combine correctly", async ({ expect }) => {
   expect(frame).toContain("[31m");
   expect(frame).toContain("[46m");
   expect(frame).toContain("[2m");
+});
+
+// G05 — height-1 box with side-only borders renders rails (Ink parity)
+// A box that is exactly 1 cell tall (borderTop/Bottom=false) must still render
+// the left and right rails on the single content row, producing │X│ output.
+// Previously the blanket `w < 2 || h < 2` guard aborted the entire drawBorder.
+test("G05: height-1 box with side-only borders renders rails", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      // height=1 → only 1 row; no top/bottom borders, only left+right rails
+      <Box borderStyle="single" borderTop={false} borderBottom={false} alignSelf="flex-start">
+        <Text>X</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  const frame = stripAnsi(lastFrame()!);
+  // The single row must carry the left AND right rails
+  expect(frame).toContain("│X│");
+});
+
+// G05 — width-1 box with top/bottom-only borders renders the edge glyphs (Ink parity)
+// A box that is exactly 1 cell wide (after removing left/right borders) must still
+// render the top and bottom horizontal edges, each a single glyph.
+test("G05: width-1 box with top/bottom-only borders renders edge glyphs", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      // width=1 content area; no left/right borders; only top+bottom
+      <Box
+        borderStyle="single"
+        borderLeft={false}
+        borderRight={false}
+        width={1}
+        alignSelf="flex-start"
+      >
+        <Text>X</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  const frame = stripAnsi(lastFrame()!);
+  const lines = frame.split("\n");
+  // Top edge must be present (─)
+  expect(lines[0]).toContain("─");
+  // Bottom edge must be present (─)
+  expect(lines[lines.length - 1]).toContain("─");
+});
+
+// G15 — vertical side rails are not shifted down when borderTop=false (Ink parity)
+// With borderTop=false, the vertical sides must start at row 0 (the content row),
+// not row 1 (which is how the buggy i=1 loop positioned them).
+test("G15: side rails appear on the first content row when borderTop=false", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="single" borderTop={false} alignSelf="flex-start">
+        <Text>Content</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  const frame = stripAnsi(lastFrame()!);
+  const lines = frame.split("\n");
+  // First line is the content row (no top border); it must carry both rails.
+  // The "single" style uses │ (U+2502 BOX DRAWINGS LIGHT VERTICAL), not ASCII |.
+  expect(lines[0]).toMatch(/^│.*│$/);
 });
 
 // borderDimColor should not dim styled child Text touching left edge
