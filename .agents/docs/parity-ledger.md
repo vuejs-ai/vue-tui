@@ -49,8 +49,8 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 | G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                                                                                | P3       | merged    | `fix/parity-custom-border`         | #42 |
 | G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                                                                                       | P3       | merged    | `fix/parity-instance-reuse`        | #43 |
 | G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                                                                            | P2       | merged    | `fix/parity-border-1cell`          | #37 |
-| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                                                                                  | P3       | pr-open   | `fix/parity-border-dim`            | #44 |
-| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | todo      | —                                  | —   |
+| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                                                                                  | P3       | merged    | `fix/parity-border-dim`            | #44 |
+| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | pr-open   | `fix/parity-sr-edges`              | #45 |
 
 ## Gap details
 
