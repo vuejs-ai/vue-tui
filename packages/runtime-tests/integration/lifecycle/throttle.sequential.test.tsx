@@ -1,3 +1,7 @@
+// Sequential: uses vi.useFakeTimers, which mutates the process-global timer
+// functions. Run concurrently, a sibling test calling useRealTimers() would
+// pull the mocked timers out mid-advanceTimersByTime. Tests are it.sequential.
+
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test, vi } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
@@ -17,7 +21,7 @@ const FAKE_TIMER_OPTS = {
   toFake: ["setTimeout", "clearTimeout", "Date"] as ("setTimeout" | "clearTimeout" | "Date")[],
 };
 
-test("throttle renders to maxFps", async () => {
+test.sequential("throttle renders to maxFps", async () => {
   // Port of Ink's "throttle renders to maxFps" — verifies leading+trailing
   // throttle pattern with maxFps=1 (1000ms window).
   vi.useFakeTimers(FAKE_TIMER_OPTS);
@@ -73,7 +77,7 @@ test("throttle renders to maxFps", async () => {
   }
 });
 
-test("immediate scheduler in debug mode commits every mutation", async () => {
+test.sequential("immediate scheduler in debug mode commits every mutation", async () => {
   // Counterpart to the throttle test: in debug mode (used by the testing
   // helper), the scheduler bypasses throttling and commits synchronously.
   // This verifies the immediate path in createCommitScheduler.
@@ -114,7 +118,7 @@ test("immediate scheduler in debug mode commits every mutation", async () => {
   app.unmount();
 });
 
-test("screen reader mode bypasses throttle (immediate commits)", async () => {
+test.sequential("screen reader mode bypasses throttle (immediate commits)", async () => {
   // Port of Ink's screen reader behavior: isScreenReaderEnabled causes
   // the scheduler to use immediate mode, ensuring every frame is flushed
   // without delay for assistive technology.
@@ -151,7 +155,7 @@ test("screen reader mode bypasses throttle (immediate commits)", async () => {
   app.unmount();
 });
 
-test("no throttled renders after unmount", async () => {
+test.sequential("no throttled renders after unmount", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const msg = shallowRef("Foo");
@@ -183,7 +187,7 @@ test("no throttled renders after unmount", async () => {
   }
 });
 
-test("unmount forces pending throttled render", async () => {
+test.sequential("unmount forces pending throttled render", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const msg = shallowRef("Hello");
@@ -214,7 +218,7 @@ test("unmount forces pending throttled render", async () => {
   }
 });
 
-test("unmount cancels pending throttled log writes when stdout is ended", async () => {
+test.sequential("unmount cancels pending throttled log writes when stdout is ended", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const { PassThrough } = await import("node:stream");
@@ -249,7 +253,7 @@ test("unmount cancels pending throttled log writes when stdout is ended", async 
   }
 });
 
-test("unmount cancels pending throttled render when stdout is ended", async () => {
+test.sequential("unmount cancels pending throttled render when stdout is ended", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const { PassThrough } = await import("node:stream");

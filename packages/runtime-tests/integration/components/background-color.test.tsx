@@ -1,18 +1,18 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
-import { expect, test } from "vite-plus/test";
+import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
 const BG_BLUE = "\x1b[44m";
 
-test("Box backgroundColor produces ANSI background codes", async () => {
+test("Box backgroundColor produces ANSI background codes", async ({ expect }) => {
   const { frames } = await render(() => <Box backgroundColor="blue" width={5} height={1} />, {
     columns: 10,
   });
   expect(frames.at(-1)).toContain(BG_BLUE);
 });
 
-test("Box backgroundColor survives border rendering", async () => {
+test("Box backgroundColor survives border rendering", async ({ expect }) => {
   const { frames } = await render(
     () => <Box backgroundColor="blue" borderStyle="single" width={6} height={3} />,
     { columns: 10 },
@@ -22,7 +22,7 @@ test("Box backgroundColor survives border rendering", async () => {
   expect(raw).toContain("┌");
 });
 
-test("child Text inherits backgroundColor from parent Box", async () => {
+test("child Text inherits backgroundColor from parent Box", async ({ expect }) => {
   const { frames } = await render(
     () => (
       <Box backgroundColor="blue" width={10} height={1}>
@@ -36,7 +36,7 @@ test("child Text inherits backgroundColor from parent Box", async () => {
   expect(raw).toContain(BG_BLUE);
 });
 
-test("wrapped text preserves backgroundColor on every line", async () => {
+test("wrapped text preserves backgroundColor on every line", async ({ expect }) => {
   const { frames } = await render(
     () => (
       <Box backgroundColor="blue" borderStyle="single" width={10} height={4}>
@@ -54,7 +54,7 @@ test("wrapped text preserves backgroundColor on every line", async () => {
 
 // --- Ink background tests ---
 
-test("Text inherits parent Box background color", async () => {
+test("Text inherits parent Box background color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="green" alignSelf="flex-start">
@@ -66,7 +66,7 @@ test("Text inherits parent Box background color", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[42mHello World[49m"`);
 });
 
-test("Text explicit background color overrides inherited", async () => {
+test("Text explicit background color overrides inherited", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" alignSelf="flex-start">
@@ -78,7 +78,7 @@ test("Text explicit background color overrides inherited", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[44mHello World[49m"`);
 });
 
-test("Nested Box background inheritance", async () => {
+test("Nested Box background inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" alignSelf="flex-start">
@@ -92,7 +92,7 @@ test("Nested Box background inheritance", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[44mHello World[49m"`);
 });
 
-test("Text without parent Box background has no inheritance", async () => {
+test("Text without parent Box background has no inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box alignSelf="flex-start">
@@ -104,7 +104,7 @@ test("Text without parent Box background has no inheritance", async () => {
   expect(lastFrame()).toBe("Hello World");
 });
 
-test("Multiple Text elements inherit same background", async () => {
+test("Multiple Text elements inherit same background", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="yellow" alignSelf="flex-start">
@@ -117,7 +117,7 @@ test("Multiple Text elements inherit same background", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[43mHello World[49m"`);
 });
 
-test("Mixed text with and without background inheritance", async () => {
+test("Mixed text with and without background inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="green" alignSelf="flex-start">
@@ -131,7 +131,7 @@ test("Mixed text with and without background inheritance", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[42mInherited No BG [41mRed BG[49m"`);
 });
 
-test("Complex nested structure with background inheritance", async () => {
+test("Complex nested structure with background inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="yellow" alignSelf="flex-start">
@@ -149,7 +149,7 @@ test("Complex nested structure with background inheritance", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[43mOuter: [44mInner: [41mExplicit[49m"`);
 });
 
-test("Box background with standard color", async () => {
+test("Box background with standard color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" alignSelf="flex-start">
@@ -161,7 +161,7 @@ test("Box background with standard color", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[41mHello[49m"`);
 });
 
-test("Box background with hex color", async () => {
+test("Box background with hex color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="#FF0000" alignSelf="flex-start">
@@ -173,7 +173,7 @@ test("Box background with hex color", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[48;2;255;0;0mHello[49m"`);
 });
 
-test("Box background with rgb color", async () => {
+test("Box background with rgb color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="rgb(255, 0, 0)" alignSelf="flex-start">
@@ -185,7 +185,7 @@ test("Box background with rgb color", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[48;2;255;0;0mHello[49m"`);
 });
 
-test("Box background with ansi256 color", async () => {
+test("Box background with ansi256 color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="ansi256(9)" alignSelf="flex-start">
@@ -197,7 +197,7 @@ test("Box background with ansi256 color", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[48;5;9mHello[49m"`);
 });
 
-test("Box background with wide characters", async () => {
+test("Box background with wide characters", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="yellow" alignSelf="flex-start">
@@ -209,7 +209,7 @@ test("Box background with wide characters", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[43mこんにちは[49m"`);
 });
 
-test("Box background with emojis", async () => {
+test("Box background with emojis", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" alignSelf="flex-start">
@@ -221,7 +221,7 @@ test("Box background with emojis", async () => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[41m🎉🎊[49m"`);
 });
 
-test("Box background fills entire area with standard color", async () => {
+test("Box background fills entire area with standard color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" width={10} height={3} alignSelf="flex-start">
@@ -237,7 +237,7 @@ test("Box background fills entire area with standard color", async () => {
   `);
 });
 
-test("Box background fills with hex color", async () => {
+test("Box background fills with hex color", async ({ expect }) => {
   const bgHexRed = "[48;2;255;0;0m";
   const bgReset = "[49m";
 
@@ -255,7 +255,7 @@ test("Box background fills with hex color", async () => {
   expect(output).toContain(bgReset);
 });
 
-test("Box background fills with rgb color", async () => {
+test("Box background fills with rgb color", async ({ expect }) => {
   const bgHexRed = "[48;2;255;0;0m";
   const bgReset = "[49m";
 
@@ -273,7 +273,7 @@ test("Box background fills with rgb color", async () => {
   expect(output).toContain(bgReset);
 });
 
-test("Box background fills with ansi256 color", async () => {
+test("Box background fills with ansi256 color", async ({ expect }) => {
   const bgAnsi256Nine = "[48;5;9m";
   const bgReset = "[49m";
 
@@ -291,7 +291,7 @@ test("Box background fills with ansi256 color", async () => {
   expect(output).toContain(bgReset);
 });
 
-test("Box background with border fills content area", async () => {
+test("Box background with border fills content area", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="cyan" borderStyle="round" width={10} height={5} alignSelf="flex-start">
@@ -309,7 +309,7 @@ test("Box background with border fills content area", async () => {
   `);
 });
 
-test("Box background with padding fills entire padded area", async () => {
+test("Box background with padding fills entire padded area", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="magenta" padding={1} width={10} height={5} alignSelf="flex-start">
@@ -327,7 +327,7 @@ test("Box background with padding fills entire padded area", async () => {
   `);
 });
 
-test("Box background with center alignment fills entire area", async () => {
+test("Box background with center alignment fills entire area", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -349,7 +349,7 @@ test("Box background with center alignment fills entire area", async () => {
   `);
 });
 
-test("Box background with column layout fills entire area", async () => {
+test("Box background with column layout fills entire area", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -374,7 +374,7 @@ test("Box background with column layout fills entire area", async () => {
   `);
 });
 
-test("Box background updates on rerender", async () => {
+test("Box background updates on rerender", async ({ expect }) => {
   const bgColor = shallowRef<string | undefined>(undefined);
 
   const { lastFrame } = await render(
@@ -397,7 +397,7 @@ test("Box background updates on rerender", async () => {
   expect(lastFrame()).toBe("Hello");
 });
 
-test("Box backgroundColor fills full width on every line when text wraps", async () => {
+test("Box backgroundColor fills full width on every line when text wraps", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box backgroundColor="red" width={10} alignSelf="flex-start">
@@ -412,7 +412,9 @@ test("Box backgroundColor fills full width on every line when text wraps", async
   `);
 });
 
-test("Text-only backgroundColor colors text content but does not fill Box width", async () => {
+test("Text-only backgroundColor colors text content but does not fill Box width", async ({
+  expect,
+}) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box width={10} alignSelf="flex-start">
@@ -429,7 +431,7 @@ test("Text-only backgroundColor colors text content but does not fill Box width"
 
 // --- Ink border-backgrounds tests ---
 
-test("border with background color", async () => {
+test("border with background color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="single" borderColor="white" borderBackgroundColor="blue">
@@ -450,7 +452,7 @@ test("border with background color", async () => {
   expect(output).toContain("[44m");
 });
 
-test("border with different background colors per side", async () => {
+test("border with different background colors per side", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -480,7 +482,7 @@ test("border with different background colors per side", async () => {
   expect(output).toContain("[44m");
 });
 
-test("border background color fallback to general borderBackgroundColor", async () => {
+test("border background color fallback to general borderBackgroundColor", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="single" borderBackgroundColor="magenta" borderTopBackgroundColor="cyan">
@@ -502,7 +504,7 @@ test("border background color fallback to general borderBackgroundColor", async 
   expect(output).toContain("[45m");
 });
 
-test("vertical border background does not bleed into content rows", async () => {
+test("vertical border background does not bleed into content rows", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="classic" borderBackgroundColor="cyan" alignSelf="flex-start" width={12}>
@@ -525,7 +527,7 @@ test("vertical border background does not bleed into content rows", async () => 
   }
 });
 
-test("foreground, background and dim combine correctly", async () => {
+test("foreground, background and dim combine correctly", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
