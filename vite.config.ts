@@ -5,7 +5,18 @@ export default defineConfig({
     "*": "vp check --fix",
   },
   fmt: {},
-  lint: { options: { typeAware: true, typeCheck: false } },
+  lint: {
+    options: { typeAware: true, typeCheck: false },
+    rules: {
+      // This is a terminal UI library: parsing keyboard escape sequences and
+      // stripping ANSI requires regexes that match control characters (ESC,
+      // BEL, etc.) by design. no-control-regex flags every such pattern as a
+      // false positive across the codebase, so disable it library-wide. We
+      // already write them as \x1b /  unicode escapes (the rule's own
+      // suggested form), not raw bytes.
+      "no-control-regex": "off",
+    },
+  },
   run: {
     cache: false,
     // `ci` is the parallel verification graph used by .github/workflows/ci.yml.
