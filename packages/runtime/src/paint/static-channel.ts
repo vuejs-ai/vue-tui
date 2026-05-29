@@ -1,5 +1,29 @@
+import Yoga from "yoga-layout";
 import type { TuiNode, TuiStatic } from "../host/nodes.ts";
 import { paintIsolated } from "./paint.ts";
+import { renderScreenReaderOutput } from "./screen-reader.ts";
+
+/**
+ * Read a static node's resolved flexDirection as the string form
+ * screen-reader.ts compares against ("row" | "row-reverse" | "column" |
+ * "column-reverse"). node-ops applies flexDirection to yoga but does NOT mirror
+ * it into `props` (it's not in STYLE_PROPS), so we read it back from the yoga
+ * node — which holds the resolved direction including the <Static> default of
+ * column. This keeps separator/order derivation identical to how
+ * screen-reader.ts (screen-reader.ts:73-82) would linearize a container.
+ */
+function resolvedFlexDirection(stat: TuiStatic): string {
+  switch (stat.yoga.getFlexDirection()) {
+    case Yoga.FLEX_DIRECTION_ROW:
+      return "row";
+    case Yoga.FLEX_DIRECTION_ROW_REVERSE:
+      return "row-reverse";
+    case Yoga.FLEX_DIRECTION_COLUMN_REVERSE:
+      return "column-reverse";
+    default:
+      return "column";
+  }
+}
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   if (root.type === "static") out.push(root);
@@ -24,7 +48,11 @@ export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
  * its cursor and unmounts them (the post-commit step mirroring Ink's
  * `useLayoutEffect(setIndex)`).
  */
-export function paintStaticNode(stat: TuiStatic, columns: number): string {
+export function paintStaticNode(
+  stat: TuiStatic,
+  columns: number,
+  isScreenReaderEnabled = false,
+): string {
   const fresh = stat.children.filter((child) => !stat.writtenNodes.has(child));
   // Paint (and record as written) only when there is something fresh — but the
   // prune and onWritten steps below run on EVERY commit, including the empty
@@ -35,7 +63,36 @@ export function paintStaticNode(stat: TuiStatic, columns: number): string {
   // lowers the cursor so subsequent grows ([A,C]) render and write the new item.
   let frame = "";
   if (fresh.length > 0) {
-    frame = paintIsolated(fresh, columns, stat);
+    if (isScreenReaderEnabled) {
+      // SR mode: linearize the fresh static children to flat plain text instead
+      // of the 2D grid painter — otherwise bordered static items would emit box
+      // glyphs in screen-reader output. Ink does the same: its renderer
+      // linearizes node.staticNode via renderNodeToScreenReaderOutput
+      // ({ skipStaticElements:false }) (renderer.ts:24).
+      //
+      // We can't simply pass the whole static node to renderScreenReaderOutput:
+      // its children include already-written items, but the write-once model
+      // requires painting ONLY the fresh (un-written) children. So we replicate
+      // exactly how screen-reader.ts linearizes a box/root container of these
+      // children (screen-reader.ts:73-82): the separator and child order derive
+      // from the container's resolved flexDirection (defaulting to the
+      // <Static> "column" default set in Static.ts).
+      const flexDirection = resolvedFlexDirection(stat);
+      // Match screen-reader.ts:76 exactly — row/row-reverse use a space, all
+      // other directions (incl. the column default) use a newline.
+      const separator = flexDirection === "row" || flexDirection === "row-reverse" ? " " : "\n";
+      // Match screen-reader.ts:79-82 — *-reverse directions reverse child order.
+      const ordered =
+        flexDirection === "row-reverse" || flexDirection === "column-reverse"
+          ? [...fresh].reverse()
+          : fresh;
+      frame = ordered
+        .map((child) => renderScreenReaderOutput(child, { skipStaticElements: false }))
+        .filter(Boolean)
+        .join(separator);
+    } else {
+      frame = paintIsolated(fresh, columns, stat);
+    }
     for (const child of fresh) stat.writtenNodes.add(child);
   }
   // Prune entries that are no longer mounted so the set can't grow unbounded

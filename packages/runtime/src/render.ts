@@ -565,7 +565,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Fullscreen: output fills or exceeds terminal height — no trailing newline.
       // Only apply when writing to a real TTY — piped output always gets trailing newlines.
       const isFullscreen = isTty && outputHeight >= viewportRows;
-      const outputToRender = isFullscreen ? output : output + "\n";
+      // SR parity (G17 edge b): Ink's screen-reader path writes the wrapped
+      // output directly with NO appended newline (ink.tsx:617-621), so an empty
+      // SR frame emits zero lines instead of a spurious blank line. We scope
+      // this to EMPTY SR output to avoid touching non-SR or non-empty SR frames.
+      const isEmptyScreenReaderFrame = isScreenReaderEnabled && output === "";
+      const outputToRender = isFullscreen || isEmptyScreenReaderFrame ? output : output + "\n";
 
       const shouldClear = shouldClearTerminalForFrame({
         isTty,
@@ -638,7 +643,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const w = resolveSize(stdout).columns;
       let staticOutput = "";
       for (const stat of findStatics(tuiRoot)) {
-        const staticFrame = paintStaticNode(stat, w);
+        const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
         if (staticFrame.length > 0) {
           staticOutput += staticFrame + "\n";
         }

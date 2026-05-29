@@ -1,6 +1,6 @@
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, createApp, Text } from "@vue-tui/runtime";
+import { Box, createApp, Static, Text } from "@vue-tui/runtime";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -81,6 +81,102 @@ test.sequential("live commit path WITHOUT SR still emits 2D grid with border gly
   expect(content).toContain("Hello world");
   // Non-SR path renders the visual frame, which DOES contain border glyphs.
   expect(content).toContain("─");
+
+  app.unmount();
+});
+
+// G17 edge (a) (Ink parity): the LIVE static channel must ALSO linearize in SR
+// mode. The dynamic frame already excludes <Static> (skipStaticElements:true),
+// but commit() flushes statics separately — and previously via the 2D grid
+// painter (paintIsolated), so a bordered static item leaked box glyphs even in
+// SR mode. Ink linearizes static too: renderer.ts renders node.staticNode via
+// renderNodeToScreenReaderOutput({ skipStaticElements:false }).
+test.sequential("live static channel emits linear screen-reader text (no border glyphs) when SR enabled", async () => {
+  const App = defineComponent(() => {
+    const items = ["Logged in"];
+    return () => (
+      <Box flexDirection="column">
+        <Static items={items}>
+          {{
+            default: ({ item }: { item: string }) => (
+              <Box key={item} borderStyle="round">
+                <Text>{item}</Text>
+              </Box>
+            ),
+          }}
+        </Static>
+        <Text>Live</Text>
+      </Box>
+    );
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    isScreenReaderEnabled: true,
+  });
+
+  await nextTick();
+  await nextTick();
+
+  const content = getContentWrites(writes).join("");
+
+  // The flat static text content must be present.
+  expect(content).toContain("Logged in");
+
+  // Border / box-drawing glyphs must NOT appear — the static channel must
+  // linearize the bordered Box in SR mode just like the dynamic frame.
+  const borderGlyphs = ["╭", "╮", "╰", "╯", "─", "│"];
+  for (const glyph of borderGlyphs) {
+    expect(content).not.toContain(glyph);
+  }
+
+  app.unmount();
+});
+
+// G17 edge (b) (Ink parity): an EMPTY SR frame must not write a spurious blank
+// trailing line. Ink's SR path writes the wrapped output directly with
+// lastOutputToRender = wrappedOutput (NO appended "\n"), and an empty frame is
+// "" → height 0, so nothing is emitted (ink.tsx:599-621). The normal frame
+// writer appends "\n" even for empty frames, which would leak a blank line.
+test.sequential("empty SR frame does not write a spurious blank trailing line", async () => {
+  const App = defineComponent(() => {
+    // A Box with no visible text produces an empty linearized SR frame.
+    return () => <Box />;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    isScreenReaderEnabled: true,
+  });
+
+  await nextTick();
+  await nextTick();
+
+  const content = getContentWrites(writes).join("");
+
+  // An empty SR frame must not produce any newline-only / blank write. The
+  // non-empty case appends a newline via the frame writer; the empty case
+  // must produce zero output lines (Ink: wrappedOutput === "" writes nothing).
+  expect(content).not.toContain("\n");
+  expect(content).toBe("");
 
   app.unmount();
 });
