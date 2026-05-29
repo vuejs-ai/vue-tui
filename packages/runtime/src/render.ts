@@ -14,6 +14,7 @@ import { EventEmitter } from "node:events";
 import isInCi from "is-in-ci";
 import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
+import wrapAnsi from "wrap-ansi";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -22,6 +23,7 @@ import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { paint } from "./paint/paint.ts";
+import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
@@ -537,6 +539,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       frameState.outputHeight = outputHeight;
     }
 
+    // Produce the dynamic frame for a given terminal width. In screen-reader
+    // mode the tree is linearized to flat plain text (no borders / 2D grid)
+    // via renderScreenReaderOutput, then wrapped with wrapAnsi(trim:false,
+    // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
+    // <Static> channel is excluded here (skipStaticElements) just like
+    // render-to-string.ts; static output is handled separately by commit().
+    function renderFrame(width: number): string {
+      if (!isScreenReaderEnabled) {
+        return paint(tuiRoot);
+      }
+      const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
+      return wrapAnsi(linear, width, { trim: false, hard: true });
+    }
+
     function commit() {
       const start = onRender ? performance.now() : 0;
 
@@ -574,7 +590,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         tuiRoot.yoga.setWidth(w);
         tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
         emitLayoutListeners(tuiRoot);
-        const frame = paint(tuiRoot);
+        const frame = renderFrame(w);
         frameState.lastOutput = frame;
         frameState.lastOutputToRender = frame + "\n";
         frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
@@ -585,7 +601,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       tuiRoot.yoga.setWidth(w);
       tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
       emitLayoutListeners(tuiRoot);
-      const frame = paint(tuiRoot);
+      const frame = renderFrame(w);
       const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
       if (debug) {
