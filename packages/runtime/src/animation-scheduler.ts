@@ -15,6 +15,13 @@ type AnimationSubscriber = {
 };
 
 export interface AnimationScheduler {
+  /**
+   * Render-throttle window in ms, derived from `maxFps`. useAnimation coalesces
+   * ticks while inside the current window so committed deltas accumulate across
+   * skipped ticks (Ink parity — see AnimationContext.renderThrottleMs). `0`
+   * disables throttling (debug / screen-reader / standalone fallback).
+   */
+  readonly renderThrottleMs: number;
   subscribe(
     callback: (currentTime: number) => void,
     interval: number,
@@ -22,7 +29,7 @@ export interface AnimationScheduler {
   dispose(): void;
 }
 
-export function createAnimationScheduler(): AnimationScheduler {
+export function createAnimationScheduler(renderThrottleMs = 0): AnimationScheduler {
   const subscribers = new Set<AnimationSubscriber>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let scheduledDueTime = Number.POSITIVE_INFINITY;
@@ -110,11 +117,12 @@ export function createAnimationScheduler(): AnimationScheduler {
     pending.length = 0;
   }
 
-  return { subscribe, dispose };
+  return { renderThrottleMs, subscribe, dispose };
 }
 
 export function createNoOpAnimationScheduler(): AnimationScheduler {
   return {
+    renderThrottleMs: 0,
     subscribe() {
       return { startTime: 0, unsubscribe() {} };
     },
