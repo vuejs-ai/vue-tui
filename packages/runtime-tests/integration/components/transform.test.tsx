@@ -46,6 +46,46 @@ test("squash multiple text nodes — <Transform> inside <Text>", async () => {
   expect(lastFrame()).toBe("[0: {0: hello world}]");
 });
 
+// G21: a nested <Transform> receives its POSITIONAL sibling index among the
+// parent <Text>'s children, matching Ink squash-text-nodes.ts:13,38 (the index
+// is the plain loop counter over ALL childNodes, including text-leaf siblings).
+test("nested <Transform> as 2nd child of <Text> gets index 1", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        a<Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("ab[1]");
+});
+
+test("nested <Transform> as 3rd child of <Text> gets index 2", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        a<Text>b</Text>
+        <Transform transform={(s: string, i: number) => `${s}[${i}]`}>c</Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("abc[2]");
+});
+
+test("sole/first-child nested <Transform> still gets index 0", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        <Transform transform={(s: string, i: number) => `${s}[${i}]`}>a</Transform>b
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("a[0]b");
+});
+
 // Resolved: Transform nodes are now yoga carriers, so multi-line text
 // under a Transform node is properly laid out. See transform-yoga.test.tsx.
 

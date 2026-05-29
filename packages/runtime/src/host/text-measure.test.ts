@@ -1,7 +1,7 @@
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
-import { createText, createTextLeaf, createVirtualText } from "./nodes.ts";
+import { createText, createTextLeaf, createTransform, createVirtualText } from "./nodes.ts";
 import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
 import { Box } from "../components/Box.ts";
@@ -33,6 +33,26 @@ test("flattenLeaves recurses into virtual-text", () => {
   v.parent = t;
   t.children = [a, v];
   a.parent = t;
+  expect(flattenLeaves(t)).toBe("ab");
+});
+
+// G21 follow-up, finding 1: flattenLeaves must NOT apply a transform to empty
+// inner text — matches paint.ts `innerText.length > 0` guard and Ink
+// squash-text-nodes.ts:34 (`nodeText.length > 0`). Without the guard,
+// a transform that adds chars to an empty string inflates the measured width
+// relative to what paint actually renders, causing layout/wrapping mismatch.
+test("flattenLeaves skips transform on empty nested text (length guard)", () => {
+  // Transform that adds chars to any input (including empty string).
+  const addCharsTransform = (s: string, _i: number) => s + "[X]";
+  const t = createText();
+  const leaf = createTextLeaf("ab");
+  leaf.parent = t;
+  // Empty transform child: no text leaves inside it.
+  const emptyTransform = createTransform(addCharsTransform);
+  emptyTransform.parent = t;
+  t.children = [leaf, emptyTransform];
+  // With the guard: flattenLeaves("ab" + skip-empty-transform) = "ab".
+  // Without the guard: flattenLeaves("ab" + "[X]") = "ab[X]" (inflated width).
   expect(flattenLeaves(t)).toBe("ab");
 });
 
