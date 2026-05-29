@@ -332,6 +332,26 @@ test("clears aspectRatio on rerender", async () => {
   expect(lastFrame({ trimLines: true })).toBe("┌──────┐\n│X     │\n└──────┘\nY");
 });
 
+// Ink parity G12: Ink's getWindowSize() uses a truthy guard (if (columns && rows))
+// so that a 0 value from stdout in non-TTY environments falls back to terminal-size
+// and then 80/24 defaults. vue-tui's renderer was using `stdout.columns ?? 80`
+// which only falls back for null/undefined — not 0 — collapsing layout to width 0.
+// References: Ink /tmp/ink-40b3a75/src/utils.ts lines 8-23.
+test("falls back to default width when stdout reports 0 columns (Ink parity G12)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width="100%">
+        <Text>hello</Text>
+      </Box>
+    )),
+    // columns: 0 — simulates non-TTY where stdout.columns is 0 (not null/undefined).
+    // With the bug: width resolves to 0, yoga collapses to 0-width, "hello" disappears.
+    // With the fix: resolveSize() truthy-guards 0, falls back to terminal-size / 80.
+    { columns: 0, rows: 0 },
+  );
+  expect(lastFrame()).toContain("hello");
+});
+
 test.skip("set max width in percent — known Yoga issue", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
