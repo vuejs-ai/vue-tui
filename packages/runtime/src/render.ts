@@ -711,6 +711,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // and makes the clearTerminal-on-overflow behavior depend on wall-clock
     // timing rather than the resize itself.
     if (interactive) {
+      // Track last known terminal width so we can detect narrowing on resize
+      // (Ink parity G11: ink.tsx:302 declares lastTerminalWidth, ink.tsx:402
+      // initializes it in the constructor).
+      let lastTerminalWidth = resolveSize(stdout).columns;
+
       const onResize = () => {
         // Cancel any pending trailing commit before painting synchronously.
         // Otherwise the throttle timer fires a second doCommit() right after
@@ -719,6 +724,25 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // clearTerminal (issue #26). The synchronous commit below already
         // reflects the current tree, so the pending commit is redundant.
         scheduler.cancel();
+
+        // Ink parity G11 (ink.tsx:459-474): when the terminal NARROWS, clear
+        // the screen and reset frame state before repainting. Without this,
+        // the previous wider frame and the new narrower frame can overlap and
+        // produce duplicate/corrupted output. Width increase and pure height
+        // changes do not trigger this path — only genuine narrowing does.
+        const currentWidth = resolveSize(stdout).columns;
+        if (currentWidth < lastTerminalWidth) {
+          writer.clear();
+          // Reset last-output strings so commit() repaints from scratch
+          // (no stale diff), but preserve outputHeight — Ink ink.tsx:462-466
+          // also leaves lastOutputHeight intact so shouldClearTerminalForFrame
+          // still sees a non-zero previousOutputHeight and can fire the
+          // clearTerminal path for overflowing frames on the resize commit.
+          frameState.lastOutput = "";
+          frameState.lastOutputToRender = "";
+        }
+        lastTerminalWidth = currentWidth;
+
         commit();
       };
       stdout.on("resize", onResize);
