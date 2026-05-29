@@ -1,5 +1,7 @@
 // packages/runtime/src/io/kitty-keyboard.ts
 
+import { writeSync as fsWriteSync } from "node:fs";
+
 const textEncoder = new TextEncoder();
 
 export const kittyFlags = {
@@ -110,7 +112,13 @@ export function stripKittyQueryResponsesAndTrailingPartial(buffer: number[]): nu
 
 export interface KittyKeyboardController {
   init(options: KittyKeyboardOptions | undefined, interactive: boolean): void;
-  dispose(): void;
+  /**
+   * @param sync When true, write the disable-kitty escape synchronously
+   * (fs.writeSync) so it reaches the fd before an abrupt signal-driven exit
+   * re-raises the signal (G18, Finding A). Defaults to async stream.write for
+   * the normal unmount path.
+   */
+  dispose(sync?: boolean): void;
   readonly isEnabled: boolean;
 }
 
@@ -195,13 +203,27 @@ export function createKittyKeyboardController(
       confirmKittySupport(flags);
     },
 
-    dispose() {
+    dispose(sync = false) {
       disposed = true;
       if (cancelDetection) {
         cancelDetection();
       }
       if (enabled) {
-        stdout.write("\x1b[<u");
+        if (sync) {
+          // Signal-exit path (G18, Finding A): flush the disable-kitty escape
+          // synchronously so it reaches the fd before signal-exit re-raises.
+          // Fall back to fd 1 when the stream has no numeric fd.
+          try {
+            // The base WriteStream type doesn't declare `fd`; tty streams do.
+            const streamFd = (stdout as { fd?: number }).fd;
+            const fd = typeof streamFd === "number" ? streamFd : 1;
+            fsWriteSync(fd, "\x1b[<u");
+          } catch {
+            // Best-effort restore during abrupt shutdown.
+          }
+        } else {
+          stdout.write("\x1b[<u");
+        }
         enabled = false;
       }
     },
