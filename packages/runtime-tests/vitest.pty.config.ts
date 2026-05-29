@@ -20,6 +20,9 @@ export default defineConfig({
     // trap). File-level parallelism is the proven, stable win.
     fileParallelism: true,
     testTimeout: 15000,
-    env: { FORCE_COLOR: "3" },
+    // CI:"false" so the runner's CI=true doesn't flip interactive detection off
+    // for any in-process render tests under this config (the PTY child helpers
+    // set it per-spawn, but vitest-level tests need it too).
+    env: { FORCE_COLOR: "3", CI: "false" },
   },
 });
