@@ -497,6 +497,11 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
     key.meta = true;
     key.shift = /^[A-Z]$/.test(parts[1]!);
   } else if ((parts = fnKeyRe.exec(s))) {
+    // `s` here is a terminal escape sequence (ASCII control chars + digits,
+    // e.g. "\x1b[1;5A"), never user text, so it has no multi-codepoint
+    // graphemes. Code-point spread is exactly what we want; the emoji-splitting
+    // concern behind no-misused-spread does not apply.
+    // eslint-disable-next-line no-misused-spread
     const segs = [...s];
 
     if (segs[0] === "" && segs[1] === "") {

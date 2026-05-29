@@ -3,7 +3,6 @@ import { sanitizeAnsi } from "./sanitize-ansi.ts";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
   return s.replace(
     /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:[:;][0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]|[\u001b\u009d]\].*?(?:\u0007|\u001b\\|\u009c)|[\u001b\u0098][\s\S]*?(?:\u0007|\u001b\\|\u009c)|[\u0080-\u009f]/g,
     "",
