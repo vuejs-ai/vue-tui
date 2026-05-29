@@ -1,12 +1,14 @@
-// Sequential: asserts on process-global resource counts (process exit/SIGINT
-// listeners, live yoga nodes). Concurrent siblings that mount/unmount apps add
-// and remove those listeners/nodes, polluting the counts. Tests are it.sequential.
+// Sequential: asserts on process-global resource counts (process exit/SIGINT/
+// beforeExit listeners, live yoga nodes). Concurrent siblings that mount/unmount
+// apps add and remove those listeners/nodes, polluting the counts. Tests are
+// it.sequential.
 
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useInput } from "@vue-tui/runtime";
+import { Box, createApp, Text, useInput } from "@vue-tui/runtime";
 import { yogaNodeTracker } from "@vue-tui/runtime/internal";
+import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test.sequential("50 render/unmount cycles leak zero process listeners", async () => {
   const exitBefore = process.listenerCount("exit");
@@ -59,4 +61,18 @@ test.sequential("raw mode stays on when one of two useInput components unmounts"
   showB.value = false;
   await nextTick();
   expect(terminal.rawMode.current).toBe(true);
+});
+
+test.sequential("waitUntilRenderFlush after unmount does not register beforeExit listener", async () => {
+  const App = defineComponent(() => () => <Text>Hello</Text>);
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  const beforeWaitCount = process.listenerCount("beforeExit");
+  app.unmount();
+  await app.waitUntilRenderFlush();
+  expect(process.listenerCount("beforeExit")).toBe(beforeWaitCount);
 });
