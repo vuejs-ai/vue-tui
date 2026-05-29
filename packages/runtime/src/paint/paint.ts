@@ -354,12 +354,16 @@ function drawBorder(
   const right = props["borderRight"] !== false;
 
   const borderColor = props["borderColor"] as string | undefined;
-  const dimAll = !!props["borderDimColor"];
+  // Keep the raw (non-coerced) general dim value so per-edge overrides work correctly.
+  const generalDim = props["borderDimColor"] as boolean | undefined;
 
   function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
     const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
     const edgeColor = (props[`border${capEdge}Color`] as string | undefined) ?? borderColor;
-    const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) || dimAll;
+    // Use nullish coalescing (not ||) so an explicit per-edge `false` wins over
+    // generalDim — only `undefined` falls back to the general value.
+    // Mirrors Ink render-border.ts:54: `borderTopDimColor ?? borderDimColor`.
+    const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) ?? generalDim;
     // Ink parity (render-border.ts:44-52): an edge's background comes only from the
     // per-edge or general border background — never from the Box's own backgroundColor.
     const edgeBg =
