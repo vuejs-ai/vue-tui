@@ -65,8 +65,13 @@ test("useInput on a non-TTY stdin throws a descriptive raw-mode error", async ()
   unmount();
 
   expect(error).toBeInstanceOf(Error);
-  expect(error?.message).toContain("Raw mode is not supported on the stdin provided");
-  expect(error?.message).toContain("https://github.com/vadimdemedes/ink/#israwmodesupported");
+  // Assert the FULL custom-stdin message (a non-process.stdin PassThrough hits the
+  // "provided to Vue TUI" branch), so exact two-line parity with Ink's wording +
+  // docs URL can't silently regress (mirrors Ink App.tsx:323-325).
+  expect(error?.message).toBe(
+    "Raw mode is not supported on the stdin provided to Vue TUI.\n" +
+      "Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+  );
 });
 
 // Test B (regression): useFocus must guard like Ink's use-focus.ts and NOT throw
