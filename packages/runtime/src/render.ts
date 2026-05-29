@@ -665,7 +665,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // and makes the clearTerminal-on-overflow behavior depend on wall-clock
     // timing rather than the resize itself.
     if (interactive) {
-      const onResize = () => commit();
+      const onResize = () => {
+        // Cancel any pending trailing commit before painting synchronously.
+        // Otherwise the throttle timer fires a second doCommit() right after
+        // this paint, and because shouldClearTerminalForFrame clears whenever
+        // the previous frame overflowed, that second commit emits a duplicate
+        // clearTerminal (issue #26). The synchronous commit below already
+        // reflects the current tree, so the pending commit is redundant.
+        scheduler.cancel();
+        commit();
+      };
       stdout.on("resize", onResize);
       mountedResizeHandler = onResize;
     }
