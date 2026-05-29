@@ -6,9 +6,9 @@ import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
-import { paint, paintIsolated } from "./paint/paint.ts";
+import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
-import { findStatics } from "./paint/static-channel.ts";
+import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import {
   AppContextKey,
   FocusContextKey,
@@ -78,13 +78,10 @@ export function renderToString(component: Component, options?: RenderToStringOpt
         root.yoga.calculateLayout(columns, undefined, Yoga.DIRECTION_LTR);
         // Flush static output from intermediate renders
         for (const stat of findStatics(root)) {
-          const fresh = stat.children.slice(stat.writtenCount);
-          if (fresh.length === 0) continue;
-          const staticFrame = paintIsolated(fresh, columns, stat);
+          const staticFrame = paintStaticNode(stat, columns);
           if (staticFrame && staticFrame !== "\n") {
             capturedStaticOutput += staticFrame + "\n";
           }
-          stat.writtenCount = stat.children.length;
         }
       },
     }),

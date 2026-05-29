@@ -21,8 +21,8 @@ import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { createAnimationScheduler } from "./animation-scheduler.ts";
-import { paint, paintIsolated } from "./paint/paint.ts";
-import { findStatics } from "./paint/static-channel.ts";
+import { paint } from "./paint/paint.ts";
+import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import {
@@ -550,13 +550,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const w = resolveSize(stdout).columns;
       let staticOutput = "";
       for (const stat of findStatics(tuiRoot)) {
-        const fresh = stat.children.slice(stat.writtenCount);
-        if (fresh.length === 0) continue;
-        const staticFrame = paintIsolated(fresh, w, stat);
+        const staticFrame = paintStaticNode(stat, w);
         if (staticFrame.length > 0) {
           staticOutput += staticFrame + "\n";
         }
-        stat.writtenCount = stat.children.length;
       }
       const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
       if (hasStaticOutput) {

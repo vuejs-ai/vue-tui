@@ -83,7 +83,25 @@ export interface TuiStatic extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
-  writtenCount: number;
+  /**
+   * Host child nodes already written to the static channel. Static items are
+   * write-once: each commit only paints the children NOT in this set. We track
+   * by node identity rather than a count because a single logical item expands
+   * to several host nodes (the <Text>/<Box> plus empty text-leaf fragment
+   * anchors Vue inserts), so a positional `writtenCount` would mis-slice. Once a
+   * child is painted it is recorded here, then the <Static> component advances
+   * its cursor and unmounts it (mirroring Ink's `setIndex(items.length)`).
+   */
+  writtenNodes: Set<TuiNode>;
+  /**
+   * Callback registered by the <Static> component, invoked by the renderer AFTER
+   * a commit has painted freshly-written items. It advances the component's
+   * reactive cursor (Ink's `index`) so the just-written items are sliced out and
+   * unmount on the next render — the vue-tui analogue of Ink's post-commit
+   * `useLayoutEffect(() => setIndex(items.length))`. Advancing AFTER paint (never
+   * during render) guarantees items are written before they are dropped.
+   */
+  onWritten?: () => void;
 }
 
 export interface TuiTransform extends NodeBase {
@@ -171,7 +189,7 @@ export function createStatic(): TuiStatic {
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
-    writtenCount: 0,
+    writtenNodes: new Set(),
   };
 }
 
