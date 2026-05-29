@@ -58,6 +58,13 @@ export default defineConfig({
         command: "vp run @vue-tui/runtime-tests#test:pty",
         dependsOn: ["ci:build"],
       },
+      // cli has no tests yet (test passes with --passWithNoTests), but wiring
+      // the branch now means future CLI tests are covered automatically rather
+      // than silently skipped.
+      "ci:test:cli": {
+        command: "vp run @vue-tui/cli#test",
+        dependsOn: ["ci:build"],
+      },
       ci: {
         command: "echo ci ok",
         dependsOn: [
@@ -68,6 +75,7 @@ export default defineConfig({
           "ci:test:testing",
           "ci:test:integration",
           "ci:test:pty",
+          "ci:test:cli",
         ],
       },
     },
