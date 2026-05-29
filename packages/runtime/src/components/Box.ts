@@ -117,11 +117,21 @@ const BoxImpl = defineComponent({
     // Ink types borderStyle as `keyof Boxes | BoxStyle`; we mirror that here.
     borderStyle: [String, Object] as PropType<BorderStyle | BoxStyle>,
     borderColor: [String, Array],
-    borderDimColor: Boolean,
-    borderTopDimColor: Boolean,
-    borderBottomDimColor: Boolean,
-    borderLeftDimColor: Boolean,
-    borderRightDimColor: Boolean,
+    // `default: undefined` is intentional and load-bearing: Vue's boolean-casting
+    // rule coerces absent Boolean props to `false` only when there is no explicit
+    // default. Adding `default: undefined` suppresses that coercion so absent
+    // per-edge dim props arrive in the paint pass as `undefined`, not `false`.
+    // This lets `edgeDim = (perEdge ?? generalDim)` correctly fall back to the
+    // general value only when the per-edge prop was truly omitted — mirroring
+    // Ink render-border.ts:54 which uses real-undefined via React's prop model
+    // (G16). The `Boolean` type is kept so Vue still accepts bare-attribute
+    // `<Box borderDimColor>` in templates (coerces `""` → `true`) and passes
+    // TypeScript type-checking for consumers.
+    borderDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+    borderTopDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+    borderBottomDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+    borderLeftDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+    borderRightDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
     borderTop: { type: Boolean, default: true },
     borderBottom: { type: Boolean, default: true },
     borderLeft: { type: Boolean, default: true },

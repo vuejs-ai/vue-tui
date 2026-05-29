@@ -1303,6 +1303,29 @@ test("G13: custom border object renders correct glyphs", async ({ expect }) => {
   expect(lines[2]).toMatch(/^GF+E$/);
 });
 
+// G16 — per-edge borderDimColor=false can override general borderDimColor (Ink parity)
+// With borderDimColor (general dim ON) and borderTopDimColor={false} (top dim explicitly OFF),
+// the top border must NOT be dim while other edges (e.g. bottom) remain dim.
+// Before the fix, `false || true` = true caused the top edge to be wrongly dimmed.
+test("G16: per-edge borderDimColor=false overrides general borderDimColor", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="single" borderDimColor borderTopDimColor={false} alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  const lines = frame.split("\n");
+  const topLine = lines[0]!;
+  const bottomLine = lines[lines.length - 1]!;
+  // Top border must NOT contain dim ANSI code (\x1b[2m / "[2m")
+  expect(topLine).not.toContain("[2m");
+  // Bottom border MUST contain dim ANSI code (general dim still applies)
+  expect(bottomLine).toContain("[2m");
+});
+
 // borderDimColor should not dim styled child Text touching left edge
 test("borderDimColor does not dim styled child Text touching left edge", async ({ expect }) => {
   const { lastFrame } = await render(
