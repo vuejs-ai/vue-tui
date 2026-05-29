@@ -1,11 +1,11 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
-import { expect, test } from "vite-plus/test";
+import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, measureText } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
 
 // single node — full width box
-test("single node - full width box", async () => {
+test("single node - full width box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round">
@@ -22,7 +22,7 @@ test("single node - full width box", async () => {
 });
 
 // single node — full width box with colorful border
-test("single node - full width box with colorful border", async () => {
+test("single node - full width box with colorful border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" borderColor="green">
@@ -39,7 +39,7 @@ test("single node - full width box with colorful border", async () => {
 });
 
 // single node — fit-content box
-test("single node - fit-content box", async () => {
+test("single node - fit-content box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -56,7 +56,7 @@ test("single node - fit-content box", async () => {
 });
 
 // single node — fit-content box with wide characters
-test("single node - fit-content box with wide characters", async () => {
+test("single node - fit-content box with wide characters", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -73,7 +73,7 @@ test("single node - fit-content box with wide characters", async () => {
 });
 
 // single node — fit-content box with emojis
-test("single node - fit-content box with emojis", async () => {
+test("single node - fit-content box with emojis", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -90,7 +90,7 @@ test("single node - fit-content box with emojis", async () => {
 });
 
 // single node — fit-content box with variation selector emojis
-test("single node - fit-content box with variation selector emojis", async () => {
+test("single node - fit-content box with variation selector emojis", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -107,7 +107,7 @@ test("single node - fit-content box with variation selector emojis", async () =>
 });
 
 // single node — fixed width box
-test("single node - fixed width box", async () => {
+test("single node - fixed width box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20}>
@@ -124,7 +124,7 @@ test("single node - fixed width box", async () => {
 });
 
 // single node — fixed width and height box
-test("single node - fixed width and height box", async () => {
+test("single node - fixed width and height box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20} height={20}>
@@ -158,7 +158,7 @@ test("single node - fixed width and height box", async () => {
 });
 
 // single node — box with padding
-test("single node - box with padding", async () => {
+test("single node - box with padding", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" padding={1} alignSelf="flex-start">
@@ -177,7 +177,7 @@ test("single node - box with padding", async () => {
 });
 
 // single node — box with horizontal alignment
-test("single node - box with horizontal alignment", async () => {
+test("single node - box with horizontal alignment", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20} justifyContent="center">
@@ -194,7 +194,7 @@ test("single node - box with horizontal alignment", async () => {
 });
 
 // single node — box with vertical alignment
-test("single node - box with vertical alignment", async () => {
+test("single node - box with vertical alignment", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" height={20} alignItems="center" alignSelf="flex-start">
@@ -228,7 +228,7 @@ test("single node - box with vertical alignment", async () => {
 });
 
 // single node — box with wrapping
-test("single node - box with wrapping", async () => {
+test("single node - box with wrapping", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={10}>
@@ -246,7 +246,7 @@ test("single node - box with wrapping", async () => {
 });
 
 // multiple nodes — full width box
-test("multiple nodes - full width box", async () => {
+test("multiple nodes - full width box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round">
@@ -263,7 +263,7 @@ test("multiple nodes - full width box", async () => {
 });
 
 // multiple nodes — full width box with colorful border
-test("multiple nodes - full width box with colorful border", async () => {
+test("multiple nodes - full width box with colorful border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" borderColor="green">
@@ -280,7 +280,7 @@ test("multiple nodes - full width box with colorful border", async () => {
 });
 
 // multiple nodes — fit-content box
-test("multiple nodes - fit-content box", async () => {
+test("multiple nodes - fit-content box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -297,7 +297,7 @@ test("multiple nodes - fit-content box", async () => {
 });
 
 // multiple nodes — fixed width box
-test("multiple nodes - fixed width box", async () => {
+test("multiple nodes - fixed width box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20}>
@@ -314,7 +314,7 @@ test("multiple nodes - fixed width box", async () => {
 });
 
 // multiple nodes — fixed width and height box
-test("multiple nodes - fixed width and height box", async () => {
+test("multiple nodes - fixed width and height box", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20} height={20}>
@@ -348,7 +348,7 @@ test("multiple nodes - fixed width and height box", async () => {
 });
 
 // multiple nodes — box with padding
-test("multiple nodes - box with padding", async () => {
+test("multiple nodes - box with padding", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" padding={1} alignSelf="flex-start">
@@ -367,7 +367,7 @@ test("multiple nodes - box with padding", async () => {
 });
 
 // multiple nodes — box with horizontal alignment
-test("multiple nodes - box with horizontal alignment", async () => {
+test("multiple nodes - box with horizontal alignment", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={20} justifyContent="center">
@@ -384,7 +384,7 @@ test("multiple nodes - box with horizontal alignment", async () => {
 });
 
 // multiple nodes — box with vertical alignment
-test("multiple nodes - box with vertical alignment", async () => {
+test("multiple nodes - box with vertical alignment", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" height={20} alignItems="center" alignSelf="flex-start">
@@ -418,7 +418,7 @@ test("multiple nodes - box with vertical alignment", async () => {
 });
 
 // multiple nodes — box with wrapping
-test("multiple nodes - box with wrapping", async () => {
+test("multiple nodes - box with wrapping", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={10}>
@@ -436,7 +436,7 @@ test("multiple nodes - box with wrapping", async () => {
 });
 
 // multiple nodes — box with wrapping and long first node
-test("multiple nodes - box with wrapping and long first node", async () => {
+test("multiple nodes - box with wrapping and long first node", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={10}>
@@ -454,7 +454,7 @@ test("multiple nodes - box with wrapping and long first node", async () => {
 });
 
 // multiple nodes — box with wrapping and very long first node
-test("multiple nodes - box with wrapping and very long first node", async () => {
+test("multiple nodes - box with wrapping and very long first node", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={10}>
@@ -473,7 +473,7 @@ test("multiple nodes - box with wrapping and very long first node", async () => 
 });
 
 // nested boxes
-test("nested boxes", async () => {
+test("nested boxes", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" width={40} padding={1}>
@@ -498,7 +498,9 @@ test("nested boxes", async () => {
 });
 
 // nested boxes — fit-content box with wide characters on flex-direction row
-test("nested boxes - fit-content box with wide characters on flex-direction row", async () => {
+test("nested boxes - fit-content box with wide characters on flex-direction row", async ({
+  expect,
+}) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -525,7 +527,7 @@ test("nested boxes - fit-content box with wide characters on flex-direction row"
 });
 
 // nested boxes — fit-content box with emojis on flex-direction row
-test("nested boxes - fit-content box with emojis on flex-direction row", async () => {
+test("nested boxes - fit-content box with emojis on flex-direction row", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start">
@@ -552,7 +554,9 @@ test("nested boxes - fit-content box with emojis on flex-direction row", async (
 });
 
 // nested boxes — fit-content box with wide characters on flex-direction column
-test("nested boxes - fit-content box with wide characters on flex-direction column", async () => {
+test("nested boxes - fit-content box with wide characters on flex-direction column", async ({
+  expect,
+}) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start" flexDirection="column">
@@ -585,7 +589,7 @@ test("nested boxes - fit-content box with wide characters on flex-direction colu
 });
 
 // nested boxes — fit-content box with emojis on flex-direction column
-test("nested boxes - fit-content box with emojis on flex-direction column", async () => {
+test("nested boxes - fit-content box with emojis on flex-direction column", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="round" alignSelf="flex-start" flexDirection="column">
@@ -618,7 +622,7 @@ test("nested boxes - fit-content box with emojis on flex-direction column", asyn
 });
 
 // render border after update — reactive borderColor changes
-test("render border after update", async () => {
+test("render border after update", async ({ expect }) => {
   const borderColor = shallowRef<string | undefined>(undefined);
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -652,7 +656,9 @@ test("render border after update", async () => {
 });
 
 // render border edge changes after update when borderStyle is unchanged
-test("render border edge changes after update when borderStyle is unchanged", async () => {
+test("render border edge changes after update when borderStyle is unchanged", async ({
+  expect,
+}) => {
   const showTop = shallowRef(true);
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -685,7 +691,7 @@ test("render border edge changes after update when borderStyle is unchanged", as
 });
 
 // hide top border
-test("hide top border", async () => {
+test("hide top border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -707,7 +713,7 @@ test("hide top border", async () => {
 });
 
 // hide bottom border
-test("hide bottom border", async () => {
+test("hide bottom border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -729,7 +735,7 @@ test("hide bottom border", async () => {
 });
 
 // hide top and bottom borders
-test("hide top and bottom borders", async () => {
+test("hide top and bottom borders", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -750,7 +756,7 @@ test("hide top and bottom borders", async () => {
 });
 
 // hide left border
-test("hide left border", async () => {
+test("hide left border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -773,7 +779,7 @@ test("hide left border", async () => {
 });
 
 // hide right border
-test("hide right border", async () => {
+test("hide right border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -796,7 +802,7 @@ test("hide right border", async () => {
 });
 
 // hide left and right border
-test("hide left and right border", async () => {
+test("hide left and right border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -819,7 +825,7 @@ test("hide left and right border", async () => {
 });
 
 // hide all borders
-test("hide all borders", async () => {
+test("hide all borders", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -846,7 +852,7 @@ test("hide all borders", async () => {
 });
 
 // change color of top border
-test("change color of top border", async () => {
+test("change color of top border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -869,7 +875,7 @@ test("change color of top border", async () => {
 });
 
 // change color of bottom border
-test("change color of bottom border", async () => {
+test("change color of bottom border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -892,7 +898,7 @@ test("change color of bottom border", async () => {
 });
 
 // change color of left border
-test("change color of left border", async () => {
+test("change color of left border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -915,7 +921,7 @@ test("change color of left border", async () => {
 });
 
 // change color of right border
-test("change color of right border", async () => {
+test("change color of right border", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -938,7 +944,7 @@ test("change color of right border", async () => {
 });
 
 // custom border style — uses "arrow" named style (same chars as the Ink custom object)
-test("custom border style", async () => {
+test("custom border style", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="arrow">
@@ -955,7 +961,7 @@ test("custom border style", async () => {
 });
 
 // arrow border on narrow box does not overflow
-test("arrow border on narrow box does not overflow", async () => {
+test("arrow border on narrow box does not overflow", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="arrow" width={3} height={3}>
@@ -974,7 +980,7 @@ test("arrow border on narrow box does not overflow", async () => {
 });
 
 // dim border color
-test("dim border color", async () => {
+test("dim border color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderDimColor borderStyle="round">
@@ -991,7 +997,7 @@ test("dim border color", async () => {
 });
 
 // dim top border color
-test("dim top border color", async () => {
+test("dim top border color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -1014,7 +1020,7 @@ test("dim top border color", async () => {
 });
 
 // dim bottom border color
-test("dim bottom border color", async () => {
+test("dim bottom border color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -1037,7 +1043,7 @@ test("dim bottom border color", async () => {
 });
 
 // dim left border color
-test("dim left border color", async () => {
+test("dim left border color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -1060,7 +1066,7 @@ test("dim left border color", async () => {
 });
 
 // dim right border color
-test("dim right border color", async () => {
+test("dim right border color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignItems="flex-start">
@@ -1084,7 +1090,7 @@ test("dim right border color", async () => {
 
 // --- borderBackgroundColor tests (ported from Ink border-backgrounds.tsx) ---
 
-test("border with background color", async () => {
+test("border with background color", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="single" borderColor="white" borderBackgroundColor="blue">
@@ -1105,7 +1111,7 @@ test("border with background color", async () => {
   expect(frame).toContain("[44m");
 });
 
-test("border with different background colors per side", async () => {
+test("border with different background colors per side", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -1132,7 +1138,7 @@ test("border with different background colors per side", async () => {
   expect(frame).toContain("[44m");
 });
 
-test("border background color fallback to general borderBackgroundColor", async () => {
+test("border background color fallback to general borderBackgroundColor", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="single" borderBackgroundColor="magenta" borderTopBackgroundColor="cyan">
@@ -1149,7 +1155,7 @@ test("border background color fallback to general borderBackgroundColor", async 
   expect(frame).toContain("[45m");
 });
 
-test("vertical border background does not bleed into content rows", async () => {
+test("vertical border background does not bleed into content rows", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderStyle="classic" borderBackgroundColor="cyan" alignSelf="flex-start" width={12}>
@@ -1171,7 +1177,7 @@ test("vertical border background does not bleed into content rows", async () => 
   }
 });
 
-test("foreground, background and dim combine correctly", async () => {
+test("foreground, background and dim combine correctly", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -1194,7 +1200,7 @@ test("foreground, background and dim combine correctly", async () => {
 });
 
 // borderDimColor should not dim styled child Text touching left edge
-test("borderDimColor does not dim styled child Text touching left edge", async () => {
+test("borderDimColor does not dim styled child Text touching left edge", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box borderDimColor borderStyle="round" alignSelf="flex-start">

@@ -1,3 +1,6 @@
+// Sequential: uses vi.useFakeTimers (process-global timer mocking). See the
+// other *.sequential.test files. The describe blocks are describe.sequential.
+
 import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
 // Internal module not in package exports — import via relative source path,
 // matching the convention in integration/lifecycle/write-synchronized.test.ts.
@@ -7,7 +10,7 @@ import {
   normalizeInterval,
 } from "../../runtime/src/animation-scheduler.ts";
 
-describe("normalizeInterval", () => {
+describe.sequential("normalizeInterval", () => {
   test("clamps and defaults", () => {
     expect(normalizeInterval(50)).toBe(50);
     expect(normalizeInterval(0)).toBe(1);
@@ -19,7 +22,7 @@ describe("normalizeInterval", () => {
   });
 });
 
-describe("createAnimationScheduler", () => {
+describe.sequential("createAnimationScheduler", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
   });
@@ -148,7 +151,7 @@ describe("createAnimationScheduler", () => {
   });
 });
 
-describe("createNoOpAnimationScheduler", () => {
+describe.sequential("createNoOpAnimationScheduler", () => {
   test("subscribe returns inert handle, never ticks", () => {
     const s = createNoOpAnimationScheduler();
     const cb = vi.fn();

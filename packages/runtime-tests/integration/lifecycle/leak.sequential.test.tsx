@@ -1,10 +1,14 @@
+// Sequential: asserts on process-global resource counts (process exit/SIGINT
+// listeners, live yoga nodes). Concurrent siblings that mount/unmount apps add
+// and remove those listeners/nodes, polluting the counts. Tests are it.sequential.
+
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 import { yogaNodeTracker } from "@vue-tui/runtime/internal";
 
-test("50 render/unmount cycles leak zero process listeners", async () => {
+test.sequential("50 render/unmount cycles leak zero process listeners", async () => {
   const exitBefore = process.listenerCount("exit");
   const sigintBefore = process.listenerCount("SIGINT");
 
@@ -19,7 +23,7 @@ test("50 render/unmount cycles leak zero process listeners", async () => {
   expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
 });
 
-test("100 render/unmount cycles leak zero yoga nodes", async () => {
+test.sequential("100 render/unmount cycles leak zero yoga nodes", async () => {
   yogaNodeTracker.reset();
 
   const App = defineComponent(() => () => <Text>x</Text>);
@@ -32,7 +36,7 @@ test("100 render/unmount cycles leak zero yoga nodes", async () => {
   expect(yogaNodeTracker.snapshot().live).toBe(0);
 });
 
-test("raw mode stays on when one of two useInput components unmounts", async () => {
+test.sequential("raw mode stays on when one of two useInput components unmounts", async () => {
   const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
