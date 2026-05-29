@@ -253,6 +253,13 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       onCommit();
       return;
     }
+    if (el.type === "static" && key === "internal_onWritten") {
+      // Callback the renderer invokes post-commit to advance the <Static>
+      // component's cursor so written items unmount. Not styling/layout.
+      el.onWritten = typeof next === "function" ? (next as () => void) : undefined;
+      onCommit();
+      return;
+    }
     if (el.type === "box" || el.type === "text" || el.type === "static" || el.type === "root") {
       if (isYogaProp(key)) {
         applyYogaProp(el, key, next);

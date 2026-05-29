@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, nextTick, shallowRef } from "vue";
+import { defineComponent, nextTick, onUnmounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, Static, createApp } from "@vue-tui/runtime";
@@ -359,6 +359,104 @@ test("render only new items in static output on final render", async () => {
   const allOutput = frames.join("");
   expect(allOutput).toContain("A");
   expect(allOutput).toContain("B");
+});
+
+// Ink reference: src/components/Static.tsx — `itemsToRender = items.slice(index)`
+// with `useLayoutEffect(() => setIndex(items.length))`. Once an item is written
+// (committed/painted), the effect advances `index` past it, so on the next
+// render `items.slice(index)` no longer includes it and its element is removed
+// from the tree → its component UNMOUNTS. vue-tui must match: a written Static
+// item's component must unmount (onUnmounted fires) while not-yet-written items
+// stay mounted.
+test("written Static items unmount their components (Ink parity)", async () => {
+  const unmounted: string[] = [];
+
+  const Item = defineComponent({
+    name: "StaticItem",
+    props: { label: { type: String, required: true } },
+    setup(props) {
+      onUnmounted(() => {
+        unmounted.push(props.label);
+      });
+      return () => <Text key={props.label}>{props.label}</Text>;
+    },
+  });
+
+  const items = shallowRef<string[]>(["A"]);
+
+  const App = defineComponent(() => () => (
+    <Box>
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => <Item key={item} label={item} />,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { unmount } = await render(App);
+
+  // After the first render, item "A" has been written. Once the write settles,
+  // its component must unmount (mirroring Ink advancing the cursor past it).
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+  expect(unmounted).toContain("A");
+
+  // Add "B". "A" was already unmounted; only "B" is freshly mounted+written.
+  items.value = ["A", "B"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+  expect(unmounted).toContain("B");
+
+  unmount();
+});
+
+// Ink reference: Static resets `index` to `items.length` on every length change
+// (`useLayoutEffect(() => setIndex(items.length), [items.length])`), so the cursor
+// can DECREASE. vue-tui must mirror this. A monotonic cursor (only-increase) drops
+// items after a shrink-then-grow: [A,B] writes (cursor→2); shrink to [A] (Ink resets
+// cursor→1); grow to [A,C] renders slice(1)=[C] and writes C. With a monotonic
+// cursor, slice(2)=[] and C is silently never painted.
+test("Static resets cursor on shrink so later items still paint (Ink parity)", async () => {
+  const items = shallowRef<string[]>(["A", "B"]);
+
+  const App = defineComponent(() => () => (
+    <Box>
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App);
+
+  // Let A and B write (cursor advances to 2).
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+  expect(frames.join("")).toContain("A");
+  expect(frames.join("")).toContain("B");
+
+  // Shrink to [A]. Ink resets the cursor to items.length (1); no re-paint of A.
+  items.value = ["A"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  // Grow to [A, C]. With Ink-parity cursor reset, slice(1)=[C] paints C.
+  // With the monotonic bug, slice(2)=[] and C is dropped forever.
+  items.value = ["A", "C"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  expect(frames.join("")).toContain("C");
 });
 
 test("Static items do not add blank lines to the dynamic frame", async () => {
