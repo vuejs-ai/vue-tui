@@ -30,13 +30,14 @@ jobs:
       # voidzero-dev/setup-vp installs Node (via `vp env use`), the vp CLI, and
       # — because run-install defaults to true — runs `vp install` in the repo
       # root, so no separate install step is needed.
-      #   node-version "22.12.0" pins the exact engines.node floor (>=22.12.0)
-      #     so CI fails if code accidentally relies on a newer Node API.
+      #   node-version "22.13.0" is the lowest Node that satisfies the toolchain:
+      #     engines.node says >=22.12.0, but pnpm@11 requires >=22.13, so 22.12.0
+      #     fails `vp install`. 22.13.0 is the real supported floor.
       #   cache (off by default) caches the pnpm store; auto-detects pnpm-lock.yaml.
       - name: Set up Vite+ (vp) and Node
         uses: voidzero-dev/setup-vp@v1
         with:
-          node-version: "22.12.0"
+          node-version: "22.13.0"
           cache: true
 
       # `ci` is the parallel verification graph defined in vite.config.ts
