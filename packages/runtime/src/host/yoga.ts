@@ -137,50 +137,68 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
 
 const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   width: (n, v) =>
-    v === undefined ? n.setWidth("auto") : n.setWidth(v as number | "auto" | `${number}%`),
+    v == null ? n.setWidth("auto") : n.setWidth(v as number | "auto" | `${number}%`),
   height: (n, v) =>
-    v === undefined ? n.setHeight("auto") : n.setHeight(v as number | "auto" | `${number}%`),
-  minWidth: (n, v) => n.setMinWidth(v as number | `${number}%`),
-  minHeight: (n, v) => n.setMinHeight(v as number | `${number}%`),
-  flexGrow: (n, v) => n.setFlexGrow(v as number),
-  flexShrink: (n, v) => n.setFlexShrink(v as number),
-  flexBasis: (n, v) => n.setFlexBasis(v as number | "auto" | `${number}%`),
-  flexDirection: (n, v) => n.setFlexDirection(toFlexDirection(v as string)),
-  flexWrap: (n, v) => n.setFlexWrap(toFlexWrap(v as string)),
-  alignItems: (n, v) => n.setAlignItems(toAlign(v as string)),
-  alignSelf: (n, v) => n.setAlignSelf(toAlign(v as string)),
-  justifyContent: (n, v) => n.setJustifyContent(toJustify(v as string)),
-  gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v as number),
-  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v as number),
-  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v as number),
+    v == null ? n.setHeight("auto") : n.setHeight(v as number | "auto" | `${number}%`),
+  // Ink default: minWidth=0 (yoga default). Reset to 0 on removal. (G19)
+  minWidth: (n, v) => n.setMinWidth(v == null ? 0 : (v as number | `${number}%`)),
+  // Ink default: minHeight=0 (yoga default). Reset to 0 on removal. (G19)
+  minHeight: (n, v) => n.setMinHeight(v == null ? 0 : (v as number | `${number}%`)),
+  // Ink default: flexGrow=0 (Box.tsx hardcodes flexGrow:0). Reset to 0 on removal. (G19)
+  flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
+  // Ink default: flexShrink=1 (Box.tsx hardcodes flexShrink:1). Reset to 1 on removal. (G19)
+  flexShrink: (n, v) => n.setFlexShrink(v == null ? 1 : (v as number)),
+  // Ink default: flexBasis=auto (yoga default). Reset via setFlexBasisAuto() on removal. (G19)
+  flexBasis: (n, v) => {
+    if (v == null) {
+      n.setFlexBasisAuto();
+    } else {
+      n.setFlexBasis(v as number | "auto" | `${number}%`);
+    }
+  },
+  // Ink default: flexDirection=row (Box.tsx hardcodes flexDirection:'row'). Reset to ROW on removal. (G19)
+  flexDirection: (n, v) =>
+    n.setFlexDirection(v == null ? Yoga.FLEX_DIRECTION_ROW : toFlexDirection(v as string)),
+  // Ink default: flexWrap=nowrap (Box.tsx hardcodes flexWrap:'nowrap'). Reset to NO_WRAP on removal. (G19)
+  flexWrap: (n, v) => n.setFlexWrap(v == null ? Yoga.WRAP_NO_WRAP : toFlexWrap(v as string)),
+  // Ink default: alignItems=stretch (yoga default). Reset to STRETCH on removal. (G19)
+  alignItems: (n, v) => n.setAlignItems(v == null ? Yoga.ALIGN_STRETCH : toAlign(v as string)),
+  // Ink default: alignSelf=auto (yoga default). Reset to AUTO on removal. (G19)
+  alignSelf: (n, v) => n.setAlignSelf(v == null ? Yoga.ALIGN_AUTO : toAlign(v as string)),
+  // Ink default: justifyContent=flex-start (yoga default). Reset to FLEX_START on removal. (G19)
+  justifyContent: (n, v) =>
+    n.setJustifyContent(v == null ? Yoga.JUSTIFY_FLEX_START : toJustify(v as string)),
+  // Ink default: gap=0 (yoga default). Reset to 0 on removal. (G19)
+  gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v == null ? 0 : (v as number)),
+  // Ink default: columnGap=0 (yoga default). Reset to 0 on removal. (G19)
+  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v == null ? 0 : (v as number)),
+  // Ink default: rowGap=0 (yoga default). Reset to 0 on removal. (G19)
+  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v == null ? 0 : (v as number)),
 
-  margin: (n, v) => n.setMargin(Yoga.EDGE_ALL, v as number),
-  marginX: (n, v) => {
-    n.setMargin(Yoga.EDGE_START, v as number);
-    n.setMargin(Yoga.EDGE_END, v as number);
-  },
-  marginY: (n, v) => {
-    n.setMargin(Yoga.EDGE_TOP, v as number);
-    n.setMargin(Yoga.EDGE_BOTTOM, v as number);
-  },
-  marginTop: (n, v) => n.setMargin(Yoga.EDGE_TOP, v as number),
-  marginBottom: (n, v) => n.setMargin(Yoga.EDGE_BOTTOM, v as number),
-  marginLeft: (n, v) => n.setMargin(Yoga.EDGE_START, v as number),
-  marginRight: (n, v) => n.setMargin(Yoga.EDGE_END, v as number),
+  // Ink default: margin=0 (yoga default). Reset all margin edges to 0 on removal. (G19)
+  margin: (n, v) => n.setMargin(Yoga.EDGE_ALL, v == null ? 0 : (v as number)),
+  // marginX/marginY map to the HORIZONTAL/VERTICAL axis edges (matching Ink
+  // styles.ts applyMarginStyles). These compose with the specific edges per
+  // yoga precedence (EDGE_START/END/TOP/BOTTOM override the axis), so removing
+  // the axis resets only the axis edge and never clobbers a surviving
+  // marginLeft/Right/Top/Bottom. (Blocker 1)
+  marginX: (n, v) => n.setMargin(Yoga.EDGE_HORIZONTAL, v == null ? 0 : (v as number)),
+  marginY: (n, v) => n.setMargin(Yoga.EDGE_VERTICAL, v == null ? 0 : (v as number)),
+  marginTop: (n, v) => n.setMargin(Yoga.EDGE_TOP, v == null ? 0 : (v as number)),
+  marginBottom: (n, v) => n.setMargin(Yoga.EDGE_BOTTOM, v == null ? 0 : (v as number)),
+  marginLeft: (n, v) => n.setMargin(Yoga.EDGE_START, v == null ? 0 : (v as number)),
+  marginRight: (n, v) => n.setMargin(Yoga.EDGE_END, v == null ? 0 : (v as number)),
 
-  padding: (n, v) => n.setPadding(Yoga.EDGE_ALL, v as number),
-  paddingX: (n, v) => {
-    n.setPadding(Yoga.EDGE_LEFT, v as number);
-    n.setPadding(Yoga.EDGE_RIGHT, v as number);
-  },
-  paddingY: (n, v) => {
-    n.setPadding(Yoga.EDGE_TOP, v as number);
-    n.setPadding(Yoga.EDGE_BOTTOM, v as number);
-  },
-  paddingTop: (n, v) => n.setPadding(Yoga.EDGE_TOP, v as number),
-  paddingBottom: (n, v) => n.setPadding(Yoga.EDGE_BOTTOM, v as number),
-  paddingLeft: (n, v) => n.setPadding(Yoga.EDGE_LEFT, v as number),
-  paddingRight: (n, v) => n.setPadding(Yoga.EDGE_RIGHT, v as number),
+  // Ink default: padding=0 (yoga default). Reset all padding edges to 0 on removal. (G19)
+  padding: (n, v) => n.setPadding(Yoga.EDGE_ALL, v == null ? 0 : (v as number)),
+  // paddingX/paddingY map to the HORIZONTAL/VERTICAL axis edges (matching Ink
+  // styles.ts applyPaddingStyles); same composition/reset semantics as margin.
+  paddingX: (n, v) => n.setPadding(Yoga.EDGE_HORIZONTAL, v == null ? 0 : (v as number)),
+  paddingY: (n, v) => n.setPadding(Yoga.EDGE_VERTICAL, v == null ? 0 : (v as number)),
+  paddingTop: (n, v) => n.setPadding(Yoga.EDGE_TOP, v == null ? 0 : (v as number)),
+  paddingBottom: (n, v) => n.setPadding(Yoga.EDGE_BOTTOM, v == null ? 0 : (v as number)),
+  paddingLeft: (n, v) => n.setPadding(Yoga.EDGE_LEFT, v == null ? 0 : (v as number)),
+  paddingRight: (n, v) => n.setPadding(Yoga.EDGE_RIGHT, v == null ? 0 : (v as number)),
 
   borderStyle: (n, v) => {
     // Border occupies 1 cell on every side when a style is set.
@@ -204,30 +222,29 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   overflowX: (_n, _v) => {},
   overflowY: (_n, _v) => {},
   maxWidth: (n, v) =>
-    v === undefined ? n.setMaxWidth(NaN as never) : n.setMaxWidth(v as number | `${number}%`),
+    v == null ? n.setMaxWidth(NaN as never) : n.setMaxWidth(v as number | `${number}%`),
   maxHeight: (n, v) =>
-    v === undefined ? n.setMaxHeight(NaN as never) : n.setMaxHeight(v as number | `${number}%`),
+    v == null ? n.setMaxHeight(NaN as never) : n.setMaxHeight(v as number | `${number}%`),
   aspectRatio: (n, v) =>
-    v === undefined ? n.setAspectRatio(undefined as never) : n.setAspectRatio(v as number),
+    v == null ? n.setAspectRatio(undefined as never) : n.setAspectRatio(v as number),
   alignContent: (n, v) =>
-    v === undefined
-      ? n.setAlignContent(Yoga.ALIGN_FLEX_START)
-      : n.setAlignContent(toAlign(v as string)),
-  position: (n, v) => n.setPositionType(toPosition(v as string)),
+    v == null ? n.setAlignContent(Yoga.ALIGN_FLEX_START) : n.setAlignContent(toAlign(v as string)),
+  // Ink default: position=relative (yoga default). Reset to RELATIVE on removal. (G19)
+  position: (n, v) => n.setPositionType(toPosition(v as string | undefined)),
   top: (n, v) =>
-    v === undefined
+    v == null
       ? n.setPosition(Yoga.EDGE_TOP, NaN as never)
       : n.setPosition(Yoga.EDGE_TOP, v as number | `${number}%`),
   right: (n, v) =>
-    v === undefined
+    v == null
       ? n.setPosition(Yoga.EDGE_RIGHT, NaN as never)
       : n.setPosition(Yoga.EDGE_RIGHT, v as number | `${number}%`),
   bottom: (n, v) =>
-    v === undefined
+    v == null
       ? n.setPosition(Yoga.EDGE_BOTTOM, NaN as never)
       : n.setPosition(Yoga.EDGE_BOTTOM, v as number | `${number}%`),
   left: (n, v) =>
-    v === undefined
+    v == null
       ? n.setPosition(Yoga.EDGE_LEFT, NaN as never)
       : n.setPosition(Yoga.EDGE_LEFT, v as number | `${number}%`),
 };
@@ -285,6 +302,7 @@ export function isYogaProp(key: string): boolean {
 }
 
 const RESETTABLE_PROPS = new Set([
+  // Already handled undefined in their setters (reset to yoga/Ink default on removal):
   "width",
   "height",
   "maxWidth",
@@ -295,9 +313,49 @@ const RESETTABLE_PROPS = new Set([
   "right",
   "bottom",
   "left",
+  // G19: newly resettable — setters now reset to yoga/Ink default on undefined.
+  // Defaults: margin/padding/minWidth/minHeight/gap*/columnGap/rowGap → 0;
+  //           flexGrow → 0; flexShrink → 1; flexBasis → auto;
+  //           flexDirection → ROW; flexWrap → NO_WRAP;
+  //           alignItems → STRETCH; alignSelf → AUTO;
+  //           justifyContent → FLEX_START; position → RELATIVE.
+  // (Matches Ink styles.ts apply blocks + Box.tsx hardcoded defaults.)
+  "minWidth",
+  "minHeight",
+  "flexGrow",
+  "flexShrink",
+  "flexBasis",
+  "flexDirection",
+  "flexWrap",
+  "alignItems",
+  "alignSelf",
+  "justifyContent",
+  "gap",
+  "columnGap",
+  "rowGap",
+  "margin",
+  "marginX",
+  "marginY",
+  "marginTop",
+  "marginBottom",
+  "marginLeft",
+  "marginRight",
+  "padding",
+  "paddingX",
+  "paddingY",
+  "paddingTop",
+  "paddingBottom",
+  "paddingLeft",
+  "paddingRight",
+  "position",
 ]);
 
-export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): void {
+export function applyYogaProp(
+  node: YogaCarrier,
+  key: string,
+  value: unknown,
+  prev?: unknown,
+): void {
   const setter = YOGA_PROP_SETTERS[key];
   if (!setter) return;
   // Vue calls patchProp with `undefined` for every declared prop a user
@@ -309,7 +367,34 @@ export function applyYogaProp(node: YogaCarrier, key: string, value: unknown): v
   // Exception: borderStyle is the one prop with intentional undefined
   // semantics — undefined means "no border", which the setter implements
   // by zeroing all four edge widths.
-  if (value === undefined && key !== "borderStyle" && !RESETTABLE_PROPS.has(key)) return;
+  //
+  // G19: RESETTABLE_PROPS setters handle undefined by resetting to the yoga/Ink
+  // default. But we only call them when the prop had a real prior value (prev
+  // is neither null nor undefined) — this prevents two cases from clobbering
+  // legitimately-set props:
+  //   1. Vue calls patchProp(el, key, null, undefined) for every declared prop
+  //      that is absent on the first mount (old=null, new=undefined).
+  //   2. Vue calls patchProp(el, key, null, undefined) for props absent in a
+  //      shorthand/longhand sibling (e.g. margin=undefined after marginTop=4).
+  // On actual removal the old value is the previously-set number/string, e.g.
+  // patchProp(el, 'marginTop', 4, undefined) — prev=4 satisfies the guard.
+  // This matches Ink's reconciler which only emits undefined for props that
+  // existed in the old vnode and were dropped from the new one.
+  //
+  // Blocker 2: Vue's HOST renderer passes next=null (not undefined) when a key
+  // disappears from a spread props object (e.g. Static spreads `style` into host
+  // props, Box forwards). So `value == null` (null OR undefined) is treated as
+  // removal — forwarding raw null to a yoga dimension setter would write NaN/0
+  // and corrupt state instead of resetting to the documented default.
+  if (value == null) {
+    if (key === "borderStyle") {
+      // borderStyle: null/undefined always means "no border" — fall through to setter.
+    } else if (RESETTABLE_PROPS.has(key) && prev !== null && prev !== undefined) {
+      // Prop was explicitly removed (defined → null/undefined): reset to yoga/Ink default.
+    } else {
+      return;
+    }
+  }
   setter(node.yoga as YogaNode, value);
 }
 
