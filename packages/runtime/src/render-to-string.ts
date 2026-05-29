@@ -78,7 +78,7 @@ export function renderToString(component: Component, options?: RenderToStringOpt
         root.yoga.calculateLayout(columns, undefined, Yoga.DIRECTION_LTR);
         // Flush static output from intermediate renders
         for (const stat of findStatics(root)) {
-          const staticFrame = paintStaticNode(stat, columns);
+          const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
           if (staticFrame && staticFrame !== "\n") {
             capturedStaticOutput += staticFrame + "\n";
           }
@@ -133,14 +133,14 @@ export function renderToString(component: Component, options?: RenderToStringOpt
       throw uncaughtError instanceof Error ? uncaughtError : new Error(String(uncaughtError));
     }
 
-    // Screen reader mode returns plain text directly — no static channel.
-    if (isScreenReaderEnabled) {
-      return output;
-    }
-
     // The static channel appends a trailing newline for terminal rendering
     // (so dynamic output starts on a fresh line). Strip it here so
-    // renderToString returns clean output.
+    // renderToString returns clean output. This applies in BOTH modes: SR mode
+    // linearizes static items into plain text too (paintStaticNode branches on
+    // isScreenReaderEnabled), and Ink's SR renderer likewise returns the static
+    // output when node.staticNode exists (renderer.ts:24-33). Prepending the
+    // captured static output mirrors the non-SR path so SR renderToString does
+    // not silently drop <Static> content.
     const normalizedStaticOutput = capturedStaticOutput.endsWith("\n")
       ? capturedStaticOutput.slice(0, -1)
       : capturedStaticOutput;
