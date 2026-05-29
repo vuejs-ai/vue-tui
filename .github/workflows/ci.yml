@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel superseded PR runs, but never cancel a push-to-main run, so every
+# commit that lands on main gets a completed CI result. github.ref is unique
+# per PR (refs/pull/<n>/merge) and per branch (refs/heads/main).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: this job only builds, type-checks and tests — it never
+# deploys, releases or comments — so read-only contents (for checkout) is all
+# GITHUB_TOKEN needs.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Check, build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # voidzero-dev/setup-vp installs Node (via `vp env use`), the vp CLI, and
+      # — because run-install defaults to true — runs `vp install` in the repo
+      # root, so no separate install step is needed.
+      #   node-version "22.12.0" pins the exact engines.node floor (>=22.12.0)
+      #     so CI fails if code accidentally relies on a newer Node API.
+      #   cache (off by default) caches the pnpm store; auto-detects pnpm-lock.yaml.
+      - name: Set up Vite+ (vp) and Node
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "22.12.0"
+          cache: true
+
+      # Steps mirror `vp run ready` as individual, labeled concerns so the run
+      # shows exactly which one failed. Build MUST precede check:type and test:
+      # @vue-tui/runtime exposes no "types" export, so testing / runtime-tests
+      # resolve its types and runtime from the built dist/*.d.mts. Steps in one
+      # job share the filesystem, so the build output persists to later steps.
+      - name: Format
+        run: vp run check:fmt
+
+      - name: Lint
+        run: vp run check:lint
+
+      - name: Build
+        run: vp run build
+
+      - name: Type check
+        run: vp run check:type
+
+      - name: Test
+        run: vp run test
