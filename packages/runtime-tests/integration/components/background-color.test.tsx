@@ -4,6 +4,29 @@ import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
 const BG_BLUE = "\x1b[44m";
+const BG_CYAN = "\x1b[46m";
+
+// Ink parity (render-border.ts:35-52): a border edge's background comes only from
+// border<Edge>BackgroundColor ?? borderBackgroundColor — it never falls back to the
+// Box's own backgroundColor. So a Box with backgroundColor but no explicit border
+// background must draw plain (uncolored-bg) border glyphs; the bg fills the inner
+// content area only.
+test("Box backgroundColor does not bleed onto border glyphs (Ink parity)", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="cyan" borderStyle="round" width={10} height={5} alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const lines = lastFrame()!.split("\n");
+  // Top and bottom border rows carry no background.
+  expect(lines[0]).not.toContain(BG_CYAN);
+  expect(lines.at(-1)).not.toContain(BG_CYAN);
+  // Inner content rows still get the background fill.
+  expect(lines[1]).toContain(BG_CYAN);
+});
 
 test("Box backgroundColor produces ANSI background codes", async ({ expect }) => {
   const { frames } = await render(() => <Box backgroundColor="blue" width={5} height={1} />, {
@@ -36,10 +59,10 @@ test("child Text inherits backgroundColor from parent Box", async ({ expect }) =
   expect(raw).toContain(BG_BLUE);
 });
 
-test("wrapped text preserves backgroundColor on every line", async ({ expect }) => {
+test("wrapped text preserves backgroundColor on every content line", async ({ expect }) => {
   const { frames } = await render(
     () => (
-      <Box backgroundColor="blue" borderStyle="single" width={10} height={4}>
+      <Box backgroundColor="blue" borderStyle="single" width={10} height={5}>
         <Text>long text here</Text>
       </Box>
     ),
@@ -47,9 +70,15 @@ test("wrapped text preserves backgroundColor on every line", async ({ expect }) 
   );
   const raw = frames.at(-1)!;
   const lines = raw.split("\n").filter(Boolean);
-  for (const line of lines) {
+  // Ink parity: the inner content rows carry the background on every line; the
+  // first/last rows are pure border glyphs and carry no background.
+  const contentLines = lines.slice(1, -1);
+  expect(contentLines.length).toBeGreaterThan(0);
+  for (const line of contentLines) {
     expect(line).toContain(BG_BLUE);
   }
+  expect(lines[0]).not.toContain(BG_BLUE);
+  expect(lines.at(-1)).not.toContain(BG_BLUE);
 });
 
 // --- Ink background tests ---
@@ -301,11 +330,11 @@ test("Box background with border fills content area", async ({ expect }) => {
     { columns: 100 },
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
-    "[46m╭────────╮[49m
-    [46m│Hi      │[49m
-    [46m│        │[49m
-    [46m│        │[49m
-    [46m╰────────╯[49m"
+    "╭────────╮
+    │[46mHi      [49m│
+    │[46m        [49m│
+    │[46m        [49m│
+    ╰────────╯"
   `);
 });
 
