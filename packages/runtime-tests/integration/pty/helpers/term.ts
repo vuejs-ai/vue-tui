@@ -18,10 +18,26 @@ const term = (fixture: string, args: string[] = []) => {
     reject = reject2;
   });
 
+  // Resolves with the raw exit info (code + signal) no matter how the process
+  // dies — used by signal-teardown tests where a SIGTERM/SIGINT kill is the
+  // expected outcome and a non-zero/signalled exit must not reject.
+  let exitInfoResolve: (info: { exitCode: number; signal?: number }) => void;
+  const exitInfoPromise = new Promise<{ exitCode: number; signal?: number }>((r) => {
+    exitInfoResolve = r;
+  });
+
   let readyResolve: () => void;
   const readyPromise = new Promise<void>((r) => {
     readyResolve = r;
   });
+
+  // Pending output-watchers: each resolves once the accumulated output matches
+  // its predicate. node-pty can fire onExit BEFORE the final onData chunk is
+  // delivered, so trailing bytes written during teardown (cursor restore,
+  // leave-alt-screen) may arrive after the exit event — especially under CI
+  // contention. Tests that assert on those bytes must wait for them, not for
+  // exit. Checked on every onData chunk below.
+  const outputWatchers = new Set<() => void>();
 
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
@@ -48,8 +64,42 @@ const term = (fixture: string, args: string[] = []) => {
         ps.write(input);
       });
     },
+    // Send a process signal to the child once it has signalled readiness, so
+    // signal-driven teardown is exercised against a fully mounted app.
+    kill(signal: string) {
+      void readyPromise.then(() => {
+        ps.kill(signal);
+      });
+    },
     output: "",
     waitForExit: async () => exitPromise,
+    waitForExitInfo: async () => exitInfoPromise,
+    // Resolve once the accumulated output satisfies `predicate`, rejecting after
+    // `timeoutMs`. Use this (not waitForExitInfo) when asserting on bytes the
+    // child emits during teardown right before exit, which node-pty may deliver
+    // after the exit event.
+    waitForOutput: async (predicate: (output: string) => boolean, timeoutMs = 10000) =>
+      new Promise<void>((res, rej) => {
+        const check = () => {
+          if (predicate(result.output)) {
+            outputWatchers.delete(check);
+            clearTimeout(timer);
+            res();
+            return true;
+          }
+          return false;
+        };
+        const timer = setTimeout(() => {
+          outputWatchers.delete(check);
+          rej(
+            new Error(
+              `waitForOutput timed out after ${timeoutMs}ms. Output:\n${JSON.stringify(result.output)}`,
+            ),
+          );
+        }, timeoutMs);
+        if (check()) return;
+        outputWatchers.add(check);
+      }),
   };
 
   ps.onData((data) => {
@@ -58,9 +108,15 @@ const term = (fixture: string, args: string[] = []) => {
     if (result.output.includes("__READY__")) {
       readyResolve();
     }
+
+    for (const watcher of outputWatchers) {
+      watcher();
+    }
   });
 
-  ps.onExit(({ exitCode }) => {
+  ps.onExit(({ exitCode, signal }) => {
+    exitInfoResolve({ exitCode, signal });
+
     if (exitCode === 0) {
       resolve();
       return;

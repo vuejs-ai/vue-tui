@@ -11,7 +11,9 @@ import {
 } from "vue";
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
+import { writeSync as fsWriteSync } from "node:fs";
 import isInCi from "is-in-ci";
+import { onExit } from "signal-exit";
 import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
@@ -179,6 +181,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
   let mountedExitListener: (() => void) | null = null;
+  // signal-exit unsubscribe fn (Ink parity G18). Registered at interactive
+  // mount so SIGINT/SIGTERM/SIGHUP route to teardown(); called in teardown()
+  // to remove the handler so it can't leak or double-run.
+  let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedDebug = false;
   let mountedInteractive = true;
@@ -239,22 +245,52 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   }
 
-  function writeBestEffort(stream: NodeJS.WriteStream, data: string) {
+  function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false) {
     if (stream.destroyed || stream.writableEnded) return;
     try {
-      stream.write(data);
+      if (sync) {
+        // Signal-exit path (G18, Finding A): signal-exit re-raises the signal
+        // IMMEDIATELY after this callback returns (`{alwaysLast:false}`), so a
+        // bare async `stream.write()` can leave the restore bytes (show-cursor,
+        // leave-alt-screen, disable-kitty) buffered and unflushed when the
+        // process dies — the terminal stays corrupted. A synchronous fd write
+        // guarantees the bytes hit the fd before the re-raise. Restore output is
+        // tiny and this only runs on the rare abrupt-exit path. Fall back to fd
+        // 1 (stdout) when the stream has no numeric fd (e.g. some wrapped TTYs).
+        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
+        const streamFd = (stream as { fd?: number }).fd;
+        const fd = typeof streamFd === "number" ? streamFd : 1;
+        fsWriteSync(fd, data);
+      } else {
+        stream.write(data);
+      }
     } catch {
-      // Stream may already be destroyed during shutdown.
+      // Stream may already be destroyed during shutdown, or the fd may be
+      // unwritable; restore is best-effort.
     }
   }
 
   let teardownStarted = false;
-  function teardown() {
+  // `sync` is set only when teardown is driven by the signal-exit callback
+  // (G18, Finding A). On that path the restore escapes must be written
+  // synchronously (fs.writeSync) so they reach the fd before signal-exit
+  // re-raises the signal. The normal unmount()/exit() path keeps async writes.
+  function teardown(sync = false) {
     // Skipped mount: this app never wired a renderer, so teardown is a
     // complete no-op — do not touch any stream or the owner's WeakMap entry.
     if (skippedMount) return;
     if (teardownStarted) return;
     teardownStarted = true;
+
+    // Remove the signal-exit handler first (Ink parity G18, ink.tsx:765:
+    // `this.unsubscribeExit()`). When teardown is triggered BY a signal,
+    // signal-exit has already unloaded its own listeners, so this is a no-op;
+    // when triggered by unmount()/exit(), it stops the handler from firing
+    // later (no leak, no double-run — teardownStarted also guards re-entry).
+    if (mountedUnsubscribeExit) {
+      mountedUnsubscribeExit();
+      mountedUnsubscribeExit = null;
+    }
 
     // Remove this app from the live-instances registry so a subsequent mount()
     // on the same stdout works normally. Only the owning app removes its entry;
@@ -298,7 +334,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedAnimationScheduler?.dispose();
     mountedAnimationScheduler = null;
     if (mountedKittyController) {
-      mountedKittyController.dispose();
+      // Disable-kitty is a restore escape: on the signal path it must flush
+      // synchronously too (Finding A).
+      mountedKittyController.dispose(sync);
       mountedKittyController = null;
     }
     if (!mountedDebug && !mountedInteractive && mountedAppContext) {
@@ -310,11 +348,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
     if (mountedAlternateScreen && mountedAppContext) {
-      writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen);
-      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h");
+      writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
+      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
       mountedAlternateScreen = false;
     } else if (!mountedDebug && mountedInteractive && mountedAppContext) {
-      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h");
+      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
     }
     if (mountedRoot) detachYoga(mountedRoot);
     if (mountedResizeHandler && mountedAppContext) {
@@ -818,6 +856,32 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const exitListener = () => teardown();
     process.on("exit", exitListener);
     mountedExitListener = exitListener;
+
+    // Signal-based teardown (Ink parity G18, ink.tsx:426). On SIGINT/SIGTERM/
+    // SIGHUP signal-exit runs this callback BEFORE the process dies, so
+    // teardown() restores the cursor, leaves the alternate screen, disables
+    // kitty keyboard, flushes the final frame and restores raw mode — the
+    // terminal isn't left corrupted. We do NOT return true / prevent exit
+    // (mirroring Ink's {alwaysLast:false}): signal-exit lets the signal
+    // proceed after the callback. teardown() is idempotent (teardownStarted
+    // guard), so a signal-triggered teardown plus a later unmount() won't
+    // double-run. Every interactive mount registers — including debug mode,
+    // which still enters the alternate screen and hides the cursor (above), so
+    // a debug-but-interactive app must restore on signal too (Ink registers
+    // signal-exit unconditionally, ink.tsx:426, and allows alt-screen in
+    // debug). Only render-to-string / non-interactive paths stay out, since
+    // they have no cursor/alt-screen to restore and must not touch process
+    // signal handlers. `!mountedUnsubscribeExit` guards against double-register
+    // on a no-op second mount; `!teardownStarted` keeps a spent (already
+    // torn-down) app instance from re-registering on a same-instance remount,
+    // which would otherwise leak — the next unmount() returns early at the
+    // teardownStarted guard before it could unsubscribe.
+    if (interactive && !mountedUnsubscribeExit && !teardownStarted) {
+      // sync=true: signal-exit re-raises the signal right after this callback
+      // returns, so the restore escapes must be flushed to the fd
+      // synchronously (Finding A) — a buffered async write can be lost.
+      mountedUnsubscribeExit = onExit(() => teardown(true), { alwaysLast: false });
+    }
 
     // Patch console.log/warn/error etc. to route through writeToStdout /
     // writeToStderr so console output doesn't corrupt the rendered frame.
