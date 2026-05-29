@@ -14,6 +14,26 @@
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
 - Never commit anything under `docs/`. That directory is for local working notes and specs — it must stay out of git.
 
+# Context Engineering
+
+Long-lived design context lives in `.agents/docs/` (committed — distinct from the
+uncommitted `docs/` working-notes folder). Convention, borrowed from rolldown:
+
+- One concept per file; files cross-link with `[[other-doc]]`.
+- If a design doc covers the area you're about to work in, **read it first**.
+- If your change affects a design doc, **update it in the same change**. Docs that drift
+  from reality are worse than no docs.
+- Capture the _why_ — trade-offs considered, alternatives rejected, known pitfalls — not
+  just what the code does.
+
+Current docs:
+
+- `.agents/docs/ink-parity-loop.md` — the Ink-parity verification loop (audit → fix → PR
+  → merge) and its reusable `/loop` prompt.
+- `.agents/docs/ink-parity.md` — pinned Ink reference version/SHA + the
+  intentional-divergence allowlist (differences that are by design, not gaps).
+- `.agents/docs/parity-ledger.md` — working ledger of audit sweeps and confirmed gaps.
+
 <!--VITE PLUS START-->
 
 # Using Vite+, the Unified Toolchain for the Web
