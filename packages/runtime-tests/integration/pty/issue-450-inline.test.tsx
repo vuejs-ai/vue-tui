@@ -56,7 +56,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   expect(clearCount).toBe(0);
 });
 
-it("#450: viewport shrink into overflow should clear once", async () => {
+it("#450: viewport shrink into overflow clears exactly once on resize", async () => {
   const stdout = makeFakeWritable({ rows: 10 });
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -69,15 +69,20 @@ it("#450: viewport shrink into overflow should clear once", async () => {
   app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
+  const clearsBeforeResize = writes.filter((w) => w.includes(ansiEscapes.clearTerminal)).length;
+  expect(clearsBeforeResize).toBe(0); // 8 lines fit in 10 rows — no clear yet
 
+  // Shrink so the content overflows the viewport. The resize renders
+  // synchronously (matching Ink), so the overflow clear is emitted right here,
+  // not deferred through the commit throttle.
   stdout.rows = 4;
   stdout.emit("resize");
   await nextTick();
-  await nextTick();
+
+  const clearsAfterResize = writes.filter((w) => w.includes(ansiEscapes.clearTerminal)).length;
+  expect(clearsAfterResize - clearsBeforeResize).toBe(1);
 
   app.unmount();
-  const clearCount = writes.filter((w) => w.includes(ansiEscapes.clearTerminal)).length;
-  expect(clearCount).toBe(1);
 });
 
 it("#450: non-TTY grow-to-overflow rerender should not clear terminal", async () => {
