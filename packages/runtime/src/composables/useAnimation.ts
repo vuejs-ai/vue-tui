@@ -83,15 +83,29 @@ export function useAnimation(options: AnimationOptions = {}): AnimationResult {
   const scheduler: AnimationScheduler =
     inject(AnimationSchedulerKey, null) ?? createAnimationScheduler();
 
+  const renderThrottleMs = scheduler.renderThrottleMs;
+
   let handle: { startTime: number; unsubscribe: () => void } | undefined;
   let startTime = 0;
-  let lastTickTime = 0;
+  // Time of the last RENDERED (non-coalesced) tick — delta is measured from
+  // here so it accumulates across ticks skipped within the throttle window.
+  let lastRenderedTime = 0;
+  // Ticks at or after this time are allowed to render; earlier ones coalesce.
+  let nextRenderTime = 0;
 
   function tick(now: number) {
+    // Coalesce intermediate ticks while inside the current render-throttle
+    // window (Ink parity — use-animation.ts:102-121). The next allowed tick
+    // jumps straight to the latest elapsed values, and delta reports the time
+    // since the last rendered tick (accumulated across the skipped ticks) so
+    // velocity-driven motion advances at correct wall-clock speed.
+    if (renderThrottleMs > 0 && now < nextRenderTime) return;
+
     frame.value = Math.floor((now - startTime) / interval);
     time.value = now - startTime;
-    delta.value = now - lastTickTime;
-    lastTickTime = now;
+    delta.value = now - lastRenderedTime;
+    lastRenderedTime = now;
+    nextRenderTime = now + renderThrottleMs;
   }
 
   function start() {
@@ -101,7 +115,8 @@ export function useAnimation(options: AnimationOptions = {}): AnimationResult {
     delta.value = 0;
     handle = scheduler.subscribe(tick, interval);
     startTime = handle.startTime;
-    lastTickTime = handle.startTime;
+    lastRenderedTime = handle.startTime;
+    nextRenderTime = handle.startTime + renderThrottleMs;
   }
 
   function stop() {

@@ -912,34 +912,100 @@ describe("useAnimation", () => {
     unmount();
   });
 
-  test("delta accounts for throttled ticks", async () => {
-    // With low maxFps, renders are throttled. When the animation finally
-    // re-renders, delta should reflect the actual elapsed time since the
-    // last rendered tick, not just one interval.
-    let lastRenderedDelta = 0;
+  test("delta accumulates across coalesced ticks within the render-throttle window", async () => {
+    // Ink parity (G02): useAnimation coalesces ticks while inside the current
+    // render-throttle window and reports delta = time since the LAST RENDERED
+    // tick, so velocity-driven motion (position += speed * delta) advances at
+    // correct wall-clock speed despite throttled commits. With a fast interval
+    // and a slow throttle, each rendered delta must reflect the accumulated
+    // window (~throttleMs), NOT a single ~interval.
+    const renderedDeltas: number[] = [];
     const App = defineComponent(() => {
       const { delta } = useAnimation({ interval: 20 });
       watchEffect(() => {
-        lastRenderedDelta = delta.value;
+        renderedDeltas.push(delta.value);
       });
       return () => <Text>x</Text>;
     });
 
-    // maxFps: 5 => throttleMs = 200ms. Animation ticks every 20ms.
-    // Renders are throttled to ~200ms windows.
+    // maxFps: 5 => throttleMs = 200ms. Animation ticks every 20ms, so ~10
+    // ticks fall inside each throttle window and must coalesce into one
+    // rendered delta of ~200ms.
     const { unmount } = mountWithOptions(App, { maxFps: 5 });
     await nextTick();
 
-    expect(lastRenderedDelta).toBe(0);
+    // Initial rendered delta is 0.
+    expect(renderedDeltas[0]).toBe(0);
 
-    // Wait well past one full 200ms throttle window
-    await delay(350);
-
-    // Delta should reflect the actual time between ticks (each tick is 20ms),
-    // not the throttle window. The last delta seen should be ~20ms per tick.
-    expect(lastRenderedDelta).toBeGreaterThan(0);
-
+    // Wait across several full 200ms throttle windows.
+    await delay(700);
     unmount();
+
+    // The non-zero rendered deltas correspond to ticks that actually committed
+    // after coalescing. Each should be on the order of the throttle window
+    // (~200ms), well above a single 20ms interval. A buggy implementation that
+    // reports one interval per committed tick yields deltas ~20ms and fails here.
+    const committedDeltas = renderedDeltas.filter((d) => d > 0);
+    expect(committedDeltas.length).toBeGreaterThan(0);
+    const maxDelta = Math.max(...committedDeltas);
+    expect(maxDelta).toBeGreaterThan(120);
+  });
+
+  test("default path (no explicit maxFps) coalesces ticks via the 30fps throttle", async () => {
+    // Ink parity (G02): with no explicit maxFps, the render throttle must still
+    // engage at the default 30fps (~34ms window), so a fast animation coalesces
+    // its ticks and reports a delta of ~one throttle window, NOT one interval.
+    //
+    // Discrimination strategy (Approach A — count-based):
+    //   interval = 8ms, window = ~250ms
+    //   Fixed   (renderThrottleMs=34): ~7 rendered commits  (250/34 ≈ 7)
+    //   Unfixed (renderThrottleMs=0):  ~31 rendered commits (250/8  ≈ 31)
+    //
+    // We assert committedDeltas.length < 15 AND maxDelta >= 30.
+    //   • Even with 2× CI scheduling jitter some callbacks fire late and run
+    //     together, the unfixed per-tick path still produces one delta per
+    //     scheduler callback — at least ~25 over 250ms — never < 15.
+    //   • The fixed path accumulates across skipped ticks so each rendered
+    //     delta spans the ~34ms window; even with conservative 30ms threshold
+    //     it never falls to the ~8ms per-tick value.
+    //
+    // A plain maxDelta > 20 assertion (the old form) was non-discriminating:
+    // a single OS-jitter-delayed callback on the unfixed path can exceed 20ms
+    // and silently pass. The count assertion rules that out completely.
+    const renderedDeltas: number[] = [];
+    const App = defineComponent(() => {
+      const { delta } = useAnimation({ interval: 8 });
+      watchEffect(() => {
+        renderedDeltas.push(delta.value);
+      });
+      return () => <Text>x</Text>;
+    });
+
+    // No maxFps -> defaults to 30 -> renderThrottleMs = ceil(1000/30) = 34ms.
+    // Animation ticks every 8ms, so ~4 ticks fall inside each window and must
+    // coalesce into one rendered delta of ~34ms.
+    const { unmount } = mountWithOptions(App, {});
+    await nextTick();
+
+    expect(renderedDeltas[0]).toBe(0);
+
+    const windowMs = 250;
+    const intervalMs = 8;
+    await delay(windowMs);
+    unmount();
+
+    const committedDeltas = renderedDeltas.filter((d) => d > 0);
+    expect(committedDeltas.length).toBeGreaterThan(0);
+
+    // COUNT assertion: fixed path coalesces → far fewer renders than raw ticks.
+    // Upper bound is half the expected raw-tick count; no amount of per-callback
+    // jitter on the unfixed path can produce fewer than this.
+    const rawTicksExpected = windowMs / intervalMs; // ~31
+    expect(committedDeltas.length).toBeLessThan(rawTicksExpected / 2); // < ~15
+
+    // DELTA assertion: each coalesced render covers ~34ms, well above 8ms.
+    const maxDelta = Math.max(...committedDeltas);
+    expect(maxDelta).toBeGreaterThanOrEqual(30);
   });
 
   test("animations advance in debug mode when interactive is false", async () => {

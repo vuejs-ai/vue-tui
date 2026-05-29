@@ -75,10 +75,12 @@ export interface MountOptions {
    */
   onRender?: (info: { renderTime: number }) => void;
   /**
-   * Maximum frames per second. Controls the throttle interval used by the
-   * commit scheduler. When not set, the default ~30fps (32ms) is used.
+   * Maximum frames per second. Controls the render-throttle window
+   * (`ceil(1000 / maxFps)` ms) that throttles both the commit scheduler and
+   * the useAnimation tick coalescing. Defaults to 30 (≈34ms), matching Ink.
    *
-   * Ignored in debug mode (commits are immediate).
+   * Ignored in debug / screen-reader mode (commits are immediate).
+   * @default 30
    */
   maxFps?: number;
   /**
@@ -343,7 +345,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const debug = options.debug ?? false;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
     const onRender = options.onRender;
-    const maxFps = options.maxFps;
+    // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
+    // the render throttle engages by default — without this the animation
+    // coalescing (G02) never kicks in on the normal non-debug path.
+    const maxFps = options.maxFps ?? 30;
     const isScreenReaderEnabled =
       options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
     mountedDebug = debug;
@@ -606,11 +611,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (onRender) onRender({ renderTime: performance.now() - start });
     }
 
+    // A single render-throttle window derived from maxFps drives BOTH the
+    // commit scheduler and the animation scheduler, mirroring Ink where one
+    // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
+    // to useAnimation (ink.tsx:337-344, 650). Debug / screen-reader paths and
+    // non-positive maxFps are unthrottled (0 = commit every tick), matching
+    // Ink's `unthrottled` gate.
+    const unthrottled = debug || isScreenReaderEnabled;
+    const renderThrottleMs = !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
+
     const schedulerOptions: { immediate: boolean; throttleMs?: number } = {
-      immediate: debug || isScreenReaderEnabled,
+      immediate: unthrottled,
     };
-    if (maxFps != null && !debug && !isScreenReaderEnabled) {
-      schedulerOptions.throttleMs = Math.round(1000 / maxFps);
+    if (!unthrottled) {
+      schedulerOptions.throttleMs = renderThrottleMs;
     }
     const scheduler = createCommitScheduler(commit, schedulerOptions);
     mountedScheduler = scheduler;
@@ -623,7 +637,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.provide(AppContextKey, appContext);
     baseApp.provide(FocusContextKey, focusContext);
     baseApp.provide(StdinContextKey, stdinController);
-    const animationScheduler = createAnimationScheduler();
+    // useAnimation coalesces ticks within this same window so committed deltas
+    // accumulate to the real wall-clock elapsed time (the value committed to
+    // stdout), rather than a single scheduler interval. It shares the exact
+    // renderThrottleMs the commit scheduler uses, so the animation cadence
+    // tracks the actual commit cadence (Ink ink.tsx:650).
+    const animationScheduler = createAnimationScheduler(renderThrottleMs);
     mountedAnimationScheduler = animationScheduler;
     baseApp.provide(AnimationSchedulerKey, animationScheduler);
     if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
