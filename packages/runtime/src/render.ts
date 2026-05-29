@@ -658,8 +658,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
 
     // Only listen for resize in interactive mode (matching Ink).
+    // Render synchronously on resize rather than through the commit throttle:
+    // a resize is a discrete event that changes the viewport, and Ink's
+    // resized() handler calls onRender() directly. Deferring it through the
+    // ~32ms throttle can leave stale/overlapping content on screen for a frame
+    // and makes the clearTerminal-on-overflow behavior depend on wall-clock
+    // timing rather than the resize itself.
     if (interactive) {
-      const onResize = () => scheduler.schedule();
+      const onResize = () => commit();
       stdout.on("resize", onResize);
       mountedResizeHandler = onResize;
     }
