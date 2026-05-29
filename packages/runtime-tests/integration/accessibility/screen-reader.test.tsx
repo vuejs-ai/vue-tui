@@ -223,6 +223,100 @@ describe("renderScreenReaderOutput (unit)", () => {
 
     root.yoga.freeRecursive();
   });
+
+  // G22 (Ink parity): dedup is only against the IMMEDIATE parent's role.
+  // A role-less intermediate box must reset the inherited parentRole to undefined
+  // so a grandchild with the same role as the grandparent IS still announced.
+  // Ink passes `node.internal_accessibility?.role` (no ?? fallback) to children.
+  test("G22: grandchild with same role as grandparent IS announced when immediate parent has no role", () => {
+    // Structure: grandparent[role=list] → middle(no role) → grandchild[role=list]
+    // Expected: both "list" annotations appear (grandchild is NOT wrongly deduped
+    // against the grandparent through the role-less intermediate).
+    const root = createRoot(createTestAppContext());
+    attachYoga(root);
+    root.yoga.setWidth(80);
+
+    const grandparent = createBox();
+    attachYoga(grandparent);
+    grandparent.internal_accessibility = { role: "list" };
+    grandparent.parent = root;
+    root.children.push(grandparent);
+    root.yoga.insertChild(grandparent.yoga, 0);
+
+    // Role-less intermediate box — must reset parentRole to undefined for its children.
+    const middle = createBox();
+    attachYoga(middle);
+    // No internal_accessibility on middle (no role).
+    middle.parent = grandparent;
+    grandparent.children.push(middle);
+    grandparent.yoga.insertChild(middle.yoga, 0);
+
+    const grandchild = createBox();
+    attachYoga(grandchild);
+    grandchild.internal_accessibility = { role: "list" };
+    grandchild.parent = middle;
+    middle.children.push(grandchild);
+    middle.yoga.insertChild(grandchild.yoga, 0);
+
+    const text = createText();
+    attachYoga(text);
+    const leaf = createTextLeaf("Item");
+    leaf.parent = text;
+    text.children.push(leaf);
+    text.parent = grandchild;
+    grandchild.children.push(text);
+    grandchild.yoga.insertChild(text.yoga, 0);
+
+    root.yoga.calculateLayout(80, undefined, DIRECTION_LTR);
+
+    const output = renderScreenReaderOutput(root);
+    // grandchild shares role with grandparent but NOT with its immediate parent
+    // (which has no role). It must NOT be deduped — both annotations must appear.
+    expect(output).toBe("list: list: Item");
+
+    root.yoga.freeRecursive();
+  });
+
+  // G22 control: immediate-parent dedup is still in effect.
+  // A child whose DIRECT parent has the same role must still be suppressed.
+  test("G22 control: child role matching immediate parent is still deduped", () => {
+    // Structure: parent[role=nav] → child[role=nav]
+    // Expected: only one "nav:" annotation (child is deduped against immediate parent).
+    const root = createRoot(createTestAppContext());
+    attachYoga(root);
+    root.yoga.setWidth(80);
+
+    const parent = createBox();
+    attachYoga(parent);
+    parent.internal_accessibility = { role: "nav" };
+    parent.parent = root;
+    root.children.push(parent);
+    root.yoga.insertChild(parent.yoga, 0);
+
+    const child = createBox();
+    attachYoga(child);
+    child.internal_accessibility = { role: "nav" };
+    child.parent = parent;
+    parent.children.push(child);
+    parent.yoga.insertChild(child.yoga, 0);
+
+    const text = createText();
+    attachYoga(text);
+    const leaf = createTextLeaf("Link");
+    leaf.parent = text;
+    text.children.push(leaf);
+    text.parent = child;
+    child.children.push(text);
+    child.yoga.insertChild(text.yoga, 0);
+
+    root.yoga.calculateLayout(80, undefined, DIRECTION_LTR);
+
+    const output = renderScreenReaderOutput(root);
+    // Child shares role with immediate parent — deduped to single annotation.
+    expect(output).toBe("nav: Link");
+
+    root.yoga.freeRecursive();
+  });
 });
 
 describe("Box aria props", () => {
