@@ -4,7 +4,8 @@
 
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test, vi } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { Box, createApp, Text } from "@vue-tui/runtime";
+import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import {
   makeFakeStdin,
@@ -297,6 +298,58 @@ test.sequential("unmount cancels pending throttled render when stdout is ended",
     app.unmount();
 
     expect(vi.getTimerCount()).toBe(baselineTimers);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test.sequential("resize does not double-clear when a throttled commit is pending", async () => {
+  // Regression for issue #26: the resize handler paints synchronously, but if
+  // a trailing throttled commit is still pending, that timer fires a second
+  // doCommit() right after. Because shouldClearTerminalForFrame clears whenever
+  // the previous frame overflowed the viewport, the second commit emits a
+  // duplicate clearTerminal. onResize must cancel the pending commit first.
+  vi.useFakeTimers(FAKE_TIMER_OPTS);
+  try {
+    const msg = shallowRef("A");
+    // Three rows of content into a 2-row viewport => the frame overflows, so
+    // every commit after the first takes the clearTerminal branch.
+    const App = defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Text>line1</Text>
+        <Text>line2</Text>
+        <Text>{msg.value}</Text>
+      </Box>
+    ));
+    const app = createApp(App);
+    const stdout = makeFakeWritable({ columns: 80, rows: 2 });
+    const stderr = makeFakeWritable({ columns: 80, rows: 2 });
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    await nextTick();
+    await nextTick();
+
+    const countClears = () => writes.join("").split(ansiEscapes.clearTerminal).length - 1;
+
+    // Leading commit only: previous height was 0, so no clear yet.
+    expect(countClears()).toBe(0);
+
+    // Mutate inside the throttle window so a trailing commit is armed.
+    msg.value = "B";
+    await nextTick();
+    expect(vi.getTimerCount()).toBeGreaterThanOrEqual(1);
+
+    // Resize while the trailing commit is pending: paints synchronously (1 clear)
+    // and must cancel the pending timer so it doesn't paint (and clear) again.
+    stdout.emit("resize");
+    vi.advanceTimersByTime(1000);
+
+    expect(countClears()).toBe(1);
+    expect(stripAnsi(writes.join(""))).toContain("B");
+
+    app.unmount();
   } finally {
     vi.useRealTimers();
   }
