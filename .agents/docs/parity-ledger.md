@@ -6,9 +6,10 @@
 
 ## Sweep history
 
-| sweep                | Ink SHA   | candidates → confirmed                 | status   |
-| -------------------- | --------- | -------------------------------------- | -------- |
-| sweep-1 (2026-05-29) | `40b3a75` | 16 verified → 14 confirmed (2 refuted) | recorded |
+| sweep                | Ink SHA   | candidates → confirmed                                                                  | status   |
+| -------------------- | --------- | --------------------------------------------------------------------------------------- | -------- |
+| sweep-1 (2026-05-29) | `40b3a75` | 16 verified → 14 confirmed (2 refuted)                                                  | recorded |
+| sweep-2 (2026-05-30) | `40b3a75` | 8 confirmed (re-audit after 16 fixes merged) → 6 new gaps (G18-G23) + 1 candidate (G24) | recorded |
 
 Refuted (NOT gaps — kept for the record): `exit()` second-wins — vue-tui is already guarded, not last-wins as earlier suspected; kitty key-release printable-text suppression — Ink behaves the same.
 
@@ -50,7 +51,14 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 | G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                                                                                       | P3       | merged    | `fix/parity-instance-reuse`        | #43 |
 | G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                                                                            | P2       | merged    | `fix/parity-border-1cell`          | #37 |
 | G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                                                                                  | P3       | merged    | `fix/parity-border-dim`            | #44 |
-| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | pr-open   | `fix/parity-sr-edges`              | #45 |
+| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | merged    | `fix/parity-sr-edges`              | #45 |
+| G18 | render-lifecycle-reconciler     | No signal-based teardown — terminal corrupted on SIGINT/SIGTERM/SIGHUP (Ink signal-exit at mount)                                                                                   | P1       | todo      | —                                  | —   |
+| G19 | box-layout-border               | Dynamic removal of most yoga style props does not reset to default (stale layout)                                                                                                   | P2       | todo      | —                                  | —   |
+| G20 | stdout-stderr-stdin-size-cursor | writeToStdout/writeToStderr lack an isUnmounted/teardown guard (post-teardown writes corrupt terminal)                                                                              | P2       | todo      | —                                  | —   |
+| G21 | text-wrap-transform             | Nested <Transform> in <Text> gets hardcoded index 0 vs child sibling position (squash path)                                                                                         | P3       | todo      | —                                  | —   |
+| G22 | app-exit-instances-animation-sr | SR role dedup inherits grandparent role; Ink dedups only vs immediate parent                                                                                                        | P3       | todo      | —                                  | —   |
+| G23 | app-exit-instances-animation-sr | <Transform> under <Box> SR-joins children with newline; Ink concatenates                                                                                                            | P3       | todo      | —                                  | —   |
+| G24 | render-lifecycle-reconciler     | Renders ALL <Static> nodes; Ink renders only the most-recent staticNode (multi-Static support — candidate)                                                                          | P3       | candidate | — (see ink-parity.md)              | —   |
 
 ## Gap details
 
@@ -316,3 +324,59 @@ _Surfaced by codex during the G03 review (2026-05-30). G03 fixed the core live S
 
 - **SR `<Static>` still grid-painted:** the SR dynamic frame uses `skipStaticElements:true`, but `commit()` still flushes `<Static>` via `paintStaticNode`→`paintIsolated` (the 2D grid painter), so bordered static content can still emit box glyphs in SR mode. Ink linearizes SR static too (`/tmp/ink-40b3a75/src/renderer.ts:24` uses `skipStaticElements:false` for the static pass). Fix: linearize the SR static channel (renderScreenReaderOutput over the fresh static children) when `isScreenReaderEnabled`.
 - **Empty SR frame trailing newline:** interactive SR frames go through the normal frame writer which appends `"\n"` for non-fullscreen/empty frames (`render.ts` write path), so an empty SR frame renders a blank line. Ink writes the `wrappedOutput` directly with height from that string and no added newline (`/tmp/ink-40b3a75/src/ink.tsx:600`). Fix: in SR mode, don't append the trailing newline for empty output.
+
+### G18 — No signal-based teardown (terminal corrupted on SIGINT/SIGTERM/SIGHUP)
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ behavior · _severity:_ HIGH · _priority:_ P1 · _(sweep-2)_
+
+- **Ink:** ink.tsx:426 registers signal-exit at mount so `teardown()` (show cursor, leave alt-screen, disable kitty, final flush) runs before the process dies on a signal.
+- **vue-tui:** no SIGINT/SIGTERM/SIGHUP handlers route through teardown — a signal kills the process with the cursor hidden / alt-screen / raw-mode left on, corrupting the terminal.
+- **Fix sketch:** add signal-exit (or SIGINT/SIGTERM/SIGHUP handlers) at mount that invoke teardown() before exit, mirroring Ink ink.tsx:426. Test via a PTY fixture or by asserting the handler is registered + runs teardown.
+
+### G19 — Dynamic yoga prop removal doesn't reset to default
+
+_area:_ `box-layout-border` · _kind:_ behavior · _severity:_ medium · _priority:_ P2 · _(sweep-2)_
+
+- **Ink:** reconciler diff emits `key: undefined` on removal; styles.ts applies the yoga default (margin/padding/minWidth/flexGrow→0, flexShrink→1, flexBasis→auto, flexDirection→ROW, position→RELATIVE, align/justify→defaults).
+- **vue-tui:** host/yoga.ts:312 early-returns on `value===undefined` except RESETTABLE_PROPS (width/height/max*/aspectRatio/alignContent/top/right/bottom/left). All margin/padding/minWidth/minHeight/gap/flex*/justify/align/flexDirection/flexWrap/position keep their STALE value when the prop is removed across renders.
+- **Fix sketch:** when value===undefined for these props, apply the documented yoga default instead of early-returning (extend RESETTABLE_PROPS + a per-prop default map). Tests: remove marginTop/paddingTop/minWidth/gap/flexGrow/justifyContent/position across renders.
+
+### G20 — writeToStdout/writeToStderr lack an isUnmounted guard
+
+_area:_ `stdout-stderr-stdin-size-cursor` · _kind:_ behavior · _severity:_ low · _priority:_ P2 · _(sweep-2)_
+
+- **Ink:** ink.tsx:673/702 — writeToStdout/writeToStderr return early if unmounted.
+- **vue-tui:** render.ts writeToStdout/writeToStderr have no `if (teardownStarted) return;` guard, so a write after teardown can clear/restore and corrupt the terminal.
+- **Fix sketch:** add `if (teardownStarted) return;` as the first line of both (teardownStarted is already a closure var). Test: call useStdout().write after unmount → no write.
+
+### G21 — Nested <Transform> gets hardcoded index 0 (squash path)
+
+_area:_ `text-wrap-transform` · _kind:_ behavior · _severity:_ low · _priority:_ P3 · _(sweep-2; refines the earlier G06 refutation — the INLINE/nested squash path IS a gap, distinct from the per-line output path)_
+
+- **Ink:** squash-text-nodes.ts:13,38 — iterates childNodes by index and calls `childNode.internal_transform(nodeText, index)` with the child's sibling position.
+- **vue-tui:** paint.ts:314 + host/text-measure.ts:26 — `for (const child of node.children)` with `child.transform(innerText, 0)` (hardcoded 0). A Transform that is the Nth child of a Text gets 0 instead of N.
+- **Fix sketch:** index-tracking loops in both spots; pass the child's position. (First/sole-child case already correct at 0.)
+
+### G22 — Screen-reader role dedup inherits grandparent role
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ correctness · _severity:_ low · _priority:_ P3 · _(sweep-2)_
+
+- **Ink:** dedups a node's role only against its IMMEDIATE parent.
+- **vue-tui:** screen-reader.ts:90 `parentRole: parentRole ?? options.parentRole` passes a grandparent role down, so dedup can wrongly suppress against a grandparent.
+- **Fix sketch:** pass only the current node's own role (`parentRole: parentRole`), matching Ink. Test SR output for nested same-role-grandparent structures.
+
+### G23 — <Transform> under <Box> SR-linearizes with newline join
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ behavior · _severity:_ low · _priority:_ P3 · _(sweep-2)_
+
+- **Ink:** a Transform concatenates its children (squashTextNodes) and applies the child transform.
+- **vue-tui:** screen-reader.ts:96-107 transform branch joins children with `"\n"` (should concatenate with "").
+- **Fix sketch:** concatenate (join "") in the transform branch; for full fidelity apply the transform fn. Test SR output of `<Box><Transform>multi-child</Transform></Box>`.
+
+### G24 — vue-tui renders ALL <Static> nodes (Ink: single staticNode) — CANDIDATE
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ behavior · _severity:_ low · _priority:_ P3 · _(sweep-2 — flagged candidate, likely intentional)_
+
+- **Ink:** maintains ONE `staticNode` (only the most-recent `<Static>` is rendered to the static channel).
+- **vue-tui:** `findStatics(root)` collects and renders ALL `<Static>` nodes — i.e. vue-tui SUPPORTS MULTIPLE `<Static>`, which Ink does not. Matching Ink would REMOVE that capability.
+- **Decision needed (like G07):** keep vue-tui's multi-Static support (allowlist) or restrict to Ink's single-staticNode. Appended to ink-parity.md candidate section; awaiting maintainer.
