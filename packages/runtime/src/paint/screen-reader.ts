@@ -86,12 +86,17 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
         : node.children;
 
     const boxNode = node as TuiBox;
+    // Ink parity (G22): pass only the CURRENT node's own role to children —
+    // no `?? options.parentRole` fallback. When this box has no role, `undefined`
+    // is forwarded, resetting the inherited parentRole so a grandchild with the
+    // same role as its grandparent is NOT wrongly deduped (dedup is immediate-
+    // parent-only, matching Ink render-node-to-output.ts:68-69).
     const parentRole = boxNode.internal_accessibility?.role;
 
     output = children
       .map((childNode) =>
         renderScreenReaderOutput(childNode, {
-          parentRole: parentRole ?? options.parentRole,
+          parentRole: parentRole,
           skipStaticElements: options.skipStaticElements,
         }),
       )
