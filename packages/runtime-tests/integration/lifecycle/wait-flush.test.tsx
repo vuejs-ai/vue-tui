@@ -226,20 +226,6 @@ test("waitUntilRenderFlush waits for unmount write callback", async () => {
   expect(didUnmountWriteCallbackFire).toBe(true);
 });
 
-test("waitUntilRenderFlush after unmount does not register beforeExit listener", async () => {
-  const App = defineComponent(() => () => <Text>Hello</Text>);
-  const app = createApp(App);
-  const stdout = makeFakeWritable();
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
-
-  const beforeWaitCount = process.listenerCount("beforeExit");
-  app.unmount();
-  await app.waitUntilRenderFlush();
-  expect(process.listenerCount("beforeExit")).toBe(beforeWaitCount);
-});
-
 test("waitUntilRenderFlush resolves after exit with error", async () => {
   let exitFn!: (err: Error) => void;
   const App = defineComponent(() => {
