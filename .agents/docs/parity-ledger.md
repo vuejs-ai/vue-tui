@@ -12,26 +12,40 @@
 
 Refuted (NOT gaps — kept for the record): `exit()` second-wins — vue-tui is already guarded, not last-wins as earlier suspected; kitty key-release printable-text suppression — Ink behaves the same.
 
+## Decisions log
+
+Non-obvious calls made while fixing gaps, recorded for review in the final report.
+
+- **2026-05-29 — Conflict policy (set by maintainer):** when an audit gap conflicts with an existing vue-tui test that deliberately asserts non-Ink behavior, align to Ink and rewrite the conflicting test — and record the decision here so it can be reviewed against expectations later.
+- **2026-05-29 — Sequencing:** the P1 gaps G01 (Static unmount), G02 (useAnimation throttle coalescing), G03 (screen-reader render path) are architecturally invasive — they hinge on timing between Vue's reactivity and the scheduler's commit, where a mistake silently drops output. Deferred until the end-to-end pipeline (PR → codex → CI → auto-merge) is validated on a low-risk fix. Started with G04.
+- **2026-05-29 — G04 (border background):** maintainer confirmed Ink behavior — border glyphs carry NO background unless `borderBackgroundColor` (or a per-edge variant) is set. Removed the `?? bgColor` fallback in `paint.ts` `colorizeEdge`. Tests rewritten to match Ink:
+  - _"wrapped text preserves backgroundColor on every line"_ → _"…on every content line"_: now asserts inner content rows carry the bg while the pure-border first/last rows do not (box height 4→5 so the wrapped text fits without overflowing onto the bottom border).
+  - _"Box background with border fills content area"_: inline snapshot updated — border rows (`╭───╮`/`╰───╯`) no longer carry bg; inner rows keep it.
+  - _"Box backgroundColor survives border rendering"_: unchanged, still passes (the inner fill keeps the bg).
+  - Added _"Box backgroundColor does not bleed onto border glyphs (Ink parity)"_ as the failing-first reproduction.
+
 ## Confirmed gaps
 
 `status` ∈ `todo · in-progress · pr-open · merged · blocked`. Priority: correctness/behavior first, omissions next.
 
-| id  | area                            | summary                                                                                                                 | priority | status | branch | PR  |
-| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------ | --- |
-| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                    | P1       | todo   | —      | —   |
-| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders' | P1       | todo   | —      | —   |
-| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo   | —      | —   |
-| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | todo   | —      | —   |
-| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo   | —      | —   |
-| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo   | —      | —   |
-| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo   | —      | —   |
-| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | todo   | —      | —   |
-| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo   | —      | —   |
-| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo   | —      | —   |
-| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo   | —      | —   |
-| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                | P2       | todo   | —      | —   |
-| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                    | P3       | todo   | —      | —   |
-| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                           | P3       | todo   | —      | —   |
+| id  | area                            | summary                                                                                                                 | priority | status  | branch                 | PR  |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------- | --- |
+| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                    | P1       | todo    | —                      | —   |
+| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders' | P1       | todo    | —                      | —   |
+| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo    | —                      | —   |
+| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | pr-open | `fix/parity-border-bg` | #30 |
+| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo    | —                      | —   |
+| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo    | —                      | —   |
+| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo    | —                      | —   |
+| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | todo    | —                      | —   |
+| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo    | —                      | —   |
+| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo    | —                      | —   |
+| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo    | —                      | —   |
+| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                | P2       | todo    | —                      | —   |
+| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                    | P3       | todo    | —                      | —   |
+| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                           | P3       | todo    | —                      | —   |
+| G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                | P2       | todo    | —                      | —   |
+| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                      | P3       | todo    | —                      | —   |
 
 ## Gap details
 
@@ -268,3 +282,23 @@ Not already covered: only public-api.test.ts references createApp, and merely to
 Severity low: this is a real gap that survives refutation, but it requires a user to deliberately mount two trees on one stdout, an uncommon path; the original claim also self-rated lower confidence. The guard is genuinely absent, so confirmed=true.
 
 - **Fix sketch:** Add an instances Map<NodeJS.WriteStream, TuiApp> in render.ts; in mount() check for an existing live instance on the resolved stdout and, if found, write Ink's warning to process.stderr and return/reuse rather than wiring a second renderer; delete the entry on unmount/exit.
+
+### G15 — Vertical border sides not shifted up when borderTop=false
+
+_area:_ `box-layout-border` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+_Surfaced by codex during the G04 review (2026-05-29), not the sweep-1 audit._
+
+- **Ink:** `/tmp/ink-40b3a75/src/render-border.ts:133` — vertical sides start at `y + offsetY` where `offsetY = showTopBorder ? 1 : 0`. With `borderTop={false}` the left/right rails begin on the first row.
+- **vue-tui:** `packages/runtime/src/paint/paint.ts:378` — vertical sides always start at `i = 1`, so when the top border is hidden the left/right rails are shifted down by one row (and the first content row has no rails).
+- **Fix sketch:** compute `offsetY = top ? 1 : 0` and start the vertical-side loop at `offsetY`, clamping the run length to the visible inner height; mirror Ink's per-edge offset for the bottom too.
+
+### G16 — Per-edge borderDimColor=false cannot override general borderDimColor
+
+_area:_ `box-layout-border` · _kind:_ behavior · _severity:_ low · _priority:_ P3
+
+_Surfaced by codex during the G04 review (2026-05-29), not the sweep-1 audit._
+
+- **Ink:** `/tmp/ink-40b3a75/src/render-border.ts:54` — `borderTopDimColor ?? borderDimColor`, so an explicit per-edge `false` overrides the general `borderDimColor`.
+- **vue-tui:** `packages/runtime/src/paint/paint.ts:351` — `(props[\`border${capEdge}DimColor\`] as boolean | undefined) || dimAll`, so a per-edge `false`cannot turn dim off once`borderDimColor` is set.
+- **Fix sketch:** use a nullish fallback `?? dimAll` (treating only `undefined` as "inherit"), matching Ink.

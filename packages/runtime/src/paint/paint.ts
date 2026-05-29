@@ -343,17 +343,17 @@ function drawBorder(
   const right = props["borderRight"] !== false;
 
   const borderColor = props["borderColor"] as string | undefined;
-  const bgColor = props["backgroundColor"] as string | undefined;
   const dimAll = !!props["borderDimColor"];
 
   function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
     const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
     const edgeColor = (props[`border${capEdge}Color`] as string | undefined) ?? borderColor;
     const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) || dimAll;
+    // Ink parity (render-border.ts:44-52): an edge's background comes only from the
+    // per-edge or general border background — never from the Box's own backgroundColor.
     const edgeBg =
       (props[`border${capEdge}BackgroundColor`] as string | undefined) ??
-      (props["borderBackgroundColor"] as string | undefined) ??
-      bgColor;
+      (props["borderBackgroundColor"] as string | undefined);
     const p: TextProps = {};
     if (edgeColor) p.color = edgeColor;
     if (edgeBg) p.backgroundColor = edgeBg;
