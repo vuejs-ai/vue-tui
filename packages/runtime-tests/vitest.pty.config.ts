@@ -13,6 +13,11 @@ export default defineConfig({
     // test) to absorb CPU contention on smaller CI runners.
     pool: "forks",
     fileParallelism: true,
+    // Tests run concurrently by default. Each spawns its own isolated PTY
+    // subprocess (or in-process app) with no shared state, and rendering is no
+    // longer wall-clock-dependent (resize renders synchronously), so exact
+    // render-count assertions stay deterministic even under CPU contention.
+    sequence: { concurrent: true },
     testTimeout: 15000,
     env: { FORCE_COLOR: "3" },
   },
