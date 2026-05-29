@@ -35,14 +35,35 @@ export default defineConfig({
       // this doesn't change overall wall-clock.
       "ci:lint": { command: "vp run check:lint", dependsOn: ["ci:build"] },
       "ci:type": { command: "vp run check:type", dependsOn: ["ci:build"] },
-      "ci:test:integration": {
-        command: "vp run -r test:integration",
+      // Test branches. Normal packages keep a plain `test` script; only
+      // runtime-tests splits into test:integration + test:pty. So the graph
+      // runs every normal package's own `test` (misc), and runtime-tests' two
+      // suites as separate branches — keeping the slow PTY suite on its own
+      // parallel branch instead of serial inside runtime-tests' `test`.
+      //   misc: select all @vue-tui/* packages, exclude runtime-tests. The glob
+      //     means new normal packages are covered automatically.
+      "ci:test:misc": {
+        command: 'vp run --filter "@vue-tui/*" --filter "!@vue-tui/runtime-tests" test',
         dependsOn: ["ci:build"],
       },
-      "ci:test:pty": { command: "vp run -r test:pty", dependsOn: ["ci:build"] },
+      "ci:test:integration": {
+        command: "vp run @vue-tui/runtime-tests#test:integration",
+        dependsOn: ["ci:build"],
+      },
+      "ci:test:pty": {
+        command: "vp run @vue-tui/runtime-tests#test:pty",
+        dependsOn: ["ci:build"],
+      },
       ci: {
         command: "echo ci ok",
-        dependsOn: ["ci:fmt", "ci:lint", "ci:type", "ci:test:integration", "ci:test:pty"],
+        dependsOn: [
+          "ci:fmt",
+          "ci:lint",
+          "ci:type",
+          "ci:test:misc",
+          "ci:test:integration",
+          "ci:test:pty",
+        ],
       },
     },
   },
