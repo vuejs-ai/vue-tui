@@ -8,7 +8,7 @@ import { AppContextKey } from "../context.ts";
  * 2. terminal-size package (works even when stdout is redirected)
  * 3. Hardcoded defaults (80x24)
  */
-function resolveSize(stdout: NodeJS.WriteStream): { columns: number; rows: number } {
+export function resolveSize(stdout: NodeJS.WriteStream): { columns: number; rows: number } {
   const cols = stdout.columns;
   const rowsVal = stdout.rows;
   if (cols && rowsVal) return { columns: cols, rows: rowsVal };

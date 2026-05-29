@@ -38,6 +38,7 @@ import {
 import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview } from "./components/ErrorOverview.ts";
+import { resolveSize } from "./composables/useTerminalSize.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
@@ -459,7 +460,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     const tuiRoot = createRoot(appContext);
     attachYoga(tuiRoot);
-    tuiRoot.yoga.setWidth(stdout.columns ?? 80);
+    tuiRoot.yoga.setWidth(resolveSize(stdout).columns);
     mountedRoot = tuiRoot;
 
     // Reset accumulated static output when the <Static> identity changes
@@ -483,7 +484,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
       const hasStaticOutput = staticOutput !== "";
       const isTty = !!stdout.isTTY;
-      const viewportRows = isTty ? (stdout.rows ?? 24) : 24;
+      // Keep non-TTY → 24 fallback (matching Ink: non-tty viewportRows is always 24).
+      // Use resolveSize for TTY to handle the 0-columns/rows case (Ink parity G12).
+      const viewportRows = isTty ? resolveSize(stdout).rows : 24;
 
       // Fullscreen: output fills or exceeds terminal height — no trailing newline.
       // Only apply when writing to a real TTY — piped output always gets trailing newlines.
@@ -543,7 +546,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       // Capture static output as a string (for both interactive and non-interactive paths)
-      const w = stdout.columns ?? 80;
+      // Use resolveSize to handle 0-columns case from non-TTY stdout (Ink parity G12).
+      const w = resolveSize(stdout).columns;
       let staticOutput = "";
       for (const stat of findStatics(tuiRoot)) {
         const fresh = stat.children.slice(stat.writtenCount);
