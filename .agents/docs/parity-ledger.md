@@ -6,15 +6,265 @@
 
 ## Sweep history
 
-| sweep                                    | Ink SHA | candidates → confirmed | status |
-| ---------------------------------------- | ------- | ---------------------- | ------ |
-| _(none yet — first run will record one)_ |         |                        |        |
+| sweep                | Ink SHA   | candidates → confirmed                 | status   |
+| -------------------- | --------- | -------------------------------------- | -------- |
+| sweep-1 (2026-05-29) | `40b3a75` | 16 verified → 14 confirmed (2 refuted) | recorded |
+
+Refuted (NOT gaps — kept for the record): `exit()` second-wins — vue-tui is already guarded, not last-wins as earlier suspected; kitty key-release printable-text suppression — Ink behaves the same.
 
 ## Confirmed gaps
 
-`status` ∈ `todo · in-progress · pr-open · merged · blocked`. Priority: correctness /
-behavior bugs first, omissions next.
+`status` ∈ `todo · in-progress · pr-open · merged · blocked`. Priority: correctness/behavior first, omissions next.
 
-| id           | area | summary | priority | status | branch | PR  |
-| ------------ | ---- | ------- | -------- | ------ | ------ | --- |
-| _(none yet)_ |      |         |          |        |        |     |
+| id  | area                            | summary                                                                                                                 | priority | status | branch | PR  |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------ | --- |
+| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                    | P1       | todo   | —      | —   |
+| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders' | P1       | todo   | —      | —   |
+| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                       | P1       | todo   | —      | —   |
+| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                | P2       | todo   | —      | —   |
+| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                              | P2       | todo   | —      | —   |
+| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                            | P2       | todo   | —      | —   |
+| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                               | P2       | todo   | —      | —   |
+| G08 | focus                           | useFocus does not react to changes in the id prop                                                                       | P2       | todo   | —      | —   |
+| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                  | P2       | todo   | —      | —   |
+| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                          | P2       | todo   | —      | —   |
+| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                          | P2       | todo   | —      | —   |
+| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                | P2       | todo   | —      | —   |
+| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                    | P3       | todo   | —      | —   |
+| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                           | P3       | todo   | —      | —   |
+
+## Gap details
+
+Full evidence captured at audit time (Ink commit `40b3a75`). Re-verify against source before fixing.
+
+### G01 — Static keeps every already-written item permanently mounted instead of unmounting it
+
+_area:_ `static-newline-spacer` · _kind:_ behavior · _severity:_ medium · _priority:_ P1
+
+- **Ink:** /tmp/ink-40b3a75/src/components/Static.tsx:30-42 — Ink holds an internal cursor `const [index, setIndex] = useState(0)`, renders only `items.slice(index)` (line 32-34), then in a layout effect advances `setIndex(items.length)` (line 36-38). After the effect settles, `itemsToRender` is `items.slice(items.length)` = [] (line 40), so the `<ink-box internal_static>` renders ZERO children (line 53-57). The React elements created for previously-emitted items are therefore removed from the tree and unmounted — Ink only ever keeps not-yet-written items mounted (the canonical 'things that don't change after they're rendered' contract, lines 21-24).
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/components/Static.ts:16-23 — the render function ALWAYS maps over the full `props.items` (`(props.items as unknown[]).map((item, index) => slots.default?.({ item, index }))`, line 21). There is no internal index/slice, so every item's component stays mounted for the life of the <Static>. One-time-WRITE is enforced separately at flush time in /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/paint/static-channel.ts:15-20 via `stat.children.slice(stat.writtenCount)`, which prevents re-PAINTING but does not unmount the components.
+- **Why it's a real gap:** Verified against actual source. Ink's Static (/tmp/ink-40b3a75/src/components/Static.tsx:30-42) holds an internal cursor index, renders only items.slice(index) (line 32-34), and advances setIndex(items.length) in useLayoutEffect (line 36-38). After the effect settles itemsToRender = items.slice(items.length) = [], so the internal_static ink-box renders ZERO children (line 53-57). React therefore reconciles away and UNMOUNTS every already-emitted item, tearing down its effects/timers/hooks.
+
+vue-tui's Static (packages/runtime/src/components/Static.ts:16-23) ALWAYS maps over the full props.items in its render function with no index/slice, so every item component stays mounted for the life of the <Static>. One-time-WRITE is enforced separately at flush via stat.children.slice(stat.writtenCount) in packages/runtime/src/paint/static-channel.ts:15-20 (and the inline copy in render.ts:550-555). I confirmed nodes.ts:86/174 only tracks writtenCount; there is no unmount/slice path in Static.ts. So writtenCount prevents re-PAINTING but does NOT unmount the components — exactly as claimed.
+
+Observable consequence: in Ink an emitted Static item's watchers/intervals/effects are destroyed right after first paint; in vue-tui they keep running and the item keeps re-rendering on reactive changes (output discarded by the writtenCount slice). The live DOM + yoga tree accumulate one Text+yoga node per historical item, and render.ts:579-580 calls calculateLayout over the whole tree (including the never-shrinking static subtree) on every commit, whereas Ink's static subtree is empty after settle.
+
+Refutation checks all failed: (1) Not in the intentional-divergences list, and it is a lifecycle/perf behavior, not a naming/idiom difference. (2) vue-tui does NOT handle it elsewhere — searched components/Static.ts, host/nodes.ts, paint/static-channel.ts, render.ts; the only mechanism is writtenCount which is paint-only. (3) Not covered by tests — packages/runtime-tests/integration/components/static.test.tsx (incl. the ported Ink tests) only asserts painted frame contents and unmount-of-the-whole-<Static>; nothing asserts per-item component unmounting or that an item's effects/timers stop after it is written. (4) Ink does behave as claimed at this commit (slice + layout-effect index advance verified). No comment in Static.ts or static-channel.ts acknowledges the divergence.
+
+Severity is medium rather than high: the canonical Static use case is a growing log of completed-task <Text> items which usually have no effects, so the typical user impact is the unbounded yoga/DOM accumulation (a perf regression on long logs) plus a correctness gap only for items that actually run effects/timers/watchers.
+
+- **Fix sketch:** In Static.ts, mirror Ink: keep a shallowRef cursor, render only items.slice(cursor) and advance cursor to items.length in onUpdated/watch (post-flush) so already-written item components unmount; adjust static-channel/render flush to account for the now-relative children. Add a test asserting an emitted Static item's onUnmounted fires / its interval stops.
+
+### G02 — useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders'
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ behavior · _severity:_ medium · _priority:_ P1
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-animation.ts:70 reads `renderThrottleMs` from AnimationContext and lines 102-121 skip ticks while `currentTime < nextRenderTimeRef.current` (throttle window), then on the next allowed tick jump to the latest elapsed values and set `nextRenderTimeRef = currentTime + renderThrottleMs`. delta is computed as `currentTime - lastRenderTimeRef` so it accumulates across coalesced ticks (delta = time since last _rendered_ tick). AnimationContext (/tmp/ink-40b3a75/src/components/AnimationContext.ts:4) carries renderThrottleMs.
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/composables/useAnimation.ts:90-95 tick() sets frame/time/delta on EVERY scheduler callback with `delta = now - lastTickTime` (time since last _scheduler_ tick). There is no renderThrottleMs concept: createAnimationScheduler() takes no throttle arg (/Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/animation-scheduler.ts:25) and render.ts:625 calls it with none. The commit-scheduler throttleMs (render.ts:608-612) only throttles render commits, not animation state.
+- **Why it's a real gap:** Verified against actual source. Ink: use-animation.ts:70 pulls renderThrottleMs from AnimationContext (AnimationContext.ts:4, wired in ink.tsx:342-344 and App.tsx:724 as Math.max(1, ceil(1000/maxFps))). The subscriber (lines 102-121) skips ticks while currentTime < nextRenderTimeRef (the throttle window), then on the next allowed tick jumps to the latest elapsed values and sets nextRenderTimeRef = currentTime + renderThrottleMs. delta = currentTime - lastRenderTimeRef, i.e. time since last _rendered_ tick, so it accumulates across coalesced ticks. The doc at use-animation.ts:42 documents this: "Time in milliseconds since the previous rendered tick. Accounts for throttled renders."
+
+vue-tui: composables/useAnimation.ts:90-95 tick() runs on EVERY scheduler callback and sets delta = now - lastTickTime (time since previous _scheduler_ tick, ~one interval). There is no renderThrottleMs concept anywhere in the animation path: createAnimationScheduler() (animation-scheduler.ts:25) takes no throttle arg, render.ts:625 calls it with none, AnimationSchedulerKey (context.ts:57) injects a plain AnimationScheduler with no throttle field. The commit-scheduler throttleMs (render.ts:608-612) throttles only terminal commits, not animation state. The vue-tui doc (useAnimation.ts:47-49) copies Ink's "Accounts for throttled renders" promise verbatim but the behavior is not implemented.
+
+Observable divergence: with maxFps set so commit-throttle > interval (e.g. interval 16ms vs ~32ms throttle), Ink reports the accumulated delta (~throttle window) on each rendered/committed frame, so render-time physics integration position += speed \* delta advances at correct wall-clock speed. vue-tui commits only some frames but each committed delta still reports ~one interval, under-integrating velocity at render time. frame/time stay monotonic, so impact is bounded to the documented velocity-driven-at-render-time pattern under active throttling — hence medium, not high.
+
+Not intentional/idiom: it is a missing mechanism, not a naming/framework difference, and is not in the intentional-divergence list. Not already covered: the existing test "delta accounts for throttled ticks" (use-animation.test.tsx:915-943) does NOT validate it — it asserts only lastRenderedDelta > 0, its watchEffect fires on every 16ms ref mutation (not on committed frames), and its own comment is self-contradictory ("should reflect time since last rendered tick" yet "~20ms per tick"). It passes trivially against the buggy per-tick delta and cannot detect the coalescing absence.
+
+- **Fix sketch:** Thread a renderThrottleMs into createAnimationScheduler (from maxFps in render.ts:611-625) and gate tick() in useAnimation.ts to skip while now < nextRenderTime, then set delta = now - lastRenderedTime and nextRenderTime = now + renderThrottleMs (mirror Ink use-animation.ts:102-121); add a test asserting committed delta ~= throttle window, not ~interval.
+
+### G03 — Live screen-reader render path is missing; commit() always paints the visual grid
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ omission · _severity:_ medium · _priority:_ P1
+
+- **Ink:** ink.tsx:573-626 — when isScreenReaderEnabled, onRender() takes a dedicated branch that calls renderer with screen-reader mode (renderer.ts:15-34 -> renderNodeToScreenReaderOutput), then wrapAnsi(output, terminalWidth, {trim:false, hard:true}) and writes via eraseLines, producing flat linear screen-reader text (no borders/spatial grid). It also has screen-reader-specific static-output erasing.
+- **vue-tui:** render.ts:532-606 commit() never references isScreenReaderEnabled; it always calls paint(tuiRoot) (the 2D grid renderer in paint/paint.ts:398). isScreenReaderEnabled is only used at render.ts:609,611 to disable commit throttling. The dedicated renderScreenReaderOutput() (paint/screen-reader.ts) is wired only into render-to-string.ts:120-121, never into the live commit path.
+- **Why it's a real gap:** Verified against source. Ink (ink.tsx:540-543) calls render(rootNode, isScreenReaderEnabled), and renderer.ts:13-35 takes the renderNodeToScreenReaderOutput branch when screen reader is on, producing flat linearized plain text (no borders/grid). The live onRender interactive path (ink.tsx:573-626) then has a dedicated screen-reader branch: wrapAnsi(output, terminalWidth, {trim:false, hard:true}) + eraseLines-based writes, plus screen-reader-specific static erasing.
+
+vue-tui's live commit() (render.ts:532-606) never references isScreenReaderEnabled; it unconditionally calls paint(tuiRoot) (the 2D grid painter, render.ts:571 and 582) for both the non-interactive and interactive branches. A grep of the entire runtime src confirms isScreenReaderEnabled is used in the live render path ONLY at render.ts:609 and 611 to disable commit throttling — never to switch the renderer. The dedicated renderScreenReaderOutput() (paint/screen-reader.ts:50) is imported and used only in render-to-string.ts:120-121, never in the live commit path. The code itself confirms intent: render.ts:361 comment says outputHeight is used for "screen-reader mode in future tasks" — i.e. the live path is explicitly not yet implemented.
+
+No test covers this: grep for screen-reader/screenReader/INK_SCREEN_READER across \*.test.ts in the runtime package returned zero files.
+
+Not an intentional divergence: it is not in the divergence allowlist, and Box.ts:147-157, Text.ts:33-41, Transform.ts:17-21 already swap in ariaLabel content and honor ariaHidden when isScreenReaderEnabled — that aria swapping only makes sense if the final output is meant to be linearized for a screen reader. So the half-built accessibility wiring corroborates that the live screen-reader render branch is a genuine missing piece, not a deliberate design choice.
+
+Severity medium rather than high: vue-tui's components do partially adapt (aria labels, ariaHidden) so output isn't identical to the visual app, but it still flows through the grid painter (borders, padding, columns, 2D spatial layout intact) instead of Ink's flat wrapAnsi linear text. A screen-reader user therefore observes materially different output than Ink, but it is a niche, opt-in path (INK_SCREEN_READER=true / isScreenReaderEnabled:true).
+
+- **Fix sketch:** In render.ts commit(), branch on isScreenReaderEnabled to use renderScreenReaderOutput(tuiRoot, {skipStaticElements:true}) + wrapAnsi(out, w, {trim:false, hard:true}) and an eraseLines-based write path, mirroring ink.tsx:573-626, instead of paint(tuiRoot).
+
+### G04 — Border edges incorrectly inherit the Box backgroundColor
+
+_area:_ `box-layout-border` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/render-border.ts:44-52 computes each edge's border background from `borderTopBackgroundColor ?? borderBackgroundColor` (etc.) only. It never falls back to the box's `node.style.backgroundColor` (grep for `backgroundColor` in render-border.ts returns nothing besides the dedicated border-bg props). So a Box with `backgroundColor` but no `borderBackgroundColor` draws plain (uncolored-bg) border glyphs.
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/paint/paint.ts:353-356 `colorizeEdge` computes `edgeBg = border<Edge>BackgroundColor ?? borderBackgroundColor ?? bgColor`, where `bgColor = props.backgroundColor` (paint.ts:346). The border glyphs therefore get painted with the Box's backgroundColor when no explicit border background is set.
+- **Why it's a real gap:** Verified against source on both sides.
+
+Ink (/tmp/ink-40b3a75/src/render-border.ts:44-52): each edge's border background = border<Edge>BackgroundColor ?? borderBackgroundColor, with NO fallback to node.style.backgroundColor. stylePiece(segment, fg, bg) with bg=undefined runs colorize(...) which returns the segment unchanged, so an uncolored-bg border glyph is emitted. render-background.ts:28-29,42-49 fills ONLY the inner content area (x+leftBorderWidth .. contentWidth), never the border cells. render-node-to-output.ts:163-164 calls renderBackground then renderBorder, so the border line is colorized independently of the box bg. Net: <Box backgroundColor=cyan borderStyle=round> draws border glyphs with default (no) background in Ink.
+
+vue-tui (paint.ts:349-362): colorizeEdge computes edgeBg = border<Edge>BackgroundColor ?? borderBackgroundColor ?? bgColor, where bgColor = props.backgroundColor (paint.ts:346). drawBorder is called (paint.ts:434-435) and fillBackground only fills the inner area (paint.ts:443), so the border glyphs themselves are painted with the box backgroundColor. This is a real, user-observable color divergence.
+
+Not intentional/idiom, not a naming difference. NOT already correctly covered: the existing snapshot test in packages/runtime-tests/integration/components/background-color.test.tsx:294-310 ("Box background with border fills content area") actually FROZE the buggy behavior — its inline snapshot shows `[46m╭────────╮[49m`, i.e. cyan bg applied to the border corners/edges. The mirrored Ink test (/tmp/ink-40b3a75/test/background.tsx:275-294) only uses loose `includes(ansi.bgCyan)` assertions (satisfied by the inner fill) and never asserts the border glyphs lack a bg, so it does not pin Ink to the cyan-bordered output. There is no test asserting Ink-parity (uncolored border bg) — so the gap is real and not caught.
+
+Severity low: cosmetic ANSI background on border glyphs only when a Box sets backgroundColor without an explicit border background; functionally minor but a genuine visual divergence and the snapshot enshrines the wrong behavior.
+
+- **Fix sketch:** In paint.ts colorizeEdge (~line 353-356), drop the `?? bgColor` fallback so edgeBg = border<Edge>BackgroundColor ?? borderBackgroundColor only; then regenerate the now-incorrect snapshot in background-color.test.tsx ("Box background with border fills content area", ~line 304) to drop [46m around the border glyphs.
+
+### G05 — Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)
+
+_area:_ `box-layout-border` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/render-border.ts has no minimum-size guard. For a box with only left/right borders (`borderTop:false, borderBottom:false`) and height 1, verticalBorderHeight stays 1 (render-border.ts:87-95) and the left/right glyphs are written (render-border.ts:97-119, 139-147). Likewise a top/bottom-only border with width 1 still repeats `box.top` once (render-border.ts:71-78).
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/paint/paint.ts:338 `if (w < 2 || h < 2) return;` aborts the whole border draw, so a 1-row box with side borders, or a 1-column box with top/bottom borders, renders no border.
+- **Why it's a real gap:** Verified on both sides and reproduced live. Ink's render-border.ts (/tmp/ink-40b3a75/src/render-border.ts) has NO minimum-size guard: for a height-1 box with only left/right borders, verticalBorderHeight = height = 1 (lines 87-95, top/bottom not subtracted) and leftBorder/rightBorder each write one glyph (lines 99-147); for a width-1 box with only top/bottom, contentWidth=1 and box.top.repeat(1) writes one glyph (lines 71-78). vue-tui's drawBorder at packages/runtime/src/paint/paint.ts:338 has `if (w < 2 || h < 2) return;` which aborts the ENTIRE border draw.
+
+Reachable and observable: I added a temporary repro test (column-flex, child Box borderStyle=round borderTop={false} borderBottom={false} wrapping single-cell content). Total box is w=3,h=1, so h<2 fires and vue-tui renders the frame "Above\n X\nBelow" — the middle row has NO side rails. Ink would render "│X│". So the side rails vanish entirely.
+
+Refutation paths all fail: (1) Not an intentional divergence — guard dates to initial commit ff82f6e with no explanatory comment, not on the divergence allowlist, and CLAUDE.md requires a comment for non-idiomatic deviations. (2) vue-tui does NOT handle it elsewhere — the early-return in drawBorder is the only path. (3) Not covered by tests — borders.test.tsx has hide-top/bottom and hide-left/right cases, but all use multi-cell content where the surviving dimension is >=2, so the w<2||h<2 cutoff is never asserted. (4) Ink does behave as claimed at this commit per source trace.
+
+Severity low: requires a degenerate 1-cell-thin box with partial borders, an edge case unlikely in typical layouts, but it is a real, observable, deterministic divergence.
+
+- **Fix sketch:** In drawBorder (paint.ts:338) replace the blanket `if (w < 2 || h < 2) return;` with Ink-style per-edge handling: clamp fill/verticalBorderHeight to >=0 and draw each visible edge by its own run length instead of aborting the whole border.
+
+### G06 — Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index
+
+_area:_ `text-wrap-transform` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/squash-text-nodes.ts:13-39 — squashTextNodes loops `for (let index = 0; index < node.childNodes.length; index++)` over ALL child nodes and calls `childNode.internal_transform(nodeText, index)` (line 38) with that childNode index. /tmp/ink-40b3a75/src/components/Transform.tsx:13 documents the public signature `transform: (children: string, index: number)`. Confirmed by reproduction: for `<Text><Transform A><Text>a</Text></Transform><Transform B><Text>b</Text></Transform></Text>`, Ink's squash yields `[A0:a][B1:b]` (second sibling gets index 1).
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/paint/paint.ts:313-314 hardcodes the index: `innerText = child.transform(innerText, 0)` inside the per-child loop of renderTextWithInlineStyles. Same hardcoded `0` in the measurement path at /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/host/text-measure.ts:26 (`child.transform(innerText, 0)`). Empirically verified via a render test: vue-tui outputs `[A0:a][B0:b]` where Ink outputs `[A0:a][B1:b]`.
+- **Why it's a real gap:** Confirmed real gap, verified empirically. Ink's squash-text-nodes.ts:13-38 loops `for (let index = 0; index < node.childNodes.length; index++)` and calls `childNode.internal_transform(nodeText, index)` (line 38), passing each child's array position. Transform.tsx:13 documents the public signature `transform: (children: string, index: number)`, and Transform wraps children in `<ink-text internal_transform={transform}>`, so two sibling <Transform>s inside one <Text> become childNodes at indices 0 and 1 → Ink yields `[A0:a][B1:b]`.
+
+vue-tui hardcodes index 0 in BOTH paths the reviewer cited: paint.ts:314 (`innerText = child.transform(innerText, 0)`) and text-measure.ts:26 (`child.transform(innerText, 0)`). I wrote a reproduction test (two sibling Transforms inside a Text via renderToString) and vue-tui produced `[A0:a][B0:b]` — the second sibling gets 0 instead of 1, exactly as claimed.
+
+Refutation criteria all fail: (1) Not intentional — the (line, index) signature is a faithful Ink port, createTransform even names the param lineIndex, and the standalone per-line path (paint.ts Output loop) correctly uses the real index, showing the 0 is an oversight not a design choice. (2) Not handled elsewhere — both squash paths hardcode 0; no sibling index is threaded into the per-child loop. (3) Not covered — every existing nested-Transform test in transform.test.tsx uses a single child, so index 0 is coincidentally correct; none uses 2+ siblings. (4) Ink does behave as claimed at this commit.
+
+Severity low: the index argument is rarely used and the divergence only surfaces with 2+ sibling Transform/Text children inside one Text that read `index` — an uncommon pattern — but it is a genuine, observable correctness gap in both render and measure paths.
+
+- **Fix sketch:** Thread the loop position into the transform call: in paint.ts renderTextWithInlineStyles and text-measure.ts flattenLeaves, iterate with an index (e.g. node.children.forEach or a counter) and pass it as the second arg to child.transform instead of 0 (matching Ink's childNodes index, including any non-element siblings in the count).
+
+### G07 — Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink
+
+_area:_ `input-keypress-kitty-paste` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-input.ts:245-247: when input==='c' && key.ctrl && internal_exitOnCtrlC, Ink only `return`s (skips the user handler) and does NOT exit. Ink's actual exit path is the legacy \x03 byte caught in /tmp/ink-40b3a75/src/components/App.tsx:244-246 emitInput. Under kitty protocol Ctrl+C arrives as \x1b[99;5u (input='c', key.ctrl), never as \x03, so Ink does not exit on kitty Ctrl+C.
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/composables/useInput.ts:100-105: when input==='c' && key.ctrl && stdin.internal_exitOnCtrlC, vue-tui calls app.exit() directly and returns. Legacy \x03 is separately caught in render.ts:914.
+- **Why it's a real gap:** Verified the claim against actual source at the cited locations and the surrounding data-flow.
+
+Ink side (REFUTE attempt failed — Ink genuinely does NOT exit on kitty Ctrl+C):
+
+- /tmp/ink-40b3a75/src/hooks/use-input.ts:245-247: when input==='c' && key.ctrl && internal_exitOnCtrlC, Ink only `return`s (skips the user handler). No exit() call.
+- Ink's real exit path is /tmp/ink-40b3a75/src/components/App.tsx:244-246 handleInput: `if (input === '\x03' && exitOnCtrlC) handleExit()`. This fires only for the literal \x03 byte.
+- Critically, App.tsx feeds handleInput via emitInput, which receives PARSED events from inputParserRef.current.push(chunk) (App.tsx:283-291). The parser in /tmp/ink-40b3a75/src/input-parser.ts:239 pushes the RAW escape sequence (`events.push(parsedEscapeSequence.sequence)`) — it does not rewrite kitty \x1b[99;5u into \x03. So under kitty protocol, input at App.tsx:244 is the raw CSI-u sequence, the \x03 check is false, and Ink does not call handleExit. The kitty sequence then reaches use-input.ts where parseKeypress resolves it to input='c'/key.ctrl and line 245 merely returns. Net: Ink swallows kitty Ctrl+C without exiting.
+
+vue-tui side (does NOT match Ink):
+
+- packages/runtime/src/composables/useInput.ts:102-105: when input==='c' && key.ctrl && stdin?.internal_exitOnCtrlC, vue-tui calls app!.exit() directly, then returns.
+- Legacy \x03 is separately intercepted in packages/runtime/src/render.ts:912-917 emitInput BEFORE dispatch to useInput, mirroring Ink's App.tsx \x03 path. But the kitty Ctrl+C exit lives ONLY inside useInput, so a kitty-enabled app with no useInput hook would not exit either — confirming the reviewer's nuance.
+
+Refutation checks: (1) Not in the intentional-divergence list and not a naming/idiom difference — it's an unintended behavioral asymmetry. (2) vue-tui does not handle it the Ink way anywhere else in the tree (render.ts only catches \x03). (3) No existing test covers it — parse-keypress-kitty.test.ts and input-parser.test.ts only assert keypress parsing, none assert app.exit() on kitty Ctrl+C. Ink behaves as claimed at this commit.
+
+Real, observable divergence. Severity low: the practical effect (kitty Ctrl+C exits) is the conventionally-expected behavior and arguably more correct than Ink's swallow; impact is limited and edge-case (kitty active + useInput mounted).
+
+- **Fix sketch:** If strict Ink parity is desired: in useInput.ts:102-105 replace app!.exit() with a bare `return` (swallow only). Optionally move kitty-Ctrl+C exit into render.ts emitInput (next to the \x03 check) so behavior is independent of useInput being mounted.
+
+### G08 — useFocus does not react to changes in the id prop
+
+_area:_ `focus` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-focus.ts:47-57 — id is memoized via useMemo on [customId], and the add/remove effect deps include id. If the consumer passes a changing customId, Ink removes the focusable under the old id and re-registers it under the new id (re-running add/remove).
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/composables/useFocus.ts:28 — `const id = options.id ?? "__auto-..."` reads options.id exactly once at setup and never watches it. ctx.add/subscribe/remove (lines 31-35, 68-72) are all keyed to that one captured id, so a later change to options.id is ignored: the focusable stays registered under the original id and isFocused never tracks the new id.
+- **Why it's a real gap:** Verified both sources. Ink (/tmp/ink-40b3a75/src/hooks/use-focus.ts:47-65): `id = useMemo(() => customId ?? random, [customId])`, the add/remove effect deps are `[id, autoFocus, add, remove]`, and the activate effect deps are `[isActive, id, ...]`. When customId changes, id recomputes, the cleanup runs remove(oldId), add(newId) re-runs, and isFocused = activeId === id tracks the new id. Ink behaves exactly as claimed.
+
+vue-tui (packages/runtime/src/composables/useFocus.ts:28): `const id = options.id ?? "__auto-..."` reads options.id exactly once at setup. id is a plain const consumed by ctx.subscribe (31), ctx.add (35), ctx.activate/deactivate (58/61), and ctx.remove (70). The only watch (54) is on isActive. There is no reactive tracking of id; a later change is silently ignored — the focusable stays registered under the original id and isFocused never tracks a new id. The vue-tui status in the claim is accurate.
+
+Notably, the type signature treats isActive as MaybeRefOrGetter<boolean> (deliberately reactive, watched) but id as plain string — so this is not symmetric framework idiom; the author wired reactivity for isActive but not id.
+
+Not covered by tests: the focus tests (packages/runtime-tests/integration/focus/{tab-cycling,programmatic-focus,focus-manager}.test.tsx) all pass props.id into useFocus but never mutate the id prop after mount, so the change-id path is untested.
+
+Not on the intentional-divergence list. Real and observable (a test could mount id='a', switch to id='b', and observe vue-tui remains registered under 'a' while Ink re-registers). Severity is low because id is virtually always static per component instance and the plain-string typing discourages dynamic binding — but the behaviors genuinely diverge.
+
+- **Fix sketch:** Make id reactive: type `id?: MaybeRefOrGetter<string>`, and in useFocus.ts watch `() => toValue(options.id)` to remove/unsubscribe the old id and re-add/subscribe under the new id (mirroring Ink's add/remove effect keyed on [id]).
+
+### G09 — External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers
+
+_area:_ `stdout-stderr-stdin-size-cursor` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/ink.tsx:687-698 (writeToStdout) and 717-728 (writeToStderr): each computes `const sync = this.shouldSync()` and, when true, writes `bsu` before `this.log.clear(); stdout.write(data); this.restoreLastOutput()` and `esu` after, so the clear+external-write+frame-restore is one atomic synchronized update. shouldSync = shouldSynchronize(stdout, interactive) (ink.tsx:994-995).
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/render.ts:380-407: writeToStdout/writeToStderr do `writer.clear(); stdout.write(data); restoreLastOutput()` with NO bsu/esu wrapping. vue-tui already imports and uses bsu/esu/shouldSynchronize for the normal render path (render.ts:27, 481, 505-522) but omits it from the external-write path. The composables surface this write via useStdout/useStderr (useStdout.ts:7, useStderr.ts:7).
+- **Why it's a real gap:** Verified against actual source. Ink (ink.tsx:687-698 writeToStdout, 717-728 writeToStderr) computes `const sync = this.shouldSync()` (shouldSync -> shouldSynchronize(stdout, interactive), 994-995) and wraps clear()+external-write+restoreLastOutput() with bsu/esu when sync is true, making it one atomic synchronized update. vue-tui (render.ts:380-407) does writer.clear(); stdout.write(data); restoreLastOutput() with NO bsu/esu wrapping in both writeToStdout and writeToStderr. The file already imports bsu/esu/shouldSynchronize (line 27) and uses them in the normal render path (line 481, 505-522), so this is an internal inconsistency, not an intentional divergence or framework-idiom difference. Test coverage: use-stdout.test.tsx only asserts the write routes through writeToStdout (no \x1b[?2026h/l check); use-stderr has no such file; write-synchronized.test.ts only unit-tests the bsu/esu constants and shouldSynchronize() helper, never the external-write path. So no existing test covers it. Real, observable gap: on mode-2026 terminals, useStdout/useStderr write() during render can tear/flicker where Ink does not. Severity low: cosmetic flicker on sync-capable terminals during concurrent external writes; helpers already present; fix is mechanical (wrap the clear/write/restore with shouldSynchronize-gated bsu/esu, matching the render path).
+- **Fix sketch:** In render.ts writeToStdout/writeToStderr, compute `const sync = shouldSynchronize(stdout, interactive)` and emit `stdout.write(bsu)` before `writer.clear()` and `stdout.write(esu)` after `restoreLastOutput()`, mirroring Ink ink.tsx:687-698/717-728.
+
+### G10 — setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error
+
+_area:_ `stdout-stderr-stdin-size-cursor` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** /tmp/ink-40b3a75/src/components/App.tsx:315-327: handleSetRawMode throws immediately when `!isRawModeSupported`, with distinct messages for process.stdin vs a custom stdin, pointing users to the isRawModeSupported docs. useInput calls setRawMode(true) on mount (/tmp/ink-40b3a75/src/hooks/use-input.ts:169), so using useInput without TTY raw-mode support surfaces this error.
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/render.ts: AppContext.setRawMode (431-437) only checks typeof and no-ops otherwise; StdinController.acquireRawMode (1004-1005) and releaseRawMode (1031-1032) both `if (!appCtx.isRawModeSupported) return;` silently. useInput.attach() calls stdin.acquireRawMode() (composables/useInput.ts:113) with no guard, so it silently does nothing. There is no throw anywhere (no "Raw mode is not supported" string in src).
+- **Why it's a real gap:** Verified against source. Ink (/tmp/ink-40b3a75/src/components/App.tsx:315-327): handleSetRawMode throws an Error immediately when !isRawModeSupported, with two distinct messages (process.stdin default vs custom stdin) both linking to the isRawModeSupported docs. useInput (use-input.ts:169) calls setRawMode(true) on mount, so using useInput in a non-TTY/unsupported environment surfaces a descriptive error. vue-tui: render.ts AppContext.setRawMode (431-437) only checks typeof setRawMode and no-ops; StdinController.acquireRawMode (1005) and releaseRawMode (1032) both `if (!appCtx.isRawModeSupported) return;` silently. useInput.attach() (useInput.ts:113) calls stdin.acquireRawMode() unguarded, so it silently does nothing. A repo-wide grep confirms no "Raw mode is not supported" string and no throw anywhere in src. No test references acquireRawMode/isRawModeSupported/the throw path, so it is not already covered. This is not a naming/idiom difference nor on the intentional-divergence list: it is a genuine, user-observable failure-mode difference (silent input-never-works vs an explicit, documented error). Severity is low because the no-op is functionally degraded-but-safe and isRawModeSupported is exposed for gating, but the gap is real.
+- **Fix sketch:** In render.ts AppContext.setRawMode (or acquireRawMode), throw a descriptive Error (matching Ink's two-message form + docs link) when !isRawModeSupported instead of silently returning; add a failing test first that mounts useInput with a non-TTY stdin and asserts the throw.
+
+### G11 — Resize handler does not clear+reset on terminal-width decrease
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** ink.tsx:459-474 resized(): compares getWindowSize(stdout).columns to this.lastTerminalWidth; when currentWidth < lastTerminalWidth it runs this.log.clear() and resets lastOutput/lastOutputToRender to '' before recomputing layout and rendering, then updates lastTerminalWidth. Comment: 'We clear the screen when decreasing terminal width to prevent duplicate overlapping re-renders.'
+- **vue-tui:** render.ts:667-680 onResize() only does scheduler.cancel() then commit(). There is no stored previous terminal width, no width-decrease comparison, and no writer.clear()/lastOutput reset on narrowing. shouldClearTerminalForFrame (render.ts:127-147) only clears based on height/overflow/fullscreen, never on width change.
+- **Why it's a real gap:** Verified against actual source on both sides.
+
+Ink (real behavior at this commit): ink.tsx:302 declares `lastTerminalWidth`, line 402 initializes it to the initial `getWindowSize(stdout).columns` in the constructor, and `resized()` (459-474) compares `currentWidth < this.lastTerminalWidth`; on a narrowing it runs `this.log.clear()` and resets `lastOutput`/`lastOutputToRender` to '' (with the explicit comment "We clear the screen when decreasing terminal width to prevent duplicate overlapping re-renders"), then recomputes layout, renders, and updates `lastTerminalWidth`. This is active, not a no-op.
+
+vue-tui: the resize handler (render.ts:667-680) only does `scheduler.cancel(); commit();`. A repo-wide search of packages/runtime/src found no `lastTerminalWidth`/previous-width tracking and no width-decrease comparison anywhere. The only force-clear path is `shouldClearTerminalForFrame` (render.ts:127-147), which is purely height/overflow/fullscreen/unmount based — none of its four conditions read width, and `nextOutputHeight`/`previousOutputHeight` come from the logical painted frame's `split("\n").length`, not physical wrapped rows.
+
+Why the gap is observable: the interactive frame writer (io/log-update.ts) erases the prior frame with `ansiEscapes.eraseLines(previousLineCount)`, where `previousLineCount` is the logical line count of the previously written string. When the terminal narrows, previously-rendered wide lines wrap to MORE physical rows than `previousLineCount`, so `eraseLines` under-erases and leaves stale overlapping leftovers — precisely the artifact Ink's narrowing-clear prevents.
+
+Not an intentional divergence: this is not on the divergence list and is a behavior (not naming/idiom) difference. The existing issue #26 work referenced in render.ts comments concerns suppressing a DUPLICATE clearTerminal on overflow during resize — a different case; it does not add the narrowing-clear.
+
+Not already covered: no test emits a stdout 'resize' that narrows width and asserts clearing. The testing helper has `terminal.resize()` (packages/testing/src/render.ts:103-110) but a grep shows zero `.resize(` call sites in any \*.test.ts; no `lastTerminalWidth`/narrowing/clearTerminal-on-width test exists.
+
+Severity low: it only manifests on an interactive TTY when the user actively shrinks terminal width AND the previous frame had lines wider than the new width; transient artifact, typically cleared by the next full repaint or scroll. Real but cosmetic and narrow in scope.
+
+- **Fix sketch:** In render.ts onResize, track a `lastTerminalWidth` (init at mount from stdout.columns); when current columns < lastTerminalWidth, call writer.clear() and reset frameState.lastOutput/lastOutputToRender to '' before commit(), then update lastTerminalWidth (mirrors ink.tsx:459-474). Add a test that narrows via terminal.resize() and asserts a clear is emitted.
+
+### G12 — Renderer frame width/rows lack terminal-size fallback (only ?? defaults)
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ behavior · _severity:_ low · _priority:_ P2
+
+- **Ink:** ink.tsx uses getWindowSize(stdout) throughout for layout width and viewport rows (e.g. calculateLayout ink.tsx:510-520, fullscreen detection ink.tsx:1047). utils.ts getWindowSize falls back to terminal-size() then 80x24 when stdout.columns/rows are 0 or undefined (handles piped processes where columns is 0).
+- **vue-tui:** render.ts uses bare nullish defaults for the live frame: tuiRoot.yoga.setWidth(stdout.columns ?? 80) at lines 462,568,579, w = stdout.columns ?? 80 at line 546, and viewportRows = stdout.rows ?? 24 at line 486. terminal-size is available and is used by the useTerminalSize composable's resolveSize (composables/useTerminalSize.ts:11-22, mirroring Ink), but the renderer does not use that fallback chain.
+- **Why it's a real gap:** CONFIRMED, but narrower than the claim states. Verified facts:
+
+Ink (commit 40b3a75) uses getWindowSize(stdout) for every layout-width and viewport-rows site: ink.tsx:402,460,511,598 (width) and 1047 (rows). utils.ts getWindowSize returns {columns,rows} when both truthy, else falls back with `columns || terminalSize().columns || 80` and `rows || terminalSize().rows || 24` — using `||` so a 0 value triggers the terminal-size fallback. The header comment explicitly says it handles "piped processes where stdout.columns is 0".
+
+vue-tui render.ts uses bare nullish defaults at every equivalent site: setWidth(stdout.columns ?? 80) at lines 462, 568, 579; w = stdout.columns ?? 80 at line 546; viewportRows = isTty ? (stdout.rows ?? 24) : 24 at line 486. I grepped the whole runtime/src tree: terminal-size / resolveSize / getWindowSize appear ONLY in composables/useTerminalSize.ts. The fallback chain exists (resolveSize, lines 11-22, deliberately mirroring Ink per its own comment) but is NOT wired into the renderer. So this is an oversight, not an intentional divergence, and is not on the divergence allowlist.
+
+No test covers it. The composables/terminal-size.test.tsx only tests useTerminalSize with normal dims (80x24, 100x40). The PTY ci.test.ts passes cols:0, but I empirically verified node-pty clamps cols:0 so the child reports stdout.columns===80, isTTY:true — it never delivers 0 to the userland code path.
+
+REFUTATION OF THE CLAIM'S MECHANISM (why severity is low): The claim emphasizes "in a redirected/piped process stdout.columns is often 0 (not undefined)". I tested this: `node -e ... | cat` yields stdout.columns === undefined (typeof undefined), NOT 0. With undefined, `undefined ?? 80 === 80` — identical to Ink, NO divergence in the common piped case. The `??` vs `||` difference only manifests when columns/rows is literally 0 while terminal-size() can still resolve a real value (e.g. an unusual TTY/CI/container reporting winsize 0 with a usable COLUMNS env). That edge case is real and Ink handles it (0-width -> paint clamps to 1 in vue-tui, vs correctly-sized in Ink), so the gap survives, but the claim overstates how often it triggers.
+
+Net: a genuine renderer-vs-composable inconsistency and a real Ink-parity gap, observable only in the columns===0 / rows===0 edge case rather than the common undefined case the claim describes.
+
+- **Fix sketch:** Wire the existing resolveSize() (useTerminalSize.ts) into render.ts: replace `stdout.columns ?? 80` (lines 462,546,568,579) and `stdout.rows ?? 24` (line 486) with the terminal-size fallback chain (use `|| 80` / `|| 80 || terminalSize` so 0 triggers fallback), and add a render-level test with a mock stdout reporting columns:0 to assert an 80-wide layout.
+
+### G13 — Custom border style objects (BoxStyle) not supported
+
+_area:_ `box-layout-border` · _kind:_ omission · _severity:_ low · _priority:_ P3
+
+- **Ink:** /tmp/ink-40b3a75/src/styles.ts:255 types `borderStyle?: keyof Boxes | BoxStyle`, and /tmp/ink-40b3a75/src/render-border.ts:31-34 handles the object case: `typeof node.style.borderStyle === 'string' ? cliBoxes[node.style.borderStyle] : node.style.borderStyle`. A user can pass a fully custom `{topLeft, top, topRight, right, ...}` object as the border.
+- **vue-tui:** /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/components/Box.ts:111 declares `borderStyle: String as PropType<BorderStyle>` (string union only), and /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/paint/paint.ts:334-336 only does `cliBoxes[style]` lookup with `style` typed as `string | undefined`. A passed object would fail the string lookup and `if (!chars) return` (paint.ts:337) skips drawing.
+- **Why it's a real gap:** Verified in source. Ink styles.ts:255 types borderStyle as `keyof Boxes | BoxStyle`, and render-border.ts:31-34 explicitly handles the object case (`typeof node.style.borderStyle === 'string' ? cliBoxes[...] : node.style.borderStyle`), so a fully custom {topLeft,top,...} object is supported. vue-tui restricts borderStyle to a string union of 8 named presets: Box.ts:25-33 defines `type BorderStyle = "single"|...|"arrow"` and Box.ts:111 declares the prop as `String as PropType<BorderStyle>`. paint.ts drawBorder (lines 334-337) types style as `string | undefined`, does `cliBoxes[style]`, and bails with `if (!chars) return` when the lookup fails. A passed object is not a valid cliBoxes key, so no border is drawn. Searched the whole runtime tree: BoxStyle only appears as an internal alias in paint.ts:323 (= cliBoxes value type), with no code path accepting a user-supplied object. No \*.test.ts references borderStyle at all, so this is not test-covered. This is not in the intentional-divergences list. Real, observable parity gap. Severity low because custom border-character objects are a niche Ink feature and the 8 named presets cover the common cases; impact is limited to users porting Ink code that supplies a literal BoxStyle object.
+- **Fix sketch:** Widen borderStyle prop type to accept an object (PropType<BorderStyle | BoxStyle>) in Box.ts and in paint.ts drawBorder use `typeof style === 'string' ? cliBoxes[style] : style` before the !chars guard.
+
+### G14 — No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ omission · _severity:_ low · _priority:_ P3
+
+- **Ink:** /tmp/ink-40b3a75/src/instances.ts:9 keeps a WeakMap<WriteStream, Ink> and /tmp/ink-40b3a75/src/render.ts:252-274 getInstance() returns the EXISTING instance for a stdout and writes a stderr warning ('render() was called again for the same stdout before the previous Ink instance was unmounted ... Reusing stdout across multiple render() calls is unsupported. Call unmount() first.') instead of creating a second renderer that competes for the same output.
+- **vue-tui:** vue-tui has no instances map (no instances.ts; grep for instances/WeakMap in render.ts finds only the unrelated rawModeRegistry at /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/render.ts:876). createApp()/mount() (render.ts:149, 338) bind options.stdout (default process.stdout) per call with no dedup or warning, so calling createApp(...).mount() twice against the same stdout creates two live renderers writing to the same stream.
+- **Why it's a real gap:** Verified all four facts against source. Ink: instances.ts:9 keeps `const instances = new WeakMap<NodeJS.WriteStream, Ink>()`; render.ts:252-274 getInstance() returns the EXISTING instance for a stdout that already has a live renderer and writes the exact warning to process.stderr ("render() was called again for the same stdout before the previous Ink instance was unmounted ... Reusing stdout across multiple render() calls is unsupported. Call unmount() first.\n") rather than creating a second competing renderer. The claim describes Ink accurately at this commit.
+
+vue-tui: grep across the entire packages/runtime/src tree finds no instances map keyed on a WriteStream — the only WeakMap is rawModeRegistry (render.ts:876, keyed on ReadStream, unrelated). mount() (render.ts:338-339) computes `const stdout = options.stdout ?? process.stdout` per call with no lookup, dedup, or warning. So `createApp(...).mount()` twice against the same stdout yields two live renderers writing the same stream. Reviewer did not miss it elsewhere.
+
+Not an intentional divergence: the listed intentional items cover the render()->createApp() entry-API rename and the minimal useExit() surface, but the competing-renderer guard is a separate protective behavior, not naming. It is observable (interleaved output, double cursor/alt-screen control) and not framework-idiom-driven.
+
+Not already covered: only public-api.test.ts references createApp, and merely to assert it is exported (line 7); no test exercises double-mount-on-same-stdout reuse or the warning.
+
+Severity low: this is a real gap that survives refutation, but it requires a user to deliberately mount two trees on one stdout, an uncommon path; the original claim also self-rated lower confidence. The guard is genuinely absent, so confirmed=true.
+
+- **Fix sketch:** Add an instances Map<NodeJS.WriteStream, TuiApp> in render.ts; in mount() check for an existing live instance on the resolved stdout and, if found, write Ink's warning to process.stderr and return/reuse rather than wiring a second renderer; delete the entry on unmount/exit.
