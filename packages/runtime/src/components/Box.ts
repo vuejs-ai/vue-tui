@@ -1,4 +1,5 @@
 import { defineComponent, h, inject, type PropType } from "vue";
+import type cliBoxes from "cli-boxes";
 import { AppContextKey } from "../context.ts";
 import type { WithChildren } from "./with-children.ts";
 
@@ -31,6 +32,10 @@ type BorderStyle =
   | "doubleSingle"
   | "classic"
   | "arrow";
+
+// Matches the shape of the cliBoxes value type — the same alias used in paint.ts.
+// Exported so consumers can type their custom border objects (Ink parity, G13).
+export type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
 
 export type AriaRole =
   | "button"
@@ -108,7 +113,9 @@ const BoxImpl = defineComponent({
     paddingLeft: Number,
     paddingRight: Number,
 
-    borderStyle: String as PropType<BorderStyle>,
+    // Accept either a preset name string or a full custom BoxStyle object (Ink parity, G13).
+    // Ink types borderStyle as `keyof Boxes | BoxStyle`; we mirror that here.
+    borderStyle: [String, Object] as PropType<BorderStyle | BoxStyle>,
     borderColor: [String, Array],
     borderDimColor: Boolean,
     borderTopDimColor: Boolean,

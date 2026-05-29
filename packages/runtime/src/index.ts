@@ -1,7 +1,7 @@
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
-export { Box, type AriaRole, type AriaState } from "./components/Box.ts";
+export { Box, type AriaRole, type AriaState, type BoxStyle } from "./components/Box.ts";
 export { Text } from "./components/Text.ts";
 export { Newline } from "./components/Newline.ts";
 export { Spacer } from "./components/Spacer.ts";

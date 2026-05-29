@@ -331,9 +331,14 @@ function drawBorder(
   props: BoxProps,
   transformers: Transformer[],
 ): void {
-  const style = props["borderStyle"] as string | undefined;
+  const style = props["borderStyle"] as string | BoxStyle | undefined;
   if (!style) return;
-  const chars = (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[style];
+  // Ink parity (render-border.ts:31-34): if borderStyle is already a BoxStyle object,
+  // use it directly; otherwise look it up by name in cliBoxes.
+  const chars: BoxStyle | undefined =
+    typeof style === "string"
+      ? (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[style]
+      : style;
   if (!chars) return;
   // No blanket min-size guard here — each edge is drawn independently when it is
   // visible and its run length is ≥ 1. This matches Ink's render-border.ts which
