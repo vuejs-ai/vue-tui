@@ -18,8 +18,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
-    "test": "vp run test:integration",
-    "test:integration": "vp test",
+    "test": "vp test",
     "check:type": "tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
