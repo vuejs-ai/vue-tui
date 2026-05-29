@@ -394,9 +394,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdout.write(data);
         return;
       }
+      // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
+      // terminal supports synchronized updates, so the three-step sequence is
+      // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
+      if (synchronize) stdout.write(bsu);
       writer.clear();
       stdout.write(data);
       restoreLastOutput();
+      if (synchronize) stdout.write(esu);
     }
 
     function writeToStderr(data: string) {
@@ -409,9 +414,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stderr.write(data);
         return;
       }
+      // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
+      // because synchronized-update mode is a stdout capability, while the
+      // actual data goes to stderr. The sync gate also uses stdout's isTTY.
+      if (synchronize) stdout.write(bsu);
       writer.clear();
       stderr.write(data);
       restoreLastOutput();
+      if (synchronize) stdout.write(esu);
     }
 
     const appContext: AppContext = {
