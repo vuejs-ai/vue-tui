@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "check:fmt": "vp fmt --check",
-    "check:lint": "vp lint",
+    "check:lint": "vp lint --deny-warnings",
     "check:type": "vp run -r check:type",
     "test": "vp run -r test",
     "build": "vp run -r build",
