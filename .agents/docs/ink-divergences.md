@@ -98,12 +98,6 @@ deliberate. Divergences fall into a few kinds:
   Keeping a previous render's value, as Ink does for these two props, is the anomaly — and an
   inconsistent one, since every other flex prop resets. Maintainer decision (2026-05-30): KEEP.
 
-### Other Vue-vs-React semantics _(placeholder)_
-
-- _(maintainer: candidates to document — `v-if`/`null` rendering as comment host nodes;
-  reactivity-driven re-render timing vs React's render cycle; keyed reconciliation order.
-  Add the ones that are genuinely by-design.)_
-
 ## Not applicable in Vue
 
 ### React concurrent mode
@@ -119,6 +113,20 @@ Surface conventions, listed so they aren't mistaken for gaps:
 - `<script setup>` SFCs / `defineComponent` instead of function components.
 - kebab-case filenames; `.ts` over `.tsx` where there's no JSX.
 - `shallowRef` by default for reactive state.
+
+Reconciler/runtime mechanics that differ from React internally yet produce **byte-identical**
+terminal output, because a commit always paints `f(current host tree)` — _how_ the tree was
+built never reaches the terminal:
+
+- **A `v-if=false` branch (or a `null`/`false`/`undefined` child) leaves a comment anchor
+  (`TuiComment`)** where Ink emits no node, but it is inert: no yoga node, paints nothing,
+  never shifts a sibling's yoga index, and is skipped for the positional `<Transform>` index
+  in all three squash paths (`G52`). Output equals omitting the element.
+- **Commit timing is deliberately Ink-aligned** — leading+trailing throttle at
+  `ceil(1000/maxFps)` ≈ 32 ms (Ink's `renderThrottleMs`), synchronous resize — even though
+  re-renders are Vue's fine-grained reactivity, not a React subtree re-render.
+- **Keyed lists use Vue core's `patchKeyedChildren`** (LIS), not React's fiber diff; output
+  depends on the final tree, not the move order.
 
 ---
 
