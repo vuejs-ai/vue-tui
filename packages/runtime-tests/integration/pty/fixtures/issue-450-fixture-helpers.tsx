@@ -1,5 +1,5 @@
 import process from "node:process";
-import { Box, Static, Text, createApp, useAppContext } from "@vue-tui/runtime";
+import { Box, Static, Text, createApp, useApp } from "@vue-tui/runtime";
 import { Fragment, defineComponent, h, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type RerenderFixtureOptions = {
@@ -18,7 +18,7 @@ const Issue450RerenderFixtureComponent = defineComponent(
     heightForFrame: (rows: number, frameCount: number) => number;
     rows: number;
   }) => {
-    const { exit } = useAppContext();
+    const { exit } = useApp();
     const frameCount = shallowRef(0);
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -102,7 +102,7 @@ type InitialFixtureOptions = {
 
 const Issue450InitialFixtureComponent = defineComponent(
   (props: { renderedMarker: string; lineCount: number; linePrefix: string }) => {
-    const { exit } = useAppContext();
+    const { exit } = useApp();
 
     onMounted(() => {
       const timer = setTimeout(() => {

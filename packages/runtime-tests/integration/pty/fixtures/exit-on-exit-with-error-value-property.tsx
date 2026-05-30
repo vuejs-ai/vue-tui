@@ -1,8 +1,8 @@
-import { createApp, Text, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const App = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   onMounted(() => {
     setTimeout(() => {

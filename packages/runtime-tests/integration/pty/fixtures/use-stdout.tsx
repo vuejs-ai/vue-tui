@@ -1,9 +1,9 @@
-import { createApp, Text, useStdout, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useStdout, useApp } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted } from "vue";
 
 const WriteToStdout = defineComponent(() => {
   const { write } = useStdout();
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   onMounted(() => {
     write("Hello from vue-tui to stdout\n");

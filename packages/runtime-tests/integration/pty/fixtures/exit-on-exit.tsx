@@ -1,9 +1,9 @@
-import { createApp, Text, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted, onScopeDispose, shallowRef } from "vue";
 
 const App = defineComponent(() => {
   const counter = shallowRef(0);
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   onMounted(() => {
     setTimeout(exit, 500);
