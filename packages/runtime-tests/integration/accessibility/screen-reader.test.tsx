@@ -1,6 +1,6 @@
-import { defineComponent, type FunctionalComponent } from "vue";
+import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { renderToString, Box, Text, Transform, Static } from "@vue-tui/runtime";
+import { renderToString, Box, Text, Transform, Static, createApp } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 import {
   createRoot,
@@ -11,6 +11,18 @@ import {
   renderScreenReaderOutput,
   type AppContext,
 } from "@vue-tui/runtime/internal";
+import {
+  makeFakeStdin,
+  makeFakeWritable,
+  captureWrites,
+  getContentWrites,
+} from "../lifecycle/test-streams.ts";
+
+// Strip ANSI control sequences (cursor-hide, log-update erase codes) so the
+// live screen-reader frames can be compared as plain text. The SR frame writer
+// interleaves erase sequences between commits; we only care about the text.
+// eslint-disable-next-line no-control-regex -- terminal ANSI escapes are control chars by definition
+const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
 
 // Yoga.DIRECTION_LTR = 0
 const DIRECTION_LTR = 0;
@@ -528,6 +540,121 @@ describe("screen reader enabled mode", () => {
       { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Hello\nWorld");
+  });
+
+  // G39 (Ink parity): a default <Box> (no explicit flexDirection) lays out as
+  // a row (yoga/Box default is FLEX_DIRECTION_ROW), so its SR children must be
+  // joined with a SPACE — matching Ink, which hardcodes flexDirection:'row' in
+  // Box.tsx and derives the SR separator from style. The yoga row default is NOT
+  // mirrored into node.props, so an absent flexDirection must be treated as
+  // "row" in screen-reader.ts. (Buggy behavior joined with "\n".)
+  test("render default Box (no flexDirection) joins children with space", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Text>Hello</Text>
+          <Text>World</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Hello World");
+  });
+
+  // G39 follow-up: pin the yoga-enum mapping + reverse-order branch that
+  // resolveBoxFlexDirection / renderScreenReaderOutput now own. row-reverse must
+  // join with a SPACE *and* reverse child order (Ink parity: reverse directions
+  // flip the visual/announced order).
+  test("render Box flexDirection=row-reverse joins with space and reverses children", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="row-reverse">
+          <Text>Hello</Text>
+          <Text>World</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // row-reverse: space separator + reversed order → "World Hello".
+    expect(output).toBe("World Hello");
+  });
+
+  // G39 follow-up: column-reverse must join with a NEWLINE (non-row separator)
+  // *and* reverse child order.
+  test("render Box flexDirection=column-reverse joins with newline and reverses children", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column-reverse">
+          <Text>Hello</Text>
+          <Text>World</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // column-reverse: newline separator + reversed order → "World\nHello".
+    expect(output).toBe("World\nHello");
+  });
+
+  // G39 stale-read guard (the core reason resolveBoxFlexDirection reads yoga, not
+  // node.props): when a Box's flexDirection is dynamically REMOVED, the yoga node
+  // resets to its row default (host/yoga.ts: flexDirection == null → ROW). Since
+  // node-ops never mirrors flexDirection into node.props (not a STYLE_PROP), the
+  // SR separator MUST be derived from the live yoga state, not a stale prop. This
+  // uses the live commit path (isScreenReaderEnabled mount) so the yoga reset is
+  // real — the old pure-props logic would read undefined → "\n" and FAIL the
+  // post-removal assertion below.
+  test.sequential("live SR Box resolves to row default (space) after flexDirection is dynamically removed", async () => {
+    // shallowRef holding the reactive flexDirection: start "column", then clear.
+    // Typed as the Box FlexDirection union (not `string`) so the JSX prop
+    // typechecks under `vp run ci` — FlexDirection isn't exported from the
+    // public index, so we inline the literal union here.
+    const flexDirection = shallowRef<
+      "row" | "row-reverse" | "column" | "column-reverse" | undefined
+    >("column");
+    const App = defineComponent(() => () => (
+      <Box flexDirection={flexDirection.value}>
+        <Text>Hello</Text>
+        <Text>World</Text>
+      </Box>
+    ));
+
+    const app = createApp(App);
+    const stdout = makeFakeWritable({ columns: 80 });
+    const stderr = makeFakeWritable({ columns: 80 });
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      exitOnCtrlC: false,
+      isScreenReaderEnabled: true,
+    });
+
+    await nextTick();
+    await nextTick();
+
+    // column → newline separator, forward order.
+    const beforeRemoval = stripAnsi(getContentWrites(writes).join(""));
+    expect(beforeRemoval).toContain("Hello\nWorld");
+    expect(beforeRemoval).not.toContain("Hello World");
+
+    // Drop flexDirection. node-ops resets the yoga node to its row default;
+    // node.props.flexDirection is undefined (never mirrored), so the SR path
+    // must read yoga (ROW) → space separator.
+    writes.length = 0;
+    flexDirection.value = undefined;
+
+    await nextTick();
+    await nextTick();
+
+    const afterRemoval = stripAnsi(getContentWrites(writes).join(""));
+    // Yoga reset to row → SPACE separator. (Stale-prop logic would emit "\n".)
+    expect(afterRemoval).toContain("Hello World");
+    expect(afterRemoval).not.toContain("Hello\nWorld");
+
+    app.unmount();
   });
 
   test("render nested Box components with Text", () => {
