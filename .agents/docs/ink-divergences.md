@@ -40,12 +40,6 @@ deliberate. Divergences fall into a few kinds:
 - **Why:** intentionally minimal, single-purpose composables. `waitUntilRenderFlush` is
   deliberately **not** exposed.
 
-### Exported text-measurement helpers
-
-- **Ink:** does not export its internal `measure-text` module.
-- **vue-tui:** exports `measureText` / `measureTextNatural` from the public index.
-- **Why:** a deliberately public utility surface for consumers who need to size text.
-
 ### No named type / prop re-exports
 
 - **Ink:** re-exports `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`,
