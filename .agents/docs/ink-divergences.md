@@ -75,12 +75,15 @@ deliberate. Divergences fall into a few kinds:
 
 ### Ctrl+C exits under the kitty protocol too
 
-- **Ink:** wires `exitOnCtrlC` only to the legacy `\x03` path, so a kitty-protocol Ctrl+C
-  (`\x1b[99;5u`) does **not** exit.
-- **vue-tui:** `useInput` exits on `input === 'c' && key.ctrl`, gated on `exitOnCtrlC`
-  (default `true`), so Ctrl+C exits under **both** legacy and kitty protocols.
-- **Why:** `exitOnCtrlC` reliably exiting under all protocols is the intended behavior; opt
-  out with `exitOnCtrlC: false`. Maintainer decision (2026-05-30): KEEP.
+- **Ink:** exits only on the legacy `\x03` byte (in `App`), so a kitty-protocol Ctrl+C
+  (`\x1b[99;5u`) parses fine but never exits — its guard is byte-specific, not Ctrl+C-specific.
+- **vue-tui:** one encoding-agnostic exit in the always-on stdin controller (`emitInput`), via
+  `parseKeypress` — matches Ctrl+C in both the legacy and kitty forms (but not Ctrl+Shift+C), so
+  it fires no matter which composable holds raw mode (`useInput` / `useFocus` / `usePaste`, or none).
+- **Why:** `exitOnCtrlC` is a contract that shouldn't depend on the wire encoding; keeping the lone
+  exit at the single always-on layer avoids a two-place seam. Opt out with `exitOnCtrlC: false`.
+  Maintainer decision (2026-05-30): KEEP. Tests: `usePaste-only app exits on {legacy,kitty} Ctrl+C`
+  in `input-kitty.test.ts`.
 
 ## Framework-semantic divergences (Vue ≠ React)
 

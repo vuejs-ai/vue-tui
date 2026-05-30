@@ -151,6 +151,36 @@ it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
   expect(ps.output).toContain("exited");
 });
 
+// --- Ctrl+C exit without useInput (raw mode held by usePaste) ---
+// exitOnCtrlC must exit even when no useInput is mounted: the exit lives in the
+// always-on stdin controller, encoding-agnostically. The legacy case is the
+// control (it already exits via the \x03 byte); the kitty case is the gap Ink
+// has — it only checks \x03, so a CSI-u Ctrl+C never exits there.
+
+it("usePaste-only app exits on legacy Ctrl+C (control)", async () => {
+  const ps = term("use-paste-ctrl-c");
+  ps.write("\x03");
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
+
+it("usePaste-only app exits on kitty Ctrl+C", async () => {
+  const ps = term("use-paste-ctrl-c");
+  ps.write(kittyKey(99, 5));
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
+
+// Ctrl+Shift+C is a distinct combo (commonly "copy"), not Ctrl+C. The kitty
+// protocol disambiguates it, so even with exitOnCtrlC on it must reach the
+// handler rather than exit. The handler writes a marker to prove delivery.
+it("useInput - kitty Ctrl+Shift+C is delivered, not treated as Ctrl+C exit", async () => {
+  const ps = term("use-input-kitty", ["ctrlShiftC"]);
+  ps.write(kittyKey(67, 6));
+  await ps.waitForExit();
+  expect(ps.output).toContain("__CTRL_SHIFT_C__");
+});
+
 // --- Query response suppression ---
 
 it("useInput - query response is silently ignored, next real key works", async () => {
