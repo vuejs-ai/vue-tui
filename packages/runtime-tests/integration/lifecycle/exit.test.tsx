@@ -2,15 +2,15 @@ import { Writable } from "node:stream";
 import { defineComponent, onMounted, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { createApp, Text, useExit } from "@vue-tui/runtime";
+import { createApp, Text, useAppContext } from "@vue-tui/runtime";
 import { makeFakeWritable, makeFakeStdin, isWriteBarrierChunk } from "./test-streams.ts";
 
-test("useExit() triggers teardown and waitUntilExit resolves", async () => {
+test("useAppContext() triggers teardown and waitUntilExit resolves", async () => {
   let exitFn!: () => void;
   let disposed = false;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     exitFn = exit;
     onScopeDispose(() => {
       disposed = true;
@@ -30,7 +30,7 @@ test("exit(error) rejects waitUntilExit with the error", async () => {
   let exitFn!: (err: Error) => void;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     exitFn = exit;
     return () => <Text>x</Text>;
   });
@@ -56,7 +56,7 @@ test("unmount() after exit() is idempotent", async () => {
   let exitFn!: () => void;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     exitFn = exit;
     return () => <Text>x</Text>;
   });
@@ -74,7 +74,7 @@ test("exit() called multiple times is idempotent", async () => {
   let exitFn!: () => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>x</Text>;
   });
 
@@ -89,7 +89,7 @@ test("waitUntilExit() resolves with result value passed to exit()", async () => 
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello from vue-tui</Text>;
   });
 
@@ -105,7 +105,7 @@ test("waitUntilExit() resolves with object result value", async () => {
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -119,7 +119,7 @@ test("waitUntilExit() resolves with undefined when exit() called with no args", 
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -135,7 +135,7 @@ test("onScopeDispose fires when exit(error) is called", async () => {
   let disposed = false;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     onScopeDispose(() => {
       disposed = true;
     });
@@ -156,7 +156,7 @@ test("exit(error) followed by exit(value) still rejects", async () => {
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -175,7 +175,7 @@ test("exit(value) resolves with the FIRST value when called rapidly twice", asyn
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -194,7 +194,7 @@ test("exit(err1) then exit(err2) rejects with the FIRST error", async () => {
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -215,7 +215,7 @@ test("exit(value) then exit(error) resolves with the FIRST value", async () => {
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -229,8 +229,9 @@ test("exit(value) then exit(error) resolves with the FIRST value", async () => {
 
 test("exit('late') after app.unmount() is a no-op (unmount value wins)", async () => {
   // isUnmounting parity (Ink parity G33): app.unmount() runs teardown()+
-  // resolveExit() without setting exitInitiated. A retained useExit() called
-  // AFTER unmount has started teardown must be a complete no-op — it must not
+  // resolveExit() without setting exitInitiated. A retained exit() (from
+  // useAppContext()) called AFTER unmount has started teardown must be a
+  // complete no-op — it must not
   // overwrite the resolved exit value. waitUntilExit resolves the original
   // unmount value (undefined), NOT 'late'. Without the teardownStarted guard in
   // exit(), the late exit captures 'late' into pendingExitResult and 'late'
@@ -238,7 +239,7 @@ test("exit('late') after app.unmount() is a no-op (unmount value wins)", async (
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -251,8 +252,8 @@ test("exit('late') after app.unmount() is a no-op (unmount value wins)", async (
 });
 
 test("retained exit() re-entered DURING unmount teardown writes is a no-op", async () => {
-  // isUnmounting parity (Ink parity G33), faithful reentrancy: a useExit()
-  // captured during setup is invoked re-entrantly from inside the stdout write
+  // isUnmounting parity (Ink parity G33), faithful reentrancy: an exit() (from
+  // useAppContext()) captured during setup is invoked re-entrantly from inside the stdout write
   // that unmount()'s final commit performs. teardownStarted is already true at
   // that point, so exit("reentrant") is a complete no-op and the original
   // unmount value (undefined) wins. Without the teardownStarted guard the
@@ -278,7 +279,7 @@ test("retained exit() re-entered DURING unmount teardown writes is a no-op", asy
   stdout.isTTY = true;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     onMounted(() => {
       exitFn = exit;
     });
@@ -306,7 +307,7 @@ test("single exit('x') resolves with 'x' (control)", async () => {
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
-    exitFn = useExit();
+    exitFn = useAppContext().exit;
     return () => <Text>hello</Text>;
   });
 
@@ -340,7 +341,7 @@ test("waitUntilExit resolves FIRST exit value when duplicate exits happen during
   stdout.columns = 100;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     onMounted(() => {
       exit("first");
       setTimeout(() => exit("second"), 0);
@@ -388,7 +389,7 @@ test("waitUntilExit resolves FIRST exit value when exit is re-entered during unm
   stdout.isTTY = true;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     onMounted(() => {
       exitFn = exit;
       shouldReenterExit = true;
@@ -437,7 +438,7 @@ test("exit with cross-realm Error resolves after stdout write callback", async (
   const foreignError = vm.runInNewContext("new Error('boom')") as Error;
 
   const App = defineComponent(() => {
-    const exit = useExit();
+    const { exit } = useAppContext();
     onMounted(() => {
       setTimeout(() => exit(foreignError), 0);
     });

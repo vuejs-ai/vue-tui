@@ -14,7 +14,7 @@ export { Spacer } from "./components/Spacer.ts";
 export { Static, type StaticProps } from "./components/Static.ts";
 export { Transform, type TransformProps } from "./components/Transform.ts";
 
-export { useExit } from "./composables/useExit.ts";
+export { useAppContext } from "./composables/useAppContext.ts";
 export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";
 export { usePaste, type UsePasteOptions } from "./composables/usePaste.ts";
 export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";

@@ -31,14 +31,15 @@ deliberate. Divergences fall into a few kinds:
 - **Why:** mirrors Vue's own `createApp` mental model — a Vue developer expects an app
   object they mount, not a one-shot render call.
 
-### App composable — `useExit()` instead of `useApp()`
+### App composable — `useAppContext()` instead of `useApp()`
 
-- **Ink:** `useApp()` returns the full AppContext (`exit`, `waitUntilRenderFlush`,
-  stdin/stdout/stderr, …).
-- **vue-tui:** `useExit()` returns only the `exit` function; the rest is reached through
-  dedicated composables (`useStdin`, `useStdout`, `useStderr`, …).
-- **Why:** intentionally minimal, single-purpose composables. `waitUntilRenderFlush` is
-  deliberately **not** exposed.
+- **Ink:** `useApp()` returns `{ exit, waitUntilRenderFlush }` — stdin/stdout/stderr are
+  separate hooks (`useStdin`/`useStdout`/`useStderr`), not part of it.
+- **vue-tui:** `useAppContext()` returns the same `{ exit, waitUntilRenderFlush }`, with
+  streams on those same peer composables.
+- **Why:** only the name differs — `useApp` reads as "the Vue application instance"
+  (`createApp`, `app.mount`), so vue-tui qualifies it as `useAppContext`. The shape is
+  identical to Ink; a naming divergence, not a surface one.
 
 ### Named type / prop re-exports
 

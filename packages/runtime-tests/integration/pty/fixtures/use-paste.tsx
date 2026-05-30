@@ -1,5 +1,5 @@
 import process from "node:process";
-import { createApp, useExit, useInput, usePaste } from "@vue-tui/runtime";
+import { createApp, useAppContext, useInput, usePaste } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const PasteDemo = defineComponent({
@@ -7,7 +7,7 @@ const PasteDemo = defineComponent({
     test: { type: String, default: undefined },
   },
   setup(props) {
-    const exit = useExit();
+    const { exit } = useAppContext();
 
     usePaste((text) => {
       if (props.test === "basic" && text === "hello world") {
@@ -41,7 +41,7 @@ const PasteDemo = defineComponent({
 });
 
 const MultipleHooksDemo = defineComponent(() => {
-  const exit = useExit();
+  const { exit } = useAppContext();
   let receivedCount = 0;
 
   const onPaste = (text: string) => {

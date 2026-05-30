@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
-import { Box, Text, Static, useInput, useExit } from "@vue-tui/runtime";
+import { Box, Text, Static, useInput, useAppContext } from "@vue-tui/runtime";
 import { runAgentLoop, type Message, type ToolCall } from "./agent";
 import MessageList from "./components/MessageList.vue";
 
@@ -14,7 +14,7 @@ const pendingCommand = shallowRef("");
 const messages: Message[] = [];
 
 let approvalResolve: ((approved: boolean) => void) | null = null;
-const exit = useExit();
+const { exit } = useAppContext();
 
 const autoApprove = process.argv.includes("--yolo");
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, reactive } from "vue";
 import chalk from "chalk";
-import { Box, Text, useExit, useInput } from "@vue-tui/runtime";
+import { Box, Text, useAppContext, useInput } from "@vue-tui/runtime";
 
 // --- world dimensions ----------------------------------------------------
 
@@ -130,7 +130,7 @@ function renderFrame(w: World): string[] {
 
 // --- component -----------------------------------------------------------
 
-const exit = useExit();
+const { exit } = useAppContext();
 const world = reactive<World>(makeWorld(0));
 
 function flap(): void {

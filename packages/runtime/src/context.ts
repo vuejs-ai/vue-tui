@@ -9,6 +9,7 @@ export interface CursorPosition {
 
 export interface AppContext {
   exit: (errorOrResult?: unknown) => void;
+  waitUntilRenderFlush: () => Promise<void>;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   stdin: NodeJS.ReadStream;
