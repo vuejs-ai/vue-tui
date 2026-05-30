@@ -213,6 +213,142 @@ test("nested <Transform>-in-<Transform> reserves correct width (measurement)", a
   expect(lastFrame()).toBe("[O<IxI>O]|");
 });
 
+// G52: Vue materializes a `null`/`false`/`v-if` render as a COMMENT host node
+// that occupies a positional slot in `node.children`. React never produces a
+// childNode for such children, so Ink's squash loop (squash-text-nodes.ts:13)
+// never advances `index` past them. The transform index must therefore advance
+// only for children React would have rendered — comment nodes must be skipped.
+// Reproduces "A{null}<Transform>B</Transform>" → "A1:B" (NOT "A2:B").
+test("G52: null sibling does not shift nested <Transform> index (paint)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        A{null}
+        <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  // "A" = index 0, the null produces a comment that must NOT take a slot, so the
+  // Transform stays at index 1.
+  expect(lastFrame()).toBe("A1:B");
+});
+
+test("G52 control: no null sibling — <Transform> still gets index 1 (paint)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        A<Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  // Without the null sibling the Transform is the 2nd child → index 1. Pairing
+  // this with the case above proves the null is what (wrongly) shifts the index.
+  expect(lastFrame()).toBe("A1:B");
+});
+
+test("G52: multiple null siblings don't shift index (paint)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        {null}A{null}
+        {false}
+        <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  // Three comment nodes (one before A, two after) must all be skipped: A=0,
+  // Transform=1.
+  expect(lastFrame()).toBe("A1:B");
+});
+
+test("G52: null sibling does not shift measured width (measurement)", async () => {
+  // If measurement counted the comment slot the Transform index would differ
+  // between paint and measure, desyncing reserved width. A trailing sibling
+  // marker pins the measured width: "A1:B" is 4 cols, so "|" must land at col 4.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          A{null}
+          <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("A1:B|");
+});
+
+// G52 (recursive twin): the comment-skip must also apply to the RECURSIVE
+// grandchild loop that recurses transform-in-transform (G32's domain). A
+// `{null}`/comment inside an OUTER <Transform> must NOT shift an INNER
+// <Transform>'s index. Ink iterates the outer transform's real childNodes
+// (squash-text-nodes.ts:13); React produces no node for `{null}`, so the inner
+// transform stays at index 0. Reproduces
+// "A<Transform outer>{null}<Transform inner>B</Transform></Transform>" so the
+// inner transform sees index 0 (output "0:B", NOT "1:B").
+test("G52 recursive: null inside outer <Transform> does not shift inner index (paint)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        A
+        <Transform transform={(s: string) => `O${s}`}>
+          {null}
+          <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+        </Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  // Inside the outer transform: the {null} comment must not take a slot, so the
+  // inner transform stays at index 0 → "0:B", wrapped by outer → "O0:B".
+  expect(lastFrame()).toBe("AO0:B");
+});
+
+test("G52 recursive control: no null inside outer <Transform> — inner still index 0 (paint)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        A
+        <Transform transform={(s: string) => `O${s}`}>
+          <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+        </Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  // Sole child of the outer transform → index 0. Pairs with the case above to
+  // prove the null is what (wrongly) shifts the recursive index.
+  expect(lastFrame()).toBe("AO0:B");
+});
+
+test("G52 recursive: null inside outer <Transform> does not shift measured width (measurement)", async () => {
+  // If measurement counted the comment slot, the inner transform index would
+  // differ between paint and measure, desyncing reserved width. A trailing
+  // sibling marker pins the measured width: "AO0:B" is 5 cols, so "|" lands at
+  // col 5.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          A
+          <Transform transform={(s: string) => `O${s}`}>
+            {null}
+            <Transform transform={(s: string, i: number) => `${i}:${s}`}>B</Transform>
+          </Transform>
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("AO0:B|");
+});
+
 test("transform with multiple lines", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (

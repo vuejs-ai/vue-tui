@@ -287,15 +287,23 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
   const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
   const merged: TextProps = { ...acc, ...defined };
   let out = "";
-  // `index` is the child's POSITIONAL index among ALL siblings (text-leaves,
-  // virtual-text, transforms, comments alike) — it is the plain loop counter,
-  // matching Ink squash-text-nodes.ts:13,38 where `internal_transform(text,
-  // index)` receives the loop index over `node.childNodes`. A nested <Transform>
-  // that is the Nth child therefore gets `index = N`, not a hardcoded 0.
-  node.children.forEach((child, index) => {
-    out += squashTransformChild(child, index, merged);
-    // Skip comments inserted by Vue for null/undefined renders
-  });
+  // `transformIndex` is the child's POSITIONAL index among the siblings React
+  // would have produced as DOM childNodes — matching Ink squash-text-nodes.ts:13
+  // where `internal_transform(text, index)` receives the loop index over
+  // `node.childNodes`. In React a `null`/`undefined`/`false` child produces NO
+  // childNode, so it never advances `index`; Vue, by contrast, materializes
+  // those renders as COMMENT host nodes that DO occupy a positional slot in
+  // `node.children`. We therefore advance `transformIndex` only for real
+  // children (skipping comments), so a nested <Transform> preceded by a `{null}`
+  // sibling still gets index 1 (not 2) — Ink parity (G52). A real <Transform>
+  // among real siblings still gets its correct positional index (G21).
+  let transformIndex = 0;
+  for (const child of node.children) {
+    out += squashTransformChild(child, transformIndex, merged);
+    // Comments (Vue's null/v-if/false renders) contribute "" and, like React's
+    // absent childNodes, must NOT advance the transform index.
+    if (child.type !== "comment") transformIndex++;
+  }
   return sanitizeAnsi(out);
 }
 
@@ -317,11 +325,18 @@ function squashTransformChild(child: TuiNode, index: number, merged: TextProps):
   }
   if (child.type === "transform") {
     let innerText = "";
-    child.children.forEach((grandchild, grandIndex) => {
-      // A grandchild may itself be a <Transform> (or text/virtual-text/text) —
-      // recurse with the SAME logic so nesting works to any depth.
+    // Recursive twin of the G52 fix in renderTextWithInlineStyles: a grandchild's
+    // positional index must skip Vue comment nodes (null/v-if/false renders),
+    // which React would not have produced as childNodes, so a `{null}` inside this
+    // OUTER <Transform> does not shift an INNER <Transform>'s index. Advancing the
+    // counter only for real children preserves G32's transform-in-transform
+    // recursion (each grandchild may itself be a <Transform> recursed to any depth)
+    // while keeping the index basis identical to the top-level loop.
+    let grandIndex = 0;
+    for (const grandchild of child.children) {
       innerText += squashTransformChild(grandchild, grandIndex, merged);
-    });
+      if (grandchild.type !== "comment") grandIndex++;
+    }
     if (innerText.length > 0 && child.transform) {
       innerText = child.transform(innerText, index);
     }
