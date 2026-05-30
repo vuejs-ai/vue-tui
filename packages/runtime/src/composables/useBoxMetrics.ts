@@ -16,7 +16,7 @@ export interface BoxMetrics {
   readonly top: number;
 }
 
-export interface UseBoxMetricsResult {
+export interface UseBoxMetricsReturn {
   /** Reactive element width. */
   readonly width: ShallowRef<number>;
   /** Reactive element height. */
@@ -110,7 +110,7 @@ export function measureElement(node: unknown): { width: number; height: number }
  * );
  * ```
  */
-export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsResult {
+export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsReturn {
   const width = shallowRef(0);
   const height = shallowRef(0);
   const left = shallowRef(0);

@@ -29,7 +29,7 @@ export interface AnimationOptions {
   isActive?: MaybeRefOrGetter<boolean>;
 }
 
-export interface AnimationResult {
+export interface UseAnimationReturn {
   /**
    * Discrete counter that increments by 1 each interval.
    * Useful for indexed sequences like spinner frames.
@@ -72,7 +72,7 @@ export interface AnimationResult {
  * </template>
  * ```
  */
-export function useAnimation(options: AnimationOptions = {}): AnimationResult {
+export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn {
   const frame = shallowRef(0);
   const time = shallowRef(0);
   const delta = shallowRef(0);

@@ -14,27 +14,27 @@ export { Spacer } from "./components/Spacer.ts";
 export { Static, type StaticProps } from "./components/Static.ts";
 export { Transform, type TransformProps } from "./components/Transform.ts";
 
-export { useApp } from "./composables/useApp.ts";
+export { useApp, type UseAppReturn } from "./composables/useApp.ts";
 export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";
 export { usePaste, type UsePasteOptions } from "./composables/usePaste.ts";
 export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";
 export { useFocusManager } from "./composables/useFocusManager.ts";
-export { useStdin } from "./composables/useStdin.ts";
-export { useStdout } from "./composables/useStdout.ts";
-export { useStderr } from "./composables/useStderr.ts";
+export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
+export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
+export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
 export { useTerminalSize, useWindowSize, type WindowSize } from "./composables/useTerminalSize.ts";
 export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
   type AnimationOptions,
-  type AnimationResult,
+  type UseAnimationReturn,
 } from "./composables/useAnimation.ts";
 export {
   useBoxMetrics,
   measureElement,
   type BoxMetrics,
-  type UseBoxMetricsResult,
+  type UseBoxMetricsReturn,
 } from "./composables/useBoxMetrics.ts";
 export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";

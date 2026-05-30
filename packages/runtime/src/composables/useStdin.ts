@@ -1,8 +1,23 @@
 import { inject } from "vue";
-import { StdinContextKey, type StdinContext } from "../context.ts";
+import { StdinContextKey } from "../context.ts";
 
-export function useStdin(): StdinContext {
+/**
+ * The public stdin surface returned by {@link useStdin}. Mirrors Ink's `useStdin()`,
+ * which returns its `PublicProps` — not the full context. The raw-mode ref-counting
+ * primitives and the paste/event-emitter plumbing on the internal `StdinContext` are
+ * reached by the framework's own composables (`useInput` / `useFocus` / `usePaste`) via
+ * `inject(StdinContextKey)`, and are deliberately not part of this public surface.
+ */
+export interface UseStdinReturn {
+  readonly stdin: NodeJS.ReadStream;
+  readonly setRawMode: (mode: boolean) => void;
+  readonly isRawModeSupported: boolean;
+}
+
+export function useStdin(): UseStdinReturn {
   const ctx = inject(StdinContextKey);
   if (!ctx) throw new Error("useStdin() must be called inside a vue-tui render tree");
+  // Return the full controller narrowed to the public surface — TS structural typing
+  // hides the internal members, exactly as Ink types `useStdin()` as `PublicProps`.
   return ctx;
 }
