@@ -146,6 +146,24 @@ test("Multiple Text elements inherit same background", async ({ expect }) => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[43mHello World[49m"`);
 });
 
+// Ink parity (Text.tsx:103-106): a child <Text>'s effective background is
+// `backgroundColor ?? inheritedBackgroundColor`, and the bg wrap is applied only
+// when that value is truthy. An explicit `backgroundColor=""` is NOT undefined,
+// so it does NOT inherit — it resolves to `""` (falsy) and OPTS OUT of the
+// inherited Box background, rendering the glyphs with no bg.
+test("Text backgroundColor='' opts out of inherited Box background", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="green" alignSelf="flex-start">
+        <Text backgroundColor="">No BG</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Bare text, no green (42) bleed and no bg reset (49) at all.
+  expect(lastFrame()).toBe("No BG");
+});
+
 test("Mixed text with and without background inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -157,7 +175,9 @@ test("Mixed text with and without background inheritance", async ({ expect }) =>
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toMatchInlineSnapshot(`"[42mInherited No BG [41mRed BG[49m"`);
+  // Matches Ink background.tsx:106-116: bgGreen('Inherited ') + 'No BG ' + bgRed('Red BG').
+  // The "" Text opts out, so green is reset (49) before "No BG " and it renders bare.
+  expect(lastFrame()).toMatchInlineSnapshot(`"[42mInherited [49mNo BG [41mRed BG[49m"`);
 });
 
 test("Complex nested structure with background inheritance", async ({ expect }) => {
