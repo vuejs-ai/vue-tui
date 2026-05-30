@@ -291,11 +291,60 @@ class Output {
   }
 }
 
-function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextProps = {}): string {
+// Compose a <Text>/<virtual-text> node's styled string by WRAPPING, matching
+// Ink's squash-text-nodes.ts + render-node-to-output.ts:136 model EXACTLY (and
+// REPLACING the old merge-down + per-leaf-applyChalk model, which closed the
+// parent's SGR at every nested-<Text> boundary so ancestor boolean styles —
+// bold/italic/underline/strikethrough/dim — did NOT survive across a nested
+// child; that was the bug).
+//
+// Ink: each <Text> renders an `ink-text` carrying its own chalk styling as
+// `internal_transform`. `squashTextNodes` concatenates a node's children — and
+// for each nested ink-text child it applies THAT CHILD's transform to the child's
+// own squashed text — but it does NOT apply the node's OWN transform. The node's
+// own transform is applied one level up: either by ITS parent's squash loop (when
+// the node is itself a nested child) or by the Output writer for the top-level
+// node (render-node-to-output.ts:136 pushes internal_transform as a per-line
+// transformer). The upshot: a Text's own style wraps the CONCATENATION of its
+// already-styled children, so `<Text bold>A<Text green>B</Text></Text>` becomes
+// `chalk.bold("A" + chalk.green("B"))` — bold stays OPEN across the green child.
+//
+// Background inheritance is faithful to Ink, where only <Box> provides
+// `backgroundContext` (Text does NOT): `inheritedBg` is the nearest enclosing
+// Box's bg and is threaded UNCHANGED to every descendant <Text> (a parent Text's
+// own backgroundColor never alters it). Each Text's effective bg is
+// `ownBackgroundColor ?? inheritedBg` (Ink Text.tsx:103-106), applied as part of
+// its own wrap; an explicit `backgroundColor=""` resolves to a falsy value and
+// opts the span out.
+function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
-  const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
-  const merged: TextProps = { ...acc, ...defined };
-  return sanitizeAnsi(squashInlineChildren(node.children, merged));
+  // Concatenate children, each already carrying its OWN style (a nested <Text>
+  // child wraps itself; the Box bg threads through unchanged), then wrap the whole
+  // concatenation with THIS node's own style — Ink's parent-wraps-children model.
+  const inner = squashInlineChildren(node.children, inheritedBg);
+  return sanitizeAnsi(applyOwnStyle(node.props, inner, inheritedBg));
+}
+
+// Apply a Text node's OWN chalk styling as a wrap around its already-composed
+// children string — the vue-tui equivalent of Ink's `internal_transform` being
+// applied to the node's squashed children. The node's effective bg is
+// `ownBackgroundColor ?? inheritedBg` (`??`, so an explicit "" opts out) — exactly
+// Ink Text.tsx:103-106. We build the prop set the wrap uses from the node's OWN
+// defined props plus this effective bg, NOT the inherited boolean styles: those
+// already wrap us at the ancestor level, so re-applying them here would double
+// the SGR codes.
+function applyOwnStyle(props: TextProps, inner: string, inheritedBg: unknown): string {
+  if (inner.length === 0) return inner;
+  const defined = Object.fromEntries(
+    Object.entries(props).filter(([, v]) => v !== undefined),
+  ) as TextProps;
+  // effective bg: own backgroundColor wins (incl. an explicit "" opt-out); else
+  // inherit the Box bg. Set it explicitly so a node WITHOUT its own bg still gets
+  // the inherited Box bg applied at its own wrap (matching Ink, where every Text's
+  // transform applies `backgroundColor ?? inheritedBackgroundColor`).
+  const effectiveBg = "backgroundColor" in defined ? defined.backgroundColor : inheritedBg;
+  const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg as never };
+  return applyChalk(inner, styleProps);
 }
 
 // Squash an array of inline children into styled text. Shared by text /
@@ -314,11 +363,15 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
 // (skipping comments), so a nested <Transform> preceded by a `{null}` sibling
 // still gets index 1 (not 2) — Ink parity (G52). A real <Transform> among real
 // siblings still gets its correct positional index (G21).
-function squashInlineChildren(children: readonly TuiNode[], merged: TextProps): string {
+//
+// `inheritedBg` is the nearest enclosing Box bg (NOT a merged style set): it
+// threads UNCHANGED to descendant <Text> nodes, which each wrap themselves with
+// their own style (Ink's parent-wraps-children composition).
+function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): string {
   let out = "";
   let transformIndex = 0;
   for (const child of children) {
-    out += squashTransformChild(child, transformIndex, merged);
+    out += squashTransformChild(child, transformIndex, inheritedBg);
     // Comments (Vue's null/v-if/false renders) contribute "" and, like React's
     // absent childNodes, must NOT advance the transform index.
     if (child.type !== "comment") transformIndex++;
@@ -333,9 +386,9 @@ function squashInlineChildren(children: readonly TuiNode[], merged: TextProps): 
 // as a line-transformer onto the Output write (paintNode "transform" case), so
 // it applies per LINE at paint time, matching Ink where internal_transform runs
 // in the Output, never in squashTextNodes for the node it lives on. (G58)
-function renderTransformAsText(node: TuiTransform, acc: TextProps = {}): string {
+function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
-  return sanitizeAnsi(squashInlineChildren(node.children, acc));
+  return sanitizeAnsi(squashInlineChildren(node.children, inheritedBg));
 }
 
 // Squash a single inline child into styled text, recursing GENERICALLY into
@@ -347,12 +400,22 @@ function renderTransformAsText(node: TuiTransform, acc: TextProps = {}): string 
 // it MUST be recursed into — otherwise the inner content is silently dropped
 // (G32). `index` is the child's positional sibling index (G21), and the transform
 // is only applied when there is actual text (Ink squash-text-nodes.ts:34).
-function squashTransformChild(child: TuiNode, index: number, merged: TextProps): string {
+//
+// A bare text-leaf has NO style of its own (it is React's `#text` node, which
+// carries no `internal_transform`), so it contributes its RAW value — NOT even
+// the inherited Box bg. ALL styling, including the effective bg
+// (`ownBg ?? inheritedBg`), is applied exactly ONCE by the enclosing <Text>'s
+// applyOwnStyle, around the whole children concatenation. Applying the inherited
+// bg here too would emit a SECOND, INNER bg-open that wins over the outer one for
+// these glyphs — e.g. `<Box bg=red><Text bg=blue>x` would render red, not blue.
+// A nested <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
+// carrying its own style INSIDE the parent's eventual wrap.
+function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknown): string {
   if (child.type === "text-leaf") {
-    return applyChalk(child.value, merged);
+    return child.value;
   }
   if (child.type === "virtual-text" || child.type === "text") {
-    return renderTextWithInlineStyles(child, merged);
+    return renderTextWithInlineStyles(child, inheritedBg);
   }
   if (child.type === "transform") {
     let innerText = "";
@@ -365,7 +428,7 @@ function squashTransformChild(child: TuiNode, index: number, merged: TextProps):
     // while keeping the index basis identical to the top-level loop.
     let grandIndex = 0;
     for (const grandchild of child.children) {
-      innerText += squashTransformChild(grandchild, grandIndex, merged);
+      innerText += squashTransformChild(grandchild, grandIndex, inheritedBg);
       if (grandchild.type !== "comment") grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
@@ -553,17 +616,12 @@ function paintNode(
     }
     case "text": {
       const layout = node.yoga.getComputedLayout();
-      // Ink Text.tsx:103-106: a Text's effective background is its OWN
-      // backgroundColor if defined (`??`, so an explicit "" is honored), else the
-      // inherited Box background; the bg is applied only when truthy. Passing the
-      // effective value as the squash base means an explicit "" opts OUT (renders
-      // bare glyphs) while `undefined` inherits — matching Ink's `??` semantics.
-      // (renderTextWithInlineStyles still lets the node's own props override this
-      // base, so the result is identical, but stating the effective value here
-      // keeps the intent explicit.)
-      const effectiveBg = (node.props["backgroundColor"] as string | undefined) ?? inheritedBg;
-      const bgProps: TextProps = effectiveBg ? { backgroundColor: effectiveBg } : {};
-      const text = renderTextWithInlineStyles(node, bgProps);
+      // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
+      // squash. The Text's own backgroundColor — including an explicit "" opt-out —
+      // is resolved against this inherited bg inside applyOwnStyle
+      // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
+      // the node's whole children concatenation alongside its boolean styles.
+      const text = renderTextWithInlineStyles(node, inheritedBg);
       // Skip writing empty text — avoids applying line transformers to empty
       // content, which matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;
@@ -608,8 +666,7 @@ function paintNode(
       // Without this the direct text-leaf children would hit the no-op leaf
       // branch and be silently dropped (G58).
       if (!transformHasYogaChild(node)) {
-        const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
-        const text = renderTransformAsText(node, bgProps);
+        const text = renderTransformAsText(node, inheritedBg);
         // Empty text: skip so the per-line transform isn't applied to "" (Ink
         // only writes ink-text when squashed text length > 0).
         if (text === "") return;
