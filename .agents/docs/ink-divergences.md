@@ -26,43 +26,22 @@ deliberate. Divergences fall into a few kinds:
 
 ### Entry point — `createApp()` instead of `render()`
 
-- **Ink:** `render(<App/>)`.
-- **vue-tui:** `createApp(App).mount(options)`.
+- **Ink:** `render(<App/>, options?)` — `options` is `RenderOptions`; returns an `Instance`.
+- **vue-tui:** `createApp(App)` returns a `TuiApp`; `app.mount(options?)` takes `MountOptions`.
 - **Why:** mirrors Vue's own `createApp` mental model — a Vue developer expects an app
-  object they mount, not a one-shot render call.
+  object (`TuiApp`) they mount, not a one-shot render call. The mount-options bag and the
+  app handle are therefore Vue-shaped (`MountOptions` / `TuiApp`), not `render()`-shaped
+  (`RenderOptions` / `Instance`).
 
-### Named type / prop re-exports
+### Host-node type — `DOMElement` → `TuiNode`
 
-- **Ink:** re-exports its component prop types plus a few data/handle types:
-  `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`, `NewlineProps`,
-  `WindowSize`, `CursorPosition`, `DOMElement`, `RenderOptions`, `Instance`,
-  `AppProps`, `StdinProps`, `StdoutProps`, `StderrProps`.
-- **vue-tui:** re-exports the framework-neutral ones under the **same names** —
-  `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`, `NewlineProps`,
-  `WindowSize` (`{ columns, rows }`) and `CursorPosition` (`{ x, y }`). These are
-  **not** divergences: a `<Box>` has props in Vue exactly as in React, so the names
-  carry over. They are derived from the runtime `props` objects via Vue's
-  `ExtractPublicPropTypes`, so they never drift from the components' real props.
-  Only the remaining few genuinely differ, each for a concrete reason — never merely
-  to "avoid React-shaped names":
-  - `DOMElement` → **`TuiNode`**. The one genuinely DOM-shaped type: Ink's
-    `DOMElement` models a DOM-emulation node (`nodeName` / `attributes` /
-    `childNodes`). vue-tui's host tree is a different representation
-    (`TuiContainer | TuiTextLeaf | TuiComment`), exported as `TuiNode` from
-    `@vue-tui/runtime/internal`.
-  - `RenderOptions` / `Instance` → **`MountOptions`** / **`TuiApp`**. Downstream of
-    the `createApp()` entry above — vue-tui mounts a Vue app, so the options bag and
-    the returned handle are Vue-shaped, not `render()`-shaped.
-  - `AppProps` / `StdinProps` / `StdoutProps` / `StderrProps` → **N/A**. These are the
-    props of Ink's internal React _context-provider components_ (`<AppContext>`,
-    `<StdinContext>`, …). vue-tui has no such components — that state is reached via
-    `createApp` plus the `useStdin` / `useStdout` / `useStderr` composables — so there
-    is nothing to name.
-- **Why:** the earlier blanket "expose a Vue-native type surface, don't leak
-  React-shaped names" over-reached — it withheld names like `BoxProps` that have no
-  React vs Vue content at all. The rule is narrower: mirror Ink's names wherever the
-  underlying type is framework-neutral; reshape only where Vue genuinely has a
-  different thing (a host node, a mounted app) or no thing at all.
+- **Ink:** exports `DOMElement`, a DOM-emulation node (`nodeName` / `attributes` /
+  `childNodes`).
+- **vue-tui:** the host tree is a different representation
+  (`TuiContainer | TuiTextLeaf | TuiComment`), exported as **`TuiNode`** from
+  `@vue-tui/runtime/internal`.
+- **Why:** vue-tui's renderer keeps a native host-node tree rather than a DOM emulation,
+  so the exported node type names that tree, not a DOM node.
 
 ## Additive features (vue-tui is a strict superset)
 
@@ -110,6 +89,11 @@ deliberate. Divergences fall into a few kinds:
 Surface conventions, listed so they aren't mistaken for gaps:
 
 - Vue **composables** (`useFocus`, `useInput`, …) instead of React **hooks**.
+- Composable **return types** follow VueUse's `UseXReturn` convention (`UseStdinReturn`,
+  `UseAppReturn`, …) — Ink names the equivalent hook-return types `XProps` (`StdinProps`,
+  `AppProps`, …), but in vue-tui `XProps` is reserved for component props (`BoxProps`,
+  derived via `ExtractPublicPropTypes`). The return shapes still mirror Ink field-for-field
+  (e.g. `useStdin()` exposes only Ink's public `{ stdin, setRawMode, isRawModeSupported }`).
 - `<script setup>` SFCs / `defineComponent` instead of function components.
 - kebab-case filenames; `.ts` over `.tsx` where there's no JSX.
 - `shallowRef` by default for reactive state.
