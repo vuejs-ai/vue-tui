@@ -553,18 +553,37 @@ function paintNode(
     }
     case "text": {
       const layout = node.yoga.getComputedLayout();
-      const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
+      // Ink Text.tsx:103-106: a Text's effective background is its OWN
+      // backgroundColor if defined (`??`, so an explicit "" is honored), else the
+      // inherited Box background; the bg is applied only when truthy. Passing the
+      // effective value as the squash base means an explicit "" opts OUT (renders
+      // bare glyphs) while `undefined` inherits — matching Ink's `??` semantics.
+      // (renderTextWithInlineStyles still lets the node's own props override this
+      // base, so the result is identical, but stating the effective value here
+      // keeps the intent explicit.)
+      const effectiveBg = (node.props["backgroundColor"] as string | undefined) ?? inheritedBg;
+      const bgProps: TextProps = effectiveBg ? { backgroundColor: effectiveBg } : {};
       const text = renderTextWithInlineStyles(node, bgProps);
       // Skip writing empty text — avoids applying line transformers to empty
       // content, which matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;
       const cellWidth = Math.max(1, Math.floor(layout.width));
       const wrapped = wrapText(text, cellWidth, node.props.wrap ?? "wrap");
+      // Pad each line to the cell width with the INHERITED Box background only —
+      // this fills the space behind the text with the Box's bg (the Box also fills
+      // it via fillBackground), and is the reason a Box bg pads to full width while
+      // a text-only bg does not. The padding uses `inheritedBg`, NOT the effective
+      // bg: a Text that overrides or opts out (backgroundColor / "") only recolors
+      // its OWN glyphs, never the surrounding Box fill. The already-rendered glyphs
+      // in `wrapped[i]` keep their effective bg, so a `backgroundColor=""` Text
+      // stays bare even though we pad the trailing cells with the inherited bg.
       if (inheritedBg) {
+        const padProps: TextProps = { backgroundColor: inheritedBg };
         for (let i = 0; i < wrapped.length; i++) {
           const pad = cellWidth - stringWidth(wrapped[i]!);
-          const padStr = pad > 0 ? " ".repeat(pad) : "";
-          wrapped[i] = applyChalk(wrapped[i]! + padStr, bgProps);
+          if (pad > 0) {
+            wrapped[i] = wrapped[i]! + applyChalk(" ".repeat(pad), padProps);
+          }
         }
       }
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
