@@ -2,6 +2,14 @@ import { inject, shallowRef, watch, onScopeDispose } from "vue";
 import { AppContextKey } from "../context.ts";
 
 /**
+ * A cursor position in output-origin coordinates. Mirrors Ink's `CursorPosition`.
+ */
+export interface CursorPosition {
+  x: number;
+  y: number;
+}
+
+/**
  * Returns `setCursorPosition` so a component can control the terminal cursor.
  *
  * Setting a position makes the cursor visible at the given coordinates
@@ -12,9 +20,9 @@ export function useCursor() {
   const ctx = inject(AppContextKey);
   if (!ctx) throw new Error("useCursor() must be called inside a vue-tui render tree");
 
-  const positionRef = shallowRef<{ x: number; y: number } | undefined>(undefined);
+  const positionRef = shallowRef<CursorPosition | undefined>(undefined);
 
-  function setCursorPosition(position: { x: number; y: number } | undefined) {
+  function setCursorPosition(position: CursorPosition | undefined) {
     positionRef.value = position;
   }
 

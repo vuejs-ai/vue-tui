@@ -1,4 +1,11 @@
-import { defineComponent, getCurrentInstance, h, inject, type PropType } from "vue";
+import {
+  defineComponent,
+  getCurrentInstance,
+  h,
+  inject,
+  type ExtractPublicPropTypes,
+  type PropType,
+} from "vue";
 import { AppContextKey } from "../context.ts";
 import type { WithChildren } from "./with-children.ts";
 
@@ -11,21 +18,23 @@ type WrapMode =
   | "truncate-middle"
   | "truncate-start";
 
+const textProps = {
+  color: [String, Array] as PropType<Color>,
+  backgroundColor: [String, Array] as PropType<Color>,
+  dimColor: Boolean,
+  bold: Boolean,
+  italic: Boolean,
+  underline: Boolean,
+  strikethrough: Boolean,
+  inverse: Boolean,
+  wrap: { type: String as PropType<WrapMode>, default: "wrap" },
+  ariaLabel: String,
+  ariaHidden: Boolean,
+};
+
 const TextImpl = defineComponent({
   name: "Text",
-  props: {
-    color: [String, Array] as PropType<Color>,
-    backgroundColor: [String, Array] as PropType<Color>,
-    dimColor: Boolean,
-    bold: Boolean,
-    italic: Boolean,
-    underline: Boolean,
-    strikethrough: Boolean,
-    inverse: Boolean,
-    wrap: { type: String as PropType<WrapMode>, default: "wrap" },
-    ariaLabel: String,
-    ariaHidden: Boolean,
-  },
+  props: textProps,
   setup(props, { slots }) {
     const appCtx = inject(AppContextKey, null);
 
@@ -56,6 +65,9 @@ const TextImpl = defineComponent({
 });
 
 export const Text = TextImpl as WithChildren<typeof TextImpl>;
+
+/** Props accepted by `<Text>` — the vue-tui analogue of Ink's `TextProps`. */
+export type TextProps = ExtractPublicPropTypes<typeof textProps>;
 
 function isInsideText(): boolean {
   let parent = getCurrentInstance()?.parent;

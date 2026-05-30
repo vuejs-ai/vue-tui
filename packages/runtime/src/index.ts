@@ -1,12 +1,18 @@
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
-export { Box, type AriaRole, type AriaState, type BoxStyle } from "./components/Box.ts";
-export { Text } from "./components/Text.ts";
-export { Newline } from "./components/Newline.ts";
+export {
+  Box,
+  type AriaRole,
+  type AriaState,
+  type BoxStyle,
+  type BoxProps,
+} from "./components/Box.ts";
+export { Text, type TextProps } from "./components/Text.ts";
+export { Newline, type NewlineProps } from "./components/Newline.ts";
 export { Spacer } from "./components/Spacer.ts";
-export { Static } from "./components/Static.ts";
-export { Transform } from "./components/Transform.ts";
+export { Static, type StaticProps } from "./components/Static.ts";
+export { Transform, type TransformProps } from "./components/Transform.ts";
 
 export { useAppContext } from "./composables/useAppContext.ts";
 export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";
@@ -16,8 +22,8 @@ export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin } from "./composables/useStdin.ts";
 export { useStdout } from "./composables/useStdout.ts";
 export { useStderr } from "./composables/useStderr.ts";
-export { useTerminalSize, useWindowSize } from "./composables/useTerminalSize.ts";
-export { useCursor } from "./composables/useCursor.ts";
+export { useTerminalSize, useWindowSize, type WindowSize } from "./composables/useTerminalSize.ts";
+export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
@@ -38,4 +44,6 @@ export {
   type KittyKeyboardOptions,
   type KittyFlagName,
 } from "./io/kitty-keyboard.ts";
-export { measureText, measureTextNatural } from "./host/text-measure.ts";
+// `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
+// its `measure-text` module internal, and so do we. They remain internal helpers
+// (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.

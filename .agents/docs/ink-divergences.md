@@ -41,20 +41,38 @@ deliberate. Divergences fall into a few kinds:
   (`createApp`, `app.mount`), so vue-tui qualifies it as `useAppContext`. The shape is
   identical to Ink; a naming divergence, not a surface one.
 
-### Exported text-measurement helpers
+### Named type / prop re-exports
 
-- **Ink:** does not export its internal `measure-text` module.
-- **vue-tui:** exports `measureText` / `measureTextNatural` from the public index.
-- **Why:** a deliberately public utility surface for consumers who need to size text.
-
-### No named type / prop re-exports
-
-- **Ink:** re-exports `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`,
-  `NewlineProps`, `WindowSize`, `CursorPosition`, `DOMElement`, `RenderOptions`, `Instance`,
-  `App/Stdin/Stdout/StderrProps`.
-- **vue-tui:** does not re-export those names; exposes its own type surface
-  (`TuiApp`, `MountOptions`, …).
-- **Why:** avoid leaking React-shaped type names; present a Vue-native type surface.
+- **Ink:** re-exports its component prop types plus a few data/handle types:
+  `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`, `NewlineProps`,
+  `WindowSize`, `CursorPosition`, `DOMElement`, `RenderOptions`, `Instance`,
+  `AppProps`, `StdinProps`, `StdoutProps`, `StderrProps`.
+- **vue-tui:** re-exports the framework-neutral ones under the **same names** —
+  `BoxProps`, `TextProps`, `StaticProps`, `TransformProps`, `NewlineProps`,
+  `WindowSize` (`{ columns, rows }`) and `CursorPosition` (`{ x, y }`). These are
+  **not** divergences: a `<Box>` has props in Vue exactly as in React, so the names
+  carry over. They are derived from the runtime `props` objects via Vue's
+  `ExtractPublicPropTypes`, so they never drift from the components' real props.
+  Only the remaining few genuinely differ, each for a concrete reason — never merely
+  to "avoid React-shaped names":
+  - `DOMElement` → **`TuiNode`**. The one genuinely DOM-shaped type: Ink's
+    `DOMElement` models a DOM-emulation node (`nodeName` / `attributes` /
+    `childNodes`). vue-tui's host tree is a different representation
+    (`TuiContainer | TuiTextLeaf | TuiComment`), exported as `TuiNode` from
+    `@vue-tui/runtime/internal`.
+  - `RenderOptions` / `Instance` → **`MountOptions`** / **`TuiApp`**. Downstream of
+    the `createApp()` entry above — vue-tui mounts a Vue app, so the options bag and
+    the returned handle are Vue-shaped, not `render()`-shaped.
+  - `AppProps` / `StdinProps` / `StdoutProps` / `StderrProps` → **N/A**. These are the
+    props of Ink's internal React _context-provider components_ (`<AppContext>`,
+    `<StdinContext>`, …). vue-tui has no such components — that state is reached via
+    `createApp` plus the `useStdin` / `useStdout` / `useStderr` composables — so there
+    is nothing to name.
+- **Why:** the earlier blanket "expose a Vue-native type surface, don't leak
+  React-shaped names" over-reached — it withheld names like `BoxProps` that have no
+  React vs Vue content at all. The rule is narrower: mirror Ink's names wherever the
+  underlying type is framework-neutral; reshape only where Vue genuinely has a
+  different thing (a host node, a mounted app) or no thing at all.
 
 ## Additive features (vue-tui is a strict superset)
 

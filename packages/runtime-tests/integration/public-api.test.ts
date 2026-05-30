@@ -27,7 +27,6 @@ test("public API exposes documented members", () => {
     "useAnimation",
     "useBoxMetrics",
     "measureElement",
-    "measureText",
     "usePaste",
     // Rendering
     "renderToString",
@@ -42,4 +41,13 @@ test("public API exposes documented members", () => {
 
 test("useWindowSize is an alias for useTerminalSize", () => {
   expect(api.useWindowSize).toBe(api.useTerminalSize);
+});
+
+// Ink keeps its `measure-text` module internal and does not re-export it. vue-tui
+// once exported `measureText`/`measureTextNatural` under the (incorrect) belief it
+// "matched Ink's public API" — it does not. These stay internal; this guards the
+// alignment against re-introduction. See .agents/docs/ink-divergences.md.
+test("does not expose internal text-measurement helpers (Ink keeps them internal)", () => {
+  expect(api).not.toHaveProperty("measureText");
+  expect(api).not.toHaveProperty("measureTextNatural");
 });
