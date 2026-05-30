@@ -639,12 +639,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Fullscreen: output fills or exceeds terminal height — no trailing newline.
       // Only apply when writing to a real TTY — piped output always gets trailing newlines.
       const isFullscreen = isTty && outputHeight >= viewportRows;
-      // SR parity (G17 edge b): Ink's screen-reader path writes the wrapped
-      // output directly with NO appended newline (ink.tsx:617-621), so an empty
-      // SR frame emits zero lines instead of a spurious blank line. We scope
-      // this to EMPTY SR output to avoid touching non-SR or non-empty SR frames.
-      const isEmptyScreenReaderFrame = isScreenReaderEnabled && output === "";
-      const outputToRender = isFullscreen || isEmptyScreenReaderFrame ? output : output + "\n";
+      // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
+      // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
+      // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
+      // and `lastOutputHeight = wrappedOutput === "" ? 0 : split("\n").length`.
+      // So EVERY SR frame, empty or not, must skip the trailing newline: an empty
+      // frame emits zero lines instead of a spurious blank line (G17), and a
+      // non-empty multi-line frame keeps its true line count so the next-frame
+      // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
+      // interactive frames are untouched — they still append "\n" as before.
+      const outputToRender = isFullscreen || isScreenReaderEnabled ? output : output + "\n";
 
       const shouldClear = shouldClearTerminalForFrame({
         isTty,
