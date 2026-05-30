@@ -444,6 +444,98 @@ describe("useAnimation", () => {
     second.unmount();
   });
 
+  // Ink parity (use-animation.tsx:529-566 "time and delta reset to 0 when
+  // interval changes"): changing `interval` reactively on a LIVE, mounted,
+  // ACTIVE animation (no remount) must reset frame/time/delta to 0 and
+  // re-subscribe at the new interval — Ink recomputes safeInterval every render
+  // and resets when it differs while active. This is the bug repro: a captured
+  // (non-reactive) interval makes this a no-op.
+  test("frame/time/delta reset to 0 when interval changes live while active", async () => {
+    const interval = shallowRef(50);
+    let frameVal = 0;
+    let timeVal = 0;
+    let deltaVal = 0;
+    const App = defineComponent(() => {
+      const { frame, time, delta } = useAnimation({ interval });
+      watchEffect(() => {
+        frameVal = frame.value;
+        timeVal = time.value;
+        deltaVal = delta.value;
+      });
+      return () => <Text>{String(frame.value)}</Text>;
+    });
+    const { unmount } = await render(App);
+
+    await delay(200);
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+    expect(timeVal).toBeGreaterThanOrEqual(50);
+
+    // Mirror Ink's '0,0,0' assertion: changing the live interval resets all three.
+    interval.value = 200;
+    await nextTick();
+    expect(frameVal).toBe(0);
+    expect(timeVal).toBe(0);
+    expect(deltaVal).toBe(0);
+
+    // And it keeps running at the new interval afterwards.
+    await delay(250);
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+
+    unmount();
+  });
+
+  // Ink parity: `shouldReset` is gated on `isActive`. Changing `interval` while
+  // INACTIVE must NOT reset values (the animation is paused — nothing to reset)
+  // and must NOT start a timer. This matches vue-tui's existing reset-while-paused
+  // behavior. The new interval only takes effect on the next activation.
+  test("changing interval while inactive does not reset and does not start", async () => {
+    const interval = shallowRef(50);
+    const active = shallowRef(false);
+    let frameVal = -1;
+    const App = defineComponent(() => {
+      const { frame } = useAnimation({ interval, isActive: active });
+      watchEffect(() => {
+        frameVal = frame.value;
+      });
+      return () => <Text>{String(frame.value)}</Text>;
+    });
+    const { unmount } = await render(App);
+
+    // Inactive from mount: frame stays 0.
+    await delay(120);
+    expect(frameVal).toBe(0);
+
+    // Change interval while still inactive — must remain frozen at 0, no timer.
+    interval.value = 200;
+    await nextTick();
+    await delay(120);
+    expect(frameVal).toBe(0);
+
+    // Activating now uses the new interval and advances.
+    active.value = true;
+    await delay(250);
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+
+    unmount();
+  });
+
+  test("interval accepts a plain number (backward compatible)", async () => {
+    // The widening to MaybeRefOrGetter<number> must remain a strict superset:
+    // a literal number still works exactly as before.
+    let frameVal = 0;
+    const App = defineComponent(() => {
+      const { frame } = useAnimation({ interval: 50 });
+      watchEffect(() => {
+        frameVal = frame.value;
+      });
+      return () => <Text>{String(frame.value)}</Text>;
+    });
+    const { unmount } = await render(App);
+    await delay(150);
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+    unmount();
+  });
+
   test("time and delta reset to 0 when animation is resumed", async () => {
     const active = shallowRef(true);
     let frameVal = 0;

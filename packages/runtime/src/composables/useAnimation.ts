@@ -17,9 +17,17 @@ import { AnimationSchedulerKey } from "../context.ts";
 export interface AnimationOptions {
   /**
    * Time between ticks in milliseconds.
+   *
+   * Reactive: pass a ref/getter to change the interval on a live animation.
+   * While ACTIVE, changing it resets `frame`/`time`/`delta` to `0` and
+   * re-subscribes at the new interval (Ink parity — `shouldReset` recomputes
+   * `safeInterval` every render and resets when it differs while active).
+   * While INACTIVE, the new value is recorded but nothing resets and no timer
+   * starts; it takes effect on the next activation. A plain `number` keeps the
+   * previous fixed behavior (the type is a strict superset).
    * @default 100
    */
-  interval?: number;
+  interval?: MaybeRefOrGetter<number>;
 
   /**
    * Whether the animation is running. When set to `false`, the animation stops.
@@ -77,7 +85,10 @@ export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn
   const time = shallowRef(0);
   const delta = shallowRef(0);
 
-  const interval = normalizeInterval(options.interval);
+  // Recomputed whenever the (reactive) interval changes — Ink re-reads
+  // safeInterval every render. `tick`/`start` read this current value so a
+  // re-subscribe after an interval change uses the new value.
+  let interval = normalizeInterval(toValue(options.interval));
   // Fall back to a local standalone scheduler when used outside a vue-tui
   // render tree (graceful degradation, not a silent break).
   const scheduler: AnimationScheduler =
@@ -144,6 +155,22 @@ export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn
       else stop();
     },
     { immediate: true, flush: "sync" },
+  );
+
+  // Watch the (reactive) interval. Ink's `shouldReset` is gated on isActive:
+  // an interval change resets + re-subscribes only when active. While inactive
+  // we just record the new normalized value (used by the next start()) and do
+  // NOT reset — there is nothing running to reset, matching reset-while-paused.
+  // Not `immediate`: the initial value is already applied above; immediate would
+  // double-subscribe with the isActive watch on mount.
+  watch(
+    () => normalizeInterval(toValue(options.interval)),
+    (next) => {
+      const wasActive = handle !== undefined;
+      interval = next;
+      if (wasActive) start();
+    },
+    { flush: "sync" },
   );
 
   onScopeDispose(stop);
