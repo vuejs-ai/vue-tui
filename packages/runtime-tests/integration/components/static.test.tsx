@@ -459,6 +459,66 @@ test("Static resets cursor on shrink so later items still paint (Ink parity)", a
   expect(frames.join("")).toContain("C");
 });
 
+// Ink reference: src/components/Static.tsx merges
+// `{position:'absolute', flexDirection:'column', ...customStyle}` onto the
+// internal_static <ink-box>, and renderer.ts:48-56 lays the static node out via
+// its OWN yoga node. So every caller-supplied LAYOUT style prop on
+// `<Static style={{...}}>` (flexDirection, padding, width, justifyContent, ...)
+// must govern how the static children are laid out and written. (G44)
+test("Static honors flexDirection:row in the isolated paint (Ink parity, G44)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value} style={{ flexDirection: "row" }}>
+        {{
+          default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App);
+
+  items.value = ["AA", "BB"];
+  await nextTick();
+
+  // The static frame must lay AA and BB out on ONE row ("AABB"), not stacked
+  // on two lines ("AA\nBB"). The buggy path hard-defaults FLEX_DIRECTION_COLUMN
+  // on the iso root and drops the row style, painting "AA\nBB".
+  const staticFrame = frames.find((f) => f.includes("AA") && f.includes("BB"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toContain("AABB");
+  expect(staticFrame).not.toContain("AA\nBB");
+});
+
+test("Static honors paddingLeft in the isolated paint (Ink parity, G44)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value} style={{ paddingLeft: 4 }}>
+        {{
+          default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App);
+
+  items.value = ["X"];
+  await nextTick();
+
+  // paddingLeft:4 must shift the static item right by 4 cells ("    X"). The
+  // buggy path never reaches the static node's resolved padding, painting "X".
+  const staticFrame = frames.find((f) => f.includes("X") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toContain("    X");
+});
+
 test("Static items do not add blank lines to the dynamic frame", async () => {
   const items = shallowRef<string[]>([]);
 

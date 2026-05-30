@@ -20,12 +20,7 @@ import type {
 } from "../host/nodes.ts";
 import { createRoot as createIsoRoot } from "../host/nodes.ts";
 import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
-import {
-  attachYoga,
-  detachYoga,
-  isYogaProp as isYogaPropFn,
-  applyYogaProp as applyYogaPropFn,
-} from "../host/yoga.ts";
+import { attachYoga, detachYoga } from "../host/yoga.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -564,25 +559,51 @@ export function paintIsolated(
 ): string {
   const iso = createIsoRoot({} as never);
   attachYoga(iso);
-  iso.yoga.setWidth(width);
 
-  // Apply the static node's yoga props (padding, flexDirection, etc.) to the
-  // iso root so the isolated layout reflects the Static wrapper's style.
+  // Mirror the static node's RESOLVED layout onto the iso root. (G44)
+  //
+  // Ink lays the static node out via its OWN yoga node: Static.tsx merges
+  // `{position:'absolute', flexDirection:'column', ...customStyle}` onto the
+  // internal_static <ink-box>, and renderer.ts:48-56 reads
+  // node.staticNode.yogaNode's computed size/layout directly. So every layout
+  // style prop on `<Static style={{...}}>` (flexDirection, padding, margin,
+  // gap, justifyContent, alignItems, width, ...) must drive the static paint.
+  //
+  // Previously this iterated `staticNode.props` and re-applied only the props
+  // found there — but node-ops only stores VISUAL props (color/border/overflow)
+  // in `el.props`; LAYOUT props are applied straight to yoga and never land in
+  // `props`. So flexDirection/padding/etc. were silently dropped and the iso
+  // root hard-defaulted to FLEX_DIRECTION_COLUMN. Instead we `copyStyle` the
+  // static node's yoga — which already holds every resolved layout prop
+  // (including the <Static> column default) via node-ops applyYogaProp — onto
+  // the fresh iso root. This is the read-back equivalent of Ink reusing
+  // node.staticNode.yogaNode, without reparenting the live static node's own
+  // yoga children (the main-tree layout/measure stays untouched).
   if (staticNode) {
-    for (const [key, value] of Object.entries(staticNode.props)) {
-      if (isYogaPropFn(key)) {
-        applyYogaPropFn(iso, key, value);
-      }
+    iso.yoga.copyStyle(staticNode.yoga);
+    // attachYoga() sets the static node's OWN yoga to display:none so it occupies
+    // no space in the dynamic frame's main-tree layout (yoga.ts:61-63). copyStyle
+    // drags that display:none onto the iso root — which would make paint() short-
+    // circuit and emit nothing. The iso root is the standalone paint root and must
+    // be visible, so force it back to display:flex.
+    iso.yoga.setDisplay(Yoga.DISPLAY_FLEX);
+    // The <Static> default style is `position:'absolute'` (Static.tsx) — correct
+    // when the static node is a child of the main tree (Ink lays it out there),
+    // but here the static node IS the standalone layout root. An absolute root
+    // with auto size collapses to 0x0 and paints nothing, so force it back to
+    // the default relative positioning. (We only ever read the children's
+    // computed positions; the root's own position type is irrelevant otherwise.)
+    iso.yoga.setPositionType(Yoga.POSITION_TYPE_RELATIVE);
+    // The iso root is a standalone layout root constrained to the available
+    // columns. Only force the column width when the static node had no explicit
+    // width of its own; an explicit `<Static style={{width}}>` is copied above
+    // and must win (it governs how children lay out and wrap).
+    const w = staticNode.yoga.getWidth();
+    if (w.unit !== Yoga.UNIT_POINT && w.unit !== Yoga.UNIT_PERCENT) {
+      iso.yoga.setWidth(width);
     }
-    // Static component defaults: position: absolute, flexDirection: column.
-    // These are set via the component's render function as Vue props, but for
-    // the iso root we need to mirror the yoga state that was on the real
-    // static node. Copy the key yoga settings that define layout direction.
-    // The static node's own yoga state already has these applied, but the iso
-    // root is fresh — we need to explicitly set flexDirection for correct layout.
-    if (!("flexDirection" in staticNode.props)) {
-      iso.yoga.setFlexDirection(Yoga.FLEX_DIRECTION_COLUMN);
-    }
+  } else {
+    iso.yoga.setWidth(width);
   }
 
   // Track which nodes we successfully added to iso's yoga tree so we can
