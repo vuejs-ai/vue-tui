@@ -1,7 +1,7 @@
-import { defineComponent } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, Transform } from "@vue-tui/runtime";
+import { Box, Newline, Text, Transform } from "@vue-tui/runtime";
 
 test("Transform uppercases descendant text", async () => {
   const { lastFrame } = await render(() => (
@@ -349,6 +349,62 @@ test("G52 recursive: null inside outer <Transform> does not shift measured width
   expect(lastFrame()).toBe("AO0:B|");
 });
 
+// G58: a STANDALONE <Transform> (NOT wrapped in <Text>) with DIRECT bare-string
+// children must render that text with the transform applied — matching Ink, where
+// <Transform> IS an ink-text host node (Transform.tsx renders <ink-text
+// internal_transform={fn}>), so bare-string children render inline within that
+// ink-text and the transform applies per line via Output. Previously vue-tui's
+// transform host was a non-text yoga carrier whose direct text-leaf children hit
+// the paint no-op branch, so the content was silently dropped. This is the
+// canonical Ink README pattern `<Transform transform={fn}>Hello World</Transform>`.
+test("G58: standalone <Transform> with bare-string children applies the transform", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <>
+        <Transform transform={(s: string) => `<${s}>`}>ab</Transform>
+        <Text>after</Text>
+      </>
+    )),
+    { columns: 40 },
+  );
+  // Ink reference (v7.0.4, columns=40): "<ab>\nafter".
+  expect(lastFrame()).toBe("<ab>\nafter");
+});
+
+// G58 (Newline sub-symptom): a <Newline> directly inside a standalone
+// <Transform> (no <Text> wrapper) must emit an inline line break inside the
+// transform's text, and the transform applies PER LINE (via Output). Ink
+// reference: `<Transform transform={s=>`<${s}>`}>a<Newline/>b</Transform>` →
+// "<a>\n<b>" (transform applied to each line "a" and "b" separately). Previously
+// the <Newline> rendered as a standalone "text" yoga node (name-based
+// isInsideText saw no <Text> ancestor) and the bare strings were dropped, so the
+// transform was applied to EMPTY lines giving "<>\n<>".
+test("G58: standalone <Transform> with <Newline> applies the transform per line", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string) => `<${s}>`}>
+        a<Newline />b
+      </Transform>
+    )),
+    { columns: 40 },
+  );
+  // Ink reference (v7.0.4, columns=40): "<a>\n<b>".
+  expect(lastFrame()).toBe("<a>\n<b>");
+});
+
+test("G58: standalone <Transform> with <Newline> and identity transform keeps both lines", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(s: string) => s}>
+        a<Newline />b
+      </Transform>
+    )),
+    { columns: 40 },
+  );
+  // Ink reference (v7.0.4): identity transform → "a\nb".
+  expect(lastFrame()).toBe("a\nb");
+});
+
 test("transform with multiple lines", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -359,4 +415,158 @@ test("transform with multiple lines", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe("[0: hello world]\n[1: goodbye world]");
+});
+
+// G58 follow-up — MUST-FIX 1: an INLINE <Transform> (inside a <Text>) does NOT
+// own the <Text>'s yoga measure func, so a reactive change to its child text
+// must dirty the ENCLOSING <Text> (the measure owner), not stop at the inline
+// transform. Ink climbs to the nearest node WITH a yoga node (dom.ts
+// findClosestYogaNode) — an inline transform renders as ink-virtual-text which
+// has NO yoga node, so the climb passes through it to the ink-text. Previously
+// the dirty-bubble stopped at the inline transform, leaving the <Text> stale, so
+// "b"→"long" only repainted within the old (narrow) measured width.
+test("G58 MF1: reactive update inside inline <Transform> dirties enclosing <Text> (width grows)", async () => {
+  const s = shallowRef("b");
+  const { lastFrame, waitUntilRenderFlush } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          a<Transform transform={(x: string) => `<${x}>`}>{s.value}</Transform>
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Initial: measured width of "a<b>" = 4, sibling "|" lands at col 4.
+  expect(lastFrame()).toBe("a<b>|");
+  s.value = "long";
+  await nextTick();
+  await waitUntilRenderFlush();
+  // Ink reference: the enclosing <Text> remeasures "a<long>" (7 cols) so "|"
+  // lands at col 7 and the full transformed text is visible. RED on cb68dd2
+  // produced "a<lo|" (stale layout — width never grew).
+  expect(lastFrame()).toBe("a<long>|");
+});
+
+// G58 follow-up — MUST-FIX 2: a <Transform> nested DIRECTLY inside another
+// STANDALONE <Transform> (no <Text> wrapper) is INLINE — it must NOT be inserted
+// as a yoga child of the outer transform. Instead the outer (standalone) measures
+// the whole squashed text, applying the inner CHILD transform's fn (Ink's
+// squashTextNodes applies child internal_transform), but NOT the outer's own fn
+// (that runs at Output paint). So the reserved width = width of "<IxI>" (5), and
+// the painted "[O<IxI>O]" overflows past that — a sibling overwrites the overflow.
+test("G58 MF2: nested <Transform>-in-standalone-<Transform> reserves inner-applied width", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Transform transform={(s: string) => `[O${s}O]`}>
+          <Transform transform={(s: string) => `<I${s}I>`}>x</Transform>
+        </Transform>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink reference (v40b3a75): "[O<Ix|>O]" — measured width = 5 ("<IxI>", inner
+  // child fn applied, outer fn not), so "|" lands at col 5 and overwrites the
+  // outer-applied overflow. RED on cb68dd2 produced "[|<IxI>O]" (inner transform
+  // became a yoga child → width 0 reserved, "|" at col 1).
+  expect(lastFrame()).toBe("[O<Ix|>O]");
+});
+
+// G58 follow-up — STRUCTURAL-DIRTY: inserting/removing an inline child under a
+// plain <Text> (or virtual-text) parent must dirty the enclosing <Text>'s yoga
+// measure owner so the layout re-measures. Ink marks the parent dirty in
+// appendChildNode / insertBeforeNode / removeChildNode for ink-text AND
+// ink-virtual-text parents (dom.ts:132,165,185), then climbs to the closest yoga
+// node (dom.ts:248). The previous vue-tui code only dirtied when the parent was a
+// <Transform>, so a STRUCTURAL change (v-if inserting/removing an inline
+// <Transform>, or inserting a bare-text child) under a <Text> left STALE LAYOUT.
+test("structural dirty: v-if inserting an inline <Transform> into <Text> grows width", async () => {
+  const show = shallowRef(false);
+  const { lastFrame, waitUntilRenderFlush } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          a{show.value ? <Transform transform={(s: string) => `<${s}>`}>long</Transform> : null}
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Initial: only "a" → width 1, sibling "|" at col 1.
+  expect(lastFrame()).toBe("a|");
+  show.value = true;
+  await nextTick();
+  await waitUntilRenderFlush();
+  // Ink reference (v40b3a75): the <Text> remeasures "a<long>" (7 cols) so "|"
+  // lands at col 7. RED before the fix: stayed "a|" (stale layout — the
+  // structural insert never dirtied the enclosing <Text>).
+  expect(lastFrame()).toBe("a<long>|");
+});
+
+test("structural dirty: v-if removing an inline <Transform> from <Text> shrinks width", async () => {
+  const show = shallowRef(true);
+  const { lastFrame, waitUntilRenderFlush } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          a{show.value ? <Transform transform={(s: string) => `<${s}>`}>long</Transform> : null}
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Initial: "a<long>" → width 7, sibling "|" at col 7.
+  expect(lastFrame()).toBe("a<long>|");
+  show.value = false;
+  await nextTick();
+  await waitUntilRenderFlush();
+  // Ink reference (v40b3a75): the <Text> remeasures "a" (1 col) so "|" lands at
+  // col 1. RED before the fix: stayed "a<long>|" with stale width (painted
+  // "a      |" — trailing blanks from the un-shrunk measured width).
+  expect(lastFrame()).toBe("a|");
+});
+
+test("structural dirty: inserting a bare-text child into <Text> grows width", async () => {
+  const show = shallowRef(false);
+  const { lastFrame, waitUntilRenderFlush } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>a{show.value ? "long" : null}</Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Initial: only "a" → width 1, sibling "|" at col 1.
+  expect(lastFrame()).toBe("a|");
+  show.value = true;
+  await nextTick();
+  await waitUntilRenderFlush();
+  // Ink reference (v40b3a75): the <Text> remeasures "along" (5 cols) so "|"
+  // lands at col 5. RED before the fix: stayed "a|" (stale layout).
+  expect(lastFrame()).toBe("along|");
+});
+
+// G58 follow-up — SHOULD-FIX: a standalone <Transform> is a text context (Ink
+// models it as ink-text → isInsideText), so a <Box> directly inside it must
+// throw the SAME dev error as a <Box> inside a <Text>. Ink reconciler.ts:205
+// throws `<Box> can't be nested inside <Text> component` from createInstance.
+test("G58 should-fix: <Box> directly inside standalone <Transform> throws like <Box> in <Text>", async () => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => s}>
+          <Box>
+            <Text>hi</Text>
+          </Box>
+        </Transform>
+      )),
+      { columns: 40 },
+    ),
+  ).rejects.toThrow("<Box> can’t be nested inside <Text> component");
 });

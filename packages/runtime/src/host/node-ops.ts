@@ -21,6 +21,8 @@ import {
   isYogaProp,
   bindTextMeasure,
   markTextDirty,
+  markTransformDirty,
+  transformHasYogaChild,
 } from "./yoga.ts";
 
 export interface TtyRendererOptions {
@@ -78,14 +80,76 @@ function findRoot(node: TuiNode): TuiRoot | null {
   return null;
 }
 
-/** Walk up the DOM tree to check if we're inside a text or virtual-text context. */
-function isInsideTextContext(node: TuiContainer): boolean {
+/**
+ * Walk up the DOM tree to check if we're inside a text context. Treats a
+ * <Transform> as a text context too: Ink models <Transform> as an ink-text host
+ * (its reconciler sets isInsideText for ink-text), so this is the vue-tui
+ * equivalent of Ink's hostContext.isInsideText. It governs BOTH text-context
+ * guards, exactly as Ink's single isInsideText flag does:
+ *
+ *  - a bare-string / <Newline> child directly inside a <Transform> is valid
+ *    inline text and must NOT trip the "text must be rendered inside <Text>"
+ *    guard (G58); and
+ *  - a <Box> directly inside a <Transform> MUST throw the same dev error as a
+ *    <Box> inside a <Text> (Ink reconciler.ts:205 throws for any isInsideText
+ *    context, ink-text included) (G58 should-fix).
+ */
+function isInsideTextOrTransformContext(node: TuiContainer): boolean {
   let current: TuiContainer | null = node;
   while (current) {
-    if (current.type === "text" || current.type === "virtual-text") return true;
+    if (current.type === "text" || current.type === "virtual-text" || current.type === "transform")
+      return true;
     current = current.parent;
   }
   return false;
+}
+
+/**
+ * Find the nearest ancestor (inclusive of `start`) that OWNS the yoga measure
+ * func used to size inline text — i.e. the node yoga must re-measure when a
+ * descendant text-leaf changes. Mirrors Ink's findClosestYogaNode (dom.ts:248),
+ * adapted for the fact that vue-tui attaches a yoga node to every <Transform>:
+ *
+ * - A <Text> always owns its measure func.
+ * - A <Transform> owns the measure func ONLY when it is STANDALONE: it has no
+ *   yoga-bearing child (so it still carries bindTransformMeasure) AND it is not
+ *   itself nested in a text/transform context (an inline transform is squashed
+ *   into the enclosing measure owner, just as Ink's ink-virtual-text — which has
+ *   no yoga node — is climbed past). An inline transform is therefore skipped and
+ *   the walk continues to the enclosing <Text>/standalone <Transform>. (G58)
+ */
+function findMeasureOwner(start: TuiNode | null): TuiNode | null {
+  let p: TuiNode | null = start;
+  while (p) {
+    if (p.type === "text") return p;
+    if (p.type === "transform") {
+      const inlineInTextContext =
+        p.parent != null &&
+        isContainer(p.parent) &&
+        isInsideTextOrTransformContext(p.parent as TuiContainer);
+      if (!transformHasYogaChild(p) && !inlineInTextContext) return p;
+    }
+    p = p.parent;
+  }
+  return null;
+}
+
+/**
+ * Dirty the measure owner of a text-context parent after a STRUCTURAL change to
+ * its children (insert / remove / move). Mirrors Ink marking the parent dirty in
+ * appendChildNode / insertBeforeNode / removeChildNode for ink-text AND
+ * ink-virtual-text parents (dom.ts:132,165,185) then climbing to the closest
+ * yoga node (findClosestYogaNode, dom.ts:248). A no-op when `parent` is not a
+ * text context (box / root / static structural changes are sized by yoga
+ * directly, no measure func to invalidate).
+ */
+function dirtyTextMeasureOwner(parent: TuiNode): void {
+  if (parent.type !== "text" && parent.type !== "virtual-text" && parent.type !== "transform") {
+    return;
+  }
+  const owner = findMeasureOwner(parent);
+  if (owner?.type === "transform") markTransformDirty(owner);
+  else if (owner?.type === "text") markTextDirty(owner);
 }
 
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
@@ -130,10 +194,22 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       throw new Error(`Cannot setText on ${node.type}`);
     }
     node.value = text;
-    // Bubble dirty up to nearest TuiText so yoga remeasures.
-    let p = node.parent;
-    while (p && p.type !== "text") p = p.parent;
-    if (p) markTextDirty(p);
+    // Bubble dirty up to the node that OWNS the yoga measure func so yoga
+    // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248):
+    // climb to the nearest node carrying the MEASURE func and mark it. The catch
+    // is that vue-tui attaches a yoga node to EVERY <Transform> (even inline ones
+    // inside a <Text>), whereas Ink turns an inline transform into ink-virtual-text
+    // with NO yoga node — so in Ink the climb passes THROUGH an inline transform to
+    // the enclosing ink-text. A <Transform> here only owns the measure func when it
+    // is STANDALONE (a text-context root with no yoga-bearing child); an inline
+    // transform (inside a <Text> or another <Transform>) does NOT, so we must keep
+    // climbing to the enclosing <Text>/standalone-transform measure owner. (G58)
+    const owner = findMeasureOwner(node.parent as TuiNode | null);
+    if (owner?.type === "text") {
+      markTextDirty(owner);
+    } else if (owner?.type === "transform") {
+      markTransformDirty(owner);
+    }
     onCommit();
   }
 
@@ -153,8 +229,14 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     const parentC = parent as TuiContainer;
 
-    // <Box> inside <Text> is invalid (matches Ink's validation).
-    if (child.type === "box" && isInsideTextContext(parentC)) {
+    // <Box> inside a text context is invalid (matches Ink's validation). Ink
+    // models <Transform> as ink-text (hostContext.isInsideText), so its
+    // reconciler throws the SAME error for a <Box> directly inside a <Transform>
+    // as for a <Box> inside a <Text> (reconciler.ts:205,
+    // `hostContext.isInsideText && originalType === 'ink-box'`). A standalone
+    // <Transform> is a text context here (G58), so we use the transform-aware
+    // context check to mirror Ink exactly. (G58 should-fix)
+    if (child.type === "box" && isInsideTextOrTransformContext(parentC)) {
       throw new Error("<Box> can’t be nested inside <Text> component");
     }
 
@@ -164,7 +246,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       child.type === "text-leaf" &&
       child.value !== "" &&
       (parentC.type === "box" || parentC.type === "root" || parentC.type === "static") &&
-      !isInsideTextContext(parentC)
+      !isInsideTextOrTransformContext(parentC)
     ) {
       throw new Error(`Text string "${child.value}" must be rendered inside <Text> component`);
     }
@@ -177,12 +259,30 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       const oldIdx = oldParent.children.indexOf(child as never);
       if (oldIdx >= 0) oldParent.children.splice(oldIdx, 1);
       removeYogaChild(oldParent, child);
+      // Mirror Ink's removeChildNode dirty-mark: detaching a child from a text
+      // context (text / virtual-text / transform) must re-measure the OLD
+      // parent's measure owner. Ink dirties on remove from the old parent AND on
+      // append to the new (dom.ts:132,165,185). We dirty the old parent here
+      // unconditionally; if it shares a measure owner with the new parent, the
+      // post-insert dirty below just re-marks the same node (markDirty is
+      // idempotent), so no skip is needed.
+      dirtyTextMeasureOwner(oldParent);
     }
 
     const idx = anchor ? parentC.children.indexOf(anchor as never) : parentC.children.length;
     parentC.children.splice(idx < 0 ? parentC.children.length : idx, 0, child as never);
     child.parent = parentC as never;
     insertYogaChild(parentC, child, idx);
+
+    // A text-context parent (text / virtual-text / transform) sizes its inline
+    // text via a measure func; a STRUCTURAL change (adding an inline child:
+    // text-leaf / virtual-text / nested transform) must re-mark the owning
+    // measure node dirty so yoga re-measures. Mirror Ink, which dirties the
+    // parent for ink-text AND ink-virtual-text in append/insert (dom.ts:132,165)
+    // then climbs to the closest yoga node (dom.ts:248). The owner may be an
+    // ANCESTOR of the immediate parent (an inline transform / virtual-text owns
+    // no measure func), so resolve it via findMeasureOwner. (G58)
+    dirtyTextMeasureOwner(parentC);
 
     // Track static node identity on the root (mirrors Ink's reconciler).
     if (child.type === "static") {
@@ -213,6 +313,15 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // Free yoga nodes for this subtree (descendants first, then this node).
     freeSubtreeYoga(child);
     child.parent = null as never;
+    // Re-measure the owning measure node when an inline child is removed from a
+    // text context (mirror of the insert() dirty-mark; Ink dirties ink-text AND
+    // ink-virtual-text parents on remove, dom.ts:185). removeYogaChild already
+    // re-bound the measure func if the LAST yoga child was removed. The owner may
+    // be an ancestor (nested transform / virtual-text), so resolve it via
+    // findMeasureOwner. `parent` still has its own parent chain (only
+    // `child.parent` was cleared), so the walk starts from the immediate
+    // parent. (G58)
+    dirtyTextMeasureOwner(parent);
     onCommit();
   }
 

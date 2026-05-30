@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { renderToString, Box, Text, Transform, Static, createApp } from "@vue-tui/runtime";
+import { renderToString, Box, Text, Transform, Newline, Static, createApp } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 import {
   createRoot,
@@ -436,6 +436,57 @@ describe("Transform accessibility", () => {
     );
     // Children are concatenated ("ab"), NOT newline-joined ("a\nb").
     expect(output).toBe("ab");
+  });
+
+  // G58 (SR twin): a standalone <Transform> with DIRECT bare-string children
+  // must include that text in screen-reader output. Ink's SR path squashes the
+  // ink-text via squashTextNodes, which includes #text children — the
+  // transform's OWN fn is NOT applied at the top level (only child transforms
+  // are). Ink reference: `<Transform transform={s=>`<${s}>`}>ab</Transform>` SR
+  // → "ab". Previously vue-tui dropped bare text-leaf children of a transform in
+  // the SR squash, yielding "".
+  test("G58: standalone <Transform> with bare-string children appears in screen-reader output", () => {
+    const output = renderToString(
+      defineComponent(() => () => <Transform transform={(s: string) => `<${s}>`}>ab</Transform>),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("ab");
+  });
+
+  // G58 follow-up — MUST-FIX 3: a CHILD (nested) <Transform> inside a standalone
+  // outer <Transform> must have its OWN fn APPLIED in SR — it is a *child* being
+  // squashed, and Ink's squashTextNodes applies child internal_transform
+  // (squash-text-nodes.ts:34). The OUTER transform's own fn is still NOT applied
+  // (it is the top-level node handed to squash). Ink reference: outer fn skipped,
+  // inner fn `s=>`{${s}}`` applied to "x" → "{x}". Previously vue-tui rendered the
+  // child transform via the top-level SR rule (which skips the child's own fn),
+  // yielding "x".
+  test("G58 MF3: nested <Transform>'s own fn IS applied inside a standalone <Transform> (SR)", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => `(outer ${s})`}>
+          <Transform transform={(s: string) => `{${s}}`}>x</Transform>
+        </Transform>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // Inner (child) fn applied → "{x}"; outer (top-level) fn NOT applied.
+    expect(output).toBe("{x}");
+  });
+
+  // G58 (SR Newline twin): a <Newline> directly inside a standalone <Transform>
+  // contributes its line break to the squashed SR text. Ink reference:
+  // `<Transform>a<Newline/>b</Transform>` SR → "a\nb".
+  test("G58: standalone <Transform> with <Newline> appears in screen-reader output", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => `<${s}>`}>
+          a<Newline />b
+        </Transform>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("a\nb");
   });
 
   // G52: Vue materializes a null/v-if/false render as a COMMENT host node that

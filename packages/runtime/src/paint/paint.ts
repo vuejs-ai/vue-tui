@@ -16,8 +16,10 @@ import type {
   TextProps,
   TuiText,
   TuiVirtualText,
+  TuiTransform,
   BoxProps,
 } from "../host/nodes.ts";
+import { transformHasYogaChild } from "../host/yoga.ts";
 import { createRoot as createIsoRoot } from "../host/nodes.ts";
 import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
@@ -286,25 +288,47 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
   if (!node.children || node.children.length === 0) return "";
   const defined = Object.fromEntries(Object.entries(node.props).filter(([, v]) => v !== undefined));
   const merged: TextProps = { ...acc, ...defined };
+  return sanitizeAnsi(squashInlineChildren(node.children, merged));
+}
+
+// Squash an array of inline children into styled text. Shared by text /
+// virtual-text nodes AND by a standalone <Transform> rendered as an inline text
+// node (G58) — in Ink a <Transform> IS an ink-text host, so its bare-string /
+// <Newline> / nested <Text> children squash exactly like any ink-text's
+// children (squash-text-nodes.ts).
+//
+// `transformIndex` is the child's POSITIONAL index among the siblings React
+// would have produced as DOM childNodes — matching Ink squash-text-nodes.ts:13
+// where `internal_transform(text, index)` receives the loop index over
+// `node.childNodes`. In React a `null`/`undefined`/`false` child produces NO
+// childNode, so it never advances `index`; Vue, by contrast, materializes those
+// renders as COMMENT host nodes that DO occupy a positional slot in
+// `node.children`. We therefore advance `transformIndex` only for real children
+// (skipping comments), so a nested <Transform> preceded by a `{null}` sibling
+// still gets index 1 (not 2) — Ink parity (G52). A real <Transform> among real
+// siblings still gets its correct positional index (G21).
+function squashInlineChildren(children: readonly TuiNode[], merged: TextProps): string {
   let out = "";
-  // `transformIndex` is the child's POSITIONAL index among the siblings React
-  // would have produced as DOM childNodes — matching Ink squash-text-nodes.ts:13
-  // where `internal_transform(text, index)` receives the loop index over
-  // `node.childNodes`. In React a `null`/`undefined`/`false` child produces NO
-  // childNode, so it never advances `index`; Vue, by contrast, materializes
-  // those renders as COMMENT host nodes that DO occupy a positional slot in
-  // `node.children`. We therefore advance `transformIndex` only for real
-  // children (skipping comments), so a nested <Transform> preceded by a `{null}`
-  // sibling still gets index 1 (not 2) — Ink parity (G52). A real <Transform>
-  // among real siblings still gets its correct positional index (G21).
   let transformIndex = 0;
-  for (const child of node.children) {
+  for (const child of children) {
     out += squashTransformChild(child, transformIndex, merged);
     // Comments (Vue's null/v-if/false renders) contribute "" and, like React's
     // absent childNodes, must NOT advance the transform index.
     if (child.type !== "comment") transformIndex++;
   }
-  return sanitizeAnsi(out);
+  return out;
+}
+
+// Render a standalone <Transform> (one NOT rendered inline inside a <Text>, and
+// with no yoga-carrying children) as if it were an inline text node — its
+// direct text-leaf / virtual-text / <Newline> children are squashed into a
+// string. The transform's OWN fn is intentionally NOT applied here: it is pushed
+// as a line-transformer onto the Output write (paintNode "transform" case), so
+// it applies per LINE at paint time, matching Ink where internal_transform runs
+// in the Output, never in squashTextNodes for the node it lives on. (G58)
+function renderTransformAsText(node: TuiTransform, acc: TextProps = {}): string {
+  if (!node.children || node.children.length === 0) return "";
+  return sanitizeAnsi(squashInlineChildren(node.children, acc));
 }
 
 // Squash a single inline child into styled text, recursing GENERICALLY into
@@ -549,6 +573,28 @@ function paintNode(
       const x = x0 + layout.left;
       const y = y0 + layout.top;
       const next = [node.transform, ...transformers];
+      // Standalone <Transform> with DIRECT inline children (bare strings,
+      // <Newline>, and no yoga-carrying <Text>/<Box> child): Ink models
+      // <Transform> as an ink-text host, so these children render INLINE within
+      // the transform's own text — they never reach paintNode as separate write
+      // ops. Squash them to a string and write it like a text node, with the
+      // transform applied per line via the Output's line-transformers (`next`).
+      // Without this the direct text-leaf children would hit the no-op leaf
+      // branch and be silently dropped (G58).
+      if (!transformHasYogaChild(node)) {
+        const bgProps: TextProps = inheritedBg ? { backgroundColor: inheritedBg } : {};
+        const text = renderTransformAsText(node, bgProps);
+        // Empty text: skip so the per-line transform isn't applied to "" (Ink
+        // only writes ink-text when squashed text length > 0).
+        if (text === "") return;
+        const cellWidth = Math.max(1, Math.floor(layout.width));
+        const wrapped = wrapText(text, cellWidth, "wrap");
+        output.write(x, y, wrapped, next);
+        return;
+      }
+      // Transform wrapping a yoga-carrying child (e.g. <Transform><Text>…)
+      // — recurse so the child <Text>/<Box> lays out and paints normally, with
+      // the transform pushed onto the line-transformers.
       for (const child of node.children) paintNode(child, output, x, y, next, inheritedBg);
       return;
     }

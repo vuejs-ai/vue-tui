@@ -9,7 +9,12 @@ import type {
   TuiText,
   TuiTransform,
 } from "./nodes.ts";
-import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
+import {
+  flattenLeaves,
+  flattenTransformLeaves,
+  measureTextNatural,
+  wrapText,
+} from "./text-measure.ts";
 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;
 
@@ -87,7 +92,20 @@ export function attachYoga(node: YogaCarrier): void {
     (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
     (node.yoga as YogaNode).setFlexShrink(1);
     (node.yoga as YogaNode).setFlexGrow(0);
+    // A standalone <Transform> with DIRECT inline children (bare strings,
+    // <Newline>) is, in Ink, an ink-text host that measures its own squashed
+    // text. Bind a text-style measure func so such a transform gets a real size
+    // (its text-leaf children carry no yoga node of their own). The measure func
+    // is cleared the moment a yoga-carrying child (e.g. <Text>) is inserted —
+    // yoga forbids a node with both a measure func and children — and re-bound
+    // when the last such child is removed. (G58)
+    bindTransformMeasure(node);
   }
+}
+
+/** A transform yoga node has at least one yoga-carrying child (e.g. a <Text>). */
+export function transformHasYogaChild(node: TuiTransform): boolean {
+  return (node.yoga as YogaNode).getChildCount() > 0;
 }
 
 export function detachYoga(node: YogaCarrier): void {
@@ -98,12 +116,16 @@ export function detachYoga(node: YogaCarrier): void {
 // Skips any siblings that don't carry a yoga node or that were excluded
 // from the yoga tree (e.g., transform nodes inside text parents).
 function yogaIndexFor(parent: TuiContainer, child: TuiNode): number {
-  const isTextParent = parent.type === "text" || parent.type === "virtual-text";
+  // A transform parent is also a text context (Ink models <Transform> as
+  // ink-text), so a transform child of it is inline and excluded from yoga —
+  // same as for a text/virtual-text parent. (G58 MF2)
+  const isTextParent =
+    parent.type === "text" || parent.type === "virtual-text" || parent.type === "transform";
   let yIdx = 0;
   for (const sibling of parent.children) {
     if (sibling === child) return yIdx;
     if (hasYoga(sibling)) {
-      // Transform nodes inside text parents are not in the yoga tree.
+      // Transform nodes inside text/transform parents are not in the yoga tree.
       if (isTextParent && sibling.type === "transform") continue;
       yIdx++;
     }
@@ -113,12 +135,25 @@ function yogaIndexFor(parent: TuiContainer, child: TuiNode): number {
 
 export function insertYogaChild(parent: TuiContainer, child: TuiNode, _domIndex: number): void {
   if (!hasYoga(parent) || !hasYoga(child)) return;
-  // Transform nodes inside a Text parent are inline: they participate in
-  // renderTextWithInlineStyles, not in yoga layout. Skip inserting them
-  // into the yoga tree to avoid corrupting text measurement.
+  // Transform nodes inside a Text OR another Transform parent are inline: they
+  // participate in renderTextWithInlineStyles / squashTransformChild, not in yoga
+  // layout. Skip inserting them into the yoga tree to avoid corrupting text
+  // measurement — the enclosing standalone transform measures the whole squashed
+  // text (incl. this inline transform's effect via flattenTransformLeaves), so
+  // making it a yoga child would (a) double-count it and (b) clear the parent's
+  // measure func, leaving the inner width unreserved. (G58 MF2; G32 keeps working
+  // because a transform-in-transform inside a <Text> was already excluded as a
+  // child of an inline transform here.)
   // (VirtualText parents are already excluded by the hasYoga check above.)
-  if (child.type === "transform" && parent.type === "text") {
+  if (child.type === "transform" && (parent.type === "text" || parent.type === "transform")) {
     return;
+  }
+  // A transform with a yoga-carrying child (e.g. <Transform><Text>…) lays out
+  // from that child, not from a measure func. Yoga forbids a node having both a
+  // measure func and children, so clear the standalone-transform measure func
+  // before inserting the child. (G58)
+  if (parent.type === "transform") {
+    (parent.yoga as YogaNode).unsetMeasureFunc();
   }
   const yIdx = yogaIndexFor(parent, child);
   (parent.yoga as YogaNode).insertChild(child.yoga as YogaNode, yIdx);
@@ -126,11 +161,18 @@ export function insertYogaChild(parent: TuiContainer, child: TuiNode, _domIndex:
 
 export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
   if (!hasYoga(parent) || !hasYoga(child)) return;
-  // Transform nodes inside a text parent were never inserted into yoga.
-  if (child.type === "transform" && parent.type === "text") {
+  // Transform nodes inside a text/transform parent were never inserted into yoga
+  // (mirror of insertYogaChild's inline-transform skip). (G58 MF2)
+  if (child.type === "transform" && (parent.type === "text" || parent.type === "transform")) {
     return;
   }
   (parent.yoga as YogaNode).removeChild(child.yoga as YogaNode);
+  // If removing the last yoga child from a transform, restore the inline-text
+  // measure func so the transform can still size its direct text-leaf children
+  // (it has become a standalone inline-text transform again). (G58)
+  if (parent.type === "transform" && (parent.yoga as YogaNode).getChildCount() === 0) {
+    bindTransformMeasure(parent as TuiTransform);
+  }
 }
 
 // --- prop application ----------------------------------------------------
@@ -429,4 +471,32 @@ export function bindTextMeasure(text: TuiText): void {
 
 export function markTextDirty(text: TuiText): void {
   text.yoga.markDirty();
+}
+
+// Measure func for a standalone <Transform> rendered as an inline text node
+// (G58). It squashes the transform's direct inline children (bare strings,
+// <Newline>, nested <Text>→virtual-text) the same way bindTextMeasure squashes a
+// <Text>'s children. Crucially the transform's OWN fn is NOT applied here —
+// matching Ink, where measureTextNode squashes via squashTextNodes (which never
+// applies the node's own internal_transform) and the transform runs only at
+// Output paint time. So the reserved width is the UNtransformed text width; the
+// transform may make the painted text wider/narrower, but that is written into
+// the surrounding (wider) container exactly as Ink does.
+export function bindTransformMeasure(node: TuiTransform): void {
+  (node.yoga as YogaNode).setMeasureFunc((availableWidth) => {
+    const raw = flattenTransformLeaves(node);
+    if (raw === "") return { width: 0, height: 0 };
+
+    const natural = measureTextNatural(raw);
+    if (natural.width <= availableWidth) return natural;
+    if (natural.width >= 1 && availableWidth > 0 && availableWidth < 1) {
+      return natural;
+    }
+    const wrapped = wrapText(raw, availableWidth, "wrap");
+    return measureTextNatural(wrapped.join("\n"));
+  });
+}
+
+export function markTransformDirty(node: TuiTransform): void {
+  (node.yoga as YogaNode).markDirty();
 }

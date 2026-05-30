@@ -2,6 +2,44 @@ import Yoga from "yoga-layout";
 import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts";
 
 /**
+ * Squash a single child of a text/transform context into plain SR text,
+ * recursing GENERICALLY into transform-typed children to ANY depth and APPLYING
+ * each CHILD transform's own fn. This is the SR twin of paint.ts /
+ * text-measure.ts squashTransformChild and mirrors Ink's squashTextNodes
+ * (squash-text-nodes.ts:22-39): it applies `internal_transform` for child nodes
+ * (line 34) but NEVER for the top-level node it is handed — that node's own fn is
+ * applied by the caller (Output), not by squash. So a nested <Transform>'s own fn
+ * IS applied here (it is a child), while a STANDALONE <Transform>'s own fn is left
+ * to the transform-branch caller below. (G58 MF3 / G32)
+ */
+function squashChildSR(child: TuiNode, index: number): string {
+  if (child.type === "text-leaf") {
+    return child.value;
+  }
+  if (child.type === "virtual-text" || child.type === "text") {
+    return squashTextContent(child);
+  }
+  if (child.type === "transform") {
+    let innerText = "";
+    // Recurse into the transform's children (each may itself be a transform,
+    // recursed to any depth), skipping Vue comment nodes for the index basis
+    // (G52), then apply THIS child transform's own fn (it is a child). Matches
+    // Ink squash-text-nodes.ts:34 (`internal_transform(nodeText, index)`).
+    let grandIndex = 0;
+    for (const grandchild of child.children) {
+      innerText += squashChildSR(grandchild, grandIndex);
+      if (grandchild.type !== "comment") grandIndex++;
+    }
+    if (innerText.length > 0 && child.transform) {
+      innerText = child.transform(innerText, index);
+    }
+    return innerText;
+  }
+  // Comments, boxes, etc. contribute nothing to squashed SR text.
+  return "";
+}
+
+/**
  * Squash text content from a text/virtual-text node tree into plain text
  * (no ANSI styling), suitable for screen reader output.
  */
@@ -14,28 +52,11 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
   // positional slot in node.children, but React skips null children, so comments
   // must NOT advance the index. Staying in lockstep with paint/measure keeps the
   // <Transform> second argument identical across all three squash paths (G52).
-  // A real nested <Transform> still receives its sibling position (G21).
+  // A real nested <Transform> still receives its sibling position (G21), and a
+  // transform-in-transform is recursed to any depth via squashChildSR (G32).
   let index = 0;
   for (const child of node.children) {
-    if (child.type === "text-leaf") {
-      text += child.value;
-    } else if (child.type === "virtual-text") {
-      text += squashTextContent(child);
-    } else if (child.type === "transform") {
-      // Recurse into transform children, then apply the transform function.
-      let innerText = "";
-      for (const grandchild of child.children) {
-        if (grandchild.type === "text-leaf") {
-          innerText += grandchild.value;
-        } else if (grandchild.type === "virtual-text" || grandchild.type === "text") {
-          innerText += squashTextContent(grandchild);
-        }
-      }
-      if (innerText.length > 0 && child.transform) {
-        innerText = child.transform(innerText, index);
-      }
-      text += innerText;
-    }
+    text += squashChildSR(child, index);
     // Comments (Vue's null/v-if/false renders) contribute nothing and, like
     // React's absent childNodes, must NOT advance the transform index.
     if (child.type !== "comment") index++;
@@ -155,16 +176,23 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
     // concatenated children. A nested <Transform> inside a <Text> DOES get its
     // transform applied (see squashTextContent above), because there it is a
     // *child* being squashed by its parent text node.
-    const children = node.children;
-    output = children
-      .map((childNode) =>
-        renderScreenReaderOutput(childNode, {
-          parentRole: options.parentRole,
-          skipStaticElements: options.skipStaticElements,
-        }),
-      )
-      .filter(Boolean)
-      .join("");
+    // Squash the transform's children with "" via squashChildSR, which APPLIES
+    // each CHILD transform's own fn (Ink squashTextNodes:34) and includes
+    // text-leaf / virtual-text / nested-transform descendants to any depth.
+    // text-leaf / virtual-text / nested <Transform> are not handled by
+    // renderScreenReaderOutput's node switch, so we must NOT delegate to it here —
+    // doing so would (a) drop direct bare-string children (G58) and (b) skip a
+    // nested transform's OWN fn (which Ink applies because it is a child) (G58
+    // MF3). The CURRENT transform's own fn is intentionally NOT applied: it is the
+    // top-level node handed to squash, so its fn runs in Output, not squash. The
+    // `index` skips Vue comment nodes for parity with paint/measure (G52). (G58)
+    let index = 0;
+    let squashed = "";
+    for (const childNode of node.children) {
+      squashed += squashChildSR(childNode, index);
+      if (childNode.type !== "comment") index++;
+    }
+    output = squashed;
   }
 
   // Add accessibility annotations
