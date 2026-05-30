@@ -26,7 +26,7 @@ describe("grapheme-aware clipping (issue #21)", () => {
     expect(frame).not.toContain("👨");
   });
 
-  test("left-edge wide grapheme straddle positions following text correctly", async () => {
+  test("left-edge wide grapheme straddle starts following text at clip origin (Ink parity)", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -38,7 +38,13 @@ describe("grapheme-aware clipping (issue #21)", () => {
       { columns: 100 },
     );
     const frame = stripAnsi(lastFrame({ trimLines: true })!);
-    expect(frame.startsWith(" x")).toBe(true);
+    // "中" (width 2) straddles the left clip edge → dropped whole. Ink output.ts:210-212
+    // sets the write origin to the clipped left edge, so the kept "x" starts AT that
+    // origin with NO leading space. Verified against the built Ink reference
+    // (/tmp/ink-40b3a75 renderToString of this exact tree → "x"). Previously this
+    // locked vue-tui's leading-space padding (" x"); rewritten to Ink per the G63
+    // decisions-log entry in .agents/docs/parity-ledger.md.
+    expect(frame).toBe("x");
   });
 
   // absolute-non-edge class (R2-000045): an absolutely-positioned ZWJ emoji is
