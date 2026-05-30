@@ -18,6 +18,7 @@ import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
+import { parseKeypress } from "./io/parse-keypress.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
@@ -1220,10 +1221,32 @@ function createStdinController(
   }
 
   function emitInput(input: string) {
-    // exitOnCtrlC: intercept \x03 BEFORE dispatching to useInput
-    if (input === "\x03" && opts.exitOnCtrlC) {
-      appCtx.exit();
-      return;
+    // exitOnCtrlC: intercept Ctrl+C here — at the always-on stdin controller,
+    // BEFORE dispatching to any listener — so the app exits no matter which
+    // composable holds raw mode (useInput / useFocus / usePaste, or none), and
+    // there's a single source of truth (useInput no longer carries its own
+    // copy). Legacy Ctrl+C is the bare \x03 byte; the kitty keyboard protocol
+    // encodes it as a CSI-u sequence (\x1b[99;5u). Fast-path the \x03 byte and
+    // parse only escape-prefixed sequences, so ordinary keystrokes aren't parsed
+    // here just to be parsed again in useInput. (Ink only checks \x03 and so
+    // never exits under kitty; see .agents/docs/ink-divergences.md.)
+    if (opts.exitOnCtrlC) {
+      if (input === "\x03") {
+        appCtx.exit();
+        return;
+      }
+      // Only an escape sequence can be a kitty-encoded Ctrl+C. `!key.shift`
+      // keeps Ctrl+Shift+C (kitty \x1b[67;6u, a distinct "copy" combo) from
+      // being read as Ctrl+C — the kitty parser lowercases `name` to "c", so
+      // shift is the only signal. (Legacy can't disambiguate the two: both send
+      // \x03 above, so legacy Ctrl+Shift+C still exits, as it always has.)
+      if (input.charCodeAt(0) === 0x1b) {
+        const key = parseKeypress(input);
+        if (key.name === "c" && key.ctrl && !key.shift && key.eventType !== "release") {
+          appCtx.exit();
+          return;
+        }
+      }
     }
     // Esc resets focus when focus is enabled
     if (input === "\x1b" && focusContext.enabled) {

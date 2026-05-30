@@ -97,13 +97,11 @@ export function useInput(
       key.shift = true;
     }
 
-    // exitOnCtrlC: intercept kitty Ctrl+C (\x1b[3;5u). Legacy \x03 is caught
-    // by emitInput in createStdinController and never reaches useInput.
-    if (input === "c" && key.ctrl && stdin?.internal_exitOnCtrlC) {
-      app!.exit();
-      return;
-    }
-
+    // Ctrl+C exit (both the legacy \x03 byte and the kitty CSI-u form) is
+    // handled once, upstream in emitInput (createStdinController), so when
+    // exitOnCtrlC is on Ctrl+C never reaches here — and useInput forwards every
+    // key it does receive. Keeping the exit in one always-on place is what makes
+    // it fire for useFocus/usePaste-only apps too; don't re-add a copy here.
     handler(input, key);
   }
 
