@@ -1,11 +1,12 @@
 import { defineComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, measureText } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
+import stringWidth from "string-width";
 
 function lineWidth(text: string): number {
-  return measureText(stripAnsi(text), 9999).width;
+  return stringWidth(stripAnsi(text));
 }
 
 describe("grapheme-aware clipping (issue #21)", () => {

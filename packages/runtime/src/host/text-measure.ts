@@ -124,18 +124,6 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   return cliTruncate(text, width, { position }).split("\n");
 }
 
-export function measureText(
-  text: string,
-  width: number,
-  mode: WrapMode = "wrap",
-): { width: number; height: number } {
-  const wrapped = wrapText(text, width, mode);
-  return {
-    width: wrapped.reduce((max, line) => Math.max(max, stringWidth(line)), 0),
-    height: wrapped.length,
-  };
-}
-
 /**
  * Natural (unwrapped) dimensions of `text`, mode-independent. Mirrors Ink's
  * measure-text.js: width = widest line, height = number of \n-separated lines.

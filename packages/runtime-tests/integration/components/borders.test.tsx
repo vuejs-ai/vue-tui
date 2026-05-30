@@ -1,8 +1,9 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, measureText } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
+import stringWidth from "string-width";
 
 // single node — full width box
 test("single node - full width box", async ({ expect }) => {
@@ -977,7 +978,7 @@ test("arrow border on narrow box does not overflow", async ({ expect }) => {
   );
   const frame = lastFrame()!;
   for (const line of frame.split("\n")) {
-    expect(measureText(stripAnsi(line), 9999).width).toBeLessThanOrEqual(3);
+    expect(stringWidth(stripAnsi(line))).toBeLessThanOrEqual(3);
   }
   const stripped = stripAnsi(frame);
   expect(stripped.split("\n")[0]).toContain("↘");

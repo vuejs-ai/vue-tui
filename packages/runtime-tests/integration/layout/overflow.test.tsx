@@ -1,8 +1,9 @@
 import { defineComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, Transform, measureText } from "@vue-tui/runtime";
+import { Box, Text, Transform } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
+import stringWidth from "string-width";
 
 /** Build a round-border box string like boxen(text, { borderStyle: "round" }) */
 function box(text: string): string {
@@ -586,7 +587,7 @@ test("out of bounds writes do not crash", async () => {
 // --- absolute overlay wide glyph clipping (issue #10) ---
 
 function lineWidth(text: string): number {
-  return measureText(stripAnsi(text), 9999).width;
+  return stringWidth(stripAnsi(text));
 }
 
 describe("absolute overlay wide glyph clipping", () => {

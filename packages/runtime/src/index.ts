@@ -38,4 +38,6 @@ export {
   type KittyKeyboardOptions,
   type KittyFlagName,
 } from "./io/kitty-keyboard.ts";
-export { measureText, measureTextNatural } from "./host/text-measure.ts";
+// `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
+// its `measure-text` module internal, and so do we. They remain internal helpers
+// (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.
