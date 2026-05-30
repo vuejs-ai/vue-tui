@@ -727,7 +727,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
       const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-      if (hasStaticOutput) {
+      // fullStaticOutput is the accumulated <Static> history. Mirror Ink's three
+      // onRender branches: it accumulates in the DEBUG branch (ink.tsx:550-553)
+      // and the normal-interactive branch (ink.tsx:626-628), but NOT in the
+      // dedicated interactive screen-reader branch (ink.tsx:573-625), which
+      // writes static inline + never clears + never replays history. So we must
+      // accumulate ALWAYS in debug (so the debug writeToStdout/writeToStderr
+      // replay of `fullStaticOutput + lastOutput` still includes static history,
+      // regardless of SR), and otherwise only when NOT in the interactive SR
+      // path. The SR exclusion is non-debug only: accumulating for interactive SR
+      // would also make a later non-SR remount on the same stream replay stale
+      // history (the original G59 motivation).
+      if (hasStaticOutput && (debug || !isScreenReaderEnabled)) {
         frameState.fullStaticOutput += staticOutput;
       }
 
@@ -768,6 +779,59 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.lastOutputToRender = frame;
         frameState.outputHeight = outputHeight;
         writer.write(frame);
+        if (onRender) onRender({ renderTime: performance.now() - start });
+        return;
+      }
+
+      if (isScreenReaderEnabled) {
+        // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
+        // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
+        // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
+        // (inline static, if any) + the wrapped output, then RETURNS — before the
+        // normal interactive frame path. Crucially it:
+        //   - NEVER calls shouldClearTerminalForFrame / emits clearTerminal, so a
+        //     tall/overflowing SR transcript does not wipe the user's scrollback;
+        //   - NEVER accumulates or replays fullStaticOutput (gated above);
+        //   - NEVER routes through the log-update writer (raw writes only);
+        //   - leaves the cursor visible (the mount-time hide is skipped for SR).
+        // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
+        // it plays the role of Ink's `wrappedOutput`.
+        const sync = synchronize;
+        if (sync) stdout.write(bsu);
+
+        if (hasStaticOutput) {
+          // Erase the previous main output before writing new static output
+          // (ink.tsx:579-588), then reset the tracked height to 0.
+          const erase =
+            frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
+          stdout.write(erase + staticOutput);
+          frameState.outputHeight = 0;
+        }
+
+        if (frame === frameState.lastOutput && !hasStaticOutput) {
+          // Unchanged frame and no new static: nothing to write (ink.tsx:590-596).
+          if (sync) stdout.write(esu);
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          return;
+        }
+
+        if (hasStaticOutput) {
+          // Already erased above; write the wrapped output directly.
+          stdout.write(frame);
+        } else {
+          const erase =
+            frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
+          stdout.write(erase + frame);
+        }
+
+        // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
+        // case — empty frame => 0 lines, multi-line frame keeps its true count so
+        // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
+        frameState.lastOutput = frame;
+        frameState.lastOutputToRender = frame;
+        frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
+        if (sync) stdout.write(esu);
         if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
@@ -839,7 +903,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Hide cursor on mount (matching Ink). Only in interactive mode — in
     // debug/test mode or non-interactive the stream may not be a real TTY.
-    if (!debug && interactive && !mountedAlternateScreen) {
+    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): Ink's SR
+    // path never hides the cursor (the dedicated SR write branch above does no
+    // cursor management), so a screen-reader user keeps a real terminal cursor.
+    if (!debug && interactive && !mountedAlternateScreen && !isScreenReaderEnabled) {
       stdout.write("\x1b[?25l");
     }
 
