@@ -175,6 +175,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // Used by the error boundary to route errors through exit().
   let exitWithError: (e: Error) => void = () => {};
 
+  // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
+  // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
+  // captures the value/error and initiates teardown while any subsequent
+  // exit() is a complete no-op. This flag mirrors that guard: it is set
+  // synchronously by the first exit() so a re-entrant exit() (e.g. fired from
+  // inside an unmount-time write callback or a later Vue tick) cannot overwrite
+  // the recorded value or re-resolve the exit promise with a later value.
+  let exitInitiated = false;
+
   let mountedRoot: TuiRoot | null = null;
   let mountedWriter: ReturnType<typeof createFrameWriter> | null = null;
   let mountedStdinController: StdinController | null = null;
@@ -528,16 +537,36 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     const appContext: AppContext = {
       exit(errorOrResult?: unknown) {
+        // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
+        // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
+        // exit() captures its value/error and initiates teardown; any
+        // SUBSEQUENT exit() is a no-op so it can neither overwrite the recorded
+        // value nor re-resolve the exit promise with a later value.
+        //
+        // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
+        // app.unmount() runs teardown()+resolveExit() WITHOUT setting
+        // exitInitiated, so a retained useExit() called re-entrantly DURING
+        // unmount teardown (or any exit() after unmount) would otherwise pass
+        // the exitInitiated check, overwrite pendingExitResult/pendingExitError
+        // and queue a microtask — letting that late value win over the unmount.
+        // Gating on teardownStarted too makes exit() a no-op once unmount/
+        // teardown is in progress. At the FIRST exit() both flags are false, so
+        // a normal exit-from-Vue-cycle still proceeds.
+        if (exitInitiated || teardownStarted) return;
+        exitInitiated = true;
+        // Record the FIRST value/error synchronously (before the deferred
+        // teardown microtask) so a re-entrant exit() — which is blocked above
+        // anyway — and the eventual resolveExit() always settle on this value.
+        if (errorOrResult instanceof Error) {
+          pendingExitError = errorOrResult;
+        } else {
+          pendingExitResult = errorOrResult;
+        }
         // Defer teardown to a microtask: exit() is frequently called from
         // inside the Vue update cycle (useInput handler, setup(), errorHandler)
         // and unmounting synchronously would tear Vue down mid-flush.
         queueMicrotask(() => {
           teardown();
-          if (errorOrResult instanceof Error) {
-            pendingExitError = errorOrResult;
-          } else {
-            pendingExitResult = errorOrResult;
-          }
           resolveExit();
         });
       },

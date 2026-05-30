@@ -151,7 +151,8 @@ test("onScopeDispose fires when exit(error) is called", async () => {
 test("exit(error) followed by exit(value) still rejects", async () => {
   // Edge case: when exit is called with an error first, a subsequent exit()
   // call with a plain value should not override the rejection. The error
-  // should take precedence because teardown runs only once.
+  // should take precedence because the FIRST exit() call wins (Ink parity G33,
+  // isUnmounted||isUnmounting guard).
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
@@ -168,10 +169,9 @@ test("exit(error) followed by exit(value) still rejects", async () => {
   await expect(waitUntilExit()).rejects.toThrow("first-error");
 });
 
-test("exit(value) resolves even when called rapidly twice", async () => {
-  // Verifies rapid duplicate exit() calls don't crash or hang.
-  // Both calls queue microtasks; teardown() is idempotent so
-  // the app shuts down cleanly regardless.
+test("exit(value) resolves with the FIRST value when called rapidly twice", async () => {
+  // First-call-wins (Ink parity G33): the FIRST exit() captures the value and
+  // initiates teardown; the second is a no-op. waitUntilExit resolves "first".
   let exitFn!: (errorOrResult?: unknown) => void;
 
   const App = defineComponent(() => {
@@ -184,20 +184,144 @@ test("exit(value) resolves even when called rapidly twice", async () => {
   exitFn("first");
   exitFn("second");
 
-  // Should resolve without throwing or hanging; second value wins because
-  // both exit() calls queue microtasks that overwrite pendingExitResult
-  // before the write barrier fires.
   const result = await waitUntilExit();
-  expect(result).toBe("second");
+  expect(result).toBe("first");
+});
+
+test("exit(err1) then exit(err2) rejects with the FIRST error", async () => {
+  // First-call-wins for errors (Ink parity G33): the first error is captured
+  // and the second exit() is a no-op, so waitUntilExit rejects with err1.
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+
+  const err1 = new Error("err1");
+  const err2 = new Error("err2");
+  exitFn(err1);
+  exitFn(err2);
+
+  await expect(waitUntilExit()).rejects.toBe(err1);
+});
+
+test("exit(value) then exit(error) resolves with the FIRST value", async () => {
+  // value→error ordering (Ink parity G33): the FIRST exit() captures the value
+  // and initiates teardown; the later exit(error) is a complete no-op, so
+  // waitUntilExit RESOLVES with the original value rather than rejecting.
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+
+  exitFn("x");
+  exitFn(new Error("e"));
+
+  await expect(waitUntilExit()).resolves.toBe("x");
+});
+
+test("exit('late') after app.unmount() is a no-op (unmount value wins)", async () => {
+  // isUnmounting parity (Ink parity G33): app.unmount() runs teardown()+
+  // resolveExit() without setting exitInitiated. A retained useExit() called
+  // AFTER unmount has started teardown must be a complete no-op — it must not
+  // overwrite the resolved exit value. waitUntilExit resolves the original
+  // unmount value (undefined), NOT 'late'. Without the teardownStarted guard in
+  // exit(), the late exit captures 'late' into pendingExitResult and 'late'
+  // wins; the guard makes it a no-op.
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { unmount, waitUntilExit } = await render(App);
+
+  unmount();
+  exitFn("late");
+
+  await expect(waitUntilExit()).resolves.toBeUndefined();
+});
+
+test("retained exit() re-entered DURING unmount teardown writes is a no-op", async () => {
+  // isUnmounting parity (Ink parity G33), faithful reentrancy: a useExit()
+  // captured during setup is invoked re-entrantly from inside the stdout write
+  // that unmount()'s final commit performs. teardownStarted is already true at
+  // that point, so exit("reentrant") is a complete no-op and the original
+  // unmount value (undefined) wins. Without the teardownStarted guard the
+  // re-entrant exit would overwrite pendingExitResult before resolveExit runs.
+  let exitFn: ((value?: unknown) => void) | undefined;
+  let shouldReenterExit = false;
+  let didReenterExit = false;
+
+  const stdout = new Writable({
+    write(
+      _chunk: string | Uint8Array,
+      _encoding: BufferEncoding,
+      callback: (error?: Error) => void,
+    ) {
+      if (shouldReenterExit && !didReenterExit && exitFn) {
+        didReenterExit = true;
+        exitFn("reentrant");
+      }
+      callback();
+    },
+  }) as unknown as NodeJS.WriteStream;
+  stdout.columns = 100;
+  stdout.isTTY = true;
+
+  const App = defineComponent(() => {
+    const exit = useExit();
+    onMounted(() => {
+      exitFn = exit;
+    });
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  // Let the app mount and capture exitFn, then trigger unmount. unmount()'s
+  // final commit writes to stdout, which re-enters exit("reentrant") while
+  // teardownStarted is already true.
+  await new Promise((r) => setTimeout(r, 0));
+  shouldReenterExit = true;
+  app.unmount();
+
+  const result = await app.waitUntilExit();
+  expect(didReenterExit).toBe(true);
+  expect(result).toBeUndefined();
+});
+
+test("single exit('x') resolves with 'x' (control)", async () => {
+  let exitFn!: (errorOrResult?: unknown) => void;
+
+  const App = defineComponent(() => {
+    exitFn = useExit();
+    return () => <Text>hello</Text>;
+  });
+
+  const { waitUntilExit } = await render(App);
+
+  exitFn("x");
+  await expect(waitUntilExit()).resolves.toBe("x");
 });
 
 // --- Exit re-entrance tests (ported from Ink render.tsx) ---
 
-test("waitUntilExit resolves last exit value when duplicate exits happen during teardown", async () => {
-  // In vue-tui, exit() queues a microtask that overwrites pendingExitResult
-  // before the write barrier callback fires. When exit() is called twice,
-  // the second call's value wins because both microtasks run before the
-  // write barrier resolves (Ink preserves the first value instead).
+test("waitUntilExit resolves FIRST exit value when duplicate exits happen during teardown", async () => {
+  // First-call-wins (Ink parity G33): the FIRST exit() captures the value and
+  // initiates teardown; a later exit() is a complete no-op, so waitUntilExit
+  // resolves "first" regardless of write-barrier timing.
   let barrierWriteCallback: (() => void) | undefined;
 
   const stdout = new Writable({
@@ -236,12 +360,13 @@ test("waitUntilExit resolves last exit value when duplicate exits happen during 
     barrierWriteCallback();
   }
   const result = await exitPromise;
-  expect(result).toBe("second");
+  expect(result).toBe("first");
 });
 
-test("waitUntilExit resolves last exit value when exit is re-entered during unmount writes", async () => {
-  // Same as above: the re-entrant exit("second") overwrites pendingExitResult
-  // because teardown() is idempotent but the result assignment still executes.
+test("waitUntilExit resolves FIRST exit value when exit is re-entered during unmount writes", async () => {
+  // First-call-wins (Ink parity G33): a re-entrant exit("second") during the
+  // unmount write is a no-op because exitInitiated is already set, so
+  // waitUntilExit resolves the original "first" value.
   let exitFn: ((value?: unknown) => void) | undefined;
   let shouldReenterExit = false;
   let didReenterExit = false;
@@ -279,7 +404,7 @@ test("waitUntilExit resolves last exit value when exit is re-entered during unmo
 
   const result = await app.waitUntilExit();
   expect(didReenterExit).toBe(true);
-  expect(result).toBe("second");
+  expect(result).toBe("first");
 });
 
 test("exit with cross-realm Error resolves after stdout write callback", async () => {
