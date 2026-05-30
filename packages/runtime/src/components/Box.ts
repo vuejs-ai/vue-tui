@@ -1,4 +1,4 @@
-import { defineComponent, h, inject, type PropType } from "vue";
+import { defineComponent, h, inject, type ExtractPublicPropTypes, type PropType } from "vue";
 import type cliBoxes from "cli-boxes";
 import { AppContextKey } from "../context.ts";
 import type { WithChildren } from "./with-children.ts";
@@ -69,94 +69,96 @@ export interface AriaState {
   selected?: boolean;
 }
 
+const boxProps = {
+  flexDirection: String as PropType<FlexDirection>,
+  flexGrow: Number,
+  flexShrink: Number,
+  flexBasis: [Number, String],
+  flexWrap: String as PropType<FlexWrap>,
+  alignItems: String as PropType<Align>,
+  alignSelf: String as PropType<AlignSelf>,
+  justifyContent: String as PropType<Justify>,
+  gap: Number,
+  columnGap: Number,
+  rowGap: Number,
+
+  width: [Number, String],
+  height: [Number, String],
+  minWidth: [Number, String],
+  minHeight: [Number, String],
+  maxWidth: [Number, String],
+  maxHeight: [Number, String],
+  aspectRatio: Number,
+  alignContent: String as PropType<AlignContent>,
+  position: String as PropType<"absolute" | "relative" | "static">,
+  top: [Number, String],
+  right: [Number, String],
+  bottom: [Number, String],
+  left: [Number, String],
+
+  margin: Number as PropType<Spacing>,
+  marginX: Number,
+  marginY: Number,
+  marginTop: Number,
+  marginBottom: Number,
+  marginLeft: Number,
+  marginRight: Number,
+  padding: Number,
+  paddingX: Number,
+  paddingY: Number,
+  paddingTop: Number,
+  paddingBottom: Number,
+  paddingLeft: Number,
+  paddingRight: Number,
+
+  // Accept either a preset name string or a full custom BoxStyle object (Ink parity, G13).
+  // Ink types borderStyle as `keyof Boxes | BoxStyle`; we mirror that here.
+  borderStyle: [String, Object] as PropType<BorderStyle | BoxStyle>,
+  borderColor: [String, Array],
+  // `default: undefined` is intentional and load-bearing: Vue's boolean-casting
+  // rule coerces absent Boolean props to `false` only when there is no explicit
+  // default. Adding `default: undefined` suppresses that coercion so absent
+  // per-edge dim props arrive in the paint pass as `undefined`, not `false`.
+  // This lets `edgeDim = (perEdge ?? generalDim)` correctly fall back to the
+  // general value only when the per-edge prop was truly omitted — mirroring
+  // Ink render-border.ts:54 which uses real-undefined via React's prop model
+  // (G16). The `Boolean` type is kept so Vue still accepts bare-attribute
+  // `<Box borderDimColor>` in templates (coerces `""` → `true`) and passes
+  // TypeScript type-checking for consumers.
+  borderDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+  borderTopDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+  borderBottomDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+  borderLeftDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+  borderRightDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
+  borderTop: { type: Boolean, default: true },
+  borderBottom: { type: Boolean, default: true },
+  borderLeft: { type: Boolean, default: true },
+  borderRight: { type: Boolean, default: true },
+  borderTopColor: [String, Array],
+  borderBottomColor: [String, Array],
+  borderLeftColor: [String, Array],
+  borderRightColor: [String, Array],
+  borderBackgroundColor: [String, Array],
+  borderTopBackgroundColor: [String, Array],
+  borderBottomBackgroundColor: [String, Array],
+  borderLeftBackgroundColor: [String, Array],
+  borderRightBackgroundColor: [String, Array],
+
+  backgroundColor: [String, Array],
+  overflow: String as PropType<"visible" | "hidden">,
+  overflowX: String as PropType<"visible" | "hidden">,
+  overflowY: String as PropType<"visible" | "hidden">,
+  display: String as PropType<"flex" | "none">,
+
+  ariaLabel: String,
+  ariaHidden: Boolean,
+  ariaRole: String as PropType<AriaRole>,
+  ariaState: Object as PropType<AriaState>,
+};
+
 const BoxImpl = defineComponent({
   name: "Box",
-  props: {
-    flexDirection: String as PropType<FlexDirection>,
-    flexGrow: Number,
-    flexShrink: Number,
-    flexBasis: [Number, String],
-    flexWrap: String as PropType<FlexWrap>,
-    alignItems: String as PropType<Align>,
-    alignSelf: String as PropType<AlignSelf>,
-    justifyContent: String as PropType<Justify>,
-    gap: Number,
-    columnGap: Number,
-    rowGap: Number,
-
-    width: [Number, String],
-    height: [Number, String],
-    minWidth: [Number, String],
-    minHeight: [Number, String],
-    maxWidth: [Number, String],
-    maxHeight: [Number, String],
-    aspectRatio: Number,
-    alignContent: String as PropType<AlignContent>,
-    position: String as PropType<"absolute" | "relative" | "static">,
-    top: [Number, String],
-    right: [Number, String],
-    bottom: [Number, String],
-    left: [Number, String],
-
-    margin: Number as PropType<Spacing>,
-    marginX: Number,
-    marginY: Number,
-    marginTop: Number,
-    marginBottom: Number,
-    marginLeft: Number,
-    marginRight: Number,
-    padding: Number,
-    paddingX: Number,
-    paddingY: Number,
-    paddingTop: Number,
-    paddingBottom: Number,
-    paddingLeft: Number,
-    paddingRight: Number,
-
-    // Accept either a preset name string or a full custom BoxStyle object (Ink parity, G13).
-    // Ink types borderStyle as `keyof Boxes | BoxStyle`; we mirror that here.
-    borderStyle: [String, Object] as PropType<BorderStyle | BoxStyle>,
-    borderColor: [String, Array],
-    // `default: undefined` is intentional and load-bearing: Vue's boolean-casting
-    // rule coerces absent Boolean props to `false` only when there is no explicit
-    // default. Adding `default: undefined` suppresses that coercion so absent
-    // per-edge dim props arrive in the paint pass as `undefined`, not `false`.
-    // This lets `edgeDim = (perEdge ?? generalDim)` correctly fall back to the
-    // general value only when the per-edge prop was truly omitted — mirroring
-    // Ink render-border.ts:54 which uses real-undefined via React's prop model
-    // (G16). The `Boolean` type is kept so Vue still accepts bare-attribute
-    // `<Box borderDimColor>` in templates (coerces `""` → `true`) and passes
-    // TypeScript type-checking for consumers.
-    borderDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
-    borderTopDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
-    borderBottomDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
-    borderLeftDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
-    borderRightDimColor: { type: Boolean as PropType<boolean | undefined>, default: undefined },
-    borderTop: { type: Boolean, default: true },
-    borderBottom: { type: Boolean, default: true },
-    borderLeft: { type: Boolean, default: true },
-    borderRight: { type: Boolean, default: true },
-    borderTopColor: [String, Array],
-    borderBottomColor: [String, Array],
-    borderLeftColor: [String, Array],
-    borderRightColor: [String, Array],
-    borderBackgroundColor: [String, Array],
-    borderTopBackgroundColor: [String, Array],
-    borderBottomBackgroundColor: [String, Array],
-    borderLeftBackgroundColor: [String, Array],
-    borderRightBackgroundColor: [String, Array],
-
-    backgroundColor: [String, Array],
-    overflow: String as PropType<"visible" | "hidden">,
-    overflowX: String as PropType<"visible" | "hidden">,
-    overflowY: String as PropType<"visible" | "hidden">,
-    display: String as PropType<"flex" | "none">,
-
-    ariaLabel: String,
-    ariaHidden: Boolean,
-    ariaRole: String as PropType<AriaRole>,
-    ariaState: Object as PropType<AriaState>,
-  },
+  props: boxProps,
   setup(props, { slots }) {
     const appCtx = inject(AppContextKey, null);
 
@@ -177,3 +179,6 @@ const BoxImpl = defineComponent({
 });
 
 export const Box = BoxImpl as WithChildren<typeof BoxImpl>;
+
+/** Props accepted by `<Box>` — the vue-tui analogue of Ink's `BoxProps`. */
+export type BoxProps = ExtractPublicPropTypes<typeof boxProps>;

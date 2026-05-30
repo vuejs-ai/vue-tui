@@ -1,8 +1,10 @@
-import { defineComponent, getCurrentInstance, h } from "vue";
+import { defineComponent, getCurrentInstance, h, type ExtractPublicPropTypes } from "vue";
+
+const newlineProps = { count: { type: Number, default: 1 } };
 
 export const Newline = defineComponent({
   name: "Newline",
-  props: { count: { type: Number, default: 1 } },
+  props: newlineProps,
   setup(props) {
     return () => {
       const content = "\n".repeat(props.count);
@@ -30,3 +32,6 @@ function isInsideText(): boolean {
   }
   return false;
 }
+
+/** Props accepted by `<Newline>` — the vue-tui analogue of Ink's `NewlineProps`. */
+export type NewlineProps = ExtractPublicPropTypes<typeof newlineProps>;
