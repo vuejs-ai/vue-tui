@@ -1,12 +1,25 @@
-import { defineComponent, h, shallowRef, watch, type PropType } from "vue";
+import {
+  defineComponent,
+  h,
+  shallowRef,
+  watch,
+  type ExtractPublicPropTypes,
+  type PropType,
+} from "vue";
 import type { WithChildren } from "./with-children.ts";
+
+const staticProps = {
+  // `required: true as const` (not bare `true`): a standalone `const` widens
+  // `true` → `boolean`, which would drop `items` from ExtractPublicPropTypes'
+  // required keys (and from the component's own `props.items` typing). The
+  // literal keeps `items` required, matching Ink's `StaticProps`.
+  items: { type: Array as PropType<unknown[]>, required: true as const },
+  style: { type: Object as PropType<Record<string, unknown>>, default: undefined },
+};
 
 const StaticImpl = defineComponent({
   name: "Static",
-  props: {
-    items: { type: Array as PropType<unknown[]>, required: true },
-    style: { type: Object as PropType<Record<string, unknown>>, default: undefined },
-  },
+  props: staticProps,
   setup(props, { slots }) {
     const defaultStyle: Record<string, unknown> = {
       position: "absolute",
@@ -64,3 +77,6 @@ const StaticImpl = defineComponent({
 });
 
 export const Static = StaticImpl as WithChildren<typeof StaticImpl>;
+
+/** Props accepted by `<Static>` — the vue-tui analogue of Ink's `StaticProps`. */
+export type StaticProps = ExtractPublicPropTypes<typeof staticProps>;
