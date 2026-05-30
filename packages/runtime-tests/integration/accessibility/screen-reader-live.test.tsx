@@ -1,5 +1,6 @@
-import { defineComponent, nextTick } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
+import ansiEscapes from "ansi-escapes";
 import { Box, createApp, Static, Text } from "@vue-tui/runtime";
 import {
   makeFakeStdin,
@@ -177,6 +178,70 @@ test.sequential("empty SR frame does not write a spurious blank trailing line", 
   // must produce zero output lines (Ink: wrappedOutput === "" writes nothing).
   expect(content).not.toContain("\n");
   expect(content).toBe("");
+
+  app.unmount();
+});
+
+// G46 (Ink parity): a NON-empty multi-line SR frame must be written verbatim
+// with NO appended trailing newline, matching Ink's SR branch (ink.tsx:617-621):
+// stdout.write(erase + wrappedOutput); lastOutputToRender = wrappedOutput (no
+// "\n"); lastOutputHeight = wrappedOutput.split("\n").length. G17 only handled
+// the empty case, so a 2-line frame "Line one\nLine two" got a spurious "\n"
+// appended — parking the cursor on a blank line below content AND making every
+// subsequent multi-line SR frame erase N+1 lines instead of N (off-by-one).
+test.sequential("non-empty multi-line SR frame appends no trailing newline and erases exactly N lines", async () => {
+  const labels = shallowRef<[string, string]>(["Line one", "Line two"]);
+  const App = defineComponent(() => {
+    return () => (
+      <Box flexDirection="column">
+        <Text>{labels.value[0]}</Text>
+        <Text>{labels.value[1]}</Text>
+      </Box>
+    );
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    isScreenReaderEnabled: true,
+  });
+
+  await nextTick();
+  await nextTick();
+
+  const firstContent = getContentWrites(writes).join("");
+
+  // (a) The first SR frame must end exactly at the last content line — no
+  // spurious trailing newline below "Line two".
+  expect(firstContent).toContain("Line one\nLine two");
+  expect(firstContent.endsWith("Line two")).toBe(true);
+  expect(firstContent.endsWith("Line two\n")).toBe(false);
+
+  // Reactive update to a second multi-line frame.
+  writes.length = 0;
+  labels.value = ["Line three", "Line four"];
+  await nextTick();
+  await nextTick();
+
+  const secondRaw = writes.join("");
+
+  // (b) The erase for the previous 2-line frame must be exactly eraseLines(2),
+  // NOT eraseLines(3) (the off-by-one caused by the spurious trailing newline).
+  expect(secondRaw).toContain(ansiEscapes.eraseLines(2));
+  expect(secondRaw).not.toContain(ansiEscapes.eraseLines(3));
+
+  // And the second frame is itself written verbatim with no trailing newline.
+  const secondContent = getContentWrites(writes).join("");
+  expect(secondContent.endsWith("Line four")).toBe(true);
+  expect(secondContent.endsWith("Line four\n")).toBe(false);
 
   app.unmount();
 });
