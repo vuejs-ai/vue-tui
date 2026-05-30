@@ -592,6 +592,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       setCursorPosition(pos: CursorPosition | undefined) {
         cursorPosition = pos;
         appContext.cursorPosition = pos;
+        // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
+        // BOTH the instance field AND this.log.setCursorPosition(position) on
+        // every render. Forwarding to the frame writer marks log-update's
+        // cursorDirty so getActiveCursor() returns the position and the commit
+        // gate (output !== lastOutput || isCursorDirty) fires the cursor suffix.
+        // Without this the cursor is never shown/moved on the interactive path.
+        // `writer` is created below in mount() but is always initialized before
+        // any render/setup can call this (originalMount runs after writer creation),
+        // so the optional-chain guards only the pre-mount appContext shape.
+        mountedWriter?.setCursorPosition(pos);
       },
     };
     mountedAppContext = appContext;
@@ -676,14 +686,33 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdout.write(staticOutput);
         writer.write(outputToRender);
         if (synchronize) stdout.write(esu);
-      } else if (synchronize && writer.willRender(outputToRender)) {
-        // Only emit BSU/ESU when log-update will actually write, so unchanged
-        // frames don't produce empty synchronized-update pairs.
-        stdout.write(bsu);
-        writer.write(outputToRender);
-        stdout.write(esu);
       } else {
-        writer.write(outputToRender);
+        // Mirror Ink's TWO-LEVEL commit gate, which keeps the synchronized-update
+        // wrapper and the "should we touch log-update at all" decision separate:
+        //
+        //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
+        //    decides whether to call the (throttled) log at all. A cursor-only move
+        //    whose position is unchanged from the previous render is still dirty, so
+        //    it must reach log-update — willRender() alone would miss it because it
+        //    compares positions, not the dirty flag. Here that gate is `willRender ||
+        //    isCursorDirty`; when both are false we skip the write entirely.
+        //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
+        //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
+        //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
+        //    flag is reset and the write no-ops cleanly — Ink emits ZERO bytes there,
+        //    not an empty `BSU`+`ESU` pair.
+        //
+        // willRender()/isCursorDirty() must be read BEFORE writer.write():
+        // log-update's render consumes/resets isCursorDirty, so reading them
+        // afterwards would be stale. Both reads are pure (no mutation), and the
+        // bsu/esu wrapper is gated on this single pre-write snapshot.
+        const willRender = writer.willRender(outputToRender);
+        if (willRender || writer.isCursorDirty()) {
+          const shouldWrap = synchronize && willRender;
+          if (shouldWrap) stdout.write(bsu);
+          writer.write(outputToRender);
+          if (shouldWrap) stdout.write(esu);
+        }
       }
 
       frameState.lastOutput = output;
@@ -894,7 +923,49 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     mountedAlternateScreen = alternateScreen;
 
-    const proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+    // Hide cursor on mount (matching Ink). Only in interactive mode — in
+    // debug/test mode or non-interactive the stream may not be a real TTY.
+    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): Ink's SR
+    // path never hides the cursor (the dedicated SR write branch above does no
+    // cursor management), so a screen-reader user keeps a real terminal cursor.
+    //
+    // This MUST happen BEFORE originalMount: mounting flushes Vue synchronously
+    // and the first commit (which, when useCursor() is active, ends with a
+    // showCursor + cursorTo via log-update) runs inside originalMount via a
+    // post-flush callback. Writing the hide afterwards would land AFTER that
+    // show and leave the cursor hidden — the last visibility change must be the
+    // show, mirroring Ink, which hides before its first render, not after.
+    if (!debug && interactive && !mountedAlternateScreen && !isScreenReaderEnabled) {
+      stdout.write("\x1b[?25l");
+    }
+
+    // The cursor (and alternate screen) have already been hidden/entered above,
+    // but the process-exit and signal-exit teardown handlers are not wired until
+    // after originalMount returns (the resize handler below needs `writer`). If
+    // originalMount throws SYNCHRONOUSLY in a way the onErrorCaptured boundary
+    // can't catch — a renderer/patch-level vnode error (e.g. a vnode whose
+    // `type` getter throws) — nothing would ever restore the cursor and the
+    // terminal would be left permanently invisible. Ink avoids this by wiring
+    // signalExit(this.unmount) in its CONSTRUCTOR (ink.tsx:426), before any
+    // hide/render. We get the same "teardown wired before hide" guarantee by
+    // running teardown() (which shows the cursor, leaves the alt screen and
+    // cleans up — idempotent) before rethrowing. The success path is unchanged:
+    // teardown only runs on a throw, so the last visibility change on a normal
+    // mount is still the SHOW emitted by the first commit.
+    let proxy: ComponentPublicInstance;
+    try {
+      proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+    } catch (err) {
+      try {
+        teardown(); // best-effort cursor/alt-screen restore
+      } catch {
+        // teardown's restore write (mountedWriter.done() -> log-update
+        // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
+        // stdout.write fails. A failing best-effort restore must NOT replace
+        // `err` — the ORIGINAL mount error must always survive and be rethrown.
+      }
+      throw err;
+    }
 
     // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
     // async errors in Vue's internal scheduler). The error boundary returns
@@ -902,15 +973,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     baseApp.config.errorHandler = (err) => {
       appContext.exit(err instanceof Error ? err : new Error(String(err)));
     };
-
-    // Hide cursor on mount (matching Ink). Only in interactive mode — in
-    // debug/test mode or non-interactive the stream may not be a real TTY.
-    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): Ink's SR
-    // path never hides the cursor (the dedicated SR write branch above does no
-    // cursor management), so a screen-reader user keeps a real terminal cursor.
-    if (!debug && interactive && !mountedAlternateScreen && !isScreenReaderEnabled) {
-      stdout.write("\x1b[?25l");
-    }
 
     // Only listen for resize in interactive mode (matching Ink).
     // Render synchronously on resize rather than through the commit throttle:
