@@ -103,18 +103,14 @@ deliberate. Divergences fall into a few kinds:
 
 ### Removing `flexDirection` / `flexWrap` resets to the default
 
-- **Ink:** `applyFlexStyles` has no `undefined` branch for `flexDirection`/`flexWrap`, so an
-  explicit `flexDirection={undefined}` leaves the yoga node's **stale** value in place. (For
-  an _omitted_ prop, Ink's `<Box>` re-applies its `row`/`nowrap` default before the style
-  spread.)
-- **vue-tui:** resets `flexDirection`/`flexWrap` to the Box default (`row`/`nowrap`) when the
-  prop is removed across renders.
-- **Why:** **Vue cannot distinguish** an omitted prop from an explicit `undefined` — both
-  collapse to the prop's default — so vue-tui must pick one behavior. It matches Ink's
-  **common** case (omitted → `row`/`nowrap`) and the Vue-idiomatic expectation (drop the
-  override → get the default). The residual difference (explicit `={undefined}` → vue-tui
-  resets, Ink keeps stale) is an unavoidable Vue-vs-React semantic. Maintainer decision
-  (2026-05-30): KEEP.
+- **Ink:** these two props have no reset branch in `applyFlexStyles` (every _other_ flex prop
+  does), so an explicit `flexDirection={undefined}` leaves the previous value in place.
+- **vue-tui:** resets to the Box default (`row` / `nowrap`) — the same state as if the prop
+  had never been set.
+- **Why:** the render is a function of the current props — with no value set you get the
+  default, and (absent a special contract) dropping or changing a prop changes the output.
+  Keeping a previous render's value, as Ink does for these two props, is the anomaly — and an
+  inconsistent one, since every other flex prop resets. Maintainer decision (2026-05-30): KEEP.
 
 ### Other Vue-vs-React semantics _(placeholder)_
 
