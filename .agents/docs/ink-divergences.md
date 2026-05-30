@@ -76,13 +76,6 @@ deliberate. Divergences fall into a few kinds:
 
 ## Additive features (vue-tui is a strict superset)
 
-### Accessibility props — `AriaRole` / `AriaState`
-
-- **Ink:** no equivalent.
-- **vue-tui:** `<Box>` / `<Text>` accept `AriaRole` / `AriaState` props that feed the
-  screen-reader linearization.
-- **Why:** additive accessibility surface; does not change visual (non-SR) rendering.
-
 ### Multiple `<Static>` regions
 
 - **Ink:** keeps a single `staticNode`; only one `<Static>` is honored.
