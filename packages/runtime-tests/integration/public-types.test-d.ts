@@ -4,8 +4,9 @@
 // framework-neutral data shapes under stable names. These names (BoxProps, TextProps,
 // …, WindowSize, CursorPosition) have nothing to do with React vs Vue — a <Box> has
 // props in Vue exactly as in React — so vue-tui re-exports them too, letting consumers
-// name a component's props the same way they would in Ink. See
-// `.agents/docs/ink-divergences.md` ("Named type / prop re-exports").
+// name a component's props the same way they would in Ink. This is parity, not a
+// divergence, so it is deliberately absent from `.agents/docs/ink-divergences.md` (which
+// records only divergences); this test is the guard that the names stay aligned.
 //
 // These assertions are erased at runtime; the real gate is `tsc --noEmit` (the package's
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
