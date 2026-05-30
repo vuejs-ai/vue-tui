@@ -464,4 +464,147 @@ describe("renderToString", () => {
     expect(output).toContain("Nested");
     expect(output).toContain("deep");
   });
+
+  // ── Nested <Text> inherits ancestor styles (Ink wrapping model) ─────────
+  //
+  // Ink composes nested <Text> by WRAPPING: squash-text-nodes.ts concatenates a
+  // node's already-styled children, then the PARENT Text's internal_transform
+  // wraps the WHOLE concatenation. So a parent's boolean styles (bold/italic/
+  // underline/strikethrough/dim) stay OPEN across a nested child — the child only
+  // ADDS its own style on top. The Ink composition is literally
+  // `chalk.<style>("A" + chalk.<childStyle>("B"))`, which is what we assert here.
+  // (The earlier merge-down + per-leaf model closed the parent SGR at the nested
+  // boundary, so bold/underline did NOT survive across the child — that was the
+  // bug this section pins.)
+
+  test("nested <Text> inherits ancestor bold across a colored child", () => {
+    const App = defineComponent(() => () => (
+      <Text bold>
+        A<Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B")));
+  });
+
+  test("nested <Text> inherits ancestor underline across a colored child", () => {
+    const App = defineComponent(() => () => (
+      <Text underline>
+        A<Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.underline("A" + chalk.green("B")));
+  });
+
+  test("ancestor bold stays open across a PLAIN nested child", () => {
+    const App = defineComponent(() => () => (
+      <Text bold>
+        A<Text>B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.bold("A" + "B"));
+  });
+
+  test("nested <Text> inherits ancestor dim across a colored child", () => {
+    const App = defineComponent(() => () => (
+      <Text dimColor>
+        A<Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.dim("A" + chalk.green("B")));
+  });
+
+  test("nested <Text> inherits ancestor italic across a colored child", () => {
+    const App = defineComponent(() => () => (
+      <Text italic>
+        A<Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.italic("A" + chalk.green("B")));
+  });
+
+  test("nested <Text> inherits ancestor strikethrough across a colored child", () => {
+    const App = defineComponent(() => () => (
+      <Text strikethrough>
+        A<Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.strikethrough("A" + chalk.green("B")));
+  });
+
+  test("ancestor bold survives leading/trailing parent text around a nested child", () => {
+    const App = defineComponent(() => () => (
+      <Text bold>
+        A<Text color="green">B</Text>C
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B") + "C"));
+  });
+
+  test("deep nesting wraps each level's style around its already-styled children", () => {
+    const App = defineComponent(() => () => (
+      <Text bold>
+        A
+        <Text underline>
+          B<Text color="green">C</Text>
+        </Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.underline("B" + chalk.green("C"))));
+  });
+
+  test("nested child's own color composes on top of inherited bold (child stays bold too)", () => {
+    // The child has BOTH its own color AND should still be bold (from the ancestor).
+    // chalk.bold(chalk.green(...)) ⇒ the green run is emitted INSIDE the bold open/
+    // close pair, so SGR-22 (bold off) comes only after the whole concatenation.
+    const App = defineComponent(() => () => (
+      <Text bold>
+        <Text color="green">B</Text>
+      </Text>
+    ));
+    expect(renderToString(App)).toBe(chalk.bold(chalk.green("B")));
+  });
+
+  // BONUS: a nested inline <Text backgroundColor=""> inside a green Box. The inner
+  // "" is INVISIBLE here. The inner Text's effective bg is `"" ?? inheritedGreen`,
+  // which is `""` (not the green) — so "b" is composed with NO bg of its own and
+  // contributes RAW. But the OUTER plain Text inherits the green Box bg and wraps
+  // the WHOLE "a"+"b"+"c" concatenation in one green span, so its inherited green
+  // covers "b" uniformly along with "a" and "c". Because nothing applies a bg
+  // INSIDE that outer span, there is no inner bg-reset: the bytes are a single
+  // `chalk.bgGreen("abc")` (one bg-open, one trailing bg-reset, no inner \x1b[49m).
+  // The inner "" would only become visible if the outer Text had no inherited bg.
+  test("BONUS: nested inline backgroundColor='' inside a green Box", () => {
+    const App = defineComponent(() => () => (
+      <Box backgroundColor="green" alignSelf="flex-start">
+        <Text>
+          a<Text backgroundColor="">b</Text>c
+        </Text>
+      </Box>
+    ));
+    // The outer Text's inherited green wraps the whole concatenation; the inner ""
+    // is invisible (no inner \x1b[49m before the final reset — see chalk bytes below).
+    expect(renderToString(App, { columns: 100 })).toBe(chalk.bgGreen("a" + "b" + "c"));
+  });
+
+  // LOCK (high blast radius): a bare text-leaf inside a <Transform> under a
+  // <Box backgroundColor> renders WITHOUT the Box bg on its glyphs. This is
+  // Ink-faithful: in Ink only <Box> provides backgroundContext and <Transform>
+  // does NOT consume it — the bare "#text" carries no internal_transform, so its
+  // glyphs are RAW. The Box bg surfaces ONLY as the trailing fill padding the Box
+  // paints to reach its width. Branch behavior: bare text-leaves return RAW text
+  // (no inherited bg applied at the leaf), so the `[hi]` glyphs are uncolored and
+  // only the 6-space fill is green. Byte-matched against Ink v7.0.4 (40b3a75):
+  //   renderToString(<Box bg=green width=10><Transform>hi</Transform></Box>)
+  //     === "[hi]\x1b[42m      \x1b[49m"  (i.e. "[hi]" + chalk.bgGreen("      "))
+  // NOTE: this is a NEW lock (not a red→green fix) — it documents and pins the
+  // already-correct branch behavior so a future change can't silently regress it.
+  test("LOCK: bare text in <Transform> under a Box bg has no bg on its glyphs", () => {
+    const App = defineComponent(() => () => (
+      <Box backgroundColor="green" width={10}>
+        <Transform transform={(s: string) => "[" + s + "]"}>hi</Transform>
+      </Box>
+    ));
+    // "[hi]" glyphs are RAW (no bg SGR); only the trailing Box-fill padding is green.
+    expect(renderToString(App, { columns: 100 })).toBe("[hi]" + chalk.bgGreen("      "));
+  });
 });
