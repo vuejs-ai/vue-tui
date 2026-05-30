@@ -21,7 +21,11 @@ function isInsideText(): boolean {
   let parent = getCurrentInstance()?.parent;
   while (parent) {
     const name = parent.type && (parent.type as { name?: string }).name;
-    if (name === "Text") return true;
+    // A <Transform> is also a text context: Ink models it as an ink-text host,
+    // so a <Newline> directly inside a standalone <Transform> renders inline
+    // (an inline line break in the transform's text), not as a standalone yoga
+    // "text" node. (G58)
+    if (name === "Text" || name === "Transform") return true;
     parent = parent.parent;
   }
   return false;

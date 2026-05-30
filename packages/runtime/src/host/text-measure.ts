@@ -2,7 +2,7 @@ import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
-import type { TextProps, TuiNode, TuiText, TuiVirtualText } from "./nodes.ts";
+import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
 
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   if (!node.children || node.children.length === 0) return "";
@@ -58,6 +58,23 @@ function squashTransformChild(child: TuiNode, index: number): string {
   }
   // Comments, boxes, etc. contribute nothing to measured text.
   return "";
+}
+
+// Squash the direct inline children of a STANDALONE <Transform> into measured
+// text (G58). In Ink a <Transform> is an ink-text host whose measure func uses
+// squashTextNodes — which squashes child text and applies CHILD transforms, but
+// NEVER the node's own internal_transform (that runs only at Output paint time).
+// We therefore reuse the same per-child squash as flattenLeaves and deliberately
+// do NOT apply `node.transform`, so the reserved width matches Ink's measure.
+export function flattenTransformLeaves(node: TuiTransform): string {
+  if (!node.children || node.children.length === 0) return "";
+  let out = "";
+  let transformIndex = 0;
+  for (const child of node.children) {
+    out += squashTransformChild(child, transformIndex);
+    if (child.type !== "comment") transformIndex++;
+  }
+  return out;
 }
 
 export type WrapMode = NonNullable<TextProps["wrap"]>;

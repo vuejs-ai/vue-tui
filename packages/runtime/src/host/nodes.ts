@@ -61,14 +61,18 @@ export interface TuiText extends NodeBase {
 
 export interface TuiVirtualText extends NodeBase {
   type: "virtual-text";
-  parent: TuiText | TuiVirtualText | null;
+  // A <Newline>/<Text> directly inside a standalone <Transform> renders inline,
+  // so a virtual-text can also be parented by a transform (G58).
+  parent: TuiText | TuiVirtualText | TuiTransform | null;
   children: TuiInlineNode[];
   props: TextProps;
 }
 
 export interface TuiTextLeaf extends NodeBase {
   type: "text-leaf";
-  parent: TuiText | TuiVirtualText | null;
+  // Bare-string children of a standalone <Transform> render inline, so a
+  // text-leaf can also be parented by a transform (G58).
+  parent: TuiText | TuiVirtualText | TuiTransform | null;
   value: string;
 }
 
