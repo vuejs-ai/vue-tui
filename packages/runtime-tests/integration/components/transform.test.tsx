@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, Transform } from "@vue-tui/runtime";
+import { Box, Text, Transform } from "@vue-tui/runtime";
 
 test("Transform uppercases descendant text", async () => {
   const { lastFrame } = await render(() => (
@@ -154,6 +154,63 @@ test("nested transforms apply inner-first: outer wraps inner result", async () =
   // Inner: transformers = [inner, outer]
   // Apply left-to-right: inner("x") = "{x}", then outer("{x}") = "({x})"
   expect(lastFrame()).toBe("({x})");
+});
+
+// G32: a <Transform> nested DIRECTLY inside another <Transform> (both inside a
+// <Text>) must be recursed into during squash so BOTH transforms run. Ink's
+// squash-text-nodes.ts:22-39 recurses generically into any ink-text/ink-virtual-text
+// child (a <Transform> renders an ink-text with internal_transform) — inner applied
+// first, then outer. Previously vue-tui dropped the inner transform's content
+// entirely (silent total content loss + 0-width measurement).
+test("nested <Transform> directly inside <Transform> in <Text> — both apply", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        <Transform transform={(s: string) => `[O${s}O]`}>
+          <Transform transform={(s: string) => `<I${s}I>`}>x</Transform>
+        </Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[O<IxI>O]");
+});
+
+test("triple-nested <Transform> in <Text> — all three apply to any depth", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        <Transform transform={(s: string) => `A${s}A`}>
+          <Transform transform={(s: string) => `B${s}B`}>
+            <Transform transform={(s: string) => `C${s}C`}>x</Transform>
+          </Transform>
+        </Transform>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("ABCxCBA");
+});
+
+test("nested <Transform>-in-<Transform> reserves correct width (measurement)", async () => {
+  // The whole box must be wide enough to hold "[O<IxI>O]" (9 cols) — if the inner
+  // transform were dropped at measure time the box would reserve width 0/3 and the
+  // sibling marker would overlap. Place a sibling after the text and assert it lands
+  // at the expected column, proving measurement counted the full transformed width.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Text>
+          <Transform transform={(s: string) => `[O${s}O]`}>
+            <Transform transform={(s: string) => `<I${s}I>`}>x</Transform>
+          </Transform>
+        </Text>
+        <Text>|</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("[O<IxI>O]|");
 });
 
 test("transform with multiple lines", async () => {

@@ -11,8 +11,9 @@
 | sweep-1 (2026-05-29) | `40b3a75` | 16 verified → 14 confirmed (2 refuted)                                                  | recorded |
 | sweep-2 (2026-05-30) | `40b3a75` | 8 confirmed (re-audit after 16 fixes merged) → 6 new gaps (G18-G23) + 1 candidate (G24) | recorded |
 | sweep-3 (2026-05-30) | `40b3a75` | 8 confirmed (re-audit, 22 fixes merged) → 7 new gaps (G25-G31, all LOW) + 1 refuted     | recorded |
+| sweep-4 (2026-05-30) | `40b3a75` | confirmation re-audit → 7 new (2 MEDIUM: G32-G33; 5 low: G34-G38) + 2 refuted-reversed  | recorded |
 
-Refuted (NOT gaps — kept for the record): `exit()` second-wins — vue-tui is already guarded, not last-wins as earlier suspected; kitty key-release printable-text suppression — Ink behaves the same.
+Refuted (NOT gaps): ~~`exit()` second-wins — vue-tui is already guarded~~ **REVERSED by sweep-4: it IS last-wins vs Ink first-wins → now tracked as G33**; kitty key-release printable-text suppression — Ink behaves the same.
 
 ## Decisions log
 
@@ -68,6 +69,13 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 | G29 | render-lifecycle-reconciler     | useCursor()/setCursorPosition never applied during normal render commits (only after console writes)                                                                                | P3       | todo    | —                                  | —   |
 | G30 | app-exit-instances-animation-sr | SR: nested <Transform> inside a box-level <Transform> drops the INNER transform fn (refines G23)                                                                                    | P3       | todo    | —                                  | —   |
 | G31 | app-exit-instances-animation-sr | useAnimation `interval` option is not reactive; Ink re-subscribes+resets when interval changes (cf. G08 id-reactivity)                                                              | P3       | todo    | —                                  | —   |
+| G32 | text-wrap-transform             | <Transform> nested directly inside another <Transform> (in <Text>) is silently DROPPED — paint+measure lose all content                                                             | P1       | todo    | —                                  | —   |
+| G33 | app-exit-instances-animation-sr | exit() resolves last-call-wins; Ink is first-call-wins (REVERSES the sweep-1 exit()-second-wins refutation)                                                                         | P1       | todo    | —                                  | —   |
+| G34 | box-layout-border               | Box border glyphs + bg fill are subject to ancestor <Transform> transformers; Ink renders chrome with empty transformer list                                                        | P3       | todo    | —                                  | —   |
+| G35 | static-newline-spacer           | <Static> container's own borderStyle/backgroundColor (non-yoga visual style) not painted                                                                                            | P3       | todo    | —                                  | —   |
+| G36 | focus                           | useFocus autoFocus prop not reactive (captured once); Ink re-registers on autoFocus change                                                                                          | P3       | todo    | —                                  | —   |
+| G37 | render-lifecycle-reconciler     | onRender renderTime metric includes stdout write + static capture, not just paint                                                                                                   | P3       | todo    | —                                  | —   |
+| G38 | app-exit-instances-animation-sr | useAnimation/scheduler quantizes interval via Math.round; Ink preserves fractional intervals                                                                                        | P3       | todo    | —                                  | —   |
 
 ## Gap details
 
