@@ -298,31 +298,42 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, acc: TextPro
   // index)` receives the loop index over `node.childNodes`. A nested <Transform>
   // that is the Nth child therefore gets `index = N`, not a hardcoded 0.
   node.children.forEach((child, index) => {
-    if (child.type === "text-leaf") {
-      out += applyChalk(child.value, merged);
-    } else if (child.type === "virtual-text") {
-      out += renderTextWithInlineStyles(child, merged);
-    } else if (child.type === "transform") {
-      // Recurse into the transform's children, then apply the transform function.
-      // This mirrors Ink's squashTextNodes behavior for <Transform> inside <Text>.
-      // Only apply the transform when there is actual text content — Ink skips
-      // transforms on empty text to avoid wrapping empty strings.
-      let innerText = "";
-      for (const grandchild of child.children) {
-        if (grandchild.type === "text-leaf") {
-          innerText += applyChalk(grandchild.value, merged);
-        } else if (grandchild.type === "virtual-text" || grandchild.type === "text") {
-          innerText += renderTextWithInlineStyles(grandchild, merged);
-        }
-      }
-      if (innerText.length > 0 && child.transform) {
-        innerText = child.transform(innerText, index);
-      }
-      out += innerText;
-    }
+    out += squashTransformChild(child, index, merged);
     // Skip comments inserted by Vue for null/undefined renders
   });
   return sanitizeAnsi(out);
+}
+
+// Squash a single inline child into styled text, recursing GENERICALLY into
+// transform-typed children to ANY nesting depth. This mirrors Ink's
+// squash-text-nodes.ts:22-39, where the loop recurses into every ink-text /
+// ink-virtual-text child (a <Transform> renders an ink-text carrying
+// internal_transform) and then applies that child's transform. Because a
+// <Transform> nested directly inside another <Transform> is itself such a child,
+// it MUST be recursed into — otherwise the inner content is silently dropped
+// (G32). `index` is the child's positional sibling index (G21), and the transform
+// is only applied when there is actual text (Ink squash-text-nodes.ts:34).
+function squashTransformChild(child: TuiNode, index: number, merged: TextProps): string {
+  if (child.type === "text-leaf") {
+    return applyChalk(child.value, merged);
+  }
+  if (child.type === "virtual-text" || child.type === "text") {
+    return renderTextWithInlineStyles(child, merged);
+  }
+  if (child.type === "transform") {
+    let innerText = "";
+    child.children.forEach((grandchild, grandIndex) => {
+      // A grandchild may itself be a <Transform> (or text/virtual-text/text) —
+      // recurse with the SAME logic so nesting works to any depth.
+      innerText += squashTransformChild(grandchild, grandIndex, merged);
+    });
+    if (innerText.length > 0 && child.transform) {
+      innerText = child.transform(innerText, index);
+    }
+    return innerText;
+  }
+  // Comments (null/undefined renders), boxes, etc. contribute nothing.
+  return "";
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
