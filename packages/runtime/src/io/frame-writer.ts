@@ -7,6 +7,7 @@ export interface FrameWriter {
   clear: () => void;
   sync: (frame: string) => void;
   setCursorPosition: (pos: CursorPosition | undefined) => void;
+  isCursorDirty: () => boolean;
   willRender: (frame: string) => boolean;
 }
 
@@ -24,7 +25,13 @@ export function createFrameWriter(
 
   return {
     write(frame: string) {
-      if (frame === lastFrame) return;
+      // Skip the frame-dedup early-return when the cursor is dirty: a
+      // cursor-only move (output byte-identical, cursor position changed —
+      // e.g. typing a space that the layout collapses) must still reach
+      // log-update so it emits buildCursorOnlySequence. log-update's own
+      // hasChanges() then decides whether to actually write. Mirrors Ink,
+      // which has no FrameWriter dedup layer and lets log-update own this.
+      if (frame === lastFrame && !(log && log.isCursorDirty())) return;
       lastFrame = frame;
       if (debug) {
         stream.write(frame + "\n");
@@ -50,6 +57,9 @@ export function createFrameWriter(
     },
     setCursorPosition(pos) {
       if (log) log.setCursorPosition(pos);
+    },
+    isCursorDirty() {
+      return log ? log.isCursorDirty() : false;
     },
     willRender(frame: string) {
       return log ? log.willRender(frame) : true;
