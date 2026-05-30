@@ -10,6 +10,7 @@
 | -------------------- | --------- | --------------------------------------------------------------------------------------- | -------- |
 | sweep-1 (2026-05-29) | `40b3a75` | 16 verified → 14 confirmed (2 refuted)                                                  | recorded |
 | sweep-2 (2026-05-30) | `40b3a75` | 8 confirmed (re-audit after 16 fixes merged) → 6 new gaps (G18-G23) + 1 candidate (G24) | recorded |
+| sweep-3 (2026-05-30) | `40b3a75` | 8 confirmed (re-audit, 22 fixes merged) → 7 new gaps (G25-G31, all LOW) + 1 refuted     | recorded |
 
 Refuted (NOT gaps — kept for the record): `exit()` second-wins — vue-tui is already guarded, not last-wins as earlier suspected; kitty key-release printable-text suppression — Ink behaves the same.
 
@@ -34,32 +35,39 @@ Non-obvious calls made while fixing gaps, recorded for review in the final repor
 
 `status` ∈ `todo · in-progress · pr-open · merged · blocked · refuted · candidate`. Priority: correctness/behavior first, omissions next.
 
-| id  | area                            | summary                                                                                                                                                                             | priority | status    | branch                             | PR  |
-| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------- | ---------------------------------- | --- |
-| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                                                                                | P1       | merged    | `fix/parity-static-unmount`        | #34 |
-| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders'                                                             | P1       | merged    | `fix/parity-useanimation-throttle` | #35 |
-| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                                                                                   | P1       | merged    | `fix/parity-sr-render`             | #36 |
-| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                                                                            | P2       | merged    | `fix/parity-border-bg`             | #30 |
-| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                                                                                          | P2       | merged    | `fix/parity-border-1cell`          | #37 |
-| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                                                                                        | P2       | refuted   | —                                  | —   |
-| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                                                                                           | P2       | candidate | — (see ink-parity.md)              | —   |
-| G08 | focus                           | useFocus does not react to changes in the id prop                                                                                                                                   | P2       | merged    | `fix/parity-usefocus-id`           | #31 |
-| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                                                                              | P2       | merged    | `fix/parity-external-bsu`          | #39 |
-| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                                                                                      | P2       | merged    | `fix/parity-setrawmode-throw`      | #40 |
-| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                                                                                      | P2       | merged    | `fix/parity-resize-clear`          | #41 |
-| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                                                                            | P2       | merged    | `fix/parity-renderer-size`         | #33 |
-| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                                                                                | P3       | merged    | `fix/parity-custom-border`         | #42 |
-| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                                                                                       | P3       | merged    | `fix/parity-instance-reuse`        | #43 |
-| G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                                                                            | P2       | merged    | `fix/parity-border-1cell`          | #37 |
-| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                                                                                  | P3       | merged    | `fix/parity-border-dim`            | #44 |
-| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | merged    | `fix/parity-sr-edges`              | #45 |
-| G18 | render-lifecycle-reconciler     | No signal-based teardown — terminal corrupted on SIGINT/SIGTERM/SIGHUP (Ink signal-exit at mount)                                                                                   | P1       | merged    | `fix/parity-signal-teardown`       | #47 |
-| G19 | box-layout-border               | Dynamic removal of most yoga style props does not reset to default (stale layout)                                                                                                   | P2       | merged    | `fix/parity-yoga-reset`            | #48 |
-| G20 | stdout-stderr-stdin-size-cursor | writeToStdout/writeToStderr lack an isUnmounted/teardown guard (post-teardown writes corrupt terminal)                                                                              | P2       | merged    | `fix/parity-write-after-unmount`   | #49 |
-| G21 | text-wrap-transform             | Nested <Transform> in <Text> gets hardcoded index 0 vs child sibling position (squash path)                                                                                         | P3       | merged    | `fix/parity-transform-index`       | #50 |
-| G22 | app-exit-instances-animation-sr | SR role dedup inherits grandparent role; Ink dedups only vs immediate parent                                                                                                        | P3       | merged    | `fix/parity-sr-role-dedup`         | #51 |
-| G23 | app-exit-instances-animation-sr | <Transform> under <Box> SR-joins children with newline; Ink concatenates                                                                                                            | P3       | pr-open   | `fix/parity-sr-transform-concat`   | #52 |
-| G24 | render-lifecycle-reconciler     | Renders ALL <Static> nodes; Ink renders only the most-recent staticNode (multi-Static support — candidate)                                                                          | P3       | candidate | — (see ink-parity.md)              | —   |
+| id  | area                            | summary                                                                                                                                                                             | priority | status  | branch                             | PR  |
+| --- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ---------------------------------- | --- |
+| G01 | static-newline-spacer           | Static keeps every already-written item permanently mounted instead of unmounting it                                                                                                | P1       | merged  | `fix/parity-static-unmount`        | #34 |
+| G02 | app-exit-instances-animation-sr | useAnimation does not coalesce ticks within the render-throttle window — delta does not 'account for throttled renders'                                                             | P1       | merged  | `fix/parity-useanimation-throttle` | #35 |
+| G03 | render-lifecycle-reconciler     | Live screen-reader render path is missing; commit() always paints the visual grid                                                                                                   | P1       | merged  | `fix/parity-sr-render`             | #36 |
+| G04 | box-layout-border               | Border edges incorrectly inherit the Box backgroundColor                                                                                                                            | P2       | merged  | `fix/parity-border-bg`             | #30 |
+| G05 | box-layout-border               | Borders skipped when content area is 1 cell tall or wide (w<2 / h<2 guard)                                                                                                          | P2       | merged  | `fix/parity-border-1cell`          | #37 |
+| G06 | text-wrap-transform             | Nested <Transform>/<Text> transform fn receives hardcoded index 0 instead of childNode index                                                                                        | P2       | refuted | —                                  | —   |
+| G07 | input-keypress-kitty-paste      | Kitty-protocol Ctrl+C triggers app exit in vue-tui but only suppresses the handler in Ink                                                                                           | P2       | kept    | — (see ink-parity.md)              | —   |
+| G08 | focus                           | useFocus does not react to changes in the id prop                                                                                                                                   | P2       | merged  | `fix/parity-usefocus-id`           | #31 |
+| G09 | stdout-stderr-stdin-size-cursor | External stdout/stderr writes are not wrapped in synchronized-update (BSU/ESU) markers                                                                                              | P2       | merged  | `fix/parity-external-bsu`          | #39 |
+| G10 | stdout-stderr-stdin-size-cursor | setRawMode silently no-ops in unsupported environments instead of throwing a descriptive error                                                                                      | P2       | merged  | `fix/parity-setrawmode-throw`      | #40 |
+| G11 | render-lifecycle-reconciler     | Resize handler does not clear+reset on terminal-width decrease                                                                                                                      | P2       | merged  | `fix/parity-resize-clear`          | #41 |
+| G12 | render-lifecycle-reconciler     | Renderer frame width/rows lack terminal-size fallback (only ?? defaults)                                                                                                            | P2       | merged  | `fix/parity-renderer-size`         | #33 |
+| G13 | box-layout-border               | Custom border style objects (BoxStyle) not supported                                                                                                                                | P3       | merged  | `fix/parity-custom-border`         | #42 |
+| G14 | app-exit-instances-animation-sr | No per-stdout instance reuse/guard — two concurrent renderers can compete for the same stdout                                                                                       | P3       | merged  | `fix/parity-instance-reuse`        | #43 |
+| G15 | box-layout-border               | Vertical border sides not shifted up when borderTop=false (Ink offsetY) — left/right rails mispositioned                                                                            | P2       | merged  | `fix/parity-border-1cell`          | #37 |
+| G16 | box-layout-border               | Per-edge borderDimColor=false cannot override general borderDimColor (`\|\| dimAll` vs Ink's `??`)                                                                                  | P3       | merged  | `fix/parity-border-dim`            | #44 |
+| G17 | render-lifecycle-reconciler     | Screen-reader live-path edges: <Static> still grid-painted (Ink linearizes, skipStaticElements:false) + empty SR frame gets a trailing newline (Ink writes wrapped output directly) | P3       | merged  | `fix/parity-sr-edges`              | #45 |
+| G18 | render-lifecycle-reconciler     | No signal-based teardown — terminal corrupted on SIGINT/SIGTERM/SIGHUP (Ink signal-exit at mount)                                                                                   | P1       | merged  | `fix/parity-signal-teardown`       | #47 |
+| G19 | box-layout-border               | Dynamic removal of most yoga style props does not reset to default (stale layout)                                                                                                   | P2       | merged  | `fix/parity-yoga-reset`            | #48 |
+| G20 | stdout-stderr-stdin-size-cursor | writeToStdout/writeToStderr lack an isUnmounted/teardown guard (post-teardown writes corrupt terminal)                                                                              | P2       | merged  | `fix/parity-write-after-unmount`   | #49 |
+| G21 | text-wrap-transform             | Nested <Transform> in <Text> gets hardcoded index 0 vs child sibling position (squash path)                                                                                         | P3       | merged  | `fix/parity-transform-index`       | #50 |
+| G22 | app-exit-instances-animation-sr | SR role dedup inherits grandparent role; Ink dedups only vs immediate parent                                                                                                        | P3       | merged  | `fix/parity-sr-role-dedup`         | #51 |
+| G23 | app-exit-instances-animation-sr | <Transform> under <Box> SR-joins children with newline; Ink concatenates                                                                                                            | P3       | pr-open | `fix/parity-sr-transform-concat`   | #52 |
+| G24 | render-lifecycle-reconciler     | Renders ALL <Static> nodes; Ink renders only the most-recent staticNode (multi-Static support — kept )                                                                              | P3       | kept    | — (see ink-parity.md)              | —   |
+| G25 | text-wrap-transform             | truncate wrap keeps multi-line when each line fits but whole string overflows (Ink collapses via cliTruncate on whole string)                                                       | P3       | todo    | —                                  | —   |
+| G26 | input-keypress-kitty-paste      | useInput suppresses input text on kitty key-RELEASE events; Ink delivers the char on release (REVERSES the sweep-1 refutation)                                                      | P3       | todo    | —                                  | —   |
+| G27 | stdout-stderr-stdin-size-cursor | releaseRawMode defers input detach + parser reset; Ink stops input synchronously (clearInputState)                                                                                  | P3       | todo    | —                                  | —   |
+| G28 | stdout-stderr-stdin-size-cursor | useStdin() leaks internal members; Ink narrows the public return to PublicProps {stdin,setRawMode,isRawModeSupported}                                                               | P3       | todo    | —                                  | —   |
+| G29 | render-lifecycle-reconciler     | useCursor()/setCursorPosition never applied during normal render commits (only after console writes)                                                                                | P3       | todo    | —                                  | —   |
+| G30 | app-exit-instances-animation-sr | SR: nested <Transform> inside a box-level <Transform> drops the INNER transform fn (refines G23)                                                                                    | P3       | todo    | —                                  | —   |
+| G31 | app-exit-instances-animation-sr | useAnimation `interval` option is not reactive; Ink re-subscribes+resets when interval changes (cf. G08 id-reactivity)                                                              | P3       | todo    | —                                  | —   |
 
 ## Gap details
 
@@ -381,3 +389,63 @@ _area:_ `render-lifecycle-reconciler` · _kind:_ behavior · _severity:_ low · 
 - **Ink:** maintains ONE `staticNode` (only the most-recent `<Static>` is rendered to the static channel).
 - **vue-tui:** `findStatics(root)` collects and renders ALL `<Static>` nodes — i.e. vue-tui SUPPORTS MULTIPLE `<Static>`, which Ink does not. Matching Ink would REMOVE that capability.
 - **Decision needed (like G07):** keep vue-tui's multi-Static support (allowlist) or restrict to Ink's single-staticNode. Appended to ink-parity.md candidate section; awaiting maintainer.
+
+### G25 — truncate wrap keeps multi-line when each line fits but whole string overflows (Ink collapses via cliTruncate on whole string)
+
+_area:_ `text-wrap-transform` · _kind:_ behavior · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/wrap-text.ts:36-48 — for any wrapType starting with 'truncate', Ink unconditionally calls cliTruncate(text, maxWidth, {position}) on the ENTIRE string (newlines included). cli-truncate budgets against the whole joined string, so when total content exceeds maxWidth it truncates and drops trailing lines, e.g. cliTruncate('abc\nxy', 4, {position:'end'}) => 'abc…' (one line). dom.
+- **vue-tui:** GAP present. /Users/yunfeihe/.warp/worktrees/vue-tui/palo-verde-wildfire/packages/runtime/src/host/text-measure.ts:83-87 adds a per-line optimization: `const lines = text.split('\n'); if (lines.every((l) => stringWidth(l) <= width)) return lines;` — it returns the original multi-line array whenever EACH line individually fits, only falling through to cliTruncate when some single line overflows. cl
+- **Fix sketch:** In text-measure.ts wrapText truncate branch, drop the per-line `lines.every(...)` short-circuit (lines 83-84) so truncate modes always defer to cliTruncate(text, width, {position}).split('\n') on the full string, matching Ink wrap-text.ts:47. Optionally gate any short-circuit on the WHOLE-string width (stringWidth(text) <= width) rather than per-line, which would preserve correctness. Add a failin
+
+### G26 — useInput suppresses input text on kitty key-RELEASE events; Ink delivers the char on release (REVERSES the sweep-1 refutation)
+
+_area:_ `input-keypress-kitty-paste` · _kind:_ behavior · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-input.ts:205-217 — for kitty-protocol keys Ink branches only on isPrintable / ctrl, with NO eventType check: a printable key sets `input = keypress.text ?? keypress.name` regardless of press/repeat/release. eventType is merely surfaced on the Key object (use-input.ts:201) and parse-keypress.ts:307-311 maps value 3 -> 'release'. So with the `reportEventTypes` kitty fl
+- **vue-tui:** DIVERGENT — vue-tui adds an extra leading branch that Ink does not have.
+- **Fix sketch:** Remove the leading `if (keypress.eventType === "release") { input = ""; }` branch (useInput.ts:73-74) so release events fall through to the isPrintable / ctrl branches exactly as Ink does — yielding `keypress.text ?? keypress.name` for printable keys and `keypress.name` for Ctrl+letter on release. Add a test-first failing test in a new useInput composable test exercising a printable 'a' release an
+
+### G27 — releaseRawMode defers input detach + parser reset; Ink stops input synchronously (clearInputState)
+
+_area:_ `stdout-stderr-stdin-size-cursor` · _kind:_ behavior · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/components/App.tsx:350-368 — when rawModeEnabledCount drops to 0, Ink calls clearInputState() SYNCHRONOUSLY (detachReadableListener + inputParserRef.current.reset() + clearPendingInputFlush, per App.tsx:212-216), then sets pendingDisableRawModeRef=true and defers ONLY the terminal teardown (stdin.setRawMode(false)/unref) via queueMicrotask. Comment at 355-357: 'Stop owning inp
+- **vue-tui:** DIVERGENT
+- **Fix sketch:** In releaseRawMode(), when state.refs reaches 0, synchronously detach input and reset parser before deferring the terminal flip — mirror Ink's clearInputState(): call stdin.off('readable', handleReadable); stdin.off('data', handleData); clearPendingFlush(); inputParser.reset() immediately, and keep only appCtx.setRawMode(state.prevRaw) + unref() inside the queueMicrotask (guarded by state.refs stil
+
+### G28 — useStdin() leaks internal members; Ink narrows the public return to PublicProps {stdin,setRawMode,isRawModeSupported}
+
+_area:_ `stdout-stderr-stdin-size-cursor` · _kind:_ behavior · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-stdin.ts:10 — public hook is typed `const useStdin = (): PublicProps => useContext(StdinContext)`, where PublicProps (StdinContext.ts:5-20) is ONLY {stdin, setRawMode, isRawModeSupported}. Internal members (setBracketedPasteMode, internal_exitOnCtrlC, internal_eventEmitter — StdinContext.ts:22-31) are reachable solely via a separate non-public `useStdinContext(): Pro
+- **vue-tui:** DIVERGENT
+- **Fix sketch:** Mirror Ink's split. Define a PublicStdinContext type ({stdin, setRawMode, isRawModeSupported}) and narrow the public composable: `export function useStdin(): PublicStdinContext`. Add a separate non-exported (or @internal) `useStdinContext(): StdinContext` for internal consumers (useInput, usePaste, useFocus, render). Internally the injected object can still carry the full shape; only the public co
+
+### G29 — useCursor()/setCursorPosition never applied during normal render commits (only after console writes)
+
+_area:_ `render-lifecycle-reconciler` · _kind:_ correctness · _severity:_ low · _(sweep-3)_
+
+- **Ink:** ink.tsx:494-497 — Ink's setCursorPosition immediately forwards to log-update: `setCursorPosition = (position) => { this.cursorPosition = position; this.log.setCursorPosition(position); }`. The render path then honors a cursor-only change even when frame text is unchanged: ink.tsx:1094 `} else if (output !== this.lastOutput || this.log.isCursorDirty()) { this.throttledLog(outputToRender); }`, and l
+- **vue-tui:** GAP — present in current src
+- **Fix sketch:** In render.ts, make appContext.setCursorPosition forward to the frame writer (mirroring ink.tsx:496):
+  setCursorPosition(pos) { cursorPosition = pos; appContext.cursorPosition = pos; writer.setCursorPosition(pos); }
+  (note: `writer` is declared after appContext today, so either move the writer creation earlier or capture it via a mutable ref / call through mountedWriter).
+
+Then make renderInteracti
+
+### G30 — SR: nested <Transform> inside a box-level <Transform> drops the INNER transform fn (refines G23)
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ correctness · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/render-node-to-output.ts:49-50 routes a box-level <Transform> (an `ink-text` node) through `output = squashTextNodes(node)`. squash-text-nodes.ts:25-39 iterates children: an inner <Transform> child is also `ink-text`, so `nodeText = squashTextNodes(child)` then, because `childNode.internal_transform` is a function, `nodeText = childNode.internal_transform(nodeText, index)` (li
+- **vue-tui:** GAP — produces "b" (inner transform fn dropped).
+- **Fix sketch:** In screen-reader.ts, the `transform` node branch (lines 105-129) should apply the node's OWN transform fn ONLY when the transform node is reached as a CHILD via recursion (mirroring squashTextNodes' child-transform application), not when it is the top-level box-level node. Cleanest approach: align with Ink by handling transform nodes the way squashTextContent already does for the text path — when
+
+### G31 — useAnimation `interval` option is not reactive; Ink re-subscribes+resets when interval changes (cf. G08 id-reactivity)
+
+_area:_ `app-exit-instances-animation-sr` · _kind:_ behavior · _severity:_ low · _(sweep-3)_
+
+- **Ink:** /tmp/ink-40b3a75/src/hooks/use-animation.ts:68 reads `interval` from props every render; line 79 `safeInterval !== previousOptions.safeInterval` makes `shouldReset` true on an interval change (line 138 returns zeros synchronously), and the layout effect lists `safeInterval` in its dep array (line 132) so it unsubscribes and re-subscribes with the new interval, restarting timing.
+- **vue-tui:** PARTIAL — interval is captured once and never reacts.
+- **Fix sketch:** Type `interval` as `MaybeRefOrGetter<number>` (mirroring `isActive`). Move `normalizeInterval` inside a watcher: `watch(() => normalizeInterval(toValue(options.interval ?? defaultInterval)), (newInterval) => { interval = newInterval; if (handle) start(); /* re-subscribe at new cadence, which resets values per Ink */ })`. The `interval` closure variable used by tick()/start() must be reassignable (
