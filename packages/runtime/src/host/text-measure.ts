@@ -7,15 +7,20 @@ import type { TextProps, TuiNode, TuiText, TuiVirtualText } from "./nodes.ts";
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   if (!node.children || node.children.length === 0) return "";
   let out = "";
-  // `index` is the child's POSITIONAL index among ALL siblings — the plain loop
-  // counter over node.children, matching Ink squash-text-nodes.ts:13,38 (index
-  // is the loop position over node.childNodes). Must use the SAME index basis as
-  // paint.ts renderTextWithInlineStyles so measurement and paint agree on what a
-  // nested <Transform> receives as its second argument.
-  node.children.forEach((child, index) => {
-    out += squashTransformChild(child, index);
-    // Skip comments inserted by Vue for null/undefined renders
-  });
+  // `transformIndex` advances only for children React would have produced as DOM
+  // childNodes — matching Ink squash-text-nodes.ts:13 (the loop position over
+  // node.childNodes). Vue materializes null/v-if/false renders as COMMENT host
+  // nodes that occupy a positional slot in node.children, but React skips null
+  // children, so comments must NOT advance the index. This is the measurement
+  // twin of paint.ts renderTextWithInlineStyles and MUST use the SAME index
+  // basis so a nested <Transform> receives the same second argument at measure
+  // and paint time — keeping reserved width in sync (G52). Real-sibling
+  // positional indexing (G21) is preserved.
+  let transformIndex = 0;
+  for (const child of node.children) {
+    out += squashTransformChild(child, transformIndex);
+    if (child.type !== "comment") transformIndex++;
+  }
   return out;
 }
 
@@ -37,9 +42,17 @@ function squashTransformChild(child: TuiNode, index: number): string {
   }
   if (child.type === "transform") {
     let innerText = "";
-    child.children.forEach((grandchild, grandIndex) => {
+    // Recursive twin of the G52 fix in flattenLeaves: a grandchild's positional
+    // index must skip Vue comment nodes (null/v-if/false renders) so a `{null}`
+    // inside this OUTER <Transform> does not shift an INNER <Transform>'s index —
+    // and so measure and paint agree on every nested transform's second argument
+    // (keeping reserved width in sync). Advancing only for real children preserves
+    // G32's transform-in-transform recursion to any depth.
+    let grandIndex = 0;
+    for (const grandchild of child.children) {
       innerText += squashTransformChild(grandchild, grandIndex);
-    });
+      if (grandchild.type !== "comment") grandIndex++;
+    }
     if (innerText.length > 0 && child.transform) innerText = child.transform(innerText, index);
     return innerText;
   }

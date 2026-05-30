@@ -7,11 +7,16 @@ import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts"
  */
 function squashTextContent(node: TuiText | TuiVirtualText): string {
   let text = "";
-  // Use forEach so `index` is the child's POSITIONAL index among ALL siblings —
-  // matching paint.ts renderTextWithInlineStyles and Ink squash-text-nodes.ts:13,38
-  // (index is the plain loop counter over node.childNodes). A nested <Transform>
-  // must receive its sibling position, not a hardcoded 0.
-  node.children.forEach((child, index) => {
+  // `index` advances only for children React would have produced as DOM
+  // childNodes — matching paint.ts renderTextWithInlineStyles and Ink
+  // squash-text-nodes.ts:13 (the loop position over node.childNodes). Vue
+  // materializes null/v-if/false renders as COMMENT host nodes that occupy a
+  // positional slot in node.children, but React skips null children, so comments
+  // must NOT advance the index. Staying in lockstep with paint/measure keeps the
+  // <Transform> second argument identical across all three squash paths (G52).
+  // A real nested <Transform> still receives its sibling position (G21).
+  let index = 0;
+  for (const child of node.children) {
     if (child.type === "text-leaf") {
       text += child.value;
     } else if (child.type === "virtual-text") {
@@ -31,8 +36,10 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
       }
       text += innerText;
     }
-    // Skip comments
-  });
+    // Comments (Vue's null/v-if/false renders) contribute nothing and, like
+    // React's absent childNodes, must NOT advance the transform index.
+    if (child.type !== "comment") index++;
+  }
   return text;
 }
 

@@ -438,6 +438,25 @@ describe("Transform accessibility", () => {
     expect(output).toBe("ab");
   });
 
+  // G52: Vue materializes a null/v-if/false render as a COMMENT host node that
+  // occupies a positional slot. React never produces a childNode for such
+  // children (Ink squash-text-nodes.ts:13 never advances index past them), so
+  // the SR squash path must skip comment nodes when indexing the transform —
+  // staying in lockstep with paint and measurement.
+  test("G52: null sibling does not shift nested <Transform> index in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Text>
+          a{null}
+          <Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
+        </Text>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // The null produces a comment that must NOT take a slot: a=0, Transform=1.
+    expect(output).toBe("ab[1]");
+  });
+
   test("renders children normally when screen reader is disabled", () => {
     const output = renderToString(
       defineComponent(() => () => (
