@@ -36,6 +36,35 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
   return text;
 }
 
+/**
+ * Resolve a box node's flexDirection as the string form the SR separator logic
+ * compares against ("row" | "row-reverse" | "column" | "column-reverse").
+ *
+ * Prefer an explicit `props.flexDirection` when present (used by unit-test
+ * fixtures that build nodes directly without a live yoga layout), otherwise read
+ * the resolved direction back from the yoga node. node-ops applies flexDirection
+ * to yoga but does NOT mirror it into `props` (it is not in STYLE_PROPS), and the
+ * yoga node holds the Box default of row (host/yoga.ts sets FLEX_DIRECTION_ROW).
+ * Mirrors static-channel.ts's resolvedFlexDirection so both SR linearization
+ * paths derive the separator identically. (Ink parity, G39.)
+ */
+function resolveBoxFlexDirection(node: TuiBox): string {
+  const fromProps = node.props["flexDirection"] as string | undefined;
+  if (fromProps !== undefined) {
+    return fromProps;
+  }
+  switch (node.yoga.getFlexDirection()) {
+    case Yoga.FLEX_DIRECTION_ROW:
+      return "row";
+    case Yoga.FLEX_DIRECTION_ROW_REVERSE:
+      return "row-reverse";
+    case Yoga.FLEX_DIRECTION_COLUMN_REVERSE:
+      return "column-reverse";
+    default:
+      return "column";
+  }
+}
+
 export interface ScreenReaderOptions {
   parentRole?: string;
   skipStaticElements?: boolean;
@@ -73,9 +102,11 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
   if (node.type === "text") {
     output = squashTextContent(node);
   } else if (node.type === "box" || node.type === "root") {
-    // Determine separator based on flex direction
-    const flexDirection =
-      node.type === "box" ? (node.props["flexDirection"] as string | undefined) : undefined;
+    // Determine separator based on flex direction (resolved from yoga so the
+    // Box default of row yields a space separator, matching Ink — see
+    // resolveBoxFlexDirection / G39). Root keeps undefined → "\n" (Ink's column
+    // default root).
+    const flexDirection = node.type === "box" ? resolveBoxFlexDirection(node as TuiBox) : undefined;
 
     const separator = flexDirection === "row" || flexDirection === "row-reverse" ? " " : "\n";
 
