@@ -1,9 +1,9 @@
 import process from "node:process";
-import { createApp, Text, useInput, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useApp } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, shallowRef } from "vue";
 
 const App = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
   const input = shallowRef("");
 
   const handleInput = (char: string) => {

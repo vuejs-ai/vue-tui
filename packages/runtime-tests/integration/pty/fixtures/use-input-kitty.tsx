@@ -1,5 +1,5 @@
 import process from "node:process";
-import { createApp, useInput, useAppContext } from "@vue-tui/runtime";
+import { createApp, useInput, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const KittyInput = defineComponent({
@@ -7,7 +7,7 @@ const KittyInput = defineComponent({
     test: { type: String, default: undefined },
   },
   setup(props) {
-    const { exit } = useAppContext();
+    const { exit } = useApp();
 
     onMounted(() => {
       process.stdout.write("__READY__");

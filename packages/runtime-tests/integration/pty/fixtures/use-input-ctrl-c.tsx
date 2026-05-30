@@ -1,9 +1,9 @@
 import process from "node:process";
-import { createApp, useInput, useAppContext } from "@vue-tui/runtime";
+import { createApp, useInput, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const UserInput = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   useInput((input, key) => {
     if (input === "c" && key.ctrl) {

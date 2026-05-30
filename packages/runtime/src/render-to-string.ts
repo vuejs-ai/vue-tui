@@ -46,7 +46,7 @@ export interface RenderToStringOptions {
  * starting a persistent terminal application.
  *
  * Terminal-specific composables (`useInput`, `useStdin`, `useStdout`,
- * `useStderr`, `useAppContext`, `useFocus`, `useFocusManager`) return default
+ * `useStderr`, `useApp`, `useFocus`, `useFocusManager`) return default
  * no-op values since there is no terminal session. They will not throw, but
  * they will not function as in a live terminal.
  *
