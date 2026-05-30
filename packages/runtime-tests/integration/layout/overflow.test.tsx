@@ -657,7 +657,14 @@ describe("absolute overlay wide glyph clipping", () => {
     }
   });
 
-  test("transform returning wide char in clipped box is clipped", async () => {
+  // G63: Ink clips THEN transforms, and never re-clips the transformer's output.
+  // The source char "x" (width 1) sits at left=3, fully inside the width-4 clip, so
+  // it survives the horizontal clip; the transform then replaces it with the wide
+  // "中" (width 2), which is emitted UNCLIPPED past the boundary. Ink reference
+  // (v7.0.4) renders exactly "abc中" here. Previously vue-tui clipped AFTER the
+  // transform (commit 2c99431), dropping the "中" — that was the non-Ink order G63
+  // reverses, so this test now asserts Ink's clip-then-transform output.
+  test("transform returning wide char in clipped box overflows (Ink clip-then-transform)", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -672,12 +679,12 @@ describe("absolute overlay wide glyph clipping", () => {
       { columns: 100 },
     );
     const frame = lastFrame({ trimLines: true })!;
-    expect(stripAnsi(frame)).toBe("abc");
+    expect(stripAnsi(frame)).toBe("abc中");
   });
 });
 
 describe("left-edge wide glyph clipping", () => {
-  test("text after clipped left-edge wide char is correctly positioned", async () => {
+  test("text after clipped left-edge wide char starts at clip origin (Ink parity)", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -690,9 +697,53 @@ describe("left-edge wide glyph clipping", () => {
     );
     const frame = lastFrame({ trimLines: true })!;
     const stripped = stripAnsi(frame);
-    // "中" (width 2) starts at col -1, straddling the left edge → clipped entirely
-    // "x" should start at col 1 (not col 0)
-    expect(stripped.startsWith(" x")).toBe(true);
+    // "中" (width 2) starts at col -1, straddling the left edge → clipped whole.
+    // Ink output.ts:210-212 sets the write origin to the clipped left edge, so the
+    // kept "x" starts AT that origin with NO leading offset. Verified against the
+    // built Ink reference (/tmp/ink-40b3a75 renderToString of this exact tree → "x").
+    // (Was vue-tui-specific " x" leading-space padding; rewritten to Ink. See the
+    // G63 decisions-log entry in .agents/docs/parity-ledger.md.)
+    expect(stripped).toBe("x");
+  });
+
+  // G63 MUST-FIX: after a LEFT horizontal clip, the per-line write origin is set
+  // to the clipped left edge (Ink output.ts:210-212 `x = clip.x1`), THEN the
+  // transform runs and writes from that origin. So a wide glyph straddling the
+  // left edge is clipped whole and the kept content starts AT the clip origin —
+  // no leading offset. Verified against the built Ink reference (/tmp/ink-40b3a75,
+  // renderToString of the SAME component): transform=>"z" → "z", [l] → "[x]".
+  test("transform after clipped left-edge wide char starts at clip origin (Ink parity)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box marginLeft={-1} flexShrink={0}>
+            <Transform transform={() => "z"}>
+              <Text>中x</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toBe("z");
+  });
+
+  test("width-sensitive transform after clipped left-edge wide char (Ink parity)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box marginLeft={-1} flexShrink={0}>
+            <Transform transform={(l: string) => `[${l}]`}>
+              <Text>中x</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    const frame = lastFrame({ trimLines: true })!;
+    expect(stripAnsi(frame)).toBe("[x]");
   });
 
   test("wide chars clipped on both edges simultaneously", async () => {
@@ -708,5 +759,56 @@ describe("left-edge wide glyph clipping", () => {
     );
     const frame = lastFrame({ trimLines: true })!;
     expect(lineWidth(frame)).toBeLessThanOrEqual(2);
+  });
+});
+
+// G63: Ink clips a line horizontally FIRST, THEN applies the line transformer to
+// the already-clipped span (output.ts: the `clipHorizontally` sliceAnsi map runs
+// before the `lines.entries()` loop that calls `transformer(line, index)`). So a
+// width-sensitive transform inside an overflowX:"hidden" box must receive the
+// CLIPPED substring, not the full line. The buggy order (transform-then-clip)
+// feeds the transformer the full line and slices its output, which corrupts
+// gradients (wrong char count) and OSC-8 hyperlinks (closing sequence sliced off).
+describe("G63 clip-then-transform order (Ink parity)", () => {
+  test("transform inside overflowX hidden receives the clipped span", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={5} overflowX="hidden">
+          <Box width={16} flexShrink={0}>
+            <Transform transform={(l: string) => `[${l}]`}>
+              <Text>hello world</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 20 },
+    );
+    // Ink reference (v7.0.4, columns=20): the line "hello world" is clipped to the
+    // 5-col content area → "hello", THEN the transform brackets it → "[hello]"
+    // (verified by running renderToString against the pinned Ink build).
+    // The buggy transform-then-clip order brackets the full line "[hello world]"
+    // then slices to 5 cols → "[hell".
+    expect(lastFrame({ trimLines: true })).toBe("[hello]");
+  });
+
+  test("transform inside overflowX hidden — left clip feeds the right span", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={5} overflowX="hidden">
+          <Box width={16} marginLeft={-6} flexShrink={0}>
+            <Transform transform={(l: string) => `[${l}]`}>
+              <Text>hello world</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 20 },
+    );
+    // The inner box is shifted left by 6 cols, so the visible window over
+    // "hello world" is columns 6..10 → "world". Ink clips to "world" first, then
+    // brackets → "[world]". The buggy order would bracket "[hello world]" then
+    // slice columns 6..10 of THAT → "world" (no brackets), so the brackets reveal
+    // which span the transform actually saw.
+    expect(lastFrame({ trimLines: true })).toBe("[world]");
   });
 });

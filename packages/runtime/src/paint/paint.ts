@@ -180,12 +180,14 @@ class Output {
           continue;
         }
 
-        // Apply transforms BEFORE horizontal clipping
-        for (const transformer of transformers) {
-          line = transformer(line, index);
-        }
-
-        // Horizontal clip (per-line, after transform)
+        // Horizontal clip BEFORE applying transforms, matching Ink's
+        // output.ts: the `clipHorizontally` sliceAnsi map runs first, THEN the
+        // `lines.entries()` loop calls `transformer(line, index)` on the
+        // already-clipped span. Width-sensitive transforms (gradients spread
+        // across the visible columns, OSC-8 hyperlinks whose closing sequence
+        // must not be sliced off) depend on receiving exactly the clipped
+        // substring — applying them to the full line and slicing the result
+        // corrupts the gradient stops and can truncate the link terminator.
         let lineX = x;
         if (clipH) {
           const lineWidth = this.caches.getStringWidth(line);
@@ -196,18 +198,23 @@ class Output {
           }
           const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
           const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
-          if (from > 0) {
-            // Advance lineX by however many columns slice-ansi actually drops
-            // from the left. slice-ansi@9 is grapheme-aware: a wide grapheme
-            // straddling the clip edge is dropped whole, so the retained
-            // content starts at `lineX + droppedWidth` (which may exceed
-            // `from`). Measuring the kept-prefix width would under-count here
-            // and misplace the following text.
-            const droppedWidth = lineWidth - this.caches.getStringWidth(sliceAnsi(line, from));
-            lineX = lineX + droppedWidth;
-          }
+          // After a LEFT clip the write origin is the clipped left edge — matching
+          // Ink output.ts:210-212 `if (x < clip.x1) x = clip.x1`. slice-ansi@9 is
+          // grapheme-aware, so a wide glyph straddling the clip edge is dropped
+          // whole and the kept content begins at this origin with NO leading
+          // offset. (We deliberately do NOT advance the origin by the dropped
+          // glyph's extra column — that produced a vue-tui-specific leading space
+          // that Ink never emits; see G63 decisions-log in parity-ledger.md.)
+          if (lineX < clipH.x1) lineX = clipH.x1;
           const maxWidth = clipH.x2 - lineX;
           line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);
+        }
+
+        // Apply transforms to the (now horizontally clipped) line. `index` is the
+        // post-vertical-clip line index — unchanged from the loop counter, matching
+        // Ink's `transformer(line, index)` where index is the entry index.
+        for (const transformer of transformers) {
+          line = transformer(line, index);
         }
 
         const characters = this.caches.getStyledChars(line);
