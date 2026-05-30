@@ -31,16 +31,6 @@ deliberate. Divergences fall into a few kinds:
 - **Why:** mirrors Vue's own `createApp` mental model — a Vue developer expects an app
   object they mount, not a one-shot render call.
 
-### App composable — `useAppContext()` instead of `useApp()`
-
-- **Ink:** `useApp()` returns `{ exit, waitUntilRenderFlush }` — stdin/stdout/stderr are
-  separate hooks (`useStdin`/`useStdout`/`useStderr`), not part of it.
-- **vue-tui:** `useAppContext()` returns the same `{ exit, waitUntilRenderFlush }`, with
-  streams on those same peer composables.
-- **Why:** only the name differs — `useApp` reads as "the Vue application instance"
-  (`createApp`, `app.mount`), so vue-tui qualifies it as `useAppContext`. The shape is
-  identical to Ink; a naming divergence, not a surface one.
-
 ### Named type / prop re-exports
 
 - **Ink:** re-exports its component prop types plus a few data/handle types:
@@ -75,13 +65,6 @@ deliberate. Divergences fall into a few kinds:
   different thing (a host node, a mounted app) or no thing at all.
 
 ## Additive features (vue-tui is a strict superset)
-
-### Accessibility props — `AriaRole` / `AriaState`
-
-- **Ink:** no equivalent.
-- **vue-tui:** `<Box>` / `<Text>` accept `AriaRole` / `AriaState` props that feed the
-  screen-reader linearization.
-- **Why:** additive accessibility surface; does not change visual (non-SR) rendering.
 
 ### Multiple `<Static>` regions
 

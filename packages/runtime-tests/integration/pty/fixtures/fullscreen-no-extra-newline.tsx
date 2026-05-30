@@ -1,9 +1,9 @@
 import process from "node:process";
-import { Box, Text, createApp, useAppContext } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, onScopeDispose } from "vue";
 
 const Fullscreen = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   onMounted(() => {
     const timer = setTimeout(() => {

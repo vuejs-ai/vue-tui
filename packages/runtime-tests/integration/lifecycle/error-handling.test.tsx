@@ -1,7 +1,7 @@
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useAppContext } from "@vue-tui/runtime";
+import { Box, Text, useApp } from "@vue-tui/runtime";
 
 test("setup() throw rejects render()", async () => {
   const Boom = defineComponent(() => {
@@ -32,20 +32,20 @@ test("render-time throw does not prevent unmount", async () => {
   expect(() => unmount()).not.toThrow();
 });
 
-test("useAppContext() called with error rejects waitUntilExit", async () => {
+test("useApp() called with error rejects waitUntilExit", async () => {
   // Mirrors Ink's "exit on exit() with error" fixture test, adapted for
   // render-based testing. Verifies exit(err) rejects the promise cleanly.
   // Also covered by exit.test.tsx "exit(error) rejects waitUntilExit with the error".
   let exitFn!: (err?: Error) => void;
 
   const App = defineComponent(() => {
-    exitFn = useAppContext().exit;
+    exitFn = useApp().exit;
     return () => <Text>running</Text>;
   });
 
   const { waitUntilExit } = await render(App);
 
-  const err = new Error("errored via useAppContext");
+  const err = new Error("errored via useApp");
   exitFn(err);
 
   await expect(waitUntilExit()).rejects.toBe(err);

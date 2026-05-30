@@ -13,7 +13,7 @@ test("public API exposes documented members", () => {
     "Static",
     "Transform",
     // Composables
-    "useAppContext",
+    "useApp",
     "useInput",
     "useFocus",
     "useFocusManager",

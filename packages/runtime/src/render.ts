@@ -545,7 +545,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         //
         // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
         // app.unmount() runs teardown()+resolveExit() WITHOUT setting
-        // exitInitiated, so a retained exit() (from useAppContext()) called re-entrantly DURING
+        // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
         // unmount teardown (or any exit() after unmount) would otherwise pass
         // the exitInitiated check, overwrite pendingExitResult/pendingExitError
         // and queue a microtask — letting that late value win over the unmount.
@@ -960,7 +960,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Auto-cleanup on process exit (process.exit, event-loop drain, uncaught
     // exception — anything that fires Node's 'exit' event). teardown() is
     // sync and idempotent, safe to call from this hook. If the user already
-    // called unmount() / exit() (via useAppContext()), this is a no-op.
+    // called unmount() / exit() (via useApp()), this is a no-op.
     const exitListener = () => teardown();
     process.on("exit", exitListener);
     mountedExitListener = exitListener;
@@ -1032,7 +1032,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   };
 
   // Hoisted so the injected appContext (built inside mount()) can expose the
-  // SAME implementation via useAppContext().waitUntilRenderFlush — both the
+  // SAME implementation via useApp().waitUntilRenderFlush — both the
   // TuiApp handle and the in-tree composable resolve identically.
   async function waitUntilRenderFlush(): Promise<void> {
     // Flush any pending OR scheduled render. Gating on hasPending() alone

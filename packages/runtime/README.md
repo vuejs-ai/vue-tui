@@ -73,7 +73,7 @@ useInput((input) => {
 | `useInput(handler, opts?)` | Keyboard input — `(input, key)` with modifier and arrow key detection |
 | `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                |
 | `useFocusManager()`        | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`       |
-| `useAppContext()`          | App context — `{ exit(error?), waitUntilRenderFlush() }`              |
+| `useApp()`                 | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`            |
 | `useTerminalSize()`        | Reactive terminal dimensions — `{ columns, rows }`                    |
 | `useAnimation(opts?)`      | Frame-based animation loop — returns `{ frame, time, delta, reset }`  |
 | `useBoxMetrics(ref)`       | Reactive layout metrics — `{ width, height, left, top, hasMeasured }` |

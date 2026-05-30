@@ -25,6 +25,10 @@ uncommitted `docs/` working-notes folder). Convention, borrowed from rolldown:
   from reality are worse than no docs.
 - Capture the _why_ — trade-offs considered, alternatives rejected, known pitfalls — not
   just what the code does.
+- Be concise and direct: the essential what + why, led by the principle or intuition. Lose no
+  information, but don't write essays or exhaustive mechanism dumps. When a behavior is the
+  correct default (e.g. render = f(current props)), state the principle — don't dress it up as
+  a framework limitation.
 
 <!--VITE PLUS START-->
 

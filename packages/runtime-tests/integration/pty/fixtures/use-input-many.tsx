@@ -1,5 +1,5 @@
 import process from "node:process";
-import { createApp, Text, useInput, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useApp } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted } from "vue";
 
 // Detect MaxListenersExceededWarning
@@ -15,7 +15,7 @@ const InputHandler = defineComponent(() => {
 });
 
 const App = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   onMounted(() => {
     setTimeout(exit, 100);

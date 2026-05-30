@@ -1,8 +1,8 @@
-import { createApp, Text, useAppContext, useStdin } from "@vue-tui/runtime";
+import { createApp, Text, useApp, useStdin } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const App = defineComponent(() => {
-  const { exit } = useAppContext();
+  const { exit } = useApp();
   const { setRawMode } = useStdin();
 
   onMounted(() => {

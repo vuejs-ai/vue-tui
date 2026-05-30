@@ -1,9 +1,9 @@
-import { Text, createApp, useAnimation, useAppContext } from "@vue-tui/runtime";
+import { Text, createApp, useAnimation, useApp } from "@vue-tui/runtime";
 import { defineComponent, h, watch } from "vue";
 
 const Spinner = defineComponent(() => {
   const { frame } = useAnimation({ interval: 8 });
-  const { exit } = useAppContext();
+  const { exit } = useApp();
 
   watch(frame, (value) => {
     if (value >= 3) {

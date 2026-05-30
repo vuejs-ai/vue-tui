@@ -1,7 +1,7 @@
 import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { createApp, Text, useAppContext } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
 import {
   makeFakeWritable,
@@ -229,7 +229,7 @@ test("waitUntilRenderFlush waits for unmount write callback", async () => {
 test("waitUntilRenderFlush resolves after exit with error", async () => {
   let exitFn!: (err: Error) => void;
   const App = defineComponent(() => {
-    const { exit } = useAppContext();
+    const { exit } = useApp();
     onMounted(() => {
       exitFn = exit as (err: Error) => void;
     });
@@ -248,14 +248,14 @@ test("waitUntilRenderFlush resolves after exit with error", async () => {
   await app.waitUntilRenderFlush();
 });
 
-// useAppContext-level waitUntilRenderFlush tests (Ink parity, ported from Ink
+// useApp-level waitUntilRenderFlush tests (Ink parity, ported from Ink
 // render.tsx "useApp waitUntilRenderFlush …"): waitUntilRenderFlush is reachable
-// from INSIDE a component via useAppContext() — Ink's useApp() returns the same
+// from INSIDE a component via useApp() — Ink's useApp() returns the same
 // { exit, waitUntilRenderFlush } pair. Ink's third "queued in same effect tick"
 // test relies on React `concurrent: true` (concurrent mode is N/A in Vue — see
 // .agents/docs/ink-divergences.md), so only the first two are ported.
 
-test("useAppContext waitUntilRenderFlush resolves after the first frame write callback", async () => {
+test("useApp waitUntilRenderFlush resolves after the first frame write callback", async () => {
   let didInitialWriteCallbackFire = false;
   let didFlushResolve = false;
 
@@ -267,7 +267,7 @@ test("useAppContext waitUntilRenderFlush resolves after the first frame write ca
   });
 
   const App = defineComponent(() => {
-    const { exit, waitUntilRenderFlush } = useAppContext();
+    const { exit, waitUntilRenderFlush } = useApp();
     onMounted(() => {
       void (async () => {
         await waitUntilRenderFlush();
@@ -288,7 +288,7 @@ test("useAppContext waitUntilRenderFlush resolves after the first frame write ca
   expect(didFlushResolve).toBe(true);
 });
 
-test("useAppContext waitUntilRenderFlush waits for state update frame flush", async () => {
+test("useApp waitUntilRenderFlush waits for state update frame flush", async () => {
   let didWorldWriteCallbackFire = false;
   let didFlushResolve = false;
 
@@ -305,7 +305,7 @@ test("useAppContext waitUntilRenderFlush waits for state update frame flush", as
 
   const text = shallowRef("Hello");
   const App = defineComponent(() => {
-    const { exit, waitUntilRenderFlush } = useAppContext();
+    const { exit, waitUntilRenderFlush } = useApp();
     onMounted(() => {
       void (async () => {
         // Settle the initial "Hello" frame first (not delayed by the harness,
