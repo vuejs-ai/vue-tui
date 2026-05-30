@@ -161,6 +161,20 @@ function shouldClearTerminalForFrame(opts: {
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 
+// Classify an exit() input as error-vs-result, matching Ink's isErrorInput
+// (ink.tsx:154-159 @ v7.0.4). The plain `instanceof Error` check fails for a
+// cross-realm Error — one created in a different VM context (e.g.
+// `vm.runInNewContext("new Error()")`) has a prototype from the OTHER realm, so
+// it isn't an instance of THIS realm's Error even though it is a genuine Error.
+// The `[object Error]` brand (Symbol.toStringTag, not prototype-based) crosses
+// realms, so it catches those foreign Errors and they REJECT waitUntilExit()
+// instead of being silently swallowed as a resolved result value. Non-Error
+// result values (string/number/plain object) brand as e.g. `[object String]`,
+// so they still RESOLVE — exactly Ink's contract.
+function isErrorInput(value: unknown): value is Error {
+  return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
+}
+
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
@@ -229,7 +243,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Skipped mount: no stream was ever wired; resolve the exit promise directly
     // without any write-barrier so the owner's stdout is never touched.
     if (skippedMount) {
-      if (pendingExitError instanceof Error) {
+      if (isErrorInput(pendingExitError)) {
         exitReject(pendingExitError);
       } else {
         exitResolve(pendingExitResult);
@@ -241,7 +255,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const hasWritableState = (stdout as any)._writableState !== undefined;
 
     const finish = () => {
-      if (pendingExitError instanceof Error) {
+      if (isErrorInput(pendingExitError)) {
         exitReject(pendingExitError);
       } else {
         exitResolve(pendingExitResult);
@@ -409,7 +423,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const errored = shallowRef(false);
 
       onErrorCaptured((err) => {
-        const e = err instanceof Error ? err : new Error(String(err));
+        // Preserve a genuine Error — including a cross-realm one (fails
+        // `instanceof Error`, passes the `[object Error]` brand check) — so the
+        // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
+        // matching Ink's ErrorBoundary (rejects with the thrown value itself).
+        // A true non-Error throw (`throw "x"`, `throw 0`) is still wrapped.
+        const e = isErrorInput(err) ? err : new Error(String(err));
         caught.value = err;
         errored.value = true;
         // Flush the ErrorOverview frame, then exit
@@ -567,7 +586,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // Record the FIRST value/error synchronously (before the deferred
         // teardown microtask) so a re-entrant exit() — which is blocked above
         // anyway — and the eventual resolveExit() always settle on this value.
-        if (errorOrResult instanceof Error) {
+        if (isErrorInput(errorOrResult)) {
           pendingExitError = errorOrResult;
         } else {
           pendingExitResult = errorOrResult;
@@ -980,7 +999,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // async errors in Vue's internal scheduler). The error boundary returns
     // false to stop propagation, so caught errors won't reach here.
     baseApp.config.errorHandler = (err) => {
-      appContext.exit(err instanceof Error ? err : new Error(String(err)));
+      // Preserve a genuine (incl. cross-realm) Error so the original survives to
+      // exit(); only wrap a true non-Error. See isErrorInput / onErrorCaptured.
+      appContext.exit(isErrorInput(err) ? err : new Error(String(err)));
     };
 
     // Only listen for resize in interactive mode (matching Ink).

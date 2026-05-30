@@ -408,12 +408,13 @@ test("waitUntilExit resolves FIRST exit value when exit is re-entered during unm
   expect(result).toBe("first");
 });
 
-test("exit with cross-realm Error resolves after stdout write callback", async () => {
-  // vue-tui uses `instanceof Error` to distinguish errors from result values.
-  // A cross-realm Error (created in a different VM context) fails the
-  // instanceof check, so it is treated as a result value and resolves
-  // rather than rejecting. This differs from Ink which rejects. The test
-  // verifies the write-callback timing: resolution waits for the barrier.
+test("exit with cross-realm Error rejects after stdout write callback", async () => {
+  // A cross-realm Error (created in a different VM context) is a genuine Error
+  // but fails `instanceof Error` because its prototype comes from the other
+  // realm. We classify exit() input with Ink's isErrorInput (instanceof OR the
+  // [object Error] brand check), so a cross-realm Error REJECTS waitUntilExit()
+  // — matching Ink. The test also verifies the write-callback timing:
+  // resolution/rejection waits for the stdout write barrier to flush.
   const vm = await import("node:vm");
   let writeCallbackFired = false;
   let barrierWriteCallbackFired = false;
@@ -450,10 +451,11 @@ test("exit with cross-realm Error resolves after stdout write callback", async (
   const { stream: stdin } = makeFakeStdin();
   app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
-  // Cross-realm Error fails instanceof check, so exit resolves with the
-  // error object as a value instead of rejecting.
-  const result = await app.waitUntilExit();
-  expect(result).toBe(foreignError);
+  // Cross-realm Error is detected via the [object Error] brand check, so exit
+  // rejects with the foreign error (matching Ink) rather than resolving it as
+  // a value.
+  await expect(app.waitUntilExit()).rejects.toBe(foreignError);
+  await expect(app.waitUntilExit()).rejects.toMatchObject({ message: "boom" });
   expect(writeCallbackFired).toBe(true);
   expect(barrierWriteCallbackFired).toBe(true);
 });

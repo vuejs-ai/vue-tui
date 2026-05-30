@@ -103,6 +103,64 @@ test("error in component triggered after mount routes through exit", async () =>
   await expect(waitUntilExit()).rejects.toThrow("post-mount boom");
 });
 
+test("component-thrown cross-realm Error preserves the original (not re-wrapped)", async () => {
+  // A cross-realm Error (created in a different VM context) is a genuine Error
+  // but fails `instanceof Error` because its prototype comes from the other
+  // realm. The error-boundary path must NOT re-wrap it into
+  // `new Error(String(foreignError))` (which would yield "Error: boom" and lose
+  // the original identity). It uses the same isErrorInput brand check as exit(),
+  // so the ORIGINAL foreign Error rejects waitUntilExit() — matching Ink's
+  // ErrorBoundary, which rejects with the thrown value itself.
+  const vm = await import("node:vm");
+  const foreignError = vm.runInNewContext("new Error('boom')") as Error;
+
+  const trigger = shallowRef(false);
+  const App = defineComponent(() => {
+    return () => {
+      if (trigger.value) throw foreignError;
+      return <Text>ok</Text>;
+    };
+  });
+
+  const { waitUntilExit, lastFrame } = await render(App);
+  expect(lastFrame()).toContain("ok");
+
+  trigger.value = true;
+  await nextTick();
+  await nextTick();
+  await Promise.resolve();
+
+  // Same identity (not a re-wrapped copy) and the original message "boom"
+  // (NOT "Error: boom" that re-wrapping would produce).
+  await expect(waitUntilExit()).rejects.toBe(foreignError);
+  await expect(waitUntilExit()).rejects.toMatchObject({ message: "boom" });
+});
+
+test("component-thrown non-Error value is still wrapped into an Error", async () => {
+  // Guard: a true non-Error throw must still be wrapped into a real Error so the
+  // exit/ErrorOverview machinery always receives an Error. Only the cross-realm
+  // Error case is preserved; this case is unchanged.
+  const trigger = shallowRef(false);
+  const App = defineComponent(() => {
+    return () => {
+      // eslint-disable-next-line no-throw-literal -- exercising a non-Error throw on purpose
+      if (trigger.value) throw "plain";
+      return <Text>ok</Text>;
+    };
+  });
+
+  const { waitUntilExit, lastFrame } = await render(App);
+  expect(lastFrame()).toContain("ok");
+
+  trigger.value = true;
+  await nextTick();
+  await nextTick();
+  await Promise.resolve();
+
+  await expect(waitUntilExit()).rejects.toBeInstanceOf(Error);
+  await expect(waitUntilExit()).rejects.toMatchObject({ message: "plain" });
+});
+
 // --- Ink error validation tests ---
 
 test("fail when Box nested inside Text", async () => {
