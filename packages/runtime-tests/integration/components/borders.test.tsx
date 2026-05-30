@@ -1340,7 +1340,7 @@ test("borderDimColor does not dim styled child Text touching left edge", async (
   );
   expect(lastFrame()).toMatchInlineSnapshot(`
     "[2m╭───────────╮[22m
-    [2m│[22m[34m[1mstyled text[22m[39m[2m│[22m
+    [2m│[22m[1m[34mstyled text[39m[22m[2m│[22m
     [2m╰───────────╯[22m"
   `);
 });
