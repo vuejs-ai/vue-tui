@@ -73,6 +73,68 @@ test("toggle focus management — Tab does nothing while disabled", async () => 
   expect(lastFrame()).toMatch(/Second ✔/);
 });
 
+// Ink parity (App.tsx): the isFocusEnabled guard lives ONLY in handleTabNavigation,
+// not in focusNext/focusPrevious. So after disableFocus(), Tab is a no-op but a
+// programmatic focusNext()/focusPrevious() STILL moves focus.
+test("programmatic focusNext() still moves focus while focus is disabled (Ink parity)", async () => {
+  let doDisableFocus!: () => void;
+  let doFocusNext!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doDisableFocus = manager.disableFocus;
+    doFocusNext = manager.focusNext;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" autoFocus />
+        <FocusItem label="Second" />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  // Disable focus management — Tab would now be a no-op...
+  doDisableFocus();
+  await nextTick();
+
+  // ...but a programmatic focusNext() must still advance to Second (Ink parity).
+  doFocusNext();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Second ✔/);
+  expect(lastFrame()).not.toMatch(/First ✔/);
+});
+
+test("programmatic focusPrevious() still moves focus while focus is disabled (Ink parity)", async () => {
+  let doDisableFocus!: () => void;
+  let doFocusPrevious!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doDisableFocus = manager.disableFocus;
+    doFocusPrevious = manager.focusPrevious;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" autoFocus />
+        <FocusItem label="Second" />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  doDisableFocus();
+  await nextTick();
+
+  // Previous from First wraps to Second (last) — must still move while disabled.
+  doFocusPrevious();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Second ✔/);
+  expect(lastFrame()).not.toMatch(/First ✔/);
+});
+
 test("does not crash when focusing next on unmounted children", async () => {
   const unmountChildren = shallowRef(false);
   let doFocusNext!: () => void;
