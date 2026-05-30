@@ -100,11 +100,23 @@ export function safeSliceEnd(text: string, maxCols: number): string {
 export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): string[] {
   if (width <= 0) return [""];
 
-  if (mode === "wrap") {
-    return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
-  }
+  if (mode === "wrap" || mode === "hard") {
+    // Mirror Ink's render-node-to-output.ts:144-150: only invoke wrap-ansi when
+    // the text is actually wider than the cell (`currentWidth > maxWidth`).
+    // wrap-ansi@10 cannot account for the visible width of NON-hyperlink OSC
+    // sequences (its regex only recognises SGR and `]8;;` links), so it counts an
+    // OSC payload like a set-title `ESC]0;…BEL` as visible columns and re-wraps —
+    // mangling the following text. string-width DOES discount those bytes, so when
+    // the text already fits we must pass it through verbatim rather than asking
+    // wrap-ansi to "wrap" it. This also matches Ink, which skips wrapText entirely
+    // for fitting text. Splitting on `\n` preserves any embedded hard newlines,
+    // exactly as Ink's `output.write` does for the unwrapped string.
+    if (measureTextNatural(text).width <= width) return text.split("\n");
 
-  if (mode === "hard") {
+    if (mode === "wrap") {
+      return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
+    }
+
     // `wordWrap: false` ensures breaks happen at the exact character boundary,
     // not at word boundaries. This is what Ink's "hard" wrap mode does.
     return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");

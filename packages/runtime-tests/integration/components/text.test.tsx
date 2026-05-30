@@ -619,8 +619,7 @@ test("do not wrap text with ST-terminated OSC hyperlinks", async () => {
   expect(stripAnsi(output)).toBe("Click here");
 });
 
-// Feature gap: non-hyperlink OSC title sequences are consumed into the OSC payload
-test.skip("do not wrap text with non-hyperlink OSC sequences", async () => {
+test("do not wrap text with non-hyperlink OSC (BEL-terminated) sequences", async () => {
   const text = "\x1b]0;My Title\x07Some text";
   const output = renderToString(
     defineComponent(() => () => (
@@ -631,6 +630,42 @@ test.skip("do not wrap text with non-hyperlink OSC sequences", async () => {
     { columns: 20 },
   );
   expect(stripAnsi(output)).toBe("Some text");
+});
+
+test("do not wrap text with non-hyperlink OSC (ST-terminated) sequences", async () => {
+  const text = "\x1b]0;My Title\x1b\\Some text";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={20}>
+        <Text wrap="wrap">{text}</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(stripAnsi(output)).toBe("Some text");
+});
+
+// KNOWN vue-tui divergence — pending the sanitize-before-wrap fix (parity gap #9),
+// NOT a shared wrap-ansi limitation. When a generic (non-hyperlink) OSC sequence
+// precedes a word long enough to force wrap-ansi's wrapWord codepath, vue-tui wraps
+// the RAW string: wrap-ansi@10 only protects `]8;;` links, so it counts the OSC
+// payload as visible columns and drops a char — vue renders "abcd\nfghij" here, NOT
+// Ink's correct "abcde\nfghij". Ink does NOT corrupt this: it wraps the SANITIZED
+// text (squash-text-nodes runs sanitizeAnsi before measure/wrap), so the OSC never
+// reaches wrap-ansi. The FITTING case (above) is fixed via Ink's wrap-only-on-overflow
+// guard; this overflow case is fixed once vue measures/wraps sanitized text (gap #9).
+// The assertion below is Ink's correct output; un-skip when gap #9 lands.
+test.skip("hard-wrap long word after non-hyperlink OSC sequence", async () => {
+  const text = "\x1b]0;My Title\x07abcdefghij";
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={5}>
+        <Text wrap="wrap">{text}</Text>
+      </Box>
+    )),
+    { columns: 5 },
+  );
+  expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
 
 test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
