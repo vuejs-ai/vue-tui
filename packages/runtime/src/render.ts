@@ -398,11 +398,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const ErrorBoundaryRoot = defineComponent({
     name: "InternalErrorBoundary",
     setup() {
-      const error = shallowRef<Error | null>(null);
+      // Two refs by design: `caught` is the ORIGINAL thrown value, passed to
+      // ErrorOverview for a faithful display (Ink stores the raw value —
+      // ErrorBoundary.tsx:18 — and ErrorOverview only renders a stack when the
+      // value has one). `errored` marks that an error occurred (the value may be
+      // a falsy primitive, so we can't test `caught` for truthiness). The
+      // exit/reject machinery still receives a wrapped Error — semantics
+      // unchanged.
+      const caught = shallowRef<unknown>(null);
+      const errored = shallowRef(false);
 
       onErrorCaptured((err) => {
         const e = err instanceof Error ? err : new Error(String(err));
-        error.value = e;
+        caught.value = err;
+        errored.value = true;
         // Flush the ErrorOverview frame, then exit
         void nextTick(() => {
           exitWithError(e);
@@ -411,8 +420,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       });
 
       return () => {
-        if (error.value) {
-          return h(ErrorOverview, { error: error.value });
+        if (errored.value) {
+          return h(ErrorOverview, { error: caught.value });
         }
         return h(userRoot, userRootProps ?? undefined);
       };

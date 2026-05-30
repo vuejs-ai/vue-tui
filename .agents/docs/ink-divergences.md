@@ -64,6 +64,18 @@ deliberate. Divergences fall into a few kinds:
   Maintainer decision (2026-05-30): KEEP. Tests: `usePaste-only app exits on {legacy,kitty} Ctrl+C`
   in `input-kitty.test.ts`.
 
+### Non-`Error` thrown values keep their message in the error overview
+
+- **Ink:** `ErrorOverview` renders `error.message`; a thrown non-`Error` (`throw 'boom'`) has no
+  `.message`, so the overview shows a blank message.
+- **vue-tui:** the error boundary keeps the **raw** thrown value and `ErrorOverview` shows
+  `String(value)` as the message, so `throw 'boom'` renders ` ERROR  boom`, not a blank
+  `ERROR`. Like Ink, no stack block is rendered when the value carries no stack.
+- **Why:** strictly more informative for the (lint-discouraged) non-`Error` throw, and it keeps
+  the message vue-tui already surfaced before — when the boundary wrapped such throws in
+  `new Error(String(value))`, which also produced a misleading synthetic stack pointing at the
+  framework internals (that synthetic stack is now gone). Introduced 2026-05-31.
+
 ## Framework-semantic divergences (Vue ≠ React)
 
 ### Removing `flexDirection` / `flexWrap` resets to the default
