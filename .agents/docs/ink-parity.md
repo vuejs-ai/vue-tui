@@ -44,6 +44,16 @@ These are differences the audit must treat as **by design**. Format:
   names (uses TuiApp / MountOptions and its own type surface instead).
 - **React concurrent mode** — Suspense / useTransition have no Vue equivalent. N/A, not a
   gap.
+- **Ctrl+C exits under kitty protocol too (G07)** — vue-tui's `useInput` exits on
+  `input==='c' && key.ctrl` gated on `internal_exitOnCtrlC` (which defaults to `true`,
+  render.ts:443). So the `exitOnCtrlC` option is honored under BOTH legacy (`\x03`) and
+  kitty (`\x1b[99;5u`) protocols. Ink wires `exitOnCtrlC` only to the `\x03` path, so kitty
+  Ctrl+C doesn't exit in Ink. Maintainer decision (2026-05-30): KEEP — Ctrl+C reliably
+  exiting under all protocols is the intended `exitOnCtrlC` behavior; opt out via
+  `exitOnCtrlC: false`.
+- **Multiple `<Static>` regions supported (G24)** — vue-tui's `findStatics(root)` renders
+  EVERY `<Static>` in the tree; Ink keeps a single `staticNode`. vue-tui is strictly more
+  capable here. Maintainer decision (2026-05-30): KEEP.
 
 ## Candidate intentional divergences (needs human review)
 
@@ -51,20 +61,5 @@ _(The loop appends here when it finds a difference it suspects is intentional bu
 not yet on the allowlist. A human promotes entries up into the allowlist — the loop never
 does.)_
 
-- **Kitty-protocol Ctrl+C exits the app (G07)** — Ink does NOT exit on a kitty-encoded
-  Ctrl+C (`\x1b[99;5u`): `use-input.ts:245-247` only `return`s (suppresses the user
-  handler), and Ink's real exit path (`App.tsx:244-246`) fires only on the literal `\x03`
-  byte, which kitty never produces. vue-tui's `useInput.ts:100-105` calls `app.exit()`
-  directly on `input==='c' && key.ctrl`, so Ctrl+C exits under BOTH legacy and kitty
-  protocols. **This is arguably better UX than Ink** (Ctrl+C reliably exits) and looks
-  like a kitty-era oversight in Ink rather than a deliberate choice. Flagged for the
-  maintainer to decide: keep vue-tui's behavior (promote to the allowlist) or match Ink
-  (remove the kitty-path exit so only `\x03` exits). Not auto-changed — removing a working
-  Ctrl+C-exits behavior to match an Ink limitation needs a human call. Tracked as G07 in
-  [[parity-ledger]] (status `candidate`).
-- **Multiple `<Static>` nodes supported (G24)** — vue-tui's `findStatics(root)` collects and
-  renders EVERY `<Static>` in the tree; Ink maintains a single `staticNode` (only the
-  most-recent `<Static>` renders). So vue-tui supports multiple `<Static>` regions, which
-  Ink does not — matching Ink would REMOVE that capability. Flagged for the maintainer:
-  keep vue-tui's multi-Static support (promote to allowlist) or restrict to Ink's single
-  staticNode. Not auto-changed. Tracked as G24 in [[parity-ledger]] (status `candidate`).
+- _(none currently — G07 and G24 were reviewed and promoted to the allowlist above on
+  2026-05-30.)_
