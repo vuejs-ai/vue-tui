@@ -46,7 +46,7 @@ export interface RenderToStringOptions {
  * starting a persistent terminal application.
  *
  * Terminal-specific composables (`useInput`, `useStdin`, `useStdout`,
- * `useStderr`, `useExit`, `useFocus`, `useFocusManager`) return default
+ * `useStderr`, `useAppContext`, `useFocus`, `useFocusManager`) return default
  * no-op values since there is no terminal session. They will not throw, but
  * they will not function as in a live terminal.
  *
@@ -168,6 +168,9 @@ export function renderToString(component: Component, options?: RenderToStringOpt
 function createNoOpAppContext(isScreenReaderEnabled = false): AppContext {
   return {
     exit: () => {},
+    // No terminal session: nothing to flush, resolve immediately (mirrors Ink's
+    // default AppContext `async waitUntilRenderFlush() {}`).
+    waitUntilRenderFlush: async () => {},
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,

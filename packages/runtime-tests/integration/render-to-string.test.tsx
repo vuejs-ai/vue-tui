@@ -10,7 +10,7 @@ import {
   Static,
   Transform,
   useInput,
-  useExit,
+  useAppContext,
   useFocus,
   useFocusManager,
   useStdin,
@@ -65,9 +65,9 @@ describe("renderToString", () => {
     expect(output).toContain("with input");
   });
 
-  test("useExit does not throw in renderToString", () => {
+  test("useAppContext does not throw in renderToString", () => {
     const App = defineComponent(() => {
-      const exit = useExit();
+      const { exit } = useAppContext();
       // exit is a function but calling it is a no-op
       void exit;
       return () => <Text>with exit</Text>;

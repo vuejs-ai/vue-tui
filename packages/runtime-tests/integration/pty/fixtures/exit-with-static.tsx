@@ -1,8 +1,8 @@
-import { createApp, Static, Text, useExit } from "@vue-tui/runtime";
+import { createApp, Static, Text, useAppContext } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
 const App = defineComponent(() => {
-  const exit = useExit();
+  const { exit } = useAppContext();
 
   onMounted(() => {
     exit(new Error("errored"));

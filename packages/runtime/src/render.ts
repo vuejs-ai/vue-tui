@@ -545,7 +545,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         //
         // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
         // app.unmount() runs teardown()+resolveExit() WITHOUT setting
-        // exitInitiated, so a retained useExit() called re-entrantly DURING
+        // exitInitiated, so a retained exit() (from useAppContext()) called re-entrantly DURING
         // unmount teardown (or any exit() after unmount) would otherwise pass
         // the exitInitiated check, overwrite pendingExitResult/pendingExitError
         // and queue a microtask — letting that late value win over the unmount.
@@ -570,6 +570,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           resolveExit();
         });
       },
+      waitUntilRenderFlush,
       stdout,
       stderr,
       stdin,
@@ -959,7 +960,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Auto-cleanup on process exit (process.exit, event-loop drain, uncaught
     // exception — anything that fires Node's 'exit' event). teardown() is
     // sync and idempotent, safe to call from this hook. If the user already
-    // called unmount() / useExit(), this is a no-op.
+    // called unmount() / exit() (via useAppContext()), this is a no-op.
     const exitListener = () => teardown();
     process.on("exit", exitListener);
     mountedExitListener = exitListener;
@@ -1030,7 +1031,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     return exitPromise;
   };
 
-  app.waitUntilRenderFlush = async function waitUntilRenderFlush(): Promise<void> {
+  // Hoisted so the injected appContext (built inside mount()) can expose the
+  // SAME implementation via useAppContext().waitUntilRenderFlush — both the
+  // TuiApp handle and the in-tree composable resolve identically.
+  async function waitUntilRenderFlush(): Promise<void> {
     // Flush any pending OR scheduled render. Gating on hasPending() alone
     // misses the window after schedule() queues a commit but before the
     // post-flush callback sets hasPendingFlag, letting this resolve early.
@@ -1051,7 +1055,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setImmediate(resolve);
       }
     });
-  };
+  }
+  app.waitUntilRenderFlush = waitUntilRenderFlush;
 
   app.clear = function clear(): void {
     mountedClear?.();

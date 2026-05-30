@@ -1,9 +1,9 @@
 import process from "node:process";
-import { Box, Text, createApp, useExit } from "@vue-tui/runtime";
+import { Box, Text, createApp, useAppContext } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, onScopeDispose } from "vue";
 
 const App = defineComponent(() => {
-  const exit = useExit();
+  const { exit } = useAppContext();
 
   onMounted(() => {
     const timer = setTimeout(() => {

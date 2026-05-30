@@ -1,5 +1,5 @@
 import process from "node:process";
-import { createApp, Box, Text, useInput, useExit } from "@vue-tui/runtime";
+import { createApp, Box, Text, useInput, useAppContext } from "@vue-tui/runtime";
 import { computed, defineComponent, h, onMounted, shallowRef, watch } from "vue";
 
 /**
@@ -11,7 +11,7 @@ import { computed, defineComponent, h, onMounted, shallowRef, watch } from "vue"
  * processed before the deferred state catches up.
  */
 const App = defineComponent(() => {
-  const exit = useExit();
+  const { exit } = useAppContext();
   const query = shallowRef("abcde");
   const deferredQuery = shallowRef("abcde");
   let done = false;

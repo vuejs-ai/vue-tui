@@ -30,6 +30,7 @@ const DIRECTION_LTR = 0;
 function createTestAppContext(): AppContext {
   return {
     exit: () => {},
+    waitUntilRenderFlush: async () => {},
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
