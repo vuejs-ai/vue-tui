@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, onUnmounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, Static, createApp } from "@vue-tui/runtime";
+import { Box, Text, Static, Spacer, createApp } from "@vue-tui/runtime";
 
 test("Static appends new items above the dynamic frame", async () => {
   const items = shallowRef<string[]>([]);
@@ -517,6 +517,232 @@ test("Static honors paddingLeft in the isolated paint (Ink parity, G44)", async 
   const staticFrame = frames.find((f) => f.includes("X") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toContain("    X");
+});
+
+// Ink reference: src/components/Static.tsx sets the static box style
+// `{position:'absolute', flexDirection:'column', ...customStyle}` with NO width,
+// and ink.tsx calculateLayout NEVER sets the static node's width — so renderer.ts
+// reads node.staticNode.yogaNode.getComputedWidth() of a yoga absolute,
+// auto-width node, which shrinks to its CONTENT. So flex-fill children
+// (<Spacer>, flexGrow, justifyContent, percent width) inside a Static item
+// COLLAPSE to content width rather than expanding to the terminal width.
+// (G64 — refines G44, which over-forced the iso root to terminal width.)
+//
+// Confirmed against the built Ink reference (v7.0.4, /tmp/ink-40b3a75/build,
+// cols=80): a Static item Box row [Text LEFT][Spacer][Text RIGHT] renders the
+// static frame "LEFTRIGHT" (9 chars; the Spacer collapses to 0), NOT
+// "LEFT" + 71 spaces + "RIGHT".
+test("Static content-sizes an auto-width item: Spacer collapses (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => (
+            <Box key={item} flexDirection="row">
+              <Text>LEFT</Text>
+              <Spacer />
+              <Text>RIGHT</Text>
+            </Box>
+          ),
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 80 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  // The static frame must content-size to "LEFTRIGHT" (Spacer collapses to 0),
+  // matching Ink. The buggy path forces the iso root to terminal width (80), so
+  // the Spacer expands and the line becomes "LEFT" + 71 spaces + "RIGHT".
+  const staticFrame = frames.find((f) => f.includes("LEFT") && f.includes("RIGHT"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toContain("LEFTRIGHT");
+  expect(staticFrame).not.toMatch(/LEFT {2,}RIGHT/);
+});
+
+// flexGrow box inside an auto-width Static item also collapses to content width.
+// Confirmed against Ink ref (cols=80): row [Text A][Box flexGrow=1][Text B] →
+// static frame "AB" (the flexGrow box collapses to 0).
+test("Static content-sizes an auto-width item: flexGrow collapses (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => (
+            <Box key={item} flexDirection="row">
+              <Text>A</Text>
+              <Box flexGrow={1} />
+              <Text>B</Text>
+            </Box>
+          ),
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 80 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  const staticFrame = frames.find(
+    (f) => f.includes("A") && f.includes("B") && !f.includes("[live]"),
+  );
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toContain("AB");
+  expect(staticFrame).not.toMatch(/A {2,}B/);
+});
+
+// G64 MUST-FIX: an auto-width Static item with CONTENT WIDER than the terminal
+// must OVERFLOW to its content width, NOT be clamped to the terminal width.
+//
+// Ink's static box is `position:absolute` + auto-width: it is a child of the
+// terminal-width root, so TEXT wraps against that containing block, but BOXES
+// size to their content and overflow past the terminal. The output grid is
+// sized from node.staticNode.yogaNode.getComputedWidth() (renderer.ts:48), which
+// can exceed the terminal width.
+//
+// Confirmed against the built Ink reference (/tmp/ink-40b3a75/build, cols=5): an
+// explicit-width child Box width:10 flexShrink:0 renders the full "ABCDEFGHIJ"
+// (10 cols, overflowing the 5-col terminal), NOT the clamped "ABCDE". The
+// b913386 setMaxWidth(columns) path clips this to "ABCDE".
+test("Static overflows an explicit-width child wider than the terminal (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => (
+            <Box key={item}>
+              <Box width={10} flexShrink={0}>
+                <Text>ABCDEFGHIJ</Text>
+              </Box>
+            </Box>
+          ),
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 5 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  const staticFrame = frames.find((f) => f.includes("ABCDE") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  // Must overflow to the full content width, NOT clamp to the terminal width.
+  expect(staticFrame).toContain("ABCDEFGHIJ");
+  expect(staticFrame).not.toBe("ABCDE");
+});
+
+// G64 MUST-FIX: a non-wrapping multi-<Text> row wider than the terminal must
+// also overflow to content width. Confirmed against Ink ref (cols=5): a row
+// [Text ABC][Text DEF] renders "ABCDEF" (6 cols, overflowing), NOT a clamped /
+// char-dropped result. The b913386 setMaxWidth(columns) path produced "ABDEF"
+// (a dropped character).
+test("Static overflows a non-wrapping two-Text row wider than the terminal (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => (
+            <Box key={item} flexDirection="row">
+              <Text>ABC</Text>
+              <Text>DEF</Text>
+            </Box>
+          ),
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 5 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  const staticFrame = frames.find((f) => f.includes("ABC") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  // Ink content-width output is exactly "ABCDEF" (Texts do not shrink/wrap here).
+  expect(staticFrame).toBe("ABCDEF");
+});
+
+// G64 (matches): plain wide TEXT must still WRAP to the terminal width, because
+// text measures/wraps against the terminal-width containing block. Confirmed
+// against Ink ref (cols=5): "ABCDEFGHIJ" → "ABCDE\nFGHIJ".
+test("Static wraps a plain wide text to the terminal width (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => <Text key={item}>ABCDEFGHIJ</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 5 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  const staticFrame = frames.find((f) => f.includes("ABCDE") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toBe("ABCDE\nFGHIJ");
+});
+
+// G64 (matches): a percent-width child wraps against the terminal-width
+// containing block. Confirmed against Ink ref (cols=6): a row of two 50%-width
+// boxes [HALF][END] → "HALEND\nF" (each box is 3 cols; HALF wraps to HAL/F).
+test("Static lays out percent-width children against the terminal width (Ink parity, G64)", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: string }) => (
+            <Box key={item}>
+              <Box width="50%">
+                <Text>HALF</Text>
+              </Box>
+              <Box width="50%">
+                <Text>END</Text>
+              </Box>
+            </Box>
+          ),
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App, { columns: 6 });
+
+  items.value = ["one"];
+  await nextTick();
+
+  const staticFrame = frames.find((f) => f.includes("HAL") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toBe("HALEND\nF");
 });
 
 test("Static items do not add blank lines to the dynamic frame", async () => {
