@@ -1001,7 +1001,6 @@ function createFocusController(): FocusContext {
   const subs = new Map<string, Set<(focused: boolean) => void>>();
   let activeId: string | null = null;
   const activeIdRef = shallowRef<string | null>(null);
-  let enabled = true;
 
   function notify(id: string, focused: boolean) {
     subs.get(id)?.forEach((fn) => fn(focused));
@@ -1031,21 +1030,24 @@ function createFocusController(): FocusContext {
     activeIdRef,
     enabled: true,
     enableFocus() {
-      enabled = true;
       ctx.enabled = true;
     },
     disableFocus() {
-      enabled = false;
       ctx.enabled = false;
     },
+    // Ink parity (App.tsx focusNext/focusPrevious): NO isFocusEnabled guard here —
+    // a programmatic focusNext()/focusPrevious() moves focus even while focus is
+    // disabled. The isFocusEnabled check lives only in the Tab/Shift-Tab handler
+    // (see focusInputListener). The focusables.length === 0 short-circuit stays so
+    // focusing on an unmounted/empty tree is a harmless no-op.
     focusNext() {
-      if (!enabled || focusables.length === 0) return;
+      if (focusables.length === 0) return;
       const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : -1;
       const next = findNextActive(idx, 1);
       if (next) setActive(next);
     },
     focusPrevious() {
-      if (!enabled || focusables.length === 0) return;
+      if (focusables.length === 0) return;
       const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : focusables.length;
       const prev = findNextActive(idx, -1);
       if (prev) setActive(prev);
@@ -1214,6 +1216,10 @@ function createStdinController(
 
   // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
   const focusInputListener = (data: string) => {
+    // Ink parity (handleTabNavigation): Tab/Shift-Tab navigation is gated by the
+    // focus-enabled flag here — disableFocus() makes Tab a no-op, but a
+    // programmatic focusNext()/focusPrevious() still works (see createFocusController).
+    if (!focusContext.enabled) return;
     if (data === "\t") focusContext.focusNext();
     else if (data === "\x1b[Z") focusContext.focusPrevious();
   };
