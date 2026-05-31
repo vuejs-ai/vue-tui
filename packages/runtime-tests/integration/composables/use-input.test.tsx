@@ -121,6 +121,9 @@ test("useInput - handle up arrow", async () => {
   const { stdin } = await render(App);
   await stdin.write("\x1b[A");
   expect(calls[0]?.key.upArrow).toBe(true);
+  // Ink fixtures/use-input.tsx:111 gate on `key.upArrow && !key.meta`; lock that
+  // a plain arrow never spuriously sets meta.
+  expect(calls[0]?.key.meta).toBe(false);
 });
 
 test("useInput - handle down arrow", async () => {
@@ -133,6 +136,8 @@ test("useInput - handle down arrow", async () => {
   const { stdin } = await render(App);
   await stdin.write("\x1b[B");
   expect(calls[0]?.key.downArrow).toBe(true);
+  // Ink fixtures/use-input.tsx:116 gate on `key.downArrow && !key.meta`.
+  expect(calls[0]?.key.meta).toBe(false);
 });
 
 test("useInput - handle right arrow", async () => {
@@ -145,6 +150,8 @@ test("useInput - handle right arrow", async () => {
   const { stdin } = await render(App);
   await stdin.write("\x1b[C");
   expect(calls[0]?.key.rightArrow).toBe(true);
+  // Ink fixtures/use-input.tsx:126 gate on `key.rightArrow && !key.meta`.
+  expect(calls[0]?.key.meta).toBe(false);
 });
 
 test("useInput - handle left arrow", async () => {
@@ -157,6 +164,8 @@ test("useInput - handle left arrow", async () => {
   const { stdin } = await render(App);
   await stdin.write("\x1b[D");
   expect(calls[0]?.key.leftArrow).toBe(true);
+  // Ink fixtures/use-input.tsx:121 gate on `key.leftArrow && !key.meta`.
+  expect(calls[0]?.key.meta).toBe(false);
 });
 
 test("useInput - handles rapid arrows and enter in one chunk per write", async () => {
