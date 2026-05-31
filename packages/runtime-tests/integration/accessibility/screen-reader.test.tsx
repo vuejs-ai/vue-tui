@@ -1125,3 +1125,151 @@ describe("screen reader enabled mode", () => {
     expect(output).toBe("Alpha\nBeta");
   });
 });
+
+// Ink-parity LOCKS for the component (renderToString) SR path. Each mirrors an
+// assertion in Ink's test/screen-reader.tsx (v7.0.4 @40b3a75) that the existing
+// suite above did not already cover.
+describe("screen reader: Ink test/screen-reader.tsx parity (component path)", () => {
+  // Ink screen-reader.tsx:78-84 — aria-label-only <Text> (no children) emits the
+  // label. Component path: Text.ts substitutes ariaLabel for an absent default slot.
+  test("aria-label-only Text (no children) emits the label", () => {
+    const output = renderToString(
+      defineComponent(() => () => <Text aria-label="Screen-reader only" />),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Screen-reader only");
+  });
+
+  // Ink screen-reader.tsx:86-92 — aria-label-only <Box> (no children) emits the
+  // label. Component path: Box.ts builds a label text node when SR + ariaLabel and
+  // there is no default slot.
+  test("aria-label-only Box (no children) emits the label", () => {
+    const output = renderToString(
+      defineComponent(() => () => <Box aria-label="Screen-reader only" />),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Screen-reader only");
+  });
+
+  // Ink screen-reader.tsx:110-122 — a display:none subtree is skipped in SR
+  // output via the LIVE component path (renderToString runs a real yoga layout, so
+  // the DISPLAY_NONE check in screen-reader.ts is exercised against live yoga, not
+  // a hand-built fixture).
+  test("display:none subtree is skipped (live component path)", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Box display="none">
+            <Text>Hidden</Text>
+          </Box>
+          <Text>Visible</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Visible");
+  });
+
+  // Ink screen-reader.tsx:320-334 ("render nested row") — a COLUMN parent whose
+  // child is a ROW joins the grandchildren with a SPACE (the row separator),
+  // distinct from the column case at :304-318 which joins with "\n".
+  test("column parent containing a row child joins grandchildren with a space", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box flexDirection="column">
+          <Box flexDirection="row">
+            <Text>Line 1</Text>
+            <Text>Line 2</Text>
+          </Box>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Line 1 Line 2");
+  });
+
+  // Ink screen-reader.tsx:186-196 — single box, checkbox role + checked state.
+  test("single box checkbox + checked", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="checkbox" aria-state={{ checked: true }}>
+          <Text>Accept terms</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("checkbox: (checked) Accept terms");
+  });
+
+  // Ink screen-reader.tsx:277-287 — single box, option role + selected state.
+  test("single box option + selected", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="option" aria-state={{ selected: true }}>
+          <Text>Blue</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("option: (selected) Blue");
+  });
+
+  // Ink screen-reader.tsx:238-248 — single box, listbox role + multiselectable.
+  test("single box listbox + multiselectable", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="listbox" aria-state={{ multiselectable: true }}>
+          <Text>Options</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("listbox: (multiselectable) Options");
+  });
+
+  // Multiple truthy aria-state keys join with ", " (screen-reader.ts:216). Insertion
+  // order is preserved (Object.keys), so checked precedes disabled. This pins the
+  // multi-state join format, which Ink derives the same way from its aria-state object.
+  test("multiple truthy aria-state keys join with comma-space", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="checkbox" aria-state={{ checked: true, disabled: true }}>
+          <Text>X</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("checkbox: (checked, disabled) X");
+  });
+
+  // Ink screen-reader.tsx:32-43 — role-only box (no state) via the component path
+  // (the existing suite only covered this through the hand-built unit fixture).
+  test("role-only box (button) via component path", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box aria-role="button">
+          <Text>Click me</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("button: Click me");
+  });
+
+  // Ink Transform.tsx:37-39 — in SR mode, accessibilityLabel REPLACES the children,
+  // and because the label is substituted as the transform node's content, the
+  // transform's OWN fn is NOT applied at the top level (screen-reader.ts leaves the
+  // top-level transform fn to its caller). So a lowercase child + an uppercasing
+  // transform still yields the bare label, NOT "X" uppercased nor "LOWERCASE".
+  test("Transform accessibilityLabel replaces children; transform not applied at top level", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => s.toUpperCase()} accessibilityLabel="X">
+          <Text>lowercase</Text>
+        </Transform>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("X");
+  });
+});
