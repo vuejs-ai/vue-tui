@@ -322,10 +322,8 @@ const malformedFromIndex = (
 };
 
 export const tokenizeAnsi = (text: string): AnsiToken[] => {
-  if (text.length === 0) {
-    return [];
-  }
-
+  // No empty-string early return: Ink falls through to the no-control-chars
+  // branch so tokenizeAnsi('') === [{type:'text', value:''}] (ansi-tokenizer.ts).
   if (!hasAnsiControlCharacters(text)) {
     return [{ type: "text", value: text }];
   }
