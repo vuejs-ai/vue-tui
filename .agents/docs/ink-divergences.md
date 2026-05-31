@@ -43,6 +43,43 @@ deliberate. Divergences fall into a few kinds:
 - **Why:** vue-tui's renderer keeps a native host-node tree rather than a DOM emulation,
   so the exported node type names that tree, not a DOM node.
 
+### `useFocusManager().activeId` empty value is `null`, not `undefined`
+
+- **Ink:** `useFocusManager().activeId` is a `string` and `undefined` when nothing is focused.
+- **vue-tui:** `activeId` is a **`ShallowRef<string | null>`** — reactive, and `null` (not
+  `undefined`) when nothing is focused.
+- **Why:** vue surfaces focus state as a reactive ref so a template re-renders when focus
+  moves, and `null` is vue-tui's house convention for an empty ref (a deliberate "no value",
+  distinct from an unset `undefined`). Field meaning is unchanged. Test:
+  `focus-manager.test.tsx` ("activeId is null when nothing is focused").
+
+### Second `mount()` on a live stdout is an inert no-op
+
+- **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
+  `render(node, {stdout})` on a stream that already has a live instance warns on stderr but
+  **reuses** that instance and `rerender`s the new tree into it.
+- **vue-tui:** a second `mount()` on a still-live stdout warns on stderr and returns an
+  **inert handle** — it wires no second renderer and renders nothing; the first app's tree
+  stays on screen. `unmount()`/`teardown()` on that handle are complete no-ops (they never
+  touch the owner's stream or registry entry).
+- **Why:** a direct consequence of the `createApp()`-vs-`render()` model — an app is an object
+  you `mount()`, not a one-shot call that doubles as a re-render. "Re-render the live instance"
+  has no place to land when the second call is a separate `TuiApp`; the correct path is
+  `unmount()` then mount again (or keep one app and update its reactive state). Failing closed
+  (no competing renderer on the shared stream) over silently hijacking the output is the
+  principled choice. Test: `instance-reuse-guard.test.tsx`.
+
+### Package `.` exports use a bare-string target, not an explicit `types` condition
+
+- **Ink:** `package.json` `exports` uses an explicit `types` condition (`{"types": …,
+"default": …}`).
+- **vue-tui:** runtime/testing `.` (and `./internal`) exports are a **bare string**
+  (`"./dist/index.mjs"`) — TS resolves the declaration via the `.d.mts`-next-to-`.mjs`
+  adjacency tsdown emits (`index.d.mts` beside `index.mjs`).
+- **Why:** with the adjacency present, an explicit `types` condition is redundant. Noted so a
+  future reader does **not** "restore parity" by adding a `types` condition the toolchain
+  already satisfies. (The `cli` package needs no `types` at all — it has no public type surface.)
+
 ## Additive features (vue-tui is a strict superset)
 
 ### Multiple `<Static>` regions
@@ -93,6 +130,76 @@ deliberate. Divergences fall into a few kinds:
   `new Error(String(value))`, which also produced a misleading synthetic stack pointing at the
   framework internals (that synthetic stack is now gone). Introduced 2026-05-31.
 
+### RGB `[r, g, b]` tuples on every color prop
+
+- **Ink:** all color props (`<Text>` color/backgroundColor, `<Box>` backgroundColor, and every
+  border color/background prop) are **string-only** — `colorize`/`stylePiece` call
+  `color.startsWith('#')`, so passing an array **throws** (`.startsWith` is not a function).
+- **vue-tui:** the public `Color` type is `string | [number, number, number]`; `applyColor`
+  handles an array via `chalk.rgb(...)` / `chalk.bgRgb(...)`. Accepted uniformly on Text color,
+  Text/Box backgroundColor, and all border color/background props.
+- **Why:** a strict superset — every string Ink accepts still works, plus an ergonomic RGB
+  tuple. The tuple is part of the typed surface (not a TS-bypass), so it's a supported input,
+  not undefined behavior. Tested.
+
+### `backgroundColor` of a chalk modifier name degrades to bare text
+
+- **Ink:** `backgroundColor='bold'` (any chalk **modifier** name, not a color) resolves
+  `isNamedColor('bold')` true (`'bold' in chalk`), then calls `chalk['bgBold']` — which doesn't
+  exist — and **throws** ("chalk.bgBold is not a function").
+- **vue-tui:** `applyColor`'s `typeof named === 'function'` guard sees `chalk['bgBold']` is
+  `undefined`, falls through `#`/`ansi256`/`rgb` (all non-matching), and returns the text
+  **unstyled** — no SGR, no throw.
+- **Why:** same fallback policy vue already applies to an unparseable `ansi256(...)`/`rgb(...)`
+  string ("no match → bare text"). A non-color background name is junk input; degrading to bare
+  text is more robust than crashing the render. Additive robustness.
+
+### `useAnimation()` outside a render tree drives a real standalone animation
+
+- **Ink:** the default `AnimationContext.subscribe()` is a no-op (`{startTime: 0,
+unsubscribe(){}}`) — a `useAnimation` rendered outside an Ink tree never ticks.
+- **vue-tui:** `useAnimation` falls back to a freshly created standalone scheduler
+  (`inject(AnimationSchedulerKey, null) ?? createAnimationScheduler()`), so `frame`/`time`/
+  `delta` actually advance even with no surrounding app.
+- **Why:** graceful degradation over a silent dead animation — the composable still does
+  something useful in isolation (e.g. a unit test, or a non-rendered driver). Additive; inside
+  a tree the injected scheduler is used exactly as Ink's. (Contrast with the terminal-bound
+  composables in the fail-fast section, which throw — those have no meaningful standalone mode.)
+
+### `measureElement` / `useBoxMetrics` also accept a Vue component-instance ref
+
+- **Ink:** `measureElement(node: DOMElement)` and `useBoxMetrics(ref: RefObject<DOMElement>)`
+  read `node.yogaNode` directly — a host `DOMElement` only.
+- **vue-tui:** the ref is resolved through `$el` as well — a `ref` bound to a **Vue component**
+  (whose root host node is on `$el`), not just a host-node ref, resolves to the underlying yoga
+  node.
+- **Why:** in Vue a template ref on a component yields the component instance, and its host node
+  is reached via `$el`. Supporting both shapes is a strict superset that matches how Vue refs
+  actually behave; a bare host-node ref still works identically to Ink.
+
+### `renderToString` supports screen-reader mode
+
+- **Ink:** `renderToString` has only a `columns` option; it always renders the non-SR (ANSI)
+  frame.
+- **vue-tui:** `renderToString` accepts `isScreenReaderEnabled?: boolean`. In SR mode it returns
+  the linearized accessibility text (`renderScreenReaderOutput`) and prepends the linearized
+  `<Static>` output, just as the non-SR path prepends the painted static frame.
+- **Why:** vue-tui already has a parity SR renderer for the live path; surfacing it through the
+  string API is a strict superset (default `false` is byte-identical to Ink) and avoids
+  silently dropping `<Static>` content when generating SR snapshots. Additive.
+
+### Narrowing resize cancels the redundant trailing `clearTerminal`
+
+- **Ink:** `resized()` paints synchronously via `onRender()` but does **not** cancel a pending
+  throttled `onRender`; on a narrowing resize that trailing commit re-runs and, because
+  `shouldClearTerminalForFrame` clears whenever the previous frame overflowed, Ink emits a
+  **second** `clearTerminal`.
+- **vue-tui:** `onResize` calls `scheduler.cancel()` before its synchronous commit, dropping the
+  now-redundant trailing commit — so the screen is cleared **once** per narrowing resize.
+- **Why:** the synchronous resize commit already reflects the current tree, so the pending
+  commit is pure duplication; emitting one clear instead of two is strictly cleaner with no
+  visible difference (issue #26). Additive robustness.
+
 ## Framework-semantic divergences (Vue ≠ React)
 
 ### Removing `flexDirection` / `flexWrap` resets to the default
@@ -140,6 +247,72 @@ deliberate. Divergences fall into a few kinds:
   diverge from Ink in the _opposite_ (unrelated-sibling) direction, where Ink drops the cursor.
   Keep the reactivity-tied behavior. Maintainer decision (2026-06-01): KEEP.
 
+### An off-spec `display` value stays visible instead of hiding
+
+- **Ink:** `applyDisplayStyles` sets `DISPLAY_NONE` for **any** present `display` that isn't
+  `'flex'` — so a typo or off-spec value (`display="block"`, `display=""`, reachable via a
+  TS-bypass) **hides** the box.
+- **vue-tui:** `toDisplay` hides only on the exact value `'none'`; every other value (including
+  off-spec) falls back to the visible default `DISPLAY_FLEX`.
+- **Why:** an unknown/typo `display` shouldn't silently delete content — failing visible is the
+  safer default. It's also consistent with the removal-reset above: a withdrawn `display` returns
+  to visible, and so does an unrecognized one. (The only honored hide is the documented `'none'`.)
+
+### Out-of-type style values are forwarded, not defensively coerced
+
+- **Ink:** several flex/align setters coerce a runtime junk value to a default — `flexShrink`
+  non-number → `1`; `alignItems`/`alignSelf`/`alignContent`/`justifyContent` falsy (`""`) →
+  their default (STRETCH / AUTO / FLEX_START); and an out-of-set value matches none of Ink's
+  `if`-chain branches, so no setter runs and the previous/default value persists.
+- **vue-tui:** these setters trust the typed prop surface and forward the raw value to yoga:
+  a non-number `flexShrink` is passed through; `toAlign("")`/`toJustify("")` look up `""` and
+  pass `undefined` to the setter; and out-of-set values that yoga happens to accept
+  (`space-*`/`baseline`/`auto` on `alignItems`) reach yoga rather than being ignored.
+- **Why:** every one of these is reachable **only** via a TS-bypass — the public prop types
+  forbid them. Within the typed contract Ink and vue-tui are identical. Ink's per-value
+  coercion is defensive code for runtime junk vue-tui's types already exclude; duplicating a
+  family of `typeof`/falsy guards for inputs the type system rejects buys nothing. (`flexGrow`
+  is not in this set — both only coerce null/undefined → `0`.) If a reviewer shows any case is
+  reachable in-type, it becomes a bug to fix, not a divergence.
+
+### Duplicate explicit-`id` `useFocus` calls dedup to one registry entry
+
+- **Ink:** `addFocusable` unconditionally appends, so two `useFocus({id: 'x'})` create **two**
+  focusables with the same id — Tab visits "x" twice, and unmounting one calls `removeFocusable`
+  which filters by id and removes **both**.
+- **vue-tui:** `add(id)` is id-keyed (`if (!focusables.some(f => f.id === id))`), so a duplicate
+  explicit id registers **one** entry.
+- **Why:** an id-keyed registry is the principled model — an id identifies one focusable, so Tab
+  visiting a duplicate twice and one unmount silently dropping the other are Ink anomalies, not
+  contracts. Auto-generated ids never collide, so this only differs for an explicit duplicate id
+  (already a user error).
+
+### Composables fail fast outside a render tree
+
+- **Ink:** the hooks read a React context whose **default** value is a no-op object, so calling
+  e.g. `useStdin()` outside an Ink tree returns inert defaults silently.
+- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useTerminalSize`, `useFocus`,
+  `useFocusManager`, `useInput`, `usePaste`, `useCursor`, and `useIsScreenReaderEnabled`
+  **throw** when their context is absent ("… must be called inside a vue-tui render tree").
+  (`useBoxMetrics` and `useAnimation` do **not** throw — they degrade: `useBoxMetrics` reports
+  zero metrics, `useAnimation` drives a real standalone scheduler. See the additive entry.)
+- **Why:** fail-fast beats a silent footgun — a composable used in the wrong place is a bug, and
+  a thrown error names it at the call site instead of returning a context that quietly does
+  nothing. The two exceptions degrade because they have a meaningful standalone behavior (a
+  measurable-zero / a working animation), so throwing would remove a useful capability.
+
+### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
+
+- **Ink:** a component that throws during render surfaces only through the error overview /
+  exit path; React emits no extra framework warning.
+- **vue-tui:** in a **development** build, a component whose `setup()` throws additionally
+  produces Vue's own `[Vue warn]` lines on stderr (e.g. the missing-render-function warning)
+  that Ink has no analog for. In interactive mode patchConsole filters `[Vue warn]` out of the
+  frame; outside that path (debug, non-patched stderr) it surfaces.
+- **Why:** these warnings come from Vue itself and are **dev-only** (stripped in production
+  builds); they have no effect on stdout output or the exit code. Documented so the stray
+  warn isn't mistaken for a vue-tui behavior — it's Vue's framework diagnostics.
+
 ## Not applicable in Vue
 
 ### React concurrent mode
@@ -181,6 +354,18 @@ built never reaches the terminal:
   re-renders are Vue's fine-grained reactivity, not a React subtree re-render.
 - **Keyed lists use Vue core's `patchKeyedChildren`** (LIS), not React's fiber diff; output
   depends on the final tree, not the move order.
+- **`wrapText` truncate has a per-line short-circuit** before its whole-string `cli-truncate`:
+  if every `\n`-split line already fits `width` it returns the lines unchanged, otherwise it
+  truncates the whole string once (as Ink does). Ink instead gates at paint time on the
+  **widest line** (`widestLine(text) > maxWidth`) before calling `wrapText`, which then
+  whole-string-truncates with no per-line check. The two paint-time gates (vue's per-line
+  `every`, Ink's widest-line) admit the same multi-line texts in practice, so production output
+  matches — documented so the divergent short-circuit branch isn't "fixed" to bare whole-string
+  truncate (which would collapse perfectly-fitting multi-line text to one line).
+- **The animation scheduler rounds the `setTimeout` delay up** (`Math.ceil(earliest - now)`)
+  where Ink passes the raw fractional delay. `setTimeout` truncates a fractional delay and would
+  fire early, re-skip (`now < nextDueTime`), and reschedule a ~0 ms delay — a sub-ms busy-loop.
+  Non-behavioral (Node coerces the delay to an int anyway); the in-code comment explains it.
 
 ---
 

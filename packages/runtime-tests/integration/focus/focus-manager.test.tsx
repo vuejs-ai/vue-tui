@@ -40,3 +40,25 @@ test("useFocusManager().activeId tracks the currently focused component", async 
   await stdin.write("\t");
   expect(activeId.value).toBe("a");
 });
+
+// Locks the vue API-surface sentinel: `activeId` is a ShallowRef whose EMPTY
+// value is `null` (Ink's equivalent is `undefined`). See ink-divergences.md
+// ("`useFocusManager().activeId` empty value is `null`, not `undefined`").
+test("useFocusManager().activeId is null when nothing is focused", async () => {
+  let activeId!: ReturnType<typeof useFocusManager>["activeId"];
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    activeId = manager.activeId;
+    // No <useFocus> children → no focusables → nothing active.
+    return () => (
+      <Box>
+        <Text>no focusables</Text>
+      </Box>
+    );
+  });
+
+  await render(App);
+
+  expect(activeId.value).toBeNull();
+});
