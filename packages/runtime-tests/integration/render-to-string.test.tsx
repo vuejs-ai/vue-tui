@@ -52,8 +52,8 @@ describe("renderToString", () => {
       </Box>
     ));
     const output = renderToString(App, { columns: 20 });
-    expect(output).toContain("Line 1");
-    expect(output).toContain("Line 2");
+    // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, 'Line 1\nLine 2')).
+    expect(output).toBe("Line 1\nLine 2");
   });
 
   test("useInput does not throw in renderToString", () => {
@@ -141,11 +141,12 @@ describe("renderToString", () => {
   test("renders padding correctly", () => {
     const App = defineComponent(() => () => (
       <Box paddingLeft={2}>
-        <Text>padded</Text>
+        <Text>Padded</Text>
       </Box>
     ));
     const output = renderToString(App, { columns: 20 });
-    expect(output).toContain("  padded");
+    // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, '  Padded')).
+    expect(output).toBe("  Padded");
   });
 
   test("rethrows non-Error values as wrapped Error", () => {
@@ -216,10 +217,12 @@ describe("renderToString", () => {
       </Box>
     ));
     const output = renderToString(App, { columns: 20 });
-    // Border characters should be present (single border uses box-drawing chars)
-    expect(output).toContain("Bordered");
-    expect(output).toContain("│");
-    expect(output).toContain("─");
+    // Lock the EXACT boxen frame: a 20-wide single border (top corner + 18 ─ + corner,
+    // content row "Bordered" + 10 fill spaces, bottom border). Byte-identical to Ink's
+    // boxen('Bordered', { width: 20, borderStyle: 'single' }) (render-to-string.tsx).
+    expect(output).toBe(
+      "┌──────────────────┐\n" + "│Bordered          │\n" + "└──────────────────┘",
+    );
   });
 
   test("renders box with flex direction row", () => {
@@ -243,6 +246,33 @@ describe("renderToString", () => {
     ));
     const output = renderToString(App);
     expect(output).toBe("A B");
+  });
+
+  // Byte-exact gap variants (Ink gap.tsx). The live render() gap tests use
+  // trimLines:true, which masks trailing-space regressions; the renderToString path
+  // is byte-exact, so these lock the WRAP and COLUMN gaps without that mask.
+  test("renders gap with flexWrap (wraps to a new row separated by a row gap)", () => {
+    const App = defineComponent(() => () => (
+      <Box gap={1} width={3} flexWrap="wrap">
+        <Text>A</Text>
+        <Text>B</Text>
+        <Text>C</Text>
+      </Box>
+    ));
+    // Ink: t.is(output, 'A B\n\nC') — "A B" fills width 3, "C" wraps below, the
+    // blank line is the row gap between the two wrapped rows.
+    expect(renderToString(App)).toBe("A B\n\nC");
+  });
+
+  test("renders column gap (blank line between stacked items)", () => {
+    const App = defineComponent(() => () => (
+      <Box flexDirection="column" gap={1}>
+        <Text>A</Text>
+        <Text>B</Text>
+      </Box>
+    ));
+    // Ink: t.is(output, 'A\n\nB')
+    expect(renderToString(App)).toBe("A\n\nB");
   });
 
   test("renders spacer pushing content apart", () => {
