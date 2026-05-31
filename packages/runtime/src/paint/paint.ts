@@ -7,7 +7,8 @@ import {
   styledCharsToString,
   tokenize,
 } from "@alcalzone/ansi-tokenize";
-import { applyChalk } from "./text-style.ts";
+import chalk from "chalk";
+import { applyChalk, applyColor } from "./text-style.ts";
 import { sanitizeAnsi } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -494,11 +495,18 @@ function drawBorder(
     const edgeBg =
       (props[`border${capEdge}BackgroundColor`] as string | undefined) ??
       (props["borderBackgroundColor"] as string | undefined);
-    const p: TextProps = {};
-    if (edgeColor) p.color = edgeColor;
-    if (edgeBg) p.backgroundColor = edgeBg;
-    if (edgeDim) p.dimColor = true;
-    return Object.keys(p).length > 0 ? applyChalk(s, p) : s;
+    // Border SGR nesting deliberately differs from <Text>'s. Mirror Ink's
+    // render-border.ts stylePiece (commit 40b3a75, lines 7-20) EXACTLY:
+    // foreground innermost, then background, then `chalk.dim` OUTERMOST —
+    // i.e. chalk.dim(bg(fg(glyphs))). This is NOT applyChalk's order, whose
+    // dim-innermost nesting is correct for <Text> (Ink Text.tsx) and must
+    // stay unchanged. Routing edges through applyChalk would emit the bytes
+    // in the wrong order (bg, fg, dim) versus Ink's (dim, bg, fg).
+    let styled = s;
+    if (edgeColor) styled = applyColor(chalk, edgeColor as never, false)(styled);
+    if (edgeBg) styled = applyColor(chalk, edgeBg as never, true)(styled);
+    if (edgeDim) styled = chalk.dim(styled);
+    return styled;
   }
 
   if (top) {
