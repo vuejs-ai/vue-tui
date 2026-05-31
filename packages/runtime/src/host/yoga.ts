@@ -190,12 +190,24 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
   // Ink default: flexShrink=1 (Box.tsx hardcodes flexShrink:1). Reset to 1 on removal. (G19)
   flexShrink: (n, v) => n.setFlexShrink(v == null ? 1 : (v as number)),
-  // Ink default: flexBasis=auto (yoga default). Reset via setFlexBasisAuto() on removal. (G19)
+  // Ink default: flexBasis=auto (yoga default), reset via the else branch on removal. (G19)
+  // Mirror Ink's flexBasis branch exactly (styles.ts:547-555):
+  //   number → setFlexBasis (absolute cells)
+  //   string → setFlexBasisPercent(Number.parseInt(v, 10))  — ANY string is a
+  //     PERCENT, including a bare numeric string like "3" → 3% (NOT 3 cells)
+  //     and "50%" → 50%; yoga would otherwise read "3" as 3 absolute cells.
+  //   else   → setFlexBasisAuto()  — this is the load-bearing fallback: Vue's
+  //     [Number, String] prop validation only WARNS on a bad runtime value
+  //     (e.g. flexBasis={false}/{}/[]) and still forwards it, so without this
+  //     branch setFlexBasis(false) THROWS where Ink renders fine via auto.
+  // null/undefined also lands in the else branch → auto (the G19 removal reset).
   flexBasis: (n, v) => {
-    if (v == null) {
-      n.setFlexBasisAuto();
+    if (typeof v === "number") {
+      n.setFlexBasis(v);
+    } else if (typeof v === "string") {
+      n.setFlexBasisPercent(Number.parseInt(v, 10));
     } else {
-      n.setFlexBasis(v as number | "auto" | `${number}%`);
+      n.setFlexBasisAuto();
     }
   },
   // Ink default: flexDirection=row (Box.tsx hardcodes flexDirection:'row'). Reset to ROW on removal. (G19)
