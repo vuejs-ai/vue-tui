@@ -1,4 +1,5 @@
 import { test as it, expect } from "vite-plus/test";
+import stripAnsi from "strip-ansi";
 import { run } from "./helpers/run.ts";
 import term from "./helpers/term.ts";
 
@@ -57,23 +58,50 @@ it("exit on unmount() with raw mode", async () => {
 });
 
 it("exit with thrown error", async () => {
-  const ps = term("exit-with-thrown-error");
-  try {
-    await ps.waitForExit();
-  } catch {
-    // yoga WASM crash causes non-zero exit; error was already logged to output
-  }
-  expect(ps.output).toContain("errored");
+  // run() rejects on a non-zero exit code; the fixture catches the rejected
+  // waitUntilExit, logs "errored", and exits 0 deterministically (Ink exit.tsx:71-74).
+  const output = await run("exit-with-thrown-error");
+  expect(output).toContain("errored");
 });
 
 it("don't exit while raw mode is active", async () => {
+  // Port of Ink exit.tsx:100-114 ("don't exit while raw mode is active"). The
+  // fixture keeps raw mode enabled and writes __READY__ after 500ms. With raw
+  // mode active and no input, the process must STAY ALIVE — Node's keep-alive
+  // (the raw-mode stdin handle) blocks exit. We wait ~500ms with NO input and
+  // confirm it has not exited, THEN send 'q' to trigger unmount + exit.
   const ps = term("exit-double-raw-mode");
+
+  // After __READY__ (resolved internally by the term helper), wait 500ms and
+  // ensure the process has NOT exited (no input has been sent yet).
+  const exitedDuringWait = await Promise.race([
+    ps.waitForExitInfo().then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
+  ]);
+  expect(exitedDuringWait).toBe(false);
+
+  // Now send 'q': the fixture unmounts and the process exits cleanly.
   ps.write("q");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
+it("exit when DEV is set", async () => {
+  // Port of Ink exit.tsx:133-142 ("exit when DEV is set"). DEV is inert in
+  // vue-tui (no React DevTools hookup), so exit-normally must still exit cleanly.
+  const output = await run("exit-normally", { env: { DEV: "true" } });
+  expect(output).toContain("exited");
+});
+
 it("exit on exit() with error and static output", async () => {
   const output = await run("exit-with-static");
   expect(output).toContain("errored");
+
+  // Static items A/B/C must each render EXACTLY once — not duplicated (Ink #397,
+  // exit.tsx:144-155). With the fixture's function slots there are no Vue warns
+  // polluting stdout, so the body lines are clean single occurrences.
+  const lines = stripAnsi(output).split(/\r?\n/);
+  expect(lines.filter((line) => line === "A")).toHaveLength(1);
+  expect(lines.filter((line) => line === "B")).toHaveLength(1);
+  expect(lines.filter((line) => line === "C")).toHaveLength(1);
 });

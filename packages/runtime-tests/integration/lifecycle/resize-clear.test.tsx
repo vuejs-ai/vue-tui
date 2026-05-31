@@ -6,7 +6,13 @@
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Box, Text } from "@vue-tui/runtime";
-import { makeFakeWritable, makeFakeStdin, captureWrites } from "./test-streams.ts";
+import stripAnsi from "strip-ansi";
+import {
+  makeFakeWritable,
+  makeFakeStdin,
+  captureWrites,
+  getContentWrites,
+} from "./test-streams.ts";
 
 // eraseLines(n) emits n repetitions of "\x1b[2K" (erase line) — the sequence
 // that log-update's clear() writes to wipe the previous rendered frame before
@@ -150,6 +156,79 @@ test("narrowing when previous frame overflows terminal fires clearTerminal (not 
   // With the outputHeight=0 bug this is suppressed (hadPreviousFrame=false,
   // wasOverflowing=false); with the fix (height preserved) wasOverflowing=true fires it.
   expect(writesAfterResize).toContain(CLEAR_TERMINAL);
+
+  app.unmount();
+});
+
+// Port of Ink render.tsx:814-847 ("rerender on resize"): a resize doesn't just
+// erase the old frame — it REFLOWS the content to the new width. A round-border
+// <Box> wrapping "Test" renders its top/bottom rule to fill the inner width, so
+// the exact bytes of the first content write must be the box padded to width-10,
+// and the LAST content write after narrowing to 8 must be the box re-padded to
+// width-8. (Ink asserts boxen('Test'.padEnd(8)) then boxen('Test'.padEnd(6)).)
+test("resize reflows content — first frame is width-10 box, last is re-padded to width-8", async () => {
+  const stdout = makeFakeWritable({ columns: 10, rows: 100 });
+  const stderr = makeFakeWritable({ columns: 10, rows: 100 });
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const App = defineComponent(() => () => (
+    <Box borderStyle="round">
+      <Text>Test</Text>
+    </Box>
+  ));
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, stderr, interactive: true, exitOnCtrlC: false });
+  await nextTick();
+  await nextTick();
+
+  // First content write: round-border box whose inner content row is "Test"
+  // padded to the 8-cell inner width (columns 10 minus the 2 border columns),
+  // matching Ink's boxen('Test'.padEnd(8), {borderStyle: 'round'}) + '\n'.
+  const contentWrites = getContentWrites(writes);
+  const width10Box = "╭────────╮\n│Test    │\n╰────────╯\n";
+  expect(stripAnsi(contentWrites[0]!)).toBe(width10Box);
+
+  // Narrow 10 → 8 columns. The frame must reflow: inner width drops to 6.
+  stdout.columns = 8;
+  stdout.emit("resize");
+  await nextTick();
+  await nextTick();
+
+  // Last content write after resize: the SAME box re-padded to the new width
+  // (Ink's boxen('Test'.padEnd(6), {borderStyle: 'round'}) + '\n').
+  const width8Box = "╭──────╮\n│Test  │\n╰──────╯\n";
+  const contentWritesAfter = getContentWrites(writes);
+  expect(stripAnsi(contentWritesAfter.at(-1)!)).toBe(width8Box);
+
+  app.unmount();
+});
+
+// Port of Ink terminal-resize.tsx:211-246: consecutive width DECREASES must EACH
+// clear. After narrowing 100→80 (clears) and then 80→60, the second narrowing
+// must clear AGAIN — proving lastTerminalWidth advanced to 80 (so 60 < 80 is a
+// fresh decrease), rather than being stuck at the original 100.
+test("consecutive width decreases each emit an erase sequence", async () => {
+  const { app, stdout, writes } = await mountInteractive(100, 24);
+
+  // First narrowing: 100 → 80.
+  let before = writes.length;
+  stdout.columns = 80;
+  stdout.emit("resize");
+  await nextTick();
+  await nextTick();
+  expect(writes.slice(before).join("")).toContain(ERASE_LINE);
+
+  // Second narrowing: 80 → 60. If lastTerminalWidth were stuck at 100, the
+  // handler would still see a decrease here too — but the discriminating case
+  // is that 60 < 80 (the UPDATED width) is itself a decrease and clears again.
+  before = writes.length;
+  stdout.columns = 60;
+  stdout.emit("resize");
+  await nextTick();
+  await nextTick();
+  expect(writes.slice(before).join("")).toContain(ERASE_LINE);
 
   app.unmount();
 });

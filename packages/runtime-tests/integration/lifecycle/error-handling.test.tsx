@@ -1,7 +1,8 @@
-import { defineComponent, nextTick, shallowRef } from "vue";
+import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
+import { PassThrough } from "node:stream";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useApp } from "@vue-tui/runtime";
+import { Box, createApp, Text, useApp, useStdin } from "@vue-tui/runtime";
 
 test("setup() throw rejects render()", async () => {
   const Boom = defineComponent(() => {
@@ -62,24 +63,59 @@ test("nested component setup error rejects waitUntilExit", async () => {
   await expect(render(App)).rejects.toThrow("setup boom nested");
 });
 
-test("does not emit unhandledRejection when render exits with an error and waitUntilExit is unused", async () => {
-  const unhandledErrors: Error[] = [];
-  const handler = (reason: unknown) => {
-    unhandledErrors.push(reason as Error);
-  };
-  process.on("unhandledRejection", handler);
+// NOTE: the "does not emit unhandledRejection …" test lives in
+// error-handling.sequential.test.tsx — it installs a process-global
+// `unhandledRejection` listener, which file-level parallelism can perturb
+// (a sibling test's stray rejection would be miscounted). See Ink's
+// test.serial for the same reason.
 
-  try {
-    const Boom = defineComponent(() => {
-      throw new Error("no-listener boom");
+// Port of Ink errors.tsx:123-169 ("clean up raw mode when error is thrown"):
+// a component that enables raw mode and then throws must have raw mode DISABLED
+// again on the error cleanup path. We spy on a TTY stdin's setRawMode and assert
+// it recorded both an enable (true) and a later disable (false) after the throw
+// rejects waitUntilExit.
+test("raw mode is disabled on the thrown-error cleanup path", async () => {
+  const setRawModeCalls: boolean[] = [];
+
+  const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
+  Object.assign(stdin, {
+    isTTY: true,
+    setRawMode(this: NodeJS.ReadStream, mode: boolean) {
+      setRawModeCalls.push(mode);
+      return this;
+    },
+    setEncoding(this: NodeJS.ReadStream) {
+      return this;
+    },
+    ref() {},
+    unref() {},
+  });
+
+  const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stdout, { isTTY: true, columns: 80, rows: 24 });
+  const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stderr, { isTTY: true, columns: 80, rows: 24 });
+
+  const Boom = defineComponent(() => {
+    const { setRawMode } = useStdin();
+    onMounted(() => {
+      setRawMode(true);
+      throw new Error("Error after raw mode enabled");
     });
-    await render(Boom).catch(() => {});
-    // Give a tick for any stray rejections to surface
-    await new Promise((r) => setTimeout(r, 10));
-    expect(unhandledErrors).toHaveLength(0);
-  } finally {
-    process.off("unhandledRejection", handler);
-  }
+    return () => <Text>Test</Text>;
+  });
+
+  const app = createApp(Boom);
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  // The thrown error routes through exit() and rejects waitUntilExit; swallow it.
+  await expect(app.waitUntilExit()).rejects.toThrow("Error after raw mode enabled");
+
+  // Raw mode was enabled, then disabled again on cleanup.
+  expect(setRawModeCalls).toContain(true);
+  expect(setRawModeCalls).toContain(false);
+  // The disable must come AFTER an enable (teardown order).
+  expect(setRawModeCalls.lastIndexOf(false)).toBeGreaterThan(setRawModeCalls.indexOf(true));
 });
 
 test("error in component triggered after mount routes through exit", async () => {
