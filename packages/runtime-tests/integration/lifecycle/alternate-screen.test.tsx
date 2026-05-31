@@ -151,6 +151,44 @@ test("alternate screen - enters on mount and exits on unmount", async () => {
   expect(chunks[0]).toContain(ansiEscapes.enterAlternativeScreen);
 });
 
+// Port of Ink ink.tsx:970-976 (setAlternateScreen): when entering the alternate
+// screen, Ink writes enterAlternativeScreen IMMEDIATELY followed by the hide-cursor
+// escape — a hide that is part of the ENTER sequence, distinct from log-update's
+// own writer-side hide on the first frame. Lock that the hide byte (\x1b[?25l)
+// appears at/after the enterAlternativeScreen index but BEFORE any rendered content.
+test("alternate screen - hides cursor as part of the enter sequence", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+  const hideCursorEscape = "\x1b[?25l";
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    alternateScreen: true,
+    interactive: true,
+    exitOnCtrlC: false,
+  });
+  await nextTick();
+
+  const output = stdout.chunks.join("");
+  const enterIndex = output.indexOf(ansiEscapes.enterAlternativeScreen);
+  const hideIndex = output.indexOf(hideCursorEscape, enterIndex);
+  const contentIndex = output.indexOf("Hello");
+
+  expect(enterIndex).not.toBe(-1);
+  expect(hideIndex).not.toBe(-1);
+  // Hide is part of the enter sequence: at/after enter, before rendered content.
+  expect(hideIndex).toBeGreaterThanOrEqual(enterIndex);
+  expect(contentIndex).not.toBe(-1);
+  expect(hideIndex).toBeLessThan(contentIndex);
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+});
+
 test("alternate screen - content is rendered between enter and exit", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();

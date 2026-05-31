@@ -7,6 +7,7 @@ import { expect, test, vi } from "vite-plus/test";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
+import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -348,6 +349,101 @@ test.sequential("resize does not double-clear when a throttled commit is pending
 
     expect(countClears()).toBe(1);
     expect(stripAnsi(writes.join(""))).toContain("B");
+
+    app.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Port of Ink render.tsx:1985-2022 ("bsu/esu wraps throttledLog trailing call"):
+// a CHANGED frame that lands as a trailing throttled commit must still be wrapped
+// in the synchronized-update sequence — bsu before content, esu after. We need a
+// real TTY + interactive so shouldSynchronize() is true (CI flips !isInCi off,
+// so interactive must be explicit).
+test.sequential("bsu/esu wraps a trailing throttled content change", async () => {
+  vi.useFakeTimers(FAKE_TIMER_OPTS);
+  try {
+    const msg = shallowRef("Hello");
+    const App = defineComponent(() => () => <Text>{msg.value}</Text>);
+    const app = createApp(App);
+    const stdout = makeFakeWritable({ columns: 80 });
+    const stderr = makeFakeWritable({ columns: 80 });
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    await nextTick();
+    await nextTick();
+
+    // Leading call wrote bsu + content + esu.
+    expect(writes.includes(bsu)).toBe(true);
+    expect(writes.includes(esu)).toBe(true);
+
+    // Mutate inside the throttle window — the trailing commit is deferred.
+    writes.length = 0;
+    msg.value = "World";
+    await nextTick();
+    await nextTick();
+    // Nothing written yet (throttled): no "World", no barriers.
+    expect(writes.some((w) => w.includes("World"))).toBe(false);
+
+    // Cross the window: the trailing commit fires and must be bsu/esu-wrapped.
+    writes.length = 0;
+    vi.advanceTimersByTime(1000);
+
+    expect(writes.includes(bsu)).toBe(true);
+    expect(writes.includes(esu)).toBe(true);
+    expect(writes.some((w) => w.includes("World"))).toBe(true);
+    // bsu precedes esu.
+    expect(writes.indexOf(bsu)).toBeLessThan(writes.indexOf(esu));
+
+    app.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+// Port of Ink render.tsx:1945-1980 ("no bsu/esu when output is unchanged"): a
+// trailing throttled rerender whose output is IDENTICAL to the last frame must
+// emit NEITHER bsu NOR esu — willRender(output) is false, so the synchronized
+// wrapper is skipped entirely (Ink emits zero bytes there). We force a re-render
+// that produces identical text via a counter ref read in the render fn but not
+// reflected in the output, mirroring Ink's rerender(sameElement).
+test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
+  vi.useFakeTimers(FAKE_TIMER_OPTS);
+  try {
+    // tick changes (forcing Vue to re-run the render fn) but the rendered Text
+    // is constant, so the produced frame is byte-identical to the prior frame.
+    const tick = shallowRef(0);
+    const App = defineComponent(() => () => {
+      void tick.value;
+      return <Text>Hello</Text>;
+    });
+    const app = createApp(App);
+    const stdout = makeFakeWritable({ columns: 80 });
+    const stderr = makeFakeWritable({ columns: 80 });
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    await nextTick();
+    await nextTick();
+
+    // Initial (leading) render emitted bsu (proves synchronization is active).
+    expect(writes.includes(bsu)).toBe(true);
+
+    // Force an identical-output rerender inside the throttle window, then cross
+    // the window so the trailing commit runs.
+    writes.length = 0;
+    tick.value++;
+    await nextTick();
+    await nextTick();
+    vi.advanceTimersByTime(1000);
+
+    // Output was unchanged → willRender is false → neither barrier is emitted.
+    expect(writes.includes(bsu)).toBe(false);
+    expect(writes.includes(esu)).toBe(false);
 
     app.unmount();
   } finally {

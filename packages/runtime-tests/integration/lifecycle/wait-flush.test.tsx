@@ -334,6 +334,48 @@ test("useApp waitUntilRenderFlush waits for state update frame flush", async () 
   expect(didFlushResolve).toBe(true);
 });
 
+// Port of Ink render.tsx:1528-1562 ("issue 596: useEffect can run before the
+// first frame write callback"). Ink's React useEffect maps to Vue's onMounted:
+// the lifecycle hook fires once the component is mounted, which happens BEFORE
+// the terminal has acknowledged the first frame write. We delay the first
+// content write's callback and assert onMounted has already run while that
+// callback is still pending; after unmount + flush the write callback fires.
+test("onMounted runs before the first frame write callback (issue 596)", async () => {
+  let didInitialWriteCallbackFire = false;
+  let didOnMountedRun = false;
+
+  const stdout = createDelayedWriteCallbackStdout({
+    shouldDelay: (chunk) => !isWriteBarrierChunk(chunk),
+    onDelayElapsed: () => {
+      didInitialWriteCallbackFire = true;
+    },
+  });
+
+  const App = defineComponent(() => {
+    onMounted(() => {
+      didOnMountedRun = true;
+    });
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  // Let the mount + first write dispatch settle, but NOT past the write-callback
+  // delay (delayMs defaults to 150). onMounted must have run; the first frame's
+  // write callback must NOT have fired yet.
+  await new Promise<void>((r) => setTimeout(r, 20));
+  expect(didOnMountedRun).toBe(true);
+  expect(didInitialWriteCallbackFire).toBe(false);
+
+  // Draining the stream releases the delayed write callback.
+  app.unmount();
+  await app.waitUntilExit();
+  expect(didInitialWriteCallbackFire).toBe(true);
+});
+
 // --- clear() API test ---
 
 test("clear output", async () => {

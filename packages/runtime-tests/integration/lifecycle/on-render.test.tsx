@@ -67,7 +67,18 @@ test("onRender is called on subsequent state updates", async () => {
   await nextTick();
   await nextTick();
 
-  expect(renderTimes.length).toBeGreaterThan(initialCount);
+  // Ink render.tsx:892-950 resets the onRender stub between rerenders and asserts
+  // callCount === 1 for each — i.e. exactly ONE onRender per state mutation, not
+  // ">". In debug mode every commit is synchronous so a single mutation must add
+  // exactly one render (no coalescing, no double-fire).
+  expect(renderTimes.length).toBe(initialCount + 1);
+
+  // A second, distinct mutation also adds exactly one more.
+  msg.value = "c";
+  await nextTick();
+  await nextTick();
+  expect(renderTimes.length).toBe(initialCount + 2);
+
   app.unmount();
 });
 
@@ -141,8 +152,16 @@ test("onRender fires on input-triggered state update", async () => {
   await nextTick();
   await nextTick();
 
-  expect(renderTimes.length).toBeGreaterThan(initialCount);
+  // Ink render.tsx:892-950: a single useInput-driven state update fires onRender
+  // EXACTLY once (callCount === 1 after resetHistory), not just "> initial".
+  expect(renderTimes.length).toBe(initialCount + 1);
   expect(renderTimes.at(-1)).toBeGreaterThanOrEqual(0);
+
+  // A second keystroke that CHANGES the value adds exactly one more render.
+  stdin.emit("data", "b");
+  await nextTick();
+  await nextTick();
+  expect(renderTimes.length).toBe(initialCount + 2);
 
   app.unmount();
 });
