@@ -505,6 +505,17 @@ test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width",
   expect(stripAnsi(output)).toBe("ABC");
 });
 
+// Mirrors Ink text.tsx:277-283 ("strip complete ESC control sequences with
+// intermediates"). The existing ESC#8-only test above misses the ESC-c (RIS, full
+// terminal reset) leg: sanitizeAnsi must strip BOTH the intermediate-byte ESC#8 and
+// the bare ESC c so neither leaks into the painted frame, leaving the visible "ABC".
+test("strip complete ESC control sequences with intermediates (ESC#8 and ESC c / RIS)", async () => {
+  const frame = await renderText(`A${ESC}#8B${ESC}cC`);
+  expect(frame).not.toContain(`${ESC}#8`);
+  expect(frame).not.toContain(`${ESC}c`);
+  expect(stripAnsi(frame)).toBe("ABC");
+});
+
 test("strip tmux DCS passthrough wrappers with ST-terminated OSC payload", async () => {
   const wrappedStart = `${ESC}Ptmux;${ESC}${ESC}]8;;https://example.com${ESC}${ESC}\\${ESC}\\`;
   const wrappedEnd = `${ESC}Ptmux;${ESC}${ESC}]8;;${ESC}${ESC}\\${ESC}\\`;
@@ -755,6 +766,8 @@ test("link ansi escapes are closed properly", async () => {
     defineComponent(() => () => <Text>{ansiEscapes.link("Example", "https://example.com")}</Text>),
     { columns: 100 },
   );
-  expect(output).toContain("Example");
-  expect(output).toContain("example.com");
+  // Lock the EXACT bytes: the OSC-8 hyperlink must round-trip unchanged (open + label +
+  // close). Ink components.tsx: t.is(output, ']8;;https://example.comExample]8;;') —
+  // identical to ansiEscapes.link(...) byte-for-byte.
+  expect(output).toBe(ansiEscapes.link("Example", "https://example.com"));
 });

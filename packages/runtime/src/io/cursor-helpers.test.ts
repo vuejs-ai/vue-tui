@@ -1,3 +1,4 @@
+import ansiEscapes from "ansi-escapes";
 import { describe, test, expect } from "vite-plus/test";
 import {
   cursorPositionChanged,
@@ -31,30 +32,33 @@ describe("cursor-helpers", () => {
     expect(cursorPositionChanged({ x: 0, y: 0 }, undefined)).toBe(true);
   });
 
+  // The escape constants must match their hardcoded literals exactly (Ink locks
+  // these byte-for-byte in cursor-helpers.tsx).
+  test("escape constants are the exact DECTCEM byte sequences", () => {
+    expect(showCursorEscape).toBe("\x1b[?25h");
+    expect(hideCursorEscape).toBe("\x1b[?25l");
+  });
+
   test("buildCursorSuffix returns empty for undefined position", () => {
     expect(buildCursorSuffix(5, undefined)).toBe("");
   });
 
   test("buildCursorSuffix moves cursor up and to position", () => {
-    const result = buildCursorSuffix(5, { x: 3, y: 2 });
-    // Should move up 3 lines (5 - 2), move to column 3, and show cursor
-    expect(result).toContain("\x1b[3A"); // cursorUp(3)
-    expect(result).toContain("\x1b[4G"); // cursorTo(3) — 1-indexed column
-    expect(result).toContain("\x1b[?25h"); // show cursor
+    // moveUp = 3 - 1 = 2 (Ink's exact case). Lock the FULL output, not substrings.
+    const result = buildCursorSuffix(3, { x: 5, y: 1 });
+    expect(result).toBe(ansiEscapes.cursorUp(2) + ansiEscapes.cursorTo(5) + showCursorEscape);
   });
 
   test("buildCursorSuffix omits cursorUp when already on target line", () => {
+    // moveUp = 3 - 3 = 0, so no cursorUp — exact composition is cursorTo + show.
     const result = buildCursorSuffix(3, { x: 0, y: 3 });
-    expect(result).not.toContain("A"); // no cursorUp
-    expect(result).toContain("\x1b[?25h"); // still shows cursor
+    expect(result).toBe(ansiEscapes.cursorTo(0) + showCursorEscape);
   });
 
   test("buildCursorSuffix - cursor at first line of single-line output", () => {
-    const result = buildCursorSuffix(1, { x: 4, y: 0 });
     // moveUp = 1 - 0 = 1
-    expect(result).toContain("\x1b[1A"); // cursorUp(1)
-    expect(result).toContain("\x1b[5G"); // cursorTo(4) — 1-indexed column
-    expect(result).toContain("\x1b[?25h"); // show cursor
+    const result = buildCursorSuffix(1, { x: 4, y: 0 });
+    expect(result).toBe(ansiEscapes.cursorUp(1) + ansiEscapes.cursorTo(4) + showCursorEscape);
   });
 
   test("buildReturnToBottom returns empty for undefined position", () => {
@@ -62,17 +66,15 @@ describe("cursor-helpers", () => {
   });
 
   test("buildReturnToBottom moves cursor down and to column 0", () => {
-    const result = buildReturnToBottom(5, { x: 3, y: 2 });
-    // down = 5 - 1 - 2 = 2
-    expect(result).toContain("\x1b[2B"); // cursorDown(2)
-    expect(result).toContain("\x1b[1G"); // cursorTo(0) — 1-indexed column 1
+    // down = 4 - 1 - 0 = 3 (Ink's exact case). Lock the FULL output.
+    const result = buildReturnToBottom(4, { x: 5, y: 0 });
+    expect(result).toBe(ansiEscapes.cursorDown(3) + ansiEscapes.cursorTo(0));
   });
 
   test("buildReturnToBottom - no cursorDown when cursor already at bottom", () => {
+    // down = 4 - 1 - 3 = 0, so no cursorDown — exact composition is just cursorTo.
     const result = buildReturnToBottom(4, { x: 0, y: 3 });
-    // down = 4 - 1 - 3 = 0, so no cursorDown
-    expect(result).not.toContain("B"); // no cursorDown
-    expect(result).toContain("\x1b[1G"); // cursorTo(0)
+    expect(result).toBe(ansiEscapes.cursorTo(0));
   });
 
   test("buildReturnToBottomPrefix returns empty when cursor was not shown", () => {
@@ -80,9 +82,9 @@ describe("cursor-helpers", () => {
   });
 
   test("buildReturnToBottomPrefix hides cursor and returns to bottom", () => {
-    const result = buildReturnToBottomPrefix(true, 5, { x: 0, y: 2 });
-    expect(result).toContain(hideCursorEscape);
-    expect(result).toContain("\x1b[2B"); // cursorDown(2): 5-1-2
+    // Lock the FULL output: hide + buildReturnToBottom (Ink's exact composition).
+    const result = buildReturnToBottomPrefix(true, 4, { x: 0, y: 0 });
+    expect(result).toBe(hideCursorEscape + buildReturnToBottom(4, { x: 0, y: 0 }));
   });
 
   test("buildReturnToBottomPrefix - with undefined previousCursorPosition still hides cursor", () => {
@@ -91,18 +93,20 @@ describe("cursor-helpers", () => {
   });
 
   test("buildCursorOnlySequence combines hide + return + reposition", () => {
+    // Lock the FULL composition: hide prefix + buildReturnToBottom + buildCursorSuffix
+    // (Ink's exact case, cursor-helpers.tsx).
     const result = buildCursorOnlySequence({
       cursorWasShown: true,
-      previousLineCount: 5,
-      previousCursorPosition: { x: 0, y: 2 },
-      visibleLineCount: 5,
-      cursorPosition: { x: 3, y: 1 },
+      previousLineCount: 2,
+      previousCursorPosition: { x: 0, y: 0 },
+      visibleLineCount: 1,
+      cursorPosition: { x: 3, y: 0 },
     });
-    expect(result).toContain(hideCursorEscape);
-    expect(result).toContain(showCursorEscape);
-    // Should contain return-to-bottom (down 2) and cursor suffix (up 4)
-    expect(result).toContain("\x1b[2B"); // cursorDown(2)
-    expect(result).toContain("\x1b[4A"); // cursorUp(4): 5-1
+    const expected =
+      hideCursorEscape +
+      buildReturnToBottom(2, { x: 0, y: 0 }) +
+      buildCursorSuffix(1, { x: 3, y: 0 });
+    expect(result).toBe(expected);
   });
 
   test("buildCursorOnlySequence skips hide when cursor was not shown", () => {

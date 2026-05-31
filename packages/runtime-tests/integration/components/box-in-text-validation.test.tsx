@@ -20,10 +20,18 @@ test("fail when text nodes are not within <Text> component (mixed)", async () =>
       <Text>World</Text>
     </Box>
   ));
-  await expect(render(App)).rejects.toThrow("must be rendered inside <Text>");
+  // Lock the EXACT message including the quoted offending string. Ink components.tsx.
+  // Anchored regex (not a substring) so extra prefix/suffix text would fail too.
+  await expect(render(App)).rejects.toThrow(
+    /^Text string "Hello" must be rendered inside <Text> component$/,
+  );
 });
 
 test("fail when text node is not within <Text> component (full)", async () => {
   const App = defineComponent(() => () => <Box>Hello World</Box>);
-  await expect(render(App)).rejects.toThrow("must be rendered inside <Text>");
+  // Lock the EXACT message: the whole offending string is quoted. Ink components.tsx.
+  // Anchored regex (not a substring) so extra prefix/suffix text would fail too.
+  await expect(render(App)).rejects.toThrow(
+    /^Text string "Hello World" must be rendered inside <Text> component$/,
+  );
 });
