@@ -650,8 +650,15 @@ function paintNode(
       // Skip writing empty text — avoids applying line transformers to empty
       // content, which matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;
-      const cellWidth = Math.max(1, Math.floor(layout.width));
-      const wrapped = wrapText(text, cellWidth, node.props.wrap ?? "wrap");
+      // Wrap at the TRUE cell width (unclamped), matching Ink's paint, which wraps at
+      // getMaxWidth(yogaNode) — a value that can legitimately be 0 (flexBasis=0, width=0,
+      // width="0%"). At width 0, wrapText returns the leading-newline wrap "\nA" → ["", "A"],
+      // pushing the glyph onto its own SECOND row exactly as the measure func reported
+      // (height 2). Clamping this to 1 would re-collapse to ["A"] on the first row, where a
+      // row-sibling overwrites it (the text-drop bug). Fitting text is untouched: wrapText's
+      // fast-path returns it verbatim.
+      const wrapWidth = Math.floor(layout.width);
+      const wrapped = wrapText(text, wrapWidth, node.props.wrap ?? "wrap");
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
       // it via fillBackground), and is the reason a Box bg pads to full width while
@@ -660,10 +667,14 @@ function paintNode(
       // its OWN glyphs, never the surrounding Box fill. The already-rendered glyphs
       // in `wrapped[i]` keep their effective bg, so a `backgroundColor=""` Text
       // stays bare even though we pad the trailing cells with the inherited bg.
+      // Pad to wrapWidth (NOT a ≥1-clamped width): at width 0 there is nothing to
+      // pad, matching Ink (getMaxWidth=0 → no padding). Clamping to 1 here would
+      // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
+      // collides with a row-sibling at the 0-width box origin.
       if (inheritedBg) {
         const padProps: TextProps = { backgroundColor: inheritedBg };
         for (let i = 0; i < wrapped.length; i++) {
-          const pad = cellWidth - stringWidth(wrapped[i]!);
+          const pad = wrapWidth - stringWidth(wrapped[i]!);
           if (pad > 0) {
             wrapped[i] = wrapped[i]! + applyChalk(" ".repeat(pad), padProps);
           }

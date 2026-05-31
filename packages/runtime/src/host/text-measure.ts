@@ -2,6 +2,7 @@ import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
+import { tokenizeAnsi } from "../paint/ansi-tokenizer.ts";
 import { sanitizeAnsi } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
 
@@ -132,8 +133,103 @@ export function safeSliceEnd(text: string, maxCols: number): string {
   return sliced;
 }
 
+// Grapheme segmenter shared across calls (constructing one is non-trivial). Locale-independent:
+// we only segment, never collate, so the default locale's segmentation rules suffice.
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Strip ALL ANSI from `text`, returning only its visible code points. Reuses the paint
+ * tokenizer (the same one sanitizeAnsi uses) rather than a strip-ansi regex dep: every
+ * non-`text` token — SGR, OSC hyperlinks, control strings — is dropped, so the result is the
+ * exact visible string wrap-ansi must lay out. (wrap-ansi recognises SGR/OSC8 and would
+ * byte-split SGR at width<=0; feeding it the plain string sidesteps that bug entirely.)
+ */
+function stripAnsi(text: string): string {
+  let out = "";
+  for (const token of tokenizeAnsi(text)) {
+    if (token.type === "text") out += token.value;
+  }
+  return out;
+}
+
+/**
+ * Replicate wrap-ansi's width<=0 layout for a (possibly STYLED) string, ANSI-awarely.
+ *
+ * The output's LINE STRUCTURE exactly equals `wrapAnsi(stripAnsi(text), 0, {hard, trim:false})
+ * .split("\n")` — wrap-ansi's authoritative width-0 layout. wrap-ansi breaks BEFORE each
+ * grapheme it cannot fit, so an interior zero-width grapheme (ZWSP/ZWNJ/ZWJ, combining mark,
+ * VS16, soft-hyphen, BOM) lands on its OWN row with the surrounding `""` blanks — but a
+ * TRAILING zero-width run (nothing visible after it) stays glued to the preceding grapheme's
+ * row (wrapAnsi("中​",0)=["","中​"], not ["","中","​"]). Deriving structure from wrap-ansi on
+ * the plain string reproduces both cases for free; the old column-stepping `slice(col,col+1)`
+ * could not (it glued an interior zero-width onto the next grapheme → line-count too low, and
+ * `break`-ed on a leading zero-width + wide glyph → dropped the rest of the line).
+ *
+ * Styling is re-applied in lockstep: the plain and styled strings share an identical grapheme
+ * sequence (SGR/OSC are zero-width), so each NON-EMPTY plain line maps to a contiguous run of
+ * graphemes (USUALLY one, but a trailing zero-width run makes it several — e.g. "中​"). We slice
+ * that run out of the STYLED text with slice-ansi via the same slot model wrap-ansi's plain
+ * layout implies, so slice-ansi re-emits the active SGR span around it (e.g. "\x1b[41mA\x1b[49m")
+ * and keeps a wide glyph whole — matching Ink's per-grapheme colored output. We never let
+ * wrap-ansi touch the styled string (it byte-splits the escapes at width<=0); we only ask it
+ * for structure.
+ */
+function wrapZeroWidthAnsi(text: string): string[] {
+  // NFC-normalize first: wrap-ansi (and therefore vue's NORMAL-width wrap path, which feeds
+  // the styled string straight to wrapAnsi) composes combining sequences (e.g. "á" →
+  // "á"). Deriving structure from wrapAnsi(stripAnsi(text)) yields composed rows, so the
+  // styled slices must be composed too or they'd diverge (same glyph/width/line-count, but
+  // different code points than the normal-width path + Ink). SGR/OSC bytes are ASCII → NFC-invariant.
+  text = text.normalize("NFC");
+  const result: string[] = [];
+  // Process each hard-newline line independently so `\n` never enters the grapheme walk
+  // (wrap-ansi joins line-blocks with `\n`, so each input line contributes its own block).
+  const styledLines = text.split("\n");
+  for (const styledLine of styledLines) {
+    const plainLine = stripAnsi(styledLine);
+    const plainLines = wrapAnsi(plainLine, 0, { hard: true, trim: false }).split("\n");
+
+    // Assign each grapheme of the plain line a slice-ansi slot range: a grapheme occupies
+    // max(1, visibleWidth) slots (a zero-width grapheme gets 1 slot of its own; a wide glyph 2).
+    // We re-style by mapping each non-empty plain line to the slot range covering its graphemes
+    // and slicing the STYLED text there (slice-ansi re-emits the active SGR span around it).
+    const slotEnds: number[] = []; // slotEnds[i] = end slot of the i-th grapheme
+    let slot = 0;
+    for (const { segment } of graphemeSegmenter.segment(plainLine)) {
+      slot += Math.max(1, stringWidth(segment));
+      slotEnds.push(slot);
+    }
+
+    // Walk wrap-ansi's plain layout. An empty row passes through verbatim; a non-empty row
+    // consumes as many graphemes as it contains (one, or several for a trailing zero-width run),
+    // and we emit the styled slice over that grapheme run's slot range.
+    let graphemeIndex = 0;
+    for (const line of plainLines) {
+      if (line === "") {
+        result.push("");
+        continue;
+      }
+      const startSlot = graphemeIndex === 0 ? 0 : slotEnds[graphemeIndex - 1]!;
+      const graphemeCount = [...graphemeSegmenter.segment(line)].length;
+      graphemeIndex += graphemeCount;
+      const endSlot = slotEnds[graphemeIndex - 1] ?? startSlot;
+      result.push(sliceAnsi(styledLine, startSlot, endSlot));
+    }
+  }
+  return result;
+}
+
 export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): string[] {
-  if (width <= 0) return [""];
+  // NO `width <= 0` short-circuit — Ink's wrapText (wrap-text.ts) has none either, and
+  // a 0-width cell is an ordinary in-range value (flexBasis=0, width=0, width="0%", a
+  // negative parsed percent). A 0-width cell forces non-empty text onto its OWN second
+  // row (height 2) — that is exactly what makes Ink render "B\nA" beside a sibling instead
+  // of DROPPING the text (vue's old `[""]` collapsed it to height 1, then paint overwrote
+  // it with the sibling → "B"). For PLAIN text wrap-ansi already does this; for STYLED text
+  // it would byte-corrupt the SGR codes at width<=0, so the wrap/hard branches route through
+  // wrapZeroWidthAnsi (ANSI-safe) instead. Empty/zero-width text is unaffected: the fast-path
+  // below returns [""] for it (and the yoga measure func short-circuits raw==="" before ever
+  // calling here), so no spurious blank row appears. Negative widths flow identically.
 
   if (mode === "wrap" || mode === "hard") {
     // Mirror Ink's render-node-to-output.ts:144-150: only invoke wrap-ansi when
@@ -147,6 +243,20 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     // for fitting text. Splitting on `\n` preserves any embedded hard newlines,
     // exactly as Ink's `output.write` does for the unwrapped string.
     if (measureTextNatural(text).width <= width) return text.split("\n");
+
+    // ANSI-safe width<=0 wrap. We reach here only for NON-empty text wider than the
+    // cell (the fast-path above already returned for empty/fitting text), so width<=0
+    // means an undersized cell that forces every grapheme onto its own row. wrap-ansi@10
+    // produces exactly that for PLAIN text — wrapAnsi("AB", 0) = "\nA\nB" (leading blank
+    // line, one grapheme per line) — but it has a width<=0 bug: it cannot recognise the
+    // SGR codes in a STYLED string and byte-splits them, so wrapAnsi("\x1b[41mA\x1b[49m", 0)
+    // = "\x1b\n[\n4\n1\nm\nA\n…", scattering the escape bytes across rows and corrupting
+    // the frame. Ink never hits this because it wraps the PLAIN squashed text and applies
+    // color via a per-line transform AFTER wrapping; vue bakes color into the string before
+    // wrapping, so we must reproduce wrap-ansi's plain-text layout ANSI-awarely. slice-ansi
+    // is grapheme-aware and re-emits the active SGR span around each slice, matching Ink's
+    // per-grapheme colored output (e.g. "B\n\x1b[41mA\x1b[49m" for a 0-width bg Box).
+    if (width <= 0) return wrapZeroWidthAnsi(text);
 
     if (mode === "wrap") {
       return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");
