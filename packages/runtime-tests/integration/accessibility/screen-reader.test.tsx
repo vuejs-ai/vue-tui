@@ -520,6 +520,37 @@ describe("Transform accessibility", () => {
     );
     expect(output).toContain("LOWERCASE");
   });
+
+  // P19: Ink's null-children guard (Transform.tsx:28-30) runs BEFORE the
+  // accessibilityLabel substitution, so a <Transform accessibilityLabel="Acc">
+  // with NO children returns null even in screen-reader mode — it emits NOTHING.
+  // Ink reference (v7.0.4, SR on): `<Transform accessibilityLabel="Acc"/>` → "".
+  // Previously vue-tui ran the SR/label branch first and emitted "Acc".
+  test("P19: childless <Transform accessibilityLabel> emits nothing in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => s} accessibilityLabel="Acc" />
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    // Null guard fires first → no node → no label text.
+    expect(output).toBe("");
+  });
+
+  // P19 control: WITH children the label substitution path is unchanged — a
+  // <Transform accessibilityLabel="Acc"> that HAS children still emits the label
+  // in SR mode. Ink reference (SR on): label substitutes for children → "Acc".
+  test("P19 control: <Transform accessibilityLabel> WITH children still emits label in SR mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => s} accessibilityLabel="Acc">
+          <Text>x</Text>
+        </Transform>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("Acc");
+  });
 });
 
 describe("screen-reader ANSI sanitization (Ink parity)", () => {
