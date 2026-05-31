@@ -57,8 +57,13 @@ export interface UseAnimationReturn {
   readonly delta: Readonly<ShallowRef<number>>;
 
   /**
-   * Resets `frame`, `time`, and `delta` to `0` and restarts timing from the current moment.
-   * Useful for one-shot animations triggered by events.
+   * Resets `frame`, `time`, and `delta` to `0` and restarts timing from the
+   * current moment. Useful for one-shot animations triggered by events.
+   *
+   * While the animation is INACTIVE (paused via `isActive`), `reset()` keeps the
+   * last frame frozen instead of zeroing immediately; the zeroing is deferred to
+   * the next resume (Ink parity — Ink's reset bumps a key consumed only by the
+   * isActive-gated effect, so a paused reset zeros on resume, not before).
    */
   readonly reset: () => void;
 }
@@ -138,11 +143,18 @@ export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn
   }
 
   function reset() {
-    const wasActive = handle !== undefined;
-    frame.value = 0;
-    time.value = 0;
-    delta.value = 0;
-    if (wasActive) start();
+    // Ink parity (use-animation.ts:83-89,138): reset() only bumps a resetKey;
+    // the actual zeroing (setAnimState(zeroAnimState)) lives INSIDE the layout
+    // effect, which early-returns while !isActive, and `shouldReset` is gated on
+    // isActive. So:
+    //  - ACTIVE: zero + restart timing now. start() already does both (the
+    //    effect re-runs on resetKey while isActive in Ink).
+    //  - INACTIVE (paused): do NOT zero — keep the last frame frozen. The next
+    //    resume runs the isActive watch → start(), which zeros, so the reset
+    //    lands on resume (Ink defers zeroing the same way).
+    if (handle !== undefined) {
+      start();
+    }
   }
 
   // Watch isActive — when toggled to true, start (which resets values);
