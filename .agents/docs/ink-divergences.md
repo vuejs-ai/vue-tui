@@ -145,7 +145,14 @@ built never reaches the terminal:
 - **A `v-if=false` branch (or a `null`/`false`/`undefined` child) leaves a comment anchor
   (`TuiComment`)** where Ink emits no node, but it is inert: no yoga node, paints nothing,
   never shifts a sibling's yoga index, and is skipped for the positional `<Transform>` index
-  in all three squash paths (`G52`). Output equals omitting the element.
+  in all three squash paths (`G52`). Output equals omitting the element. This also governs
+  `<Transform>`'s own children guard: a childless `<Transform>` (or one whose only child is a
+  `null`/`false`/`v-if=false` comment anchor) renders **no node** (matching Ink for `null`,
+  consistent with every other component). It diverges from Ink only for a literal `{false}` /
+  `{cond && x}`-false child — React's `false !== null`, so Ink renders an empty node (and a gap
+  slot); Vue collapses `false`/`null` to the same `TuiComment` and cannot distinguish them, so
+  it omits the node. Keeping `<Transform>` consistent with the comment-anchor model is the
+  principled choice.
 - **Commit timing is deliberately Ink-aligned** — leading+trailing throttle at
   `ceil(1000/maxFps)` ≈ 32 ms (Ink's `renderThrottleMs`), synchronous resize — even though
   re-renders are Vue's fine-grained reactivity, not a React subtree re-render.
