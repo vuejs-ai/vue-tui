@@ -168,8 +168,15 @@ class Output {
           ? { x1: clip.x1, x2: clip.x2 }
           : null;
 
-      // Safe early skip: entire write starts at or past right clip edge
-      if (clipH && x >= clipH.x2) continue;
+      // Safe early skip: entire write starts strictly PAST the right clip edge.
+      // Must be strict `>` (not `>=`), matching Ink output.ts:188 (`x > clip.x2`):
+      // an op that starts AT x === clip.x2 still has to take the per-line clip path
+      // so its transformers run on the (empty) clipped slice. A transformer that
+      // produces output from empty input (e.g. `() => '中'`) emits AT the clip edge;
+      // a whole-op `>=` skip would wrongly drop it. The inner per-line clip below
+      // already uses strict `>`, so for normal/identity ops x === clip.x2 still
+      // clips to empty → characters.length === 0 → skip (no net output).
+      if (clipH && x > clipH.x2) continue;
 
       let offsetY = 0;
 
@@ -205,7 +212,7 @@ class Output {
           // whole and the kept content begins at this origin with NO leading
           // offset. (We deliberately do NOT advance the origin by the dropped
           // glyph's extra column — that produced a vue-tui-specific leading space
-          // that Ink never emits; see G63 decisions-log in parity-ledger.md.)
+          // that Ink never emits.)
           if (lineX < clipH.x1) lineX = clipH.x1;
           const maxWidth = clipH.x2 - lineX;
           line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);

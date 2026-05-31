@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { Box, Text, Transform } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
 import stringWidth from "string-width";
 
@@ -66,5 +66,87 @@ describe("grapheme-aware clipping (issue #21)", () => {
     const lines = stripAnsi(lastFrame({ trimLines: true })!).split("\n");
     expect(lines[0]).toBe("coabc");
     expect(lines[1]).toBe("ct👨‍👩‍👧‍👦");
+  });
+
+  // A write op that starts EXACTLY at the right clip edge (x === clip.x2) must NOT
+  // be short-circuited as a whole — it has to take the per-line clip path so its
+  // transformers still run on the (now empty) clipped slice. A transformer that
+  // produces output from EMPTY input (e.g. `() => '中'`) emits its output AT the
+  // clip edge. Matches Ink output.ts:188 (strict `x > clip.x2`), then the
+  // `lines.entries()` loop running `transformer('')`. Captured against the built
+  // Ink reference (/tmp/ink @40b3a75, columns=100, renderToString):
+  // transform `() => '中'` at x=4 of a width=4 overflow=hidden Box → "    中".
+  test("transformer that emits from empty input still runs at the right clip edge (Ink parity)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box position="absolute" left={4}>
+            <Transform transform={() => "中"}>
+              <Text>x</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    // Ink reference: "    中" — 4 leading spaces then 中 painted at the clip edge.
+    expect(stripAnsi(lastFrame()!)).toBe("    中");
+  });
+
+  // A transformer that APPENDS to its (empty, clipped) input also runs at the edge:
+  // Ink calls it with "" → "" + "X" = "X", painted at the clip edge.
+  test("transformer that appends to empty input runs at the right clip edge (Ink parity)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box position="absolute" left={4}>
+            <Transform transform={(s: string) => `${s}X`}>
+              <Text>q</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    // Ink reference: "    X" — the clipped slice is "", the transform appends "X".
+    expect(stripAnsi(lastFrame()!)).toBe("    X");
+  });
+
+  // Control: an IDENTITY transform at the same clip edge must emit NOTHING — the
+  // clipped slice is empty, identity returns "", characters.length === 0 → skip.
+  // Proves the fix only resurrects ops whose transformer produces output from
+  // empty input; ops with no net output at the edge stay clipped away.
+  test("identity transform at the right clip edge emits nothing (control)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box position="absolute" left={4}>
+            <Transform transform={(s: string) => s}>
+              <Text>x</Text>
+            </Transform>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    // Ink reference: "" — clipped to empty, identity transform emits nothing.
+    expect(stripAnsi(lastFrame()!)).toBe("");
+  });
+
+  // Control: plain text (no transformer) at the right clip edge emits nothing —
+  // clipped to empty → characters.length === 0 → skip. Ink reference: "".
+  test("plain text at the right clip edge emits nothing (control)", async () => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Box width={4} height={1} overflow="hidden">
+          <Box position="absolute" left={4}>
+            <Text>x</Text>
+          </Box>
+        </Box>
+      )),
+      { columns: 100 },
+    );
+    // Ink reference: "" — clipped to empty.
+    expect(stripAnsi(lastFrame()!)).toBe("");
   });
 });
