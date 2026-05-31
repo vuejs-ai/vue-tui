@@ -3,7 +3,10 @@ const MAX_TIMER_INTERVAL = 2_147_483_647;
 
 export function normalizeInterval(interval: number | undefined): number {
   if (interval === undefined || !Number.isFinite(interval)) return DEFAULT_INTERVAL;
-  return Math.min(Math.max(1, Math.round(interval)), MAX_TIMER_INTERVAL);
+  // No rounding — Ink's normalizeAnimationInterval (use-animation.ts:147-151) preserves
+  // fractional intervals (e.g. 16.67ms for 60fps); rounding would drift frame counts and
+  // the scheduler's nextDueTime over time. The scheduler already ceil()s the setTimeout delay.
+  return Math.min(Math.max(1, interval), MAX_TIMER_INTERVAL);
 }
 
 type AnimationSubscriber = {

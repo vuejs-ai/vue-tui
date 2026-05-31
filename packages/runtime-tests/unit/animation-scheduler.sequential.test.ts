@@ -20,6 +20,15 @@ describe.sequential("normalizeInterval", () => {
     expect(normalizeInterval(Number.POSITIVE_INFINITY)).toBe(100);
     expect(normalizeInterval(Number.MAX_SAFE_INTEGER)).toBe(2_147_483_647);
   });
+
+  test("preserves fractional intervals, matching Ink (no rounding)", () => {
+    // Ink's normalizeAnimationInterval does NOT round (use-animation.ts:147-151),
+    // so a 60fps interval (16.67ms) or 8.4ms stays fractional; rounding would drift
+    // frame=floor(elapsed/interval) and the scheduler's nextDueTime over time.
+    expect(normalizeInterval(16.67)).toBe(16.67);
+    expect(normalizeInterval(8.4)).toBe(8.4);
+    expect(normalizeInterval(0.5)).toBe(1); // still clamped to >= 1
+  });
 });
 
 describe.sequential("createAnimationScheduler", () => {
