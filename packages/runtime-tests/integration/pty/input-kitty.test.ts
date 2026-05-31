@@ -66,8 +66,12 @@ it("useInput - handle kitty protocol repeat event", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - release event produces empty input", async () => {
-  const ps = term("use-input-kitty", ["releaseEmpty"]);
+// Ink (use-input.ts:204-217) has no release special-case: a printable 'a'
+// release delivers input "a" (the text), not "". The fixture exits only if
+// input === "a", so a regression to the old release->"" behavior would hang
+// (and fail). See .agents/docs/ink-divergences.md.
+it("useInput - release event delivers the key (input='a'), matching Ink", async () => {
+  const ps = term("use-input-kitty", ["release"]);
   ps.write(kittyKey(97, 1, 3));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");

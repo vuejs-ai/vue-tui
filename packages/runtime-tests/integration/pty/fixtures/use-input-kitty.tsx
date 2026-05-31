@@ -58,7 +58,11 @@ const KittyInput = defineComponent({
         return;
       }
 
-      if (props.test === "release" && key.eventType === "release") {
+      // Ink (use-input.ts:204-217) has no release special-case: a printable
+      // 'a' release ('a' up, CSI 97;1:3 u) delivers input "a", not "".
+      // Asserting input === "a" here (not just eventType) is what guards against
+      // the old undocumented divergence that blanked input on release.
+      if (props.test === "release" && input === "a" && key.eventType === "release") {
         exit();
         return;
       }
@@ -104,11 +108,6 @@ const KittyInput = defineComponent({
       }
 
       if (props.test === "ctrlLetter" && input === "a" && key.ctrl) {
-        exit();
-        return;
-      }
-
-      if (props.test === "releaseEmpty" && input === "" && key.eventType === "release") {
         exit();
         return;
       }
