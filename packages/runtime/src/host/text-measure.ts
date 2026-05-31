@@ -2,6 +2,7 @@ import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
+import { sanitizeAnsi } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
 
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
@@ -21,7 +22,36 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
     out += squashTransformChild(child, transformIndex);
     if (child.type !== "comment") transformIndex++;
   }
-  return out;
+  // Sanitize the measured string so MEASURE+WRAP operate on the SAME bytes PAINT
+  // emits — parity gap #9. Ink's squashTextNodes returns sanitizeAnsi(text)
+  // (squash-text-nodes.ts:45); dom.ts:227 measures that squash and
+  // render-node-to-output.ts:141-150 wraps it, so a control sequence sanitizeAnsi
+  // STRIPS at paint never reaches string-width OR wrap-ansi in Ink. Without this
+  // sanitize, our raw measure/wrap diverges from paint in one of two distinct ways,
+  // depending on whether the control sequence has a visible width:
+  //
+  //   * WIDTH mis-measure (e.g. ESC#8/DECALN): string-width("A\x1b#8BC") is 2, but
+  //     paint strips ESC#8 and emits the 3-column "ABC". A raw measure UNDER-sizes
+  //     the yoga cell, so at a tight width the trailing visible char is clipped
+  //     (vue rendered "AB" for "A\x1b#8BC" at width 3).
+  //   * WRAP-step break (e.g. erase-line CSI \x1b[2K): here raw and sanitized
+  //     string-width are EQUAL (both count \x1b[2K as zero), so width is fine — but
+  //     wrap-ansi doesn't recognise the \x1b[2K CSI and returns "abCD\x1b[2Kef"
+  //     un-wrapped on one line, so at width 4 the trailing "ef" overflows the
+  //     single-line cell and is clipped. Feeding the sanitized "abCDef" instead
+  //     wraps correctly to "abCD" / "ef".
+  //
+  // Sanitizing the squash output here fixes BOTH for the same reason: measure and
+  // wrap then see the identical stripped string paint emits. This is the measure
+  // twin of paint's renderTextWithInlineStyles (which also ends in sanitizeAnsi);
+  // because flattenLeaves recurses into nested <Text> children, the sanitize runs
+  // at EVERY nesting level, exactly like Ink's recursive squashTextNodes, and
+  // sanitizeAnsi is idempotent so the nested re-sanitization is harmless. This
+  // single output feeds measureTextNatural, bindTextMeasure, and wrapText.
+  // (Note: sanitizeAnsi PRESERVES OSC sequences, so this does NOT fix the
+  // non-hyperlink-OSC overflow-wrap case — that is a separate Output-grid-clip
+  // gap; see the skipped test in text.test.tsx.)
+  return sanitizeAnsi(out);
 }
 
 // Squash a single child into measured text, recursing GENERICALLY into
@@ -74,7 +104,12 @@ export function flattenTransformLeaves(node: TuiTransform): string {
     out += squashTransformChild(child, transformIndex);
     if (child.type !== "comment") transformIndex++;
   }
-  return out;
+  // Sanitize for the same reason as flattenLeaves (parity gap #9; see that comment
+  // for the two distinct width/wrap mechanisms): the standalone <Transform> measure
+  // func feeds this into measureTextNatural/wrapText, and the paint twin
+  // renderTransformAsText also ends in sanitizeAnsi — so measure+wrap must see the
+  // same sanitized string paint produces.
+  return sanitizeAnsi(out);
 }
 
 export type WrapMode = NonNullable<TextProps["wrap"]>;

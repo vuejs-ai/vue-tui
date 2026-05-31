@@ -483,13 +483,26 @@ test("strip complete C1 non-SGR CSI sequences without leaking parameters", async
   expect(stripAnsi(frame)).toBe("ABC");
 });
 
-// ESC#8 (DECALN) and ESC c (RIS) are Fe-type sequences that should be stripped,
-// but ESC c currently consumes the following character, producing "AB" instead of "ABC".
-test.skip("strip complete ESC control sequences with intermediates — known rendering issue", async () => {
-  const frame = await renderText(`A${ESC}#8B${ESC}cC`);
-  expect(frame).not.toContain(`${ESC}#8`);
-  expect(frame).not.toContain(`${ESC}c`);
-  expect(stripAnsi(frame)).toBe("ABC");
+// ESC#8 (DECALN) is an Fe-type sequence with an intermediate byte that sanitizeAnsi
+// strips at PAINT time. This is a WIDTH mis-measure: raw string-width("A\x1b#8BC") is
+// 2, but paint strips ESC#8 and emits the 3-column "ABC". Before parity gap #9 the
+// MEASURE path flattened the RAW string, so the raw width (2) UNDER-sized the yoga
+// cell; at a tight width the trailing "C" was clipped (vue rendered "AB"). Ink
+// measures the SANITIZED squash (squash-text-nodes.ts:45 / dom.ts:227), so the cell
+// is sized to the visible "ABC" and survives even at width 3.
+test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width", async () => {
+  // width 3 is exactly the SANITIZED visible width ("ABC"); the raw string measures
+  // narrower (2), so a raw measure undersizes the cell and drops the trailing "C".
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={3}>
+        <Text>{`A${ESC}#8BC`}</Text>
+      </Box>
+    )),
+    { columns: 3 },
+  );
+  expect(output).not.toContain(`${ESC}#8`);
+  expect(stripAnsi(output)).toBe("ABC");
 });
 
 test("strip tmux DCS passthrough wrappers with ST-terminated OSC payload", async () => {
@@ -645,16 +658,20 @@ test("do not wrap text with non-hyperlink OSC (ST-terminated) sequences", async 
   expect(stripAnsi(output)).toBe("Some text");
 });
 
-// KNOWN vue-tui divergence — pending the sanitize-before-wrap fix (parity gap #9),
-// NOT a shared wrap-ansi limitation. When a generic (non-hyperlink) OSC sequence
-// precedes a word long enough to force wrap-ansi's wrapWord codepath, vue-tui wraps
-// the RAW string: wrap-ansi@10 only protects `]8;;` links, so it counts the OSC
-// payload as visible columns and drops a char — vue renders "abcd\nfghij" here, NOT
-// Ink's correct "abcde\nfghij". Ink does NOT corrupt this: it wraps the SANITIZED
-// text (squash-text-nodes runs sanitizeAnsi before measure/wrap), so the OSC never
-// reaches wrap-ansi. The FITTING case (above) is fixed via Ink's wrap-only-on-overflow
-// guard; this overflow case is fixed once vue measures/wraps sanitized text (gap #9).
-// The assertion below is Ink's correct output; un-skip when gap #9 lands.
+// NOT fixed by parity gap #9 (sanitize-before-measure) — verified separate root cause.
+// sanitizeAnsi PRESERVES OSC sequences (Ink does too: sanitize-ansi.ts:17 keeps `osc`
+// tokens), so the non-hyperlink OSC `]0;My Title\x07` survives the measure squash and
+// still reaches wrap-ansi. wrap-ansi@10 only protects `]8;;` HYPERLINK OSCs, so it
+// SPLITS this generic OSC across lines (`["\x1b]0;My ","Title","\x07abcde","fghij"]`).
+// Ink's wrapText produces the IDENTICAL split lines (verified against Ink v7.0.4) —
+// the divergence is downstream in the Output grid: vue clips chars at the grid right
+// edge (the issue-#10 wide-glyph clip, paint.ts `if (offsetX >= this.width) break`),
+// and the now-visible BEL/broken-OSC bytes consume a grid cell, pushing the trailing
+// "e" past column 5 where vue DROPS it ("abcd\nfghij"). Ink never clips overflow, so
+// "e" survives ("abcde\nfghij"). Confirmed: disabling vue's grid clip makes this pass,
+// and the fix is identical with/without the measure sanitize. This is the issue-#10
+// grid-clip vs control-byte interaction, a DIFFERENT parity gap. The assertion below
+// is Ink's correct output; un-skip when that grid-clip gap is addressed.
 test.skip("hard-wrap long word after non-hyperlink OSC sequence", async () => {
   const text = "\x1b]0;My Title\x07abcdefghij";
   const output = renderToString(
@@ -679,6 +696,38 @@ test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
     { columns: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
+});
+
+// FIXED by parity gap #9 (sanitize-before-measure), exercising the NESTED-leaf squash
+// path. The text "ab" + green "CD" + "\x1b[2K" (erase-line CSI) + "ef" sanitizes to the
+// 6-visible-column "abCDef". Unlike the ESC#8 case, this is NOT a width mis-measure:
+// raw and sanitized string-width are EQUAL (both count \x1b[2K as zero). The break is
+// in the WRAP step — wrap-ansi doesn't recognise the \x1b[2K CSI, so before the fix it
+// received the raw "abCD\x1b[2Kef" and returned it un-wrapped on one line; at width 4
+// the trailing "ef" overflowed the single-line cell and was clipped (vue dropped it).
+// Ink measures+wraps the SANITIZED squash → "abCDef" wraps at width 4 to "abCD\nef".
+// This proves the fix flows through flattenLeaves' nested squashTransformChild
+// recursion, not just the single-leaf path.
+test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across nested Text", async () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={4}>
+        <Text bold>
+          ab<Text color="green">CD</Text>
+          {"\x1b[2K"}ef
+        </Text>
+      </Box>
+    )),
+    { columns: 4 },
+  );
+  expect(stripAnsi(output)).toBe("abCD\nef");
+  // Exact-byte lock against an SGR-ordering / reset regression: each wrapped line must
+  // re-open and close its own bold (\x1b[1m … \x1b[22m), and the nested green must open
+  // and reset (\x1b[32m … \x1b[39m) INSIDE line 1's bold span. Byte-for-byte identical
+  // to Ink v7.0.4's renderToString for this input (verified against /tmp/ink @ v7.0.4).
+  const line1 = chalk.bold(`ab${chalk.green("CD")}`);
+  const line2 = chalk.bold("ef");
+  expect(output).toBe(`${line1}\n${line2}`);
 });
 
 // Feature gap: ST-terminated OSC sequences not handled correctly in wrap-ansi path
