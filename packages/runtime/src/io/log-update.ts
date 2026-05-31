@@ -28,11 +28,24 @@ export type LogUpdate = {
 const visibleLineCount = (lines: string[], str: string): number =>
   str.endsWith("\n") ? lines.length - 1 : lines.length;
 
+// Cursor hide/show is a TTY-only concern. Ink routes every hide/show through
+// `cli-cursor`, which short-circuits `if (!stream.isTTY) return`
+// (cli-cursor/index.js:8-24), so a forced-interactive run on a piped/non-TTY
+// stream emits no cursor escapes. `stream` is typed `Writable`, which has no
+// `isTTY`, so we read it off the runtime object (WriteStream sets it).
+const isTtyStream = (stream: Writable): boolean => Boolean((stream as { isTTY?: boolean }).isTTY);
+
 const hideCursor = (stream: Writable): void => {
+  if (!isTtyStream(stream)) {
+    return;
+  }
   stream.write(hideCursorEscape);
 };
 
 const showCursor = (stream: Writable): void => {
+  if (!isTtyStream(stream)) {
+    return;
+  }
   stream.write(showCursorEscape);
 };
 
@@ -140,6 +153,9 @@ const createStandard = (
     previousOutput = str;
     previousLineCount = lines.length;
 
+    // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
+    // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
+    // unlike render()/done()'s hide/show which DO route through cli-cursor.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);
     }
@@ -330,6 +346,9 @@ const createIncremental = (
     previousOutput = str;
     previousLines = lines;
 
+    // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
+    // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
+    // unlike render()/done()'s hide/show which DO route through cli-cursor.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);
     }
