@@ -138,6 +138,104 @@ test("<Transform> with null children", async () => {
   expect(lastFrame()).toBe("");
 });
 
+// P13: an EMPTY <Transform> (no children) must create NO host node, so in a flex
+// row with gap it consumes NO gap slot. Ink's <Transform> (Transform.tsx:28-30)
+// returns null when `children === undefined || children === null`, so an empty
+// <Transform> sibling adds neither a node nor a gap. Ink reference (v7.0.4,
+// gap=2 row): `a + <Transform/> + b` → "a  b" (a single gap), IDENTICAL to the
+// no-transform control. Previously vue-tui always created a {0,0} transform host
+// node, which ate a gap slot → "a    b".
+test("P13: empty <Transform> in a gap row consumes no gap slot", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" gap={2}>
+        <Text>a</Text>
+        <Transform transform={(s: string) => s} />
+        <Text>b</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink reference: empty Transform = no node = no gap slot → one gap of 2 spaces.
+  expect(lastFrame({ trimLines: true })).toBe("a  b");
+});
+
+test("P13 control: gap row with no transform sibling is the same width", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" gap={2}>
+        <Text>a</Text>
+        <Text>b</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Pairs with the case above: an empty Transform must match this exactly.
+  expect(lastFrame({ trimLines: true })).toBe("a  b");
+});
+
+// DELIBERATE divergence (documented in ink-divergences.md — the comment-anchor model):
+// a literal `{false}` / `{cond && <x/>}`-false child. In React `false !== null`, so Ink
+// renders an empty ink-text node that EATS a gap slot → "a    b". Vue materializes
+// `false`, `null`, `undefined`, and `v-if=false` into the SAME Comment vnode and cannot
+// tell them apart, so <Transform> treats them all as "no children" (omit the node) —
+// rendering "a  b", consistent with how every other component (e.g. <Box>) treats a
+// false/v-if child. Locking vue's principled side so it can't silently change.
+test("a `{cond && x}`-false <Transform> child omits the node (vue comment-anchor divergence)", async () => {
+  const show = false;
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" gap={2}>
+        <Text>a</Text>
+        <Transform transform={(s: string) => s}>{show && <Text>x</Text>}</Transform>
+        <Text>b</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // vue: false child = comment anchor = no node = no gap slot. (Ink would render "a    b".)
+  expect(lastFrame({ trimLines: true })).toBe("a  b");
+});
+
+test("P13 control: NON-empty <Transform> in a gap row DOES take a gap slot", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" gap={2}>
+        <Text>a</Text>
+        <Transform transform={(s: string) => s}>
+          <Text>x</Text>
+        </Transform>
+        <Text>b</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // A Transform WITH children is a real node → two gap slots. Proves the fix only
+  // drops the empty case. Ink reference: "a  x  b".
+  expect(lastFrame({ trimLines: true })).toBe("a  x  b");
+});
+
+// P13 boundary: an empty-STRING child is NOT null — Ink's guard is exactly
+// `children === undefined || children === null`, so `<Transform>{''}</Transform>`
+// (children === '') renders a real (0-width) node and DOES take a gap slot. Ink
+// reference (gap=2 row): "a    b" (two gap slots). The Vue analogue: an empty
+// string materializes as a TEXT vnode (not a comment), so it must NOT be treated
+// as "no children".
+test("P13 boundary: empty-string-child <Transform> still takes a gap slot (matches Ink)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" gap={2}>
+        <Text>a</Text>
+        <Transform transform={(s: string) => s}>{""}</Transform>
+        <Text>b</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink: empty STRING child (≠ null) → real node → two gap slots → "a    b".
+  expect(lastFrame({ trimLines: true })).toBe("a    b");
+});
+
 test("nested transforms apply inner-first: outer wraps inner result", async () => {
   const outer = (s: string) => `(${s})`;
   const inner = (s: string) => `{${s}}`;
