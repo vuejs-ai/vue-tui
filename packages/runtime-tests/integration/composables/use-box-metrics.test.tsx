@@ -47,6 +47,33 @@ describe("useBoxMetrics", () => {
     expect(pos.value.t).toBe(0);
   });
 
+  // Ink use-box-metrics.tsx:37-61 ("returns correct position"): a tracked box on
+  // the SECOND row of a column with marginLeft=5 must report left=5 (the margin)
+  // and top=1 (the row below the first line).
+  test("returns non-zero left/top for an offset box on the second row", async () => {
+    const pos = shallowRef({ l: -1, t: -1 });
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      const metrics = useBoxMetrics(boxRef);
+      watchEffect(() => {
+        pos.value = { l: metrics.left.value, t: metrics.top.value };
+      });
+      return () => (
+        <Box flexDirection="column">
+          <Text>first line</Text>
+          <Box ref={boxRef} marginLeft={5}>
+            <Text>tracked</Text>
+          </Box>
+        </Box>
+      );
+    });
+    await render(App, { columns: 100 });
+    await nextTick();
+    // marginLeft=5 → left=5; second row → top=1.
+    expect(pos.value.l).toBe(5);
+    expect(pos.value.t).toBe(1);
+  });
+
   test("hasMeasured starts false", async () => {
     let measured = false;
     const App = defineComponent(() => {

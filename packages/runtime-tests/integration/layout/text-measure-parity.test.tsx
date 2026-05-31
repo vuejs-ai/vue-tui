@@ -37,3 +37,21 @@ test("narrow truncate matches Ink's re-measure-then-truncate behavior", async ()
   expect(lines[0]).toBe("x");
   expect(lines[1]).toBe("…");
 });
+
+// Ink measure-text.tsx returns height 0 for empty text (text.length === 0), and
+// the yoga measure func short-circuits raw === "" to {width:0,height:0}. So an
+// empty <Text> in a column contributes NO row — the only visible line is the
+// non-empty sibling, with NO leading blank line above it.
+test("empty <Text> in a column contributes height 0 (no leading blank line)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Text>{""}</Text>
+        <Text>hello</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Single line "hello" — the empty text adds no row above it.
+  expect(lastFrame()).toBe("hello");
+});

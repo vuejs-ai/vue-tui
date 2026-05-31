@@ -27,6 +27,26 @@ test("reset prop when it's removed from the element", async () => {
   expect(lastFrame()).toBe("x");
 });
 
+// Ink reconciler.tsx:76-96 ("remove style prop from intrinsic node"): removing
+// marginLeft must reset the yoga margin edge to 0, not keep the stale 1. The
+// frame flips from " X" (1-col left margin) to "X".
+test("reset marginLeft to 0 on removal (Ink reconciler parity)", async () => {
+  const withStyle = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box {...(withStyle.value ? { marginLeft: 1 } : {})}>
+      <Text>X</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  expect(lastFrame()).toBe(" X");
+
+  withStyle.value = false;
+  await nextTick();
+  expect(lastFrame()).toBe("X");
+});
+
 // G19: dynamic removal of yoga style props must reset to yoga/Ink default, not keep stale value.
 
 test("reset marginTop to 0 on removal (G19)", async () => {
@@ -349,4 +369,58 @@ test("reset position to relative on removal (G19)", async () => {
   await nextTick();
   // After reset to relative (position prop removed), A re-enters flow above B
   expect(lastFrame({ trimLines: true })).toBe("A\nB\n");
+});
+
+// G19 (the documented flexDirection/flexWrap divergence — previously only a code
+// comment, no test): removing flexDirection / flexWrap must reset to the yoga
+// default (row / nowrap), per the declarative contract render = f(current props).
+// Ink's applyStyles persists the last value on a removed prop; vue-tui resets to
+// the default. These lock the VISUAL effect of the reset.
+
+test("reset flexDirection to row (default) on removal (G19 divergence)", async () => {
+  // While flexDirection="column" the two texts stack (A over B); after removal the
+  // box reverts to the row default and they sit side-by-side (AB).
+  const col = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box {...(col.value ? { flexDirection: "column" } : {})}>
+      <Text>A</Text>
+      <Text>B</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  expect(lastFrame({ trimLines: true })).toBe("A\nB");
+
+  col.value = false;
+  await nextTick();
+  expect(lastFrame({ trimLines: true })).toBe("AB");
+});
+
+test("reset flexWrap to nowrap (default) on removal (G19 divergence)", async () => {
+  // Width-4 container with three width-2 boxes. While flexWrap="wrap" they wrap to
+  // two rows (AA BB on row 0, CC on row 1); after removal the box reverts to the
+  // nowrap default, overflowing all three onto a single row (AABBCC).
+  const wrap = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box width={4} {...(wrap.value ? { flexWrap: "wrap" } : {})}>
+      <Box width={2} flexShrink={0}>
+        <Text>AA</Text>
+      </Box>
+      <Box width={2} flexShrink={0}>
+        <Text>BB</Text>
+      </Box>
+      <Box width={2} flexShrink={0}>
+        <Text>CC</Text>
+      </Box>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  expect(lastFrame({ trimLines: true })).toBe("AABB\nCC");
+
+  wrap.value = false;
+  await nextTick();
+  expect(lastFrame({ trimLines: true })).toBe("AABBCC");
 });

@@ -412,6 +412,20 @@ test("measureTextNatural uses widest line and raw line count", () => {
   expect(measureTextNatural("")).toEqual({ width: 0, height: 1 });
 });
 
+// Ink measure-text.tsx:24-34 (widest-line width, `text.split('\n').length`
+// height): a TRAILING newline produces an extra (empty) trailing line, and a
+// string of only newlines is all empty lines. height = number of \n-separated
+// segments; width = widest line.
+test("measureTextNatural counts the trailing-newline empty line", () => {
+  // "hello\n" → ["hello", ""] → widest line 5, two lines.
+  expect(measureTextNatural("hello\n")).toEqual({ width: 5, height: 2 });
+});
+
+test("measureTextNatural counts an only-newline string as all empty lines", () => {
+  // "\n\n" → ["", "", ""] → no visible width, three lines.
+  expect(measureTextNatural("\n\n")).toEqual({ width: 0, height: 3 });
+});
+
 test("clipped empty write does not corrupt existing wide characters", () => {
   // When a write is clipped to an empty string, the boundary cleanup
   // must not run, otherwise it would destroy a wide character that
