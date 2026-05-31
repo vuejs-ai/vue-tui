@@ -80,9 +80,13 @@ test("row - space evenly two text nodes", async () => {
   expect(lastFrame({ trimLines: true })).toBe("  A   B");
 });
 
-// Yoga has a bug, where first child in a container with space-around doesn't have
-// the correct X coordinate and measure function is used on that child node
-test.skip("row - align two text nodes with equal space around them — known Yoga issue", async () => {
+// Yoga has a bug where the first child in a space-around container gets the wrong
+// X coordinate (its measure func runs on a mis-placed node). Mirrors Ink's
+// test.failing for the same input: we assert the DESIRED output " A B" and mark
+// the test `fails`, so it RUNS and passes only WHILE the shared yoga bug persists.
+// If yoga ever fixes this, the test flips to passing-unexpectedly and fails the
+// run — flagging that this comment (and Ink's matching divergence note) is stale.
+test.fails("row - align two text nodes with equal space around them — known Yoga issue", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="row" justifyContent="space-around" width={5}>
@@ -144,9 +148,10 @@ test("column - align two text nodes on the edges", async () => {
   expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB");
 });
 
-// Yoga has a bug, where first child in a container with space-around doesn't have
-// the correct X coordinate and measure function is used on that child node
-test.skip("column - align two text nodes with equal space around them — known Yoga issue", async () => {
+// Same yoga space-around first-child bug on the column axis. test.fails asserts
+// the DESIRED "\nA\n\nB\n" and passes only while the bug persists (see the row
+// case above for the rationale). Mirrors Ink's test.failing.
+test.fails("column - align two text nodes with equal space around them — known Yoga issue", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" justifyContent="space-around" height={5}>

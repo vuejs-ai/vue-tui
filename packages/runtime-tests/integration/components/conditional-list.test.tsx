@@ -62,6 +62,36 @@ test("keyed v-for reorder renders in new order", async () => {
   expect(lines[2]).toContain("item-2");
 });
 
+// Ink reconciler.tsx:154-212 ("insert child between other children"): with
+// STABLE keys, inserting a new child between two existing ones must place it in
+// the right slot — not append, not reorder. Mirrors Ink's keyed [a,c] -> [a,b,c].
+test("keyed insert between existing children places B between A and C", async () => {
+  const insert = shallowRef(false);
+  const App = defineComponent(
+    () => () =>
+      insert.value ? (
+        <Box flexDirection="column">
+          <Text key="a">A</Text>
+          <Text key="b">B</Text>
+          <Text key="c">C</Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column">
+          <Text key="a">A</Text>
+          <Text key="c">C</Text>
+        </Box>
+      ),
+  );
+
+  const { lastFrame } = await render(App, { columns: 10 });
+  expect(lastFrame()).toBe("A\nC");
+
+  insert.value = true;
+  await nextTick();
+  // B lands in the middle (stable keys), so the column order is A / B / C.
+  expect(lastFrame()).toBe("A\nB\nC");
+});
+
 test("repeated list shuffles don't crash", async () => {
   const items = shallowRef([1, 2, 3, 4, 5]);
   const App = defineComponent(() => {
