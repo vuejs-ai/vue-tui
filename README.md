@@ -11,7 +11,7 @@ Build with components, develop with HMR, test with confidence.
 
 - **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
-- **Dev toolkit** — **HMR** in the terminal, plus build and preview out of the box
+- **Dev toolkit** _(experimental)_ — **HMR** in the terminal, plus build and preview out of the box
 - **Input & focus** — keyboard handling, focus management, Tab navigation, Kitty keyboard protocol
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 
