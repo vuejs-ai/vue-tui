@@ -64,6 +64,23 @@ deliberate. Divergences fall into a few kinds:
   Maintainer decision (2026-05-30): KEEP. Tests: `usePaste-only app exits on {legacy,kitty} Ctrl+C`
   in `input-kitty.test.ts`.
 
+### `parseKeypress` filters kitty query-responses (second safety net)
+
+- **Ink:** filters kitty keyboard-protocol query-responses (`ESC[?Nu`) in exactly **one** place —
+  the auto-detection lifecycle in `ink.tsx` (`stripKittyQueryResponsesAndTrailingPartial` on a
+  private `onData` buffer). Its `parse-keypress.ts` has no query-response branch.
+- **vue-tui:** mirrors that detection layer (in `kitty-keyboard.ts`) **and** adds a second net —
+  `parseKeypress` returns `{ ignore: true }` for `ESC[?Nu`, which `useInput` then drops.
+- **Why:** the detection layer does **not** cover the real input pipeline (`stdin 'data'` →
+  `inputParser` → `emitInput` → `useInput` → `parseKeypress`). In `enabled` mode it never runs;
+  in `auto` mode its `onData` listener and the stdin controller's `handleData` both subscribe to
+  the same `'data'` event, so stripping its private buffer can't stop the chunk reaching
+  `handleData`; and after detection settles the listener is gone. Empirically (Layer 2 removed,
+  rebuilt) a stray query-response reaches a `useInput` handler as spurious `"[?1u"` input in all
+  of those cases — including a response split across two reads, which `inputParser` reassembles
+  before dispatch. So this is load-bearing, not redundant. Introduced 2026-05-31. Tests: "kitty
+  query-response - end-to-end filtering" in `kitty-lifecycle.test.ts` (RED without it).
+
 ### Non-`Error` thrown values keep their message in the error overview
 
 - **Ink:** `ErrorOverview` renders `error.message`; a thrown non-`Error` (`throw 'boom'`) has no
