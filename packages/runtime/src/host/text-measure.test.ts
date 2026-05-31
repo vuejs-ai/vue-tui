@@ -1,6 +1,7 @@
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
+import wrapAnsi from "wrap-ansi";
 import { createText, createTextLeaf, createTransform, createVirtualText } from "./nodes.ts";
 import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
@@ -62,6 +63,124 @@ test("wrapText splits on width", () => {
 
 test("wrapText truncate-end cuts with ellipsis", () => {
   expect(wrapText("abcdefgh", 5, "truncate-end")).toEqual(["abcd…"]);
+});
+
+test("wrapText at width 0 wraps non-empty text onto its own line (Ink parity)", () => {
+  // Ink has NO width<=0 guard: wrapAnsi("A", 0, {hard:true, trim:false}) = "\nA",
+  // so a 0-width text occupies a SECOND row (height 2). This is what makes Ink
+  // render "B\nA" for a 0-width Box beside a sibling, instead of dropping the text.
+  expect(wrapText("A", 0, "wrap")).toEqual(["", "A"]);
+  expect(wrapText("A", 0, "hard")).toEqual(["", "A"]);
+});
+
+test("wrapText at width 0 keeps EMPTY text empty (no spurious blank row)", () => {
+  // Empty text measures width 0 (≤ 0), so wrapAnsi("", 0) = "" → [""] (height 1).
+  // The 0-width fix must not turn empty text into an extra row.
+  expect(wrapText("", 0, "wrap")).toEqual([""]);
+});
+
+test("wrapText at width 0 truncates to empty", () => {
+  // cliTruncate("A", 0) = "" — matches Ink's truncate path at a 0-width cell.
+  expect(wrapText("A", 0, "truncate")).toEqual([""]);
+});
+
+test("wrapText at width 0 keeps SGR codes intact on a styled string (no byte-split)", () => {
+  // wrap-ansi@10 byte-splits the escapes of a STYLED string at width<=0
+  // (wrapAnsi("\x1b[41mA\x1b[49m", 0) = "\x1b\n[\n4\n1\nm\nA\n…"), which corrupted the
+  // frame to "B\n[". wrapText now splits ANSI-awarely: leading "" + one entry per grapheme
+  // with its SGR span preserved, matching Ink's per-grapheme colored output.
+  expect(wrapText("\x1b[41mA\x1b[49m", 0, "wrap")).toEqual(["", "\x1b[41mA\x1b[49m"]);
+  expect(wrapText("\x1b[41mAB\x1b[49m", 0, "wrap")).toEqual([
+    "",
+    "\x1b[41mA\x1b[49m",
+    "\x1b[41mB\x1b[49m",
+  ]);
+  // hard mode behaves identically at width 0 (every grapheme must break anyway).
+  expect(wrapText("\x1b[41mAB\x1b[49m", 0, "hard")).toEqual([
+    "",
+    "\x1b[41mA\x1b[49m",
+    "\x1b[41mB\x1b[49m",
+  ]);
+});
+
+test("wrapText at width 0 keeps a wide (CJK) glyph whole and styled", () => {
+  // A 2-column glyph must NOT be column-sliced in half; slice-ansi keeps it whole and
+  // re-emits its bg span — matching Ink's "\x1b[41m你\x1b[49m" on its own row.
+  expect(wrapText("\x1b[41m你好\x1b[49m", 0, "wrap")).toEqual([
+    "",
+    "\x1b[41m你\x1b[49m",
+    "\x1b[41m好\x1b[49m",
+  ]);
+  // Mixed narrow + wide.
+  expect(wrapText("A你", 0, "wrap")).toEqual(["", "A", "你"]);
+});
+
+test("wrapText at width 0 splits each hard-newline line independently", () => {
+  // wrapAnsi("A\nB", 0) = "\nA\n\nB"; each input line gets a leading "" plus its graphemes.
+  expect(wrapText("A\nB", 0, "wrap")).toEqual(["", "A", "", "B"]);
+});
+
+test("wrapText at width 0 places a ZERO-WIDTH char on its OWN row (line-count parity)", () => {
+  // Reviewer reproducer 1: the old column-stepping slice glued the ZWSP (U+200B) onto the
+  // next grapheme and advanced only 1 column, yielding ["", "A", "​B"] (count 3). wrap-ansi
+  // places the ZWSP on its own row: ["", "A", "​", "", "B"] (count 5) — required for height
+  // parity with Ink (wrong line count → wrong yoga height).
+  expect(wrapText("A​B", 0, "wrap")).toEqual(["", "A", "​", "", "B"]);
+});
+
+test("wrapText at width 0 does NOT drop text after a leading zero-width + wide glyph", () => {
+  // Reviewer reproducer 2: the old `if (cellWidth === 0) break` abandoned the rest of the
+  // line when a zero-width char preceded a wide glyph, so "​中" returned [""] (中 GONE).
+  // wrap-ansi keeps everything: ["​", "", "中"].
+  expect(wrapText("​中", 0, "wrap")).toEqual(["​", "", "中"]);
+});
+
+// Load-bearing lock: wrapZeroWidthAnsi's LINE STRUCTURE must EXACTLY equal wrap-ansi's
+// authoritative width-0 layout for plain text across a battery of zero-width / wide / combining
+// / emoji / multiline inputs. Imported the same way the source imports wrap-ansi.
+test("wrapText at width 0 matches wrap-ansi's plain width-0 layout for the full battery", () => {
+  const battery = [
+    "A",
+    "AB",
+    "",
+    " ",
+    "A\nB",
+    "A​B", // ZWSP
+    "​中", // ZWSP + wide
+    "中​A", // wide + ZWSP
+    "\u00e1b", // composed acute (NFC form)
+    "a\u0301b", // EXPLICITLY decomposed (a + U+0301): wrap-ansi NFC-composes, so wrapText must too
+    "\u0301a", // leading combining mark
+    "\u4e2d\u0301", // combining mark on a wide glyph
+    "⚠️", // VS16
+    "🍔", // emoji
+    "👨‍👩‍👧", // ZWJ family
+    "a­b", // soft hyphen
+    "﻿A", // BOM
+    "X​Y中​Z\nP­Q", // mixed multiline
+    "中​", // TRAILING zero-width: wrap-ansi glues it to the prev row (["","中​"]), not its own row
+    "AB​", // trailing zero-width after a narrow glyph
+    "A​​B", // consecutive interior zero-widths (each its own row, no extra leading "")
+    "中​中", // wide / interior zero-width / wide
+  ];
+  for (const input of battery) {
+    const expected = wrapAnsi(input, 0, { hard: true, trim: false }).split("\n");
+    expect(wrapText(input, 0, "wrap"), `input=${JSON.stringify(input)}`).toEqual(expected);
+  }
+});
+
+test("wrapText at width 0 preserves SGR styling per non-empty row with a zero-width char", () => {
+  // A styled input whose painted span straddles a zero-width char: each non-empty output row
+  // keeps its SGR span, and the line count matches the PLAIN version (structure parity).
+  const styled = "\x1b[41mA​B\x1b[49m";
+  const plainStructure = wrapAnsi("A​B", 0, { hard: true, trim: false }).split("\n");
+  const got = wrapText(styled, 0, "wrap");
+  // Line count matches the plain structure exactly.
+  expect(got.length).toBe(plainStructure.length);
+  // Each non-empty row carries its red-bg SGR span; empty rows stay empty.
+  expect(got).toEqual(["", "\x1b[41mA\x1b[49m", "\x1b[41m​\x1b[49m", "", "\x1b[41mB\x1b[49m"]);
+  // Stripping the SGR from each row reproduces the plain structure.
+  expect(got.map(stripAnsi)).toEqual(plainStructure);
 });
 
 test("truncate keeps ZWJ emoji whole", () => {

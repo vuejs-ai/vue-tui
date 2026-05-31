@@ -207,20 +207,13 @@ test("non-number/non-string flexBasis falls back to auto (Ink parity), does not 
   expect(lastFrame({ trimLines: true })).toBe("AB");
 });
 
-// PRE-EXISTING DOWNSTREAM DIVERGENCE — out of scope for the string→percent setter.
-// A zero/negative parsed percent ("0"→0%, "-5"→-5%, "0x10"→parseInt=0→0%) produces
-// a 0-width inner box. Ink renders "B\nA" (B on the row, A wraps onto the next line);
-// vue renders "B" (A dropped). EVIDENCE: with width=6 and this exact tree, the frame is
-//   input    vue-OLD (setFlexBasis(string))   vue-NEW (setFlexBasisPercent)   Ink v7.0.4
-//   "0"      "B"                              "B"                             "B\nA"
-//   "-5"     "B"                              "B"                             "B\nA"
-//   "0x10"   "B"                              "B"                             "B\nA"
-// vue-OLD already differed from Ink here, so this PR's setter change neither caused nor
-// fixed it — the two setters yield byte-identical yoga COMPUTED layout for these inputs;
-// the "B" vs "B\nA" gap is a separate downstream paint/wrap divergence. Skipped (not
-// xfail-asserted as "B") so we don't lock vue's current behavior as correct: the target
-// is Ink's "B\nA". Tracked separately from the flexBasis-percent setter work.
-test.skip("zero/negative flexBasis% wraps the sibling in Ink (downstream divergence)", async () => {
+// A zero/negative parsed percent ("0"→0%, "-5"→-5%, "0x10"→parseInt=0→0%) produces a
+// 0-width inner box. Ink renders "B\nA" (B on the row, A wraps onto the next line). The
+// 0-width text measures via wrapAnsi("A", 0, {hard:true, trim:false}) = "\nA" → height 2,
+// so A occupies a second row. vue previously dropped the text ("B") because wrapText's
+// `width <= 0 → [""]` guard collapsed the measure to height 1. Verified against Ink v7.0.4
+// (@40b3a75): all four of flexBasis=0/"0%" and width=0/"0%" render "B\nA".
+test("zero/negative flexBasis% wraps the sibling in Ink (downstream divergence)", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="row" width={6}>
@@ -232,6 +225,86 @@ test.skip("zero/negative flexBasis% wraps the sibling in Ink (downstream diverge
     )),
     { columns: 100 },
   );
-  // Ink v7.0.4 renders "B\nA"; vue currently renders "B" (see comment above).
+  // Ink v7.0.4 renders "B\nA".
   expect(lastFrame({ trimLines: true })).toBe("B\nA");
+});
+
+test("zero-width Box wraps its text onto its own line (width={0})", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6}>
+        <Box width={0}>
+          <Text>A</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink v7.0.4 renders "B\nA": the 0-width text measures height 2 via
+  // wrapAnsi("A", 0, {hard:true}) = "\nA", so A wraps below sibling B.
+  expect(lastFrame({ trimLines: true })).toBe("B\nA");
+});
+
+test('zero-percent-width Box wraps its text onto its own line (width="0%")', async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6}>
+        <Box width="0%">
+          <Text>A</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink v7.0.4 renders "B\nA" — same as width={0}; a 0% resolved width is also 0px.
+  expect(lastFrame({ trimLines: true })).toBe("B\nA");
+});
+
+test("zero-width Box with EMPTY text adds no spurious row", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={6}>
+        <Box width={0}>
+          <Text>{""}</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Ink v7.0.4 renders "B": empty text measures width 0 (≤ 0), so it never wraps and
+  // never gains a second row. The 0-width fix must NOT add a blank row here.
+  expect(lastFrame({ trimLines: true })).toBe("B");
+});
+
+test("zero-width Box with backgroundColor wraps cleanly, keeping the bg glyph (Ink parity)", async () => {
+  // Regression guard for the wrap-ansi width<=0 byte-split: at width 0 the 0-width Box's
+  // text wraps onto its own row, but vue bakes the bg color INTO the string before wrapping,
+  // and wrap-ansi@10 byte-splits the SGR escapes of a STYLED string at width<=0
+  // (wrapAnsi("\x1b[41mA\x1b[49m", 0) = "\x1b\n[\n4\n1\nm\nA\n…"). That scattered the escape
+  // bytes across rows and rendered a garbage "B\n[" (the 2nd byte of "\x1b[41m"). wrapText
+  // now routes width<=0 styled text through an ANSI-aware per-grapheme split, matching Ink,
+  // which wraps PLAIN text and colorizes per line afterwards.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" width={6}>
+        <Box width={0} backgroundColor="red">
+          <Text>A</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // RAW-byte parity target captured from Ink v7.0.4 (@40b3a75) with chalk level 3:
+  // "B\n\x1b[41mA\x1b[49m\n" — row 2 keeps the FULL bg-colored glyph (overflow:visible).
+  // vue trims trailing whitespace/newlines per frame line, so the equivalent raw frame is
+  // "B\n\x1b[41mA\x1b[49m" (no trailing newline). The bg glyph must survive intact.
+  expect(lastFrame({ raw: true })).toBe("B\n\x1b[41mA\x1b[49m");
+  // And the stripped visible layout is "B\nA" (sanity check on the wrap position).
+  // eslint-disable-next-line no-control-regex -- strip ANSI to assert the visible layout
+  const visible = lastFrame({ trimLines: true })!.replace(/\x1b\[[0-9;]*m/g, "");
+  expect(visible).toBe("B\nA");
 });
