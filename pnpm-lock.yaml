@@ -22,8 +22,8 @@ catalogs:
       specifier: ^5.6.2
       version: 5.6.2
     is-in-ci:
-      specifier: ^1.0.0
-      version: 1.0.0
+      specifier: ^2.0.0
+      version: 2.0.0
     node-pty:
       specifier: 1.2.0-beta.13
       version: 1.2.0-beta.13
@@ -190,7 +190,7 @@ importers:
         version: 4.0.0
       is-in-ci:
         specifier: 'catalog:'
-        version: 1.0.0
+        version: 2.0.0
       patch-console:
         specifier: 'catalog:'
         version: 2.0.0
@@ -257,7 +257,7 @@ importers:
         version: 5.6.2
       is-in-ci:
         specifier: 'catalog:'
-        version: 1.0.0
+        version: 2.0.0
       node-pty:
         specifier: 'catalog:'
         version: 1.2.0-beta.13
@@ -1664,9 +1664,9 @@ packages:
     resolution: {integrity: sha512-5XHYaSyiqADb4RnZ1Bdad6cPp8Toise4TzEjcOYDHZkTCbKgiUl7WTUCpNWHuxmDt91wnsZBc9xinNzopv3JMQ==}
     engines: {node: '>=18'}
 
-  is-in-ci@1.0.0:
-    resolution: {integrity: sha512-eUuAjybVTHMYWm/U+vBO1sY/JOCgoPCXRxzdju0K+K0BiGW0SChEL1MLC0PoCIR1OlPo5YAp8HuQoUlsWEICwg==}
-    engines: {node: '>=18'}
+  is-in-ci@2.0.0:
+    resolution: {integrity: sha512-cFeerHriAnhrQSbpAxL37W1wcJKUUX07HyLWZCW1URJT/ra3GyUTzBgUnh24TMVfNTV2Hij2HLxkPHFZfOZy5w==}
+    engines: {node: '>=20'}
     hasBin: true
 
   js-tokens@4.0.0:
@@ -3200,7 +3200,7 @@ snapshots:
     dependencies:
       get-east-asian-width: 1.6.0
 
-  is-in-ci@1.0.0: {}
+  is-in-ci@2.0.0: {}
 
   js-tokens@4.0.0: {}
 
