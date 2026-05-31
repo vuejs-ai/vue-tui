@@ -121,6 +121,82 @@ test("Nested Box background inheritance", async ({ expect }) => {
   expect(lastFrame()).toMatchInlineSnapshot(`"[44mHello World[49m"`);
 });
 
+// Ink parity (Box.tsx:103 truthy provide-guard + render-background.ts:11 falsy
+// fill-guard): an inner <Box backgroundColor=""> does NOT override the ancestor's
+// backgroundContext (the `if (backgroundColor)` guard is falsy for ""), so its
+// descendants keep inheriting the ancestor's bg — while the empty-bg Box itself
+// paints NO fill. The fill var and the value threaded to children must be SPLIT.
+test("inner Box backgroundColor='' keeps inheriting ancestor Box background", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="red" alignSelf="flex-start">
+        <Box backgroundColor="">
+          <Text>Hello World</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Inner text still renders on the inherited RED (41) bg, not bare.
+  expect(lastFrame()).toMatchInlineSnapshot(`"[41mHello World[49m"`);
+});
+
+test("two-level-deep empty-bg Boxes still inherit ancestor Box background", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="red" alignSelf="flex-start">
+        <Box backgroundColor="">
+          <Box backgroundColor="">
+            <Text>Hello World</Text>
+          </Box>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toMatchInlineSnapshot(`"[41mHello World[49m"`);
+});
+
+// Locks the case a single-variable fix would break. A SIZED/BORDERED inner
+// empty-bg Box must add NO own fill inside its border (Ink render-background.ts:11
+// skips fill when style.backgroundColor is falsy), yet its descendants still
+// inherit the ancestor's bg. We make the outer green box SHORTER (height 2) than
+// the inner box (height 4): the outer's green fill backs the inner's first
+// content row but NOT its second. The discriminator is that second inner content
+// row — with the correct split it stays BARE (the inner Box emits no fill of its
+// own), exactly matching Ink; a single-variable fix would emit an inner green fill
+// across every content row, painting that row green. Byte-for-byte parity with
+// real Ink v7.0.4 (40b3a75) rendering this exact tree.
+test("sized/bordered inner empty-bg Box adds no own fill but text still inherits", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column" alignSelf="flex-start" height={6}>
+        <Box backgroundColor="green" width={14} height={2}>
+          <Box backgroundColor="" borderStyle="single" width={10} height={4}>
+            <Text>Hi</Text>
+          </Box>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Row 0: inner top border, then the outer's green fill in the 4 cells right of it.
+  // Row 1: "Hi" + inherited-green text fill inside the border; outer green right.
+  // Row 2: inner's SECOND content row — BARE (no [42m); outer is only 2 tall, and
+  //        the empty-bg inner Box paints nothing of its own.
+  // Row 3: inner bottom border.
+  expect(lastFrame()).toMatchInlineSnapshot(`
+    "┌────────┐[42m    [49m
+    │[42mHi      [49m│[42m    [49m
+    │        │
+    └────────┘"
+  `);
+});
+
 test("Text without parent Box background has no inheritance", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (

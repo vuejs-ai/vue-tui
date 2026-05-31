@@ -586,17 +586,29 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
-      const bg = (node.props["backgroundColor"] as string | undefined) ?? inheritedBg;
+      // Split the Box's own bg from the value threaded to children — they use
+      // different fallback rules, mirroring Ink's two separate guards:
+      //   - FILL uses the Box's OWN bg with a FALSY guard (Ink render-background.ts:11
+      //     `if (!node.style.backgroundColor) return`), so an empty-string own-bg
+      //     (`backgroundColor=""`) paints NO fill. `fillBackground` itself also guards
+      //     `if (!color)`, but keep the own value here so a sized/bordered empty-bg Box
+      //     never fills its content area with an ancestor color Ink wouldn't emit.
+      //   - The value THREADED to children uses a TRUTHY fallback to `inheritedBg`
+      //     (Ink Box.tsx:103 `if (backgroundColor)` provide-guard), so an empty-string
+      //     own-bg does NOT override the ancestor's background context — descendants
+      //     keep inheriting it. (Arrays `[r,g,b]` are always truthy, so they still win.)
+      const ownBg = node.props["backgroundColor"] as string | undefined;
+      const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
         drawBorder(output, x, y, w, h, node.props, transformers);
       }
-      if (bg) {
+      if (ownBg) {
         const hasBorder = !!node.props["borderStyle"];
         const bt = hasBorder && node.props["borderTop"] !== false ? 1 : 0;
         const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
-        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, bg, transformers);
+        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg, transformers);
       }
 
       // Overflow clipping: clip children to the box content area (inside
@@ -622,7 +634,7 @@ function paintNode(
         clipped = true;
       }
 
-      for (const child of node.children) paintNode(child, output, x, y, transformers, bg);
+      for (const child of node.children) paintNode(child, output, x, y, transformers, childBg);
 
       if (clipped) output.unclip();
       return;
