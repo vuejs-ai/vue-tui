@@ -224,6 +224,101 @@ test("manually focus previous component via focusPrevious()", async () => {
   expect(lastFrame()).toMatch(/Third ✔/);
 });
 
+// Ink parity (App.tsx:455-470 focusNext / 472-487 focusPrevious): focusNext is
+// `findNextFocusable(...) ?? firstFocusableId` and ALWAYS reassigns activeFocusId.
+// When NO focusable is active, both branches are undefined → activeFocusId is
+// cleared. focus(id) moves activeId onto an item regardless of its isActive, so an
+// activeId can point at an isActive=false item; a subsequent focusNext() must clear
+// that stale id rather than leave it pinned. (vue's sentinel for "none" is null.)
+test("focusNext() clears a stale activeId when no focusable is active (Ink parity)", async () => {
+  let activeId!: ReturnType<typeof useFocusManager>["activeId"];
+  let focusFn!: (id: string) => void;
+  let doFocusNext!: () => void;
+
+  const Item = defineComponent({
+    props: { id: { type: String, required: true } },
+    setup(props) {
+      // All items inactive — none can be reached by Tab/focusNext.
+      const { isFocused } = useFocus({ id: props.id, isActive: false });
+      return () => (
+        <Text>
+          {isFocused.value ? "▶ " : "  "}
+          {props.id}
+        </Text>
+      );
+    },
+  });
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    activeId = manager.activeId;
+    focusFn = manager.focus;
+    doFocusNext = manager.focusNext;
+    return () => (
+      <Box flexDirection="column">
+        <Item id="a" />
+        <Item id="b" />
+        <Item id="c" />
+      </Box>
+    );
+  });
+
+  await render(App);
+
+  // focus(id) ignores isActive and pins activeId onto 'b'.
+  focusFn("b");
+  await nextTick();
+  expect(activeId.value).toBe("b");
+
+  // No focusable is active, so focusNext() must clear the stale activeId.
+  doFocusNext();
+  await nextTick();
+  expect(activeId.value).toBe(null);
+});
+
+test("focusPrevious() clears a stale activeId when no focusable is active (Ink parity)", async () => {
+  let activeId!: ReturnType<typeof useFocusManager>["activeId"];
+  let focusFn!: (id: string) => void;
+  let doFocusPrevious!: () => void;
+
+  const Item = defineComponent({
+    props: { id: { type: String, required: true } },
+    setup(props) {
+      const { isFocused } = useFocus({ id: props.id, isActive: false });
+      return () => (
+        <Text>
+          {isFocused.value ? "▶ " : "  "}
+          {props.id}
+        </Text>
+      );
+    },
+  });
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    activeId = manager.activeId;
+    focusFn = manager.focus;
+    doFocusPrevious = manager.focusPrevious;
+    return () => (
+      <Box flexDirection="column">
+        <Item id="a" />
+        <Item id="b" />
+        <Item id="c" />
+      </Box>
+    );
+  });
+
+  await render(App);
+
+  focusFn("b");
+  await nextTick();
+  expect(activeId.value).toBe("b");
+
+  doFocusPrevious();
+  await nextTick();
+  expect(activeId.value).toBe(null);
+});
+
 // Ink parity (use-focus.ts: id via useMemo([customId]), add/remove effect keyed on
 // [id]): changing the id prop must re-register the component under the new id.
 // Focus is driven purely by focus(id) here (no Tab) so the assertions reflect

@@ -1233,18 +1233,26 @@ function createFocusController(): FocusContext {
     // a programmatic focusNext()/focusPrevious() moves focus even while focus is
     // disabled. The isFocusEnabled check lives only in the Tab/Shift-Tab handler
     // (see focusInputListener). The focusables.length === 0 short-circuit stays so
-    // focusing on an unmounted/empty tree is a harmless no-op.
+    // focusing on an empty tree is a harmless no-op; with 0 focusables activeId is
+    // already null (remove() clears it), matching Ink (findNextFocusable and
+    // firstFocusableId both undefined → activeFocusId undefined), and it also avoids
+    // the `% 0` NaN in findNextActive.
+    //
+    // Ink (App.tsx:455-470 / 472-487): focusNext = `findNextFocusable(...) ??
+    // firstFocusableId` and ALWAYS reassigns activeFocusId. findNextActive already
+    // wraps to the first active (or null if none), so it's equivalent to Ink's
+    // `next ?? first` — including the clear-to-null case when NO focusable is active.
+    // We must call setActive UNCONDITIONALLY: a null result clears a stale activeId
+    // (e.g. left by focus(id) pinning an isActive=false item), matching Ink.
     focusNext() {
       if (focusables.length === 0) return;
       const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : -1;
-      const next = findNextActive(idx, 1);
-      if (next) setActive(next);
+      setActive(findNextActive(idx, 1));
     },
     focusPrevious() {
       if (focusables.length === 0) return;
       const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : focusables.length;
-      const prev = findNextActive(idx, -1);
-      if (prev) setActive(prev);
+      setActive(findNextActive(idx, -1));
     },
     focus(id) {
       const entry = focusables.find((f) => f.id === id);
