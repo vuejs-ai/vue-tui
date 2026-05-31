@@ -1,7 +1,7 @@
-import { defineComponent, shallowRef, nextTick } from "vue";
+import { defineComponent, ref, shallowRef, nextTick, watchEffect } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
 
 test("set width", async () => {
   const { lastFrame } = await render(
@@ -31,6 +31,93 @@ test("set width in percent", async () => {
     { columns: 100 },
   );
   expect(lastFrame({ trimLines: true })).toBe("A    B");
+});
+
+// Ink coerces a STRING width to a PERCENT (styles.ts applyDimensionStyles:
+// `typeof style.width === 'string'` → setWidthPercent(parseInt(width, 10))).
+// So a bare-numeric string is a PERCENT, NOT absolute cells: width="50" on a
+// width=10 parent → 5 cells. Without the fix vue forwards "50" raw to
+// setWidth → 50 absolute cells → "A" + 50 spaces + "B".
+test("set width with bare numeric string is a percent (Ink parity)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" width={10}>
+        <Box width="50">
+          <Text>A</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("A    B");
+});
+
+// Ink uses parseInt(width, 10) which TRUNCATES the fraction: "55.9%" → 55%, NOT
+// parseFloat which would give 55.9% → 56 cells (yoga rounds 55.9% of 100 to 56).
+// Assert the COMPUTED width directly via useBoxMetrics so the test discriminates
+// parseInt(55) from parseFloat(55.9→56): a paint-frame assertion can't, because
+// trimLines collapses both a 55- and 56-cell box to the same column once the
+// child text is left-aligned. RED on the pre-fix parseFloat path (width 56),
+// GREEN after (width 55).
+test("set width with fractional percent string truncates to 55 like Ink parseInt", async () => {
+  const computedWidth = shallowRef(-1);
+  const App = defineComponent(() => {
+    const boxRef = ref(null);
+    const metrics = useBoxMetrics(boxRef);
+    watchEffect(() => {
+      computedWidth.value = metrics.width.value;
+    });
+    return () => (
+      <Box flexDirection="row" width={100}>
+        <Box ref={boxRef} width="55.9%">
+          <Text>A</Text>
+        </Box>
+        <Text>B</Text>
+      </Box>
+    );
+  });
+  await render(App, { columns: 200 });
+  // useBoxMetrics defers measurement to nextTick after the commit.
+  await nextTick();
+  // parseInt("55.9", 10) → 55 → 55% of 100 = 55 cells (NOT parseFloat → 55.9 → 56).
+  expect(computedWidth.value).toBe(55);
+});
+
+// Ink: parseInt("", 10) → NaN, which yoga accepts via setWidthPercent without
+// throwing. vue forwarded "" raw to setWidth("") which THROWS, crashing render.
+test("set width to empty string does not throw and renders child (Ink parity)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" width={10}>
+        <Box width="">
+          <Text>X</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toContain("X");
+});
+
+// Ink's applyDimensionStyles else-branch routes a non-number/non-string width to
+// setWidthAuto() (styles.ts:669-671), so a junk value renders fine. vue used to
+// forward it raw to setWidth(false) which THROWS ("Invalid value false for
+// setWidth"), crashing the render. Lock the parity: junk width must not throw and
+// must still render the child (auto sizing). Vue's [Number, String] prop
+// validation only WARNS on `false` and still forwards it, so this path is real.
+test("set width to a junk (non-number/non-string) value does not throw and renders child (Ink parity)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" width={10}>
+        <Box width={false as never}>
+          <Text>X</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toContain("X");
 });
 
 test("set min width", async () => {

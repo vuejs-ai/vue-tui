@@ -178,14 +178,55 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
 // --- prop application ----------------------------------------------------
 
 const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
-  width: (n, v) =>
-    v == null ? n.setWidth("auto") : n.setWidth(v as number | "auto" | `${number}%`),
-  height: (n, v) =>
-    v == null ? n.setHeight("auto") : n.setHeight(v as number | "auto" | `${number}%`),
-  // Ink default: minWidth=0 (yoga default). Reset to 0 on removal. (G19)
-  minWidth: (n, v) => n.setMinWidth(v == null ? 0 : (v as number | `${number}%`)),
-  // Ink default: minHeight=0 (yoga default). Reset to 0 on removal. (G19)
-  minHeight: (n, v) => n.setMinHeight(v == null ? 0 : (v as number | `${number}%`)),
+  // Mirror Ink's applyDimensionStyles width/height branch exactly (styles.ts:664-682):
+  //   number → setWidth (absolute cells)
+  //   string → setWidthPercent(Number.parseInt(v, 10)) — ANY string is a PERCENT,
+  //     so a bare-numeric string like "50" is 50%, NOT 50 absolute cells, and
+  //     parseInt TRUNCATES fractions ("55.9%" → 55%). parseInt("") → NaN, which
+  //     yoga's percent setter accepts without throwing.
+  //   else   → setWidthAuto() — this is the load-bearing fallback (like flexBasis's
+  //     setFlexBasisAuto): Vue's [Number, String] prop validation only WARNS on a
+  //     bad runtime value (e.g. width={false}/{}/[]) and still forwards it, so
+  //     without this branch the raw setWidth(false) THROWS ("Invalid value false
+  //     for setWidth") and crashes the render where Ink renders fine via auto.
+  // null/undefined also land in the else branch → auto (the G19 removal reset,
+  // equivalent to the prior setWidth("auto")).
+  width: (n, v) => {
+    if (typeof v === "number") {
+      n.setWidth(v);
+    } else if (typeof v === "string") {
+      n.setWidthPercent(Number.parseInt(v, 10));
+    } else {
+      n.setWidthAuto();
+    }
+  },
+  height: (n, v) => {
+    if (typeof v === "number") {
+      n.setHeight(v);
+    } else if (typeof v === "string") {
+      n.setHeightPercent(Number.parseInt(v, 10));
+    } else {
+      n.setHeightAuto();
+    }
+  },
+  // Mirror Ink's applyDimensionStyles minWidth branch exactly (styles.ts:684-690):
+  //   string → setMinWidthPercent(Number.parseInt(v, 10))
+  //   else   → setMinWidth(v ?? 0) — number falls here (= setMinWidth(v)), and so
+  //     does a junk value (e.g. minWidth={false} → setMinWidth(false), which THROWS
+  //     in yoga exactly as it does in Ink, since `?? 0` only catches null/undefined).
+  //     Ink has no auto fallback for min/max, so we faithfully forward junk to the
+  //     cell setter and match Ink's behavior, including its throw.
+  // Ink default: minWidth=0 (yoga default) → null/undefined reset to 0 on removal. (G19)
+  minWidth: (n, v) =>
+    typeof v === "string"
+      ? n.setMinWidthPercent(Number.parseInt(v, 10))
+      : n.setMinWidth(v == null ? 0 : (v as number)),
+  // Mirror Ink's minHeight branch (styles.ts:692-698); see minWidth above.
+  // Ink default: minHeight=0 (yoga default) → null/undefined reset to 0 on removal. (G19)
+  minHeight: (n, v) =>
+    typeof v === "string"
+      ? n.setMinHeightPercent(Number.parseInt(v, 10))
+      : n.setMinHeight(v == null ? 0 : (v as number)),
   // Ink default: flexGrow=0 (Box.tsx hardcodes flexGrow:0). Reset to 0 on removal. (G19)
   flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
   // Ink default: flexShrink=1 (Box.tsx hardcodes flexShrink:1). Reset to 1 on removal. (G19)
@@ -275,32 +316,56 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Yoga does not support per-axis overflow; these are accepted silently.
   overflowX: (_n, _v) => {},
   overflowY: (_n, _v) => {},
+  // Mirror Ink's applyDimensionStyles maxWidth branch (styles.ts:700-714):
+  //   string → setMaxWidthPercent(Number.parseInt(v, 10))
+  //   else   → setMaxWidth(v) — number falls here; a junk value (maxWidth={false})
+  //     forwards to setMaxWidth(false), which THROWS in yoga exactly as in Ink (Ink
+  //     has no auto fallback for max). We map null/undefined → NaN here (yoga's "no
+  //     max", the G19 removal reset) because Vue's host renderer can deliver raw
+  //     null and setMaxWidth(null) throws ("Cannot read properties of null"); NaN is
+  //     equivalent to Ink's else with an absent/undefined value.
   maxWidth: (n, v) =>
-    v == null ? n.setMaxWidth(NaN as never) : n.setMaxWidth(v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setMaxWidthPercent(Number.parseInt(v, 10))
+      : n.setMaxWidth(v == null ? (NaN as never) : (v as number)),
+  // Mirror Ink's maxHeight branch (styles.ts:708-714); see maxWidth above.
   maxHeight: (n, v) =>
-    v == null ? n.setMaxHeight(NaN as never) : n.setMaxHeight(v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setMaxHeightPercent(Number.parseInt(v, 10))
+      : n.setMaxHeight(v == null ? (NaN as never) : (v as number)),
   aspectRatio: (n, v) =>
     v == null ? n.setAspectRatio(undefined as never) : n.setAspectRatio(v as number),
   alignContent: (n, v) =>
     v == null ? n.setAlignContent(Yoga.ALIGN_FLEX_START) : n.setAlignContent(toAlign(v as string)),
   // Ink default: position=relative (yoga default). Reset to RELATIVE on removal. (G19)
   position: (n, v) => n.setPositionType(toPosition(v as string | undefined)),
+  // Mirror Ink's applyPositionStyles branch exactly (styles.ts:428-441):
+  //   string → setPositionPercent(edge, Number.parseFloat(value)) — so a
+  //     bare-numeric string like top="50" is 50% of the container, NOT 50 absolute
+  //     cells. NOTE: Ink uses parseFloat for positions (preserving fractions) vs
+  //     parseInt for dimensions (above) — that distinction is intentional, keep it.
+  //   else   → setPosition(edge, value) — number falls here; a junk value
+  //     (top={false}) forwards to setPosition(edge, false), which THROWS in yoga
+  //     exactly as in Ink (Ink has no auto fallback for positions). We map
+  //     null/undefined → NaN here (yoga's auto, the G19 removal reset), the
+  //     equivalent of Ink's else with an absent value (Vue can deliver raw null,
+  //     and setPosition(edge, null) throws).
   top: (n, v) =>
-    v == null
-      ? n.setPosition(Yoga.EDGE_TOP, NaN as never)
-      : n.setPosition(Yoga.EDGE_TOP, v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setPositionPercent(Yoga.EDGE_TOP, Number.parseFloat(v))
+      : n.setPosition(Yoga.EDGE_TOP, v == null ? (NaN as never) : (v as number)),
   right: (n, v) =>
-    v == null
-      ? n.setPosition(Yoga.EDGE_RIGHT, NaN as never)
-      : n.setPosition(Yoga.EDGE_RIGHT, v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setPositionPercent(Yoga.EDGE_RIGHT, Number.parseFloat(v))
+      : n.setPosition(Yoga.EDGE_RIGHT, v == null ? (NaN as never) : (v as number)),
   bottom: (n, v) =>
-    v == null
-      ? n.setPosition(Yoga.EDGE_BOTTOM, NaN as never)
-      : n.setPosition(Yoga.EDGE_BOTTOM, v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setPositionPercent(Yoga.EDGE_BOTTOM, Number.parseFloat(v))
+      : n.setPosition(Yoga.EDGE_BOTTOM, v == null ? (NaN as never) : (v as number)),
   left: (n, v) =>
-    v == null
-      ? n.setPosition(Yoga.EDGE_LEFT, NaN as never)
-      : n.setPosition(Yoga.EDGE_LEFT, v as number | `${number}%`),
+    typeof v === "string"
+      ? n.setPositionPercent(Yoga.EDGE_LEFT, Number.parseFloat(v))
+      : n.setPosition(Yoga.EDGE_LEFT, v == null ? (NaN as never) : (v as number)),
 };
 
 function toFlexDirection(v: string): FlexDirection {
