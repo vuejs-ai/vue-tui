@@ -1199,10 +1199,68 @@ test("foreground, background and dim combine correctly", async ({ expect }) => {
     { columns: 100 },
   );
   const frame = lastFrame()!;
-  // red FG=31, cyan BG=46, dim=2
-  expect(frame).toContain("[31m");
-  expect(frame).toContain("[46m");
-  expect(frame).toContain("[2m");
+  // EXACT-byte parity with Ink's render-border.ts stylePiece (commit 40b3a75,
+  // lines 7-20): fg INNERMOST, then bg, then dim OUTERMOST —
+  // chalk.dim(chalk.bgCyan(chalk.red(glyphs))). With chalk level 3 the open
+  // codes nest dim(2) -> bg(46) -> fg(31) and close fg(39) -> bg(49) -> dim(22).
+  // A lax `.toContain('[31m')` etc. would pass even with the wrong (Text-style,
+  // dim-innermost) nesting, so assert the precise byte windows.
+  const topLine = frame.split("\n")[0]!;
+  expect(topLine).toContain("\x1b[2m\x1b[46m\x1b[31m");
+  expect(topLine).toContain("\x1b[39m\x1b[49m\x1b[22m");
+});
+
+test("border side rails: foreground, background and dim combine in Ink byte order", async ({
+  expect,
+}) => {
+  // Exercises a vertical edge (left rail) — colorizeEdge is the single shared
+  // path for all four edges, so this guards the same SGR ordering on the rails.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderLeftDimColor
+        borderStyle="single"
+        borderLeftColor="red"
+        borderLeftBackgroundColor="cyan"
+        alignSelf="flex-start"
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = lastFrame()!;
+  // The left rail glyph │ lives on the content row (row index 1). Same Ink
+  // stylePiece order as the top edge: dim(2) -> bg(46) -> fg(31), close
+  // fg(39) -> bg(49) -> dim(22).
+  const railRow = frame.split("\n")[1]!;
+  expect(railRow).toContain("\x1b[2m\x1b[46m\x1b[31m");
+  expect(railRow).toContain("\x1b[39m\x1b[49m\x1b[22m");
+});
+
+test("border foreground + background (no dim) nests bg outer, fg inner like Ink", async ({
+  expect,
+}) => {
+  // The no-dim subset must also match Ink's stylePiece: colorize(colorize(glyph,
+  // fg,'foreground'), bg,'background') => bg(46) outer, fg(31) inner, no dim wrap.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle="single"
+        borderTopColor="red"
+        borderTopBackgroundColor="cyan"
+        alignSelf="flex-start"
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const topLine = lastFrame()!.split("\n")[0]!;
+  expect(topLine).toContain("\x1b[46m\x1b[31m");
+  expect(topLine).toContain("\x1b[39m\x1b[49m");
+  // and NO dim code on this edge
+  expect(topLine).not.toContain("\x1b[2m");
 });
 
 // G05 — height-1 box with side-only borders renders rails (Ink parity)

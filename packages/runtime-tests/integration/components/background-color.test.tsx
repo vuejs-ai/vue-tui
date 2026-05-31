@@ -592,8 +592,12 @@ test("foreground, background and dim combine correctly", async ({ expect }) => {
     { columns: 100 },
   );
   const output = lastFrame()!;
-  // red FG (31), cyan BG (46), dim (2)
-  expect(output).toContain("[31m");
-  expect(output).toContain("[46m");
-  expect(output).toContain("[2m");
+  // EXACT-byte parity with Ink's render-border.ts stylePiece (commit 40b3a75,
+  // lines 7-20): fg innermost, then bg, then dim outermost. Open codes nest
+  // dim(2) -> bg(46) -> fg(31); close fg(39) -> bg(49) -> dim(22). The lax
+  // `.toContain('[31m')` form this replaces would pass even with the wrong
+  // Text-style (dim-innermost) nesting.
+  const topLine = output.split("\n")[0]!;
+  expect(topLine).toContain("\x1b[2m\x1b[46m\x1b[31m");
+  expect(topLine).toContain("\x1b[39m\x1b[49m\x1b[22m");
 });
