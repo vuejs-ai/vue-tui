@@ -59,6 +59,27 @@ test("absolute position with percentage bottom and right offsets", async () => {
   expect(lastFrame({ trimLines: true })).toBe("\n  X\n\n");
 });
 
+// Ink coerces a STRING position offset to a PERCENT (styles.ts
+// applyPositionStyles: `typeof value === 'string'` →
+// setPositionPercent(edge, parseFloat(value))). So a bare-numeric string like
+// top="50" is 50% of the container height, NOT 50 absolute cells. This mirrors
+// the "absolute position with percentage offsets" test (top="50%" left="50%")
+// but with bare-numeric strings. Without the fix vue forwards "50" raw to
+// setPosition → 50 absolute cells → pushed off-screen.
+test("absolute position with bare numeric string offsets is a percent (Ink parity)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row" width={6} height={4}>
+        <Box position="absolute" top="50" left="50">
+          <Text>X</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame({ trimLines: true })).toBe("\n\n   X\n");
+});
+
 test("relative position offsets visual position while keeping flow", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
