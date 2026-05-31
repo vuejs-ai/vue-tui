@@ -1280,14 +1280,13 @@ interface StdinController extends StdinContext {
 
 interface RawModeState {
   refs: number;
-  prevRaw: boolean | null;
 }
 const rawModeRegistry = new WeakMap<NodeJS.ReadStream, RawModeState>();
 
 function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
   let state = rawModeRegistry.get(stdin);
   if (!state) {
-    state = { refs: 0, prevRaw: null };
+    state = { refs: 0 };
     rawModeRegistry.set(stdin, state);
   }
   return state;
@@ -1455,7 +1454,6 @@ function createStdinController(
       }
       const state = getRawModeState(stdin);
       if (state.refs === 0) {
-        state.prevRaw = (stdin as { isRaw?: boolean }).isRaw ?? false;
         if (typeof stdin.ref === "function") stdin.ref();
         if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
         appCtx.setRawMode(true);
@@ -1484,18 +1482,32 @@ function createStdinController(
       const state = getRawModeState(stdin);
       state.refs = Math.max(0, state.refs - 1);
       localRefs = Math.max(0, localRefs - 1);
-      if (state.refs === 0 && state.prevRaw !== null) {
-        // Defer the actual disable: when components swap (v-if key change),
-        // Vue unmounts the old before mounting the new, so refs briefly hits 0.
-        // Disabling synchronously would drop raw mode between the two mounts.
+      if (state.refs === 0) {
+        // Stop owning input SYNCHRONOUSLY on the last release, matching Ink's
+        // clearInputState (App.tsx:212-216,357): reset the parser, cancel the
+        // pending-escape flush, and detach the data/readable listeners NOW — so a
+        // partial escape buffered before a same-render useInput swap cannot leak
+        // into the replacement. (A same-tick re-acquire re-attaches the listener
+        // with a fresh parser; deferring this is the bug — the gated microtask
+        // below short-circuits when refs is back >0, so the reset never ran.)
+        inputParser.reset();
+        clearPendingFlush();
+        stdin.off("readable", handleReadable);
+        stdin.off("data", handleData);
+        // Defer ONLY the terminal raw-mode toggle (Ink defers just disableRawMode,
+        // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
+        // the old before mounting the new, so refs briefly hits 0. Disabling
+        // synchronously would drop raw mode between the two mounts; the microtask
+        // short-circuits if a replacement re-acquired in the meantime.
         queueMicrotask(() => {
-          if (state.refs > 0 || state.prevRaw === null) return;
-          appCtx.setRawMode(state.prevRaw);
-          state.prevRaw = null;
-          stdin.off("readable", handleReadable);
-          stdin.off("data", handleData);
+          if (state.refs > 0) return;
+          // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
+          // never restores a captured prior raw state. Restoring a captured prevRaw was a
+          // vue-only invention that corrupts on a sync re-acquire swap: it gets
+          // re-snapshotted as true (raw still active via the deferred toggle), leaving
+          // the terminal in raw mode after exit.
+          appCtx.setRawMode(false);
           if (typeof stdin.unref === "function") stdin.unref();
-          inputParser.reset();
         });
       }
     },
@@ -1512,9 +1524,13 @@ function createStdinController(
         const state = getRawModeState(stdin);
         state.refs = Math.max(0, state.refs - localRefs);
         localRefs = 0;
-        if (state.refs === 0 && state.prevRaw !== null) {
-          appCtx.setRawMode(state.prevRaw);
-          state.prevRaw = null;
+        if (state.refs === 0) {
+          // Unconditionally setRawMode(false) on final teardown — Ink's
+          // disableRawMode (App.tsx:218-222) never restores a captured prior raw
+          // state. (Same rationale as releaseRawMode: a restored prevRaw could be
+          // the framework's own raw=true snapshotted during a sync swap, which
+          // would leave the terminal raw on exit.)
+          appCtx.setRawMode(false);
           if (typeof stdin.unref === "function") stdin.unref();
           inputParser.reset();
         }
