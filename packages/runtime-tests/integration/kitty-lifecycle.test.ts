@@ -7,8 +7,8 @@ import {
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
 } from "@vue-tui/runtime/internal";
-import { createApp } from "@vue-tui/runtime";
-import { defineComponent } from "vue";
+import { createApp, useInput } from "@vue-tui/runtime";
+import { defineComponent, h } from "vue";
 
 const textEncoder = new TextEncoder();
 
@@ -421,6 +421,85 @@ describe("kitty lifecycle - mount/unmount integration", () => {
     });
 
     expect(written.filter((s) => s.includes("\x1b[>"))).toHaveLength(0);
+    app.unmount();
+  });
+});
+
+// --- Query-response must never reach a useInput handler (Layer 2 regression) ---
+//
+// vue-tui filters kitty query-responses (ESC[?Nu) in TWO places:
+//   Layer 1 — the one-shot auto-detection onData listener in kitty-keyboard.ts
+//             (a faithful port of Ink's ink.tsx detection): strips responses
+//             from ITS OWN private buffer and unshifts the non-query remainder.
+//   Layer 2 — parseKeypress returns {ignore:true} for ESC[?Nu; useInput drops it.
+//
+// Layer 1 alone does NOT cover the real input pipeline
+// (stdin 'data' → inputParser → emitInput → useInput → parseKeypress):
+//   * In `enabled` mode no detection listener exists at all.
+//   * In `auto` mode the detection onData and the controller's handleData are
+//     both subscribed to the SAME 'data' event, so stripping Layer 1's private
+//     buffer doesn't stop the chunk reaching handleData.
+//   * After detection settles, the detection listener is gone entirely.
+// In every case the query-response flows to parseKeypress, so Layer 2 is
+// load-bearing — Ink lacks it (a documented additive divergence). These tests
+// lock that: with Layer 2 removed they fail (handler sees a spurious "[?1u").
+function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" }) {
+  const { stdout } = createFakeStdout();
+  const { stdin } = createFakeStdin();
+  (stdin as any).read = vi.fn(() => null);
+  (stdin as any).ref = vi.fn();
+  (stdin as any).unref = vi.fn();
+
+  const inputs: string[] = [];
+  const App = defineComponent(() => {
+    useInput((input) => {
+      inputs.push(input);
+    });
+    return () => h("text", null, "x");
+  });
+
+  const app = createApp(App);
+  app.mount({
+    stdout: stdout as unknown as NodeJS.WriteStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    kittyKeyboard,
+  });
+  return { app, stdin, inputs };
+}
+
+describe("kitty query-response - end-to-end filtering", () => {
+  test("enabled mode: stray query-response never reaches useInput", () => {
+    // No auto-detection runs in `enabled` mode, so Layer 1 is absent here.
+    const { app, stdin, inputs } = mountWithInput({ mode: "enabled" });
+    stdin.emit("data", "\x1b[?1u");
+    expect(inputs).toEqual([]);
+    app.unmount();
+  });
+
+  test("auto mode: query-response during detection never reaches useInput", () => {
+    // Detection onData and the controller's handleData both see this chunk.
+    const { app, stdin, inputs } = mountWithInput({ mode: "auto" });
+    stdin.emit("data", "\x1b[?1u");
+    expect(inputs).toEqual([]);
+    app.unmount();
+  });
+
+  test("auto mode: query-response after detection settled never reaches useInput", () => {
+    const { app, stdin, inputs } = mountWithInput({ mode: "auto" });
+    stdin.emit("data", "\x1b[?1u"); // settles detection; removes Layer 1 listener
+    inputs.length = 0;
+    stdin.emit("data", "\x1b[?1u"); // stray, late response
+    expect(inputs).toEqual([]);
+    app.unmount();
+  });
+
+  test("enabled mode: query-response split across two chunks never reaches useInput", () => {
+    // inputParser reassembles "\x1b[?" + "1u" into a full CSI sequence before
+    // dispatch, so Layer 2 (not Layer 1's trailing-partial logic) is what filters it.
+    const { app, stdin, inputs } = mountWithInput({ mode: "enabled" });
+    stdin.emit("data", "\x1b[?");
+    stdin.emit("data", "1u");
+    expect(inputs).toEqual([]);
     app.unmount();
   });
 });
