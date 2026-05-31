@@ -89,6 +89,17 @@ deliberate. Divergences fall into a few kinds:
   Keeping a previous render's value, as Ink does for these two props, is the anomaly — and an
   inconsistent one, since every other flex prop resets. Maintainer decision (2026-05-30): KEEP.
 
+### Removing `display` resets to the default (visible)
+
+- **Ink:** `applyDisplayStyles` (`styles.ts`) sets `DISPLAY_NONE` whenever an explicit
+  `display` is present and not `'flex'` — so a present-but-undefined `display={undefined}`
+  **hides** the box, and an omitted `display` **persists** the prior value.
+- **vue-tui:** a removed/undefined `display` resets to the Box default `DISPLAY_FLEX`
+  (visible) — the same state as if the prop had never been set.
+- **Why:** same reasoning as the `flexDirection`/`flexWrap` reset above — render =
+  f(current props): no `display` set → the default (visible). Persisting a withdrawn prop,
+  or flipping it to hidden, is the anomaly. Maintainer decision (2026-05-31): KEEP.
+
 ## Not applicable in Vue
 
 ### React concurrent mode

@@ -402,6 +402,13 @@ const RESETTABLE_PROPS = new Set([
   "paddingLeft",
   "paddingRight",
   "position",
+  // display: removing/undefining `display` resets to the DEFAULT (visible,
+  // DISPLAY_FLEX) — the setter already maps undefined → DISPLAY_FLEX. This is a
+  // DELIBERATE divergence from Ink (which hides on a present-undefined `display`):
+  // render = f(current props), so a withdrawn prop returns to the default, just
+  // like flexDirection/flexWrap (G19). See .agents/docs/ink-divergences.md
+  // ("Removing `display` resets to the default").
+  "display",
 ]);
 
 export function applyYogaProp(
