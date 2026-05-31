@@ -680,7 +680,13 @@ describe("useAnimation", () => {
       unmount();
     });
 
-    test("reset() while paused zeroes refs and stays at 0", async () => {
+    // Ink parity (use-animation.ts:83-89,138): reset() while PAUSED only bumps
+    // resetKey; the zeroing (setAnimState(zeroAnimState)) lives inside the
+    // layout effect, which early-returns while !isActive. shouldReset is gated
+    // on isActive too. So a paused reset() keeps the last frame frozen and zeros
+    // only on the NEXT resume. (Previously this test locked the divergent
+    // immediate-zero-while-paused behavior; flipped to match Ink.)
+    test("reset() while paused keeps the last frame; zeros on resume", async () => {
       const active = shallowRef(true);
       let frame!: Readonly<ShallowRef<number>>;
       let reset!: () => void;
@@ -694,11 +700,52 @@ describe("useAnimation", () => {
       await delay(120);
       active.value = false;
       await nextTick();
+      const frozen = frame.value;
+      expect(frozen).toBeGreaterThanOrEqual(1);
+
+      // reset() while paused must NOT zero — the last frame stays frozen.
       reset();
+      await nextTick();
+      expect(frame.value).toBe(frozen);
+      await delay(120);
+      expect(frame.value).toBe(frozen);
+
+      // Resuming zeros (the deferred reset lands here) then advances.
+      active.value = true;
       await nextTick();
       expect(frame.value).toBe(0);
       await delay(120);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
+      unmount();
+    });
+
+    // Guard: reset() while ACTIVE must still zero frame/time/delta immediately
+    // (Ink: the layout effect re-runs on resetKey while isActive and calls
+    // setAnimState(zeroAnimState)). The paused-reset fix must not regress this.
+    test("reset() while active zeros immediately then keeps advancing", async () => {
+      let frame!: Readonly<ShallowRef<number>>;
+      let time!: Readonly<ShallowRef<number>>;
+      let delta!: Readonly<ShallowRef<number>>;
+      let reset!: () => void;
+      const App = defineComponent(() => {
+        const anim = useAnimation({ interval: 30 });
+        frame = anim.frame;
+        time = anim.time;
+        delta = anim.delta;
+        reset = anim.reset;
+        return () => <Text>{String(frame.value)}</Text>;
+      });
+      const { unmount } = await render(App);
+      await delay(150);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
+
+      reset();
       expect(frame.value).toBe(0);
+      expect(time.value).toBe(0);
+      expect(delta.value).toBe(0);
+
+      await delay(150);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
       unmount();
     });
 
