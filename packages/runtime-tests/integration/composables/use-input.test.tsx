@@ -378,3 +378,67 @@ test("exitOnCtrlC intercepts \\x03 in raw mode", async () => {
   expect(handler).not.toHaveBeenCalled();
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
+
+// --- Kitty release events deliver the key, matching Ink (no release special-case) ---
+// Ink (use-input.ts:204-217) classifies a kitty event purely by isPrintable /
+// ctrl+letter, regardless of press/repeat/release. A printable release ('a' up,
+// CSI 97;1:3 u) therefore delivers input "a", not "". vue-tui previously had an
+// undocumented `eventType === "release"` guard that blanked input to ""; these
+// tests lock the Ink-matching behavior.
+
+test("useInput - kitty printable RELEASE delivers the key (input='a'), not ''", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+
+  const { stdin } = await render(App);
+  // 'a' release event (codepoint 97, modifier 1, eventType 3 = release)
+  await stdin.write("\x1b[97;1:3u");
+  expect(calls[0]?.input).toBe("a");
+  expect(calls[0]?.key.eventType).toBe("release");
+});
+
+test("useInput - kitty ctrl+letter RELEASE delivers the letter name (input='a'), not ''", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+
+  const { stdin } = await render(App);
+  // Ctrl+A via codepoint 1-26 form (codepoint 1), modifier 5 (ctrl),
+  // eventType 3 (release). Not printable, but the ctrl+letter branch must still
+  // flow the name "a" through on release — same as Ink.
+  await stdin.write("\x1b[1;5:3u");
+  expect(calls[0]?.input).toBe("a");
+  expect(calls[0]?.key.ctrl).toBe(true);
+  expect(calls[0]?.key.eventType).toBe("release");
+});
+
+// VERIFY no spurious exit from a Ctrl+C RELEASE under exitOnCtrlC. The kitty
+// exit guard lives in emitInput (render.ts) and is scoped to `eventType !==
+// "release"`, so removing the useInput release guard must NOT make a release
+// exit. A Ctrl+C release should instead be delivered to the handler (input "c").
+test("useInput - kitty Ctrl+C RELEASE does not exit (delivered to handler); press still exits", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>running</Text>;
+  });
+  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+
+  // Ctrl+C RELEASE (codepoint 99 'c', modifier 5 = ctrl, eventType 3 = release):
+  // must NOT exit; flows to the handler with input "c".
+  await stdin.write("\x1b[99;5:3u");
+  expect(calls[0]?.input).toBe("c");
+  expect(calls[0]?.key.ctrl).toBe(true);
+  expect(calls[0]?.key.eventType).toBe("release");
+
+  // Ctrl+C PRESS still exits (unchanged divergence behavior).
+  await stdin.write("\x1b[99;5:1u");
+  await expect(waitUntilExit()).resolves.toBeUndefined();
+  // Press was intercepted in emitInput and never reached the handler.
+  expect(calls.length).toBe(1);
+});

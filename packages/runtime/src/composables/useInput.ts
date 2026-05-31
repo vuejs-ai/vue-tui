@@ -70,9 +70,14 @@ export function useInput(
 
     let input: string;
     if (keypress.isKittyProtocol) {
-      if (keypress.eventType === "release") {
-        input = "";
-      } else if (keypress.isPrintable) {
+      // No release special-case: Ink (use-input.ts:204-217) classifies a kitty
+      // event purely by isPrintable / ctrl+letter, regardless of
+      // press/repeat/release. A printable release delivers `text ?? name` (e.g.
+      // 'a'); a ctrl+letter release delivers the letter name. Suppressing input
+      // on release here was an undocumented divergence — removed for byte-parity
+      // with Ink. (Ctrl+C exit is scoped to non-release in emitInput, so a
+      // Ctrl+C release flowing through here does not trigger a spurious exit.)
+      if (keypress.isPrintable) {
         input = keypress.text ?? keypress.name;
       } else if (keypress.ctrl && keypress.name.length === 1) {
         input = keypress.name;
