@@ -149,6 +149,30 @@ test("reset flexGrow to 0 on removal (G19)", async () => {
   expect(lastFrame({ trimLines: true })).toBe("AB");
 });
 
+test("reset flexBasis to auto on removal (G19)", async () => {
+  // flexBasis="50%" fixes the inner box at 3 cells (50% of 6) so A pads to width 3
+  // before B; removing flexBasis resets to auto, shrinking the box to content (1 cell).
+  const hasBasis = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="row" width={6}>
+      <Box {...(hasBasis.value ? { flexBasis: "50%" } : {})}>
+        <Text>A</Text>
+      </Box>
+      <Text>B</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // 50% of 6 = 3 cells → A occupies 3 cols before B
+  expect(lastFrame({ trimLines: true })).toBe("A  B");
+
+  hasBasis.value = false;
+  await nextTick();
+  // After reset to auto, box shrinks to content; A and B are adjacent
+  expect(lastFrame({ trimLines: true })).toBe("AB");
+});
+
 test("reset justifyContent to flex-start on removal (G19)", async () => {
   // justifyContent=flex-end pushes 'x' to the end of a fixed-width row; removing resets to flex-start.
   const hasJustify = shallowRef(true);
