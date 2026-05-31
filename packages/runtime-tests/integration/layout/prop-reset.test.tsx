@@ -263,6 +263,70 @@ test("marginX composes with marginLeft (specific edge wins) (Blocker 1)", async 
   expect(lastFrame({ trimLines: true })).toBe("     X  Y");
 });
 
+// Removing `display` resets to the DEFAULT (visible / DISPLAY_FLEX), not persist
+// and not hide. This is a DELIBERATE divergence from Ink documented in
+// .agents/docs/ink-divergences.md ("Removing `display` resets to the default"):
+// Ink's applyDisplayStyles hides on a present-but-undefined `display` (and persists
+// on omitted); vue-tui treats a removed prop as "back to the default" per the
+// declarative contract (render = f(current props)) — same reasoning as the
+// flexDirection/flexWrap reset (G19).
+
+test("reset display=none to visible default on removal (display divergence)", async () => {
+  // display="none" hides 'X'; removing the prop must reset to the default (visible),
+  // NOT keep the stale DISPLAY_NONE (the bug) and NOT hide (Ink's behavior).
+  const hidden = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box {...(hidden.value ? { display: "none" } : {})}>
+      <Text>X</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // While display="none" is set, the box and its text are hidden.
+  expect(lastFrame({ trimLines: true })).toBe("");
+
+  hidden.value = false;
+  await nextTick();
+  // After removal, display resets to the default (DISPLAY_FLEX) → 'X' is visible.
+  expect(lastFrame({ trimLines: true })).toBe("X");
+});
+
+test("display=flex removed stays visible (default unchanged) (display divergence)", async () => {
+  // An explicit display="flex" is already the default; removing it must leave the
+  // box visible (default), confirming removal lands on the default both ways.
+  const explicit = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box {...(explicit.value ? { display: "flex" } : {})}>
+      <Text>X</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  expect(lastFrame({ trimLines: true })).toBe("X");
+
+  explicit.value = false;
+  await nextTick();
+  expect(lastFrame({ trimLines: true })).toBe("X");
+});
+
+test("explicit display=none still hides while set (display divergence control)", async () => {
+  // Control: an explicitly-set display="none" must still hide — the reset only
+  // fires on REMOVAL, never while the prop holds the value "none".
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Box display="none">
+        <Text>hidden</Text>
+      </Box>
+      <Text>shown</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  expect(lastFrame({ trimLines: true })).toBe("shown");
+});
+
 test("reset position to relative on removal (G19)", async () => {
   // position=absolute with offsets removes the box from flow and moves it visually;
   // removing 'position' should restore relative positioning (back in flow at top).
