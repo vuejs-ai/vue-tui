@@ -117,6 +117,29 @@ deliberate. Divergences fall into a few kinds:
   f(current props): no `display` set → the default (visible). Persisting a withdrawn prop,
   or flipping it to hidden, is the anomaly. Maintainer decision (2026-05-31): KEEP.
 
+### `useCursor()` re-assertion follows fine-grained reactivity, not React's render cascade
+
+- **Ink:** `useCursor`'s no-deps `useInsertionEffect` (`use-cursor.ts:27-32`) re-runs on every
+  render **of the cursor component**, re-marking the cursor dirty (`ink.tsx:494-497`); log-update
+  resets `cursorDirty` each commit. React re-renders a whole subtree when an ancestor commits, so
+  if the cursor component is in that subtree it re-renders and the cursor is re-asserted — even
+  when only an ancestor's unrelated state changed. (If an _unrelated sibling_ owns the changing
+  state, the cursor component does **not** re-render, so Ink does **not** re-assert and the cursor
+  is dropped that commit.)
+- **vue-tui:** `useCursor` propagates via `watch(positionRef, …, {flush:'sync'})` — it re-asserts
+  when the position **reference changes** (or the owning component re-renders and re-sets it). Vue's
+  fine-grained reactivity re-runs only components whose own deps changed, so an _ancestor_-driven
+  commit does **not** re-run a cursor child that didn't depend on the changed value, and a
+  set-once cursor is dropped that commit.
+- **Why:** the two agree for the **recommended** usage — set the position reactively (in the render
+  body / from a ref the component reads), as Ink's apps and vue-tui's parity tests do — and they
+  agree in the unrelated-sibling case (both drop). They differ only in the narrow edge of a
+  **set-once** cursor plus an **ancestor-driven** commit: React's render cascade re-asserts it,
+  Vue's fine-grained reactivity does not. This is a direct consequence of Vue ≠ React (cascade vs
+  fine-grained re-render) and cannot be papered over: a global per-commit re-assert would make vue
+  diverge from Ink in the _opposite_ (unrelated-sibling) direction, where Ink drops the cursor.
+  Keep the reactivity-tied behavior. Maintainer decision (2026-06-01): KEEP.
+
 ## Not applicable in Vue
 
 ### React concurrent mode
