@@ -375,7 +375,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
       mountedAlternateScreen = false;
-    } else if (!mountedDebug && mountedInteractive && mountedAppContext) {
+    } else if (
+      !mountedDebug &&
+      mountedInteractive &&
+      mountedAppContext &&
+      Boolean(mountedAppContext.stdout.isTTY)
+    ) {
+      // isTTY gate (cli-cursor short-circuit): Ink's non-alt-screen teardown
+      // show goes through log.done() -> cliCursor.show, which no-ops on a
+      // non-TTY stream. Forced-interactive on a piped stdout emits no show.
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
     }
     if (mountedRoot) detachYoga(mountedRoot);
@@ -969,7 +977,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // post-flush callback. Writing the hide afterwards would land AFTER that
     // show and leave the cursor hidden — the last visibility change must be the
     // show, mirroring Ink, which hides before its first render, not after.
-    if (!debug && interactive && !mountedAlternateScreen && !isScreenReaderEnabled) {
+    // isTTY gate (cli-cursor short-circuit, cli-cursor/index.js:8-24): cursor
+    // hide/show is a TTY-only concern. In Ink the only mount-time hide lives in
+    // setAlternateScreen (alt-screen + isTTY gated); the non-alt-screen hide
+    // comes from log-update's isTTY-gated cliCursor.hide. So a caller forcing
+    // interactive onto a piped/non-TTY stdout must NOT leak a hide here.
+    if (
+      !debug &&
+      interactive &&
+      !mountedAlternateScreen &&
+      !isScreenReaderEnabled &&
+      Boolean(stdout.isTTY)
+    ) {
       stdout.write("\x1b[?25l");
     }
 
