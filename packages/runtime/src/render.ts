@@ -515,7 +515,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Clear() resets log-update's cursor state, so replay the latest cursor
       // intent before restoring output after external stdout/stderr writes.
       writer.setCursorPosition(cursorPosition);
-      writer.write(frameState.lastOutputToRender ?? frameState.lastOutput + "\n");
+      // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
+      // the first content commit, the value the narrowing-resize path assigns
+      // (render.ts:1043), and what an empty screen-reader frame leaves — must fall
+      // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
+      // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
+      // empty string would pass through and restore nothing after an external write.
+      writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
     }
 
     function writeToStdout(data: string) {
