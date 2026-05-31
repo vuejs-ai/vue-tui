@@ -217,3 +217,28 @@ test("clipped empty write does not corrupt existing wide characters", () => {
   );
   expect(stripAnsi(output)).toBe("あい");
 });
+
+// A wide char whose LEADING cell is in-bounds but TRAILING cell exceeds the
+// terminal/box width must still render its leading cell and OVERFLOW the row —
+// matching Ink, which has no x-bounds check in its Output write loop. The
+// past-width trailing placeholder is dropped later by line.filter + trimEnd.
+// Box width 4 (== terminal); 你 (width 2) overlaid at left=3 lands on cols 3,4 —
+// trailing col 4 is past width. Ink renders "aa 你" (visible width 5); vue used
+// to drop 你 wholesale (its leading col-3 cell included) via the now-removed
+// `offsetX + characterWidth > this.width` guard. Verified against the built Ink
+// reference (/tmp/ink @ v7.0.4 renderToString of this exact tree → "aa 你").
+test("wide char with in-bounds leading cell but out-of-bounds trailing cell still renders (overflows row, Ink parity)", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={4} height={1}>
+        <Text>aa</Text>
+        <Box position="absolute" left={3}>
+          <Text>你</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 4 },
+  );
+  expect(stripAnsi(output)).toBe("aa 你");
+  expect(stringWidth(stripAnsi(output))).toBe(5);
+});
