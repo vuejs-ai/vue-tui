@@ -664,15 +664,13 @@ test("do not wrap text with non-hyperlink OSC (ST-terminated) sequences", async 
 // still reaches wrap-ansi. wrap-ansi@10 only protects `]8;;` HYPERLINK OSCs, so it
 // SPLITS this generic OSC across lines (`["\x1b]0;My ","Title","\x07abcde","fghij"]`).
 // Ink's wrapText produces the IDENTICAL split lines (verified against Ink v7.0.4) —
-// the divergence is downstream in the Output grid: vue clips chars at the grid right
-// edge (the issue-#10 wide-glyph clip, paint.ts `if (offsetX >= this.width) break`),
-// and the now-visible BEL/broken-OSC bytes consume a grid cell, pushing the trailing
-// "e" past column 5 where vue DROPS it ("abcd\nfghij"). Ink never clips overflow, so
-// "e" survives ("abcde\nfghij"). Confirmed: disabling vue's grid clip makes this pass,
-// and the fix is identical with/without the measure sanitize. This is the issue-#10
-// grid-clip vs control-byte interaction, a DIFFERENT parity gap. The assertion below
-// is Ink's correct output; un-skip when that grid-clip gap is addressed.
-test.skip("hard-wrap long word after non-hyperlink OSC sequence", async () => {
+// the divergence was downstream in the Output grid: vue used to clip chars at the grid
+// right edge (the `offsetX + characterWidth > this.width` guard in paint.ts), and the
+// now-visible BEL/broken-OSC bytes consumed a grid cell, pushing the trailing "e" past
+// column 5 where vue DROPPED it ("abcd\nfghij"). Ink never clips in its Output write
+// loop, so "e" survives ("abcde\nfghij"). FIXED by removing vue's two x-bounds guards
+// to match Ink's Output loop exactly (the wide-char-at-edge parity fix) — un-skipped.
+test("hard-wrap long word after non-hyperlink OSC sequence", async () => {
   const text = "\x1b]0;My Title\x07abcdefghij";
   const output = renderToString(
     defineComponent(() => () => (

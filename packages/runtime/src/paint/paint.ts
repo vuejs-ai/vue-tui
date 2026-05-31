@@ -246,15 +246,20 @@ class Output {
           currentLine[offsetX - 1] = spaceCell;
         }
 
+        // NO x-bounds check here — matches Ink's Output write loop
+        // (output.ts:272-294), which writes `currentLine[offsetX] = character`
+        // and the trailing placeholder cells regardless of `this.width`. A wide
+        // char whose LEADING cell is in-bounds but whose TRAILING cell exceeds
+        // the width still renders its leading cell and OVERFLOWS the row; the
+        // past-width placeholder is dropped later as a sparse hole by
+        // `line.filter(item => item !== undefined)` + `.trimEnd()` (see below).
+        // Guarding on width here (as vue once did) instead DROPPED the whole wide
+        // char — leading cell included — when only its trailing cell was past the
+        // edge, so an edge-aligned `aa你` rendered as `aa`. Box-level
+        // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
+        // path); this loop must not re-implement a second, glyph-truncating clip.
         for (const character of characters) {
-          if (offsetX >= this.width) break;
-
           const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
-
-          if (offsetX + characterWidth > this.width) {
-            offsetX += characterWidth;
-            continue;
-          }
 
           currentLine[offsetX] = character;
 
