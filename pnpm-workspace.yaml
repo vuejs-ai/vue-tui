@@ -16,7 +16,7 @@ catalog:
   vite-plus: ^0.1.22
   "@vitejs/plugin-vue-jsx": ^5.1.5
   chalk: ^5.6.2
-  is-in-ci: ^1.0.0
+  is-in-ci: ^2.0.0
   patch-console: ^2.0.0
   strip-ansi: ^7.2.0
   node-pty: 1.2.0-beta.13
