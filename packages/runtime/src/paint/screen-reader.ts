@@ -1,5 +1,6 @@
 import Yoga from "yoga-layout";
 import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts";
+import { sanitizeAnsi } from "./sanitize-ansi.ts";
 
 /**
  * Squash a single child of a text/transform context into plain SR text,
@@ -61,7 +62,12 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
     // React's absent childNodes, must NOT advance the transform index.
     if (child.type !== "comment") index++;
   }
-  return text;
+  // Strip cursor/erase control sequences (keep SGR/OSC) from the squashed text,
+  // exactly as Ink's squashTextNodes returns sanitizeAnsi(text)
+  // (squash-text-nodes.ts:45). This is the SR twin of host/text-measure.ts:54.
+  // Without it an embedded control sequence (e.g. `\x1b[2J`) survives into
+  // screen-reader output.
+  return sanitizeAnsi(text);
 }
 
 /**
@@ -192,7 +198,11 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
       squashed += squashChildSR(childNode, index);
       if (childNode.type !== "comment") index++;
     }
-    output = squashed;
+    // A standalone <Transform> is an `ink-text` node in Ink, squashed via
+    // squashTextNodes which returns sanitizeAnsi(text) (squash-text-nodes.ts:45).
+    // Strip cursor/erase control sequences (keep SGR/OSC) so an embedded control
+    // sequence does not survive into screen-reader output.
+    output = sanitizeAnsi(squashed);
   }
 
   // Add accessibility annotations

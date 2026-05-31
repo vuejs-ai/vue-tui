@@ -522,6 +522,62 @@ describe("Transform accessibility", () => {
   });
 });
 
+describe("screen-reader ANSI sanitization (Ink parity)", () => {
+  // Ink squashes every ink-text via squashTextNodes, which ALWAYS returns
+  // sanitizeAnsi(text) (squash-text-nodes.ts:45) — stripping cursor/erase CSI
+  // (e.g. `\x1b[2J`) while keeping SGR + OSC. vue-tui's SR squash previously
+  // concatenated raw text-leaf values with NO sanitize, so an embedded control
+  // sequence survived into screen-reader output. This is the SR twin of
+  // text-measure.ts:54 (`return sanitizeAnsi(out)`).
+  // eslint-disable-next-line no-control-regex -- ESC erase code is a control char by definition; testing it is the point
+  const ERASE_SCREEN = "\x1b[2J";
+
+  test("strips an erase CSI embedded in <Text> in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => <Text>{`a${ERASE_SCREEN}b`}</Text>),
+      { isScreenReaderEnabled: true },
+    );
+    // The erase sequence is stripped; visible chars survive.
+    expect(output).toBe("ab");
+  });
+
+  test("strips an erase CSI in <Text> nested under <Box> in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Box>
+          <Text>{`x${ERASE_SCREEN}y`}</Text>
+        </Box>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("xy");
+  });
+
+  test("strips an erase CSI inside a standalone <Transform> in screen-reader mode", () => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Transform transform={(s: string) => s}>{`p${ERASE_SCREEN}q`}</Transform>
+      )),
+      { isScreenReaderEnabled: true },
+    );
+    expect(output).toBe("pq");
+  });
+
+  test("keeps SGR (color) sequences in screen-reader output, matching Ink's sanitizeAnsi", () => {
+    // sanitizeAnsi strips cursor/erase CSI but KEEPS SGR + OSC — so this would
+    // FAIL against a strip-everything replacement, proving we mirror Ink's
+    // sanitizeAnsi (sanitize-ansi.ts), not a blanket ANSI strip.
+    // eslint-disable-next-line no-control-regex -- SGR codes are control chars; asserting they survive is the point
+    const colored = "a\x1b[31mb\x1b[39mc";
+    const output = renderToString(
+      defineComponent(() => () => <Text>{`${colored}${ERASE_SCREEN}`}</Text>),
+      { isScreenReaderEnabled: true },
+    );
+    // SGR kept, trailing erase stripped.
+    expect(output).toBe(colored);
+  });
+});
+
 describe("integration: aria props via render", () => {
   test("no unknown prop warnings for aria props", async () => {
     // This test verifies that aria props don't trigger the "[vue-tui] unknown prop" warning
