@@ -92,16 +92,20 @@ deliberate. Divergences fall into a few kinds:
 'auto'` opts back into Ink's exact lazy behavior.
 - **Why:** for a long-running interactive app (a full-screen TUI, a coding agent),
   Ink's lazy model makes raw mode **oscillate** as the user moves between input and
-  no-input screens, with two real consequences: (1) keystrokes echo into a
-  half-drawn frame on a no-input / streaming screen; (2) Ctrl+C flips meaning — on a
-  no-input screen raw is off, so Ctrl+C becomes a kernel SIGINT and (e.g.) kills an
-  agent mid-generation instead of reaching the app's "interrupt this generation"
-  handler. Holding raw for the lifetime makes Ctrl+C and keystroke handling
-  identical on every screen and removes the echo. This matches the cross-framework
-  norm — Bubble Tea, Textual, Ratatui, and prompt_toolkit all own the terminal for
-  the program lifetime; Ink's hook-driven model is the outlier (its "cooked on a
-  no-input screen" is an emergent side-effect of refcounting input hooks, not a
-  relied-upon feature).
+  no-input screens. The main consequence is **echo**: on a no-input / streaming
+  screen the terminal is back in cooked mode, so typed keys echo into the
+  half-drawn frame (and line-buffer). Ctrl+C also changes path — on a no-input
+  screen it is a kernel SIGINT rather than the app's own `\x03` intercept. Note
+  `exitOnCtrlC` defaults to `true` in both Ink and vue-tui, so by default Ctrl+C
+  exits either way; the divergence is only the exit path/code (a graceful exit `0`
+  vs a re-raised SIGINT `130`). It matters for an app that sets `exitOnCtrlC:
+false` to handle Ctrl+C itself: under the lazy model its opt-out is silently
+  bypassed on a no-input screen (the SIGINT still exits). Holding raw for the
+  lifetime keeps echo and Ctrl+C handling identical on every screen. This matches
+  the cross-framework norm — Bubble Tea, Textual, Ratatui, and prompt_toolkit all
+  own the terminal for the program lifetime; Ink's hook-driven model is the outlier
+  (its "cooked on a no-input screen" is an emergent side-effect of refcounting
+  input hooks, not a relied-upon feature).
 - **Consequence:** owning raw mode `ref()`s stdin, so an `'always'` app stays alive
   until you explicitly `unmount()` / `exit()` — it does **not** auto-exit when idle
   (the same way an Ink app holding a `useInput` already doesn't). The "render and
