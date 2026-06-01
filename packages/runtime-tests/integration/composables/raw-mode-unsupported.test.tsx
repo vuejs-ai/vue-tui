@@ -1,16 +1,22 @@
 import { PassThrough } from "node:stream";
-import { nextTick, defineComponent } from "vue";
+import { nextTick, defineComponent, onMounted, onUnmounted } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useFocus, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
 import { makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 // Builds a stdin that is NOT a TTY, so isRawModeSupported is false. This mirrors
 // piping input into a program (e.g. `echo x | node app.js`) where raw mode can't
-// be enabled. Matches Ink's isRawModeSupported = stdin.isTTY check.
-function makeNonTtyStdin(): NodeJS.ReadStream {
+// be enabled. Matches Ink's isRawModeSupported = stdin.isTTY check. The optional
+// setRawMode spy lets a test assert the underlying ioctl is NEVER issued on an
+// unsupported stdin (parity with Ink's test/components.tsx setRawMode-throw test).
+function makeNonTtyStdin(setRawModeCalls?: boolean[]): NodeJS.ReadStream {
   const s = new PassThrough() as unknown as NodeJS.ReadStream;
   Object.assign(s, {
     isTTY: false,
+    setRawMode(this: NodeJS.ReadStream, mode: boolean) {
+      setRawModeCalls?.push(mode);
+      return this;
+    },
     setEncoding(this: NodeJS.ReadStream) {
       return this;
     },
@@ -86,4 +92,67 @@ test("useFocus on a non-TTY stdin does not throw (graceful no-op)", async () => 
   unmount();
 
   expect(error).toBeUndefined();
+});
+
+// Test C: the PUBLIC useStdin().setRawMode must be SYMMETRIC on a non-TTY stdin —
+// BOTH setRawMode(true) (enable) AND setRawMode(false) (disable) throw the same
+// descriptive error, and the underlying stdin.setRawMode ioctl is never issued.
+// Mirrors Ink's test/components.tsx "setRawMode() should throw if raw mode is not
+// supported" (asserts didCatchInMount === 1 AND didCatchInUnmount === 1 AND
+// !stdin.setRawMode.called) and Ink's handleSetRawMode (App.tsx:317-327), which
+// guards at the TOP, before the enable/disable split. Before the fix vue threw on
+// the enable branch (acquireRawMode) but silently no-opped the disable branch
+// (releaseRawMode's `if (!isRawModeSupported) return`) — an asymmetry Ink lacks.
+test("useStdin().setRawMode is symmetric on a non-TTY: both enable AND disable throw", async () => {
+  const setRawModeCalls: boolean[] = [];
+  const enableErrors: Error[] = [];
+  const disableErrors: Error[] = [];
+
+  const App = defineComponent(() => {
+    const { setRawMode } = useStdin();
+
+    onMounted(() => {
+      try {
+        setRawMode(true);
+      } catch (e) {
+        enableErrors.push(e as Error);
+      }
+    });
+
+    onUnmounted(() => {
+      try {
+        setRawMode(false);
+      } catch (e) {
+        disableErrors.push(e as Error);
+      }
+    });
+
+    return () => <Text>test</Text>;
+  });
+
+  const stdout = makeFakeWritable();
+  const stdin = makeNonTtyStdin(setRawModeCalls);
+
+  const app = createApp(App);
+  app.waitUntilExit().catch(() => {});
+  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false });
+  await nextTick();
+  app.unmount();
+  await nextTick();
+
+  const expectedMessage =
+    "Raw mode is not supported on the stdin provided to Vue TUI.\n" +
+    "Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported";
+
+  // Enable path throws (this already held before the fix).
+  expect(enableErrors).toHaveLength(1);
+  expect(enableErrors[0]?.message).toBe(expectedMessage);
+
+  // Disable path throws too (this is the fix: pre-fix it silently no-opped).
+  expect(disableErrors).toHaveLength(1);
+  expect(disableErrors[0]?.message).toBe(expectedMessage);
+
+  // The underlying terminal ioctl is never issued — both throws short-circuit
+  // before touching stdin.setRawMode (Ink: t.false(stdin.setRawMode.called)).
+  expect(setRawModeCalls).toEqual([]);
 });
