@@ -224,6 +224,108 @@ test("manually focus previous component via focusPrevious()", async () => {
   expect(lastFrame()).toMatch(/Third ✔/);
 });
 
+// Ink parity (App.tsx:455-470 / 472-487): with NO focus yet (activeId null),
+// focusNext targets the FIRST focusable and focusPrevious targets the LAST. This
+// pins the reachable "no current focus" boundary for BOTH directions so the
+// shared start-index logic (which folds the null case and the unreachable
+// activeId-not-in-list case into one symmetric branch) cannot regress one
+// direction without the other.
+test("focusNext() with no active focus targets the first focusable", async () => {
+  let doFocusNext!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doFocusNext = manager.focusNext;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" />
+        <FocusItem label="Second" />
+        <FocusItem label="Third" />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  // No autoFocus anywhere → nothing is focused at mount.
+  expect(lastFrame()).not.toMatch(/✔/);
+
+  // From "no current focus", focusNext lands on the first focusable.
+  doFocusNext();
+  await nextTick();
+  expect(lastFrame()).toMatch(/First ✔/);
+  expect(lastFrame()).not.toMatch(/Second ✔|Third ✔/);
+});
+
+test("focusPrevious() with no active focus targets the last focusable", async () => {
+  let doFocusPrevious!: () => void;
+
+  const App = defineComponent(() => {
+    const manager = useFocusManager();
+    doFocusPrevious = manager.focusPrevious;
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" />
+        <FocusItem label="Second" />
+        <FocusItem label="Third" />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  expect(lastFrame()).not.toMatch(/✔/);
+
+  // From "no current focus", a backward step wraps to the LAST focusable.
+  doFocusPrevious();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Third ✔/);
+  expect(lastFrame()).not.toMatch(/First ✔|Second ✔/);
+});
+
+// Exercise startSearchIndex's VALID-index path (activeId non-null) via the
+// manager API directly: focusPrevious from a middle item steps to its
+// predecessor, and from the first item wraps to the last; focusNext from the
+// last wraps to the first. (Tab-cycling covers the same code path through the
+// keypress handler; this pins it through the programmatic API so a regression in
+// the shared start-index helper can't slip through either entry point.)
+test("focusPrevious()/focusNext() with an active focus step to the adjacent item and wrap", async () => {
+  let manager!: ReturnType<typeof useFocusManager>;
+
+  const App = defineComponent(() => {
+    manager = useFocusManager();
+    return () => (
+      <Box flexDirection="column">
+        <FocusItem label="First" autoFocus />
+        <FocusItem label="Second" />
+        <FocusItem label="Third" />
+      </Box>
+    );
+  });
+
+  const { lastFrame } = await render(App);
+  // First autoFocuses → activeId is the first item.
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  // focusNext from the first → second.
+  manager.focusNext();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Second ✔/);
+
+  // focusPrevious from the middle → back to the first (predecessor, not a wrap).
+  manager.focusPrevious();
+  await nextTick();
+  expect(lastFrame()).toMatch(/First ✔/);
+
+  // focusPrevious from the first → wraps to the last.
+  manager.focusPrevious();
+  await nextTick();
+  expect(lastFrame()).toMatch(/Third ✔/);
+
+  // focusNext from the last → wraps back to the first.
+  manager.focusNext();
+  await nextTick();
+  expect(lastFrame()).toMatch(/First ✔/);
+});
+
 // Ink parity (App.tsx:455-470 focusNext / 472-487 focusPrevious): focusNext is
 // `findNextFocusable(...) ?? firstFocusableId` and ALWAYS reassigns activeFocusId.
 // When NO focusable is active, both branches are undefined → activeFocusId is
