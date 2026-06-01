@@ -1499,13 +1499,13 @@ function createStdinController(
       }
       const state = getRawModeState(stdin);
       if (state.refs === 0) {
-        // If a same-tick swap left raw mode physically enabled (its disable is
-        // still queued), don't re-ref or re-toggle — just cancel the pending
-        // disable. Ink (App.tsx:331-344) skips stdin.ref()/setRawMode(true) here
-        // when isRawModeAlreadyEnabled; re-issuing them is a redundant ioctl AND
-        // an unbalanced ref() (the deferred disable would bail on refs>0 and never
-        // unref). setEncoding('utf8') and the data listener still run: encoding is
-        // idempotent and the listener was detached synchronously in releaseRawMode.
+        // SHARED (per-stdin) terminal raw-mode enable. If a same-tick swap left
+        // raw mode physically enabled (its disable is still queued), don't re-ref
+        // or re-toggle — just cancel the pending disable. Ink (App.tsx:331-344)
+        // skips stdin.ref()/setRawMode(true) when isRawModeAlreadyEnabled;
+        // re-issuing them is a redundant ioctl AND an unbalanced ref() (the
+        // deferred disable would bail on refs>0 and never unref). setEncoding is
+        // idempotent so it stays here.
         const alreadyEnabled = state.pendingDisable;
         state.pendingDisable = false;
         if (!alreadyEnabled) {
@@ -1513,6 +1513,17 @@ function createStdinController(
           appCtx.setRawMode(true);
         }
         if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
+      }
+      if (localRefs === 0) {
+        // PER-CONTROLLER input listener. Each controller (one per render tree)
+        // attaches its OWN handleData → its OWN parser → its OWN event emitter,
+        // gated on THIS controller's ref count, NOT the shared one. So two apps
+        // sharing one stdin both receive every keystroke: vue's 'data' (push)
+        // event broadcasts to every listener — unlike Ink's 'readable' (pull)
+        // model where the first-registered listener drains the buffer and a
+        // second same-stdin app stays deaf until the first unmounts
+        // (App.tsx:278-313). The terminal raw-mode toggle above stays shared so
+        // one app's unmount can't drop raw mode while another still needs it.
         stdin.on("data", handleData);
       }
       state.refs++;
@@ -1538,19 +1549,22 @@ function createStdinController(
       const state = getRawModeState(stdin);
       state.refs = Math.max(0, state.refs - 1);
       localRefs = Math.max(0, localRefs - 1);
-      if (state.refs === 0) {
-        // Stop owning input SYNCHRONOUSLY on the last release, matching Ink's
-        // clearInputState (App.tsx:212-216,357): reset the parser, cancel the
-        // pending-escape flush, and detach the data/readable listeners NOW — so a
-        // partial escape buffered before a same-render useInput swap cannot leak
-        // into the replacement. (A same-tick re-acquire re-attaches the listener
-        // with a fresh parser; deferring this is the bug — the gated microtask
-        // below short-circuits when refs is back >0, so the reset never ran.)
+      if (localRefs === 0) {
+        // PER-CONTROLLER: stop THIS controller owning input SYNCHRONOUSLY when its
+        // own last useInput releases, matching Ink's clearInputState
+        // (App.tsx:212-216,357): reset its parser, cancel its pending-escape flush,
+        // and detach its data/readable listeners NOW — so a partial escape buffered
+        // before a same-render useInput swap cannot leak into the replacement. (A
+        // same-tick re-acquire re-attaches the listener with a fresh parser.)
+        // Gated on localRefs, not the shared refcount: another app on the same
+        // stdin keeps its own listener and parser intact.
         inputParser.reset();
         clearPendingFlush();
         stdin.off("readable", handleReadable);
         stdin.off("data", handleData);
-        // Defer ONLY the terminal raw-mode toggle (Ink defers just disableRawMode,
+      }
+      if (state.refs === 0) {
+        // Defer ONLY the SHARED terminal raw-mode toggle (Ink defers just disableRawMode,
         // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
         // the old before mounting the new, so refs briefly hits 0. Disabling
         // synchronously would drop raw mode between the two mounts; the microtask
