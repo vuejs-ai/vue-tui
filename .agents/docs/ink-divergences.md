@@ -200,6 +200,28 @@ unsubscribe(){}}`) — a `useAnimation` rendered outside an Ink tree never ticks
   commit is pure duplication; emitting one clear instead of two is strictly cleaner with no
   visible difference (issue #26). Additive robustness.
 
+### Two apps sharing one stdin both receive input
+
+- **Ink:** raw-mode count and the input listener are **per-`App`** (`useRef`), and Ink reads via
+  the `'readable'` event + `stdin.read()` (pull, `App.tsx:278-313`). Two `render()`s to different
+  stdout but one stdin each attach a `readable` listener, but the first-registered listener's
+  `read()` loop **drains** the buffer every tick, so the second app stays **deaf** until the first
+  unmounts (it self-heals then). And because counts are per-`App`, the first app's unmount calls
+  `stdin.setRawMode(false)`, dropping raw mode while the second still needs it.
+- **vue-tui:** the terminal raw-mode toggle is refcounted **per-stdin** (a shared `WeakMap`), so one
+  app's unmount can't drop raw mode while another holds it; and the `'data'` input listener is
+  **per-controller** — each app attaches its own `handleData` → own parser → own emitter. Since
+  `'data'` (push) broadcasts to **every** listener, both apps receive every keystroke, and the
+  second keeps receiving after the first unmounts.
+- **Why:** strictly more correct for a combination vue-tui already allows (two `createApp`s to
+  different stdout — cf. the same-stdout no-op above is keyed on stdout, not stdin). The push model
+  has no drain race, and a shared raw-mode refcount is the right ownership model when several
+  renderers share one input. Rare in practice (the common one-app→terminal flow never hits it;
+  realistic only for stdout+stderr both-interactive, or an embedding host), so it's robustness, not
+  a headline feature. Single-app behavior is byte-identical (one controller's `localRefs` ≡ the
+  shared `refs`). Test: `raw-mode-lifecycle.test.tsx` ("two apps sharing one stdin both receive
+  input…").
+
 ## Framework-semantic divergences (Vue ≠ React)
 
 ### Removing `flexDirection` / `flexWrap` resets to the default
