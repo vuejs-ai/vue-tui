@@ -1511,9 +1511,35 @@ function createStdinController(
   // escape would survive into the next composable.
   let lifetimeFloor = 0;
 
+  // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
+  // throws a descriptive error rather than silently no-opping. Two messages —
+  // one for the default process.stdin, one for a custom stream — both pointing
+  // at the isRawModeSupported docs.
+  const throwRawModeUnsupported = (): never => {
+    if (stdin === process.stdin) {
+      throw new Error(
+        "Raw mode is not supported on the current process.stdin, which Vue TUI uses as input stream by default.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+      );
+    }
+    throw new Error(
+      "Raw mode is not supported on the stdin provided to Vue TUI.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+    );
+  };
+
   const controller: StdinController = {
     stdin,
     setRawMode(mode: boolean) {
+      // Guard at the TOP — BEFORE the enable/disable split — so the PUBLIC
+      // useStdin().setRawMode throws symmetrically on an unsupported stdin,
+      // matching Ink's handleSetRawMode (App.tsx:317-327): both setRawMode(true)
+      // and setRawMode(false) throw. The guard lives here (not in the internal
+      // releaseRawMode) because the framework's own composables — useInput /
+      // useFocus / usePaste — call acquireRawMode()/releaseRawMode() DIRECTLY at
+      // teardown, and that internal release MUST stay a no-op so an unsupported-
+      // stdin app can unmount cleanly. Only this public wrapper enforces the
+      // symmetric throw. (acquireRawMode also throws on its own, so the enable
+      // path is unchanged for the unguarded useInput consumer.)
+      if (!appCtx.isRawModeSupported) throwRawModeUnsupported();
       if (mode) {
         controller.acquireRawMode();
       } else {
@@ -1525,20 +1551,10 @@ function createStdinController(
     internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
       if (!appCtx.isRawModeSupported) {
-        // Match Ink's handleSetRawMode (App.tsx): enabling raw mode on an
-        // unsupported stdin throws a descriptive error rather than silently
-        // no-opping. Two messages — one for the default process.stdin, one for
-        // a custom stream — both pointing at the isRawModeSupported docs. The
-        // unguarded useInput path surfaces this; useFocus guards before calling
-        // (see composables/useFocus.ts), so it degrades to a no-op like Ink.
-        if (stdin === process.stdin) {
-          throw new Error(
-            "Raw mode is not supported on the current process.stdin, which Vue TUI uses as input stream by default.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
-          );
-        }
-        throw new Error(
-          "Raw mode is not supported on the stdin provided to Vue TUI.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
-        );
+        // The unguarded useInput path surfaces this throw directly; useFocus
+        // guards before calling (see composables/useFocus.ts), so it degrades to
+        // a no-op like Ink.
+        throwRawModeUnsupported();
       }
       const state = getRawModeState(stdin);
       if (state.refs === 0) {
