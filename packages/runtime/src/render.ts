@@ -1219,6 +1219,21 @@ function createFocusController(): FocusContext {
     return null;
   }
 
+  // The start index a directional search begins FROM (it scans from the next slot
+  // in `direction`). With a valid current focus, that's its index. With no current
+  // focus we begin just outside the end we're moving away from, so the first
+  // candidate is the first focusable (forward) or the last (backward) — symmetric
+  // for both directions. findIndex returning -1 (activeId set but not in the list)
+  // is treated as "no current": unreachable while the activeId invariant holds
+  // (setActive only ever stores null or a present id; remove() clears a removed
+  // active), but folding it in here keeps focusNext/focusPrevious from diverging if
+  // that invariant is ever broken.
+  function startSearchIndex(direction: 1 | -1): number {
+    const i = activeId ? focusables.findIndex((f) => f.id === activeId) : -1;
+    if (i >= 0) return i;
+    return direction === 1 ? -1 : focusables.length;
+  }
+
   const ctx: FocusContext = {
     activeId: null,
     activeIdRef,
@@ -1246,13 +1261,11 @@ function createFocusController(): FocusContext {
     // (e.g. left by focus(id) pinning an isActive=false item), matching Ink.
     focusNext() {
       if (focusables.length === 0) return;
-      const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : -1;
-      setActive(findNextActive(idx, 1));
+      setActive(findNextActive(startSearchIndex(1), 1));
     },
     focusPrevious() {
       if (focusables.length === 0) return;
-      const idx = activeId ? focusables.findIndex((f) => f.id === activeId) : focusables.length;
-      setActive(findNextActive(idx, -1));
+      setActive(findNextActive(startSearchIndex(-1), -1));
     },
     focus(id) {
       const entry = focusables.find((f) => f.id === id);
@@ -1307,13 +1320,18 @@ interface StdinController extends StdinContext {
 
 interface RawModeState {
   refs: number;
+  // True between a last-release (refs→0) and the microtask that actually disables
+  // raw mode. A same-tick re-acquire reads this to know raw mode is still
+  // physically on, so it can skip re-issuing ref()/setRawMode(true) and cancel the
+  // queued disable — Ink's pendingDisableRawModeRef (App.tsx:335-336,361-368).
+  pendingDisable: boolean;
 }
 const rawModeRegistry = new WeakMap<NodeJS.ReadStream, RawModeState>();
 
 function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
   let state = rawModeRegistry.get(stdin);
   if (!state) {
-    state = { refs: 0 };
+    state = { refs: 0, pendingDisable: false };
     rawModeRegistry.set(stdin, state);
   }
   return state;
@@ -1481,9 +1499,20 @@ function createStdinController(
       }
       const state = getRawModeState(stdin);
       if (state.refs === 0) {
-        if (typeof stdin.ref === "function") stdin.ref();
+        // If a same-tick swap left raw mode physically enabled (its disable is
+        // still queued), don't re-ref or re-toggle — just cancel the pending
+        // disable. Ink (App.tsx:331-344) skips stdin.ref()/setRawMode(true) here
+        // when isRawModeAlreadyEnabled; re-issuing them is a redundant ioctl AND
+        // an unbalanced ref() (the deferred disable would bail on refs>0 and never
+        // unref). setEncoding('utf8') and the data listener still run: encoding is
+        // idempotent and the listener was detached synchronously in releaseRawMode.
+        const alreadyEnabled = state.pendingDisable;
+        state.pendingDisable = false;
+        if (!alreadyEnabled) {
+          if (typeof stdin.ref === "function") stdin.ref();
+          appCtx.setRawMode(true);
+        }
         if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
-        appCtx.setRawMode(true);
         stdin.on("data", handleData);
       }
       state.refs++;
@@ -1525,9 +1554,12 @@ function createStdinController(
         // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
         // the old before mounting the new, so refs briefly hits 0. Disabling
         // synchronously would drop raw mode between the two mounts; the microtask
-        // short-circuits if a replacement re-acquired in the meantime.
+        // short-circuits if a replacement re-acquired in the meantime — which it
+        // signals by clearing pendingDisable (matching Ink's flag, App.tsx:362-365).
+        state.pendingDisable = true;
         queueMicrotask(() => {
-          if (state.refs > 0) return;
+          if (!state.pendingDisable) return;
+          state.pendingDisable = false;
           // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
           // never restores a captured prior raw state. Restoring a captured prevRaw was a
           // vue-only invention that corrupts on a sync re-acquire swap: it gets
@@ -1547,16 +1579,33 @@ function createStdinController(
         appCtx.stdout.write("\x1b[?2004l");
       }
       bracketedPasteModeCount = 0;
-      if (localRefs > 0 && appCtx.isRawModeSupported) {
+      if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
-        state.refs = Math.max(0, state.refs - localRefs);
-        localRefs = 0;
-        if (state.refs === 0) {
-          // Unconditionally setRawMode(false) on final teardown — Ink's
-          // disableRawMode (App.tsx:218-222) never restores a captured prior raw
-          // state. (Same rationale as releaseRawMode: a restored prevRaw could be
-          // the framework's own raw=true snapshotted during a sync swap, which
-          // would leave the terminal raw on exit.)
+        // Drop this controller's outstanding refs (if Vue's unmount hasn't already
+        // released them via onScopeDispose → releaseRawMode).
+        let releasedLastRef = false;
+        if (localRefs > 0) {
+          state.refs = Math.max(0, state.refs - localRefs);
+          localRefs = 0;
+          releasedLastRef = state.refs === 0;
+        }
+        // Force the terminal raw-mode disable SYNCHRONOUSLY when raw mode is no
+        // longer owned. This covers BOTH teardown orderings:
+        //   (1) dispose() ran while this controller still held refs (above), or
+        //   (2) Vue's unmount already fired releaseRawMode (localRefs is 0) which
+        //       DEFERRED the disable to a microtask — but on the signal-exit path
+        //       (teardown(true) re-raises the signal without draining microtasks)
+        //       that microtask never runs, so the terminal would be left raw and
+        //       the shell stops echoing after Ctrl+C.
+        // Mirrors Ink's unmount cleanup guard `rawModeEnabledCount > 0 ||
+        // pendingDisableRawModeRef.current` (App.tsx:626-631). Clearing
+        // pendingDisable also cancels the queued microtask so it can't double-unref.
+        if (state.refs === 0 && (releasedLastRef || state.pendingDisable)) {
+          // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
+          // never restores a captured prior raw state. (A restored prevRaw could be
+          // the framework's own raw=true snapshotted during a sync swap, which would
+          // leave the terminal raw on exit.)
+          state.pendingDisable = false;
           appCtx.setRawMode(false);
           if (typeof stdin.unref === "function") stdin.unref();
           inputParser.reset();
