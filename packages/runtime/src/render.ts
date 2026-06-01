@@ -51,7 +51,24 @@ export interface MountOptions {
   stderr?: NodeJS.WriteStream;
   debug?: boolean;
   exitOnCtrlC?: boolean;
-  rawMode?: boolean;
+  /**
+   * Controls when the app holds the terminal's raw mode, which suppresses the
+   * terminal's own echo and line-editing.
+   *
+   * - `'always'` (default): raw mode is enabled at mount and held for the whole
+   *   run, even when no input composable is mounted, so typed keys never echo
+   *   into the rendered frame and Ctrl+C behaves the same on every screen.
+   * - `'auto'`: raw mode is enabled only while a `useInput`, `useFocus`, or
+   *   `usePaste` is mounted, and released when the last one unmounts — so a
+   *   screen with no input handler returns to the terminal's normal cooked mode
+   *   (native echo, line-editing, Ctrl+C/Ctrl+Z). This is Ink's original behavior.
+   *
+   * Has no effect when non-interactive or when stdin is not a TTY (raw mode is
+   * unsupported there).
+   *
+   * @default 'always'
+   */
+  rawMode?: "always" | "auto";
   /**
    * Override automatic interactive mode detection.
    *
@@ -487,6 +504,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     liveInstances.set(stdout, app);
     mountedAsOwner = true;
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
+    // 'always' (default): own raw mode for the whole interactive run; 'auto':
+    // Ink's lazy model where input composables acquire it on demand. See the
+    // MountOptions.rawMode docs and .agents/docs/ink-divergences.md.
+    const rawMode = options.rawMode ?? "always";
     const onRender = options.onRender;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
     // the render throttle engages by default — without this the animation
@@ -655,6 +676,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       focusContext,
     });
     mountedStdinController = stdinController;
+
+    // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
+    // the refcount floor never drops to 0 while the app runs — raw mode is held
+    // continuously regardless of which input composables come and go, and there
+    // is no cooked-mode oscillation between input and no-input screens. Gated on
+    // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
+    // must not seize raw mode. The matching release happens in the controller's
+    // dispose() at teardown. (Diverges from Ink's lazy default — see
+    // .agents/docs/ink-divergences.md.)
+    if (rawMode === "always" && interactive && stdinController.isRawModeSupported) {
+      stdinController.holdRawModeForLifetime();
+    }
 
     const kittyController = createKittyKeyboardController(stdin, stdout);
     kittyController.init(options.kittyKeyboard, interactive);
@@ -1316,6 +1349,10 @@ function createFocusController(): FocusContext {
 
 interface StdinController extends StdinContext {
   dispose: () => void;
+  // rawMode 'always': take a lifetime raw-mode hold (raw on + keep-alive + input
+  // listener) that input composables stack on top of, with the per-consumer
+  // input-state cleanup re-based to this floor.
+  holdRawModeForLifetime: () => void;
 }
 
 interface RawModeState {
@@ -1467,6 +1504,12 @@ function createStdinController(
   emitter.on("input", focusInputListener);
 
   let localRefs = 0;
+  // 0 normally; 1 once the App takes a lifetime raw-mode hold (rawMode 'always').
+  // The hold keeps raw mode + the data listener alive for the whole run, so the
+  // per-consumer "clear input state" must fire when localRefs returns to THIS
+  // floor (last input composable gone), not 0 — otherwise a buffered partial
+  // escape would survive into the next composable.
+  let lifetimeFloor = 0;
 
   const controller: StdinController = {
     stdin,
@@ -1526,8 +1569,29 @@ function createStdinController(
         // one app's unmount can't drop raw mode while another still needs it.
         stdin.on("data", handleData);
       }
+      if (localRefs === lifetimeFloor) {
+        // The FIRST input consumer joining above the App's lifetime floor (and
+        // the very first acquire in 'auto', where the floor is 0). Under rawMode
+        // 'always' the lifetime listener keeps parsing on no-input screens, so an
+        // escape typed while idle leaves a buffered partial + pending-flush timer;
+        // discard it here so it can't bleed into this consumer ~20ms later. (The
+        // mirror clear on the last consumer's release handles a same-tick swap;
+        // this handles a delayed idle→input transition.)
+        inputParser.reset();
+        clearPendingFlush();
+      }
       state.refs++;
       localRefs++;
+    },
+    holdRawModeForLifetime() {
+      // Same as acquireRawMode (raw on + ref + data listener), but marks the
+      // resulting ref as the App's lifetime floor: input composables stack above
+      // it, and releaseRawMode's input-state cleanup fires when the last consumer
+      // returns localRefs to this floor (1) rather than 0. So raw mode and the
+      // listener stay alive across no-input screens, but a buffered partial escape
+      // is still cleared when an input composable unmounts — no bleed into the next.
+      controller.acquireRawMode();
+      lifetimeFloor = 1;
     },
     setBracketedPasteMode(enabled: boolean) {
       if (enabled) {
@@ -1549,17 +1613,21 @@ function createStdinController(
       const state = getRawModeState(stdin);
       state.refs = Math.max(0, state.refs - 1);
       localRefs = Math.max(0, localRefs - 1);
-      if (localRefs === 0) {
-        // PER-CONTROLLER: stop THIS controller owning input SYNCHRONOUSLY when its
-        // own last useInput releases, matching Ink's clearInputState
-        // (App.tsx:212-216,357): reset its parser, cancel its pending-escape flush,
-        // and detach its data/readable listeners NOW — so a partial escape buffered
-        // before a same-render useInput swap cannot leak into the replacement. (A
-        // same-tick re-acquire re-attaches the listener with a fresh parser.)
-        // Gated on localRefs, not the shared refcount: another app on the same
-        // stdin keeps its own listener and parser intact.
+      if (localRefs === lifetimeFloor) {
+        // PER-CONSUMER: the last input composable on THIS controller released.
+        // Clear pending parser state SYNCHRONOUSLY (Ink's clearInputState,
+        // App.tsx:212-216,357): reset the parser and cancel the pending-escape
+        // flush, so a partial escape (e.g. a lone ESC during a screen swap) can't
+        // bleed into the next composable. Re-based to `lifetimeFloor`: under rawMode
+        // 'always' the App holds a floor ref (and keeps the listener), so this fires
+        // when consumers return to 1, not 0.
         inputParser.reset();
         clearPendingFlush();
+      }
+      if (localRefs === 0) {
+        // CONTROLLER fully released (no App hold, no consumers): detach the input
+        // listeners too. Gated on localRefs, not the shared refcount, so another
+        // app on the same stdin keeps its own listener intact.
         stdin.off("readable", handleReadable);
         stdin.off("data", handleData);
       }

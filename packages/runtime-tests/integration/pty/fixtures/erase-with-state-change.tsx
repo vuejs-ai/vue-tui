@@ -25,4 +25,4 @@ const Erase = defineComponent(() => {
 
 process.stdout.rows = Number(process.argv[2]);
 const app = createApp(Erase);
-app.mount();
+app.mount({ rawMode: "auto" }); // relies on auto-exit (default "always" holds raw & never exits)

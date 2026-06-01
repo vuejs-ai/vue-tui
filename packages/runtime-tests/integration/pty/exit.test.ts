@@ -86,6 +86,26 @@ it("don't exit while raw mode is active", async () => {
   expect(ps.output).toContain("exited");
 });
 
+it("rawMode 'always' (default): a no-input app stays alive and exits on Ctrl+C", async () => {
+  // The default rawMode 'always' holds raw mode for the whole interactive run, so
+  // even a no-input app (no useInput, no stdin listener) does NOT auto-exit — the
+  // lifetime raw-mode ref keeps the loop alive. (Under 'auto' the same app exits
+  // immediately; cf. exit-normally, pinned to 'auto'.) Ctrl+C still exits it
+  // cleanly because raw mode is held and exitOnCtrlC defaults to true — the
+  // headline benefit that Ctrl+C works on a no-input screen.
+  const ps = term("exit-rawmode-always");
+
+  const exitedDuringWait = await Promise.race([
+    ps.waitForExitInfo().then(() => true),
+    new Promise<false>((resolve) => setTimeout(() => resolve(false), 500)),
+  ]);
+  expect(exitedDuringWait).toBe(false);
+
+  ps.write("\x03"); // Ctrl+C
+  await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
+
 it("exit when DEV is set", async () => {
   // Port of Ink exit.tsx:133-142 ("exit when DEV is set"). DEV is inert in
   // vue-tui (no React DevTools hookup), so exit-normally must still exit cleanly.

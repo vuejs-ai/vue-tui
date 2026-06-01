@@ -80,6 +80,35 @@ deliberate. Divergences fall into a few kinds:
   future reader does **not** "restore parity" by adding a `types` condition the toolchain
   already satisfies. (The `cli` package needs no `types` at all — it has no public type surface.)
 
+### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
+
+- **Ink:** raw mode is **lazy / reference-counted to input hooks** — `useInput` /
+  `useFocus` / `usePaste` enable it on mount and release it when the last one
+  unmounts, so a screen with no input handler falls back to cooked mode. There is
+  no option to hold it.
+- **vue-tui:** the `rawMode` mount option defaults to **`'always'`** — raw mode is
+  enabled at mount and held for the whole interactive run (when `interactive` and
+  stdin is a TTY), regardless of which input composables are mounted. `rawMode:
+'auto'` opts back into Ink's exact lazy behavior.
+- **Why:** for a long-running interactive app (a full-screen TUI, a coding agent),
+  Ink's lazy model makes raw mode **oscillate** as the user moves between input and
+  no-input screens, with two real consequences: (1) keystrokes echo into a
+  half-drawn frame on a no-input / streaming screen; (2) Ctrl+C flips meaning — on a
+  no-input screen raw is off, so Ctrl+C becomes a kernel SIGINT and (e.g.) kills an
+  agent mid-generation instead of reaching the app's "interrupt this generation"
+  handler. Holding raw for the lifetime makes Ctrl+C and keystroke handling
+  identical on every screen and removes the echo. This matches the cross-framework
+  norm — Bubble Tea, Textual, Ratatui, and prompt_toolkit all own the terminal for
+  the program lifetime; Ink's hook-driven model is the outlier (its "cooked on a
+  no-input screen" is an emergent side-effect of refcounting input hooks, not a
+  relied-upon feature).
+- **Consequence:** owning raw mode `ref()`s stdin, so an `'always'` app stays alive
+  until you explicitly `unmount()` / `exit()` — it does **not** auto-exit when idle
+  (the same way an Ink app holding a `useInput` already doesn't). The "render and
+  auto-exit" pattern (Ink's inline-output use) is `rawMode: 'auto'`. Tests:
+  `raw-mode-lifecycle.test.tsx` (`'always'` holds raw with no input hook; `'auto'`
+  stays cooked; no mid-session oscillation).
+
 ## Additive features (vue-tui is a strict superset)
 
 ### Multiple `<Static>` regions
