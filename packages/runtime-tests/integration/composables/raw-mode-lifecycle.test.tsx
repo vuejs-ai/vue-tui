@@ -177,3 +177,67 @@ test("teardown disables raw mode synchronously so a signal exit can't leave the 
   expect(setRawModeCalls).toEqual([true, false]);
   expect(refCount()).toBe(0);
 });
+
+// Two independent apps (separate createApp/stdout) sharing ONE stdin. The
+// terminal raw-mode toggle is refcounted per-stdin (shared) so the first app's
+// unmount can't drop raw mode while the second still needs it — vue's deliberate
+// improvement over Ink, whose per-App counts let the first unmount disable raw
+// for everyone. But the INPUT listener is per-controller: each app attaches its
+// own "data" handler, so BOTH receive every keystroke (vue's push model has no
+// drain race), and the second keeps receiving after the first unmounts.
+//
+// Before the per-controller-listener fix the "data" handler was attached only
+// when the SHARED refcount went 0→1, so the second app's handler never attached
+// and it was permanently deaf (worse than Ink, which at least self-heals when
+// the first app unmounts).
+test("two apps sharing one stdin both receive input; the second keeps receiving after the first unmounts", async () => {
+  const aKeys: string[] = [];
+  const bKeys: string[] = [];
+
+  const AppA = defineComponent(() => {
+    useInput((input) => aKeys.push(input));
+    return () => <Text>a</Text>;
+  });
+  const AppB = defineComponent(() => {
+    useInput((input) => bKeys.push(input));
+    return () => <Text>b</Text>;
+  });
+
+  const stdout1 = makeFakeWritable();
+  const stdout2 = makeFakeWritable();
+  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
+
+  const appA = createApp(AppA);
+  const appB = createApp(AppB);
+  appA.mount({ stdout: stdout1, stdin, debug: true, exitOnCtrlC: false });
+  appB.mount({ stdout: stdout2, stdin, debug: true, exitOnCtrlC: false });
+  await settle();
+
+  // Raw mode enabled exactly once (shared refcount); both apps hold the one ref.
+  expect(setRawModeCalls).toEqual([true]);
+  expect(refCount()).toBe(1);
+
+  // Both apps receive the same keystroke.
+  (stdin as unknown as PassThrough).write("z");
+  await settle();
+  expect(aKeys).toEqual(["z"]);
+  expect(bKeys).toEqual(["z"]);
+
+  // First app unmounts: raw mode must STAY on (B still holds the shared ref),
+  // and B must keep receiving — A must not.
+  appA.unmount();
+  await settle();
+  expect(setRawModeCalls).toEqual([true]);
+  expect(refCount()).toBe(1);
+
+  (stdin as unknown as PassThrough).write("y");
+  await settle();
+  expect(aKeys).toEqual(["z"]);
+  expect(bKeys).toEqual(["z", "y"]);
+
+  // Second app unmounts: now raw mode is disabled and the ref released.
+  appB.unmount();
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
+});
