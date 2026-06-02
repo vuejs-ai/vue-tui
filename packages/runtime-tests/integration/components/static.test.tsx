@@ -774,3 +774,129 @@ test("Static items do not add blank lines to the dynamic frame", async () => {
   const frame = lastFrame()!;
   expect(frame).toBe("[live]");
 });
+
+// A07 — multiple <Static> regions both render.
+//
+// Ink honors only the FIRST <Static> in the tree (ink.tsx tracks a single
+// `staticNode`); a second one is silently dropped. vue-tui is an ADDITIVE
+// DIVERGENCE: every <Static> node found by findStatics() is painted, so two
+// independent static regions in one tree BOTH emit their items. This pins that
+// superset behavior (there was previously no test mounting two regions).
+test("two separate <Static> regions both render their items (additive divergence)", async () => {
+  const headerItems = shallowRef<string[]>([]);
+  const logItems = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={headerItems.value}>
+        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+      </Static>
+      <Static items={logItems.value}>
+        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App);
+
+  // Populate both regions; each region's items must appear in the emitted output.
+  headerItems.value = ["HEADER-1", "HEADER-2"];
+  logItems.value = ["LOG-1", "LOG-2"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  const allOutput = frames.join("");
+  // BOTH regions render (Ink would drop the second).
+  expect(allOutput).toContain("HEADER-1");
+  expect(allOutput).toContain("HEADER-2");
+  expect(allOutput).toContain("LOG-1");
+  expect(allOutput).toContain("LOG-2");
+});
+
+// B04(a) — the render-prop's SECOND arg (`index`) is the ABSOLUTE array index,
+// stable across INCREMENTAL appends.
+//
+// Static.ts renders `items.slice(cursor)` and passes `index = cursor + i`, where
+// the cursor advances to items.length after each batch is written. So an item's
+// index is its position in the FULL list, never its position within the append
+// batch. This mirrors Ink's Static, which renders `items.slice(index)` and passes
+// the absolute index to the render prop. (Confirmed: batch [a0,a1] → indices 0,1;
+// batch [b2,b3] appended → indices 2,3, NOT 0,1.)
+test("Static render-prop index is the absolute array index across incremental appends", async () => {
+  const seen: Array<{ item: string; index: number }> = [];
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box>
+      <Static items={items.value}>
+        {{
+          default: ({ item, index }: { item: string; index: number }) => {
+            seen.push({ item, index });
+            return <Text key={item}>{item}</Text>;
+          },
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  await render(App);
+
+  // First batch: two items at absolute indices 0 and 1.
+  items.value = ["a0", "a1"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  // Second batch appended: the new items must get absolute indices 2 and 3
+  // (their position in the FULL [a0,a1,b2,b3] list), not the batch-local 0,1.
+  items.value = ["a0", "a1", "b2", "b3"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  // Each item was rendered with its absolute index. (Items render once; the
+  // already-written a0/a1 are sliced out before the second batch renders.)
+  expect(seen).toEqual([
+    { item: "a0", index: 0 },
+    { item: "a1", index: 1 },
+    { item: "b2", index: 2 },
+    { item: "b3", index: 3 },
+  ]);
+});
+
+// B04(b) — vertical padding on the <Static> container paints into the static frame.
+//
+// Static.ts merges the caller `style` onto the internal static box, and
+// static-channel.ts paints that node via its OWN yoga node (paintIsolated). So
+// paddingTop/paddingBottom resolve as real layout: they add blank rows above /
+// below the item inside the painted static frame. Confirmed against the pinned
+// Ink reference (v7.0.4): paddingTop:2 paddingBottom:1 → static frame "\n\nX\n\n"
+// (2 blank rows above X, then X, then 1 blank row below).
+test("Static container vertical padding adds blank rows to the painted static frame", async () => {
+  const items = shallowRef<string[]>([]);
+
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static items={items.value} style={{ paddingTop: 2, paddingBottom: 1 }}>
+        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const { frames } = await render(App);
+
+  items.value = ["X"];
+  await nextTick();
+  await new Promise((r) => setTimeout(r, 50));
+  await nextTick();
+
+  // The captured static chunk is the "\n"-terminated fullStaticOutput. With
+  // paddingTop:2 / paddingBottom:1 the painted region is "\n\nX\n\n" (Ink parity).
+  const staticFrame = frames.find((f) => f.includes("X") && !f.includes("[live]"));
+  expect(staticFrame).toBeDefined();
+  expect(staticFrame).toBe("\n\nX\n\n");
+});

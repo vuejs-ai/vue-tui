@@ -289,6 +289,89 @@ test("rawMode 'auto': a no-input app never enables raw mode (Ink lazy behavior)"
   app.unmount();
 });
 
+// B11 — under rawMode 'auto' the Ink-parity LAZY path is exercised end-to-end:
+// useInput ACQUIRES raw mode on mount and RELEASES it when its component
+// unmounts. The new 'always' default masks this (its app-lifetime floor ref keeps
+// raw mode pinned for the whole session); 'auto' is the escape hatch that restores
+// Ink's lazy acquire/release, so this pins the behavior the default hides.
+//
+// useInput.ts: attach() → stdin.acquireRawMode() on mount; detach() (onScopeDispose
+// / isActive→false) → stdin.releaseRawMode(). With NO floor ref under 'auto', the
+// last consumer's release drops the refcount to 0 and disables raw mode (back to
+// cooked). The disable is deferred to a microtask (render.ts), which settle() drains.
+test("rawMode 'auto': useInput acquires raw on mount and releases it on unmount (Ink lazy)", async () => {
+  const showInput = shallowRef(true);
+  const Child = defineComponent(() => {
+    useInput(() => {});
+    return () => <Text>input</Text>;
+  });
+  const App = defineComponent(() => () => (showInput.value ? <Child /> : <Text>idle</Text>));
+
+  const stdout = makeFakeWritable();
+  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  // Mounting the useInput consumer enables raw mode exactly once (0→1).
+  expect(setRawModeCalls).toEqual([true]);
+  expect(refCount()).toBe(1);
+
+  // Unmount the ONLY input consumer. Under 'auto' there is no floor ref, so the
+  // release drops the refcount to 0 and disables raw mode — back to cooked.
+  showInput.value = false;
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
+
+  // Teardown must not re-toggle (raw mode is already cooked).
+  app.unmount();
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
+});
+
+// B11 — the same lazy release is driven by useInput's isActive gate (not just by
+// unmount). Setting isActive false detaches (releaseRawMode → cooked); flipping it
+// back true re-attaches (acquireRawMode → raw). This is the per-consumer gating Ink
+// exposes via the `isActive` option (use-input.ts), still live under 'auto'.
+test("rawMode 'auto': useInput isActive=false releases raw mode, true re-acquires (Ink lazy)", async () => {
+  const active = shallowRef(true);
+  const App = defineComponent(() => {
+    useInput(() => {}, { isActive: () => active.value });
+    return () => <Text>listening</Text>;
+  });
+
+  const stdout = makeFakeWritable();
+  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  // Active on mount → raw acquired once.
+  expect(setRawModeCalls).toEqual([true]);
+  expect(refCount()).toBe(1);
+
+  // Deactivate → detach releases raw mode (cooked).
+  active.value = false;
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
+
+  // Reactivate → re-attach re-acquires raw mode.
+  active.value = true;
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false, true]);
+  expect(refCount()).toBe(1);
+
+  app.unmount();
+  await settle();
+  expect(setRawModeCalls).toEqual([true, false, true, false]);
+  expect(refCount()).toBe(0);
+});
+
 // rawMode 'always': raw mode must NOT drop when an input component unmounts
 // mid-session — the app's lifetime ref holds the floor at 1, so there is no
 // cooked-mode oscillation as the user navigates between input and no-input

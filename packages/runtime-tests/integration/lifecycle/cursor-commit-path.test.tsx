@@ -309,6 +309,68 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     }
   });
 
+  test("a child useCursor unmount emits the cursor-HIDE escape (show -> hide ordering)", async () => {
+    // B19 (Ink parity, use-cursor.ts:29-31): when a `useCursor` child unmounts,
+    // its onScopeDispose runs ctx.setCursorPosition(undefined) — exactly Ink's
+    // useInsertionEffect cleanup `context.setCursorPosition(undefined)`. That
+    // marks log-update cursorDirty with an undefined position. On the NEXT
+    // commit, the frame changed (child swapped to a no-cursor branch) so render()
+    // takes the `else` branch and writes buildReturnToBottomPrefix(cursorWasShown:
+    // true, ...) — which begins with hideCursorEscape (`\x1b[?25l`). So the cursor
+    // that was SHOWN at the child's position must be HIDDEN when the owner unmounts.
+    //
+    // This is observable only at the interactive stream level: the debug render()
+    // helper has FrameWriter.log === null, so log-update (and its cursor escapes)
+    // never runs. We capture raw stdout write chunks (Ink's getWriteCalls pattern).
+    const showChild = shallowRef(true);
+    const CursorChild = defineComponent(() => {
+      const { setCursorPosition } = useCursor();
+      return () => {
+        // Distinct cursor column so the SHOW is unambiguous: x=5 -> cursorTo(5).
+        setCursorPosition({ x: 5, y: 0 });
+        return <Text>child</Text>;
+      };
+    });
+    const HostApp = defineComponent(() => {
+      return () => <Box>{showChild.value ? <CursorChild /> : <Text>no cursor here</Text>}</Box>;
+    });
+
+    const { stream: stdout, writes } = makeTtyStdout();
+    const stdin = makeTtyStdin();
+
+    const app = createApp(HostApp);
+    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    await app.waitUntilRenderFlush();
+
+    // While the child is mounted the cursor is SHOWN at its position (x=5).
+    const beforeUnmount = writes.join("");
+    expect(beforeUnmount).toContain(showCursorEscape);
+    expect(beforeUnmount).toContain(cursorTo(5));
+    // The last visibility change so far is a SHOW (the active cursor).
+    expect(beforeUnmount.lastIndexOf(showCursorEscape)).toBeGreaterThan(
+      beforeUnmount.lastIndexOf(hideCursorEscape),
+    );
+
+    // Unmount the cursor owner. onScopeDispose -> setCursorPosition(undefined);
+    // the next commit must HIDE the previously-shown cursor.
+    const writesBeforeUnmount = writes.length;
+    showChild.value = false;
+    await nextTick();
+    await app.waitUntilRenderFlush();
+
+    // A HIDE escape must have been emitted on the unmount commit, and it must be
+    // the LAST visibility change (the cursor is now gone — not re-shown).
+    const unmountWrites = writes.slice(writesBeforeUnmount).join("");
+    expect(unmountWrites).toContain(hideCursorEscape);
+
+    const fullOutput = writes.join("");
+    expect(fullOutput.lastIndexOf(hideCursorEscape)).toBeGreaterThan(
+      fullOutput.lastIndexOf(showCursorEscape),
+    );
+
+    app.unmount();
+  });
+
   test("a synchronous mount throw rethrows the ORIGINAL error even if cursor-restore also throws", async () => {
     // DEFECT 2b (Codex review): the mount path tears down on a synchronous
     // throw to re-show the cursor, but teardown's restore (mountedWriter.done()
