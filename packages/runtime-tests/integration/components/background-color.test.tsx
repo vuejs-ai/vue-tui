@@ -1,7 +1,7 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
+import { Box, Text, renderToString } from "@vue-tui/runtime";
 
 const BG_BLUE = "\x1b[44m";
 const BG_CYAN = "\x1b[46m";
@@ -676,4 +676,301 @@ test("foreground, background and dim combine correctly", async ({ expect }) => {
   const topLine = output.split("\n")[0]!;
   expect(topLine).toContain("\x1b[2m\x1b[46m\x1b[31m");
   expect(topLine).toContain("\x1b[39m\x1b[49m\x1b[22m");
+});
+
+// --- A12: chalk-modifier-name backgroundColor aligns to Ink's throw ---
+//
+// Ink colorize.ts (commit 40b3a75): for a BACKGROUND, `isNamedColor(color)`
+// (`color in chalk`) is true for a chalk MODIFIER name ("bold","dim","italic",
+// "underline","inverse","hidden","strikethrough",…), so it builds
+// methodName = `bg${Capitalize(color)}` and calls `chalk[methodName]` — which is
+// undefined for a modifier (chalk has no `bgBold`/`bgDim`/…) — and THROWS
+// "chalk.bgBold is not a function". A chalk COLOR name resolves to a real `bg*`
+// method and works; a string NOT in chalk falls through to bare text (no throw);
+// foreground `color="bold"` resolves `chalk.bold` (a real fn) and bolds (no throw).
+// border<Edge>BackgroundColor route through the same colorize('background') in
+// render-border.ts stylePiece, so Ink throws there too. vue-tui must validate
+// during component RENDER (so the throw lands in the error boundary, not the
+// post-flush paint where it would wedge Vue's scheduler — cf. the borderStyle fix #124).
+
+const BG_MODIFIER_NAMES = [
+  "bold",
+  "dim",
+  "italic",
+  "underline",
+  "inverse",
+  "hidden",
+  "strikethrough",
+  "reset",
+  "overline",
+] as const;
+
+for (const modifier of BG_MODIFIER_NAMES) {
+  test(`<Box backgroundColor="${modifier}"> (chalk modifier name) throws (Ink parity)`, async ({
+    expect,
+  }) => {
+    await expect(
+      render(
+        defineComponent(() => () => (
+          <Box backgroundColor={modifier} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/backgroundColor/i);
+  });
+
+  test(`<Text backgroundColor="${modifier}"> (chalk modifier name) throws (Ink parity)`, async ({
+    expect,
+  }) => {
+    await expect(
+      render(
+        defineComponent(() => () => <Text backgroundColor={modifier}>Hi</Text>),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/backgroundColor/i);
+  });
+
+  test(`<Box borderBackgroundColor="${modifier}"> (chalk modifier name) throws (Ink parity)`, async ({
+    expect,
+  }) => {
+    await expect(
+      render(
+        defineComponent(() => () => (
+          <Box borderStyle="single" borderBackgroundColor={modifier} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/backgroundColor/i);
+  });
+}
+
+// Per-edge border backgrounds route through the same colorize('background') in
+// Ink's render-border.ts stylePiece, so a modifier name on any edge throws too.
+for (const edgeProp of [
+  "borderTopBackgroundColor",
+  "borderBottomBackgroundColor",
+  "borderLeftBackgroundColor",
+  "borderRightBackgroundColor",
+] as const) {
+  test(`<Box ${edgeProp}="dim"> (chalk modifier name) throws (Ink parity)`, async ({ expect }) => {
+    await expect(
+      render(
+        defineComponent(() => () => (
+          <Box borderStyle="single" {...{ [edgeProp]: "dim" }} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/backgroundColor/i);
+  });
+}
+
+// MUST NOT throw: a chalk COLOR name has a real `bg*` method and works.
+test("backgroundColor of a real color name (a bg* method exists) does NOT throw", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="blackBright" alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toContain("Hi");
+});
+
+// MUST NOT throw: a string NOT in chalk falls through to bare text in Ink (no
+// throw). vue-tui keeps that degrade — only the in-chalk modifier names throw.
+test("backgroundColor of an unknown non-chalk string degrades to bare text (no throw)", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box backgroundColor="not-a-real-color" alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // No SGR background codes, just bare text.
+  expect(lastFrame()).toBe("Hi");
+});
+
+// MUST NOT throw: hex / ansi256 / rgb / [r,g,b] backgrounds are valid forms.
+test("backgroundColor hex / ansi256 / rgb / [r,g,b] do NOT throw", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column" alignSelf="flex-start">
+        <Box backgroundColor="#00ff00">
+          <Text>A</Text>
+        </Box>
+        <Box backgroundColor="ansi256(9)">
+          <Text>B</Text>
+        </Box>
+        <Box backgroundColor="rgb(1, 2, 3)">
+          <Text>C</Text>
+        </Box>
+        <Box backgroundColor={[4, 5, 6]}>
+          <Text>D</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const out = lastFrame()!;
+  expect(out).toContain("A");
+  expect(out).toContain("D");
+});
+
+// MUST NOT throw: foreground `color="bold"` resolves `chalk.bold` (a real fn) and
+// applies the modifier — Ink works here (no throw), and vue-tui must match.
+test('foreground color="bold" (a chalk modifier) bolds, does NOT throw', async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box alignSelf="flex-start">
+        <Text color="bold">Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // chalk.bold => ESC[1m … ESC[22m
+  expect(lastFrame()).toContain("\x1b[1m");
+});
+
+// --- A12 gating: vue must throw WHERE Ink colorizes, and NOT elsewhere ---
+//
+// Ink throws on a chalk-modifier-name bg LAZILY — only when it actually
+// colorizes a rendered piece (render-border.ts gates on `borderStyle` truthy +
+// the edge being DRAWN and uses `border<Edge>BackgroundColor ?? borderBackgroundColor`;
+// render-background/Text skip empty/hidden nodes). vue-tui's component-render
+// validation must mirror those gates, or it OVER-THROWS where Ink renders fine.
+// These pin the now-correct NON-throwing cases (RED before the gating fix).
+
+// No borderStyle → render-border.ts:28 gate is false → no border colorize at all.
+// So a modifier-name borderBackgroundColor with NO borderStyle must NOT throw.
+test("borderBackgroundColor modifier name with NO borderStyle does NOT throw (Ink: gate off)", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderBackgroundColor="bold" alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // No border is drawn (no borderStyle); the bg is never colorized.
+  expect(lastFrame()).toContain("Hi");
+});
+
+// A per-edge modifier-name bg on a DISABLED edge must NOT throw: Ink only
+// colorizes the edge when it is drawn (`border<Edge> !== false`). Here the top
+// edge is disabled, so its bg never reaches colorize.
+test("borderTopBackgroundColor modifier name on a DISABLED top edge does NOT throw (Ink: edge not drawn)", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle="single"
+        borderTop={false}
+        borderTopBackgroundColor="bold"
+        alignSelf="flex-start"
+        width={8}
+        height={3}
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Top edge not drawn → its modifier-name bg never colorized → no throw.
+  expect(lastFrame()).toContain("Hi");
+});
+
+// A bad GENERAL borderBackgroundColor is harmless if every DRAWN edge overrides
+// it with a valid per-edge value: in Ink the general value is only the fallback
+// (`border<Edge>BackgroundColor ?? borderBackgroundColor`), so when all four
+// edges supply a valid override the general value never reaches colorize.
+test("bad general borderBackgroundColor with valid per-edge on every drawn edge does NOT throw", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle="single"
+        borderBackgroundColor="bold"
+        borderTopBackgroundColor="blue"
+        borderBottomBackgroundColor="blue"
+        borderLeftBackgroundColor="blue"
+        borderRightBackgroundColor="blue"
+        alignSelf="flex-start"
+        width={8}
+        height={3}
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Every drawn edge resolves to a valid "blue"; the bad general value is never used.
+  expect(lastFrame()).toContain("Hi");
+});
+
+// Empty <Text backgroundColor="bold">{""}</Text>: Ink's Text returns null for
+// empty children BEFORE attaching its colorizing transform, so colorize never
+// runs. vue-tui validates AFTER the empty early-return, so this must NOT throw.
+test('empty <Text backgroundColor="bold">{""}</Text> does NOT throw (Ink: returns null first)', async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box alignSelf="flex-start">
+        <Text backgroundColor="bold">{""}</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // Empty text renders nothing and never colorizes.
+  expect(lastFrame()).toBe("");
+});
+
+// A screen-reader-hidden <Box> / <Text> with a modifier-name bg must NOT throw:
+// Ink emits no node for an aria-hidden element under a screen reader, so it
+// never colorizes. vue-tui validates AFTER the screen-reader-hidden early-return.
+// Uses renderToString (which supports isScreenReaderEnabled) — a throw during
+// render would propagate out of renderToString, so `not.toThrow` pins the fix.
+test("screen-reader-hidden Box with modifier-name backgroundColor does NOT throw", ({ expect }) => {
+  const App = defineComponent(() => () => (
+    <Box ariaHidden backgroundColor="bold" alignSelf="flex-start">
+      <Text>secret</Text>
+    </Box>
+  ));
+  let out = "<unset>";
+  expect(() => {
+    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+  }).not.toThrow();
+  // Hidden from the screen reader → not rendered → bg never colorized → no throw.
+  expect(out).not.toContain("secret");
+});
+
+// And the hidden <Text> variant: a screen-reader-hidden Text with a modifier-name
+// bg also returns null before colorize, so it must NOT throw either.
+test("screen-reader-hidden Text with modifier-name backgroundColor does NOT throw", ({
+  expect,
+}) => {
+  const App = defineComponent(() => () => (
+    <Box alignSelf="flex-start">
+      <Text ariaHidden backgroundColor="bold">
+        secret
+      </Text>
+    </Box>
+  ));
+  expect(() => renderToString(App, { columns: 100, isScreenReaderEnabled: true })).not.toThrow();
 });

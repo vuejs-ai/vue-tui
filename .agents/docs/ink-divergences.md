@@ -175,18 +175,6 @@ false` to handle Ctrl+C itself: under the lazy model its opt-out is silently
   tuple. The tuple is part of the typed surface (not a TS-bypass), so it's a supported input,
   not undefined behavior. Tested.
 
-### `backgroundColor` of a chalk modifier name degrades to bare text
-
-- **Ink:** `backgroundColor='bold'` (any chalk **modifier** name, not a color) resolves
-  `isNamedColor('bold')` true (`'bold' in chalk`), then calls `chalk['bgBold']` — which doesn't
-  exist — and **throws** ("chalk.bgBold is not a function").
-- **vue-tui:** `applyColor`'s `typeof named === 'function'` guard sees `chalk['bgBold']` is
-  `undefined`, falls through `#`/`ansi256`/`rgb` (all non-matching), and returns the text
-  **unstyled** — no SGR, no throw.
-- **Why:** same fallback policy vue already applies to an unparseable `ansi256(...)`/`rgb(...)`
-  string ("no match → bare text"). A non-color background name is junk input; degrading to bare
-  text is more robust than crashing the render. Additive robustness.
-
 ### `useAnimation()` outside a render tree drives a real standalone animation
 
 - **Ink:** the default `AnimationContext.subscribe()` is a no-op (`{startTime: 0,
