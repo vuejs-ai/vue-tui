@@ -35,15 +35,24 @@ const visibleLineCount = (lines: string[], str: string): number =>
 // `isTTY`, so we read it off the runtime object (WriteStream sets it).
 const isTtyStream = (stream: Writable): boolean => Boolean((stream as { isTTY?: boolean }).isTTY);
 
+// The show-cursor restore at done() runs on the teardown path, where stdout may
+// already be destroyed/ended. `isTTY` stays cached-truthy after destroy()/end(),
+// so gating cursor writes on isTTY alone throws ERR_STREAM_DESTROYED on a
+// teardown where the terminal is already gone. Mirror Ink's `canWriteToStdout =
+// !destroyed && !writableEnded` guard (App.tsx:620-624, the cursor-show on
+// unmount) so a TTY-gated cursor write is also skipped on a dead stream.
+const canWriteToStream = (stream: Writable): boolean =>
+  !stream.destroyed && !(stream as { writableEnded?: boolean }).writableEnded;
+
 const hideCursor = (stream: Writable): void => {
-  if (!isTtyStream(stream)) {
+  if (!isTtyStream(stream) || !canWriteToStream(stream)) {
     return;
   }
   stream.write(hideCursorEscape);
 };
 
 const showCursor = (stream: Writable): void => {
-  if (!isTtyStream(stream)) {
+  if (!isTtyStream(stream) || !canWriteToStream(stream)) {
     return;
   }
   stream.write(showCursorEscape);
