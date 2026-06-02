@@ -19,3 +19,4 @@ export {
   resolveFlags,
   type KittyKeyboardController,
 } from "./io/kitty-keyboard.ts";
+export { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
