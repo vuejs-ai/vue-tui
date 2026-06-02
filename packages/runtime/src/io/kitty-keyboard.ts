@@ -221,7 +221,12 @@ export function createKittyKeyboardController(
           } catch {
             // Best-effort restore during abrupt shutdown.
           }
-        } else {
+        } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
+          // Skip the disable-kitty write on a destroyed/ended stdout: `isTTY`
+          // stays cached-truthy after destroy()/end(), so an unguarded write on
+          // a teardown where stdout is already gone throws ERR_STREAM_DESTROYED.
+          // Mirror Ink's `if (canWriteToStdout) writeBestEffort(stdout,
+          // '[<u')` (ink.tsx:792-795).
           stdout.write("\x1b[<u");
         }
         enabled = false;
