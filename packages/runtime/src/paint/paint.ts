@@ -472,6 +472,12 @@ function drawBorder(
     typeof style === "string"
       ? (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[style]
       : style;
+  // Defensive internal fallback: an unknown borderStyle name has no entry in
+  // cliBoxes, so silently draw no border rather than throw. This is unreachable
+  // via the public API — the Box component validates an unknown non-empty
+  // borderStyle string during render and throws there (caught by vue-tui's error
+  // boundary), so paint never sees an invalid name. A raw throw HERE would unwind
+  // through Vue's post-flush commit and wedge its internal flush state. (audit 2.3)
   if (!chars) return;
   // No blanket min-size guard here — each edge is drawn independently when it is
   // visible and its run length is ≥ 1. This matches Ink's render-border.ts which
