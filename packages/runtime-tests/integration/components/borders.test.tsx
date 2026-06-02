@@ -1385,6 +1385,141 @@ test("G16: per-edge borderDimColor=false overrides general borderDimColor", asyn
   expect(bottomLine).toContain("[2m");
 });
 
+// audit 2.3 — an UNKNOWN borderStyle string THROWS (Ink parity), rather than
+// silently degrading to no border (the old vue-tui behavior, which also wrongly
+// reserved a 1-cell inset). Ink's render-border.ts has no existence check: it
+// reads box.topLeft/box.top off `cliBoxes[name]` === undefined and crashes with a
+// TypeError. We align by throwing a clear, descriptive Error — but do it in the
+// Box component's RENDER (Box.ts), so the throw is caught by vue-tui's existing
+// error boundary (onErrorCaptured → ErrorOverview → exit), exactly like any other
+// component render error. paint.ts stays a silent `if (!chars) return` fallback
+// (a raw throw in the post-flush commit would wedge Vue's scheduler).
+//
+// OBSERVED behavior: the error boundary routes the thrown Error through exit(),
+// which REJECTS waitUntilExit(); @vue-tui/testing's render() surfaces that
+// rejection (its earlyError detector rethrows before returning a result), so
+// render() itself REJECTS with the message. The ErrorOverview frame is rendered
+// internally but never reaches the caller — render() never resolves a result.
+// (TS-bypass via `as any`: the public prop type is the cli-boxes keyof union, so
+// an unknown name is reachable only by escaping the type system.)
+test("UNKNOWN borderStyle throws (Ink parity)", async ({ expect }) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Box borderStyle={"definitely-not-a-real-style" as any} alignSelf="flex-start">
+          <Text>Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/Unknown borderStyle/);
+});
+
+// A bare `in cliBoxes` membership check has two false-accept holes that these
+// guard against:
+//   1. cli-boxes' CJS-interop `default` self-key — `"default" in cliBoxes` is true,
+//      but cliBoxes.default is the WHOLE boxes object, not a BoxStyle (no string
+//      `.top`). Paint would then read `.top`/`.topLeft` off it → garbage/crash.
+//   2. `in` walks the prototype chain, so Object.prototype members like
+//      "toString"/"constructor"/"hasOwnProperty" report as "in cliBoxes" while
+//      resolving to a function/undefined — never a real BoxStyle.
+// A shape check (resolved value is an object with a string `top`) rejects all of
+// these. Each name must THROW exactly like any other unknown style.
+for (const badName of ["default", "toString", "constructor", "hasOwnProperty"]) {
+  test(`borderStyle ${JSON.stringify(badName)} (in-cliBoxes false-accept) throws`, async ({
+    expect,
+  }) => {
+    await expect(
+      render(
+        defineComponent(() => () => (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          <Box borderStyle={badName as any} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/Unknown borderStyle/);
+  });
+}
+
+// Guard the negative cases that MUST NOT throw — only a non-empty unknown STRING
+// does. The Box-render check skips any falsy borderStyle (false/undefined/"" =
+// "no border"), every valid cli-boxes preset name, and a custom BoxStyle OBJECT
+// (Ink types borderStyle as `keyof Boxes | BoxStyle`). We assert each renders
+// normally (no rejection from render()) and that a valid style/object actually
+// draws border glyphs while a falsy one draws none. (`false` is reachable only
+// via a TS-bypass — Ink's type has no `false`.)
+test("non-throwing borderStyle (false/undefined/valid/object) renders normally", async ({
+  expect,
+}) => {
+  const falseResult = await render(
+    defineComponent(() => () => (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      <Box borderStyle={false as any} alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const falseFrame = stripAnsi(falseResult.lastFrame()!);
+  expect(falseFrame).toContain("Hi");
+  // No box-drawing glyphs of any border style appear.
+  expect(falseFrame).not.toMatch(/[╭╮╰╯─│┌┐└┘╔╗╚╝═║↘↗↖↙]/);
+
+  const undefinedResult = await render(
+    defineComponent(() => () => (
+      <Box borderStyle={undefined} alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const undefinedFrame = stripAnsi(undefinedResult.lastFrame()!);
+  expect(undefinedFrame).toContain("Hi");
+  expect(undefinedFrame).not.toMatch(/[╭╮╰╯─│┌┐└┘╔╗╚╝═║↘↗↖↙]/);
+
+  // A valid preset name renders its border (here `round` → ╭╮╰╯), no throw.
+  const validResult = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="round" alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const validFrame = stripAnsi(validResult.lastFrame()!);
+  expect(validFrame).toContain("Hi");
+  expect(validFrame).toMatch(/[╭╮╰╯]/);
+
+  // A custom BoxStyle OBJECT is valid (Ink parity G13) and must NOT throw — the
+  // check only fires for an unknown STRING. The object's own glyphs render.
+  const customStyle = {
+    topLeft: "A",
+    top: "B",
+    topRight: "C",
+    left: "D",
+    right: "E",
+    bottomLeft: "F",
+    bottom: "G",
+    bottomRight: "H",
+  };
+  const objectResult = await render(
+    defineComponent(() => () => (
+      <Box borderStyle={customStyle} alignSelf="flex-start">
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const objectFrame = stripAnsi(objectResult.lastFrame()!);
+  expect(objectFrame).toContain("Hi");
+  // Corner glyphs from the custom object are drawn.
+  expect(objectFrame).toContain("A");
+  expect(objectFrame).toContain("H");
+});
+
 // borderDimColor should not dim styled child Text touching left edge
 test("borderDimColor does not dim styled child Text touching left edge", async ({ expect }) => {
   const { lastFrame } = await render(

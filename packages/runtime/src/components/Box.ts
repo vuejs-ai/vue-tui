@@ -1,5 +1,5 @@
 import { defineComponent, h, inject, type ExtractPublicPropTypes, type PropType } from "vue";
-import type cliBoxes from "cli-boxes";
+import cliBoxes from "cli-boxes";
 import { AppContextKey } from "../context.ts";
 import type { WithChildren } from "./with-children.ts";
 
@@ -168,6 +168,44 @@ const BoxImpl = defineComponent({
       // When screen reader is enabled and aria-hidden is set, render nothing.
       if (isScreenReaderEnabled && props.ariaHidden) {
         return null;
+      }
+
+      // Validate borderStyle during RENDER so an unknown name is caught by
+      // vue-tui's error boundary (onErrorCaptured → ErrorOverview), exactly like
+      // any other component render error. Ink crashes on an unknown borderStyle
+      // with a raw TypeError during paint (render-border.ts reads box.topLeft off
+      // cliBoxes[name] === undefined); we align to that "throw on unknown" contract
+      // but do it here rather than in paint, where a throw would unwind through
+      // Vue's post-flush commit and wedge its scheduler. Only a NON-EMPTY unknown
+      // STRING throws: a falsy value (false/undefined/"" = no border) and a custom
+      // BoxStyle OBJECT are both valid and pass through. (audit 2.3)
+      // `borderStyle.length > 0` (not `!== ""`): once `typeof === "string"` narrows
+      // the prop to the BorderStyle keyof union, an `!== ""` literal comparison has
+      // "no overlap" per TS (the union has no `""` member). The empty string is only
+      // reachable via a TS-bypass; `.length > 0` excludes it without tripping that.
+      //
+      // We validate the RESOLVED box has a real BoxStyle SHAPE rather than testing
+      // `borderStyle in cliBoxes`, because `in` has two false-accept holes that let
+      // a non-box value reach paint (which then reads `.top`/`.topLeft` glyph
+      // strings off it):
+      //   1. cli-boxes' default export carries a CJS-interop `default` self-key, so
+      //      `"default" in cliBoxes` is true — but cliBoxes.default is the WHOLE
+      //      boxes object, not a BoxStyle (it has no string `top`).
+      //   2. `in` walks the prototype chain, so Object.prototype members
+      //      ("toString", "constructor", "hasOwnProperty", …) report as "in
+      //      cliBoxes" while resolving to a function/undefined — never a BoxStyle.
+      // Resolving `cliBoxes[name]` and requiring an object with a string `top`
+      // rejects unknown names (undefined), "default" (whole object, no string
+      // `top`), and inherited props, while accepting every real preset.
+      const borderStyle = props.borderStyle;
+      if (typeof borderStyle === "string" && borderStyle.length > 0) {
+        // Cast via `unknown` to add a string index signature: cliBoxes is typed as
+        // the `Boxes` keyof object (no index signature), so a direct cast is a TS2352
+        // "insufficient overlap" error. Same cast paint.ts uses to look up by name.
+        const resolved = (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[borderStyle];
+        if (typeof resolved !== "object" || resolved === null || typeof resolved.top !== "string") {
+          throw new Error(`Unknown borderStyle: ${JSON.stringify(borderStyle)}`);
+        }
       }
 
       const ariaLabel = props.ariaLabel;
