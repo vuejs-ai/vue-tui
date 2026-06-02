@@ -597,6 +597,59 @@ describe("useAnimation", () => {
     unmount();
   });
 
+  // B20: a zero interval must not busy-hang the scheduler — the animation keeps
+  // ADVANCING (and real wall-clock time progresses) over a short window rather
+  // than spinning forever or stalling. This is the observable end-to-end
+  // guarantee ONLY: it deliberately makes NO claim about the exact cadence. The
+  // exact `Math.max(1, 0) === 1` clamp is pinned directly in the scheduler unit
+  // test (packages/runtime-tests/unit/animation-scheduler.sequential.test.ts —
+  // normalizeInterval), which is the discriminating guard against the clamp
+  // regressing (e.g. to 30ms); a "frame > 1 after 60ms" assertion here cannot
+  // tell 1ms from 30ms apart, so we do not assert it.
+  test("interval 0 advances frames without busy-hanging (no cadence claim)", async () => {
+    let frameVal = 0;
+    let timeVal = 0;
+    const App = defineComponent(() => {
+      const { frame, time } = useAnimation({ interval: 0 });
+      watchEffect(() => {
+        frameVal = frame.value;
+        timeVal = time.value;
+      });
+      return () => <Text>{String(frame.value)}</Text>;
+    });
+    const { unmount } = await render(App);
+    // If 0 were NOT clamped to a positive delay, the scheduler would either
+    // busy-loop (never yielding) or never settle and this test would hang/time
+    // out. Reaching the assertions at all proves it did neither.
+    await delay(60);
+    // The animation advanced (made real progress) ...
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+    // ... and real wall-clock time progressed.
+    expect(timeVal).toBeGreaterThan(0);
+    unmount();
+  });
+
+  // B20: a negative interval must ALSO not busy-hang — same observable
+  // advances/no-hang guarantee as interval 0. The exact `Math.max(1, -5) === 1`
+  // clamp is pinned in the scheduler unit test (normalizeInterval), not here.
+  test("negative interval (-5) advances frames without busy-hanging (no cadence claim)", async () => {
+    let frameVal = 0;
+    let timeVal = 0;
+    const App = defineComponent(() => {
+      const { frame, time } = useAnimation({ interval: -5 });
+      watchEffect(() => {
+        frameVal = frame.value;
+        timeVal = time.value;
+      });
+      return () => <Text>{String(frame.value)}</Text>;
+    });
+    const { unmount } = await render(App);
+    await delay(60);
+    expect(frameVal).toBeGreaterThanOrEqual(1);
+    expect(timeVal).toBeGreaterThan(0);
+    unmount();
+  });
+
   // -- Behavior over real time (migrated from fake-timer tests) --
   // Timer-precision and exact-frame assertions now live in the scheduler
   // unit tests (packages/runtime-tests/unit/animation-scheduler.test.ts).

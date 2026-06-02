@@ -16,6 +16,11 @@ import {
   useStdin,
   useStdout,
   useStderr,
+  useCursor,
+  usePaste,
+  useTerminalSize,
+  useAnimation,
+  useBoxMetrics,
 } from "@vue-tui/runtime";
 
 describe("renderToString", () => {
@@ -636,5 +641,103 @@ describe("renderToString", () => {
     ));
     // "[hi]" glyphs are RAW (no bg SGR); only the trailing Box-fill padding is green.
     expect(renderToString(App, { columns: 100 })).toBe("[hi]" + chalk.bgGreen("      "));
+  });
+
+  // ── B29: renderToString serves the TERMINAL composables with inert no-op
+  // contexts ──────────────────────────────────────────────────────────────
+  //
+  // renderToString runs with NO terminal session: it provides no-op AppContext +
+  // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
+  // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
+  // useStdout/useStderr. These pin the remaining terminal composables —
+  // useCursor, usePaste, useTerminalSize, useAnimation, useBoxMetrics — so that
+  // rendering a component which CALLS them degrades to inert values instead of
+  // throwing (they must still return a string).
+  describe("terminal composables degrade to no-ops (do not throw)", () => {
+    test("useCursor does not throw in renderToString", () => {
+      const App = defineComponent(() => {
+        // setCursorPosition forwards to the no-op AppContext.setCursorPosition.
+        const { setCursorPosition } = useCursor();
+        setCursorPosition({ x: 2, y: 0 });
+        return () => <Text>with cursor</Text>;
+      });
+      const output = renderToString(App);
+      expect(output).toBe("with cursor");
+    });
+
+    test("usePaste does not throw in renderToString", () => {
+      let pasted = "";
+      const App = defineComponent(() => {
+        // usePaste injects StdinContext (no-op here) and attaches to its
+        // internal_eventEmitter — no terminal session, so the handler never fires.
+        usePaste((text) => {
+          pasted = text;
+        });
+        return () => <Text>with paste</Text>;
+      });
+      const output = renderToString(App);
+      expect(output).toBe("with paste");
+      // The no-op stdin never emits a paste, so the handler stayed inert.
+      expect(pasted).toBe("");
+    });
+
+    test("useTerminalSize does not throw in renderToString", () => {
+      const App = defineComponent(() => {
+        // Resolves dimensions from ctx.stdout (process.stdout in the no-op
+        // context) with the terminal-size fallback; never throws.
+        const { columns, rows } = useTerminalSize();
+        return () => <Text>size {columns.value > 0 && rows.value > 0 ? "ok" : "fallback"}</Text>;
+      });
+      const output = renderToString(App);
+      expect(output).toContain("size");
+    });
+
+    test("useAnimation does not throw in renderToString (frame frozen at 0)", () => {
+      const App = defineComponent(() => {
+        // The no-op AnimationScheduler never ticks, so frame stays 0 and no timer
+        // leaks (subscribe returns an inert unsubscribe).
+        const { frame } = useAnimation({ interval: 50 });
+        return () => <Text>{`frame:${frame.value}`}</Text>;
+      });
+      const output = renderToString(App);
+      expect(output).toBe("frame:0");
+    });
+
+    test("useBoxMetrics does not throw in renderToString", () => {
+      const App = defineComponent(() => {
+        // useBoxMetrics tracks a Box ref via the root layout listener. In the
+        // synchronous renderToString teardown the post-flush measurement may not
+        // have run, so hasMeasured can still be false — the point is it must NOT
+        // throw and the frame must still render.
+        const boxRef = shallowRef(null);
+        const { hasMeasured } = useBoxMetrics(boxRef);
+        return () => (
+          <Box ref={boxRef}>
+            <Text>{hasMeasured.value ? "measured" : "metrics"}</Text>
+          </Box>
+        );
+      });
+      const output = renderToString(App, { columns: 40 });
+      expect(output).toContain("metrics");
+    });
+
+    test("all five terminal composables together render to a string without throwing", () => {
+      const App = defineComponent(() => {
+        const { setCursorPosition } = useCursor();
+        setCursorPosition({ x: 1, y: 0 });
+        usePaste(() => {});
+        useTerminalSize();
+        const { frame } = useAnimation({ interval: 30 });
+        const boxRef = shallowRef(null);
+        useBoxMetrics(boxRef);
+        return () => (
+          <Box ref={boxRef}>
+            <Text>{`all:${frame.value}`}</Text>
+          </Box>
+        );
+      });
+      const output = renderToString(App, { columns: 40 });
+      expect(output).toContain("all:0");
+    });
   });
 });

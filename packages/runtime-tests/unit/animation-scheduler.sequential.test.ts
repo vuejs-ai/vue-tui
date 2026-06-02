@@ -14,6 +14,7 @@ describe.sequential("normalizeInterval", () => {
   test("clamps and defaults", () => {
     expect(normalizeInterval(50)).toBe(50);
     expect(normalizeInterval(0)).toBe(1);
+    expect(normalizeInterval(-5)).toBe(1);
     expect(normalizeInterval(-10)).toBe(1);
     expect(normalizeInterval(undefined)).toBe(100);
     expect(normalizeInterval(Number.NaN)).toBe(100);
