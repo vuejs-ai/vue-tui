@@ -1,6 +1,7 @@
 import { PassThrough } from "node:stream";
 import { nextTick, type Component } from "vue";
 import { createApp, type TuiApp } from "@vue-tui/runtime";
+import { INTERNAL_FRAME_SINK, type FrameSink } from "@vue-tui/runtime/internal";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackApp } from "./cleanup.ts";
 
@@ -57,16 +58,45 @@ export async function render(
   });
   const { stream: stdin, rawMode } = makeFakeStdin();
 
+  // Capture committed frames via the runtime's internal per-app frame SINK
+  // (@vue-tui/runtime/internal: INTERNAL_FRAME_SINK), NOT by reverse-engineering
+  // them out of stdout. The runtime's debug commit branch invokes this callback
+  // with the EXACT content chunks it writes to stdout — the accumulated <Static>
+  // history chunk (when non-empty), then the dynamic frame — in write order, and
+  // the debug writeToStdout/writeToStderr branches forward their replayed-frame
+  // bytes too. Terminal-control escapes the runtime writes to stay byte-faithful
+  // to Ink (bracketed-paste `\x1b[?2004h/l`, cursor hide/show, BSU/ESU) are NOT
+  // forwarded, so `frames[]` are provably content-only.
+  //
+  // Properties this preserves vs the old stdout-sniffing capture:
+  //   - EMPTY render is forwarded as "" (Ink-faithful: `fullStaticOutput +
+  //     output`, both "" — ink.tsx:558), so `frames.at(-1)` reads back "" after
+  //     rendering null and `lastFrame()` correctly returns "".
+  //   - VERBATIM content — NO trailing-newline stripping. The static-history
+  //     chunk stays "\n"-terminated; the dynamic-frame chunk has NO trailing
+  //     newline (output.ts:305-312), so a real blank trailing row (e.g. a height
+  //     4 box "AB\n\n\n") survives. `trimFrame` / `trimLines` handle display
+  //     trimming in `lastFrame()` instead.
+  //   - The flush WRITE BARRIER (`stdout.write("", () => ...)`) never reaches the
+  //     sink — barriers are pure stdout drain awaits, not commits — so they can't
+  //     clobber `lastFrame()`.
   const frames: string[] = [];
-  stdout.on("data", (chunk) => {
-    let raw = chunk.toString();
-    // Debug-mode frame writer appends "\n"; strip it so frame height matches yoga layout
-    if (raw.endsWith("\n")) raw = raw.slice(0, -1);
-    frames.push(raw);
-  });
+  const frameSink: FrameSink = (chunk) => {
+    frames.push(chunk);
+  };
 
   const app: TuiApp = createApp(component, options.props ?? undefined);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: options.exitOnCtrlC ?? false });
+  // The frame sink is passed via a Symbol-keyed INTERNAL option, kept off the
+  // public MountOptions type (Ink-faithful). Cast through `Parameters` to attach
+  // it without widening the public type.
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    debug: true,
+    exitOnCtrlC: options.exitOnCtrlC ?? false,
+    [INTERNAL_FRAME_SINK]: frameSink,
+  } as Parameters<TuiApp["mount"]>[0]);
 
   trackApp(app);
 
@@ -113,8 +143,11 @@ export async function render(
 
   return {
     lastFrame: (opts?: LastFrameOptions) => {
-      const f = frames.at(-1);
-      if (f === undefined) return undefined;
+      // An empty render is written (and so captured) as "", so `frames.at(-1)`
+      // reads back "" after rendering null — matching Ink. `?? ""` is a defensive
+      // floor for the (unreachable in practice) pre-first-render read; `render()`
+      // always flushes at least one render before returning.
+      const f = frames.at(-1) ?? "";
       if (opts?.raw) return f;
       if (opts?.trimLines)
         return f

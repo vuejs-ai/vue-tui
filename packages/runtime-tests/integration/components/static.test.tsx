@@ -338,9 +338,10 @@ test("render only new items in static output on final render", async () => {
 
   const { frames, unmount } = await render(App);
 
-  // Initial render — no items, should produce empty or near-empty output
+  // Initial render — no items: Ink writes `fullStaticOutput + output`, both ""
+  // here (ink.tsx:558), so the captured initial frame is the empty string.
   const initialFrame = frames.at(-1);
-  expect(initialFrame !== undefined).toBe(true);
+  expect(initialFrame).toBe("");
 
   items.value = ["A"];
   await nextTick();
@@ -679,7 +680,9 @@ test("Static overflows a non-wrapping two-Text row wider than the terminal (Ink 
   const staticFrame = frames.find((f) => f.includes("ABC") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   // Ink content-width output is exactly "ABCDEF" (Texts do not shrink/wrap here).
-  expect(staticFrame).toBe("ABCDEF");
+  // The captured static chunk is the "\n"-terminated `fullStaticOutput` (each
+  // static frame is joined as `frame + "\n"`, Ink-faithful — ink.tsx static path).
+  expect(staticFrame).toBe("ABCDEF\n");
 });
 
 // G64 (matches): plain wide TEXT must still WRAP to the terminal width, because
@@ -706,7 +709,8 @@ test("Static wraps a plain wide text to the terminal width (Ink parity, G64)", a
 
   const staticFrame = frames.find((f) => f.includes("ABCDE") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
-  expect(staticFrame).toBe("ABCDE\nFGHIJ");
+  // "\n"-terminated static chunk (`fullStaticOutput`), Ink-faithful.
+  expect(staticFrame).toBe("ABCDE\nFGHIJ\n");
 });
 
 // G64 (matches): a percent-width child wraps against the terminal-width
@@ -742,7 +746,8 @@ test("Static lays out percent-width children against the terminal width (Ink par
 
   const staticFrame = frames.find((f) => f.includes("HAL") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
-  expect(staticFrame).toBe("HALEND\nF");
+  // "\n"-terminated static chunk (`fullStaticOutput`), Ink-faithful.
+  expect(staticFrame).toBe("HALEND\nF\n");
 });
 
 test("Static items do not add blank lines to the dynamic frame", async () => {

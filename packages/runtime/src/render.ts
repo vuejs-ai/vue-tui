@@ -29,6 +29,7 @@ import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
+import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import {
   AppContextKey,
@@ -484,6 +485,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stderr = options.stderr ?? process.stderr;
     const debug = options.debug ?? false;
 
+    // Internal, test-only per-app frame sink (see io/frame-sink.ts). Read off a
+    // Symbol-keyed mount option so it never appears on the public MountOptions
+    // type (which stays Ink-faithful). Closure-captured here — no module-global
+    // state — so concurrent test files / multiple apps stay isolated. When set,
+    // the debug commit branch forwards the EXACT content chunks it writes to
+    // stdout (static-history chunk, then dynamic frame), MINUS escapes, so the
+    // testing helper's frames[] are provably content-only.
+    const frameSink = (options as { [INTERNAL_FRAME_SINK]?: FrameSink })[INTERNAL_FRAME_SINK];
+
     // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
     // already rendering to this stdout, warn on stderr and skip wiring a second
     // competing renderer. The second mount is a deliberate no-op: the caller
@@ -559,7 +569,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // clear()/write/restore on an already-torn-down renderer.
       if (teardownStarted) return;
       if (debug) {
-        stdout.write(data + frameState.fullStaticOutput + frameState.lastOutput);
+        const out = data + frameState.fullStaticOutput + frameState.lastOutput;
+        stdout.write(out);
+        // Forward the EXACT stdout bytes to the test-only sink. This is content
+        // (app data + replayed frame), not a terminal-control escape, so the
+        // testing helper's frames[] reproduce today's verbatim capture — only
+        // escapes are excluded under B′.
+        frameSink?.(out);
         return;
       }
       if (!interactive) {
@@ -582,7 +598,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (teardownStarted) return;
       if (debug) {
         stderr.write(data);
-        stdout.write(frameState.fullStaticOutput + frameState.lastOutput);
+        const replay = frameState.fullStaticOutput + frameState.lastOutput;
+        stdout.write(replay);
+        // Forward the replayed-frame stdout bytes to the test-only sink (content,
+        // not an escape). The stderr `data` is intentionally NOT forwarded: the
+        // old verbatim capture wrapped STDOUT only, so stderr never appeared in
+        // frames[]. Faithful B′ keeps frames[] = the stdout content stream.
+        frameSink?.(replay);
         return;
       }
       if (!interactive) {
@@ -872,19 +894,49 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
       if (debug) {
-        // Debug mode: write static output directly to stdout, then frame
-        // through the frame writer (which appends "\n" in debug mode).
-        // Clear the writer first so the frame is always emitted even when
-        // the dynamic content is unchanged (static output was written above
-        // as a separate chunk, so the test harness sees it separately).
-        if (hasStaticOutput) {
-          writer.clear();
-          stdout.write(staticOutput);
+        // Debug mode mirrors Ink's onRender debug branch (ink.tsx:550-558): its
+        // contract is "every update rendered as a separate, FULL output". Ink
+        // writes `this.fullStaticOutput + output` UNCONDITIONALLY on every render
+        // — the ENTIRE accumulated <Static> history (not just this commit's delta)
+        // prepended to the current dynamic frame, with NO equality short-circuit.
+        // Two fixes vs the old behavior, BOTH scoped to this debug branch only:
+        //   (a) re-emit the FULL accumulated history (frameState.fullStaticOutput,
+        //       accumulated at line 847-849) on every render, not just this
+        //       commit's static delta — Ink re-prints all static every render; and
+        //   (b) write straight to stdout, bypassing the FrameWriter, whose
+        //       `frame === lastFrame` dedup would swallow a byte-identical debug
+        //       rerender that Ink still emits.
+        // The static history and dynamic frame are written as two consecutive
+        // stdout.write calls: the byte stream reaching the terminal is identical
+        // to Ink's single `fullStaticOutput + output` write (stdout.write inserts
+        // no separator), while keeping the dynamic frame its own chunk so the
+        // @vue-tui/testing render() helper can still split frames (its `lastFrame`
+        // is the dynamic frame, `frames` distinguishes static from dynamic).
+        // The non-debug interactive path below is untouched — it keeps the
+        // per-commit static delta and the FrameWriter dedup (the correct,
+        // efficient live-render behavior).
+        if (frameState.fullStaticOutput !== "") {
+          stdout.write(frameState.fullStaticOutput);
+          // Forward the static-history chunk to the test-only frame sink in the
+          // SAME order it reaches stdout (static first, dynamic next), with the
+          // EXACT value written — so the testing helper's frames[] reproduce
+          // today's content faithfully, minus the escapes (which only go to
+          // stdout). No-op when no sink is registered (normal runs).
+          frameSink?.(frameState.fullStaticOutput);
         }
         frameState.lastOutput = frame;
         frameState.lastOutputToRender = frame;
         frameState.outputHeight = outputHeight;
-        writer.write(frame);
+        // Ink writes `fullStaticOutput + output` with NO trailing newline
+        // (ink.tsx:558; `output` is \n-joined and returned WITHOUT a trailing
+        // \n — output.ts:305-312). Writing `frame` (not `frame + "\n"`) makes
+        // the concatenation of these two stdout.write calls byte-identical to
+        // Ink's single write.
+        stdout.write(frame);
+        // Always forward the dynamic frame to the sink (mirrors the always-run
+        // stdout.write above). lastFrame() is the most recent dynamic frame; an
+        // empty render forwards "" so lastFrame() reads back "" (Ink-faithful).
+        frameSink?.(frame);
         if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
