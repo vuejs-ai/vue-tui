@@ -1,6 +1,7 @@
 import { defineComponent, h, inject, type ExtractPublicPropTypes, type PropType } from "vue";
 import cliBoxes from "cli-boxes";
 import { AppContextKey } from "../context.ts";
+import { assertValidBackgroundColor } from "../paint/text-style.ts";
 import type { WithChildren } from "./with-children.ts";
 
 type Spacing = number;
@@ -169,6 +170,84 @@ const BoxImpl = defineComponent({
       if (isScreenReaderEnabled && props.ariaHidden) {
         return null;
       }
+
+      // --- backgroundColor validation (A12) ---
+      //
+      // Validate the bg-style props during RENDER so a chalk-modifier name (the
+      // exact case Ink's colorize.ts throws on) is caught by vue-tui's error
+      // boundary, not the post-flush paint pass where a throw wedges Vue's
+      // scheduler (cf. the borderStyle fix #124). See assertValidBackgroundColor /
+      // Ink colorize.ts (40b3a75).
+      //
+      // Placed AFTER the screen-reader-hidden early-return to mirror Ink WHERE it
+      // throws: Ink's render-node-to-output never reaches render-background /
+      // render-border for a node it didn't emit, and a screen-reader-hidden Box
+      // emits nothing — so colorize never runs for it. Below, we additionally
+      // gate each value the way Ink's renderers do, so vue throws exactly where
+      // Ink would colorize, and not elsewhere.
+
+      // Box's OWN backgroundColor: Ink's render-background.ts only colorizes when
+      // the resolved content area is > 0 (after subtracting drawn borders); it
+      // bails early otherwise. We can't know the content area at render time
+      // (layout hasn't run), so we validate eagerly. ACCEPTED tiny over-throw: a
+      // degenerate-size Box (content area <= 0, e.g. width/height collapses to
+      // border-only or 0) with a chalk-modifier-name backgroundColor throws here
+      // where Ink would silently skip the fill. This is a niche case on
+      // clearly-invalid input (a modifier name is never a valid bg); matching
+      // Ink's layout-time gate at render time is not worth the complexity.
+      assertValidBackgroundColor(props.backgroundColor);
+
+      // Border backgrounds: Ink's render-border.ts only colorizes a border bg
+      // when (a) borderStyle is truthy (line 28 gate) AND (b) the specific edge
+      // is DRAWN (`border<Edge> !== false`), and the value it passes per edge is
+      // `border<Edge>BackgroundColor ?? borderBackgroundColor` (the per-edge
+      // value with the general value as fallback — lines 44-52, 80/100/112/126).
+      // So we validate exactly the resolved bg of each DRAWN edge — never the
+      // general value on its own, and never an edge whose border isn't drawn.
+      // Consequences (matching Ink, not over-throwing):
+      //   - no borderStyle → no border colorize at all → nothing validated.
+      //   - borderTop={false} → top edge not drawn → its resolved bg not checked.
+      //   - a bad general borderBackgroundColor but every DRAWN edge overrides it
+      //     with a valid per-edge value → general value never reaches colorize →
+      //     not validated → no throw.
+      // ACCEPTED irreducible over-throw (same class as the content-area note
+      // above): top/bottom edge bg is validated eagerly, but Ink only colorizes a
+      // top/bottom border string when it's non-empty — a degenerate box (e.g.
+      // width=0 with no left/right border) produces an empty string Ink skips.
+      // Matching that needs layout, unavailable at render. Niche + invalid-input-only.
+      if (props.borderStyle) {
+        const generalBg = props.borderBackgroundColor;
+        if (props.borderTop !== false) {
+          assertValidBackgroundColor(
+            props.borderTopBackgroundColor ?? generalBg,
+            "borderTopBackgroundColor",
+          );
+        }
+        if (props.borderBottom !== false) {
+          assertValidBackgroundColor(
+            props.borderBottomBackgroundColor ?? generalBg,
+            "borderBottomBackgroundColor",
+          );
+        }
+        if (props.borderLeft !== false) {
+          assertValidBackgroundColor(
+            props.borderLeftBackgroundColor ?? generalBg,
+            "borderLeftBackgroundColor",
+          );
+        }
+        if (props.borderRight !== false) {
+          assertValidBackgroundColor(
+            props.borderRightBackgroundColor ?? generalBg,
+            "borderRightBackgroundColor",
+          );
+        }
+      }
+
+      // NOTE: this component-level validation covers the public `<Box>`/`<Text>`
+      // API only. A raw host-op call (`h("box", { backgroundColor: "bold" })`)
+      // bypasses it; the paint layer keeps its silent degrade-to-bare-text there
+      // rather than throwing (a throw in the post-flush paint pass wedges Vue's
+      // scheduler). Same accepted limitation as the borderStyle fix (#124).
 
       // Validate borderStyle during RENDER so an unknown name is caught by
       // vue-tui's error boundary (onErrorCaptured → ErrorOverview), exactly like

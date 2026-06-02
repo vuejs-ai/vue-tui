@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { expect, test } from "vite-plus/test";
-import { applyChalk } from "./text-style.ts";
+import { applyChalk, assertValidBackgroundColor, isInvalidBackgroundColor } from "./text-style.ts";
 
 test("named color applies chalk method", () => {
   const prev = chalk.level;
@@ -153,6 +153,71 @@ test("level 0 emits no ANSI codes regardless of styles", () => {
   chalk.level = 0;
   try {
     expect(applyChalk("X", { color: "red", bold: true, backgroundColor: "blue" })).toBe("X");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
+// A12: a chalk-MODIFIER name as a BACKGROUND is what Ink colorize.ts throws on
+// (`'bold' in chalk` true, but `chalk.bgBold` is not a function). vue-tui detects
+// it at render so the error boundary catches it. Every other form is valid.
+test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
+  for (const m of [
+    "bold",
+    "dim",
+    "italic",
+    "underline",
+    "inverse",
+    "hidden",
+    "strikethrough",
+    "reset",
+    "overline",
+    "visible",
+  ]) {
+    expect(isInvalidBackgroundColor(m)).toBe(true);
+  }
+});
+
+test("isInvalidBackgroundColor: real colors / hex / ansi256 / rgb / tuple / unknown / empty are valid", () => {
+  for (const ok of [
+    "red",
+    "blue",
+    "blackBright",
+    "redBright",
+    "#ff0000",
+    "ansi256(9)",
+    "rgb(1,2,3)",
+    "not-a-real-color",
+    "",
+    undefined,
+    null,
+    [1, 2, 3],
+  ]) {
+    expect(isInvalidBackgroundColor(ok)).toBe(false);
+  }
+});
+
+test("assertValidBackgroundColor throws only for a modifier name, with the label in the message", () => {
+  expect(() => assertValidBackgroundColor("bold")).toThrow(/backgroundColor/i);
+  expect(() => assertValidBackgroundColor("dim", "borderTopBackgroundColor")).toThrow(
+    /borderTopBackgroundColor/,
+  );
+  // No throw for valid forms.
+  expect(() => assertValidBackgroundColor("red")).not.toThrow();
+  expect(() => assertValidBackgroundColor("#abcdef")).not.toThrow();
+  expect(() => assertValidBackgroundColor("not-a-real-color")).not.toThrow();
+  expect(() => assertValidBackgroundColor([1, 2, 3])).not.toThrow();
+  expect(() => assertValidBackgroundColor(undefined)).not.toThrow();
+});
+
+// Foreground is UNAFFECTED: `color="bold"` resolves `chalk.bold` (a real fn) and
+// applies the modifier — Ink does NOT throw on a foreground modifier name, and
+// neither does vue-tui. (Only the bg path has the missing-`bg*`-method problem.)
+test("foreground modifier name still applies (no validation on color)", () => {
+  const prev = chalk.level;
+  chalk.level = 1;
+  try {
+    expect(applyChalk("X", { color: "bold" })).toBe(chalk.bold("X"));
   } finally {
     chalk.level = prev;
   }
