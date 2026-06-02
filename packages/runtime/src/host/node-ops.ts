@@ -193,7 +193,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (node.type !== "text-leaf") {
       throw new Error(`Cannot setText on ${node.type}`);
     }
-    node.value = text;
+    // Coerce any non-string at the host text sink, matching Ink's setTextNodeValue
+    // (dom.ts: `if (typeof text !== 'string') text = String(text)`). Guard on
+    // typeof so normal string values are stored as-is (no double-work).
+    node.value = typeof text === "string" ? text : String(text);
     // Bubble dirty up to the node that OWNS the yoga measure func so yoga
     // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248):
     // climb to the nearest node carrying the MEASURE func and mark it. The catch
