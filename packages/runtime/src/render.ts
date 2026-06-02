@@ -1444,6 +1444,18 @@ function createStdinController(
   const FLUSH_DELAY = 20; // ms, matching Ink
   let bracketedPasteModeCount = 0;
 
+  // Write the bracketed-paste-disable escape only when stdout can still take it.
+  // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
+  // the paste-OFF write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
+  // where stdout is already gone. Mirror Ink's `canWriteToStdout` guard
+  // (App.tsx:620/633-635): isTTY AND `!destroyed && !writableEnded`. Matches the
+  // render-level writeBestEffort helper, which isn't in this function's scope.
+  function disableBracketedPaste() {
+    const stdout = appCtx.stdout;
+    if (!stdout.isTTY || stdout.destroyed || stdout.writableEnded) return;
+    stdout.write("\x1b[?2004l");
+  }
+
   function clearPendingFlush() {
     if (pendingFlushTimer !== undefined) {
       clearTimeout(pendingFlushTimer);
@@ -1670,8 +1682,8 @@ function createStdinController(
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
-        if (bracketedPasteModeCount === 0 && appCtx.stdout.isTTY) {
-          appCtx.stdout.write("\x1b[?2004l");
+        if (bracketedPasteModeCount === 0) {
+          disableBracketedPaste();
         }
       }
     },
@@ -1725,8 +1737,8 @@ function createStdinController(
       stdin.off("readable", handleReadable);
       stdin.off("data", handleData);
       emitter.off("input", focusInputListener);
-      if (bracketedPasteModeCount > 0 && appCtx.stdout.isTTY) {
-        appCtx.stdout.write("\x1b[?2004l");
+      if (bracketedPasteModeCount > 0) {
+        disableBracketedPaste();
       }
       bracketedPasteModeCount = 0;
       if (appCtx.isRawModeSupported) {
