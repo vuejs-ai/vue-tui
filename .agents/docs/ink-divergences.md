@@ -302,17 +302,6 @@ unsubscribe(){}}`) — a `useAnimation` rendered outside an Ink tree never ticks
   diverge from Ink in the _opposite_ (unrelated-sibling) direction, where Ink drops the cursor.
   Keep the reactivity-tied behavior. Maintainer decision (2026-06-01): KEEP.
 
-### An off-spec `display` value stays visible instead of hiding
-
-- **Ink:** `applyDisplayStyles` sets `DISPLAY_NONE` for **any** present `display` that isn't
-  `'flex'` — so a typo or off-spec value (`display="block"`, `display=""`, reachable via a
-  TS-bypass) **hides** the box.
-- **vue-tui:** `toDisplay` hides only on the exact value `'none'`; every other value (including
-  off-spec) falls back to the visible default `DISPLAY_FLEX`.
-- **Why:** an unknown/typo `display` shouldn't silently delete content — failing visible is the
-  safer default. It's also consistent with the removal-reset above: a withdrawn `display` returns
-  to visible, and so does an unrecognized one. (The only honored hide is the documented `'none'`.)
-
 ### Out-of-type style values are forwarded, not defensively coerced
 
 - **Ink:** several flex/align setters coerce a runtime junk value to a default — `flexShrink`

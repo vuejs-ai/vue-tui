@@ -308,7 +308,18 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   borderLeft: (n, v) => n.setBorder(Yoga.EDGE_LEFT, v ? 1 : 0),
   borderRight: (n, v) => n.setBorder(Yoga.EDGE_RIGHT, v ? 1 : 0),
 
-  display: (n, v) => n.setDisplay(v === "none" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
+  // Ink styles.ts applyDisplayStyles: `display === 'flex' ? DISPLAY_FLEX : DISPLAY_NONE`,
+  // so ANY present value that isn't 'flex' (incl. off-spec strings reachable via a TS
+  // bypass — the public prop type is 'flex' | 'none') hides (A21). A19 carve-out: a
+  // removed/undefined `display` (value is null/undefined) must reset to the visible
+  // default DISPLAY_FLEX — Vue can't tell `display={undefined}` from an omitted prop, so
+  // it falls under the declarative render = f(current props) reset, NOT Ink's hide-on-
+  // present-undefined. Hence the `v != null` guard: ANY present (non-null) value except
+  // 'flex' hides — matching Ink, which hides non-string present junk too (`display={5}`,
+  // a deep TS-bypass: `5 === 'flex'` is false → DISPLAY_NONE) — while null/undefined
+  // (removed) → DISPLAY_FLEX (A19).
+  display: (n, v) =>
+    n.setDisplay(v != null && v !== "flex" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
   // Ink does NOT call setOverflow on yoga — it only clips visually in paint.
   // Calling setOverflow(HIDDEN) would prevent nodes from expanding beyond
   // their bounds during layout, which differs from Ink's behavior.
