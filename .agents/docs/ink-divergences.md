@@ -43,16 +43,6 @@ deliberate. Divergences fall into a few kinds:
 - **Why:** vue-tui's renderer keeps a native host-node tree rather than a DOM emulation,
   so the exported node type names that tree, not a DOM node.
 
-### `useFocusManager().activeId` empty value is `null`, not `undefined`
-
-- **Ink:** `useFocusManager().activeId` is a `string` and `undefined` when nothing is focused.
-- **vue-tui:** `activeId` is a **`ShallowRef<string | null>`** — reactive, and `null` (not
-  `undefined`) when nothing is focused.
-- **Why:** vue surfaces focus state as a reactive ref so a template re-renders when focus
-  moves, and `null` is vue-tui's house convention for an empty ref (a deliberate "no value",
-  distinct from an unset `undefined`). Field meaning is unchanged. Test:
-  `focus-manager.test.tsx` ("activeId is null when nothing is focused").
-
 ### Second `mount()` on a live stdout is an inert no-op
 
 - **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
@@ -289,6 +279,21 @@ unsubscribe(){}}`) — a `useAnimation` rendered outside an Ink tree never ticks
   fine-grained re-render) and cannot be papered over: a global per-commit re-assert would make vue
   diverge from Ink in the _opposite_ (unrelated-sibling) direction, where Ink drops the cursor.
   Keep the reactivity-tied behavior. Maintainer decision (2026-06-01): KEEP.
+
+### Reactive composable state is a `shallowRef`, not a plain snapshot
+
+- **Ink/React:** a hook re-runs on every render of its component, so it can return a plain value
+  and the caller always reads the latest one. (`useFocusManager().activeId`, for instance, is a
+  bare `string | undefined`, re-read fresh each render.)
+- **vue-tui:** a composable's `setup()` runs **once**, so reactive state can't be a plain
+  snapshot — it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
+  updates and re-renders the template; read these as `.value`. Every stateful composable follows
+  this — `useTerminalSize()`, `useFocusManager().activeId`, … — and an empty one holds `null`
+  (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`), where Ink's plain
+  value is `undefined`.
+- **Why:** the two frameworks track a changing value differently — React reads the newest value
+  by re-running the hook, Vue wraps it in a ref the template subscribes to. This is the general
+  rule, not a per-API choice; `useFocusManager().activeId` is just one instance.
 
 ### Out-of-type style values are forwarded, not defensively coerced
 
