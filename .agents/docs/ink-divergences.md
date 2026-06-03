@@ -345,6 +345,29 @@ unsubscribe(){}}`) — a `useAnimation` rendered outside an Ink tree never ticks
   builds); they have no effect on stdout output or the exit code. Documented so the stray
   warn isn't mistaken for a vue-tui behavior — it's Vue's framework diagnostics.
 
+### Invalid input is validated at the component layer, not sunk into paint
+
+- **Principle:** vue-tui validates invalid render input (a chalk-**modifier** `backgroundColor`
+  like `"bold"`, an unknown `borderStyle`) at the **component-render layer** (`Box.ts` /
+  `Text.ts`), not down at the **paint layer**. A bad value therefore throws where the **error
+  boundary** catches it → `ErrorOverview` → a clean `reject` of `waitUntilExit()`, exactly like
+  any other component error — the app reports the error instead of crashing.
+- **Ink:** validates the same inputs **lazily at paint** (`colorize` / `render-border`, run from
+  the reconciler's commit hook) — **outside** React's ErrorBoundary, so a bad value is an
+  uncaught crash, not a recoverable error.
+- **Why:** the forcing function is framework-semantic — vue-tui's paint runs in a Vue
+  **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there escapes
+  `onErrorCaptured` and wedges the scheduler; unlike a component error, it can't be made
+  recoverable. (The escape itself is symmetric, not a Vue weakness: a component error boundary —
+  React `ErrorBoundary`; vue-tui's `onErrorCaptured` wrapper — covers framework-managed component
+  work, never the renderer's paint callbacks, so a paint-layer throw is uncatchable in **both**
+  engines.) So validating in `Box` / `Text` keeps a bad value on that boundary-driven recoverable
+  path; Ink's paint-time check can only crash.
+- **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
+  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic inputs
+  match Ink; both error on bad input — only the channel (graceful reject vs crash) differs.
+  Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
+
 ## Not applicable in Vue
 
 ### React concurrent mode
