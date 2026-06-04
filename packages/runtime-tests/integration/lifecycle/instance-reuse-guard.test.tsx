@@ -49,9 +49,7 @@ test("warn + skip wiring when mount() is called on an already-live stdout", asyn
 
   // (a) A warning containing the key phrase was written to process.stderr.
   stderrSpy.mockRestore();
-  expect(stderrWrites.join("")).toContain(
-    "createApp()/mount() was called again for the same stdout before the previous Vue TUI instance was unmounted",
-  );
+  expect(stderrWrites.join("")).toContain("this stdout already has a live app");
 
   // (b) The second mount did NOT wire a second renderer: no additional writes
   // to stdout happened immediately after the second mount (the second app
@@ -96,9 +94,7 @@ test("warn + skip wiring when mount() is called on an already-live stdout", asyn
   const app3 = createApp(App);
   app3.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
   thirdSpy.mockRestore();
-  expect(thirdWrites.join("")).toContain(
-    "createApp()/mount() was called again for the same stdout before the previous Vue TUI instance was unmounted",
-  );
+  expect(thirdWrites.join("")).toContain("this stdout already has a live app");
 
   // Cleanup: app1 still owns the stream; unmount it cleanly.
   app1.unmount();
@@ -128,7 +124,7 @@ test("unmounting first app allows a subsequent mount on the same stdout (no warn
   stderrSpy.mockRestore();
 
   const warnText = stderrWrites.join("");
-  expect(warnText).not.toContain("createApp()/mount() was called again for the same stdout");
+  expect(warnText).not.toContain("this stdout already has a live app");
 
   // app2 renders cleanly.
   await app2.waitUntilRenderFlush();
