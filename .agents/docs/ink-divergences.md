@@ -293,21 +293,6 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   app handle are therefore Vue-shaped (`MountOptions` / `TuiApp`), not `render()`-shaped
   (`RenderOptions` / `Instance`).
 
-#### Second `mount()` on a live stdout is an inert no-op
-
-- **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
-  `render(node, {stdout})` on a stream that already has a live instance warns on stderr but
-  **reuses** that instance and `rerender`s the new tree into it.
-- **vue-tui:** a second `mount()` on a still-live stdout warns on stderr and returns an
-  **inert handle**. It wires no second renderer and renders nothing; the first app's tree
-  stays on screen. `unmount()`/`teardown()` on that handle are complete no-ops (they never
-  touch the owner's stream or registry entry).
-- **Why:** an app is an object you `mount()`, not a one-shot call that doubles as a
-  re-render. "Re-render the live instance" has no place to land when the second call is a
-  separate `TuiApp`; the correct path is `unmount()` then mount again (or keep one app and
-  update its reactive state). Returning an inert handle avoids adding a competing renderer
-  on the shared stream. Test: `instance-reuse-guard.test.tsx`.
-
 #### Host-node type - `DOMElement` -> `TuiNode`
 
 - **Ink:** exports `DOMElement`, a DOM-emulation node (`nodeName` / `attributes` /
@@ -360,6 +345,25 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
 These divergences are deliberate, but they are not strict supersets and are not primarily
 driven by Vue's framework model or API conventions. vue-tui intentionally chooses a
 different runtime behavior, ownership rule, or out-of-contract handling.
+
+### Second `mount()` on a live stdout is an inert no-op
+
+- **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
+  `render(node, {stdout})` on a stream that already has a live instance warns on stderr but
+  **reuses** that instance and `rerender`s the new tree into it.
+- **vue-tui:** a second `mount()` on a still-live stdout warns on stderr and returns an
+  **inert handle**. It wires no second renderer and renders nothing; the first app's tree
+  stays on screen. `unmount()`/`teardown()` on that handle never touch the owner's stream or
+  registry entry (`unmount()` only settles the inert handle's own exit promise).
+- **Why:** a second `mount()` on a live stdout is a misuse (forgot to `unmount()`, a
+  re-render glitch fired `mount()` twice, or expecting `mount()` to re-render — it doesn't;
+  update reactive state for that). Ink treats it as unsupported and warns too. vue-tui fails
+  safe: it ignores the second mount, keeps the live app rendering, and warns with the two
+  recovery paths. It deliberately doesn't copy Ink's reuse-and-rerender: there's no clean
+  public path to it (`createApp` binds the tree to the app, so an Ink-style rerender would
+  mean reaching into the live app's container or tearing it down first), and on a misuse path
+  keeping the running app stable beats auto-tearing it down (which would churn on a re-render
+  glitch). Maintainer decision (2026-06-04): KEEP. Test: `instance-reuse-guard.test.tsx`.
 
 ### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
 

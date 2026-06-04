@@ -502,7 +502,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // alternate-screen renderer cannot swallow it via patchConsole.
     if (liveInstances.has(stdout)) {
       process.stderr.write(
-        "Warning: createApp()/mount() was called again for the same stdout before the previous Vue TUI instance was unmounted. Reusing stdout across multiple mount() calls is unsupported. Call unmount() first.\n",
+        "Warning: this stdout already has a live app, so this mount() was ignored. To update the current view, change its reactive state instead of remounting; to mount another app, unmount() the existing one first.\n",
       );
       // Mark this app as skipped so unmount()/teardown()/resolveExit() are
       // complete no-ops — they must never touch the owner's stream or WeakMap entry.
