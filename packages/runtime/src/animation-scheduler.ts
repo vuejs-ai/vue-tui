@@ -55,9 +55,10 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
     }
     if (earliest === Number.POSITIVE_INFINITY) return;
     scheduledDueTime = earliest;
-    // Round up: setTimeout truncates fractional delays, which would fire the
-    // timer before `earliest`. onTick then skips (now < nextDueTime) and
-    // reschedules a ~0ms delay, busy-looping until the clock catches up.
+    // Round up: setTimeout truncates a fractional delay, so the timer would fire
+    // just before `earliest`; onTick then finds nothing due (now < nextDueTime),
+    // skips, and reschedules — one wasted wakeup per frame. Ceiling makes it fire
+    // at-or-after the due time, so the frame lands on the first wakeup.
     const delay = Math.ceil(Math.max(0, earliest - performance.now()));
     timer = setTimeout(onTick, delay);
   }

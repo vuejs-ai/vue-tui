@@ -1008,13 +1008,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const unthrottled = debug || isScreenReaderEnabled;
     const renderThrottleMs = !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
 
-    const schedulerOptions: { immediate: boolean; throttleMs?: number } = {
+    // Unthrottled (debug / screen-reader) commits fire every tick, so the
+    // throttle window is unused there — renderThrottleMs is already 0. Otherwise
+    // it's the maxFps-derived window (34ms at the default maxFps=30).
+    const scheduler = createCommitScheduler(commit, {
       immediate: unthrottled,
-    };
-    if (!unthrottled) {
-      schedulerOptions.throttleMs = renderThrottleMs;
-    }
-    const scheduler = createCommitScheduler(commit, schedulerOptions);
+      throttleMs: renderThrottleMs,
+    });
     mountedScheduler = scheduler;
     mountedCommit = commit;
     scheduledCommit = scheduler.schedule;
