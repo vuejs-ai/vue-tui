@@ -59,17 +59,6 @@ deliberate. Divergences fall into a few kinds:
   (no competing renderer on the shared stream) over silently hijacking the output is the
   principled choice. Test: `instance-reuse-guard.test.tsx`.
 
-### Package `.` exports use a bare-string target, not an explicit `types` condition
-
-- **Ink:** `package.json` `exports` uses an explicit `types` condition (`{"types": …,
-"default": …}`).
-- **vue-tui:** runtime/testing `.` (and `./internal`) exports are a **bare string**
-  (`"./dist/index.mjs"`) — TS resolves the declaration via the `.d.mts`-next-to-`.mjs`
-  adjacency tsdown emits (`index.d.mts` beside `index.mjs`).
-- **Why:** with the adjacency present, an explicit `types` condition is redundant. Noted so a
-  future reader does **not** "restore parity" by adding a `types` condition the toolchain
-  already satisfies. (The `cli` package needs no `types` at all — it has no public type surface.)
-
 ### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
 
 - **Ink:** raw mode is **lazy / reference-counted to input hooks** — `useInput` /
