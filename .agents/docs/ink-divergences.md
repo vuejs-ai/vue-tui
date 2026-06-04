@@ -398,34 +398,26 @@ Reconciler/runtime mechanics that differ from React internally yet produce **byt
 terminal output, because a commit always paints `f(current host tree)` — _how_ the tree was
 built never reaches the terminal:
 
-- **A `v-if=false` branch (or a `null`/`false`/`undefined` child) leaves a comment anchor
-  (`TuiComment`)** where Ink emits no node, but it is inert: no yoga node, paints nothing,
-  never shifts a sibling's yoga index, and is skipped for the positional `<Transform>` index
-  in all three squash paths (`G52`). Output equals omitting the element. This also governs
-  `<Transform>`'s own children guard: a childless `<Transform>` (or one whose only child is a
-  `null`/`false`/`v-if=false` comment anchor) renders **no node** (matching Ink for `null`,
-  consistent with every other component). It diverges from Ink only for a literal `{false}` /
-  `{cond && x}`-false child — React's `false !== null`, so Ink renders an empty node (and a gap
-  slot); Vue collapses `false`/`null` to the same `TuiComment` and cannot distinguish them, so
-  it omits the node. Keeping `<Transform>` consistent with the comment-anchor model is the
-  principled choice.
+- **Vue leaves a comment placeholder where React renders nothing.** A `null`/`false`/`undefined`
+  child or a `v-if="false"` branch is materialized by `@vue/runtime-core` as a **comment vnode**
+  — the position anchor `v-if` uses to refill its slot when the condition flips back — which
+  vue-tui's host renderer creates as a `TuiComment`. React/Ink emit no node at all here, so
+  vue-tui's host tree carries comment nodes Ink's never has. **To keep the output byte-identical,
+  vue-tui makes the `TuiComment` inert:** no yoga node, paints nothing, never shifts a sibling's
+  yoga index, and is skipped when counting the positional `<Transform>` index (the
+  `if (child.type !== "comment") index++` guards across all three squash paths — top-level paint,
+  nested transform, screen-reader; `G52`). Net output equals omitting the element. The same model
+  drives `<Transform>`'s own guard: a slot that is empty or all-comments renders **no node**
+  (`return null`), matching Ink's `children == null` guard for the common `{null}` /
+  `{cond ? x : null}` idioms. **One residual divergence:** a literal `{false}` / `{cond && x}`-false
+  child — React keeps `false !== null`, so Ink renders an empty node (a gap slot in a flex-gap
+  container) while Vue collapses `false` and `null` into the same `TuiComment` and omits it. That
+  gap-slot mismatch is the deliberate, structurally unavoidable cost of one comment-anchor model
+  everywhere.
 - **Commit timing is deliberately Ink-aligned** — leading+trailing throttle at
-  `ceil(1000/maxFps)` ≈ 32 ms (Ink's `renderThrottleMs`), synchronous resize — even though
-  re-renders are Vue's fine-grained reactivity, not a React subtree re-render.
-- **Keyed lists use Vue core's `patchKeyedChildren`** (LIS), not React's fiber diff; output
-  depends on the final tree, not the move order.
-- **`wrapText` truncate has a per-line short-circuit** before its whole-string `cli-truncate`:
-  if every `\n`-split line already fits `width` it returns the lines unchanged, otherwise it
-  truncates the whole string once (as Ink does). Ink instead gates at paint time on the
-  **widest line** (`widestLine(text) > maxWidth`) before calling `wrapText`, which then
-  whole-string-truncates with no per-line check. The two paint-time gates (vue's per-line
-  `every`, Ink's widest-line) admit the same multi-line texts in practice, so production output
-  matches — documented so the divergent short-circuit branch isn't "fixed" to bare whole-string
-  truncate (which would collapse perfectly-fitting multi-line text to one line).
-- **The animation scheduler rounds the `setTimeout` delay up** (`Math.ceil(earliest - now)`)
-  where Ink passes the raw fractional delay. `setTimeout` truncates a fractional delay and would
-  fire early, re-skip (`now < nextDueTime`), and reschedule a ~0 ms delay — a sub-ms busy-loop.
-  Non-behavioral (Node coerces the delay to an int anyway); the in-code comment explains it.
+  `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's `renderThrottleMs`),
+  synchronous resize — even though re-renders are Vue's fine-grained reactivity, not a React
+  subtree re-render.
 
 ---
 

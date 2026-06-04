@@ -12,19 +12,21 @@ export interface CommitScheduler {
 export interface CommitSchedulerOptions {
   /** Disable time-based throttle (used in tests / debug mode). */
   immediate?: boolean;
-  /** Override throttle interval in ms. Takes precedence over the default 32ms. */
-  throttleMs?: number;
+  /**
+   * Throttle window in ms — the leading+trailing commit interval. The caller
+   * derives it from `maxFps` (`ceil(1000/maxFps)`, i.e. 34ms at the default
+   * maxFps=30, matching Ink). Unused when `immediate` is set (commits fire
+   * every tick); pass 0 there.
+   */
+  throttleMs: number;
 }
-
-/** Default minimum interval between commits (~30fps). */
-const DEFAULT_THROTTLE_MS = 32;
 
 export function createCommitScheduler(
   commit: () => void,
-  options: CommitSchedulerOptions = {},
+  options: CommitSchedulerOptions,
 ): CommitScheduler {
   const immediate = options.immediate ?? false;
-  const throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS;
+  const throttleMs = options.throttleMs;
   let scheduled = false;
   // Multiple concurrent flush() callers can be waiting on the same pending
   // commit; settle all of them rather than overwriting a single resolver.
