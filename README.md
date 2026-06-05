@@ -32,20 +32,20 @@ npm install
 npm run dev
 ```
 
-Edit `App.vue` and watch the terminal update instantly.
+Edit `app.vue` and watch the terminal update instantly.
 
 ## Example
 
 ```ts
 // src/main.ts
 import { createApp } from "@vue-tui/runtime";
-import App from "./App.vue";
+import App from "./app.vue";
 
 createApp(App).mount();
 ```
 
 ```vue
-<!-- src/App.vue -->
+<!-- src/app.vue -->
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";

@@ -565,7 +565,7 @@ test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width",
   expect(stripAnsi(output)).toBe("ABC");
 });
 
-// Mirrors Ink text.tsx:277-283 ("strip complete ESC control sequences with
+// Mirrors Ink Text.tsx:277-283 ("strip complete ESC control sequences with
 // intermediates"). The existing ESC#8-only test above misses the ESC-c (RIS, full
 // terminal reset) leg: sanitizeAnsi must strip BOTH the intermediate-byte ESC#8 and
 // the bare ESC c so neither leaks into the painted frame, leaving the visible "ABC".

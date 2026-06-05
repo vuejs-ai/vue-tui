@@ -43,7 +43,7 @@ import {
 } from "./context.ts";
 import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
-import { ErrorOverview } from "./components/ErrorOverview.ts";
+import { ErrorOverview } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useTerminalSize.ts";
 
 export interface MountOptions {

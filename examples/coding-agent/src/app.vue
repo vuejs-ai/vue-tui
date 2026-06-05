@@ -2,7 +2,7 @@
 import { shallowRef } from "vue";
 import { Box, Text, Static, useInput, useApp } from "@vue-tui/runtime";
 import { runAgentLoop, type Message, type ToolCall } from "./agent";
-import MessageList from "./components/MessageList.vue";
+import MessageList from "./components/message-list.vue";
 
 type AppState = "idle" | "streaming" | "approving";
 

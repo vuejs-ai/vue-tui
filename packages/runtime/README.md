@@ -27,13 +27,13 @@ npm install @vue-tui/runtime vue
 ```ts
 // src/main.ts
 import { createApp } from "@vue-tui/runtime";
-import App from "./App.vue";
+import App from "./app.vue";
 
 createApp(App).mount();
 ```
 
 ```vue
-<!-- src/App.vue -->
+<!-- src/app.vue -->
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";

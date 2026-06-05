@@ -3,8 +3,8 @@ import { cwd } from "node:process";
 import { defineComponent, h, type PropType } from "vue";
 import StackUtils from "stack-utils";
 import codeExcerpt, { type CodeExcerpt } from "code-excerpt";
-import { Box } from "./Box.ts";
-import { Text } from "./Text.ts";
+import { Box } from "./box.ts";
+import { Text } from "./text.ts";
 
 // Ported from Ink's src/components/ErrorOverview.tsx (v7.0.4). We use the <Box>
 // and <Text> wrapper components (not raw host elements) because Ink does, and
