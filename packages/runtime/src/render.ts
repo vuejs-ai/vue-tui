@@ -354,7 +354,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedClear = null;
     const stdout = mountedAppContext?.stdout;
     const stdoutWritable = stdout && !stdout.destroyed && !stdout.writableEnded;
-    if (mountedInteractive && !mountedDebug && mountedCommit && stdoutWritable) {
+    // Final-frame re-emit at unmount. Ink's settleThrottle path (ink.tsx:749-762)
+    // runs a final onRender when shouldRenderFinalFrame is true; for the DEBUG
+    // path throttledOnRender is undefined, so `!this.throttledOnRender` makes
+    // shouldRenderFinalFrame unconditionally true and Ink re-emits the last frame
+    // before the unmount-time trailing write. Mirror that here: both interactive
+    // and debug get a final mountedCommit() (debug commits are unthrottled, so a
+    // re-commit always re-writes `fullStaticOutput + frame`). Non-interactive-
+    // non-debug stays excluded — its frame is deferred to the trailing-write block
+    // below, matching Ink's `this.lastOutput + '\n'` branch (ink.tsx:817-818).
+    if ((mountedInteractive || mountedDebug) && mountedCommit && stdoutWritable) {
       try {
         mountedCommit();
       } catch {
@@ -381,11 +390,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedKittyController.dispose(sync);
       mountedKittyController = null;
     }
-    if (!mountedDebug && !mountedInteractive && mountedAppContext) {
-      // Non-interactive: write the deferred last frame at unmount (matching Ink).
-      const lastFrame = mountedGetLastOutput?.() ?? "";
-      if (lastFrame) {
-        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
+    if (!mountedInteractive && mountedAppContext) {
+      // Non-interactive teardown write, mirroring Ink's finishUnmount branch
+      // (ink.tsx:812-819: `stdout.write(this.options.debug ? '\n' : this.lastOutput + '\n')`).
+      // In DEBUG each render already wrote its full frame to stdout (and the
+      // final-frame re-emit above re-wrote the last one), so only a trailing
+      // newline is owed — Ink writes a bare "\n" here unconditionally. In
+      // non-debug non-interactive mode the dynamic frame was deferred during
+      // rendering, so write it now as `lastFrame + "\n"`.
+      if (mountedDebug) {
+        writeBestEffort(mountedAppContext.stdout, "\n");
+      } else {
+        const lastFrame = mountedGetLastOutput?.() ?? "";
+        if (lastFrame) {
+          writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
+        }
       }
     }
     if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
@@ -928,7 +947,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // EXACT value written — so the testing helper's frames[] reproduce
           // today's content faithfully, minus the escapes (which only go to
           // stdout). No-op when no sink is registered (normal runs).
-          frameSink?.(frameState.fullStaticOutput);
+          //
+          // Gate on !teardownStarted: the final mountedCommit() in teardown()
+          // (every teardown route — unmount/cleanup/exit/Ctrl+C/signal/
+          // process.exit — sets teardownStarted=true before re-emitting) is a
+          // stdout byte-parity FLUSH, not a render, so it must keep writing to
+          // stdout but must NOT push a spurious entry into the live frames[].
+          if (!teardownStarted) frameSink?.(frameState.fullStaticOutput);
         }
         frameState.lastOutput = frame;
         frameState.lastOutputToRender = frame;
@@ -939,10 +964,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // the concatenation of these two stdout.write calls byte-identical to
         // Ink's single write.
         stdout.write(frame);
-        // Always forward the dynamic frame to the sink (mirrors the always-run
+        // Forward the dynamic frame to the sink (mirrors the always-run
         // stdout.write above). lastFrame() is the most recent dynamic frame; an
         // empty render forwards "" so lastFrame() reads back "" (Ink-faithful).
-        frameSink?.(frame);
+        // Same teardown gate as the static chunk above: the teardown re-emit
+        // flushes to stdout for byte parity but is not a render, so it must not
+        // append a duplicate of the final frame to the live frames[].
+        if (!teardownStarted) frameSink?.(frame);
         if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
