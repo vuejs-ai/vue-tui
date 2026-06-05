@@ -217,30 +217,6 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   Ink drops the cursor. Keep the reactivity-tied behavior. Maintainer decision
   (2026-06-01): KEEP.
 
-#### Invalid input is validated at the component layer, not the paint layer
-
-- **Principle:** vue-tui validates invalid render input (a chalk-**modifier**
-  `backgroundColor` like `"bold"`, an unknown `borderStyle`) at the
-  **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
-  value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
-  clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
-  reports the error instead of crashing.
-- **Ink:** validates the same inputs **lazily at paint** (`colorize` / `render-border`, run
-  from the reconciler's commit hook): **outside** React's ErrorBoundary, so a bad value is
-  an uncaught crash, not a recoverable error.
-- **Why:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
-  **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there
-  escapes `onErrorCaptured` and wedges the scheduler. Unlike a component error, it cannot
-  be made recoverable. The escape itself is symmetric, not a Vue weakness: a component
-  error boundary (React `ErrorBoundary`; vue-tui's `onErrorCaptured` wrapper) covers
-  framework-managed component work, never the renderer's paint callbacks, so a paint-layer
-  throw is uncatchable in **both** engines. Validating in `Box` / `Text` keeps a bad value
-  on that boundary-driven recoverable path; Ink's paint-time check can only crash.
-- **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
-  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
-  inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
-  differs. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
-
 #### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
 
 - **Ink:** a component that throws during render surfaces only through the error overview /
@@ -252,27 +228,6 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
 - **Why:** these warnings come from Vue itself and are **dev-only** (stripped in production
   builds); they have no effect on stdout output or the exit code. Documented so the stray
   warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics.
-
-#### Vue comment placeholders are inert host nodes, with one residual `false`-child divergence
-
-- **Ink:** React emits no host node for `null` / `false` / `undefined` children in the
-  ordinary cases, so those children do not affect layout or transform indexing.
-- **vue-tui:** a `null` / `false` / `undefined` child or a `v-if="false"` branch is
-  materialized by `@vue/runtime-core` as a **comment vnode**. That comment is the position
-  anchor Vue uses to refill its slot when the condition flips back. vue-tui's host
-  renderer creates a `TuiComment` for it, and makes that node inert: no yoga node, paints
-  nothing, never shifts a sibling's yoga index, and is skipped when counting the positional
-  `<Transform>` index (the `if (child.type !== "comment") index++` guards across all three
-  squash paths: top-level paint, nested transform, screen-reader; `G52`).
-- **Why:** comment anchors are part of Vue's update model. The renderer must preserve the
-  anchor while making it output-inert, so the terminal result equals omitting the element in
-  the common `null` / `v-if` cases. `<Transform>` follows the same model: a slot that is
-  empty or all-comments renders **no node** (`return null`), matching Ink's
-  `children == null` guard for common `{null}` / `{cond ? x : null}` idioms.
-- **Residual divergence:** a literal `{false}` / `{cond && x}`-false child differs. React
-  keeps `false !== null`, so Ink renders an empty node (a gap slot in a flex-gap container).
-  Vue collapses `false` and `null` into the same `TuiComment` and omits it. That gap-slot
-  mismatch is the documented cost of using one comment-anchor model everywhere.
 
 #### React concurrent mode
 
@@ -293,28 +248,6 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   app handle are therefore Vue-shaped (`MountOptions` / `TuiApp`), not `render()`-shaped
   (`RenderOptions` / `Instance`).
 
-#### Host-node type - `DOMElement` -> `TuiNode`
-
-- **Ink:** exports `DOMElement`, a DOM-emulation node (`nodeName` / `attributes` /
-  `childNodes`).
-- **vue-tui:** the host tree is a different representation
-  (`TuiContainer | TuiTextLeaf | TuiComment`), exported as **`TuiNode`** from
-  `@vue-tui/runtime/internal`.
-- **Why:** vue-tui's renderer keeps a native host-node tree rather than a DOM emulation, so
-  the exported node type names that tree, not a DOM node.
-
-#### Removing `flexDirection` / `flexWrap` resets to the default
-
-- **Ink:** these two props have no reset branch in `applyFlexStyles` (every _other_ flex
-  prop does), so an explicit `flexDirection={undefined}` leaves the previous value in
-  place.
-- **vue-tui:** resets to the Box default (`row` / `nowrap`): the same state as if the prop
-  had never been set.
-- **Why:** render is a function of the current props. With no value set, you get the
-  default, and (absent a special contract) dropping or changing a prop changes the output.
-  Keeping a previous render's value does not match that current-props model, and Ink resets
-  every other flex prop. Maintainer decision (2026-05-30): KEEP.
-
 #### Removing `display` resets to the default (visible)
 
 - **Ink:** `applyDisplayStyles` (`styles.ts`) sets `DISPLAY_NONE` whenever an explicit
@@ -323,10 +256,9 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   value.
 - **vue-tui:** a removed/undefined `display` resets to the Box default `DISPLAY_FLEX`
   (visible): the same state as if the prop had never been set.
-- **Why:** same reasoning as the `flexDirection`/`flexWrap` reset above: render =
-  f(current props). No `display` set means the default (visible). Persisting a withdrawn
-  prop, or flipping it to hidden, does not match that model. Maintainer decision
-  (2026-05-31): KEEP.
+- **Why:** render = f(current props): no `display` set means the default (visible).
+  Persisting a withdrawn prop, or flipping it to hidden, does not match that model. Maintainer
+  decision (2026-05-31): KEEP.
 
 #### Public composable naming follows Vue conventions
 
@@ -427,6 +359,16 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
 
+### Removing `flexDirection` / `flexWrap` resets to the default
+
+- **Ink:** neither prop has a reset branch in `applyFlexStyles` (every _other_ flex prop
+  does), so an explicit `flexDirection={undefined}` leaves the previous value in place.
+- **vue-tui:** resets to the Box default (`row` / `nowrap`): the same state as if the prop
+  had never been set.
+- **Why:** render is a function of the current props. With no value set you get the default,
+  and dropping a prop changes the output; keeping a previous render's value does not match
+  that, and Ink resets every other flex prop. Maintainer decision (2026-05-30): KEEP.
+
 ### Duplicate explicit-`id` `useFocus` calls dedup to one registry entry
 
 - **Ink:** `addFocusable` unconditionally appends, so two `useFocus({id: 'x'})` create
@@ -454,6 +396,33 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   exceptions fall back because they have a meaningful standalone behavior (zero metrics / a
   working animation), so throwing would remove a useful capability.
 
+### Invalid input is validated at the component layer, not the paint layer
+
+- **Principle:** vue-tui validates invalid render input (a chalk-**modifier**
+  `backgroundColor` like `"bold"`, an unknown `borderStyle`) at the
+  **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
+  value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
+  clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
+  reports the error instead of crashing.
+- **Ink:** validates the same inputs **lazily at paint** (`colorize` / `render-border`, run
+  from the reconciler's commit hook): **outside** React's ErrorBoundary, so a bad value is
+  an uncaught crash, not a recoverable error.
+- **Why:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
+  **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there
+  escapes `onErrorCaptured` and wedges the scheduler. Unlike a component error, it cannot
+  be made recoverable. The escape itself is symmetric, not a Vue weakness: a component
+  error boundary (React `ErrorBoundary`; vue-tui's `onErrorCaptured` wrapper) covers
+  framework-managed component work, never the renderer's paint callbacks, so a paint-layer
+  throw is uncatchable in **both** engines. Validating in `Box` / `Text` keeps a bad value
+  on that boundary-driven recoverable path; Ink's paint-time check can only crash. This is
+  a deliberately chosen fail-safe given a constraint that is symmetric across React and Vue
+  (recover-vs-crash), not a Vue-model-forced difference — hence an intentional choice rather
+  than a model-implied one.
+- **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
+  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
+  inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
+  differs. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
+
 ## Non-Behavioral Notes
 
 These notes are not divergence entries. They document Vue-facing conventions or internal
@@ -462,6 +431,20 @@ mechanics so they are not mistaken for parity gaps.
 - Vue SFCs use `<script setup>`, and component definitions use `defineComponent()`.
 - `shallowRef` is the default for reactive state. Use `ref` only when deep reactivity is
   intentional and documented.
+- The exported host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
+  from `@vue-tui/runtime/internal`), not Ink's DOM-emulation `DOMElement`
+  (`nodeName` / `attributes` / `childNodes`). vue-tui keeps a native host tree, so the
+  exported type names that tree; `measureElement` and template refs accept it. No runtime
+  behavior differs from Ink's DOM-emulation node.
+- `null` / `false` / `undefined` / `v-if="false"` children are materialized by Vue as
+  comment vnodes, which vue-tui's host renderer turns into an inert `TuiComment`: no yoga
+  node, paints nothing, never shifts a sibling, and skipped when counting the positional
+  `<Transform>` index (the `child.type !== "comment"` guards in `paint.ts`,
+  `text-measure.ts`, and `screen-reader.ts`; `G52`). The result matches Ink, which drops
+  these children outright — React never renders `null` / `false` / `undefined` (verified
+  against Ink v7.0.4: `{false}`, `{null}`, `{undefined}` each produce no node; only a real
+  empty `<Box/>` occupies a flex-gap slot). `<Transform>` over an empty or all-comment slot
+  renders no node (`return null`), matching Ink's `children == null` guard.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at
   `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's
   `renderThrottleMs`), synchronous resize. This remains true even though re-renders come

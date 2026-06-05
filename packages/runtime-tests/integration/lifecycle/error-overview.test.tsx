@@ -132,8 +132,10 @@ test("unparsable stack frame falls back to literal backslash-t (not a real TAB)"
 test("primitive (non-Error) throw renders ERROR header with no synthetic stack", async () => {
   const frame = await renderErrorFrame(PrimitiveThrower);
 
-  // Ink derives the message from the value (String(value)) and renders just the
-  // header for a primitive throw.
+  // vue-tui renders String(value) as the message for a primitive throw, so the header
+  // shows the thrown text. (Ink renders {error.message}, blank for a primitive that has no
+  // .message — see .agents/docs/ink-divergences.md, section "Non-Error thrown values keep
+  // their message in the error overview".)
   expect(frame).toContain(" ERROR  primitive thrown");
 
   // A primitive has no .stack, so Ink renders no origin/excerpt/stack block.
