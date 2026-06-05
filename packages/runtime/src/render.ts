@@ -916,11 +916,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       if (!interactive && !debug) {
-        // Non-interactive: write static output immediately, defer dynamic frame.
-        if (hasStaticOutput) {
-          stdout.write(staticOutput);
-        }
-
+        // Non-interactive: compute the dynamic frame now, write static output
+        // after onRender, and defer dynamic frame output until unmount.
         tuiRoot.yoga.setWidth(w);
         tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
         emitLayoutListeners(tuiRoot);
@@ -929,6 +926,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.lastOutputToRender = frame + "\n";
         frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
         if (onRender) onRender({ renderTime: performance.now() - start });
+        if (hasStaticOutput) {
+          stdout.write(staticOutput);
+        }
         return;
       }
 
@@ -978,6 +978,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.lastOutput = frame;
         frameState.lastOutputToRender = frame;
         frameState.outputHeight = outputHeight;
+        if (onRender) onRender({ renderTime: performance.now() - start });
         // Ink writes `fullStaticOutput + output` with NO trailing newline
         // (ink.tsx:558; `output` is \n-joined and returned WITHOUT a trailing
         // \n — output.ts:305-312). Writing `frame` (not `frame + "\n"`) makes
@@ -991,7 +992,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // flushes to stdout for byte parity but is not a render, so it must not
         // append a duplicate of the final frame to the live frames[].
         if (!teardownStarted) frameSink?.(frame);
-        if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
 
@@ -1009,6 +1009,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
         // it plays the role of Ink's `wrappedOutput`.
         const sync = synchronize;
+        if (onRender) onRender({ renderTime: performance.now() - start });
         if (sync) stdout.write(bsu);
 
         if (hasStaticOutput) {
@@ -1023,7 +1024,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (frame === frameState.lastOutput && !hasStaticOutput) {
           // Unchanged frame and no new static: nothing to write (ink.tsx:590-596).
           if (sync) stdout.write(esu);
-          if (onRender) onRender({ renderTime: performance.now() - start });
           return;
         }
 
@@ -1044,13 +1044,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
         if (sync) stdout.write(esu);
-        if (onRender) onRender({ renderTime: performance.now() - start });
         return;
       }
 
       // Interactive path
-      renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
       if (onRender) onRender({ renderTime: performance.now() - start });
+      renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
     }
 
     // A single render-throttle window derived from maxFps drives BOTH the
