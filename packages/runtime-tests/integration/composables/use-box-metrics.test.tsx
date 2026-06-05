@@ -313,6 +313,45 @@ describe("measureElement", () => {
     expect(measuredHeight.value).toBe(3);
   });
 
+  // Characterization test locking the JSDoc guidance: a BARE measureElement()
+  // call inside watchPostEffect reads layout BEFORE the commit scheduler's
+  // queuePostFlushCb has run calculateLayout, so it does NOT return the real
+  // width (yoga reports an uncomputed value). The same read deferred with
+  // nextTick — the pattern useBoxMetrics itself uses — returns the real width.
+  // This guards the corrected guidance against a regression to the old
+  // "call it directly from watchPostEffect" advice.
+  test("bare watchPostEffect reads stale layout; nextTick reads the real width", async () => {
+    const bareWidth = shallowRef<number>(-1);
+    const deferredWidth = shallowRef(0);
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      watchPostEffect(() => {
+        // Bare read: runs before calculateLayout in the same flush → unusable.
+        bareWidth.value = measureElement(boxRef.value).width;
+        // Deferred read: runs after the commit's layout pass → correct.
+        void nextTick(() => {
+          deferredWidth.value = measureElement(boxRef.value).width;
+        });
+      });
+      // Box with no explicit width fills the 80-column terminal.
+      return () => (
+        <Box ref={boxRef}>
+          <Text>fill</Text>
+        </Box>
+      );
+    });
+    await render(App, { columns: 80 });
+    await nextTick();
+    await nextTick();
+    // The deferred (documented-correct) read returns the real terminal width.
+    expect(deferredWidth.value).toBe(80);
+    // The bare read is the uncomputed pre-layout value. On this first-render path
+    // yoga's getComputedWidth() is NaN (and measureElement's `?? 0` does not
+    // coalesce NaN), so pin exactly that — a plain `!== 80` would also pass if the
+    // watcher never ran or returned 0, which would not prove the bare path is stale.
+    expect(Number.isNaN(bareWidth.value)).toBe(true);
+  });
+
   test("measureElement works when render is throttled", async () => {
     const measuredWidth = shallowRef(0);
     const App = defineComponent(() => {

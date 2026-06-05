@@ -71,12 +71,30 @@ function findRootNode(node: TuiNode | null): TuiRoot | null {
 /**
  * Imperative function that reads yoga computed dimensions from a TUI node.
  *
- * Returns `{ width: 0, height: 0 }` before layout (when yoga node doesn't
- * exist or hasn't been calculated).
+ * Returns `{ width: 0, height: 0 }` when the ref is not attached to an element.
  *
- * Note: `measureElement()` returns `{width: 0, height: 0}` when called during
- * render (before layout is calculated). Call it from post-render code, such as
- * `watchPostEffect`, `onMounted`, input handlers, or timer callbacks.
+ * Timing matters: layout is computed inside the commit scheduler's post-flush
+ * callback, which can run *after* your own `watchPostEffect`/render-time code in
+ * the same flush. A bare `measureElement()` called there reads layout that has
+ * not been recalculated yet, so it does not return the current size. Read it
+ * only *after* the layout commit:
+ * - wrap the read in `nextTick(() => measureElement(ref.value))` (the pattern
+ *   {@link useBoxMetrics} itself uses), or
+ * - call it from an input handler or timer callback that fires after a flush.
+ *
+ * For reactive metrics that stay in sync across renders and resizes, prefer
+ * {@link useBoxMetrics}, which handles this timing for you.
+ *
+ * @example
+ * ```tsx
+ * const boxRef = ref(null);
+ * watchPostEffect(() => {
+ *   // Defer the read so it runs after layout is committed.
+ *   void nextTick(() => {
+ *     const { width } = measureElement(boxRef.value);
+ *   });
+ * });
+ * ```
  */
 export function measureElement(node: unknown): { width: number; height: number } {
   const tuiNode = resolveYogaNode(node);
