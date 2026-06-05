@@ -134,7 +134,8 @@ test("primitive (non-Error) throw renders ERROR header with no synthetic stack",
 
   // vue-tui renders String(value) as the message for a primitive throw, so the header
   // shows the thrown text. (Ink renders {error.message}, blank for a primitive that has no
-  // .message — see ink-divergences.md "Non-Error thrown values keep their message".)
+  // .message — see .agents/docs/ink-divergences.md, section "Non-Error thrown values keep
+  // their message in the error overview".)
   expect(frame).toContain(" ERROR  primitive thrown");
 
   // A primitive has no .stack, so Ink renders no origin/excerpt/stack block.
