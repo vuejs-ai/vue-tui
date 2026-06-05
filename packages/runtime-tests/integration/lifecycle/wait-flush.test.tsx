@@ -114,9 +114,62 @@ test("waitUntilRenderFlush resolves when stdout is not writable", async () => {
   await nextTick();
   (stdout as NodeJS.WriteStream & { writable?: boolean }).writable = false;
   await app.waitUntilRenderFlush();
+  expect(getContentWrites(writes).some((w) => stripAnsi(w).includes("World"))).toBe(false);
 
   app.unmount();
   await app.waitUntilExit();
+});
+
+test("waitUntilExit waits for stdout barrier when only writableLength is exposed", async () => {
+  let didBarrierCallbackFire = false;
+  let barrierWrites = 0;
+  const writes: string[] = [];
+  const stdout = {
+    columns: 80,
+    rows: 24,
+    isTTY: false,
+    destroyed: false,
+    writable: true,
+    writableEnded: false,
+    writableLength: 0,
+    write(chunk: string | Uint8Array, callback?: () => void) {
+      const text = String(chunk);
+      writes.push(text);
+      if (text === "" && callback) {
+        barrierWrites++;
+        setTimeout(() => {
+          didBarrierCallbackFire = true;
+          callback();
+        }, 20);
+      } else {
+        callback?.();
+      }
+      return true;
+    },
+    on() {
+      return this;
+    },
+    off() {
+      return this;
+    },
+  } as unknown as NodeJS.WriteStream;
+
+  const App = defineComponent(() => () => <Text>Hello</Text>);
+  const app = createApp(App);
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: false, patchConsole: false });
+  await nextTick();
+  await nextTick();
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
+
+  expect(writes.some((w) => stripAnsi(w).includes("Hello"))).toBe(true);
+  expect(barrierWrites).toBe(1);
+  expect(didBarrierCallbackFire).toBe(true);
 });
 
 test("waitUntilRenderFlush waits for rerender write callback", async () => {

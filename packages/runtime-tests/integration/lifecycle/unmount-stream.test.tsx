@@ -88,6 +88,39 @@ test("non-interactive mode writes only last frame at unmount", async () => {
   expect(postUnmountOutput).toContain("the-content");
 });
 
+test("non-interactive unmount skips final frame when stdout is not writable", async () => {
+  const App = defineComponent(() => () => <Text>the-content</Text>);
+
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+  (stdout as NodeJS.WriteStream & { writable?: boolean }).writable = false;
+
+  const chunks: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    chunks.push(chunk.toString());
+  });
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    interactive: false,
+  });
+
+  await nextTick();
+  await nextTick();
+
+  app.unmount();
+  await app.waitUntilExit();
+
+  expect(chunks.join("")).not.toContain("the-content");
+});
+
 test("non-interactive mode does not emit erase or cursor sequences", async () => {
   // In non-interactive mode (non-TTY), the runtime should not emit any
   // ANSI erase sequences or cursor manipulation — only plain text output.

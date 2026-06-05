@@ -193,6 +193,24 @@ function isErrorInput(value: unknown): value is Error {
   return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
 }
 
+type MaybeWritableStream = NodeJS.WriteStream & {
+  writable?: boolean;
+  writableEnded?: boolean;
+  destroyed?: boolean;
+  writableLength?: number;
+  _writableState?: unknown;
+};
+
+function getWritableStreamState(stdout: MaybeWritableStream): {
+  canWriteToStdout: boolean;
+  hasWritableState: boolean;
+} {
+  return {
+    canWriteToStdout: !stdout.destroyed && !stdout.writableEnded && (stdout.writable ?? true),
+    hasWritableState: stdout._writableState !== undefined || stdout.writableLength !== undefined,
+  };
+}
+
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
@@ -268,9 +286,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       return;
     }
-    const stdout = mountedAppContext?.stdout ?? process.stdout;
-    const canWrite = stdout && !stdout.destroyed && !(stdout as any).writableEnded;
-    const hasWritableState = (stdout as any)._writableState !== undefined;
+    const stdout = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
+    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stdout);
 
     const finish = () => {
       if (isErrorInput(pendingExitError)) {
@@ -280,7 +297,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     };
 
-    if (canWrite && hasWritableState) {
+    if (canWriteToStdout && hasWritableState) {
       stdout.write("", () => finish());
     } else {
       setImmediate(() => finish());
@@ -288,7 +305,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   }
 
   function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false) {
-    if (stream.destroyed || stream.writableEnded) return;
+    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) return;
     try {
       if (sync) {
         // Signal-exit path (G18, Finding A): signal-exit re-raises the signal
@@ -353,7 +370,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Prevent post-unmount app.clear() from writing to a torn-down stream.
     mountedClear = null;
     const stdout = mountedAppContext?.stdout;
-    const stdoutWritable = stdout && !stdout.destroyed && !stdout.writableEnded;
+    const stdoutWritable = stdout
+      ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
+      : false;
     // Final-frame re-emit at unmount. Ink's settleThrottle path (ink.tsx:749-762)
     // runs a final onRender when shouldRenderFinalFrame is true; for the DEBUG
     // path throttledOnRender is undefined, so `!this.throttledOnRender` makes
@@ -407,7 +426,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
     }
-    if (mountedWriter && !mountedDebug && mountedInteractive) mountedWriter.done();
+    if (mountedWriter && !mountedDebug && mountedInteractive && stdoutWritable)
+      mountedWriter.done();
     if (mountedAlternateScreen && mountedAppContext) {
       writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
@@ -1266,18 +1286,28 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // SAME implementation via useApp().waitUntilRenderFlush — both the
   // TuiApp handle and the in-tree composable resolve identically.
   async function waitUntilRenderFlush(): Promise<void> {
+    const stream = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
+    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
+
     // Flush any pending OR scheduled render. Gating on hasPending() alone
     // misses the window after schedule() queues a commit but before the
     // post-flush callback sets hasPendingFlag, letting this resolve early.
-    // flush() resolves immediately when nothing is scheduled or pending, so
-    // delegating unconditionally is safe and closes that window.
+    // When stdout cannot be written, match Ink's settleThrottle behavior:
+    // cancel instead of flushing so delayed callbacks cannot write later.
     if (mountedScheduler) {
-      await mountedScheduler.flush();
+      if (canWriteToStdout) {
+        await mountedScheduler.flush();
+      } else {
+        mountedScheduler.cancel();
+      }
     }
     // Wait for stdout write barrier — ensures the written frame is
     // flushed to the underlying stream.
-    const stream = mountedAppContext?.stdout ?? process.stdout;
     await new Promise<void>((resolve) => {
+      if (!canWriteToStdout || !hasWritableState) {
+        setImmediate(resolve);
+        return;
+      }
       // PassThrough (test fakes) may not support the write callback form;
       // fall back to setImmediate so we still yield the event loop.
       try {
