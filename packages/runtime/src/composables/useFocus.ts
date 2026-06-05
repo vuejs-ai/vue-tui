@@ -12,7 +12,7 @@ import { FocusContextKey, StdinContextKey } from "../context.ts";
 let nextAutoId = 0;
 
 export interface UseFocusOptions {
-  autoFocus?: boolean;
+  autoFocus?: MaybeRefOrGetter<boolean>;
   isActive?: MaybeRefOrGetter<boolean>;
   id?: MaybeRefOrGetter<string>;
 }
@@ -67,11 +67,11 @@ export function useFocus(options: UseFocusOptions = {}): {
     currentId = undefined;
   };
 
-  const register = (id: string) => {
+  const register = (id: string, autoFocus: boolean) => {
     unsubscribe = ctx.subscribe(id, (v) => {
       isFocused.value = v;
     });
-    ctx.add(id, { autoFocus: options.autoFocus });
+    ctx.add(id, { autoFocus });
     currentId = id;
     // Apply the current active state to the freshly-registered id.
     if (toValue(isActive)) {
@@ -83,11 +83,11 @@ export function useFocus(options: UseFocusOptions = {}): {
   };
 
   watch(
-    () => toValue(options.id) ?? fallbackId,
-    (id) => {
+    () => [toValue(options.id) ?? fallbackId, toValue(options.autoFocus ?? false)] as const,
+    ([id, autoFocus]) => {
       unregister();
       isFocused.value = false;
-      register(id);
+      register(id, autoFocus);
     },
     { immediate: true, flush: "sync" },
   );
