@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, nextTick, shallowRef, watchEffect } from "vue";
+import { defineComponent, effectScope, nextTick, shallowRef, watchEffect } from "vue";
 import type { ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
@@ -816,6 +816,97 @@ describe("useAnimation", () => {
       expect(f2.value).toBe(0);
       unmount();
     });
+
+    // Ink parity (use-animation.ts:77-96): `shouldReset` is computed ONCE from
+    // the FINAL batched values — `isActive && (intervalChanged || becameActive
+    // || resetKeyChanged)`. When `isActive` ends up false, `shouldReset` is
+    // false regardless of an interval change in the same render, so the frame
+    // FREEZES at its last live value (no reset to 0). This guards the bug where
+    // splitting into two `flush:"sync"` watchers made the interval watcher fire
+    // first (while still active) and erroneously `start()` → zero the frame
+    // before the isActive watcher could `stop()`.
+    test("batched interval-change + pause in one tick freezes the frame (not 0)", async () => {
+      const interval = shallowRef(30);
+      const active = shallowRef(true);
+      let frame!: Readonly<ShallowRef<number>>;
+      const App = defineComponent(() => {
+        frame = useAnimation({ interval, isActive: active }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
+      });
+      const { unmount } = await render(App);
+      await delay(150);
+      const live = frame.value;
+      expect(live).toBeGreaterThanOrEqual(1);
+
+      // Interval FIRST, then pause — the bug order. Both mutations land in one
+      // synchronous batch.
+      interval.value = 200;
+      active.value = false;
+      await nextTick();
+
+      // Pausing wins: the frame freezes at the last live value, NOT 0.
+      expect(frame.value).toBe(live);
+      await delay(150);
+      expect(frame.value).toBe(live);
+      unmount();
+    });
+
+    // Guard: the reverse batch order (pause FIRST, then interval) must agree —
+    // pausing still wins and the frame freezes at the last live value.
+    test("batched pause + interval-change in one tick also freezes the frame", async () => {
+      const interval = shallowRef(30);
+      const active = shallowRef(true);
+      let frame!: Readonly<ShallowRef<number>>;
+      const App = defineComponent(() => {
+        frame = useAnimation({ interval, isActive: active }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
+      });
+      const { unmount } = await render(App);
+      await delay(150);
+      const live = frame.value;
+      expect(live).toBeGreaterThanOrEqual(1);
+
+      active.value = false;
+      interval.value = 200;
+      await nextTick();
+
+      expect(frame.value).toBe(live);
+      await delay(150);
+      expect(frame.value).toBe(live);
+      unmount();
+    });
+
+    // Guard: resuming after a batched interval-change + pause must zero and then
+    // advance at the NEW interval (the deferred reset lands on resume, Ink-style).
+    test("resume after batched interval-change + pause zeros then advances at the new interval", async () => {
+      const interval = shallowRef(30);
+      const active = shallowRef(true);
+      let frame!: Readonly<ShallowRef<number>>;
+      const App = defineComponent(() => {
+        frame = useAnimation({ interval, isActive: active }).frame;
+        return () => <Text>{String(frame.value)}</Text>;
+      });
+      const { unmount } = await render(App);
+      await delay(150);
+      expect(frame.value).toBeGreaterThanOrEqual(1);
+
+      interval.value = 200;
+      active.value = false;
+      await nextTick();
+      const frozen = frame.value;
+      expect(frozen).toBeGreaterThanOrEqual(1);
+
+      active.value = true;
+      await nextTick();
+      // Resume zeros immediately.
+      expect(frame.value).toBe(0);
+
+      // New interval is 200ms: after ~120ms it must still be frame 0 (one frame
+      // would need 200ms), proving the re-subscribe used the new interval.
+      await delay(120);
+      expect(frame.value).toBe(0);
+      unmount();
+    });
   });
 
   // ---------------------------------------------------------------
@@ -1225,6 +1316,70 @@ describe("useAnimation", () => {
     expect(frameVal).toBeGreaterThanOrEqual(1);
 
     unmount();
+  });
+
+  // Blessed standalone fallback (ink-divergences.md "useAnimation() outside a
+  // render tree drives a standalone animation"): with NO mounted component,
+  // useAnimation must still tick, and reactive interval/isActive changes must
+  // still take effect. The combined-watcher fix relies on `flush:"post"`, which
+  // fires standalone too — this guards that it keeps working there.
+  test("standalone (no render tree): ticks and reacts to live interval/isActive changes", async () => {
+    const scope = effectScope();
+    const interval = shallowRef(30);
+    const active = shallowRef(true);
+    let frame!: Readonly<ShallowRef<number>>;
+    scope.run(() => {
+      frame = useAnimation({ interval, isActive: active }).frame;
+    });
+
+    // Advances with no surrounding app.
+    await delay(150);
+    const live = frame.value;
+    expect(live).toBeGreaterThanOrEqual(1);
+
+    // Pause takes effect standalone — the frame freezes.
+    active.value = false;
+    await nextTick();
+    const frozen = frame.value;
+    await delay(120);
+    expect(frame.value).toBe(frozen);
+
+    // Resume + new interval take effect standalone: zero, then advance at 30ms.
+    interval.value = 30;
+    active.value = true;
+    await nextTick();
+    expect(frame.value).toBe(0);
+    await delay(150);
+    expect(frame.value).toBeGreaterThanOrEqual(1);
+
+    scope.stop();
+  });
+
+  // Blessed standalone fallback, batched-pause guard: the bug's exact shape
+  // (interval-change + pause in one synchronous batch) must freeze, not zero,
+  // outside a render tree too.
+  test("standalone (no render tree): batched interval-change + pause freezes the frame", async () => {
+    const scope = effectScope();
+    const interval = shallowRef(30);
+    const active = shallowRef(true);
+    let frame!: Readonly<ShallowRef<number>>;
+    scope.run(() => {
+      frame = useAnimation({ interval, isActive: active }).frame;
+    });
+
+    await delay(150);
+    const live = frame.value;
+    expect(live).toBeGreaterThanOrEqual(1);
+
+    interval.value = 200;
+    active.value = false;
+    await nextTick();
+
+    expect(frame.value).toBe(live);
+    await delay(120);
+    expect(frame.value).toBe(live);
+
+    scope.stop();
   });
 
   test("renderToString renders frame 0 without throwing or leaking timers", () => {
