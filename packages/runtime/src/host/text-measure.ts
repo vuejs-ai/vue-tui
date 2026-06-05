@@ -155,15 +155,23 @@ function stripAnsi(text: string): string {
 /**
  * Replicate wrap-ansi's width<=0 layout for a (possibly STYLED) string, ANSI-awarely.
  *
- * The output's LINE STRUCTURE exactly equals `wrapAnsi(stripAnsi(text), 0, {hard, trim:false})
- * .split("\n")` — wrap-ansi's authoritative width-0 layout. wrap-ansi breaks BEFORE each
- * grapheme it cannot fit, so an interior zero-width grapheme (ZWSP/ZWNJ/ZWJ, combining mark,
- * VS16, soft-hyphen, BOM) lands on its OWN row with the surrounding `""` blanks — but a
- * TRAILING zero-width run (nothing visible after it) stays glued to the preceding grapheme's
- * row (wrapAnsi("中​",0)=["","中​"], not ["","中","​"]). Deriving structure from wrap-ansi on
- * the plain string reproduces both cases for free; the old column-stepping `slice(col,col+1)`
- * could not (it glued an interior zero-width onto the next grapheme → line-count too low, and
- * `break`-ed on a leading zero-width + wide glyph → dropped the rest of the line).
+ * The output's LINE STRUCTURE exactly equals wrap-ansi's authoritative width-0 layout for the
+ * given wrap `mode` — `wrap` uses `{hard:true, trim:false}`, `hard` uses
+ * `{hard:true, trim:false, wordWrap:false}`, mirroring Ink's wrap-text.ts (the SOLE difference
+ * between the two modes). At width 0 `wordWrap:false` makes wrap-ansi emit an EXTRA blank row
+ * before each interior word's first grapheme (wrapAnsi("a b c",0,…,wordWrap:false) =
+ * ["","a"," ","","b"," ","","c"] vs `wrap`'s ["","a"," ","b"," ","c"]), so `hard` measures
+ * taller than `wrap` — which is exactly Ink's behavior. Threading `mode` here keeps both
+ * line-counts in lockstep with Ink instead of measuring `hard` with `wrap` structure.
+ *
+ * wrap-ansi breaks BEFORE each grapheme it cannot fit, so an interior zero-width grapheme
+ * (ZWSP/ZWNJ/ZWJ, combining mark, VS16, soft-hyphen, BOM) lands on its OWN row with the
+ * surrounding `""` blanks — but a TRAILING zero-width run (nothing visible after it) stays glued
+ * to the preceding grapheme's row (wrapAnsi("中​",0)=["","中​"], not ["","中","​"]). Deriving
+ * structure from wrap-ansi on the plain string reproduces both cases for free; the old
+ * column-stepping `slice(col,col+1)` could not (it glued an interior zero-width onto the next
+ * grapheme → line-count too low, and `break`-ed on a leading zero-width + wide glyph → dropped
+ * the rest of the line).
  *
  * Styling is re-applied in lockstep: the plain and styled strings share an identical grapheme
  * sequence (SGR/OSC are zero-width), so each NON-EMPTY plain line maps to a contiguous run of
@@ -174,7 +182,7 @@ function stripAnsi(text: string): string {
  * wrap-ansi touch the styled string (it byte-splits the escapes at width<=0); we only ask it
  * for structure.
  */
-function wrapZeroWidthAnsi(text: string): string[] {
+function wrapZeroWidthAnsi(text: string, mode: "wrap" | "hard"): string[] {
   // NFC-normalize first: wrap-ansi (and therefore vue's NORMAL-width wrap path, which feeds
   // the styled string straight to wrapAnsi) composes combining sequences (e.g. "á" →
   // "á"). Deriving structure from wrapAnsi(stripAnsi(text)) yields composed rows, so the
@@ -185,9 +193,15 @@ function wrapZeroWidthAnsi(text: string): string[] {
   // Process each hard-newline line independently so `\n` never enters the grapheme walk
   // (wrap-ansi joins line-blocks with `\n`, so each input line contributes its own block).
   const styledLines = text.split("\n");
+  // Pick wrap-ansi's width-0 options per mode, mirroring Ink wrap-text.ts: `hard` adds
+  // `wordWrap:false` (extra blank row at each interior word boundary), `wrap` does not. Only the
+  // structural line count changes; the re-styling loop below maps each NON-EMPTY row to one
+  // grapheme run regardless of how many extra "" rows hard mode interleaves.
+  const wrapOptions =
+    mode === "hard" ? { hard: true, trim: false, wordWrap: false } : { hard: true, trim: false };
   for (const styledLine of styledLines) {
     const plainLine = stripAnsi(styledLine);
-    const plainLines = wrapAnsi(plainLine, 0, { hard: true, trim: false }).split("\n");
+    const plainLines = wrapAnsi(plainLine, 0, wrapOptions).split("\n");
 
     // Assign each grapheme of the plain line a slice-ansi slot range: a grapheme occupies
     // max(1, visibleWidth) slots (a zero-width grapheme gets 1 slot of its own; a wide glyph 2).
@@ -256,7 +270,7 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     // wrapping, so we must reproduce wrap-ansi's plain-text layout ANSI-awarely. slice-ansi
     // is grapheme-aware and re-emits the active SGR span around each slice, matching Ink's
     // per-grapheme colored output (e.g. "B\n\x1b[41mA\x1b[49m" for a 0-width bg Box).
-    if (width <= 0) return wrapZeroWidthAnsi(text);
+    if (width <= 0) return wrapZeroWidthAnsi(text, mode);
 
     if (mode === "wrap") {
       return wrapAnsi(text, width, { hard: true, trim: false }).split("\n");

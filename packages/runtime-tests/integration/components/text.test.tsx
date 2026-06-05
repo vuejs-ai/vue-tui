@@ -346,6 +346,32 @@ test("hard wrap with long word", async () => {
   expect(lastFrame()).toBe("aaaaa\naaaaa");
 });
 
+test("hard wrap at width 0 measures one row per grapheme PLUS a blank row per interior word boundary (Ink parity)", async () => {
+  // Ink wrap-text.ts uses wordWrap:false for `hard` mode: at width 0 that inserts an extra
+  // blank row before each interior word's first grapheme, so "a b c" measures height 8
+  // (["","a"," ","","b"," ","","c"]) — NOT the height-6 `wrap`-mode layout. The 0-width
+  // Box is the tallest child, so the row sibling "X" sits on the FIRST row, and the column
+  // grows to 8 rows. If `hard` were (wrongly) measured with `wrap` structure, the box would
+  // be 6 rows tall.
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="row">
+        <Box width={0}>
+          <Text wrap="hard">a b c</Text>
+        </Box>
+        <Text>X</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const lines = stripAnsi(lastFrame()!).split("\n");
+  // 8 rows total (the 0-width hard-wrapped Text dictates the column height).
+  expect(lines.length).toBe(8);
+  // The 0-width column contributes no visible columns, so each row is just the sibling's
+  // contribution on row 0 ("X") and empty rows below — confirming height 8, not 6.
+  expect(lines[0]).toContain("X");
+});
+
 test("don't hard wrap text if there is enough space", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
