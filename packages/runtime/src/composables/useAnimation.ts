@@ -157,32 +157,45 @@ export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn
     }
   }
 
-  // Watch isActive — when toggled to true, start (which resets values);
-  // when toggled to false, stop (values freeze).
+  // A SINGLE watcher on BOTH (isActive, interval), mirroring Ink's render-time
+  // `shouldReset = isActive && (intervalChanged || becameActive)`
+  // (use-animation.ts:77-96). Ink derives this once from the FINAL values of a
+  // render, so a batch that both changes interval AND flips isActive→false
+  // resolves to `shouldReset === false` and the frame FREEZES.
+  //
+  // Two `flush:"sync"` watchers cannot reproduce that: `sync` fires once PER
+  // mutation, so `interval.value = 200; active.value = false` in one batch ran
+  // the interval watcher first (while still active) → erroneous start() → frame
+  // zeroed, before the isActive watcher could stop(). `flush:"post"` coalesces
+  // the batch and fires once with the final values — verified to fire even in
+  // the blessed standalone fallback (no mounted component drives the post-flush
+  // queue, but a reactive mutation still flushes it). We always record the new
+  // normalized `interval` so the next start() uses it.
   const isActive = options.isActive ?? true;
+  // immediate handles the initial mount: a single start()/stop(), no double
+  // subscribe (the old code split this across an immediate isActive watch + a
+  // non-immediate interval watch for exactly that reason).
   watch(
-    () => toValue(isActive),
-    (active) => {
-      if (active) start();
-      else stop();
+    () => [toValue(isActive), normalizeInterval(toValue(options.interval))] as const,
+    ([active, nextInterval], prev) => {
+      const intervalChanged = prev !== undefined && nextInterval !== prev[1];
+      const becameActive = prev === undefined || !prev[0];
+      interval = nextInterval;
+      if (!active) {
+        // Paused (or starting inactive): stop and freeze. Nothing to reset —
+        // matching reset-while-paused; the deferred zero lands on the next
+        // resume (which hits the `start()` below via becameActive).
+        stop();
+        return;
+      }
+      // Active. Ink resets+re-subscribes only when something relevant changed:
+      // the animation just became active, or the interval changed while active.
+      // (Vue's watch fires only on a real change, so on a pure re-render with an
+      // unchanged interval this watcher does not run at all — no reset, matching
+      // Ink's "rerender with same interval does not reset".)
+      if (becameActive || intervalChanged) start();
     },
-    { immediate: true, flush: "sync" },
-  );
-
-  // Watch the (reactive) interval. Ink's `shouldReset` is gated on isActive:
-  // an interval change resets + re-subscribes only when active. While inactive
-  // we just record the new normalized value (used by the next start()) and do
-  // NOT reset — there is nothing running to reset, matching reset-while-paused.
-  // Not `immediate`: the initial value is already applied above; immediate would
-  // double-subscribe with the isActive watch on mount.
-  watch(
-    () => normalizeInterval(toValue(options.interval)),
-    (next) => {
-      const wasActive = handle !== undefined;
-      interval = next;
-      if (wasActive) start();
-    },
-    { flush: "sync" },
+    { immediate: true, flush: "post" },
   );
 
   onScopeDispose(stop);
