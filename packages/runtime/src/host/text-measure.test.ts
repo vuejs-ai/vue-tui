@@ -135,6 +135,65 @@ test("wrapText at width 0 does NOT drop text after a leading zero-width + wide g
   expect(wrapText("​中", 0, "wrap")).toEqual(["​", "", "中"]);
 });
 
+test("wrapText at width 0 in HARD mode drops a blank row at every interior word boundary (Ink parity)", () => {
+  // Ink's wrap-text.ts uses `wordWrap:false` for `hard` mode but NOT for `wrap`: at width 0
+  // that makes wrap-ansi emit an EXTRA blank row before each interior word's first grapheme.
+  // wrapAnsi("a b c", 0, {hard:true, trim:false, wordWrap:false}) =
+  //   ["","a"," ","","b"," ","","c"]  (height 8)
+  // whereas `wrap` mode (no wordWrap:false) =
+  //   ["","a"," ","b"," ","c"]        (height 6).
+  // Measuring `hard` with `wrap` structure UNDER-counts the height, so a sibling laid out below
+  // this node lands one row too high vs Ink. The fix threads the wrap mode into wrapZeroWidthAnsi.
+  expect(wrapText("a b c", 0, "hard")).toEqual(["", "a", " ", "", "b", " ", "", "c"]);
+  // `wrap` mode at width 0 stays UNCHANGED (no wordWrap:false → no extra blank rows).
+  expect(wrapText("a b c", 0, "wrap")).toEqual(["", "a", " ", "b", " ", "c"]);
+});
+
+test("wrapText at width 0 in HARD mode re-styles correctly across the extra blank rows", () => {
+  // The re-styling slot map must still pair each NON-EMPTY row with the right grapheme/SGR span
+  // even though hard mode inserts extra "" rows. Red-bg over "a b": hard layout is
+  // ["","a"," ","","b"] — the "a" and "b" rows keep their SGR span, the blank rows stay empty.
+  const styled = "\x1b[41ma b\x1b[49m";
+  const plainStructure = wrapAnsi("a b", 0, { hard: true, trim: false, wordWrap: false }).split(
+    "\n",
+  );
+  const got = wrapText(styled, 0, "hard");
+  expect(got.length).toBe(plainStructure.length);
+  expect(got.map(stripAnsi)).toEqual(plainStructure);
+  expect(got).toEqual(["", "\x1b[41ma\x1b[49m", "\x1b[41m \x1b[49m", "", "\x1b[41mb\x1b[49m"]);
+});
+
+// Load-bearing lock: in HARD mode wrapZeroWidthAnsi's LINE STRUCTURE must EXACTLY equal
+// wrap-ansi's authoritative width-0 layout WITH `wordWrap:false` (Ink wrap-text.ts hard path),
+// across the same battery used for `wrap` mode below.
+test("wrapText at width 0 in HARD mode matches wrap-ansi's wordWrap:false width-0 layout for the full battery", () => {
+  const battery = [
+    "a b c", // multiple interior word boundaries → multiple extra blank rows
+    "a b",
+    "ab cd",
+    "A",
+    "AB",
+    "",
+    " ",
+    "A\nB",
+    "A​B", // ZWSP
+    "​中", // ZWSP + wide
+    "中​A", // wide + ZWSP
+    "áb", // composed acute (NFC form)
+    "áb", // EXPLICITLY decomposed
+    "⚠️", // VS16
+    "🍔", // emoji
+    "👨‍👩‍👧", // ZWJ family
+    "a­b", // soft hyphen
+    "X​Y中​Z\nP­Q", // mixed multiline
+    "中​", // trailing zero-width
+  ];
+  for (const input of battery) {
+    const expected = wrapAnsi(input, 0, { hard: true, trim: false, wordWrap: false }).split("\n");
+    expect(wrapText(input, 0, "hard"), `input=${JSON.stringify(input)}`).toEqual(expected);
+  }
+});
+
 // Load-bearing lock: wrapZeroWidthAnsi's LINE STRUCTURE must EXACTLY equal wrap-ansi's
 // authoritative width-0 layout for plain text across a battery of zero-width / wide / combining
 // / emoji / multiline inputs. Imported the same way the source imports wrap-ansi.
