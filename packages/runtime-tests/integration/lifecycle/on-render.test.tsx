@@ -111,6 +111,58 @@ test("no onRender callback when option is not provided", async () => {
   app.unmount();
 });
 
+async function expectOnRenderWriteBeforeFrame(
+  options: {
+    debug?: boolean;
+    isScreenReaderEnabled?: boolean;
+  } = {},
+) {
+  const App = defineComponent(() => () => <Text>Hello</Text>);
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+
+  const writes: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    writes.push(chunk.toString());
+  });
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    ...options,
+    onRender: () => {
+      stdout.write("R");
+    },
+  });
+
+  await nextTick();
+  await nextTick();
+
+  const output = writes.join("");
+  expect(output.indexOf("R")).toBeGreaterThanOrEqual(0);
+  expect(output.indexOf("Hello")).toBeGreaterThanOrEqual(0);
+  expect(output.indexOf("R")).toBeLessThan(output.indexOf("Hello"));
+
+  app.unmount();
+}
+
+test("onRender fires before debug output is written", async () => {
+  await expectOnRenderWriteBeforeFrame({ debug: true });
+});
+
+test("onRender fires before interactive output is written", async () => {
+  await expectOnRenderWriteBeforeFrame();
+});
+
+test("onRender fires before screen-reader output is written", async () => {
+  await expectOnRenderWriteBeforeFrame({ isScreenReaderEnabled: true });
+});
+
 test("onRender fires on input-triggered state update", async () => {
   // Mirrors the third assertion in Ink's "outputs renderTime when onRender is passed":
   // after an initial render and a manual rerender, a useInput-driven state
