@@ -1390,7 +1390,7 @@ test("G16: per-edge borderDimColor=false overrides general borderDimColor", asyn
 // reserved a 1-cell inset). Ink's render-border.ts has no existence check: it
 // reads box.topLeft/box.top off `cliBoxes[name]` === undefined and crashes with a
 // TypeError. We align by throwing a clear, descriptive Error — but do it in the
-// Box component's RENDER (Box.ts), so the throw is caught by vue-tui's existing
+// Box component's RENDER (box.ts), so the throw is caught by vue-tui's existing
 // error boundary (onErrorCaptured → ErrorOverview → exit), exactly like any other
 // component render error. paint.ts stays a silent `if (!chars) return` fallback
 // (a raw throw in the post-flush commit would wedge Vue's scheduler).

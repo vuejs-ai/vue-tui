@@ -221,7 +221,7 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
 
 - **Principle:** vue-tui validates invalid render input (a chalk-**modifier**
   `backgroundColor` like `"bold"`, an unknown `borderStyle`) at the
-  **component-render layer** (`Box.ts` / `Text.ts`), not down at the **paint layer**. A bad
+  **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
   value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
   clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
   reports the error instead of crashing.
@@ -460,8 +460,6 @@ These notes are not divergence entries. They document Vue-facing conventions or 
 mechanics so they are not mistaken for parity gaps.
 
 - Vue SFCs use `<script setup>`, and component definitions use `defineComponent()`.
-- Filenames use kebab-case.
-- Files use `.ts` over `.tsx` where there is no JSX.
 - `shallowRef` is the default for reactive state. Use `ref` only when deep reactivity is
   intentional and documented.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at

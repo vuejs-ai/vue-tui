@@ -5,6 +5,6 @@
 // Controls: space / ↑ / w to flap, q or Ctrl-C to quit, r to restart after dying.
 
 import { createApp } from "@vue-tui/runtime";
-import App from "./App.vue";
+import App from "./app.vue";
 
 createApp(App).mount();

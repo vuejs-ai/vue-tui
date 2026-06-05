@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
-import Counter from "./Counter.vue";
-import Clock from "./Clock.vue";
+import Counter from "./counter.vue";
+import Clock from "./clock.vue";
 
 const showClock = shallowRef(true);
 
@@ -15,7 +15,7 @@ useInput((input) => {
 <template>
   <Box backgroundColor="blue" borderStyle="round" width="20">
     <Text bold color="cyan">vue-tui basic (template)</Text>
-    <Text dimColor>Try editing Counter.vue or App.vue</Text>
+    <Text dimColor>Try editing counter.vue or app.vue</Text>
     <Text dimColor>Press c=toggle clock, q=quit</Text>
     <Text> </Text>
     <Counter />

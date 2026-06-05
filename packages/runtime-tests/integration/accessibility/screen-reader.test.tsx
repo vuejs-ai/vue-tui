@@ -1131,7 +1131,7 @@ describe("screen reader enabled mode", () => {
 // suite above did not already cover.
 describe("screen reader: Ink test/screen-reader.tsx parity (component path)", () => {
   // Ink screen-reader.tsx:78-84 — aria-label-only <Text> (no children) emits the
-  // label. Component path: Text.ts substitutes ariaLabel for an absent default slot.
+  // label. Component path: text.ts substitutes ariaLabel for an absent default slot.
   test("aria-label-only Text (no children) emits the label", () => {
     const output = renderToString(
       defineComponent(() => () => <Text aria-label="Screen-reader only" />),
@@ -1141,7 +1141,7 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   });
 
   // Ink screen-reader.tsx:86-92 — aria-label-only <Box> (no children) emits the
-  // label. Component path: Box.ts builds a label text node when SR + ariaLabel and
+  // label. Component path: box.ts builds a label text node when SR + ariaLabel and
   // there is no default slot.
   test("aria-label-only Box (no children) emits the label", () => {
     const output = renderToString(

@@ -1,7 +1,7 @@
 import { shallowRef, defineComponent } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
-import Counter from "./Counter";
-import Clock from "./Clock";
+import Counter from "./counter";
+import Clock from "./clock";
 
 export default defineComponent(() => {
   const showClock = shallowRef(true);
@@ -16,7 +16,7 @@ export default defineComponent(() => {
       <Text bold color="cyan">
         vue-tui basic (JSX)
       </Text>
-      <Text dimColor>Try editing Counter.tsx or App.tsx</Text>
+      <Text dimColor>Try editing counter.tsx or app.tsx</Text>
       <Text dimColor>Press c=toggle clock, q=quit</Text>
       <Text> </Text>
       <Counter />

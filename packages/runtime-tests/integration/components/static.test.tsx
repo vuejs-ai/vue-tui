@@ -818,7 +818,7 @@ test("two separate <Static> regions both render their items (additive divergence
 // B04(a) — the render-prop's SECOND arg (`index`) is the ABSOLUTE array index,
 // stable across INCREMENTAL appends.
 //
-// Static.ts renders `items.slice(cursor)` and passes `index = cursor + i`, where
+// static.ts renders `items.slice(cursor)` and passes `index = cursor + i`, where
 // the cursor advances to items.length after each batch is written. So an item's
 // index is its position in the FULL list, never its position within the append
 // batch. This mirrors Ink's Static, which renders `items.slice(index)` and passes
@@ -869,7 +869,7 @@ test("Static render-prop index is the absolute array index across incremental ap
 
 // B04(b) — vertical padding on the <Static> container paints into the static frame.
 //
-// Static.ts merges the caller `style` onto the internal static box, and
+// static.ts merges the caller `style` onto the internal static box, and
 // static-channel.ts paints that node via its OWN yoga node (paintIsolated). So
 // paddingTop/paddingBottom resolve as real layout: they add blank rows above /
 // below the item inside the painted static frame. Confirmed against the pinned

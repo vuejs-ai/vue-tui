@@ -7,12 +7,12 @@ export {
   type AriaState,
   type BoxStyle,
   type BoxProps,
-} from "./components/Box.ts";
-export { Text, type TextProps } from "./components/Text.ts";
-export { Newline, type NewlineProps } from "./components/Newline.ts";
-export { Spacer } from "./components/Spacer.ts";
-export { Static, type StaticProps } from "./components/Static.ts";
-export { Transform, type TransformProps } from "./components/Transform.ts";
+} from "./components/box.ts";
+export { Text, type TextProps } from "./components/text.ts";
+export { Newline, type NewlineProps } from "./components/newline.ts";
+export { Spacer } from "./components/spacer.ts";
+export { Static, type StaticProps } from "./components/static.ts";
+export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
 export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";

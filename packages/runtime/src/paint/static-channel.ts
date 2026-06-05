@@ -76,7 +76,7 @@ export function paintStaticNode(
       // exactly how screen-reader.ts linearizes a box/root container of these
       // children (screen-reader.ts:73-82): the separator and child order derive
       // from the container's resolved flexDirection (defaulting to the
-      // <Static> "column" default set in Static.ts).
+      // <Static> "column" default set in static.ts).
       const flexDirection = resolvedFlexDirection(stat);
       // Match screen-reader.ts:76 exactly — row/row-reverse use a space, all
       // other directions (incl. the column default) use a newline.
