@@ -788,11 +788,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // wrapper and the "should we touch log-update at all" decision separate:
         //
         //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
-        //    decides whether to call the (throttled) log at all. A cursor-only move
-        //    whose position is unchanged from the previous render is still dirty, so
-        //    it must reach log-update — willRender() alone would miss it because it
-        //    compares positions, not the dirty flag. Here that gate is `willRender ||
-        //    isCursorDirty`; when both are false we skip the write entirely.
+        //    decides whether to call the (throttled) log at all. It compares the RAW
+        //    frame (`output`, no trailing "\n") against the PREVIOUS frame
+        //    (frameState.lastOutput, set at the end of this fn) — NOT log-update's
+        //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
+        //    case: on the first commit of an app that renders nothing, both are ""
+        //    so the gate is false and log-update — including its LAZY cursor hide —
+        //    is never reached, so an empty app emits zero cursor escapes (cursor
+        //    stays visible), matching Ink. Using willRender(outputToRender) here
+        //    instead would compare "\n" against "" and wrongly fire the hide. A
+        //    cursor-only move whose position is unchanged is still dirty, so the
+        //    `|| isCursorDirty` disjunct keeps it reaching log-update.
         //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
         //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
         //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
@@ -804,7 +810,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // afterwards would be stale. Both reads are pure (no mutation), and the
         // bsu/esu wrapper is gated on this single pre-write snapshot.
         const willRender = writer.willRender(outputToRender);
-        if (willRender || writer.isCursorDirty()) {
+        if (output !== frameState.lastOutput || writer.isCursorDirty()) {
           const shouldWrap = synchronize && willRender;
           if (shouldWrap) stdout.write(bsu);
           writer.write(outputToRender);
@@ -1050,32 +1056,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     mountedAlternateScreen = alternateScreen;
 
-    // Hide cursor on mount (matching Ink). Only in interactive mode — in
-    // debug/test mode or non-interactive the stream may not be a real TTY.
-    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): Ink's SR
-    // path never hides the cursor (the dedicated SR write branch above does no
-    // cursor management), so a screen-reader user keeps a real terminal cursor.
+    // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
+    // LAZILY: the non-alt-screen hide comes from log-update's isTTY-gated
+    // cliCursor.hide on the first render that actually writes (log-update.ts:
+    // 55-59), and the onRender outer gate skips log-update entirely for an empty
+    // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
+    // commit). So an interactive app whose root renders nothing emits ZERO
+    // cursor escapes — the cursor stays visible — while a non-empty / useCursor
+    // app hides on its first render via the same lazy path. The renderInteractive
+    // commit gate below mirrors that `output !== frameState.lastOutput` outer
+    // condition so the empty-frame skip (and thus the no-hide behavior) holds.
     //
-    // This MUST happen BEFORE originalMount: mounting flushes Vue synchronously
-    // and the first commit (which, when useCursor() is active, ends with a
-    // showCursor + cursorTo via log-update) runs inside originalMount via a
-    // post-flush callback. Writing the hide afterwards would land AFTER that
-    // show and leave the cursor hidden — the last visibility change must be the
-    // show, mirroring Ink, which hides before its first render, not after.
-    // isTTY gate (cli-cursor short-circuit, cli-cursor/index.js:8-24): cursor
-    // hide/show is a TTY-only concern. In Ink the only mount-time hide lives in
-    // setAlternateScreen (alt-screen + isTTY gated); the non-alt-screen hide
-    // comes from log-update's isTTY-gated cliCursor.hide. So a caller forcing
-    // interactive onto a piped/non-TTY stdout must NOT leak a hide here.
-    if (
-      !debug &&
-      interactive &&
-      !mountedAlternateScreen &&
-      !isScreenReaderEnabled &&
-      Boolean(stdout.isTTY)
-    ) {
-      stdout.write("\x1b[?25l");
-    }
+    // Ordering for a useCursor app is preserved without an eager hide: log-update
+    // hides-then-shows WITHIN a single render() (it hides at the top, then emits
+    // the showCursor + cursorTo suffix for the active position), so the last
+    // visibility change on the first frame is the SHOW — exactly Ink's ordering.
+    //
+    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
+    // dedicated write branch never routes through log-update, so no hide. The
+    // only mount-time hide that remains is the alt-screen one above
+    // (setAlternateScreen, alt-screen + isTTY gated), mirroring Ink.
 
     // The cursor (and alternate screen) have already been hidden/entered above,
     // but the process-exit and signal-exit teardown handlers are not wired until

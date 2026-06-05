@@ -1,0 +1,25 @@
+import process from "node:process";
+import { createApp, useApp } from "@vue-tui/runtime";
+import { defineComponent, onMounted } from "vue";
+
+// An interactive app whose ROOT renders nothing. Ink emits ZERO cursor escapes
+// for an empty frame (its onRender outer gate `output !== lastOutput` is false
+// when both are "", so log-update — and its lazy hide — is never reached, and
+// the only mount-time hide lives in setAlternateScreen). vue-tui must match:
+// a no-content interactive app must NOT hide the terminal cursor.
+//
+// rawMode "auto" so the no-input app does not depend on the lifetime raw-mode
+// hold; we exit explicitly after signalling readiness so the PTY run resolves.
+const App = defineComponent(() => {
+  const { exit } = useApp();
+  onMounted(() => {
+    process.stdout.write("__READY__");
+    setTimeout(() => exit(), 100);
+  });
+  return () => null;
+});
+
+const app = createApp(App);
+app.mount({ rawMode: "auto", exitOnCtrlC: false });
+await app.waitUntilExit();
+console.log("exited");
