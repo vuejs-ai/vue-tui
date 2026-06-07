@@ -1,4 +1,4 @@
-import { defineComponent, shallowRef } from "vue";
+import { defineComponent, nextTick, shallowRef, toRef, type PropType } from "vue";
 import { describe, test, expect } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput, usePaste } from "@vue-tui/runtime";
@@ -50,6 +50,39 @@ describe("usePaste", () => {
     active.value = true;
     await stdin.write("\x1b[200~captured\x1b[201~");
     expect(pasted.value).toBe("captured");
+  });
+
+  test("accepts a handler ref and calls the latest function", async () => {
+    const calls: string[] = [];
+    const firstHandler = (text: string) => calls.push(`first:${text}`);
+    const secondHandler = (text: string) => calls.push(`second:${text}`);
+    const currentHandler = shallowRef(firstHandler);
+
+    const Child = defineComponent({
+      props: {
+        onPaste: {
+          type: Function as PropType<(text: string) => void>,
+          required: true,
+        },
+      },
+      setup(props) {
+        usePaste(toRef(props, "onPaste"));
+        return () => <Text>child</Text>;
+      },
+    });
+
+    const App = defineComponent(() => {
+      return () => <Child onPaste={currentHandler.value} />;
+    });
+
+    const { stdin } = await render(App);
+    await stdin.write("\x1b[200~alpha\x1b[201~");
+    expect(calls).toEqual(["first:alpha"]);
+
+    currentHandler.value = secondHandler;
+    await nextTick();
+    await stdin.write("\x1b[200~beta\x1b[201~");
+    expect(calls).toEqual(["first:alpha", "second:beta"]);
   });
 
   test("usePaste intercepts paste so useInput does not receive it", async () => {

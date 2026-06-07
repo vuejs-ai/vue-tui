@@ -98,19 +98,6 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   in `new Error(String(value))`, which also produced a misleading synthetic stack pointing
   at framework internals. That synthetic stack is now gone. Introduced 2026-05-31.
 
-### RGB `[r, g, b]` tuples on every color prop
-
-- **Ink:** all color props (`<Text>` color/backgroundColor, `<Box>` backgroundColor, and
-  every border color/background prop) are **string-only**. `colorize`/`stylePiece` call
-  `color.startsWith('#')`, so passing an array **throws** (`.startsWith` is not a
-  function).
-- **vue-tui:** the public `Color` type is `string | [number, number, number]`; `applyColor`
-  handles an array via `chalk.rgb(...)` / `chalk.bgRgb(...)`. Accepted uniformly on Text
-  color, Text/Box backgroundColor, and all border color/background props.
-- **Why:** a strict superset. Every string Ink accepts still works, plus an ergonomic RGB
-  tuple. The tuple is part of the typed surface (not a TS-bypass), so it is a supported
-  input, not undefined behavior. Tested.
-
 ### `useAnimation()` outside a render tree drives a standalone animation
 
 - **Ink:** the default `AnimationContext.subscribe()` is a no-op subscription with
@@ -164,7 +151,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   race, and a shared raw-mode refcount matches the ownership model when several renderers
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
-  sharing one stdin both receive input...").
+  sharing one stdin both receive input..."). Maintainer decision (2026-06-07): KEEP.
 
 ## Vue-Aligned Design
 
@@ -191,7 +178,8 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
 - **Why:** the two frameworks track a changing value differently. React reads the newest
   value by re-running the hook; Vue wraps it in a ref the template subscribes to. This is
   the general rule, not a per-API choice. `useFocusManager().activeId` is just one
-  instance.
+  instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
+  not as a one-time snapshot. Maintainer decision (2026-06-07): KEEP.
 
 #### `useCursor()` re-assertion follows fine-grained reactivity, not React's render cascade
 
@@ -227,7 +215,11 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   `[Vue warn]` out of the frame; outside that path (debug, non-patched stderr) it surfaces.
 - **Why:** these warnings come from Vue itself and are **dev-only** (stripped in production
   builds); they have no effect on stdout output or the exit code. Documented so the stray
-  warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics.
+  warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics. While
+  console patching is active, vue-tui treats the `[Vue warn]` prefix as that framework
+  diagnostics channel and filters it. This may also filter user-authored stderr logs that
+  intentionally use the same reserved prefix; use a different application prefix when that
+  output must be preserved. Maintainer decision (2026-06-06): KEEP.
 
 #### React concurrent mode
 
@@ -246,7 +238,9 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
 - **Why:** mirrors Vue's own `createApp` mental model. A Vue developer expects an app
   object (`TuiApp`) they mount, not a one-shot render call. The mount-options bag and the
   app handle are therefore Vue-shaped (`MountOptions` / `TuiApp`), not `render()`-shaped
-  (`RenderOptions` / `Instance`).
+  (`RenderOptions` / `Instance`). Do not add Ink-compatible aliases here: aliases would
+  make the public API look render-shaped while the actual runtime contract is app-shaped.
+  Maintainer decision (2026-06-07): KEEP.
 
 #### Removing `display` resets to the default (visible)
 
@@ -270,7 +264,38 @@ reactivity, lifecycle, component boundaries, current-props model, or API convent
   derived via `ExtractPublicPropTypes`).
 - **Why:** the public surface should read like Vue code. The return shapes still mirror
   Ink field-for-field where the same public state exists; reactive state is represented as
-  refs for the model-implied reason documented above.
+  refs for the model-implied reason documented above. Do not export Ink-compatible alias
+  names for these types: Vue-first naming is more important than making type imports look
+  portable across React and Vue. `XProps` stays reserved for component props; composable
+  returns stay `UseXReturn`. Maintainer decision (2026-06-07): KEEP.
+
+#### Function-valued composable inputs use `MaybeRef`, not getters
+
+- **Ink/React:** `useInput` and `usePaste` use React's current-props model: a hook can keep
+  a stable event listener and still call the latest handler after a re-render.
+- **vue-tui:** `setup()` runs once, so passing a function prop's current value directly
+  (`useInput(props.onInput)`) captures a one-time snapshot. When a composable should follow
+  a function-valued prop, pass a live prop ref instead:
+  `useInput(toRef(props, "onInput"))` / `usePaste(toRef(props, "onPaste"))`. A wrapper
+  closure that reads `props.onInput(...)` at event time is also correct.
+- **Why:** this is Vue's standard reactive-source boundary: pass the source, not a value
+  read from it in setup. The handler parameter accepts `MaybeRef<Handler>` and resolves it
+  with `unref()` when input/paste occurs. It deliberately does **not** accept
+  `MaybeRefOrGetter<Handler>` because a handler is itself a function:
+  `useInput(() => {})` must remain an input handler, not be reinterpreted as a getter that
+  returns one. Maintainer decision (2026-06-06): KEEP.
+
+#### `<Static>` uses a scoped slot object instead of positional render arguments
+
+- **Ink/React:** `<Static>` receives a function-as-children render callback and calls it as
+  `render(item, absoluteIndex)`.
+- **vue-tui:** `<Static>` exposes a Vue scoped slot with `{ item, index }`, so template
+  users write `v-slot="{ item, index }"` and TSX users pass a slot function that receives
+  one props object.
+- **Why:** this is the framework-native match for React render children. Vue scoped slots
+  pass one props object, not multiple positional arguments, and that object form is what
+  Vue users expect for slot payloads. The rendered item/index values remain equivalent.
+  Maintainer decision (2026-06-06): KEEP.
 
 ## Intentional Divergence Choices
 
@@ -341,6 +366,53 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   commit repeats the same clear. Emitting one clear instead of two has no visible behavior
   difference (issue #26).
 
+### Degenerate boxes do not lay out or paint children when the content area is gone
+
+- **Ink:** its size model is border-box-like: `width`/`height` are handed to Yoga as the
+  element's outer size, while border and padding consume space inside that size. Ink has no
+  `boxSizing` / `content-box` prop. During paint, though, Ink only clips children when
+  `overflow` is hidden. With default visible overflow, children can leak into border rows
+  or outside the box when border/padding squeeze the content area to zero, and a bare
+  `width={0}` Box can still let zero-width text wrapping create extra visible rows
+  (`B\nA` beside a sibling). Examples in Ink v7.0.4 include:
+  `width={3} height={2} borderStyle="single"` painting the child on the bottom border row;
+  `width={2} height={3}` leaking the child past the right border;
+  `width={4} height={3} paddingX={1} borderStyle="single"` leaking into the bottom
+  border; and bare `width={0}` text reserving rows through wrap-ansi's width-0 layout.
+- **vue-tui:** layout computes each Box's inner content size by subtracting computed border
+  and padding from the outer box size, clamps it to `{width >= 0, height >= 0}`, and
+  temporarily removes that Box's yoga children from the layout when either dimension is
+  zero. Paint applies the same inner-content gate, so the child subtree neither reserves
+  invisible rows nor writes glyphs outside a nonexistent content area. Border and background
+  are still painted as far as the outer area permits. Positive-size content areas keep the
+  existing overflow behavior; this is not a blanket `overflow:hidden`.
+- **Layout model guidance:** primitive `Box` should preserve the Yoga/flexbox model rather
+  than paper over it with ad-hoc layout corrections. Defaults such as `flexShrink: 1` are
+  part of that model, and a child resolving to zero width or height can be a valid layout
+  result. Higher-level components are where stronger user intent belongs: scroll, list, and
+  viewport abstractions should keep their content at natural size (`flexShrink: 0`, or an
+  equivalent encapsulated default) and let a bounded viewport clip or offset what is visible.
+  Paint containment is the renderer invariant underneath both cases: whatever Yoga resolves,
+  children may only paint inside their owning Box's content rectangle; if that rectangle has
+  no positive width or height, the child subtree does not paint.
+- **Why:** children need a real content rectangle to lay out and paint into. If the
+  resolved content width or height is zero, rendering child text or nested borders on top
+  of the frame, outside the box, or on later rows is an implementation artifact, not useful
+  output. This follows the common TUI box model: Ratatui renders child widgets into an
+  inner `Rect`, Textual reduces content space from the assigned box, and Rich panels render
+  children with child width/height after subtracting the border. Bubble Tea's viewport
+  follows the same separation at the component level: content keeps its natural size while
+  the viewport exposes a bounded visible window and offsets. The behavior also prevents
+  negative repeat/count math and paint crashes in tiny legal boxes. Maintainer decision
+  (2026-06-07): KEEP. Tests: `text-wrap-width.test.tsx`, `flex.test.tsx`,
+  `text.test.tsx`.
+- **Future `content-box`:** this does not block adding an explicit content-box option
+  later. That option would change how a requested size is expanded into an outer box size
+  before layout. Once an outer box exists, the paint invariant remains the same: a child
+  subtree only lays out and paints when the resolved inner content rectangle has positive
+  width and height. The default remains border-box-like, matching Ink's current public
+  sizing model.
+
 ### Out-of-type style values are forwarded, not defensively coerced
 
 - **Ink:** several flex/align setters coerce an invalid runtime value to a default:
@@ -369,18 +441,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   and dropping a prop changes the output; keeping a previous render's value does not match
   that, and Ink resets every other flex prop. Maintainer decision (2026-05-30): KEEP.
 
-### Duplicate explicit-`id` `useFocus` calls dedup to one registry entry
-
-- **Ink:** `addFocusable` unconditionally appends, so two `useFocus({id: 'x'})` create
-  **two** focusables with the same id. Tab visits "x" twice, and unmounting one calls
-  `removeFocusable` which filters by id and removes **both**.
-- **vue-tui:** `add(id)` is id-keyed (`if (!focusables.some(f => f.id === id))`), so a
-  duplicate explicit id registers **one** entry.
-- **Why:** the registry treats an id as identifying one focusable. With duplicate explicit
-  ids, Ink visits the same id twice and one unmount removes both entries. Auto-generated
-  ids never collide, so this only differs for an explicit duplicate id (already a user
-  error).
-
 ### Composables throw outside a render tree
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
@@ -394,7 +454,9 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Why:** a composable used in the wrong place is a bug, and a thrown error names it at
   the call site instead of returning a context that quietly does nothing. The two
   exceptions fall back because they have a meaningful standalone behavior (zero metrics / a
-  working animation), so throwing would remove a useful capability.
+  working animation), so throwing would remove a useful capability. Required app,
+  terminal, focus, and input context should fail fast when absent; no-op defaults hide bugs.
+  Maintainer decision (2026-06-07): KEEP.
 
 ### Invalid input is validated at the component layer, not the paint layer
 
@@ -421,7 +483,10 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
   over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
   inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
-  differs. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
+  differs. Maintainer decision (2026-06-07): KEEP. vue-tui makes the more reliable
+  library choice here: reject the same invalid input with a recoverable, prop-specific
+  error instead of preserving Ink's lower-level paint crash and chalk implementation
+  message. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
 
 ## Non-Behavioral Notes
 
@@ -444,7 +509,13 @@ mechanics so they are not mistaken for parity gaps.
   these children outright — React never renders `null` / `false` / `undefined` (verified
   against Ink v7.0.4: `{false}`, `{null}`, `{undefined}` each produce no node; only a real
   empty `<Box/>` occupies a flex-gap slot). `<Transform>` over an empty or all-comment slot
-  renders no node (`return null`), matching Ink's `children == null` guard.
+  renders no node (`return null`), matching Ink's `children == null` guard for nullish
+  children and intentionally diverging for a literal `false` child. Ink's React
+  `children` check sees `false !== null` and creates an empty `ink-text` layout item that
+  can consume a flex-gap slot; Vue materializes `false`, `null`, `undefined`, and
+  `v-if=false` as the same comment-anchor shape, so vue-tui treats the all-comment slot as
+  absent. Maintainer decision (2026-06-07): KEEP. This is the correct Vue behavior:
+  conditional false children should behave like no node, not like an empty layout item.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at
   `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's
   `renderThrottleMs`), synchronous resize. This remains true even though re-renders come

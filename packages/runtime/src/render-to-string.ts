@@ -4,6 +4,7 @@ import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
+import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { paint } from "./paint/paint.ts";
@@ -75,13 +76,22 @@ export function renderToString(component: Component, options?: RenderToStringOpt
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({
       onCommit: () => {
-        root.yoga.calculateLayout(columns, undefined, Yoga.DIRECTION_LTR);
-        // Flush static output from intermediate renders
-        for (const stat of findStatics(root)) {
-          const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
-          if (staticFrame && staticFrame !== "\n") {
-            capturedStaticOutput += staticFrame + "\n";
+        const restoreLayoutGuards = calculateLayoutWithContentGuards(
+          root,
+          columns,
+          undefined,
+          Yoga.DIRECTION_LTR,
+        );
+        try {
+          // Flush static output from intermediate renders
+          for (const stat of findStatics(root)) {
+            const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
+            if (staticFrame && staticFrame !== "\n") {
+              capturedStaticOutput += staticFrame + "\n";
+            }
           }
+        } finally {
+          restoreLayoutGuards();
         }
       },
     }),
@@ -109,14 +119,21 @@ export function renderToString(component: Component, options?: RenderToStringOpt
     // Synchronously render the Vue tree into the root.
     app.mount(root);
 
-    // Calculate final layout (onCommit may have already done this, but
-    // ensure the final state is laid out).
-    root.yoga.calculateLayout(columns, undefined, Yoga.DIRECTION_LTR);
-
-    // Render the dynamic frame to a string.
-    const output = isScreenReaderEnabled
-      ? renderScreenReaderOutput(root, { skipStaticElements: true })
-      : paint(root);
+    const restoreLayoutGuards = calculateLayoutWithContentGuards(
+      root,
+      columns,
+      undefined,
+      Yoga.DIRECTION_LTR,
+    );
+    let output: string;
+    try {
+      // Render the dynamic frame to a string.
+      output = isScreenReaderEnabled
+        ? renderScreenReaderOutput(root, { skipStaticElements: true })
+        : paint(root);
+    } finally {
+      restoreLayoutGuards();
+    }
 
     // Tear down: unmount the tree so Vue cleans up child nodes and runs
     // effect cleanup functions. Child yoga nodes are freed by the node-ops

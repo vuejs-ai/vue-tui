@@ -73,6 +73,7 @@ export function useFocus(options: UseFocusOptions = {}): {
     });
     ctx.add(id, { autoFocus });
     currentId = id;
+    isFocused.value = ctx.activeId === id;
     // Apply the current active state to the freshly-registered id.
     if (toValue(isActive)) {
       ctx.activate(id);

@@ -1,4 +1,4 @@
-import { defineComponent, shallowRef, nextTick } from "vue";
+import { defineComponent, shallowRef, nextTick, h } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
@@ -880,6 +880,28 @@ test("change color of top border", async ({ expect }) => {
   `);
 });
 
+test("non-string host borderTopColor falls back to general borderColor", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(
+      () => () =>
+        h("box", {
+          borderStyle: "single",
+          borderColor: "red",
+          borderTopColor: [0, 0, 255],
+          width: 4,
+          height: 3,
+        }),
+    ),
+    { columns: 100 },
+  );
+
+  expect(lastFrame()).toMatchInlineSnapshot(`
+    "[31m┌──┐[39m
+    [31m│[39m  [31m│[39m
+    [31m└──┘[39m"
+  `);
+});
+
 // change color of bottom border
 test("change color of bottom border", async ({ expect }) => {
   const { lastFrame } = await render(
@@ -1159,6 +1181,30 @@ test("border background color fallback to general borderBackgroundColor", async 
   // cyan=46, magenta=45
   expect(frame).toContain("[46m");
   expect(frame).toContain("[45m");
+});
+
+test("non-string host borderTopBackgroundColor falls back to general borderBackgroundColor", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(
+      () => () =>
+        h("box", {
+          borderStyle: "single",
+          borderBackgroundColor: "red",
+          borderTopBackgroundColor: [0, 0, 255],
+          width: 4,
+          height: 3,
+        }),
+    ),
+    { columns: 100 },
+  );
+
+  expect(lastFrame()).toMatchInlineSnapshot(`
+    "[41m┌──┐[49m
+    [41m│[49m  [41m│[49m
+    [41m└──┘[49m"
+  `);
 });
 
 test("vertical border background does not bleed into content rows", async ({ expect }) => {

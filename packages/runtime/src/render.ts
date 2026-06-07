@@ -21,6 +21,7 @@ import { createInputParser, type InputEvent } from "./io/input-parser.ts";
 import { parseKeypress } from "./io/parse-keypress.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
+import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
@@ -421,9 +422,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writeBestEffort(mountedAppContext.stdout, "\n");
       } else {
         const lastFrame = mountedGetLastOutput?.() ?? "";
-        if (lastFrame) {
-          writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
-        }
+        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
       }
     }
     if (mountedWriter && !mountedDebug && mountedInteractive && stdoutWritable)
@@ -919,137 +918,155 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // Non-interactive: compute the dynamic frame now, write static output
         // after onRender, and defer dynamic frame output until unmount.
         tuiRoot.yoga.setWidth(w);
-        tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
-        emitLayoutListeners(tuiRoot);
-        const frame = renderFrame(w);
-        frameState.lastOutput = frame;
-        frameState.lastOutputToRender = frame + "\n";
-        frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-        if (onRender) onRender({ renderTime: performance.now() - start });
-        if (hasStaticOutput) {
-          stdout.write(staticOutput);
+        const restoreLayoutGuards = calculateLayoutWithContentGuards(
+          tuiRoot,
+          w,
+          undefined,
+          Yoga.DIRECTION_LTR,
+        );
+        try {
+          emitLayoutListeners(tuiRoot);
+          const frame = renderFrame(w);
+          frameState.lastOutput = frame;
+          frameState.lastOutputToRender = frame + "\n";
+          frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          if (hasStaticOutput) {
+            stdout.write(staticOutput);
+          }
+        } finally {
+          restoreLayoutGuards();
         }
         return;
       }
 
       tuiRoot.yoga.setWidth(w);
-      tuiRoot.yoga.calculateLayout(w, undefined, Yoga.DIRECTION_LTR);
-      emitLayoutListeners(tuiRoot);
-      const frame = renderFrame(w);
-      const outputHeight = frame === "" ? 0 : frame.split("\n").length;
+      const restoreLayoutGuards = calculateLayoutWithContentGuards(
+        tuiRoot,
+        w,
+        undefined,
+        Yoga.DIRECTION_LTR,
+      );
+      try {
+        emitLayoutListeners(tuiRoot);
+        const frame = renderFrame(w);
+        const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
-      if (debug) {
-        // Debug mode mirrors Ink's onRender debug branch (ink.tsx:550-558): its
-        // contract is "every update rendered as a separate, FULL output". Ink
-        // writes `this.fullStaticOutput + output` UNCONDITIONALLY on every render
-        // — the ENTIRE accumulated <Static> history (not just this commit's delta)
-        // prepended to the current dynamic frame, with NO equality short-circuit.
-        // Two fixes vs the old behavior, BOTH scoped to this debug branch only:
-        //   (a) re-emit the FULL accumulated history (frameState.fullStaticOutput,
-        //       accumulated at line 847-849) on every render, not just this
-        //       commit's static delta — Ink re-prints all static every render; and
-        //   (b) write straight to stdout, bypassing the FrameWriter, whose
-        //       `frame === lastFrame` dedup would swallow a byte-identical debug
-        //       rerender that Ink still emits.
-        // The static history and dynamic frame are written as two consecutive
-        // stdout.write calls: the byte stream reaching the terminal is identical
-        // to Ink's single `fullStaticOutput + output` write (stdout.write inserts
-        // no separator), while keeping the dynamic frame its own chunk so the
-        // @vue-tui/testing render() helper can still split frames (its `lastFrame`
-        // is the dynamic frame, `frames` distinguishes static from dynamic).
-        // The non-debug interactive path below is untouched — it keeps the
-        // per-commit static delta and the FrameWriter dedup (the correct,
-        // efficient live-render behavior).
-        if (frameState.fullStaticOutput !== "") {
-          stdout.write(frameState.fullStaticOutput);
-          // Forward the static-history chunk to the test-only frame sink in the
-          // SAME order it reaches stdout (static first, dynamic next), with the
-          // EXACT value written — so the testing helper's frames[] reproduce
-          // today's content faithfully, minus the escapes (which only go to
-          // stdout). No-op when no sink is registered (normal runs).
-          //
-          // Gate on !teardownStarted: the final mountedCommit() in teardown()
-          // (every teardown route — unmount/cleanup/exit/Ctrl+C/signal/
-          // process.exit — sets teardownStarted=true before re-emitting) is a
-          // stdout byte-parity FLUSH, not a render, so it must keep writing to
-          // stdout but must NOT push a spurious entry into the live frames[].
-          if (!teardownStarted) frameSink?.(frameState.fullStaticOutput);
-        }
-        frameState.lastOutput = frame;
-        frameState.lastOutputToRender = frame;
-        frameState.outputHeight = outputHeight;
-        if (onRender) onRender({ renderTime: performance.now() - start });
-        // Ink writes `fullStaticOutput + output` with NO trailing newline
-        // (ink.tsx:558; `output` is \n-joined and returned WITHOUT a trailing
-        // \n — output.ts:305-312). Writing `frame` (not `frame + "\n"`) makes
-        // the concatenation of these two stdout.write calls byte-identical to
-        // Ink's single write.
-        stdout.write(frame);
-        // Forward the dynamic frame to the sink (mirrors the always-run
-        // stdout.write above). lastFrame() is the most recent dynamic frame; an
-        // empty render forwards "" so lastFrame() reads back "" (Ink-faithful).
-        // Same teardown gate as the static chunk above: the teardown re-emit
-        // flushes to stdout for byte parity but is not a render, so it must not
-        // append a duplicate of the final frame to the live frames[].
-        if (!teardownStarted) frameSink?.(frame);
-        return;
-      }
-
-      if (isScreenReaderEnabled) {
-        // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
-        // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
-        // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
-        // (inline static, if any) + the wrapped output, then RETURNS — before the
-        // normal interactive frame path. Crucially it:
-        //   - NEVER calls shouldClearTerminalForFrame / emits clearTerminal, so a
-        //     tall/overflowing SR transcript does not wipe the user's scrollback;
-        //   - NEVER accumulates or replays fullStaticOutput (gated above);
-        //   - NEVER routes through the log-update writer (raw writes only);
-        //   - leaves the cursor visible (the mount-time hide is skipped for SR).
-        // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
-        // it plays the role of Ink's `wrappedOutput`.
-        const sync = synchronize;
-        if (onRender) onRender({ renderTime: performance.now() - start });
-        if (sync) stdout.write(bsu);
-
-        if (hasStaticOutput) {
-          // Erase the previous main output before writing new static output
-          // (ink.tsx:579-588), then reset the tracked height to 0.
-          const erase =
-            frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
-          stdout.write(erase + staticOutput);
-          frameState.outputHeight = 0;
+        if (debug) {
+          // Debug mode mirrors Ink's onRender debug branch (ink.tsx:550-558): its
+          // contract is "every update rendered as a separate, FULL output". Ink
+          // writes `this.fullStaticOutput + output` UNCONDITIONALLY on every render
+          // — the ENTIRE accumulated <Static> history (not just this commit's delta)
+          // prepended to the current dynamic frame, with NO equality short-circuit.
+          // Two fixes vs the old behavior, BOTH scoped to this debug branch only:
+          //   (a) re-emit the FULL accumulated history (frameState.fullStaticOutput,
+          //       accumulated at line 847-849) on every render, not just this
+          //       commit's static delta — Ink re-prints all static every render; and
+          //   (b) write straight to stdout, bypassing the FrameWriter, whose
+          //       `frame === lastFrame` dedup would swallow a byte-identical debug
+          //       rerender that Ink still emits.
+          // The static history and dynamic frame are written as two consecutive
+          // stdout.write calls: the byte stream reaching the terminal is identical
+          // to Ink's single `fullStaticOutput + output` write (stdout.write inserts
+          // no separator), while keeping the dynamic frame its own chunk so the
+          // @vue-tui/testing render() helper can still split frames (its `lastFrame`
+          // is the dynamic frame, `frames` distinguishes static from dynamic).
+          // The non-debug interactive path below is untouched — it keeps the
+          // per-commit static delta and the FrameWriter dedup (the correct,
+          // efficient live-render behavior).
+          if (frameState.fullStaticOutput !== "") {
+            stdout.write(frameState.fullStaticOutput);
+            // Forward the static-history chunk to the test-only frame sink in the
+            // SAME order it reaches stdout (static first, dynamic next), with the
+            // EXACT value written — so the testing helper's frames[] reproduce
+            // today's content faithfully, minus the escapes (which only go to
+            // stdout). No-op when no sink is registered (normal runs).
+            //
+            // Gate on !teardownStarted: the final mountedCommit() in teardown()
+            // (every teardown route — unmount/cleanup/exit/Ctrl+C/signal/
+            // process.exit — sets teardownStarted=true before re-emitting) is a
+            // stdout byte-parity FLUSH, not a render, so it must keep writing to
+            // stdout but must NOT push a spurious entry into the live frames[].
+            if (!teardownStarted) frameSink?.(frameState.fullStaticOutput);
+          }
+          frameState.lastOutput = frame;
+          frameState.lastOutputToRender = frame;
+          frameState.outputHeight = outputHeight;
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          // Ink writes `fullStaticOutput + output` with NO trailing newline
+          // (ink.tsx:558; `output` is \n-joined and returned WITHOUT a trailing
+          // \n — output.ts:305-312). Writing `frame` (not `frame + "\n"`) makes
+          // the concatenation of these two stdout.write calls byte-identical to
+          // Ink's single write.
+          stdout.write(frame);
+          // Forward the dynamic frame to the sink (mirrors the always-run
+          // stdout.write above). lastFrame() is the most recent dynamic frame; an
+          // empty render forwards "" so lastFrame() reads back "" (Ink-faithful).
+          // Same teardown gate as the static chunk above: the teardown re-emit
+          // flushes to stdout for byte parity but is not a render, so it must not
+          // append a duplicate of the final frame to the live frames[].
+          if (!teardownStarted) frameSink?.(frame);
+          return;
         }
 
-        if (frame === frameState.lastOutput && !hasStaticOutput) {
-          // Unchanged frame and no new static: nothing to write (ink.tsx:590-596).
+        if (isScreenReaderEnabled) {
+          // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
+          // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
+          // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
+          // (inline static, if any) + the wrapped output, then RETURNS — before the
+          // normal interactive frame path. Crucially it:
+          //   - NEVER calls shouldClearTerminalForFrame / emits clearTerminal, so a
+          //     tall/overflowing SR transcript does not wipe the user's scrollback;
+          //   - NEVER accumulates or replays fullStaticOutput (gated above);
+          //   - NEVER routes through the log-update writer (raw writes only);
+          //   - leaves the cursor visible (the mount-time hide is skipped for SR).
+          // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
+          // it plays the role of Ink's `wrappedOutput`.
+          const sync = synchronize;
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          if (sync) stdout.write(bsu);
+
+          if (hasStaticOutput) {
+            // Erase the previous main output before writing new static output
+            // (ink.tsx:579-588), then reset the tracked height to 0.
+            const erase =
+              frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
+            stdout.write(erase + staticOutput);
+            frameState.outputHeight = 0;
+          }
+
+          if (frame === frameState.lastOutput && !hasStaticOutput) {
+            // Unchanged frame and no new static: nothing to write (ink.tsx:590-596).
+            if (sync) stdout.write(esu);
+            return;
+          }
+
+          if (hasStaticOutput) {
+            // Already erased above; write the wrapped output directly.
+            stdout.write(frame);
+          } else {
+            const erase =
+              frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
+            stdout.write(erase + frame);
+          }
+
+          // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
+          // case — empty frame => 0 lines, multi-line frame keeps its true count so
+          // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
+          frameState.lastOutput = frame;
+          frameState.lastOutputToRender = frame;
+          frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
           if (sync) stdout.write(esu);
           return;
         }
 
-        if (hasStaticOutput) {
-          // Already erased above; write the wrapped output directly.
-          stdout.write(frame);
-        } else {
-          const erase =
-            frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
-          stdout.write(erase + frame);
-        }
-
-        // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
-        // case — empty frame => 0 lines, multi-line frame keeps its true count so
-        // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
-        frameState.lastOutput = frame;
-        frameState.lastOutputToRender = frame;
-        frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-
-        if (sync) stdout.write(esu);
-        return;
+        // Interactive path
+        if (onRender) onRender({ renderTime: performance.now() - start });
+        renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+      } finally {
+        restoreLayoutGuards();
       }
-
-      // Interactive path
-      if (onRender) onRender({ renderTime: performance.now() - start });
-      renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
     }
 
     // A single render-throttle window derived from maxFps drives BOTH the
@@ -1335,6 +1352,7 @@ interface Focusable {
 function createFocusController(): FocusContext {
   const focusables: Focusable[] = [];
   const subs = new Map<string, Set<(focused: boolean) => void>>();
+  let activeFocusable: Focusable | null = null;
   let activeId: string | null = null;
   const activeIdRef = shallowRef<string | null>(null);
 
@@ -1342,37 +1360,49 @@ function createFocusController(): FocusContext {
     subs.get(id)?.forEach((fn) => fn(focused));
   }
 
-  function setActive(next: string | null) {
-    if (activeId === next) return;
+  function setActiveFocusable(next: Focusable | null) {
+    if (next !== null && !focusables.includes(next)) {
+      next = null;
+    }
+    if (activeFocusable === next) return;
+
     const prev = activeId;
-    activeId = next;
+    activeFocusable = next;
+    const nextId = next?.id ?? null;
+
+    if (prev === nextId) return;
+
+    activeId = nextId;
     ctx.activeId = activeId;
     activeIdRef.value = activeId;
     if (prev) notify(prev, false);
-    if (next) notify(next, true);
+    if (nextId) notify(nextId, true);
   }
 
-  function findNextActive(startIdx: number, direction: 1 | -1): string | null {
+  function findNextActive(startIdx: number, direction: 1 | -1): Focusable | null {
     const len = focusables.length;
     for (let i = 0; i < len; i++) {
       const idx = (startIdx + direction * (i + 1) + len * len) % len;
-      if (focusables[idx]!.isActive) return focusables[idx]!.id;
+      if (focusables[idx]!.isActive) return focusables[idx]!;
     }
     return null;
   }
 
   // The start index a directional search begins FROM (it scans from the next slot
-  // in `direction`). With a valid current focus, that's its index. With no current
-  // focus we begin just outside the end we're moving away from, so the first
-  // candidate is the first focusable (forward) or the last (backward) — symmetric
-  // for both directions. findIndex returning -1 (activeId set but not in the list)
-  // is treated as "no current": unreachable while the activeId invariant holds
-  // (setActive only ever stores null or a present id; remove() clears a removed
-  // active), but folding it in here keeps focusNext/focusPrevious from diverging if
-  // that invariant is ever broken.
+  // in `direction`). With duplicate ids, public `activeId` is not enough to know
+  // which registry entry the user is leaving, so we track the active entry object
+  // internally and only expose its id. With no current focus we begin just outside
+  // the end we're moving away from, so the first candidate is the first focusable
+  // (forward) or the last (backward) — symmetric for both directions.
   function startSearchIndex(direction: 1 | -1): number {
-    const i = activeId ? focusables.findIndex((f) => f.id === activeId) : -1;
-    if (i >= 0) return i;
+    if (activeFocusable) {
+      const i = focusables.indexOf(activeFocusable);
+      if (i >= 0) return i;
+    }
+    if (activeId) {
+      const i = focusables.findIndex((f) => f.id === activeId);
+      if (i >= 0) return i;
+    }
     return direction === 1 ? -1 : focusables.length;
   }
 
@@ -1399,45 +1429,56 @@ function createFocusController(): FocusContext {
     // firstFocusableId` and ALWAYS reassigns activeFocusId. findNextActive already
     // wraps to the first active (or null if none), so it's equivalent to Ink's
     // `next ?? first` — including the clear-to-null case when NO focusable is active.
-    // We must call setActive UNCONDITIONALLY: a null result clears a stale activeId
+    // We must call setActiveFocusable UNCONDITIONALLY: a null result clears a stale activeId
     // (e.g. left by focus(id) pinning an isActive=false item), matching Ink.
     focusNext() {
       if (focusables.length === 0) return;
-      setActive(findNextActive(startSearchIndex(1), 1));
+      setActiveFocusable(findNextActive(startSearchIndex(1), 1));
     },
     focusPrevious() {
       if (focusables.length === 0) return;
-      setActive(findNextActive(startSearchIndex(-1), -1));
+      setActiveFocusable(findNextActive(startSearchIndex(-1), -1));
     },
     focus(id) {
       const entry = focusables.find((f) => f.id === id);
-      if (entry) setActive(id);
+      if (entry) setActiveFocusable(entry);
     },
     blur() {
-      setActive(null);
+      setActiveFocusable(null);
     },
+    // Ink treats focus ids as registration entries, not unique keys: duplicate
+    // explicit ids are user-created ambiguity, but they still participate in
+    // focus order. Matching that means add pushes every registration, while
+    // remove/activate/deactivate affect every entry with the same id.
     add(id, options) {
-      if (!focusables.some((f) => f.id === id)) {
-        focusables.push({ id, isActive: true });
-      }
-      if (options.autoFocus && activeId == null) {
-        setActive(id);
+      const entry: Focusable = { id, isActive: true };
+      focusables.push(entry);
+      if (options.autoFocus && activeFocusable == null) {
+        setActiveFocusable(entry);
       }
     },
     remove(id) {
-      const idx = focusables.findIndex((f) => f.id === id);
-      if (idx >= 0) focusables.splice(idx, 1);
-      if (activeId === id) setActive(null);
+      const removingActive = activeFocusable?.id === id;
+      for (let i = focusables.length - 1; i >= 0; i--) {
+        if (focusables[i]!.id === id) focusables.splice(i, 1);
+      }
+      if (removingActive) setActiveFocusable(null);
     },
     activate(id) {
-      const entry = focusables.find((f) => f.id === id);
-      if (entry) entry.isActive = true;
+      for (const entry of focusables) {
+        if (entry.id === id) entry.isActive = true;
+      }
     },
     deactivate(id) {
-      const entry = focusables.find((f) => f.id === id);
-      if (entry) {
-        entry.isActive = false;
-        if (activeId === id) setActive(null);
+      let changed = false;
+      for (const entry of focusables) {
+        if (entry.id === id) {
+          entry.isActive = false;
+          changed = true;
+        }
+      }
+      if (changed && activeFocusable?.id === id) {
+        setActiveFocusable(null);
       }
     },
     subscribe(id, fn) {

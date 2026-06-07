@@ -115,7 +115,7 @@ const boxProps = {
   // Accept either a preset name string or a full custom BoxStyle object (Ink parity, G13).
   // Ink types borderStyle as `keyof Boxes | BoxStyle`; we mirror that here.
   borderStyle: [String, Object] as PropType<BorderStyle | BoxStyle>,
-  borderColor: [String, Array],
+  borderColor: String,
   // `default: undefined` is intentional and load-bearing: Vue's boolean-casting
   // rule coerces absent Boolean props to `false` only when there is no explicit
   // default. Adding `default: undefined` suppresses that coercion so absent
@@ -135,17 +135,17 @@ const boxProps = {
   borderBottom: { type: Boolean, default: true },
   borderLeft: { type: Boolean, default: true },
   borderRight: { type: Boolean, default: true },
-  borderTopColor: [String, Array],
-  borderBottomColor: [String, Array],
-  borderLeftColor: [String, Array],
-  borderRightColor: [String, Array],
-  borderBackgroundColor: [String, Array],
-  borderTopBackgroundColor: [String, Array],
-  borderBottomBackgroundColor: [String, Array],
-  borderLeftBackgroundColor: [String, Array],
-  borderRightBackgroundColor: [String, Array],
+  borderTopColor: String,
+  borderBottomColor: String,
+  borderLeftColor: String,
+  borderRightColor: String,
+  borderBackgroundColor: String,
+  borderTopBackgroundColor: String,
+  borderBottomBackgroundColor: String,
+  borderLeftBackgroundColor: String,
+  borderRightBackgroundColor: String,
 
-  backgroundColor: [String, Array],
+  backgroundColor: String,
   overflow: String as PropType<"visible" | "hidden">,
   overflowX: String as PropType<"visible" | "hidden">,
   overflowY: String as PropType<"visible" | "hidden">,
@@ -216,28 +216,29 @@ const BoxImpl = defineComponent({
       // width=0 with no left/right border) produces an empty string Ink skips.
       // Matching that needs layout, unavailable at render. Niche + invalid-input-only.
       if (props.borderStyle) {
-        const generalBg = props.borderBackgroundColor;
+        const stringBg = (value: unknown) => (typeof value === "string" ? value : undefined);
+        const generalBg = stringBg(props.borderBackgroundColor);
         if (props.borderTop !== false) {
           assertValidBackgroundColor(
-            props.borderTopBackgroundColor ?? generalBg,
+            stringBg(props.borderTopBackgroundColor) ?? generalBg,
             "borderTopBackgroundColor",
           );
         }
         if (props.borderBottom !== false) {
           assertValidBackgroundColor(
-            props.borderBottomBackgroundColor ?? generalBg,
+            stringBg(props.borderBottomBackgroundColor) ?? generalBg,
             "borderBottomBackgroundColor",
           );
         }
         if (props.borderLeft !== false) {
           assertValidBackgroundColor(
-            props.borderLeftBackgroundColor ?? generalBg,
+            stringBg(props.borderLeftBackgroundColor) ?? generalBg,
             "borderLeftBackgroundColor",
           );
         }
         if (props.borderRight !== false) {
           assertValidBackgroundColor(
-            props.borderRightBackgroundColor ?? generalBg,
+            stringBg(props.borderRightBackgroundColor) ?? generalBg,
             "borderRightBackgroundColor",
           );
         }

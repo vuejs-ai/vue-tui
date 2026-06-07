@@ -22,11 +22,11 @@ test("hex color applies chalk.hex", () => {
   }
 });
 
-test("rgb tuple applies chalk.rgb", () => {
+test("non-string color values do not have a tuple-specific styling path", () => {
   const prev = chalk.level;
   chalk.level = 1;
   try {
-    expect(applyChalk("x", { color: [255, 0, 0] })).toBe(chalk.rgb(255, 0, 0)("x"));
+    expect(applyChalk("x", { color: [255, 0, 0] })).toBe("x");
   } finally {
     chalk.level = prev;
   }
@@ -160,7 +160,7 @@ test("level 0 emits no ANSI codes regardless of styles", () => {
 
 // A12: a chalk-MODIFIER name as a BACKGROUND is what Ink colorize.ts throws on
 // (`'bold' in chalk` true, but `chalk.bgBold` is not a function). vue-tui detects
-// it at render so the error boundary catches it. Every other form is valid.
+// it at render so the error boundary catches it. Every other Ink-compatible form is valid.
 test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
   for (const m of [
     "bold",
@@ -178,7 +178,7 @@ test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", (
   }
 });
 
-test("isInvalidBackgroundColor: real colors / hex / ansi256 / rgb / tuple / unknown / empty are valid", () => {
+test("isInvalidBackgroundColor: real colors / hex / ansi256 / rgb / unknown / empty are valid", () => {
   for (const ok of [
     "red",
     "blue",
@@ -191,7 +191,6 @@ test("isInvalidBackgroundColor: real colors / hex / ansi256 / rgb / tuple / unkn
     "",
     undefined,
     null,
-    [1, 2, 3],
   ]) {
     expect(isInvalidBackgroundColor(ok)).toBe(false);
   }
@@ -206,7 +205,6 @@ test("assertValidBackgroundColor throws only for a modifier name, with the label
   expect(() => assertValidBackgroundColor("red")).not.toThrow();
   expect(() => assertValidBackgroundColor("#abcdef")).not.toThrow();
   expect(() => assertValidBackgroundColor("not-a-real-color")).not.toThrow();
-  expect(() => assertValidBackgroundColor([1, 2, 3])).not.toThrow();
   expect(() => assertValidBackgroundColor(undefined)).not.toThrow();
 });
 

@@ -11,14 +11,7 @@ import type { TextProps } from "../host/nodes.ts";
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
 
-export function applyColor(
-  c: ChalkInstance,
-  color: string | [number, number, number],
-  bg: boolean,
-): ChalkInstance {
-  if (Array.isArray(color)) {
-    return bg ? c.bgRgb(color[0], color[1], color[2]) : c.rgb(color[0], color[1], color[2]);
-  }
+export function applyColor(c: ChalkInstance, color: unknown, bg: boolean): ChalkInstance {
   if (typeof color !== "string") return c;
   // Named chalk color (validated by presence of the method, like Ink's
   // `color in chalk`): apply when known, otherwise fall through to bare text.
@@ -63,11 +56,11 @@ function bgKey(name: string): string {
  * render so vue-tui's error boundary (onErrorCaptured → ErrorOverview) handles it.
  *
  * Only the in-chalk-but-no-bg-method case is rejected; valid colors, hex,
- * ansi256, rgb, `[r,g,b]` tuples, and unknown non-chalk strings all return false.
+ * ansi256, rgb strings, and unknown non-chalk strings all return false.
  */
 export function isInvalidBackgroundColor(color: unknown): boolean {
-  // Only a non-empty STRING can be a chalk name. Arrays ([r,g,b]), undefined,
-  // null, hex/ansi256/rgb strings (not `in chalk`) all fall through to `false`.
+  // Only a non-empty string can be a chalk name. Non-strings, undefined, null,
+  // hex/ansi256/rgb strings (not `in chalk`) all fall through to `false`.
   if (typeof color !== "string" || color.length === 0) return false;
   const isInChalk = color in (chalk as unknown as Record<string, unknown>);
   if (!isInChalk) return false;
@@ -99,8 +92,8 @@ export function applyChalk(text: string, props: TextProps): string {
   // different, non-Ink byte sequence for any multi-style Text (G68).
   let s = text;
   if (props.dimColor) s = chalk.dim(s);
-  if (props.color) s = applyColor(chalk, props.color as never, false)(s);
-  if (props.backgroundColor) s = applyColor(chalk, props.backgroundColor as never, true)(s);
+  if (props.color) s = applyColor(chalk, props.color, false)(s);
+  if (props.backgroundColor) s = applyColor(chalk, props.backgroundColor, true)(s);
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);
   if (props.underline) s = chalk.underline(s);

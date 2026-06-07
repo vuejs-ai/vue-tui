@@ -41,10 +41,13 @@ export const ErrorOverview = defineComponent({
         typeof (error as { stack?: unknown })?.stack === "string"
           ? (error as { stack: string }).stack
           : undefined;
-      // Ink renders `{error.message}`; for an Error that's its message, for a
-      // primitive thrown value we fall back to String(value) so the header still
-      // shows something meaningful (e.g. `throw "boom"` → ` ERROR  boom`).
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Ink renders `{error.message}`. A cross-realm Error has a different
+      // prototype and fails `instanceof Error`, so read a string `.message`
+      // structurally; primitives still fall back to String(value).
+      const errorMessage =
+        typeof (error as { message?: unknown })?.message === "string"
+          ? (error as { message: string }).message
+          : String(error);
 
       // First stack line is the message; the rest are frames. The first frame
       // is the throw origin used for the file:line:col header and excerpt.

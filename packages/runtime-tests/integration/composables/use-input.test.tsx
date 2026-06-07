@@ -1,4 +1,4 @@
-import { defineComponent, shallowRef } from "vue";
+import { defineComponent, nextTick, shallowRef, toRef, type PropType } from "vue";
 import { expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput, useStdout, type Key } from "@vue-tui/runtime";
@@ -42,6 +42,39 @@ test("useInput respects isActive ref", async () => {
   active.value = true;
   await stdin.write("b");
   expect(calls).toEqual(["b"]);
+});
+
+test("useInput accepts a handler ref and calls the latest function", async () => {
+  const calls: string[] = [];
+  const firstHandler = (input: string) => calls.push(`first:${input}`);
+  const secondHandler = (input: string) => calls.push(`second:${input}`);
+  const currentHandler = shallowRef(firstHandler);
+
+  const Child = defineComponent({
+    props: {
+      onInput: {
+        type: Function as PropType<(input: string, key: Key) => void>,
+        required: true,
+      },
+    },
+    setup(props) {
+      useInput(toRef(props, "onInput"));
+      return () => <Text>child</Text>;
+    },
+  });
+
+  const App = defineComponent(() => {
+    return () => <Child onInput={currentHandler.value} />;
+  });
+
+  const { stdin } = await render(App);
+  await stdin.write("a");
+  expect(calls).toEqual(["first:a"]);
+
+  currentHandler.value = secondHandler;
+  await nextTick();
+  await stdin.write("b");
+  expect(calls).toEqual(["first:a", "second:b"]);
 });
 
 test("two useInput hooks both receive the same input", async () => {
