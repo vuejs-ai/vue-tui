@@ -658,15 +658,10 @@ function paintNode(
         fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg, transformers);
       }
 
-      const contentMetrics = getBoxContentMetrics(node, w, h);
-      // A Box with no inner content area has no legal child paint region.
-      if (contentMetrics.width === 0 || contentMetrics.height === 0) {
-        return;
-      }
-
       // Overflow clipping: clip children to the box content area (inside
       // borders) when overflow/overflowX/overflowY is "hidden". Matches Ink's
-      // per-axis clip/unclip approach.
+      // per-axis clip/unclip approach. Applied BEFORE the zero-content decision
+      // so a degenerate box's absolute children are still clipped by overflow.
       let clipped = false;
       const overflow = node.props["overflow"] as string | undefined;
       const clipH =
@@ -685,6 +680,22 @@ function paintNode(
           y2: clipV ? y + h - bb : undefined,
         });
         clipped = true;
+      }
+
+      const contentMetrics = getBoxContentMetrics(node, w, h);
+      // A Box with no inner content area has no legal paint region for FLOW
+      // children. Absolutely-positioned children, though, are placed against
+      // the containing block (border-box), not the content rect — Ink still
+      // paints them — so paint just those and keep flow children suppressed.
+      if (contentMetrics.width === 0 || contentMetrics.height === 0) {
+        for (const child of node.children) {
+          const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
+          if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
+            paintNode(child, output, x, y, transformers, childBg);
+          }
+        }
+        if (clipped) output.unclip();
+        return;
       }
 
       for (const child of node.children) paintNode(child, output, x, y, transformers, childBg);

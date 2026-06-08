@@ -388,10 +388,13 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   border; and bare `width={0}` text reserving rows through wrap-ansi's width-0 layout.
 - **vue-tui:** layout computes each Box's inner content size by subtracting computed border
   and padding from the outer box size, clamps it to `{width >= 0, height >= 0}`, and
-  temporarily removes that Box's yoga children from the layout when either dimension is
-  zero. Paint applies the same inner-content gate, so the child subtree neither reserves
-  invisible rows nor writes glyphs outside a nonexistent content area. Border and background
-  are still painted as far as the outer area permits. Positive-size content areas keep the
+  temporarily removes that Box's **in-flow** yoga children from the layout when either
+  dimension is zero. Paint applies the same inner-content gate, so the in-flow child subtree
+  neither reserves invisible rows nor writes glyphs outside a nonexistent content area.
+  Border and background are still painted as far as the outer area permits.
+  **Absolutely-positioned children are exempt** — their region is the containing block
+  (border-box), not the content rect, so they still lay out and paint (clipped only by
+  `overflow:hidden`), matching Ink. Positive-size content areas keep the
   existing overflow behavior; this is not a blanket `overflow:hidden`.
 - **Layout model guidance:** primitive `Box` should preserve the Yoga/flexbox model rather
   than paper over it with ad-hoc layout corrections. Defaults such as `flexShrink: 1` are
@@ -400,8 +403,10 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   viewport abstractions should keep their content at natural size (`flexShrink: 0`, or an
   equivalent encapsulated default) and let a bounded viewport clip or offset what is visible.
   Paint containment is the renderer invariant underneath both cases: whatever Yoga resolves,
-  children may only paint inside their owning Box's content rectangle; if that rectangle has
-  no positive width or height, the child subtree does not paint.
+  **in-flow** children may only paint inside their owning Box's content rectangle; if that
+  rectangle has no positive width or height, the in-flow child subtree does not paint.
+  Absolutely-positioned children are the exception — they paint against the containing block
+  and are suppressed only by `overflow:hidden`, matching Ink.
 - **Why:** children need a real content rectangle to lay out and paint into. If the
   resolved content width or height is zero, rendering child text or nested borders on top
   of the frame, outside the box, or on later rows is an implementation artifact, not useful
@@ -412,7 +417,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   the viewport exposes a bounded visible window and offsets. The behavior also prevents
   negative repeat/count math and paint crashes in tiny legal boxes. Maintainer decision
   (2026-06-07): KEEP. Tests: `text-wrap-width.test.tsx`, `flex.test.tsx`,
-  `text.test.tsx`.
+  `text.test.tsx`, `absolute-in-degenerate-box.test.tsx`.
 - **Future `content-box`:** this does not block adding an explicit content-box option
   later. That option would change how a requested size is expanded into an outer box size
   before layout. Once an outer box exists, the paint invariant remains the same: a child
