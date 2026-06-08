@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Development server for Vue 3 terminal apps with Yoga flexbox layout.",
   "license": "MIT",
   "bin": {
