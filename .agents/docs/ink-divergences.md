@@ -250,10 +250,11 @@ current-props model, or API conventions.
   prop diff carries a `display` that is not `'flex'`, and Ink's reconciler diff emits a
   withdrawn key as `display: undefined`. So clearing a previously-set `display` (`'none'` or
   `'flex'` → removed) **hides** the box: Ink treats the withdrawn prop as `none`, neither
-  keeping the prior value nor restoring the default. (`display={undefined}` on a box that
-  never set `display` is a no-op and stays visible — the diff registers no change.) In the
-  common toggle `display={hidden ? 'none' : undefined}`, Ink stays hidden on the `undefined`
-  branch; you must set `display="flex"` to show it again.
+  keeping the prior value nor restoring the default. (A box that simply **omits** `display`
+  stays visible — `'display' in style` is false, so no `setDisplay` runs; but an explicit
+  `display={undefined}` is itself applied as `DISPLAY_NONE` and hides, like any non-`'flex'`
+  value.) In the common toggle `display={hidden ? 'none' : undefined}`, Ink stays hidden on
+  the `undefined` branch; you must set `display="flex"` to show it again.
 - **vue-tui:** a removed/undefined `display` resets to the Box default `DISPLAY_FLEX`
   (visible): the same state as if the prop had never been set.
 - **Why:** render = f(current props): no `display` set means the default (visible).
