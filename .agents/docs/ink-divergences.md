@@ -86,18 +86,6 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   filter is therefore intentional, not redundant. Introduced 2026-05-31. Tests: "kitty
   query-response - end-to-end filtering" in `kitty-lifecycle.test.ts` (RED without it).
 
-### Non-`Error` thrown values keep their message in the error overview
-
-- **Ink:** `ErrorOverview` renders `error.message`; a thrown non-`Error` (`throw 'boom'`)
-  has no `.message`, so the overview shows a blank message.
-- **vue-tui:** the error boundary keeps the **raw** thrown value and `ErrorOverview` shows
-  `String(value)` as the message, so `throw 'boom'` renders ` ERROR  boom`, not a blank
-  `ERROR`. Like Ink, no stack block is rendered when the value carries no stack.
-- **Why:** this gives a useful message for the (lint-discouraged) non-`Error` throw, and it
-  keeps the message vue-tui already surfaced before: when the boundary wrapped such throws
-  in `new Error(String(value))`, which also produced a misleading synthetic stack pointing
-  at framework internals. That synthetic stack is now gone. Introduced 2026-05-31.
-
 ### `useAnimation()` outside a render tree drives a standalone animation
 
 - **Ink:** the default `AnimationContext.subscribe()` is a no-op subscription with
@@ -118,13 +106,17 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   component** (whose root host node is on `$el`), not just a host-node ref, resolves to the
   underlying yoga node.
 - **Why:** in Vue a template ref on a component yields the component instance, and its host
-  node is reached via `$el`. Supporting both shapes is a strict superset that matches how
-  Vue refs behave; a bare host-node ref still works identically to Ink.
+  node is reached via `$el`. Because `<Box>` is a `defineComponent`, the `$el` path is in
+  fact the **primary** path a normal `ref` on `<Box>` takes — the bare host-node ref is the
+  rarer raw-host case. Supporting both is a strict superset that matches how Vue refs behave;
+  a bare host-node ref still works identically to Ink.
 
 ### `renderToString` supports screen-reader mode
 
 - **Ink:** `renderToString` has only a `columns` option; it always renders the non-SR
-  (ANSI) frame.
+  (ANSI) frame. Ink's **live** `render()` does expose `isScreenReaderEnabled` (plus a full
+  accessibility stack), so this is Ink choosing not to surface SR in the _string_ API, not a
+  missing SR capability.
 - **vue-tui:** `renderToString` accepts `isScreenReaderEnabled?: boolean`. In SR mode it
   returns the linearized accessibility text (`renderScreenReaderOutput`) and prepends the
   linearized `<Static>` output, just as the non-SR path prepends the painted static frame.
@@ -173,9 +165,11 @@ current-props model, or API conventions.
 - **vue-tui:** a composable's `setup()` runs **once**, so reactive state cannot be a plain
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
-  follows this, including `useTerminalSize()` and `useFocusManager().activeId`. An empty
-  one holds `null` (Vue's convention for an empty ref: a template ref is
-  `ref<T | null>(null)`), where Ink's plain value is `undefined`.
+  follows this — `useFocusManager().activeId` is a single ref read as `.value`, while a
+  composable may instead return an **object of refs** (`useTerminalSize()` returns
+  `{ columns, rows }`, read as `.columns.value` / `.rows.value`). An empty single-ref state
+  holds `null` (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`),
+  where Ink's plain value is `undefined`.
 - **Why:** the two frameworks track a changing value differently. React reads the newest
   value by re-running the hook; Vue wraps it in a ref the template subscribes to. This is
   the general rule, not a per-API choice. `useFocusManager().activeId` is just one
@@ -196,11 +190,14 @@ current-props model, or API conventions.
   and re-sets it). Vue's fine-grained reactivity re-runs only components whose own deps
   changed, so an ancestor-driven commit does **not** re-run a cursor child that did not
   depend on the changed value, and a set-once cursor is dropped that commit.
-- **Why:** the two agree for the **recommended** usage: set the position reactively (in the
-  render body / from a ref the component reads), as Ink's apps and vue-tui's parity tests
-  do. They also agree in the unrelated-sibling case (both drop). They differ only in the
-  narrow edge of a **set-once** cursor plus an **ancestor-driven** commit: React's render
-  cascade re-asserts it, Vue's fine-grained reactivity does not. This is a consequence of
+- **Why:** they agree whenever the cursor child itself re-renders (its own deps change) and
+  in the unrelated-sibling case (both drop). They differ whenever a commit happens **without
+  the cursor child's own deps changing** — most commonly an **ancestor-driven** commit:
+  React's render cascade re-renders the child and re-asserts the cursor; Vue's fine-grained
+  reactivity does not re-run the child, so the cursor is dropped that commit. Setting the
+  position reactively in the render body does **not** by itself close this gap (verified by
+  running: an ancestor-only commit drops a render-body-set cursor in vue-tui while Ink
+  re-asserts) — it helps only when that ancestor change also flows into a ref the child reads. This is a consequence of
   React's cascade vs Vue's fine-grained re-render model. A global per-commit re-assert
   would make vue-tui diverge from Ink in the opposite (unrelated-sibling) direction, where
   Ink drops the cursor. Keep the reactivity-tied behavior. Maintainer decision
@@ -263,8 +260,10 @@ current-props model, or API conventions.
 
 #### Public composable naming follows Vue conventions
 
-- **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...) and the equivalent
-  hook-return types are named `XProps` (`StdinProps`, `AppProps`, ...).
+- **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...). Where a hook returns a
+  public type, Ink names it `XProps` — this holds for the stream/app hooks (`useStdin` →
+  `StdinProps`, `useStdout` → `StdoutProps`, `useApp` → `AppProps`); the lead examples don't
+  fit (`useInput`/`usePaste` return `void`, `useFocus` returns an unexported type).
 - **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...), and
   composable return types follow VueUse's `UseXReturn` convention (`UseStdinReturn`,
   `UseAppReturn`, ...). In vue-tui, `XProps` is reserved for component props (`BoxProps`,
@@ -309,6 +308,22 @@ current-props model, or API conventions.
 These divergences are deliberate, but they are not strict supersets and are not primarily
 driven by Vue's framework model or API conventions. vue-tui intentionally chooses a
 different runtime behavior, ownership rule, or out-of-contract handling.
+
+### Non-`Error` thrown values keep their message in the error overview
+
+- **Ink:** Ink **accepts** the throw — a thrown non-`Error` (`throw 'boom'`) is caught by its
+  ErrorBoundary and rendered through `ErrorOverview` (verified by running real Ink: an
+  `ERROR` overview with a **blank** message, exit 0, no crash) because `error.message` is
+  `undefined` for a string throw.
+- **vue-tui:** the error boundary keeps the **raw** thrown value and `ErrorOverview` shows
+  `String(value)` as the message, so `throw 'boom'` renders ` ERROR  boom`, not a blank
+  `ERROR`. Like Ink, no stack block is rendered when the value carries no stack.
+- **Why:** same input, different output — **not** an additive superset (both accept the
+  non-`Error` throw; vue-tui takes no extra input), so this is an intentional choice. Showing
+  `String(value)` gives a useful message for the (lint-discouraged) non-`Error` throw and
+  keeps the message vue-tui surfaced before it stopped wrapping such throws in
+  `new Error(String(value))` (which produced a misleading synthetic stack pointing at
+  framework internals; that stack is now gone). Introduced 2026-05-31.
 
 ### Second `mount()` on a live stdout is an inert no-op
 
@@ -360,18 +375,21 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (`'always'` holds raw with no input hook; `'auto'` stays cooked; no mid-session
   oscillation).
 
-### Narrowing resize cancels the redundant trailing `clearTerminal`
+### Resize unconditionally cancels the pending trailing commit
 
 - **Ink:** `resized()` paints synchronously via `onRender()` but does **not** cancel a
-  pending throttled `onRender`; on a narrowing resize that trailing commit re-runs and,
-  because `shouldClearTerminalForFrame` clears whenever the previous frame overflowed, Ink
-  emits a **second** `clearTerminal`.
-- **vue-tui:** `onResize` calls `scheduler.cancel()` before its synchronous commit,
-  dropping the now-redundant trailing commit. The screen is cleared **once** per narrowing
-  resize.
+  pending throttled `onRender`; when that trailing commit re-runs and
+  `shouldClearTerminalForFrame` clears (because the previous frame overflowed), Ink emits a
+  **second** `clearTerminal`.
+- **vue-tui:** `onResize` calls `scheduler.cancel()` as its **first, unconditional** step on
+  **every** resize (not only narrowing ones), dropping any pending throttled commit before
+  its synchronous commit, so the redundant trailing clear never fires.
 - **Why:** the synchronous resize commit already reflects the current tree, so the pending
-  commit repeats the same clear. Emitting one clear instead of two has no visible behavior
-  difference (issue #26).
+  commit would repeat the same clear. The dedup is triggered by an overflowing frame plus a
+  pending commit — not by narrowing specifically; a widening resize cancels the pending
+  commit too. Emitting one clear instead of two has no visible behavior difference
+  (issue #26). The separate narrowing-only `writer.clear()` frame reset is a distinct
+  mechanism.
 
 ### Degenerate boxes do not lay out or paint children when the content area is gone
 
@@ -460,15 +478,20 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
 
-### Removing `flexDirection` / `flexWrap` resets to the default
+### Removing `flexDirection` / `flexWrap` is parity through the public `<Box>`
 
-- **Ink:** neither prop has a reset branch in `applyFlexStyles` (every _other_ flex prop
-  does), so an explicit `flexDirection={undefined}` leaves the previous value in place.
-- **vue-tui:** resets to the Box default (`row` / `nowrap`): the same state as if the prop
-  had never been set.
-- **Why:** render is a function of the current props. With no value set you get the default,
-  and dropping a prop changes the output; keeping a previous render's value does not match
-  that, and Ink resets every other flex prop. Maintainer decision (2026-05-30): KEEP.
+- **Ink:** `applyFlexStyles` has no reset branch for these two props (every _other_ flex prop
+  does), so at the **raw `ink-box` host layer** an explicit `flexDirection={undefined}` leaves
+  the previous value in place. But the public `<Box>` re-injects `flexDirection:'row'` /
+  `flexWrap:'nowrap'` on every render (`Box.tsx:84-85`, before spreading user style), so a
+  user who removes the prop still gets the default — Ink resets **through the component**.
+- **vue-tui:** resets to the Box default (`row` / `nowrap`) explicitly (G19). Through the
+  public `<Box>` this is **identical to Ink** (verified by running: a `column` → removed goes
+  `"A\nB"` → `"AB"` in both engines).
+- **Why:** this is **not a user-observable divergence** — both reset through the public
+  component; only the raw-host-layer behavior differs (vue-tui resets, Ink persists). Kept as
+  the explicit contrast to `display`, which has **no** Box default and so genuinely diverges.
+  Maintainer decision (2026-05-30): KEEP.
 
 ### Composables throw outside a render tree
 
@@ -522,9 +545,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 These notes are not divergence entries. They document Vue-facing conventions or internal
 mechanics so they are not mistaken for parity gaps.
 
-- Vue SFCs use `<script setup>`, and component definitions use `defineComponent()`.
-- `shallowRef` is the default for reactive state. Use `ref` only when deep reactivity is
-  intentional and documented.
 - The exported host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
   from `@vue-tui/runtime/internal`), not Ink's DOM-emulation `DOMElement`
   (`nodeName` / `attributes` / `childNodes`). vue-tui keeps a native host tree, so the
