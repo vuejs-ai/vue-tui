@@ -224,7 +224,8 @@ current-props model, or API conventions.
 
 #### React concurrent mode
 
-- **Ink:** built on React; Suspense / `useTransition` are React features.
+- **Ink:** built on React; `useTransition` and interruptible concurrent rendering are
+  React features.
 - **vue-tui:** no equivalent.
 - **Why:** this is a React-only concept with no Vue equivalent, so it is N/A rather than a
   parity gap.
@@ -245,10 +246,14 @@ current-props model, or API conventions.
 
 #### Removing `display` resets to the default (visible)
 
-- **Ink:** `applyDisplayStyles` (`styles.ts`) sets `DISPLAY_NONE` whenever an explicit
-  `display` is present and not `'flex'`, so a present-but-undefined
-  `display={undefined}` **hides** the box, and an omitted `display` **persists** the prior
-  value.
+- **Ink:** `applyDisplayStyles` (`styles.ts`) calls `setDisplay(DISPLAY_NONE)` whenever the
+  prop diff carries a `display` that is not `'flex'`, and Ink's reconciler diff emits a
+  withdrawn key as `display: undefined`. So clearing a previously-set `display` (`'none'` or
+  `'flex'` → removed) **hides** the box: Ink treats the withdrawn prop as `none`, neither
+  keeping the prior value nor restoring the default. (`display={undefined}` on a box that
+  never set `display` is a no-op and stays visible — the diff registers no change.) In the
+  common toggle `display={hidden ? 'none' : undefined}`, Ink stays hidden on the `undefined`
+  branch; you must set `display="flex"` to show it again.
 - **vue-tui:** a removed/undefined `display` resets to the Box default `DISPLAY_FLEX`
   (visible): the same state as if the prop had never been set.
 - **Why:** render = f(current props): no `display` set means the default (visible).
