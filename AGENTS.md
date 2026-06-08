@@ -23,6 +23,7 @@
   `fix(runtime): align Ink parity behavior`.
 - Never commit anything under `docs/`. That directory is for local working notes and specs — it must stay out of git.
 - To read Ink's source (parity / divergence work), clone it once to a fixed local path and read from there — `git clone https://github.com/vadimdemedes/ink /tmp/ink` only when `/tmp/ink` is missing, otherwise reuse the existing clone (Ink isn't an npm dependency, so it's not in `node_modules`). Before trusting anything you read, check out and confirm the pinned baseline — `.agents/docs/ink-divergences.md` records the exact version/commit (currently v7.0.4); a claim read against the wrong Ink version is worse than none.
+- Behavior claims must be **run, not reasoned**: a parity assertion or `ink-divergences.md` "what Ink does" line is a hypothesis until a real harness against the pinned version (real frames/stderr/exit) confirms it. Source-reading and memory can mislead; when a run contradicts the code you read, trust the run.
 - When documenting an intentional Ink divergence, update `.agents/docs/ink-divergences.md` and follow its "How to Classify a Divergence" flow. Do not add placeholder or unsorted entries; if the classification is unclear, state that uncertainty in the entry's rationale.
 
 # Context Engineering
