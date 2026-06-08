@@ -175,6 +175,73 @@ test("useFocusManager().activeId updates on programmatic focus(id)", async () =>
   expect(activeId.value).toBe("first");
 });
 
+test("duplicate explicit focus ids participate in focus order like Ink", async () => {
+  let activeId!: ReturnType<typeof useFocusManager>["activeId"];
+
+  const Item = defineComponent({
+    props: {
+      id: { type: String, required: true },
+      label: { type: String, required: true },
+      autoFocus: Boolean,
+    },
+    setup(props) {
+      const { isFocused } = useFocus({
+        id: props.id,
+        autoFocus: props.autoFocus,
+      });
+      return () => (
+        <Text>
+          {isFocused.value ? "▶ " : "  "}
+          {props.label}
+        </Text>
+      );
+    },
+  });
+
+  const App = defineComponent(() => {
+    activeId = useFocusManager().activeId;
+    return () => (
+      <Box flexDirection="column">
+        <Item id="dup" label="first duplicate" autoFocus />
+        <Item id="dup" label="second duplicate" />
+        <Item id="next" label="next" />
+      </Box>
+    );
+  });
+
+  const { lastFrame, stdin } = await render(App);
+
+  expect(activeId.value).toBe("dup");
+  expect(lastFrame()).toContain("▶ first duplicate");
+  expect(lastFrame()).toContain("▶ second duplicate");
+
+  await stdin.write("\t");
+
+  // Ink keeps duplicate explicit ids as separate registry entries. Moving from
+  // the first duplicate to the second duplicate leaves the public activeId
+  // unchanged, so both components with that id still report focused.
+  expect(activeId.value).toBe("dup");
+  expect(lastFrame()).toContain("▶ first duplicate");
+  expect(lastFrame()).toContain("▶ second duplicate");
+  expect(lastFrame()).not.toContain("▶ next");
+
+  await stdin.write("\t");
+
+  // The duplicate ids are two registry entries, so the next Tab advances past
+  // the second duplicate to the following distinct focusable.
+  expect(activeId.value).toBe("next");
+  expect(lastFrame()).not.toContain("▶ first duplicate");
+  expect(lastFrame()).not.toContain("▶ second duplicate");
+  expect(lastFrame()).toContain("▶ next");
+
+  await stdin.write("\x1b[Z");
+
+  expect(activeId.value).toBe("dup");
+  expect(lastFrame()).toContain("▶ first duplicate");
+  expect(lastFrame()).toContain("▶ second duplicate");
+  expect(lastFrame()).not.toContain("▶ next");
+});
+
 // LOCK: unmounting the focused item resets activeId. Mirrors Ink focus.tsx:708-742
 // ("activeId resets to undefined when focused component unmounts"). Vue uses a
 // v-if (`show`) toggle in place of Ink's rerender-without-the-child.

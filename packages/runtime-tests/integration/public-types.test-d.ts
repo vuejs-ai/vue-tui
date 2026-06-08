@@ -12,13 +12,15 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { useApp, useStdin, useStdout, useStderr } from "@vue-tui/runtime";
+import { shallowRef } from "vue";
+import { useApp, useInput, usePaste, useStdin, useStdout, useStderr } from "@vue-tui/runtime";
 import type {
   BoxProps,
   TextProps,
   StaticProps,
   TransformProps,
   NewlineProps,
+  Key,
   WindowSize,
   CursorPosition,
   UseAppReturn,
@@ -33,6 +35,11 @@ expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<
 >();
 expectTypeOf<BoxProps["gap"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<TextProps["bold"]>().toEqualTypeOf<boolean | undefined>();
+expectTypeOf<TextProps["color"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
 expectTypeOf<TransformProps["transform"]>().toEqualTypeOf<
   (line: string, lineIndex: number) => string
@@ -75,3 +82,9 @@ expectTypeOf<UseAppReturn>().toEqualTypeOf<{
   readonly waitUntilRenderFlush: () => Promise<void>;
 }>();
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
+
+const inputHandler = shallowRef((_input: string, _key: Key) => {});
+expectTypeOf(inputHandler).toMatchTypeOf<Parameters<typeof useInput>[0]>();
+
+const pasteHandler = shallowRef((_text: string) => {});
+expectTypeOf(pasteHandler).toMatchTypeOf<Parameters<typeof usePaste>[0]>();

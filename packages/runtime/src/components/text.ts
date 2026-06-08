@@ -14,7 +14,6 @@ import { AppContextKey } from "../context.ts";
 import { assertValidBackgroundColor } from "../paint/text-style.ts";
 import type { WithChildren } from "./with-children.ts";
 
-type Color = string | [number, number, number];
 type WrapMode =
   | "wrap"
   | "hard"
@@ -24,8 +23,8 @@ type WrapMode =
   | "truncate-start";
 
 const textProps = {
-  color: [String, Array] as PropType<Color>,
-  backgroundColor: [String, Array] as PropType<Color>,
+  color: String,
+  backgroundColor: String,
   dimColor: Boolean,
   bold: Boolean,
   italic: Boolean,

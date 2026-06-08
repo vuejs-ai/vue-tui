@@ -4,6 +4,11 @@
 - Always use Vue's `shallowRef` over `ref` by default. Using `ref` requires a solid justification and a code comment explaining why deep reactivity is needed.
 - Always use `defineComponent()` to define components. Never use bare `{ setup() {} }` objects — they lack component scope, so `inject`, `watch`, and `onScopeDispose` won't work correctly.
 - Vue SFCs must use `<script setup>` unless there's an explicit reason not to.
+- When passing function-valued props into composables, do not pass a one-time prop value
+  like `useInput(props.onInput)`. Pass a live source with `toRef(props, "onInput")`, or
+  pass a wrapper closure that reads `props.onInput(...)` at event time. For composable
+  APIs that accept function handlers, prefer `MaybeRef<Handler>` + `unref()` over
+  `MaybeRefOrGetter<Handler>`: handler functions and getter functions are ambiguous.
 - For ordinary Vue UI, start with template syntax. Use JSX/TSX when it makes test fixtures or highly dynamic structures clearer, and reserve `h()` for renderer internals or genuinely programmatic vnode construction where template/JSX would be the wrong tool.
 - Prefer kebab-case for new file names, including Vue SFCs and JSX/TSX files. Keep local consistency when touching existing areas, and do not rename existing files only for casing unless the task is explicitly about naming.
 - When code must deviate from normal/idiomatic style because the situation genuinely requires it (e.g. a control-character regex in a terminal parser, a deliberate string code-point spread, a lint rule suppressed for a justified reason), add a comment explaining _why_ it has to be written that way. Don't silence a linter or write surprising code without a note — the next reader should not have to guess whether it's intentional.
@@ -14,6 +19,8 @@
 - Tests that depend on **process-global state** — fake timers (`vi.useFakeTimers`, which mutates global `setTimeout`/`performance`) or assertions on shared globals (`process.listenerCount`, live yoga-node counts) — live in `*.sequential.test.*` files. Even file-level parallelism can perturb them, and grouping them by name documents the constraint. Add a header comment saying which global forces it.
 - Tests must not implicitly depend on the host environment. The CI runner sets `CI=true`, which flips `interactive = !isInCi && isTTY` off (disabling the resize listener, cursor, ANSI erases) — so both vitest configs force `env: { CI: "false" }`, and PTY child helpers set `CI: "false"` per-spawn. If a test needs a specific CI/TTY/color behavior, inject it explicitly (mount option, child env) rather than relying on the ambient value. Reproduce CI locally with `CI=true vp run ci` on a fresh checkout (`rm -rf packages/*/dist`).
 - After completing any task, run `vp run ready` (or `vpr ready`) to verify: lint, type-check, test all packages, and build.
+- Commit messages and PR titles must follow Conventional Commits, e.g.
+  `fix(runtime): align Ink parity behavior`.
 - Never commit anything under `docs/`. That directory is for local working notes and specs — it must stay out of git.
 - To read Ink's source (parity / divergence work), clone it once to a fixed local path and read from there — `git clone https://github.com/vadimdemedes/ink /tmp/ink` only when `/tmp/ink` is missing, otherwise reuse the existing clone (Ink isn't an npm dependency, so it's not in `node_modules`). Before trusting anything you read, check out and confirm the pinned baseline — `.agents/docs/ink-divergences.md` records the exact version/commit (currently v7.0.4); a claim read against the wrong Ink version is worse than none.
 - When documenting an intentional Ink divergence, update `.agents/docs/ink-divergences.md` and follow its "How to Classify a Divergence" flow. Do not add placeholder or unsorted entries; if the classification is unclear, state that uncertainty in the entry's rationale.

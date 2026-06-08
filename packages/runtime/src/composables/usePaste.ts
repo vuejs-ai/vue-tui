@@ -1,18 +1,28 @@
-import { inject, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
+import {
+  inject,
+  onScopeDispose,
+  toValue,
+  unref,
+  watch,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+} from "vue";
 import { StdinContextKey } from "../context.ts";
 
 export interface UsePasteOptions {
   isActive?: MaybeRefOrGetter<boolean>;
 }
 
-export function usePaste(handler: (text: string) => void, options: UsePasteOptions = {}): void {
+type PasteHandler = (text: string) => void;
+
+export function usePaste(handler: MaybeRef<PasteHandler>, options: UsePasteOptions = {}): void {
   const stdin = inject(StdinContextKey);
   if (!stdin) throw new Error("usePaste() must be called inside a vue-tui render tree");
 
   let attached = false;
 
   function listener(text: string) {
-    handler(text);
+    unref(handler)(text);
   }
 
   function attach() {

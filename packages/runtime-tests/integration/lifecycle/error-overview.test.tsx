@@ -113,6 +113,21 @@ test("nested component throw renders a frame containing ERROR and the message", 
   expect(frame).toContain("Nested component error");
 });
 
+test("cross-realm Error overview header renders message without Error prefix", async () => {
+  const vm = await import("node:vm");
+  const foreignError = vm.runInNewContext("new Error('boom')") as Error;
+  const CrossRealmThrower = defineComponent(() => {
+    return () => {
+      throw foreignError;
+    };
+  });
+
+  const frame = await renderErrorFrame(CrossRealmThrower);
+
+  expect(frame).toContain(" ERROR  boom");
+  expect(frame).not.toContain(" ERROR  Error: boom");
+});
+
 test("unparsable stack frame falls back to literal backslash-t (not a real TAB)", async () => {
   const frame = await renderErrorFrame(UnparsableStackThrower);
 

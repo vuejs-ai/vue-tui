@@ -1,4 +1,12 @@
-import { inject, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
+import {
+  inject,
+  onScopeDispose,
+  toValue,
+  unref,
+  watch,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+} from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
 import { parseKeypress, nonAlphanumericKeys } from "../io/parse-keypress.ts";
 
@@ -30,10 +38,9 @@ export interface UseInputOptions {
   isActive?: MaybeRefOrGetter<boolean>;
 }
 
-export function useInput(
-  handler: (input: string, key: Key) => void,
-  options: UseInputOptions = {},
-): void {
+type InputHandler = (input: string, key: Key) => void;
+
+export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptions = {}): void {
   const app = inject(AppContextKey);
   const stdin = inject(StdinContextKey);
   if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
@@ -107,7 +114,7 @@ export function useInput(
     // exitOnCtrlC is on Ctrl+C never reaches here — and useInput forwards every
     // key it does receive. Keeping the exit in one always-on place is what makes
     // it fire for useFocus/usePaste-only apps too; don't re-add a copy here.
-    handler(input, key);
+    unref(handler)(input, key);
   }
 
   function attach() {

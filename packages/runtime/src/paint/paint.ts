@@ -19,9 +19,11 @@ import type {
   TuiVirtualText,
   TuiTransform,
   BoxProps,
+  TuiBox,
 } from "../host/nodes.ts";
 import { transformHasYogaChild } from "../host/yoga.ts";
 import { createRoot as createIsoRoot, createBox as createIsoBox } from "../host/nodes.ts";
+import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
 import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
 
@@ -325,9 +327,10 @@ class Output {
 // Background inheritance is faithful to Ink, where only <Box> provides
 // `backgroundContext` (Text does NOT): `inheritedBg` is the nearest enclosing
 // Box's bg and is threaded UNCHANGED to every descendant <Text> (a parent Text's
-// own backgroundColor never alters it). Each Text's effective bg is
-// `ownBackgroundColor ?? inheritedBg` (Ink Text.tsx:103-106), applied as part of
-// its own wrap; an explicit `backgroundColor=""` resolves to a falsy value and
+// own backgroundColor never alters it). Each Text's string own bg wins (Ink's
+// `ownBackgroundColor ?? inheritedBg` for the public string-only surface), while
+// host-level non-string values are treated as absent. An explicit
+// `backgroundColor=""` remains a string own bg, resolves to a falsy value, and
 // opts the span out.
 function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
@@ -351,12 +354,12 @@ function applyOwnStyle(props: TextProps, inner: string, inheritedBg: unknown): s
   const defined = Object.fromEntries(
     Object.entries(props).filter(([, v]) => v !== undefined),
   ) as TextProps;
-  // effective bg: own backgroundColor wins (incl. an explicit "" opt-out); else
-  // inherit the Box bg. Set it explicitly so a node WITHOUT its own bg still gets
-  // the inherited Box bg applied at its own wrap (matching Ink, where every Text's
-  // transform applies `backgroundColor ?? inheritedBackgroundColor`).
-  const effectiveBg = "backgroundColor" in defined ? defined.backgroundColor : inheritedBg;
-  const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg as never };
+  // effective bg: string own backgroundColor wins (incl. an explicit "" opt-out);
+  // non-string host values are not part of the public color surface and must not
+  // cut off Box background inheritance.
+  const ownBg = defined.backgroundColor;
+  const effectiveBg = typeof ownBg === "string" ? ownBg : inheritedBg;
+  const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg };
   return applyChalk(inner, styleProps);
 }
 
@@ -492,22 +495,26 @@ function drawBorder(
   const left = props["borderLeft"] !== false;
   const right = props["borderRight"] !== false;
 
-  const borderColor = props["borderColor"] as string | undefined;
+  const stringProp = (name: string): string | undefined => {
+    const value = props[name];
+    return typeof value === "string" ? value : undefined;
+  };
+
+  const borderColor = stringProp("borderColor");
   // Keep the raw (non-coerced) general dim value so per-edge overrides work correctly.
   const generalDim = props["borderDimColor"] as boolean | undefined;
+  const borderBackgroundColor = stringProp("borderBackgroundColor");
 
   function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
     const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
-    const edgeColor = (props[`border${capEdge}Color`] as string | undefined) ?? borderColor;
+    const edgeColor = stringProp(`border${capEdge}Color`) ?? borderColor;
     // Use nullish coalescing (not ||) so an explicit per-edge `false` wins over
     // generalDim — only `undefined` falls back to the general value.
     // Mirrors Ink render-border.ts:54: `borderTopDimColor ?? borderDimColor`.
     const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) ?? generalDim;
     // Ink parity (render-border.ts:44-52): an edge's background comes only from the
     // per-edge or general border background — never from the Box's own backgroundColor.
-    const edgeBg =
-      (props[`border${capEdge}BackgroundColor`] as string | undefined) ??
-      (props["borderBackgroundColor"] as string | undefined);
+    const edgeBg = stringProp(`border${capEdge}BackgroundColor`) ?? borderBackgroundColor;
     // Border SGR nesting deliberately differs from <Text>'s. Mirror Ink's
     // render-border.ts stylePiece (commit 40b3a75, lines 7-20) EXACTLY:
     // foreground innermost, then background, then `chalk.dim` OUTERMOST —
@@ -516,8 +523,8 @@ function drawBorder(
     // stay unchanged. Routing edges through applyChalk would emit the bytes
     // in the wrong order (bg, fg, dim) versus Ink's (dim, bg, fg).
     let styled = s;
-    if (edgeColor) styled = applyColor(chalk, edgeColor as never, false)(styled);
-    if (edgeBg) styled = applyColor(chalk, edgeBg as never, true)(styled);
+    if (edgeColor) styled = applyColor(chalk, edgeColor, false)(styled);
+    if (edgeBg) styled = applyColor(chalk, edgeBg, true)(styled);
     if (edgeDim) styled = chalk.dim(styled);
     return styled;
   }
@@ -550,6 +557,28 @@ function drawBorder(
   }
 }
 
+function getBoxContentMetrics(
+  node: TuiBox,
+  w: number,
+  h: number,
+): { width: number; height: number } {
+  const left =
+    node.yoga.getComputedBorder(Yoga.EDGE_LEFT) + node.yoga.getComputedPadding(Yoga.EDGE_LEFT);
+  const right =
+    node.yoga.getComputedBorder(Yoga.EDGE_RIGHT) + node.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
+  const top =
+    node.yoga.getComputedBorder(Yoga.EDGE_TOP) + node.yoga.getComputedPadding(Yoga.EDGE_TOP);
+  const bottom =
+    node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM) + node.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+  const frameWidth = left + right;
+  const frameHeight = top + bottom;
+
+  return {
+    width: Math.max(0, Math.floor(w - frameWidth)),
+    height: Math.max(0, Math.floor(h - frameHeight)),
+  };
+}
+
 function fillBackground(
   output: Output,
   x: number,
@@ -560,8 +589,12 @@ function fillBackground(
   transformers: Transformer[],
 ): void {
   if (!color) return;
-  const line = applyChalk(" ".repeat(w), { backgroundColor: color });
-  for (let i = 0; i < h; i++) output.write(x, y + i, [line], transformers);
+  const width = Math.max(0, Math.floor(w));
+  const height = Math.max(0, Math.floor(h));
+  if (width === 0 || height === 0) return;
+
+  const line = applyChalk(" ".repeat(width), { backgroundColor: color });
+  for (let i = 0; i < height; i++) output.write(x, y + i, [line], transformers);
 }
 
 export function paint(root: TuiNode): string {
@@ -609,8 +642,9 @@ function paintNode(
       //   - The value THREADED to children uses a TRUTHY fallback to `inheritedBg`
       //     (Ink Box.tsx:103 `if (backgroundColor)` provide-guard), so an empty-string
       //     own-bg does NOT override the ancestor's background context — descendants
-      //     keep inheriting it. (Arrays `[r,g,b]` are always truthy, so they still win.)
-      const ownBg = node.props["backgroundColor"] as string | undefined;
+      //     keep inheriting it.
+      const rawBg = node.props["backgroundColor"];
+      const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
         drawBorder(output, x, y, w, h, node.props, transformers);
@@ -622,6 +656,12 @@ function paintNode(
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
         fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg, transformers);
+      }
+
+      const contentMetrics = getBoxContentMetrics(node, w, h);
+      // A Box with no inner content area has no legal child paint region.
+      if (contentMetrics.width === 0 || contentMetrics.height === 0) {
+        return;
       }
 
       // Overflow clipping: clip children to the box content area (inside
@@ -855,8 +895,14 @@ export function paintIsolated(
     yIdx++;
   }
 
+  let restoreLayoutGuards = () => {};
   try {
-    iso.yoga.calculateLayout(width, undefined, Yoga.DIRECTION_LTR);
+    restoreLayoutGuards = calculateLayoutWithContentGuards(
+      iso,
+      width,
+      undefined,
+      Yoga.DIRECTION_LTR,
+    );
     // Size the output grid from the INNER static box (mirroring Ink
     // renderer.ts:32-33 reading node.staticNode.yogaNode.getComputed*), NOT the
     // root — so the grid equals the content width and can exceed the terminal.
@@ -872,6 +918,7 @@ export function paintIsolated(
     for (const child of staticBox.children) paintNode(child, out, x0, y0, []);
     return out.get().output;
   } finally {
+    restoreLayoutGuards();
     // Restore yoga parents in reverse order so earlier indices remain stable.
     for (const { yc, origParent, origIndex } of yogaAdded.slice().reverse()) {
       staticBox.yoga.removeChild(yc.yoga);
@@ -930,10 +977,17 @@ function paintUnderRoot(
     yIdx++;
   }
 
+  let restoreLayoutGuards = () => {};
   try {
-    iso.yoga.calculateLayout(width, undefined, Yoga.DIRECTION_LTR);
+    restoreLayoutGuards = calculateLayoutWithContentGuards(
+      iso,
+      width,
+      undefined,
+      Yoga.DIRECTION_LTR,
+    );
     return paint(iso);
   } finally {
+    restoreLayoutGuards();
     for (const { yc, origParent, origIndex } of yogaAdded.slice().reverse()) {
       iso.yoga.removeChild(yc.yoga);
       if (origParent) {

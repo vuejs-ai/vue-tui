@@ -1,4 +1,4 @@
-import { defineComponent, shallowRef, nextTick } from "vue";
+import { defineComponent, shallowRef, nextTick, h } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
@@ -802,8 +802,43 @@ test("backgroundColor of an unknown non-chalk string degrades to bare text (no t
   expect(lastFrame()).toBe("Hi");
 });
 
-// MUST NOT throw: hex / ansi256 / rgb / [r,g,b] backgrounds are valid forms.
-test("backgroundColor hex / ansi256 / rgb / [r,g,b] do NOT throw", async ({ expect }) => {
+test("non-string host Box backgroundColor does not override inherited background", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(
+      () => () =>
+        h("box", { backgroundColor: "red", width: 5, height: 2 }, [
+          h("box", { backgroundColor: [0, 0, 255], width: 5, height: 2 }, [h("text", null, "Hi")]),
+        ]),
+    ),
+    { columns: 100 },
+  );
+
+  expect(lastFrame()).toMatchInlineSnapshot(`
+    "[41mHi   [49m
+    [41m     [49m"
+  `);
+});
+
+test("non-string host Text backgroundColor does not override inherited background", async ({
+  expect,
+}) => {
+  const { lastFrame } = await render(
+    defineComponent(
+      () => () =>
+        h("box", { backgroundColor: "red", alignSelf: "flex-start" }, [
+          h("text", { backgroundColor: [0, 0, 255] }, "Hi"),
+        ]),
+    ),
+    { columns: 100 },
+  );
+
+  expect(lastFrame()).toMatchInlineSnapshot(`"[41mHi[49m"`);
+});
+
+// MUST NOT throw: hex / ansi256 / rgb(...) string backgrounds are valid Ink forms.
+test("backgroundColor hex / ansi256 / rgb string do NOT throw", async ({ expect }) => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="column" alignSelf="flex-start">
@@ -816,16 +851,13 @@ test("backgroundColor hex / ansi256 / rgb / [r,g,b] do NOT throw", async ({ expe
         <Box backgroundColor="rgb(1, 2, 3)">
           <Text>C</Text>
         </Box>
-        <Box backgroundColor={[4, 5, 6]}>
-          <Text>D</Text>
-        </Box>
       </Box>
     )),
     { columns: 100 },
   );
   const out = lastFrame()!;
   expect(out).toContain("A");
-  expect(out).toContain("D");
+  expect(out).toContain("C");
 });
 
 // MUST NOT throw: foreground `color="bold"` resolves `chalk.bold` (a real fn) and
@@ -921,6 +953,32 @@ test("bad general borderBackgroundColor with valid per-edge on every drawn edge 
   );
   // Every drawn edge resolves to a valid "blue"; the bad general value is never used.
   expect(lastFrame()).toContain("Hi");
+});
+
+test("non-string border edge background does not suppress invalid general fallback", async ({
+  expect,
+}) => {
+  // Deliberately bypass the public string type to exercise runtime JS input.
+  const legacyTuple = [0, 0, 255] as unknown as string;
+
+  await expect(
+    render(
+      defineComponent(
+        () => () =>
+          h(Box, {
+            borderStyle: "single",
+            borderBackgroundColor: "bold",
+            borderTopBackgroundColor: legacyTuple,
+            borderBottom: false,
+            borderLeft: false,
+            borderRight: false,
+            width: 4,
+            height: 1,
+          }),
+      ),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/borderTopBackgroundColor/i);
 });
 
 // Empty <Text backgroundColor="bold">{""}</Text>: Ink's Text returns null for

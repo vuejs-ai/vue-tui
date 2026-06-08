@@ -88,6 +88,41 @@ test("non-interactive mode writes only last frame at unmount", async () => {
   expect(postUnmountOutput).toContain("the-content");
 });
 
+test("non-interactive empty final frame still writes trailing newline at unmount", async () => {
+  // Ink writes `lastOutput + "\n"` during non-interactive teardown even when
+  // `lastOutput` is empty. This is observable in scripts/pipes as a final newline.
+  const App = defineComponent(() => () => null);
+
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+
+  const chunks: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    chunks.push(chunk.toString());
+  });
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    interactive: false,
+  });
+
+  await nextTick();
+  await nextTick();
+
+  expect(chunks.join("")).toBe("");
+
+  app.unmount();
+
+  expect(chunks.join("")).toBe("\n");
+});
+
 test("non-interactive unmount skips final frame when stdout is not writable", async () => {
   const App = defineComponent(() => () => <Text>the-content</Text>);
 
