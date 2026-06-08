@@ -21,8 +21,8 @@ sections are narrower, while later sections are broader fallbacks.
 1. If Ink's supported subset still behaves the same and vue-tui only accepts more inputs,
    supports more contexts, or exposes an extra capability, put it in **Additive
    Supersets**.
-2. If the primary reason is alignment with Vue's framework model, philosophy, or user
-   expectations, put it in **Vue-Aligned Design**.
+2. If the primary reason is alignment with Vue's API shape, framework model, mental
+   model, or user expectations, put it in **Vue API and Mental Model Divergences**.
    - Use **Model-Implied Differences** when the difference comes from the React/Vue
      framework-model boundary. Matching Ink would require React-shaped machinery inside
      Vue, changing a core Vue-facing contract, or dealing with a React-only concept that
@@ -153,14 +153,15 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). Maintainer decision (2026-06-07): KEEP.
 
-## Vue-Aligned Design
+## Vue API and Mental Model Divergences
 
-These divergences come from choosing Vue's framework model and user expectations as the
-source of truth while tracking Ink. Some are model-implied: matching Ink would require
-React-shaped machinery inside Vue, changing a core Vue-facing contract, or handling a
-React-only concept that has no Vue equivalent. Others are idiomatic choices: Ink could be
-copied, but vue-tui chooses the behavior or public surface that better fits Vue's
-reactivity, lifecycle, component boundaries, current-props model, or API conventions.
+These divergences come from choosing Vue's API shape, framework model, mental model, and
+user expectations as the source of truth while tracking Ink. Some are model-implied:
+matching Ink would require React-shaped machinery inside Vue, changing a core Vue-facing
+contract, or handling a React-only concept that has no Vue equivalent. Others are
+idiomatic choices: Ink could be copied, but vue-tui chooses the behavior or public
+surface that better fits Vue's reactivity, lifecycle, component boundaries,
+current-props model, or API conventions.
 
 ### Model-Implied Differences
 
@@ -413,6 +414,23 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   width and height. The default remains border-box-like, matching Ink's current public
   sizing model.
 
+### `<Transform>` treats all-comment children as no children
+
+- **Ink:** `Transform` returns `null` only for undefined or null children. React's
+  `false` child is not nullish, so Ink creates an empty `ink-text` node that can consume a
+  flex-gap slot.
+- **vue-tui:** Vue materializes `null` / `false` / `undefined` / `v-if="false"` /
+  falsy-`&&` children as comment vnodes. `<Transform>` treats an absent slot or an
+  all-comment slot as no renderable children and returns `null`, so a literal `false`
+  child omits the node and does not consume a gap slot.
+- **Why:** after Vue slot resolution, vue-tui cannot reliably distinguish a literal
+  `false` child from the comment anchors Vue uses for ordinary empty branches. Rendering an
+  all-comment slot as an empty layout node would make framework anchors affect layout,
+  which is worse than matching Ink's React-only `false !== null` edge. This keeps
+  `<Transform>` consistent with how the rest of vue-tui treats false / empty conditional
+  children: no node. Maintainer decision (2026-06-07): KEEP. Test:
+  `transform.test.tsx`.
+
 ### Out-of-type style values are forwarded, not defensively coerced
 
 - **Ink:** several flex/align setters coerce an invalid runtime value to a default:
@@ -423,7 +441,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **vue-tui:** these setters trust the typed prop surface and forward the raw value to
   yoga: a non-number `flexShrink` is passed through; `toAlign("")`/`toJustify("")` look up
   `""` and pass `undefined` to the setter; and out-of-set values that yoga happens to
-  accept (`space-*`/`baseline`/`auto` on `alignItems`) reach yoga rather than being ignored.
+  accept (`space-*`/`auto` on `alignItems`) reach yoga rather than being ignored.
 - **Why:** every one of these is reachable **only** via a TS-bypass. The public prop types
   forbid them. Within the typed contract Ink and vue-tui are identical. Ink's per-value
   coercion is defensive code for runtime values vue-tui's types already exclude. Duplicating
@@ -499,23 +517,15 @@ mechanics so they are not mistaken for parity gaps.
 - The exported host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
   from `@vue-tui/runtime/internal`), not Ink's DOM-emulation `DOMElement`
   (`nodeName` / `attributes` / `childNodes`). vue-tui keeps a native host tree, so the
-  exported type names that tree; `measureElement` and template refs accept it. No runtime
-  behavior differs from Ink's DOM-emulation node.
+  exported type names that tree; `measureElement` and template refs accept it. The type
+  rename itself does not imply a runtime behavior difference from Ink's DOM-emulation node.
 - `null` / `false` / `undefined` / `v-if="false"` children are materialized by Vue as
   comment vnodes, which vue-tui's host renderer turns into an inert `TuiComment`: no yoga
-  node, paints nothing, never shifts a sibling, and skipped when counting the positional
-  `<Transform>` index (the `child.type !== "comment"` guards in `paint.ts`,
-  `text-measure.ts`, and `screen-reader.ts`; `G52`). The result matches Ink, which drops
-  these children outright — React never renders `null` / `false` / `undefined` (verified
-  against Ink v7.0.4: `{false}`, `{null}`, `{undefined}` each produce no node; only a real
-  empty `<Box/>` occupies a flex-gap slot). `<Transform>` over an empty or all-comment slot
-  renders no node (`return null`), matching Ink's `children == null` guard for nullish
-  children and intentionally diverging for a literal `false` child. Ink's React
-  `children` check sees `false !== null` and creates an empty `ink-text` layout item that
-  can consume a flex-gap slot; Vue materializes `false`, `null`, `undefined`, and
-  `v-if=false` as the same comment-anchor shape, so vue-tui treats the all-comment slot as
-  absent. Maintainer decision (2026-06-07): KEEP. This is the correct Vue behavior:
-  conditional false children should behave like no node, not like an empty layout item.
+  node, paints nothing, never shifts a sibling, and skipped when counting child positions
+  (the `child.type !== "comment"` guards in `paint.ts`, `text-measure.ts`, and
+  `screen-reader.ts`; `G52`). This is renderer mechanics, not a divergence entry by
+  itself. The observable `<Transform>` literal-`false` edge is documented above as an
+  intentional divergence.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at
   `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's
   `renderThrottleMs`), synchronous resize. This remains true even though re-renders come
