@@ -111,16 +111,20 @@ useInput((input) => {
 
 ## Composables (Hooks)
 
-| Composable                 | Description                                                                           |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)` | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection |
-| `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                                |
-| `useFocusManager()`        | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`               |
-| `useApp()`                 | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                            |
-| `useTerminalSize()`        | Reactive terminal dimensions — `{ columns, rows }`                                    |
-| `useStdin()`               | Access stdin stream and raw mode control                                              |
-| `useStdout()`              | Write directly to stdout                                                              |
-| `useStderr()`              | Write directly to stderr                                                              |
+| Composable                 | Description                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)` | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection  |
+| `usePaste(handler, opts?)` | Handle bracketed paste — receives the pasted `text` as a single event                  |
+| `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                                 |
+| `useFocusManager()`        | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                |
+| `useApp()`                 | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                             |
+| `useTerminalSize()`        | Reactive terminal dimensions — `{ columns, rows }` (Ink-compat alias: `useWindowSize`) |
+| `useStdin()`               | Access stdin stream and raw mode control                                               |
+| `useStdout()`              | Write directly to stdout                                                               |
+| `useStderr()`              | Write directly to stderr                                                               |
+| `useBoxMetrics(ref)`       | Measure a `<Box>` via a template ref — reactive `{ width, height, left, top }`         |
+| `useCursor()`              | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates           |
+| `useAnimation(opts?)`      | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`           |
 
 ## Testing
 
