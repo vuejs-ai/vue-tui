@@ -685,8 +685,9 @@ function paintNode(
       const contentMetrics = getBoxContentMetrics(node, w, h);
       // A Box with no inner content area has no legal paint region for FLOW
       // children. Absolutely-positioned children, though, are placed against
-      // the containing block (border-box), not the content rect — Ink still
-      // paints them — so paint just those and keep flow children suppressed.
+      // their containing block — the padding box (inside the borders) — not the
+      // content rect, so Ink still paints them; paint just those and keep flow
+      // children suppressed.
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;

@@ -410,9 +410,9 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   dimension is zero. Paint applies the same inner-content gate, so the in-flow child subtree
   neither reserves invisible rows nor writes glyphs outside a nonexistent content area.
   Border and background are still painted as far as the outer area permits.
-  **Absolutely-positioned children are exempt** — their region is the containing block
-  (border-box), not the content rect, so they still lay out and paint (clipped only by
-  `overflow:hidden`), matching Ink. Positive-size content areas keep the
+  **Absolutely-positioned children are exempt** — their containing block is the padding box
+  (inside the borders), not the content rect, so they still lay out and paint (clipped only
+  by `overflow:hidden`), matching Ink. Positive-size content areas keep the
   existing overflow behavior; this is not a blanket `overflow:hidden`.
 - **Layout model guidance:** primitive `Box` should preserve the Yoga/flexbox model rather
   than paper over it with ad-hoc layout corrections. Defaults such as `flexShrink: 1` are
