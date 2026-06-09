@@ -64,9 +64,10 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
     const inner = getBoxInnerSize(node);
     if (inner.width === 0 || inner.height === 0) {
       for (const child of node.children) {
-        // Absolutely-positioned children are placed against the containing
-        // block (border-box), not the content rect, so the zero-content guard
-        // must not hide them — Ink lays them out and paints them regardless.
+        // Absolutely-positioned children are placed against their containing
+        // block — the padding box (inside the borders) — not the content rect,
+        // so the zero-content guard must not hide them; Ink lays them out and
+        // paints them regardless.
         if (hasYoga(child) && child.yoga.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE) {
           continue;
         }
