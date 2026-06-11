@@ -231,6 +231,35 @@ current-props model, or API conventions.
 - **Why:** this is a React-only concept with no Vue equivalent, so it is N/A rather than a
   parity gap.
 
+#### `<Transform>` treats all-comment children as no children
+
+- **Ink:** `Transform` returns `null` only for `undefined` / `null` children. React's
+  `false` child and a literal `[]` child are not nullish, so each creates an empty
+  `ink-text` node that consumes a flex-gap slot, and in screen-reader mode that node
+  still announces `accessibilityLabel` (a `false` or `[]` child with a label reads the
+  label).
+- **vue-tui:** after slot resolution, `null` / `false` / `undefined` / `v-if="false"` /
+  a `false`-yielding `&&` all materialize as the same Comment vnode — React's
+  `false !== null` edge has no Vue equivalent. `<Transform>` treats an absent slot, an
+  all-comment slot, or an empty slot array (`() => []`) as no renderable children and
+  returns `null`: the node is omitted, no gap slot is consumed, and a
+  `<Transform accessibilityLabel>` whose children all resolve this way announces nothing
+  in screen-reader mode (the guard runs before label substitution, as in Ink). Boundary
+  parity: `''` and `0` children are text vnodes, not comments — both engines render a
+  node (`''` takes a gap slot; `0` prints `0`) — and a Vue JSX `{[]}` child is a
+  Fragment vnode that still renders a node, matching Ink; only the bare `() => []` slot
+  collapses.
+- **Why:** a child set that renders nothing equals omitting the child — letting
+  framework anchors occupy layout slots would be worse than matching Ink's React-only
+  `false !== null` edge, which Vue cannot see. The same forcing covers the screen-reader
+  case: Ink announces the label for `false` but not `null` children; vue-tui sees
+  identical comments, cannot honor both, and consistently takes the `null` side. The
+  `() => []` collapse alone is **not** model-forced (Vue can see the empty array); it is
+  a deliberate consistency rider — in each engine `() => []` and `() => [false]` behave
+  alike (Ink renders a node for both, vue-tui omits both), and aligning only `[]` would
+  create an asymmetry that exists in neither engine without reaching parity. Maintainer
+  decision (2026-06-07): KEEP. Test: `transform.test.tsx`.
+
 ### Vue-Idiomatic Choices
 
 #### Entry point - `createApp()` instead of `render()`
@@ -264,20 +293,28 @@ current-props model, or API conventions.
 
 #### Public composable naming follows Vue conventions
 
-- **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...). Where a hook returns a
-  public type, Ink names it `XProps` — this holds for the stream/app hooks (`useStdin` →
-  `StdinProps`, `useStdout` → `StdoutProps`, `useApp` → `AppProps`); the lead examples don't
-  fit (`useInput`/`usePaste` return `void`, `useFocus` returns an unexported type).
-- **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...), and
-  composable return types follow VueUse's `UseXReturn` convention (`UseStdinReturn`,
-  `UseAppReturn`, ...). In vue-tui, `XProps` is reserved for component props (`BoxProps`,
-  derived via `ExtractPublicPropTypes`).
-- **Why:** the public surface should read like Vue code. The return shapes still mirror
+- **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...), but return-type naming
+  is mixed: the stream/app hooks return exported context types named `XProps` (`useStdin` →
+  `StdinProps`, `useStdout` → `StdoutProps`, `useApp` → `AppProps`), newer hooks return
+  exported non-`XProps` types — result-named (`useBoxMetrics` → `UseBoxMetricsResult`,
+  `useAnimation` → `AnimationResult`) or a bare data name (`useWindowSize` → `WindowSize`) —
+  and the rest fit neither: `useInput`/`usePaste` return `void`, `useFocus`/`useFocusManager`
+  return an unexported type, `useCursor` an inline shape, `useIsScreenReaderEnabled` a bare
+  `boolean`.
+- **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...). Where a
+  composable's return type is exported under a name, the name always follows VueUse's
+  `UseXReturn` convention (`UseAppReturn`, `UseStdinReturn`, `UseStdoutReturn`,
+  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`); the remaining composables
+  return `void`, plain `boolean`, or small unexported inline shapes — never an `XProps`
+  type. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
+  `ExtractPublicPropTypes`).
+- **Why:** the public surface should read like Vue code: named composable return types get a
+  single convention (`UseXReturn`) instead of Ink's mix of `XProps`, result names, and bare
+  names, and `XProps` keeps its Vue meaning (component props). Return shapes still mirror
   Ink field-for-field where the same public state exists; reactive state is represented as
   refs for the model-implied reason documented above. Do not export Ink-compatible alias
   names for these types: Vue-first naming is more important than making type imports look
-  portable across React and Vue. `XProps` stays reserved for component props; composable
-  returns stay `UseXReturn`. Maintainer decision (2026-06-07): KEEP.
+  portable across React and Vue. Maintainer decision (2026-06-07): KEEP.
 
 #### Function-valued composable inputs use `MaybeRef`, not getters
 
@@ -447,23 +484,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   width and height. The default remains border-box-like, matching Ink's current public
   sizing model.
 
-### `<Transform>` treats all-comment children as no children
-
-- **Ink:** `Transform` returns `null` only for undefined or null children. React's
-  `false` child is not nullish, so Ink creates an empty `ink-text` node that can consume a
-  flex-gap slot.
-- **vue-tui:** Vue materializes `null` / `false` / `undefined` / `v-if="false"` /
-  falsy-`&&` children as comment vnodes. `<Transform>` treats an absent slot or an
-  all-comment slot as no renderable children and returns `null`, so a literal `false`
-  child omits the node and does not consume a gap slot.
-- **Why:** after Vue slot resolution, vue-tui cannot reliably distinguish a literal
-  `false` child from the comment anchors Vue uses for ordinary empty branches. Rendering an
-  all-comment slot as an empty layout node would make framework anchors affect layout,
-  which is worse than matching Ink's React-only `false !== null` edge. This keeps
-  `<Transform>` consistent with how the rest of vue-tui treats false / empty conditional
-  children: no node. Maintainer decision (2026-06-07): KEEP. Test:
-  `transform.test.tsx`.
-
 ### Out-of-type style values are forwarded, not defensively coerced
 
 - **Ink:** several flex/align setters coerce an invalid runtime value to a default:
@@ -559,8 +579,8 @@ mechanics so they are not mistaken for parity gaps.
   node, paints nothing, never shifts a sibling, and skipped when counting child positions
   (the `child.type !== "comment"` guards in `paint.ts`, `text-measure.ts`, and
   `screen-reader.ts`; `G52`). This is renderer mechanics, not a divergence entry by
-  itself. The observable `<Transform>` literal-`false` edge is documented above as an
-  intentional divergence.
+  itself. The observable `<Transform>` literal-`false` edge is documented above as a
+  **model-implied divergence**.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at
   `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's
   `renderThrottleMs`), synchronous resize. This remains true even though re-renders come
