@@ -257,14 +257,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAlternateScreen = false;
   let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
-  // Tracks whether this app is the owner of the liveInstances entry for its
-  // stdout. A second mount that hits the guard sets this to false so teardown()
-  // does not evict the first app's entry.
+  // Tracks whether this app currently owns the liveInstances entry for its
+  // stdout — set when a mount() actually wires a renderer, cleared when
+  // teardown() evicts the entry. A mount() that hits the instance-reuse guard
+  // wires nothing and leaves this (and all other mounted* state) untouched:
+  // whether unmount()/teardown() have real work to do is derived from the
+  // actually-wired state, never from a sticky "was ever guarded" flag (audit
+  // e18 — a sticky flag let one guarded call disable teardown of a mount the
+  // app DID wire).
   let mountedAsOwner = false;
-  // Set to true when mount() hit the instance-reuse guard and returned early.
-  // unmount()/teardown()/resolveExit() must be complete no-ops in that case —
-  // they must not touch the owner's stream or WeakMap entry.
-  let skippedMount = false;
 
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
@@ -277,9 +278,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let pendingExitResult: unknown = undefined;
 
   function resolveExit() {
-    // Skipped mount: no stream was ever wired; resolve the exit promise directly
-    // without any write-barrier so the owner's stdout is never touched.
-    if (skippedMount) {
+    // Nothing wired: this app never mounted a renderer (every mount() either
+    // never happened or hit the instance-reuse guard, which wires nothing).
+    // Settle the exit promise directly without any write-barrier so no stream
+    // — in particular a guarded stream's owner — is ever touched. Apps that
+    // DID wire a renderer always have mountedAppContext set, so a guarded
+    // call can never reroute their exit settling away from the real stream.
+    if (!mountedAppContext) {
       if (isErrorInput(pendingExitError)) {
         exitReject(pendingExitError);
       } else {
@@ -336,9 +341,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // synchronously (fs.writeSync) so they reach the fd before signal-exit
   // re-raises the signal. The normal unmount()/exit() path keeps async writes.
   function teardown(sync = false) {
-    // Skipped mount: this app never wired a renderer, so teardown is a
-    // complete no-op — do not touch any stream or the owner's WeakMap entry.
-    if (skippedMount) return;
+    // Nothing wired: this app never mounted a renderer (never mounted, or
+    // every mount() hit the instance-reuse guard, which wires nothing), so
+    // teardown is a complete no-op — do not touch any stream or another
+    // app's WeakMap entry. Derived from actual wired state, NOT a sticky
+    // "was ever guarded" flag: a guarded mount() call is inert for that call
+    // only and must never disable teardown of a mount this app DID wire
+    // (double-fire on its own live stdout, a later mount on a free stdout,
+    // or merely targeting another app's busy stream — audit e18).
+    if (!mountedAppContext) return;
     if (teardownStarted) return;
     teardownStarted = true;
 
@@ -538,13 +549,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // must unmount() the first app before mounting on the same stream.
     // We write the warning directly to native process.stderr so an existing
     // alternate-screen renderer cannot swallow it via patchConsole.
+    // The skip is scoped to THIS call only: it wires nothing, mutates no
+    // per-app state, and returns an inert handle. unmount()/teardown()/
+    // resolveExit() consult the actually-wired state (mountedAppContext /
+    // mountedAsOwner), so a guarded call never affects the app's ability to
+    // tear down a mount it really wired (audit e18: a sticky skip flag here
+    // made the owner's double-fire — and even targeting someone else's busy
+    // stream — permanently disable the app's own teardown).
     if (liveInstances.has(stdout)) {
       process.stderr.write(
         "Warning: this stdout already has a live app, so this mount() was ignored. To update the current view, change its reactive state instead of remounting; to mount another app, unmount() the existing one first.\n",
       );
-      // Mark this app as skipped so unmount()/teardown()/resolveExit() are
-      // complete no-ops — they must never touch the owner's stream or WeakMap entry.
-      skippedMount = true;
       return {} as ComponentPublicInstance;
     }
 
