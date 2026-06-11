@@ -1120,6 +1120,34 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     mountedAlternateScreen = alternateScreen;
 
+    // Patch console.log/warn/error etc. to route through writeToStdout /
+    // writeToStderr so console output doesn't corrupt the rendered frame.
+    // Installed BEFORE originalMount (matching Ink, which patches in its
+    // constructor before the first render — ink.tsx:435-436): a dev-only
+    // [Vue warn] emitted DURING the initial mount (e.g. the missing-render-
+    // function warn when the root's setup() throws) must hit the filter too.
+    // The mount-throw catch below runs teardown(), which restores the console,
+    // so a synchronous mount failure cannot leak a patched console.
+    // Disabled in debug mode (matching Ink).
+    if (options.patchConsole !== false && !debug) {
+      try {
+        mountedRestoreConsole = patchConsoleFn((stream, data) => {
+          if (stream === "stdout") {
+            appContext.writeToStdout(data);
+          }
+          if (stream === "stderr") {
+            // Filter Vue internal warnings
+            if (!data.startsWith("[Vue warn]")) {
+              appContext.writeToStderr(data);
+            }
+          }
+        });
+      } catch {
+        // patch-console uses console.Console which may not be available in
+        // some environments (e.g., vitest workers). Degrade gracefully.
+      }
+    }
+
     // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
     // LAZILY: the non-alt-screen hide comes from log-update's isTTY-gated
     // cliCursor.hide on the first render that actually writes (log-update.ts:
@@ -1256,28 +1284,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // returns, so the restore escapes must be flushed to the fd
       // synchronously (Finding A) — a buffered async write can be lost.
       mountedUnsubscribeExit = onExit(() => teardown(true), { alwaysLast: false });
-    }
-
-    // Patch console.log/warn/error etc. to route through writeToStdout /
-    // writeToStderr so console output doesn't corrupt the rendered frame.
-    // Disabled in debug mode (matching Ink).
-    if (options.patchConsole !== false && !debug) {
-      try {
-        mountedRestoreConsole = patchConsoleFn((stream, data) => {
-          if (stream === "stdout") {
-            appContext.writeToStdout(data);
-          }
-          if (stream === "stderr") {
-            // Filter Vue internal warnings
-            if (!data.startsWith("[Vue warn]")) {
-              appContext.writeToStderr(data);
-            }
-          }
-        });
-      } catch {
-        // patch-console uses console.Console which may not be available in
-        // some environments (e.g., vitest workers). Degrade gracefully.
-      }
     }
 
     return proxy;

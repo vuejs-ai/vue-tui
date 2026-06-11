@@ -206,18 +206,22 @@ current-props model, or API conventions.
 #### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
 
 - **Ink:** a component that throws during render surfaces only through the error overview /
-  exit path; React emits no extra framework warning.
+  exit path; React emits no extra framework warning on stderr (verified: stderr stays
+  empty).
 - **vue-tui:** in a **development** build, a component whose `setup()` throws additionally
   produces Vue's own `[Vue warn]` lines on stderr (for example, the missing-render-function
-  warning) that Ink has no analog for. In interactive mode `patchConsole` filters
-  `[Vue warn]` out of the frame; outside that path (debug, non-patched stderr) it surfaces.
+  warning) that Ink has no analog for. While console patching is active (the default;
+  disabled by `patchConsole: false` or `debug`, independent of interactive mode), vue-tui
+  treats the `[Vue warn]` prefix as Vue's framework-diagnostics channel and drops those
+  stderr lines. The patch is installed before the first mount (matching Ink, which patches
+  before the first render), so a `setup()` throw during the **initial** mount is filtered
+  too. With patching off, every `[Vue warn]` surfaces.
 - **Why:** these warnings come from Vue itself and are **dev-only** (stripped in production
-  builds); they have no effect on stdout output or the exit code. Documented so the stray
-  warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics. While
-  console patching is active, vue-tui treats the `[Vue warn]` prefix as that framework
-  diagnostics channel and filters it. This may also filter user-authored stderr logs that
-  intentionally use the same reserved prefix; use a different application prefix when that
-  output must be preserved. Maintainer decision (2026-06-06): KEEP.
+  builds); they never enter the stdout frame and do not change the exit path. Documented so
+  the stray warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics.
+  The prefix filter may also drop user-authored stderr logs that intentionally reuse the
+  reserved `[Vue warn]` prefix; use a different application prefix when that output must be
+  preserved. Maintainer decision (2026-06-06): KEEP.
 
 #### React concurrent mode
 
