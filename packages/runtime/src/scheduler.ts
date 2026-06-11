@@ -39,22 +39,44 @@ export function createCommitScheduler(
     for (const resolve of resolvers) resolve();
   }
 
-  // Throttle state (production only): leading+trailing pattern.
-  // The leading call fires immediately, subsequent calls within the window
-  // are collapsed into a single trailing call at the end of the window.
-  let lastCommitTime = 0;
+  // Throttle state (production only). This mirrors the OBSERVABLE timing of
+  // Ink's render throttle — es-toolkit/compat `throttle(fn, wait, {leading,
+  // trailing})`, i.e. `debounce(fn, wait, {leading, trailing, maxWait: wait})`
+  // — not its implementation (verified against real Ink v7.0.4, audit e29):
+  //   - leading: a call with no active trailing window commits synchronously
+  //     and arms the window;
+  //   - trailing: EVERY deferred call re-arms the window, so the trailing
+  //     commit fires at lastCall+wait (NOT windowStart+wait);
+  //   - maxWait: when a call arrives a full window after the first deferral
+  //     (`pendingAt`), it commits synchronously — sustained updates hold a
+  //     ~wait cadence instead of debounce-starving forever.
   let trailingTimer: ReturnType<typeof setTimeout> | null = null;
   let hasPendingFlag = false;
+  // Time of the first call since the last leading/trailing commit
+  // (es-toolkit compat-debounce `pendingAt`); drives the maxWait edge.
+  let pendingAt: number | null = null;
 
   function doCommit() {
     scheduled = false;
     hasPendingFlag = false;
-    lastCommitTime = Date.now();
+    pendingAt = null;
     try {
       commit();
     } finally {
       drainFlushResolvers();
     }
+  }
+
+  // (Re-)arm the trailing window at now+wait. Like es-toolkit's debounce
+  // `schedule()`, the timer is armed even when nothing is deferred yet (after
+  // a leading/maxWait commit): an "empty" expiry is a no-op, but while armed
+  // it marks the window as active so calls inside it defer.
+  function armTrailingWindow() {
+    if (trailingTimer) clearTimeout(trailingTimer);
+    trailingTimer = setTimeout(() => {
+      trailingTimer = null;
+      if (hasPendingFlag) doCommit();
+    }, throttleMs);
   }
 
   function schedule() {
@@ -66,30 +88,38 @@ export function createCommitScheduler(
       // it — bail here so it doesn't commit on a torn-down tree or re-arm a
       // trailing timer that nothing will cancel.
       if (!scheduled) return;
+      // Reset eagerly (not only in doCommit): a deferred call must leave
+      // `scheduled` false so the NEXT call re-enters this callback and
+      // re-arms the trailing window — `lastCall+wait` only works if every
+      // call reaches the throttle, as every Ink `onRender` call does.
+      scheduled = false;
       if (immediate) {
         doCommit();
         return;
       }
-      // Leading+trailing throttle: fire immediately if enough time has
-      // passed since last commit (leading edge). Otherwise mark pending
-      // and let the trailing timer handle it.
-      const elapsed = Date.now() - lastCommitTime;
-      if (elapsed >= throttleMs) {
-        // Leading edge: fire immediately
-        if (trailingTimer) {
-          clearTimeout(trailingTimer);
-          trailingTimer = null;
-        }
+      const now = Date.now();
+      if (pendingAt === null) pendingAt = now;
+      if (now - pendingAt >= throttleMs) {
+        // maxWait edge: deferred calls have been pushing the trailing edge
+        // for a full window — commit now, then re-arm an (empty) window so
+        // the next call defers instead of double-committing as leading.
+        // pendingAt is stamped AFTER the commit (es-toolkit does the same),
+        // so paint time doesn't eat into the next window.
         doCommit();
-      } else {
-        // Within throttle window: schedule trailing edge
+        pendingAt = Date.now();
+        armTrailingWindow();
+        return;
+      }
+      const isWindowActive = trailingTimer !== null;
+      // Ink parity (audit e29): every call re-anchors the trailing edge to
+      // now+wait, exactly like es-toolkit's debounce re-arming per call.
+      armTrailingWindow();
+      if (isWindowActive) {
+        // Inside an active window: defer to the trailing edge.
         hasPendingFlag = true;
-        if (!trailingTimer) {
-          trailingTimer = setTimeout(() => {
-            trailingTimer = null;
-            if (hasPendingFlag) doCommit();
-          }, throttleMs - elapsed);
-        }
+      } else {
+        // Leading edge: no active window — commit synchronously.
+        doCommit();
       }
     });
   }
@@ -112,6 +142,9 @@ export function createCommitScheduler(
     }
     hasPendingFlag = false;
     scheduled = false;
+    // Clean slate: the next schedule() after a cancel commits on the leading
+    // edge (no live window, no deferral history).
+    pendingAt = null;
     // Resolve any waiters blocked on flush() — the pending commit will never
     // fire now, so leaving them unsettled would hang waitUntilRenderFlush.
     drainFlushResolvers();
