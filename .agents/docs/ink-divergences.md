@@ -588,6 +588,13 @@ mechanics so they are not mistaken for parity gaps.
   itself. The observable `<Transform>` literal-`false` edge is documented above as a
   **model-implied divergence**.
 - Commit timing is deliberately Ink-aligned: leading+trailing throttle at
-  `ceil(1000/maxFps)` ms (34ms at the default `maxFps=30`, matching Ink's
-  `renderThrottleMs`), synchronous resize. This remains true even though re-renders come
-  from Vue's fine-grained reactivity, not a React subtree re-render.
+  `Math.max(1, Math.ceil(1000/maxFps))` ms behind a `maxFps > 0` guard (34ms at the
+  default `maxFps=30` — both engines compute exactly this), synchronous resize. The
+  scheduler mirrors the observable timing of Ink's es-toolkit throttle (run-verified vs
+  v7.0.4): the trailing timer re-arms on every deferred call, so the trailing commit
+  fires at `lastCall+wait` (not `windowStart+wait`), and a call arriving a full window
+  after the first deferral commits synchronously (es-toolkit's `maxWait`), keeping a
+  ~`wait` cadence under sustained updates. This remains true even though re-renders come
+  from Vue's fine-grained reactivity, not a React subtree re-render. One deliberate
+  exception: resize cancels the pending trailing commit — see the divergence entry
+  "Resize unconditionally cancels the pending trailing commit".
