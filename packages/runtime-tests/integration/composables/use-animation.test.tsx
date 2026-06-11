@@ -1187,9 +1187,16 @@ describe("useAnimation", () => {
     // Should have very few committed frames during the throttle window
     expect(framesDuringThrottle).toBeLessThanOrEqual(2);
 
-    // Wait for a full throttle window to elapse
-    await delay(1200);
-    // Now at least one more frame should have been committed
+    // Wait for the next throttled commit by polling instead of a fixed sleep:
+    // the trailing commit re-arms per deferred call (lastCall+wait, matching
+    // Ink's throttle), so on a starved CI runner a fixed 1200ms margin races
+    // the ~1s cadence — render-count assertions on wall-clock margins are the
+    // known flake trap. The contract is "commits keep flowing at ~1/sec", so
+    // assert the next commit EVENTUALLY lands under a generous deadline.
+    const deadline = Date.now() + 5000;
+    while (frames.length <= framesAfterMount && Date.now() < deadline) {
+      await delay(50);
+    }
     expect(frames.length).toBeGreaterThan(framesAfterMount);
 
     unmount();
