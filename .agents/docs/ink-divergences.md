@@ -225,11 +225,21 @@ current-props model, or API conventions.
 
 #### React concurrent mode
 
-- **Ink:** built on React; `useTransition` and interruptible concurrent rendering are
-  React features.
-- **vue-tui:** no equivalent.
-- **Why:** this is a React-only concept with no Vue equivalent, so it is N/A rather than a
-  parity gap.
+- **Ink:** built on React; `useTransition` / `useDeferredValue` work as ordinary React
+  hooks. Ink v7 also exposes a `concurrent?: boolean` render option (default `false`)
+  with two distinct halves (run-verified vs v7.0.4): the root-tag half is inert — under
+  the pinned reconciler (react-reconciler 0.33.0 / React 19) every root is overwritten to
+  ConcurrentRoot, and hook/preemption probes behave identically in both modes — but the
+  dispatch half is live: the default commits the first frame synchronously inside
+  `render()` / `rerender()` (bytes reach stdout before the call returns), while
+  `concurrent: true` schedules the commit asynchronously on a later tick.
+- **vue-tui:** no equivalent — no such composables, and `MountOptions` has no
+  `concurrent` flag. `mount()` commits the first frame synchronously, matching Ink's
+  default dispatch.
+- **Why:** React scheduling concepts with no Vue counterpart; N/A rather than a parity
+  gap. The absent `MountOptions.concurrent` is this entry, not an unlisted difference:
+  the one observable behavior the flag adds (deferring the first paint past the mount
+  call) has no Vue-side demand, and vue-tui already matches Ink's default.
 
 #### `<Transform>` treats all-comment children as no children
 
@@ -561,7 +571,11 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   on that boundary-driven recoverable path; Ink's paint-time check can only crash. This is
   a deliberately chosen fail-safe given a constraint that is symmetric across React and Vue
   (recover-vs-crash), not a Vue-model-forced difference — hence an intentional choice rather
-  than a model-implied one.
+  than a model-implied one. Provenance: the wedge claim rests on the earlier paint-throw
+  investigation; the 2026-06-12 audit could not reach a paint throw from public or raw-host
+  input (paint's `if (!chars) return;` border fallback intercepts an invalid `borderStyle`
+  that bypasses component validation), so it stands on that prior record, not an in-audit
+  reproduction.
 - **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
   over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
   inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
