@@ -371,10 +371,16 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
   `render(node, {stdout})` on a stream that already has a live instance warns on stderr but
   **reuses** that instance and `rerender`s the new tree into it.
-- **vue-tui:** a second `mount()` on a still-live stdout warns on stderr and returns an
-  **inert handle**. It wires no second renderer and renders nothing; the first app's tree
-  stays on screen. `unmount()`/`teardown()` on that handle never touch the owner's stream or
-  registry entry (`unmount()` only settles the inert handle's own exit promise).
+- **vue-tui:** a second `mount()` on a still-live stdout warns on stderr, wires no second
+  renderer, renders nothing, and returns an empty placeholder object (the real controls —
+  `unmount()`, `waitUntilExit()` — live on the app, not on `mount()`'s return value). The
+  first app's tree stays on screen. The skip is scoped to that one guarded call — derived
+  from what the app actually wired, never sticky: a guarded _different_ app's `unmount()`
+  settles only its own exit promise and never touches the owner's stream or registry entry;
+  the _owner_ double-firing `mount()` on its own stdout keeps a fully working `unmount()`
+  (the warning's recovery path); an app that once hit the guard can later mount — and
+  cleanly unmount — on a free stdout; and a live app that merely targeted another app's
+  busy stream stays fully killable.
 - **Why:** a second `mount()` on a live stdout is a misuse (forgot to `unmount()`, a
   re-render glitch fired `mount()` twice, or expecting `mount()` to re-render — it doesn't;
   update reactive state for that). Ink treats it as unsupported and warns too. vue-tui fails
