@@ -241,7 +241,9 @@ current-props model, or API conventions.
   a deliberate consistency rider — in each engine `() => []` and `() => [false]` behave
   alike (Ink renders a node for both, vue-tui omits both), and aligning only `[]` would
   create an asymmetry that exists in neither engine without reaching parity. Maintainer
-  decision (2026-06-07): KEEP. Test: `transform.test.tsx`.
+  decision (2026-06-07): KEEP; the screen-reader `accessibilityLabel` rider (Ink announces the
+  label for a `false` child, vue-tui announces nothing) explicitly confirmed (2026-06-12).
+  Test: `transform.test.tsx`.
 
 ### Vue-Idiomatic Choices
 
@@ -273,6 +275,31 @@ current-props model, or API conventions.
 - **Why:** render = f(current props): no `display` set means the default (visible).
   Persisting a withdrawn prop, or flipping it to hidden, does not match that model. Maintainer
   decision (2026-05-31): KEEP.
+
+#### Withdrawing `flexDirection` / `flexWrap` resets to the default
+
+- **Ink:** `applyFlexStyles` has no reset branch for these two props (every _other_ flex prop
+  does). The public `<Box>` injects `flexDirection:'row'` / `flexWrap:'nowrap'` and spreads
+  user style **after** it (`Box.tsx:84-85`), so **omitting** the prop keeps the injected
+  default (parity). But passing the value **explicitly** — `flexDirection={undefined}` or
+  `={null}`, i.e. the common `cond ? 'column' : undefined` toggle — the explicit key clobbers
+  the injected default, and with no reset branch yoga keeps the **previous** value: a
+  `column` → `={undefined}` update stays `column` in Ink (run-verified) where vue-tui returns
+  to `row`. At first **mount**, `<Box flexDirection={undefined}>` shows yoga's initial
+  `column`, not Box's documented `row`; `flexWrap` has no mount divergence (yoga's `nowrap`
+  default coincides with Box's). `null` behaves exactly like `undefined` in every case.
+- **vue-tui:** resets to the Box default (`row` / `nowrap`) on **every** withdrawal form — key
+  absent, explicit `undefined`, or explicit `null`, at mount and on update (G19) — the same
+  layout as if the prop had never been set.
+- **Why:** render = f(current props): the current props determine the layout, so withdrawing
+  the prop — however it is expressed — returns to the default, exactly like the `display` entry
+  above. Ink's persist-stale is an artifact of the Box-default spread order plus the missing
+  reset branch, not intended behavior; matching it would preserve abnormal behavior (a
+  `cond ? 'column' : undefined` toggle that silently sticks on `column`). The prior KEEP
+  (2026-05-30) was premised on "not user-observable"; the audit disproved that — explicit
+  `undefined`/`null` withdrawal and the mount-time default **are** observable through the
+  public `<Box>` — so this is reclassified here as a Vue-Idiomatic Choice beside `display`.
+  Maintainer decision (2026-06-12): KEEP (reconfirmed).
 
 #### Public composable naming follows Vue conventions
 
@@ -541,21 +568,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   those `typeof`/falsy guards would add checks for inputs the public types reject.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
-
-### Removing `flexDirection` / `flexWrap` is parity through the public `<Box>`
-
-- **Ink:** `applyFlexStyles` has no reset branch for these two props (every _other_ flex prop
-  does), so at the **raw `ink-box` host layer** an explicit `flexDirection={undefined}` leaves
-  the previous value in place. But the public `<Box>` re-injects `flexDirection:'row'` /
-  `flexWrap:'nowrap'` on every render (`Box.tsx:84-85`, before spreading user style), so a
-  user who removes the prop still gets the default — Ink resets **through the component**.
-- **vue-tui:** resets to the Box default (`row` / `nowrap`) explicitly (G19). Through the
-  public `<Box>` this is **identical to Ink** (verified by running: a `column` → removed goes
-  `"A\nB"` → `"AB"` in both engines).
-- **Why:** this is **not a user-observable divergence** — both reset through the public
-  component; only the raw-host-layer behavior differs (vue-tui resets, Ink persists). Kept as
-  the explicit contrast to `display`, which has **no** Box default and so genuinely diverges.
-  Maintainer decision (2026-05-30): KEEP.
 
 ### Composables throw outside a render tree
 
