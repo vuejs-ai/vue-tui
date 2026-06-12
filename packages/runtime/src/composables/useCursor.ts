@@ -14,7 +14,12 @@ export interface CursorPosition {
  *
  * Setting a position makes the cursor visible at the given coordinates
  * (relative to the output origin). Pass `undefined` to hide the cursor.
- * The cursor position is automatically cleared when the component unmounts.
+ *
+ * The declared position **persists**: the runtime re-asserts it at the end of
+ * every frame, so the caret stays put across unrelated repaints (a spinner tick,
+ * a log line) until you set a new position or clear it — you do not need to
+ * re-set it on every render. The position is automatically cleared when the
+ * component unmounts.
  */
 export function useCursor() {
   const ctx = inject(AppContextKey);

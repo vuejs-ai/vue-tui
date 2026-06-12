@@ -189,6 +189,65 @@ describe("standard rendering", () => {
     expect(secondCall.includes(showCursorEscape)).toBe(false);
   });
 
+  test("persistent declaration: a non-dirty changed-output re-render re-emits the declared cursor suffix", () => {
+    // Persistent-declaration core. The caret is declared ONCE, then an unrelated
+    // repaint (different output, NO setCursorPosition call this commit, so
+    // cursorDirty is false) must STILL re-emit the caret-restore suffix at the
+    // last-declared position — not drop it and zombie the caret to the corner.
+    const stdout = createStdout();
+    const render = logUpdate.create(stdout, { showCursor: true });
+
+    render.setCursorPosition({ x: 5, y: 1 });
+    render("Line 1\nLine 2\n"); // declares + shows the cursor
+    expect(render.isCursorDirty()).toBe(false); // consumed by the render
+
+    // Unrelated repaint: output changes, cursor is NOT re-declared.
+    render("Changed\nLine 2\n");
+
+    const secondCall = stdout.write.secondCall.args[0] as string;
+    // The frame still ends at the declared column (the persistent re-emit), not
+    // the bottom-left corner.
+    expect(
+      secondCall.endsWith(ansiEscapes.cursorUp(1) + ansiEscapes.cursorTo(5) + showCursorEscape),
+    ).toBe(true);
+  });
+
+  test("D5 clamp: a stale y past shrunk content lands on the last visible line, not below", () => {
+    // The caret is declared at y=2 against a 3-line frame, then content shrinks
+    // to 1 line WITHOUT re-declaring. The persistent re-emit must clamp y to the
+    // visible line count so it never moves below the rendered block.
+    const stdout = createStdout();
+    const render = logUpdate.create(stdout, { showCursor: true });
+
+    render.setCursorPosition({ x: 3, y: 2 });
+    render("Line 1\nLine 2\nLine 3\n");
+
+    // Shrink to a single line; no setCursorPosition — y=2 is now out of range.
+    render("Only\n");
+
+    const secondCall = stdout.write.secondCall.args[0] as string;
+    // visibleLineCount is 1, y clamped to 1 -> moveUp 0, so the SUFFIX is just
+    // cursorTo(3) + show with no leading cursorUp (an unclamped y=2 would have
+    // emitted cursorUp(-1)-as-nothing here but a larger frame would move above
+    // the block; the clamp guarantees the suffix never moves past the content).
+    expect(secondCall.endsWith(ansiEscapes.cursorTo(3) + showCursorEscape)).toBe(true);
+  });
+
+  test("D5 clamp: a stale x past terminal width lands at the rightmost cell, not beyond", () => {
+    // stdout width is 100 (createStdout). Declare x past the edge; the re-emit
+    // must clamp x to width-1 so the column move stays in range.
+    const stdout = createStdout();
+    const render = logUpdate.create(stdout, { showCursor: true });
+
+    render.setCursorPosition({ x: 250, y: 0 });
+    render("Hello\n");
+
+    const written = stdout.write.firstCall.args[0] as string;
+    // x clamped to 99 -> cursorTo(99).
+    expect(written.endsWith(ansiEscapes.cursorTo(99) + showCursorEscape)).toBe(true);
+    expect(written.includes(ansiEscapes.cursorTo(250))).toBe(false);
+  });
+
   test("returns to bottom before erase when cursor was positioned", () => {
     const stdout = createStdout();
     const render = logUpdate.create(stdout, { showCursor: true });
@@ -499,18 +558,23 @@ describe.each(modes)("$name mode - cursor positioning", ({ incremental }) => {
     expect(secondCall.endsWith(ansiEscapes.cursorTo(3) + showCursorEscape)).toBe(true);
   });
 
-  test("sync() resets cursor state", () => {
+  test("sync() updates the frame baseline so the next render has no stale return", () => {
+    // sync() to a SHORTER frame must update previousLineCount/Position so the
+    // next render does not emit a stale return-to-bottom for the old 3-line
+    // frame. Under persistent-declaration sync re-seats the declared cursor (it
+    // no longer zeros it), so the next render legitimately hides-then-shows; the
+    // invariant that survives is "no stale cursorDown(3) from the old height".
     const { stdout, render } = createRenderForMode(incremental);
 
     render.setCursorPosition({ x: 5, y: 0 });
     render("Line 1\nLine 2\nLine 3\n");
 
-    render.sync("Fresh output\n");
+    render.sync("Fresh output\n"); // 1-line baseline now
 
     render("Updated output\n");
 
     const afterSync = stdout.get();
-    expect(afterSync.includes(hideCursorEscape)).toBe(false);
+    // The stale 3-line return must NOT appear (sync rebased the height to 1).
     expect(afterSync.includes(ansiEscapes.cursorDown(3))).toBe(false);
   });
 
@@ -537,17 +601,25 @@ describe.each(modes)("$name mode - cursor positioning", ({ incremental }) => {
     expect(renderCall.startsWith(hideCursorEscape)).toBe(true);
   });
 
-  test("sync() hides cursor when previous render showed cursor", () => {
+  test("sync() re-seats the still-declared cursor (persistent declaration)", () => {
+    // Persistent-declaration: a sync() after a render that showed the cursor does
+    // NOT drop it — the declaration is still live, so sync re-emits the caret
+    // suffix at the declared position (it formerly emitted a bare hide because the
+    // dirty-gate zeroed the active cursor on a non-dirty sync). The cursor stays
+    // visible at its edit point across the out-of-band repaint.
     const { stdout, render } = createRenderForMode(incremental);
 
     render.setCursorPosition({ x: 5, y: 1 });
     render("Line 1\nLine 2\nLine 3\n");
     expect(stdout.write.callCount).toBe(1);
 
-    render.sync("Fresh output\n");
+    render.sync("Fresh output\n"); // 1-line frame, cursor {5,1} still declared
 
     expect(stdout.write.callCount).toBe(2);
-    expect(stdout.write.secondCall.args[0] as string).toBe(hideCursorEscape);
+    const synced = stdout.write.secondCall.args[0] as string;
+    // y=1 clamped to visibleLineCount 1 -> moveUp 0; suffix is cursorTo(5)+show.
+    expect(synced).toBe(ansiEscapes.cursorTo(5) + showCursorEscape);
+    expect(synced.includes(hideCursorEscape)).toBe(false);
   });
 });
 
