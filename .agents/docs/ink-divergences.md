@@ -274,6 +274,26 @@ current-props model, or API conventions.
   Persisting a withdrawn prop, or flipping it to hidden, does not match that model. Maintainer
   decision (2026-05-31): KEEP.
 
+#### Nullish `flexDirection` / `flexWrap` reset to Box defaults
+
+- **Ink:** the public `<Box>` injects `flexDirection:'row'` and `flexWrap:'nowrap'` before
+  spreading user style. If a previously-set prop is **truly omitted**, that default reaches
+  the host and both engines reset (`column` -> omitted renders `"A\nB"` -> `"AB"`; `wrap`
+  -> omitted stops wrapping). But an explicit `flexDirection={undefined}` / `{null}` or
+  `flexWrap={undefined}` / `{null}` overwrites the default before the host layer. Ink's
+  `applyFlexStyles` has no reset branch for these two props, so a dynamic nullish value
+  preserves the previous Yoga value. On first mount, nullish `flexDirection` leaves Yoga's
+  column default; nullish `flexWrap` happens to match nowrap.
+- **vue-tui:** nullish current values reset to the public Box defaults (`row` / `nowrap`)
+  in the same way as true omission (G19). A conditional spread that removes the key remains
+  parity with Ink; a live binding whose value becomes `null` or `undefined` intentionally
+  resets instead of preserving prior Yoga state.
+- **Why:** render = f(current props): a Vue binding with no current `flexDirection` /
+  `flexWrap` value means "use the Box default", not "keep whatever Yoga had last render".
+  Preserving the prior value would make layout depend on history rather than current props.
+  The cost is limited to explicit nullish public bindings; true omission remains Ink-parity.
+  Tests: `prop-reset.test.tsx`.
+
 #### Public composable naming follows Vue conventions
 
 - **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...), but return-type naming
@@ -541,21 +561,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   those `typeof`/falsy guards would add checks for inputs the public types reject.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
-
-### Removing `flexDirection` / `flexWrap` is parity through the public `<Box>`
-
-- **Ink:** `applyFlexStyles` has no reset branch for these two props (every _other_ flex prop
-  does), so at the **raw `ink-box` host layer** an explicit `flexDirection={undefined}` leaves
-  the previous value in place. But the public `<Box>` re-injects `flexDirection:'row'` /
-  `flexWrap:'nowrap'` on every render (`Box.tsx:84-85`, before spreading user style), so a
-  user who removes the prop still gets the default — Ink resets **through the component**.
-- **vue-tui:** resets to the Box default (`row` / `nowrap`) explicitly (G19). Through the
-  public `<Box>` this is **identical to Ink** (verified by running: a `column` → removed goes
-  `"A\nB"` → `"AB"` in both engines).
-- **Why:** this is **not a user-observable divergence** — both reset through the public
-  component; only the raw-host-layer behavior differs (vue-tui resets, Ink persists). Kept as
-  the explicit contrast to `display`, which has **no** Box default and so genuinely diverges.
-  Maintainer decision (2026-05-30): KEEP.
 
 ### Composables throw outside a render tree
 
