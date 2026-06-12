@@ -176,33 +176,6 @@ current-props model, or API conventions.
   instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
   not as a one-time snapshot. Maintainer decision (2026-06-07): KEEP.
 
-#### `useCursor()` re-assertion follows fine-grained reactivity, not React's render cascade
-
-- **Ink:** `useCursor`'s no-deps `useInsertionEffect` (`use-cursor.ts:27-32`) re-runs on
-  every render **of the cursor component**, re-marking the cursor dirty
-  (`ink.tsx:494-497`); log-update resets `cursorDirty` each commit. React re-renders a
-  whole subtree when an ancestor commits, so if the cursor component is in that subtree it
-  re-renders and the cursor is re-asserted, even when only an ancestor's unrelated state
-  changed. If an unrelated sibling owns the changing state, the cursor component does
-  **not** re-render, so Ink does **not** re-assert and the cursor is dropped that commit.
-- **vue-tui:** `useCursor` propagates via `watch(positionRef, ..., {flush:'sync'})`. It
-  re-asserts when the position **reference changes** (or the owning component re-renders
-  and re-sets it). Vue's fine-grained reactivity re-runs only components whose own deps
-  changed, so an ancestor-driven commit does **not** re-run a cursor child that did not
-  depend on the changed value, and a set-once cursor is dropped that commit.
-- **Why:** they agree whenever the cursor child itself re-renders (its own deps change) and
-  in the unrelated-sibling case (both drop). They differ whenever a commit happens **without
-  the cursor child's own deps changing** — most commonly an **ancestor-driven** commit:
-  React's render cascade re-renders the child and re-asserts the cursor; Vue's fine-grained
-  reactivity does not re-run the child, so the cursor is dropped that commit. Setting the
-  position reactively in the render body does **not** by itself close this gap (verified by
-  running: an ancestor-only commit drops a render-body-set cursor in vue-tui while Ink
-  re-asserts) — it helps only when that ancestor change also flows into a ref the child reads. This is a consequence of
-  React's cascade vs Vue's fine-grained re-render model. A global per-commit re-assert
-  would make vue-tui diverge from Ink in the opposite (unrelated-sibling) direction, where
-  Ink drops the cursor. Keep the reactivity-tied behavior. Maintainer decision
-  (2026-06-01): KEEP.
-
 #### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
 
 - **Ink:** a component that throws during render surfaces only through the error overview /
@@ -431,6 +404,51 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (Ink's inline-output use) is `rawMode: 'auto'`. Tests: `raw-mode-lifecycle.test.tsx`
   (`'always'` holds raw with no input hook; `'auto'` stays cooked; no mid-session
   oscillation).
+
+### `useCursor()` re-asserts the declared caret every commit (persistent declaration)
+
+- **Ink:** `useCursor`'s no-deps `useInsertionEffect` (`use-cursor.ts:27-32`) re-marks the
+  cursor dirty only when **the cursor's React component re-renders**, and log-update emits
+  the caret only on a dirty commit. React's render cascade re-renders the child on an
+  **ancestor**-driven commit (so Ink re-asserts there), but on an unrelated **sibling/leaf**
+  repaint the cursor component does not re-render — Ink does **not** re-assert and the caret
+  is dropped, **zombieing** to the bottom-left corner (run-verified vs v7.0.4: a sibling
+  spinner tick ends `…> hello\n` with no caret suffix, leaving the caret at row 2 col 0).
+- **vue-tui:** the runtime re-emits the **last-declared** caret at the **end of every
+  commit** (until the declaration changes or is cleared), so a focused input's caret stays
+  at its edit point across unrelated repaints (spinner / log line / progress bar) in **all**
+  component topologies. The hide-before-erase / show-at-resolved-position flicker discipline
+  is preserved (no corner streak), and the re-emitted position is clamped to the visible
+  region (y to the line count, x to the width) so a post-resize/shrink stale coordinate
+  never moves out of range.
+- **Why:** this is a **deliberate divergence FROM Ink toward correct terminal-app
+  behavior**, not Ink-alignment. Real terminal programs that own an edit point re-place the
+  caret at that point **every frame** (vim emits `\e[<row>;<col>H` after each repaint;
+  readline re-lands the buffer offset on SIGWINCH; nano homes to its edit cell) — they never
+  leave the caret where the repaint dragged it. Aligning to Ink exists to reduce bugs, not to
+  preserve abnormal behavior; matching Ink's topology-conditional zombie would preserve
+  abnormal behavior, so vue-tui diverges. Per the classification flow this is **not** a
+  Model-Implied difference (Vue is not _forced_ here — fine-grained reactivity could also be
+  made to re-run the child; the runtime simply chooses to be more correct than Ink at the
+  commit level), and it is not Vue-API-shaped, so it lands in **Intentional Divergence
+  Choices**. The `{x,y}` `setCursorPosition` surface is **unchanged** — it remains the right
+  low-level IME primitive (a composing glyph offset deliberately decoupled from the buffer
+  point); the fix is an internal per-commit re-emit, so the public API stays compatible. A
+  cleared declaration (`setCursorPosition(undefined)`, e.g. `useCursor`'s `onScopeDispose`
+  on unmount) re-emits no caret, so teardown still ends with the cursor shown and handed back
+  (`\x1b[?25h`); the persistent re-emit runs **before** the unmount clear, so it cannot
+  resurrect a torn-down caret. The one accepted residue is a stale-but-in-range absolute
+  position if an app declares a fixed `{x,y}` and then shrinks content without re-declaring
+  (it parks at a plausible spot, strictly better than a corner-zombie); a future **Stage 2**
+  focus-owned, content-tracking caret (recomputed from the focused widget's layout each
+  frame) would dissolve that residue. Tests: PTY `cursor-sibling-repaint.test.ts` (a
+  sibling-topology spinner tick re-asserts the caret, not the corner) and unit
+  `frame-writer.test.ts` (a non-dirty changed-output re-render re-emits the declared suffix;
+  D5 clamp). **Maintainer decision (2026-06-12): OVERRIDE prior KEEP — adopt per-commit
+  re-assert.** The prior KEEP (2026-06-01) had kept the reactivity-tied behavior to avoid
+  diverging from Ink in the sibling direction; that rationale was overturned when running
+  real terminal apps showed Ink itself zombies the caret there, so matching Ink was matching
+  a defect, not parity.
 
 ### Resize unconditionally cancels the pending trailing commit
 

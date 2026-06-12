@@ -35,6 +35,12 @@ const visibleLineCount = (lines: string[], str: string): number =>
 // `isTTY`, so we read it off the runtime object (WriteStream sets it).
 const isTtyStream = (stream: Writable): boolean => Boolean((stream as { isTTY?: boolean }).isTTY);
 
+// Terminal width for the D5 cursor-x clamp (see buildCursorSuffix). `stream` is
+// typed `Writable`, which has no `columns`; the runtime WriteStream sets it.
+// Returns undefined when unknown so the clamp falls back to the no-width path.
+const streamWidth = (stream: Writable): number | undefined =>
+  (stream as { columns?: number }).columns;
+
 // The show-cursor restore at done() runs on the teardown path, where stdout may
 // already be destroyed/ended. `isTTY` stays cached-truthy after destroy()/end(),
 // so gating cursor writes on isTTY alone throws ERR_STREAM_DESTROYED on a
@@ -70,7 +76,19 @@ const createStandard = (
   let previousCursorPosition: CursorPosition | undefined;
   let cursorWasShown = false;
 
-  const getActiveCursor = () => (cursorDirty ? cursorPosition : undefined);
+  // Persistent-declaration: the active cursor is the LAST-declared position and
+  // is re-emitted at the end of EVERY commit, so a focused input's caret stays
+  // at its edit point across unrelated repaints (spinner/log/progress) in all
+  // component topologies — matching real terminal apps (vim/readline/nano
+  // re-place the caret each frame). It is NOT gated on cursorDirty: gating there
+  // dropped the caret on any commit that did not re-declare, zombieing it to the
+  // bottom-left corner (a deliberate divergence from Ink — see
+  // .agents/docs/ink-divergences.md). A CLEARED declaration (setCursorPosition
+  // undefined, e.g. useCursor's onScopeDispose on unmount) sets cursorPosition
+  // to undefined, so the next re-emit places no caret — the clear is not
+  // resurrected. cursorDirty still tracks "was re-declared this commit" purely
+  // to gate the commit/dedup paths (render.ts outer gate + frame-writer skip).
+  const getActiveCursor = () => cursorPosition;
   const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
     return str !== previousOutput || cursorChanged;
@@ -82,8 +100,6 @@ const createStandard = (
       hasHiddenCursor = true;
     }
 
-    // Only use cursor if setCursorPosition was called since last render.
-    // This ensures stale positions don't persist after component unmount.
     const activeCursor = getActiveCursor();
     cursorDirty = false;
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
@@ -94,7 +110,7 @@ const createStandard = (
 
     const lines = str.split("\n");
     const visibleCount = visibleLineCount(lines, str);
-    const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor);
+    const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor, streamWidth(stream));
 
     if (str === previousOutput && cursorChanged) {
       stream.write(
@@ -104,6 +120,7 @@ const createStandard = (
           previousCursorPosition,
           visibleLineCount: visibleCount,
           cursorPosition: activeCursor,
+          width: streamWidth(stream),
         }),
       );
     } else {
@@ -155,7 +172,10 @@ const createStandard = (
   };
 
   render.sync = (str: string) => {
-    const activeCursor = cursorDirty ? cursorPosition : undefined;
+    // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
+    // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
+    // at the declared point too.
+    const activeCursor = getActiveCursor();
     cursorDirty = false;
 
     const lines = str.split("\n");
@@ -170,7 +190,9 @@ const createStandard = (
     }
 
     if (activeCursor) {
-      stream.write(buildCursorSuffix(visibleLineCount(lines, str), activeCursor));
+      stream.write(
+        buildCursorSuffix(visibleLineCount(lines, str), activeCursor, streamWidth(stream)),
+      );
     }
 
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
@@ -200,7 +222,11 @@ const createIncremental = (
   let previousCursorPosition: CursorPosition | undefined;
   let cursorWasShown = false;
 
-  const getActiveCursor = () => (cursorDirty ? cursorPosition : undefined);
+  // Persistent-declaration (see createStandard for the full rationale): the
+  // active cursor is the last-declared position, re-emitted at the end of every
+  // commit so it survives unrelated repaints; a cleared declaration emits no
+  // caret. cursorDirty only gates the commit/dedup paths now.
+  const getActiveCursor = () => cursorPosition;
   const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
     return str !== previousOutput || cursorChanged;
@@ -212,8 +238,6 @@ const createIncremental = (
       hasHiddenCursor = true;
     }
 
-    // Only use cursor if setCursorPosition was called since last render.
-    // This ensures stale positions don't persist after component unmount.
     const activeCursor = getActiveCursor();
     cursorDirty = false;
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
@@ -234,6 +258,7 @@ const createIncremental = (
           previousCursorPosition,
           visibleLineCount: visibleCount,
           cursorPosition: activeCursor,
+          width: streamWidth(stream),
         }),
       );
       previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
@@ -248,7 +273,7 @@ const createIncremental = (
     );
 
     if (str === "\n" || previousOutput.length === 0) {
-      const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor);
+      const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor, streamWidth(stream));
       stream.write(
         returnPrefix + ansiEscapes.eraseLines(previousLines.length) + str + cursorSuffix,
       );
@@ -303,7 +328,7 @@ const createIncremental = (
       );
     }
 
-    const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor);
+    const cursorSuffix = buildCursorSuffix(visibleCount, activeCursor, streamWidth(stream));
     buffer.push(cursorSuffix);
 
     stream.write(buffer.join(""));
@@ -348,7 +373,10 @@ const createIncremental = (
   };
 
   render.sync = (str: string) => {
-    const activeCursor = cursorDirty ? cursorPosition : undefined;
+    // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
+    // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
+    // at the declared point too.
+    const activeCursor = getActiveCursor();
     cursorDirty = false;
 
     const lines = str.split("\n");
@@ -363,7 +391,9 @@ const createIncremental = (
     }
 
     if (activeCursor) {
-      stream.write(buildCursorSuffix(visibleLineCount(lines, str), activeCursor));
+      stream.write(
+        buildCursorSuffix(visibleLineCount(lines, str), activeCursor, streamWidth(stream)),
+      );
     }
 
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;

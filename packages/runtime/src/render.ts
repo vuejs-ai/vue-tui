@@ -732,9 +732,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         appContext.cursorPosition = pos;
         // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
         // BOTH the instance field AND this.log.setCursorPosition(position) on
-        // every render. Forwarding to the frame writer marks log-update's
-        // cursorDirty so getActiveCursor() returns the position and the commit
-        // gate (output !== lastOutput || isCursorDirty) fires the cursor suffix.
+        // every render. Forwarding to the frame writer updates log-update's
+        // last-declared position (persistently re-emitted at every commit) and
+        // marks cursorDirty so the commit gate (output !== lastOutput ||
+        // isCursorDirty) fires even on a cursor-only move (same output, new pos).
         // Without this the cursor is never shown/moved on the interactive path.
         // `writer` is created below in mount() but is always initialized before
         // any render/setup can call this (originalMount runs after writer creation),
