@@ -44,7 +44,7 @@ import {
 } from "./context.ts";
 import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
-import { ErrorOverview } from "./components/error-overview.ts";
+import { ErrorOverview, messageForNonError } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useTerminalSize.ts";
 
 export interface MountOptions {
@@ -502,8 +502,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // `instanceof Error`, passes the `[object Error]` brand check) — so the
         // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
         // matching Ink's ErrorBoundary (rejects with the thrown value itself).
-        // A true non-Error throw (`throw "x"`, `throw 0`) is still wrapped.
-        const e = isErrorInput(err) ? err : new Error(String(err));
+        // A true non-Error throw (`throw "x"`, `throw 0`, `throw {message:'x'}`)
+        // is wrapped with the SAME message ErrorOverview displays
+        // (messageForNonError), so the shown and rejected messages agree (e17).
+        const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
         caught.value = err;
         errored.value = true;
         // Flush the ErrorOverview frame, then exit
@@ -1218,8 +1220,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // false to stop propagation, so caught errors won't reach here.
     baseApp.config.errorHandler = (err) => {
       // Preserve a genuine (incl. cross-realm) Error so the original survives to
-      // exit(); only wrap a true non-Error. See isErrorInput / onErrorCaptured.
-      appContext.exit(isErrorInput(err) ? err : new Error(String(err)));
+      // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
+      // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
+      appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
     };
 
     // Only listen for resize in interactive mode (matching Ink).

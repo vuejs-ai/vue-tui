@@ -333,21 +333,27 @@ These divergences are deliberate, but they are not strict supersets and are not 
 driven by Vue's framework model or API conventions. vue-tui intentionally chooses a
 different runtime behavior, ownership rule, or out-of-contract handling.
 
-### Non-`Error` thrown values keep their message in the error overview
+### Non-`Error` thrown values: uniform show-the-error-and-reject
 
-- **Ink:** Ink **accepts** the throw — a thrown non-`Error` (`throw 'boom'`) is caught by its
-  ErrorBoundary and rendered through `ErrorOverview` (verified by running real Ink: an
-  `ERROR` overview with a **blank** message, exit 0, no crash) because `error.message` is
-  `undefined` for a string throw.
-- **vue-tui:** the error boundary keeps the **raw** thrown value and `ErrorOverview` shows
-  `String(value)` as the message, so `throw 'boom'` renders ` ERROR  boom`, not a blank
-  `ERROR`. Like Ink, no stack block is rendered when the value carries no stack.
-- **Why:** same input, different output — **not** an additive superset (both accept the
-  non-`Error` throw; vue-tui takes no extra input), so this is an intentional choice. Showing
-  `String(value)` gives a useful message for the (lint-discouraged) non-`Error` throw and
-  keeps the message vue-tui surfaced before it stopped wrapping such throws in
-  `new Error(String(value))` (which produced a misleading synthetic stack pointing at
-  framework internals; that stack is now gone). Introduced 2026-05-31.
+- **Ink:** accepts the throw, but its handling is **non-uniform** (run-verified vs v7.0.4):
+  for a **truthy** non-`Error` it renders an `ErrorOverview` showing a string `.message`
+  (**blank** for a bare string, since `'boom'.message` is `undefined`) **and RESOLVES**
+  `waitUntilExit()` with the **raw** thrown value — a throw looks like a clean exit. For a
+  **falsy** throw (`0` / `''` / `null`) it renders **no** overview and leaves
+  `waitUntilExit()` **PENDING** (recoverable — a later unmount resolves it with `undefined`).
+- **vue-tui:** **any** thrown value renders an `ErrorOverview` (message = a string `.message`
+  if present, else `String(value)`) **and REJECTS** `waitUntilExit()` with an `Error` whose
+  `.message` **EQUALS the displayed message** — one `messageForNonError(value)` helper feeds
+  both the overview header and the reject-wrap, so display and reject can't drift (e17). No
+  synthetic stack (a value with no `.stack` renders only the header).
+- **Why:** aligning to Ink reduces bugs only where Ink is correct. Ink resolving the exit
+  promise with a thrown value, and silently hanging on a falsy throw, are abnormal, so
+  vue-tui deliberately diverges to one uniform contract: show the error, reject the exit. Same
+  recover-vs-crash family as the invalid-input-validation divergence. Showing a real message
+  (string `.message` else `String(value)`) is useful for the lint-discouraged non-`Error`
+  throw, and matching the rejected message to it removes a confusing internal inconsistency
+  (`throw {message:'x'}` once displayed `x` but rejected `[object Object]`). Introduced
+  2026-05-31; consistency fixed 2026-06-12. Maintainer decision (2026-06-12): KEEP.
 
 ### Second `mount()` on a live stdout is an inert no-op
 
