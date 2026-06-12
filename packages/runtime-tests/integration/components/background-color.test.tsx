@@ -875,6 +875,46 @@ test('foreground color="bold" (a chalk modifier) bolds, does NOT throw', async (
   expect(lastFrame()).toContain("\x1b[1m");
 });
 
+// Foreground colors have their own invalid named-color edge: some chalk keys
+// exist but are not callable color/modifier methods. Ink calls chalk[color] in
+// that case and crashes; vue-tui validates during render so the app rejects
+// through ErrorOverview instead of letting paint wedge the scheduler.
+test('foreground color="level" throws (Ink parity, recoverable channel)', async ({ expect }) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        <Box alignSelf="flex-start">
+          <Text color="level">Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/color/i);
+});
+
+for (const borderColorProp of [
+  "borderColor",
+  "borderTopColor",
+  "borderBottomColor",
+  "borderLeftColor",
+  "borderRightColor",
+] as const) {
+  test(`<Box ${borderColorProp}="level"> throws (Ink parity, recoverable channel)`, async ({
+    expect,
+  }) => {
+    await expect(
+      render(
+        defineComponent(() => () => (
+          <Box borderStyle="single" {...{ [borderColorProp]: "level" }} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/color/i);
+  });
+}
+
 // --- A12 gating: vue must throw WHERE Ink colorizes, and NOT elsewhere ---
 //
 // Ink throws on a chalk-modifier-name bg LAZILY — only when it actually

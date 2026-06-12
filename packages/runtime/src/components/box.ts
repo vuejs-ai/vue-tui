@@ -1,7 +1,7 @@
 import { defineComponent, h, inject, type ExtractPublicPropTypes, type PropType } from "vue";
 import cliBoxes from "cli-boxes";
 import { AppContextKey } from "../context.ts";
-import { assertValidBackgroundColor } from "../paint/text-style.ts";
+import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import type { WithChildren } from "./with-children.ts";
 
 type Spacing = number;
@@ -216,29 +216,46 @@ const BoxImpl = defineComponent({
       // width=0 with no left/right border) produces an empty string Ink skips.
       // Matching that needs layout, unavailable at render. Niche + invalid-input-only.
       if (props.borderStyle) {
-        const stringBg = (value: unknown) => (typeof value === "string" ? value : undefined);
-        const generalBg = stringBg(props.borderBackgroundColor);
+        const stringStyle = (value: unknown) => (typeof value === "string" ? value : undefined);
+        const generalBg = stringStyle(props.borderBackgroundColor);
+        const generalFg = stringStyle(props.borderColor);
         if (props.borderTop !== false) {
+          assertValidForegroundColor(
+            stringStyle(props.borderTopColor) ?? generalFg,
+            "borderTopColor",
+          );
           assertValidBackgroundColor(
-            stringBg(props.borderTopBackgroundColor) ?? generalBg,
+            stringStyle(props.borderTopBackgroundColor) ?? generalBg,
             "borderTopBackgroundColor",
           );
         }
         if (props.borderBottom !== false) {
+          assertValidForegroundColor(
+            stringStyle(props.borderBottomColor) ?? generalFg,
+            "borderBottomColor",
+          );
           assertValidBackgroundColor(
-            stringBg(props.borderBottomBackgroundColor) ?? generalBg,
+            stringStyle(props.borderBottomBackgroundColor) ?? generalBg,
             "borderBottomBackgroundColor",
           );
         }
         if (props.borderLeft !== false) {
+          assertValidForegroundColor(
+            stringStyle(props.borderLeftColor) ?? generalFg,
+            "borderLeftColor",
+          );
           assertValidBackgroundColor(
-            stringBg(props.borderLeftBackgroundColor) ?? generalBg,
+            stringStyle(props.borderLeftBackgroundColor) ?? generalBg,
             "borderLeftBackgroundColor",
           );
         }
         if (props.borderRight !== false) {
+          assertValidForegroundColor(
+            stringStyle(props.borderRightColor) ?? generalFg,
+            "borderRightColor",
+          );
           assertValidBackgroundColor(
-            stringBg(props.borderRightBackgroundColor) ?? generalBg,
+            stringStyle(props.borderRightBackgroundColor) ?? generalBg,
             "borderRightBackgroundColor",
           );
         }

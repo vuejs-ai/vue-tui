@@ -576,15 +576,16 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 ### Invalid input is validated at the component layer, not the paint layer
 
-- **Principle:** vue-tui validates invalid render input (a chalk-**modifier**
-  `backgroundColor` like `"bold"`, an unknown `borderStyle`) at the
+- **Principle:** vue-tui validates the covered invalid render inputs — a
+  chalk-**modifier** `backgroundColor` like `"bold"`, a foreground color key that exists
+  on chalk but is not callable like `"level"`, and an unknown `borderStyle` — at the
   **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
   value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
   clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
   reports the error instead of crashing.
-- **Ink:** validates the same inputs **lazily at paint** (`colorize` / `render-border`, run
-  from the reconciler's commit hook): **outside** React's ErrorBoundary, so a bad value is
-  an uncaught crash, not a recoverable error.
+- **Ink:** validates the same covered inputs **lazily at paint** (`colorize` /
+  `render-border`, run from the reconciler's commit hook): **outside** React's
+  ErrorBoundary, so a bad value is an uncaught crash, not a recoverable error.
 - **Why:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
   **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there
   escapes `onErrorCaptured` and wedges the scheduler. Unlike a component error, it cannot
@@ -601,12 +602,13 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   that bypasses component validation), so it stands on that prior record, not an in-audit
   reproduction.
 - **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
-  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
-  inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
-  differs. Maintainer decision (2026-06-07): KEEP. vue-tui makes the more reliable
-  library choice here: reject the same invalid input with a recoverable, prop-specific
-  error instead of preserving Ink's lower-level paint crash and chalk implementation
-  message. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
+  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. For the
+  covered public inputs in normal reachable cases, both libraries error; only the channel
+  (recoverable reject vs crash) differs. Maintainer decision (2026-06-07): KEEP. vue-tui
+  makes the more reliable library choice here: reject the same invalid input with a
+  recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
+  chalk implementation message. Tests: `background-color.test.tsx`, plus the `borderStyle`
+  validation tests.
 
 ## Non-Behavioral Notes
 
