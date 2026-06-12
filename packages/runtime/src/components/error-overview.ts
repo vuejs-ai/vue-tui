@@ -22,6 +22,28 @@ const stackUtils = new StackUtils({
   internals: StackUtils.nodeInternals(),
 });
 
+// The user-facing message for a NON-Error thrown value. SINGLE source of truth
+// shared by the ErrorOverview header (what the user SEES) and render.ts's
+// reject-wrap (`new Error(messageForNonError(value))`, what waitUntilExit()
+// REJECTS with), so the displayed and rejected messages can never drift apart
+// (audit finding e17). Prefer a string `.message` (covers `throw {message:'x'}`
+// and a cross-realm Error read structurally); otherwise fall back to
+// `String(value)` (covers `throw 'boom'`, `throw 42`, a non-string `.message`).
+export function messageForNonError(value: unknown): string {
+  // Read `.message` exactly once: the typecheck and the returned value must see
+  // the SAME read, and the read is guarded because this feeds the error-display
+  // / reject path — it must not itself throw on a pathological thrown object
+  // (e.g. a `.message` getter that throws), which the old `String(value)` form
+  // never touched. Fall back to `String(value)` on any failure, as before.
+  let message: unknown;
+  try {
+    message = (value as { message?: unknown })?.message;
+  } catch {
+    return String(value);
+  }
+  return typeof message === "string" ? message : String(value);
+}
+
 export const ErrorOverview = defineComponent({
   name: "ErrorOverview",
   props: {
@@ -43,11 +65,10 @@ export const ErrorOverview = defineComponent({
           : undefined;
       // Ink renders `{error.message}`. A cross-realm Error has a different
       // prototype and fails `instanceof Error`, so read a string `.message`
-      // structurally; primitives still fall back to String(value).
-      const errorMessage =
-        typeof (error as { message?: unknown })?.message === "string"
-          ? (error as { message: string }).message
-          : String(error);
+      // structurally; primitives still fall back to String(value). The same
+      // helper computes the message render.ts rejects waitUntilExit() with, so
+      // the shown and rejected messages stay identical (e17).
+      const errorMessage = messageForNonError(error);
 
       // First stack line is the message; the rest are frames. The first frame
       // is the throw origin used for the file:line:col header and excerpt.

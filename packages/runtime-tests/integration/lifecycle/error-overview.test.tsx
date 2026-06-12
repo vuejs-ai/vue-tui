@@ -86,6 +86,120 @@ async function renderErrorFrame(component: Parameters<typeof createApp>[0]): Pro
   return stripAnsi(lastContentWrite);
 }
 
+// Capture BOTH the painted ERROR overview frame AND what waitUntilExit() rejects
+// with, from a SINGLE mount of the same throwing component. This is what proves
+// display/reject CONSISTENCY: the message shown to the user and the message on
+// the rejected Error must be the same string (audit finding e17).
+async function renderFrameAndReject(component: Parameters<typeof createApp>[0]): Promise<{
+  frame: string;
+  reject: { kind: "rejected"; message: unknown; isError: boolean } | { kind: "resolved" };
+}> {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const app = createApp(component);
+  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+
+  let reject: { kind: "rejected"; message: unknown; isError: boolean } | { kind: "resolved" } = {
+    kind: "resolved",
+  };
+  const settled = app.waitUntilExit().then(
+    () => {
+      reject = { kind: "resolved" };
+    },
+    (e: unknown) => {
+      reject = { kind: "rejected", message: (e as Error)?.message, isError: e instanceof Error };
+    },
+  );
+
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+  await settled;
+
+  const content = getContentWrites(writes);
+  const lastContentWrite = content.at(-1);
+  if (lastContentWrite === undefined) {
+    throw new Error("no content write captured");
+  }
+  return { frame: stripAnsi(lastContentWrite), reject };
+}
+
+// Pull the message that follows the white-on-red " ERROR " label out of the
+// painted frame (the text the user actually sees as the error message).
+function overviewMessage(frame: string): string {
+  const header = frame.split("\n").find((l) => l.includes("ERROR"));
+  if (header === undefined) throw new Error("no ERROR header line in frame");
+  // Label renders as "  ERROR " (space-padded) then " <message>" (a leading
+  // space before the message). Strip the label + all surrounding whitespace to
+  // recover the pure message text.
+  return header.replace(/^\s*ERROR\s*/, "").trimEnd();
+}
+
+// --- Display/reject consistency (audit finding e17) ---
+// vue-tui's blessed contract: ANY thrown value renders an ErrorOverview AND
+// rejects waitUntilExit() with an Error whose .message EQUALS the displayed
+// message. Before the fix, `throw {message:'objmsg'}` DISPLAYED "objmsg" but
+// REJECTED with "[object Object]" (the wrap site used new Error(String(err))).
+
+test("non-Error throw: overview message and rejected Error message are identical (object with string message)", async () => {
+  const Thrower = defineComponent(() => {
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- exercising a non-Error throw with a string .message (e17)
+      throw { message: "objmsg" };
+    };
+  });
+
+  const { frame, reject } = await renderFrameAndReject(Thrower);
+
+  // Display: the overview surfaces the string .message.
+  expect(frame).toContain(" ERROR  objmsg");
+  // Reject: the SAME message, not "[object Object]".
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  expect(reject.isError).toBe(true);
+  expect(reject.message).toBe("objmsg");
+  // Consistency: display === reject.
+  expect(reject.message).toBe(overviewMessage(frame));
+});
+
+test("non-Error throw: overview message and rejected Error message are identical (number)", async () => {
+  const Thrower = defineComponent(() => {
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- exercising a primitive non-Error throw (e17)
+      throw 42;
+    };
+  });
+
+  const { frame, reject } = await renderFrameAndReject(Thrower);
+
+  expect(frame).toContain(" ERROR  42");
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  expect(reject.message).toBe("42");
+  expect(reject.message).toBe(overviewMessage(frame));
+});
+
+test("non-Error throw: non-string .message falls back to String on BOTH paths and they agree", async () => {
+  const Thrower = defineComponent(() => {
+    return () => {
+      // A NON-string .message: the overview's `typeof message === 'string'` guard
+      // fails, so both paths fall back to String(value). They must still AGREE.
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- exercising a non-Error throw with a non-string .message (e17)
+      throw { message: 42 };
+    };
+  });
+
+  const { frame, reject } = await renderFrameAndReject(Thrower);
+
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  // Both fall back to String({message:42}) === "[object Object]".
+  expect(reject.message).toBe("[object Object]");
+  expect(reject.message).toBe(overviewMessage(frame));
+});
+
 test("renders a full ERROR overview frame with label, origin, excerpt, and stack", async () => {
   const frame = await renderErrorFrame(ThrowingComponent);
 
@@ -149,8 +263,8 @@ test("primitive (non-Error) throw renders ERROR header with no synthetic stack",
 
   // vue-tui renders String(value) as the message for a primitive throw, so the header
   // shows the thrown text. (Ink renders {error.message}, blank for a primitive that has no
-  // .message — see .agents/docs/ink-divergences.md, section "Non-Error thrown values keep
-  // their message in the error overview".)
+  // .message — see .agents/docs/ink-divergences.md, section "Non-Error thrown values:
+  // uniform show-the-error-and-reject".)
   expect(frame).toContain(" ERROR  primitive thrown");
 
   // A primitive has no .stack, so Ink renders no origin/excerpt/stack block.
