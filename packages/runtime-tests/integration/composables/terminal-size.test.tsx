@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, createApp, Text, useTerminalSize } from "@vue-tui/runtime";
+import { Box, createApp, Text, useWindowSize } from "@vue-tui/runtime";
 
 // A TTY-like writable that we control directly (columns/rows + resize listeners)
 // — the @vue-tui/testing render() helper hides the underlying stdout, but the
@@ -31,9 +31,9 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-test("useTerminalSize reacts to resize event", async () => {
+test("useWindowSize reacts to resize event", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -48,9 +48,9 @@ test("useTerminalSize reacts to resize event", async () => {
   expect(lastFrame()).toContain("120x40");
 });
 
-test("useTerminalSize returns initial terminal dimensions", async () => {
+test("useWindowSize returns initial terminal dimensions", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -62,10 +62,10 @@ test("useTerminalSize returns initial terminal dimensions", async () => {
   expect(lastFrame()).toContain("100x40");
 });
 
-test("useTerminalSize removes resize listener on unmount", async () => {
+test("useWindowSize removes resize listener on unmount", async () => {
   // After unmount, further resize events should not cause errors
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -82,9 +82,9 @@ test("useTerminalSize removes resize listener on unmount", async () => {
   await expect(terminal.resize(60, 20)).resolves.toBeUndefined();
 });
 
-test("useTerminalSize does not crash when resize fires after unmount", async () => {
+test("useWindowSize does not crash when resize fires after unmount", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -122,7 +122,7 @@ test("layout responds to terminal width change", async () => {
 
 test("multiple consecutive resizes all take effect", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -145,7 +145,7 @@ test("multiple consecutive resizes all take effect", async () => {
 
 test("terminal width decrease triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useTerminalSize();
+    const { columns } = useWindowSize();
     return () => <Text>{columns.value}</Text>;
   });
 
@@ -158,7 +158,7 @@ test("terminal width decrease triggers rerender", async () => {
 
 test("terminal width increase triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useTerminalSize();
+    const { columns } = useWindowSize();
     return () => <Text>{columns.value}</Text>;
   });
 
@@ -173,9 +173,9 @@ test("resize listener is cleaned up via onScopeDispose", async () => {
   let disposeCalled = false;
 
   const App = defineComponent(() => {
-    // useTerminalSize registers an onScopeDispose listener internally;
+    // useWindowSize registers an onScopeDispose listener internally;
     // we also register one to verify the scope is properly disposed on unmount.
-    useTerminalSize();
+    useWindowSize();
     onScopeDispose(() => {
       disposeCalled = true;
     });
@@ -193,14 +193,14 @@ test("resize listener is cleaned up via onScopeDispose", async () => {
 // count when stdout.columns is 0"). When the mount stdout reports columns 0,
 // resolveSize() falls through to the terminal-size package / 80 default, so the
 // captured value must be a positive number (never 0).
-test("useTerminalSize falls back to a positive column count when stdout.columns is 0", async () => {
+test("useWindowSize falls back to a positive column count when stdout.columns is 0", async () => {
   const stdout = makeTtyStream(0, 24);
   const stderr = makeTtyStream(0, 24);
   const stdin = makeFakeStdin();
 
   let capturedColumns = -1;
   const App = defineComponent(() => {
-    const { columns } = useTerminalSize();
+    const { columns } = useWindowSize();
     capturedColumns = columns.value;
     return () => <Text>{String(columns.value)}</Text>;
   });
@@ -217,9 +217,9 @@ test("useTerminalSize falls back to a positive column count when stdout.columns 
 });
 
 // Mirrors Ink terminal-resize.tsx:43-64 ("removes resize listener on unmount").
-// The resize listener count must grow by mounting a useTerminalSize component
+// The resize listener count must grow by mounting a useWindowSize component
 // and return exactly to baseline after unmount (no leaked listener).
-test("useTerminalSize resize listener returns to baseline on unmount", async () => {
+test("useWindowSize resize listener returns to baseline on unmount", async () => {
   const stdout = makeTtyStream(80, 24);
   const stderr = makeTtyStream(80, 24);
   const stdin = makeFakeStdin();
@@ -227,7 +227,7 @@ test("useTerminalSize resize listener returns to baseline on unmount", async () 
   const baseline = stdout.listenerCount("resize");
 
   const App = defineComponent(() => {
-    const { columns, rows } = useTerminalSize();
+    const { columns, rows } = useWindowSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}

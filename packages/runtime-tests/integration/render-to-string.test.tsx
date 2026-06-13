@@ -18,7 +18,7 @@ import {
   useStderr,
   useCursor,
   usePaste,
-  useTerminalSize,
+  useWindowSize,
   useAnimation,
   useBoxMetrics,
 } from "@vue-tui/runtime";
@@ -650,7 +650,7 @@ describe("renderToString", () => {
   // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, usePaste, useTerminalSize, useAnimation, useBoxMetrics — so that
+  // useCursor, usePaste, useWindowSize, useAnimation, useBoxMetrics — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -681,11 +681,11 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useTerminalSize does not throw in renderToString", () => {
+    test("useWindowSize does not throw in renderToString", () => {
       const App = defineComponent(() => {
         // Resolves dimensions from ctx.stdout (process.stdout in the no-op
         // context) with the terminal-size fallback; never throws.
-        const { columns, rows } = useTerminalSize();
+        const { columns, rows } = useWindowSize();
         return () => <Text>size {columns.value > 0 && rows.value > 0 ? "ok" : "fallback"}</Text>;
       });
       const output = renderToString(App);
@@ -726,7 +726,7 @@ describe("renderToString", () => {
         const { setCursorPosition } = useCursor();
         setCursorPosition({ x: 1, y: 0 });
         usePaste(() => {});
-        useTerminalSize();
+        useWindowSize();
         const { frame } = useAnimation({ interval: 30 });
         const boxRef = shallowRef(null);
         useBoxMetrics(boxRef);

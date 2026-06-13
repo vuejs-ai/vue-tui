@@ -30,12 +30,12 @@ export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
-export { useTerminalSize, useWindowSize, type WindowSize } from "./composables/useTerminalSize.ts";
+export { useWindowSize, type WindowSize } from "./composables/useWindowSize.ts";
 export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
-  type AnimationOptions,
+  type UseAnimationOptions,
   type UseAnimationReturn,
 } from "./composables/useAnimation.ts";
 export {
@@ -44,8 +44,6 @@ export {
   type BoxMetrics,
   type UseBoxMetricsReturn,
 } from "./composables/useBoxMetrics.ts";
-export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
-export type { DevState, DevErrorInfo } from "./hmr.ts";
 export {
   kittyFlags,
   kittyModifiers,
@@ -55,3 +53,7 @@ export {
 // `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
 // its `measure-text` module internal, and so do we. They remain internal helpers
 // (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.
+// `renderScreenReaderOutput` / `ScreenReaderOptions` are likewise NOT public: Ink keeps
+// its SR linearizer (`renderNodeToScreenReaderOutput`) module-internal, and it was never
+// usefully callable from here (its `TuiNode` argument type isn't public). It lives in
+// `@vue-tui/runtime/internal`. See .agents/docs/accessibility-api.md.

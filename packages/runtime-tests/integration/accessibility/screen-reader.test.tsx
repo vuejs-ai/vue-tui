@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { renderToString, Box, Text, Transform, Newline, Static, createApp } from "@vue-tui/runtime";
+import { Box, Text, Transform, Newline, Static, createApp } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 import {
   createRoot,
@@ -9,6 +9,7 @@ import {
   createTextLeaf,
   attachYoga,
   renderScreenReaderOutput,
+  renderToStringWithScreenReader as renderToString,
   type AppContext,
 } from "@vue-tui/runtime/internal";
 import {

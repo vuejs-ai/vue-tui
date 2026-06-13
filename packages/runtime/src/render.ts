@@ -45,7 +45,7 @@ import {
 import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview, messageForNonError } from "./components/error-overview.ts";
-import { resolveSize } from "./composables/useTerminalSize.ts";
+import { resolveSize } from "./composables/useWindowSize.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;

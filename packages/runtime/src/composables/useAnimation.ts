@@ -14,7 +14,7 @@ import {
 } from "../animation-scheduler.ts";
 import { AnimationSchedulerKey } from "../context.ts";
 
-export interface AnimationOptions {
+export interface UseAnimationOptions {
   /**
    * Time between ticks in milliseconds.
    *
@@ -85,7 +85,7 @@ export interface UseAnimationReturn {
  * </template>
  * ```
  */
-export function useAnimation(options: AnimationOptions = {}): UseAnimationReturn {
+export function useAnimation(options: UseAnimationOptions = {}): UseAnimationReturn {
   const frame = shallowRef(0);
   const time = shallowRef(0);
   const delta = shallowRef(0);

@@ -1,7 +1,8 @@
 import { defineComponent, shallowRef, nextTick, h } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, renderToString } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
+import { renderToStringWithScreenReader as renderToString } from "@vue-tui/runtime/internal";
 
 const BG_BLUE = "\x1b[44m";
 const BG_CYAN = "\x1b[46m";
