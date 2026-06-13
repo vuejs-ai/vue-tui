@@ -17,11 +17,12 @@ the most important part of the contract to get right.
 
 Because it is contract, it is **tested, not merely shipped**:
 
-- `public-api.test.ts` checks the public barrel: every documented export must be present (a
-  removed or renamed one fails it), and specific internal-only members (`measureText`, the
-  screen-reader linearizer) are asserted absent — including a compile-time `@ts-expect-error`
-  guard that their internal-only _types_ (e.g. `ScreenReaderOptions`) stay off the public barrel.
-  It is not yet an exhaustive snapshot, so an accidentally-_added_ export would not fail it.
+- `public-api.test.ts` snapshots the **exact** public value-export set — adding, removing, or
+  renaming any runtime export fails it, so every surface change must be a deliberate edit there.
+  Specific internal-only members (`measureText`, the screen-reader linearizer) are additionally
+  tripwired, and internal-only _types_ (e.g. `ScreenReaderOptions`) are guarded with a compile-time
+  `@ts-expect-error`. Type-only exports are erased at runtime, so the _type_ surface is guarded
+  individually rather than exhaustively snapshotted.
 - Type-_safety_ behavior is established by RUNNING the type-checker against real usage (`tsc` for
   TSX, `vue-tsc` for templates), never assumed. See [[accessibility-api]] for a worked example —
   which aria spellings the compiler does and does not catch, proven with both tools.
