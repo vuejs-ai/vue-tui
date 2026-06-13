@@ -354,6 +354,8 @@ current-props model, or API conventions.
 
 #### ARIA props are typed camelCase; kebab still works but is not type-checked
 
+Full design, type-safety findings, and precedent survey: [[accessibility-api]].
+
 - **Ink:** kebab string-literal prop keys (`'aria-label'`, `'aria-hidden'`, `'aria-role'` union,
   `'aria-state'` object); JSX keys never camelize.
 - **vue-tui:** the same vocabulary as typed **camelCase** props (`ariaLabel`/`ariaHidden`/
