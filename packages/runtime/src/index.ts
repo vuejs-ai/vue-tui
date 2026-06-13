@@ -27,7 +27,7 @@ export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
-  type AnimationOptions,
+  type UseAnimationOptions,
   type UseAnimationReturn,
 } from "./composables/useAnimation.ts";
 export {

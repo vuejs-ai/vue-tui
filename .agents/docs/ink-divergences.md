@@ -291,6 +291,15 @@ current-props model, or API conventions.
   return `void`, plain `boolean`, or small unexported inline shapes — never an `XProps`
   type. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
   `ExtractPublicPropTypes`).
+- **Options types follow the same principle:** Ink names a composable's options type locally
+  `Options` / `Props` and usually does **not** export it (e.g. `useAnimation`'s `Options` is
+  internal — only the return `AnimationResult` is exported, `use-animation.ts:14,30`). vue-tui
+  exports each composable's options type under VueUse's `UseXOptions` name: `UseInputOptions`,
+  `UsePasteOptions`, `UseFocusOptions`, `UseAnimationOptions`. `useAnimation`'s options type
+  originally shipped as `AnimationOptions` — the lone holdout — and was renamed to
+  `UseAnimationOptions` (a hard rename, no alias) while the package is pre-1.0 (`0.0.x`, no
+  stability promise yet). **Maintainer decision (2026-06-13): export composable options types
+  as `UseXOptions`; renamed `AnimationOptions` → `UseAnimationOptions`.**
 - **Why:** the public surface should read like Vue code: named composable return types get a
   single convention (`UseXReturn`) instead of Ink's mix of `XProps`, result names, and bare
   names, and `XProps` keeps its Vue meaning (component props). Return shapes still mirror
