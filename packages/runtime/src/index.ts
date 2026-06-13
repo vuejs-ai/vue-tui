@@ -5,13 +5,21 @@ export {
   Box,
   type AriaRole,
   type AriaState,
+  type BoxLayoutStyle,
   type BoxStyle,
   type BoxProps,
 } from "./components/box.ts";
 export { Text, type TextProps } from "./components/text.ts";
 export { Newline, type NewlineProps } from "./components/newline.ts";
-export { Spacer } from "./components/spacer.ts";
-export { Static, type StaticProps } from "./components/static.ts";
+export { Spacer, type SpacerProps } from "./components/spacer.ts";
+export {
+  Static,
+  type StaticChildren,
+  type StaticProps,
+  type StaticSlot,
+  type StaticSlotProps,
+  type StaticStyle,
+} from "./components/static.ts";
 export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";

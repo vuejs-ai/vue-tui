@@ -11,7 +11,7 @@
  *   - children rejected     -> the `accepted` cases error
  *   - prop validation lost   -> the `@ts-expect-error` directives become unused
  */
-import { Box, Static, Text, Transform } from "@vue-tui/runtime";
+import { Box, Newline, Spacer, Static, Text, Transform } from "@vue-tui/runtime";
 
 // Children are accepted (the shim's whole purpose under the automatic runtime).
 export const accepted = [
@@ -20,12 +20,26 @@ export const accepted = [
     <Text>nested child</Text>
   </Box>,
   <Static items={[1, 2, 3]}>
-    <Text>static child</Text>
+    {({ item, index }) => {
+      const renderedItem = item.toFixed(0);
+      const renderedIndex = index.toFixed(0);
+      return (
+        <Text>
+          {renderedIndex}:{renderedItem}
+        </Text>
+      );
+    }}
   </Static>,
   <Transform transform={(line) => line}>
     <Text>transformed child</Text>
   </Transform>,
+  <Newline />,
+  <Spacer />,
 ];
+
+const invalidScopedTransformSlot = {
+  default: ({ item }: { item: string }) => <Text>{item}</Text>,
+};
 
 // Declared props stay validated — children must not widen the prop bag.
 export const rejected = [
@@ -39,4 +53,20 @@ export const rejected = [
   <Transform>x</Transform>,
   // @ts-expect-error `items` is required
   <Static>x</Static>,
+  // @ts-expect-error `<Text>` has an ordinary default slot, not a scoped slot
+  <Text>{({ item }: { item: string }) => item}</Text>,
+  // @ts-expect-error `<Box>` has no named `foo` slot
+  <Box>{{ foo: () => <Text>x</Text> }}</Box>,
+  // @ts-expect-error `<Transform>` has an ordinary default slot, not a scoped slot
+  <Transform transform={(line) => line}>{invalidScopedTransformSlot}</Transform>,
+  // @ts-expect-error `<Newline>` does not accept children
+  <Newline>x</Newline>,
+  // @ts-expect-error `<Spacer>` does not accept children
+  <Spacer>x</Spacer>,
+  // @ts-expect-error `<Static>` children are Vue scoped slots: one `{ item, index }` object
+  <Static items={[1]}>{(item: number, index: number) => <Text>{item + index}</Text>}</Static>,
+  // @ts-expect-error `style` is the supported layout style surface, not an arbitrary object
+  <Static items={[1]} style={{ flexDirektion: "row" }}>
+    {({ item }) => <Text>{item}</Text>}
+  </Static>,
 ];
