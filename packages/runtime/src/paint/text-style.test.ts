@@ -1,6 +1,12 @@
 import chalk from "chalk";
 import { expect, test } from "vite-plus/test";
-import { applyChalk, assertValidBackgroundColor, isInvalidBackgroundColor } from "./text-style.ts";
+import {
+  applyChalk,
+  assertValidBackgroundColor,
+  assertValidForegroundColor,
+  isInvalidBackgroundColor,
+  isInvalidForegroundColor,
+} from "./text-style.ts";
 
 test("named color applies chalk method", () => {
   const prev = chalk.level;
@@ -206,6 +212,19 @@ test("assertValidBackgroundColor throws only for a modifier name, with the label
   expect(() => assertValidBackgroundColor("#abcdef")).not.toThrow();
   expect(() => assertValidBackgroundColor("not-a-real-color")).not.toThrow();
   expect(() => assertValidBackgroundColor(undefined)).not.toThrow();
+});
+
+test("assertValidForegroundColor throws only for chalk keys that are not methods", () => {
+  expect(isInvalidForegroundColor("level")).toBe(true);
+  expect(() => assertValidForegroundColor("level")).toThrow(/color/i);
+  expect(() => assertValidForegroundColor("level", "borderTopColor")).toThrow(/borderTopColor/);
+
+  // Valid foreground forms and unknown strings keep Ink's bare-text fallback.
+  expect(isInvalidForegroundColor("bold")).toBe(false);
+  expect(isInvalidForegroundColor("red")).toBe(false);
+  expect(isInvalidForegroundColor("#abcdef")).toBe(false);
+  expect(isInvalidForegroundColor("not-a-real-color")).toBe(false);
+  expect(isInvalidForegroundColor(undefined)).toBe(false);
 });
 
 // Foreground is UNAFFECTED: `color="bold"` resolves `chalk.bold` (a real fn) and

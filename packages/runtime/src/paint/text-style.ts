@@ -69,6 +69,19 @@ export function isInvalidBackgroundColor(color: unknown): boolean {
 }
 
 /**
+ * Detect a foreground color value that Ink's `colorize` would THROW on.
+ *
+ * Ink's foreground path calls `chalk[color](str)` when `color in chalk`. That
+ * works for real colors and modifiers (`red`, `bold`) but throws for non-method
+ * chalk properties such as `level`.
+ */
+export function isInvalidForegroundColor(color: unknown): boolean {
+  if (typeof color !== "string" || color.length === 0) return false;
+  const method = (chalk as unknown as Record<string, unknown>)[color];
+  return color in (chalk as unknown as Record<string, unknown>) && typeof method !== "function";
+}
+
+/**
  * Throw (during component render) if `color` is a chalk-modifier-name
  * backgroundColor — the exact case Ink's colorize.ts throws on. No-op for every
  * valid background form. `label` names the offending prop in the message.
@@ -78,6 +91,18 @@ export function assertValidBackgroundColor(color: unknown, label = "backgroundCo
     throw new Error(
       `Invalid ${label}: ${JSON.stringify(color)} (chalk has no bg method for it — ` +
         `it is a text modifier, not a background color)`,
+    );
+  }
+}
+
+/**
+ * Throw during component render for foreground color names that Ink's paint path
+ * would throw on. `label` names the offending prop in the message.
+ */
+export function assertValidForegroundColor(color: unknown, label = "color"): void {
+  if (isInvalidForegroundColor(color)) {
+    throw new Error(
+      `Invalid ${label}: ${JSON.stringify(color)} (chalk has this key but it is not a color method)`,
     );
   }
 }

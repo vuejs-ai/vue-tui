@@ -5,8 +5,21 @@ import {
   watch,
   type ExtractPublicPropTypes,
   type PropType,
+  type SlotsType,
+  type VNodeChild,
 } from "vue";
-import type { WithChildren } from "./with-children.ts";
+import type { BoxLayoutStyle } from "./box.ts";
+
+export interface StaticSlotProps<T = unknown> {
+  item: T;
+  index: number;
+}
+
+export type StaticSlot<T = unknown> = (props: StaticSlotProps<T>) => VNodeChild;
+
+export type StaticChildren<T = unknown> = StaticSlot<T> | { default: StaticSlot<T> };
+
+export type StaticStyle = BoxLayoutStyle;
 
 const staticProps = {
   // `required: true as const` (not bare `true`): a standalone `const` widens
@@ -14,14 +27,17 @@ const staticProps = {
   // required keys (and from the component's own `props.items` typing). The
   // literal keeps `items` required, matching Ink's `StaticProps`.
   items: { type: Array as PropType<unknown[]>, required: true as const },
-  style: { type: Object as PropType<Record<string, unknown>>, default: undefined },
+  style: { type: Object as PropType<StaticStyle>, default: undefined },
 };
 
 const StaticImpl = defineComponent({
   name: "Static",
   props: staticProps,
+  slots: Object as SlotsType<{
+    default: StaticSlot;
+  }>,
   setup(props, { slots }) {
-    const defaultStyle: Record<string, unknown> = {
+    const defaultStyle: StaticStyle = {
       position: "absolute",
       flexDirection: "column",
     };
@@ -76,7 +92,18 @@ const StaticImpl = defineComponent({
   },
 });
 
-export const Static = StaticImpl as WithChildren<typeof StaticImpl>;
-
 /** Props accepted by `<Static>` — the vue-tui analogue of Ink's `StaticProps`. */
-export type StaticProps = ExtractPublicPropTypes<typeof staticProps>;
+type StaticBaseProps = ExtractPublicPropTypes<typeof staticProps>;
+
+export type StaticProps<T = unknown> = Omit<StaticBaseProps, "items"> & {
+  items: T[];
+};
+
+export const Static = StaticImpl as typeof StaticImpl & {
+  new <T = unknown>(): {
+    $props: StaticProps<T> & { children?: StaticChildren<T> };
+    $slots: {
+      default?: StaticSlot<T>;
+    };
+  };
+};

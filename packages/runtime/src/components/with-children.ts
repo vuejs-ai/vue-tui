@@ -1,3 +1,9 @@
+import type { VNodeChild } from "vue";
+
+export type DefaultSlot = () => VNodeChild;
+
+export type DefaultChildren = VNodeChild | DefaultSlot | { default: DefaultSlot };
+
 /**
  * Adds an optional `children` prop to a component's JSX `$props` so that TSX
  * written under the automatic runtime (`jsx: "react-jsx"` + `jsxImportSource:
@@ -7,6 +13,6 @@
  * that prop to the default slot at runtime, so this is a type-only shim with no
  * runtime effect.
  */
-export type WithChildren<C, T = unknown> = C & {
+export type WithChildren<C, T = DefaultChildren> = C & {
   new (): { $props: { children?: T } };
 };

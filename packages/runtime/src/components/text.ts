@@ -11,7 +11,7 @@ import {
   type VNode,
 } from "vue";
 import { AppContextKey } from "../context.ts";
-import { assertValidBackgroundColor } from "../paint/text-style.ts";
+import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import type { WithChildren } from "./with-children.ts";
 
 type WrapMode =
@@ -73,6 +73,7 @@ const TextImpl = defineComponent({
       // a group of only empty/inert children) gets past it, so we additionally
       // skip validation when the content would render empty. (A12)
       if (wouldRenderNonEmptyText(children)) {
+        assertValidForegroundColor(props.color);
         assertValidBackgroundColor(props.backgroundColor);
       }
 

@@ -290,6 +290,26 @@ current-props model, or API conventions.
   Persisting a withdrawn prop, or flipping it to hidden, does not match that model. Maintainer
   decision (2026-05-31): KEEP.
 
+#### Nullish `flexDirection` / `flexWrap` reset to Box defaults
+
+- **Ink:** the public `<Box>` injects `flexDirection:'row'` and `flexWrap:'nowrap'` before
+  spreading user style. If a previously-set prop is **truly omitted**, that default reaches
+  the host and both engines reset (`column` -> omitted renders `"A\nB"` -> `"AB"`; `wrap`
+  -> omitted stops wrapping). But an explicit `flexDirection={undefined}` / `{null}` or
+  `flexWrap={undefined}` / `{null}` overwrites the default before the host layer. Ink's
+  `applyFlexStyles` has no reset branch for these two props, so a dynamic nullish value
+  preserves the previous Yoga value. On first mount, nullish `flexDirection` leaves Yoga's
+  column default; nullish `flexWrap` happens to match nowrap.
+- **vue-tui:** nullish current values reset to the public Box defaults (`row` / `nowrap`)
+  in the same way as true omission (G19). A conditional spread that removes the key remains
+  parity with Ink; a live binding whose value becomes `null` or `undefined` intentionally
+  resets instead of preserving prior Yoga state.
+- **Why:** render = f(current props): a Vue binding with no current `flexDirection` /
+  `flexWrap` value means "use the Box default", not "keep whatever Yoga had last render".
+  Preserving the prior value would make layout depend on history rather than current props.
+  The cost is limited to explicit nullish public bindings; true omission remains Ink-parity.
+  Tests: `prop-reset.test.tsx`.
+
 #### Public composable naming follows Vue conventions
 
 - **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...), but return-type naming
@@ -587,21 +607,6 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
 
-### Removing `flexDirection` / `flexWrap` is parity through the public `<Box>`
-
-- **Ink:** `applyFlexStyles` has no reset branch for these two props (every _other_ flex prop
-  does), so at the **raw `ink-box` host layer** an explicit `flexDirection={undefined}` leaves
-  the previous value in place. But the public `<Box>` re-injects `flexDirection:'row'` /
-  `flexWrap:'nowrap'` on every render (`Box.tsx:84-85`, before spreading user style), so a
-  user who removes the prop still gets the default — Ink resets **through the component**.
-- **vue-tui:** resets to the Box default (`row` / `nowrap`) explicitly (G19). Through the
-  public `<Box>` this is **identical to Ink** (verified by running: a `column` → removed goes
-  `"A\nB"` → `"AB"` in both engines).
-- **Why:** this is **not a user-observable divergence** — both reset through the public
-  component; only the raw-host-layer behavior differs (vue-tui resets, Ink persists). Kept as
-  the explicit contrast to `display`, which has **no** Box default and so genuinely diverges.
-  Maintainer decision (2026-05-30): KEEP.
-
 ### Composables throw outside a render tree
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
@@ -621,15 +626,16 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 ### Invalid input is validated at the component layer, not the paint layer
 
-- **Principle:** vue-tui validates invalid render input (a chalk-**modifier**
-  `backgroundColor` like `"bold"`, an unknown `borderStyle`) at the
+- **Principle:** vue-tui validates the covered invalid render inputs — a
+  chalk-**modifier** `backgroundColor` like `"bold"`, a foreground color key that exists
+  on chalk but is not callable like `"level"`, and an unknown `borderStyle` — at the
   **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
   value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
   clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
   reports the error instead of crashing.
-- **Ink:** validates the same inputs **lazily at paint** (`colorize` / `render-border`, run
-  from the reconciler's commit hook): **outside** React's ErrorBoundary, so a bad value is
-  an uncaught crash, not a recoverable error.
+- **Ink:** validates the same covered inputs **lazily at paint** (`colorize` /
+  `render-border`, run from the reconciler's commit hook): **outside** React's
+  ErrorBoundary, so a bad value is an uncaught crash, not a recoverable error.
 - **Why:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
   **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there
   escapes `onErrorCaptured` and wedges the scheduler. Unlike a component error, it cannot
@@ -646,12 +652,13 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   that bypasses component validation), so it stands on that prior record, not an in-audit
   reproduction.
 - **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
-  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. Realistic
-  inputs match Ink; both error on bad input. Only the channel (recoverable reject vs crash)
-  differs. Maintainer decision (2026-06-07): KEEP. vue-tui makes the more reliable
-  library choice here: reject the same invalid input with a recoverable, prop-specific
-  error instead of preserving Ink's lower-level paint crash and chalk implementation
-  message. Tests: `background-color.test.tsx`, plus the `borderStyle` validation tests.
+  over-throws in a few degenerate, invalid-input-only cases Ink never reaches. For the
+  covered public inputs in normal reachable cases, both libraries error; only the channel
+  (recoverable reject vs crash) differs. Maintainer decision (2026-06-07): KEEP. vue-tui
+  makes the more reliable library choice here: reject the same invalid input with a
+  recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
+  chalk implementation message. Tests: `background-color.test.tsx`, plus the `borderStyle`
+  validation tests.
 
 ## Non-Behavioral Notes
 

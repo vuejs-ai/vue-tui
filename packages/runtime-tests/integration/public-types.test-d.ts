@@ -16,10 +16,16 @@ import { shallowRef } from "vue";
 import { useApp, useInput, usePaste, useStdin, useStdout, useStderr } from "@vue-tui/runtime";
 import type {
   BoxProps,
+  BoxLayoutStyle,
   TextProps,
+  StaticChildren,
   StaticProps,
+  StaticSlot,
+  StaticSlotProps,
+  StaticStyle,
   TransformProps,
   NewlineProps,
+  SpacerProps,
   Key,
   WindowSize,
   CursorPosition,
@@ -41,10 +47,25 @@ expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
+expectTypeOf<StaticProps<string>["items"]>().toEqualTypeOf<string[]>();
+expectTypeOf<StaticProps["style"]>().toEqualTypeOf<StaticStyle | undefined>();
+expectTypeOf<StaticStyle>().toEqualTypeOf<BoxLayoutStyle>();
+expectTypeOf<StaticStyle["flexDirection"]>().toEqualTypeOf<BoxProps["flexDirection"]>();
+expectTypeOf<StaticSlotProps<string>>().toEqualTypeOf<{ item: string; index: number }>();
+expectTypeOf<StaticSlot<string>>().toEqualTypeOf<
+  (props: StaticSlotProps<string>) => import("vue").VNodeChild
+>();
+expectTypeOf<StaticChildren<string>>().toEqualTypeOf<
+  | StaticSlot<string>
+  | {
+      default: StaticSlot<string>;
+    }
+>();
 expectTypeOf<TransformProps["transform"]>().toEqualTypeOf<
   (line: string, lineIndex: number) => string
 >();
 expectTypeOf<NewlineProps["count"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<keyof SpacerProps>().toEqualTypeOf<never>();
 
 // Framework-neutral data shapes, mirrored from Ink exactly.
 expectTypeOf<WindowSize>().toEqualTypeOf<{ readonly columns: number; readonly rows: number }>();
