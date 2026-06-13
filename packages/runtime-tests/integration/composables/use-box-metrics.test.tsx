@@ -1,7 +1,7 @@
 import { defineComponent, nextTick, ref, shallowRef, watchEffect, watchPostEffect } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useBoxMetrics, measureElement, useTerminalSize } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, measureElement, useWindowSize } from "@vue-tui/runtime";
 
 describe("useBoxMetrics", () => {
   test("returns layout dimensions after render", async () => {
@@ -379,7 +379,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     const App = defineComponent(() => {
       const boxRef = ref(null);
       const { width } = useBoxMetrics(boxRef);
-      useTerminalSize();
+      useWindowSize();
       return () => (
         <Box ref={boxRef}>
           <Text>Width: {width.value}</Text>
@@ -407,7 +407,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
       });
 
       const { height } = useBoxMetrics(trackedRef);
-      useTerminalSize();
+      useWindowSize();
 
       return () => (
         <Box flexDirection="column">
@@ -636,7 +636,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     const App = defineComponent(() => {
       const boxRef = ref(null);
       useBoxMetrics(boxRef);
-      useTerminalSize();
+      useWindowSize();
       return () => (
         <Box ref={boxRef}>
           <Text>Hello</Text>

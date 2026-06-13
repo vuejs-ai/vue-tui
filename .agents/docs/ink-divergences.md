@@ -13,6 +13,33 @@ Reference baseline: Ink **v7.0.4** (commit
 `40b3a7578811fd616341ca4e31cc7748aeeff12f`). When bumping the target Ink version,
 re-validate every entry below against the new source.
 
+## Why align to Ink — and when not to
+
+Aligning to Ink is a **means, not an end**. Ink is a mature, battle-tested implementation, so
+matching its public surface and behavior lets vue-tui inherit years of bug-fixes and edge-case
+handling for free. That — reducing bugs by reusing proven behavior — is the entire point of
+alignment.
+
+It follows that **alignment is not the top priority**. When Ink's behavior is itself a defect,
+is unreasonable, or is un-idiomatic for Vue, **conformance to Vue's philosophy and the plain
+reasonableness/correctness of the behavior outrank parity.** There vue-tui deliberately diverges,
+and records it here so the choice is conscious and blessed, not drift.
+
+This guards against two opposite failure modes:
+
+- **Blind alignment** — copying Ink even where Ink is wrong, or where matching would force
+  un-Vue machinery, merely to match. (Rejected e.g. in the `useCursor` corner-zombie, the
+  resolve-on-throw exit, and the paint-time invalid-input crash — Ink behaviors vue-tui treats
+  as defects, not contracts.)
+- **Lazy divergence** — inventing a different behavior and rationalizing it as "Vue's way is
+  better" with no genuine Vue-philosophy or correctness reason. Mere presence in this file is
+  **not** a blessing; every kept divergence needs a real reason and a maintainer decision.
+
+So the test for any difference is never just "does it match Ink?" but "is this the most
+reasonable, most Vue-idiomatic behavior — and where it diverges from Ink, is that because Ink is
+wrong or un-Vue, recorded with a maintainer decision?" Reasonableness and Vue idiom come first;
+alignment is simply the cheapest way to get there whenever Ink is already right.
+
 ## How to Classify a Divergence
 
 Classify each divergence by the first rule that applies. The order matters: earlier
@@ -109,20 +136,9 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   node is reached via `$el`. Because `<Box>` is a `defineComponent`, the `$el` path is in
   fact the **primary** path a normal `ref` on `<Box>` takes — the bare host-node ref is the
   rarer raw-host case. Supporting both is a strict superset that matches how Vue refs behave;
-  a bare host-node ref still works identically to Ink.
-
-### `renderToString` supports screen-reader mode
-
-- **Ink:** `renderToString` has only a `columns` option; it always renders the non-SR
-  (ANSI) frame. Ink's **live** `render()` does expose `isScreenReaderEnabled` (plus a full
-  accessibility stack), so this is Ink choosing not to surface SR in the _string_ API, not a
-  missing SR capability.
-- **vue-tui:** `renderToString` accepts `isScreenReaderEnabled?: boolean`. In SR mode it
-  returns the linearized accessibility text (`renderScreenReaderOutput`) and prepends the
-  linearized `<Static>` output, just as the non-SR path prepends the painted static frame.
-- **Why:** vue-tui already has a parity SR renderer for the live path. Surfacing it through
-  the string API is a strict superset (default `false` is byte-identical to Ink) and keeps
-  `<Static>` content in generated SR snapshots. Additive.
+  a bare host-node ref still works identically to Ink. Maintainer decision (2026-06-13): KEEP
+  — a reasonable Vue-idiomatic adoption (the component-instance ref is the natural Vue path;
+  the bare host-node ref stays Ink-identical).
 
 ### Two apps sharing one stdin both receive input
 
@@ -336,6 +352,24 @@ current-props model, or API conventions.
   Vue users expect for slot payloads. The rendered item/index values remain equivalent.
   Maintainer decision (2026-06-06): KEEP.
 
+#### ARIA props are typed camelCase; kebab still works but is not type-checked
+
+- **Ink:** kebab string-literal prop keys (`'aria-label'`, `'aria-hidden'`, `'aria-role'` union,
+  `'aria-state'` object); JSX keys never camelize.
+- **vue-tui:** the same vocabulary as typed **camelCase** props (`ariaLabel`/`ariaHidden`/
+  `ariaRole`/`ariaState`; `AriaRole`/`AriaState` exported, identical to Ink's). Ink's kebab still
+  works at runtime (Vue camelizes onto the declared prop), so `aria-role` ports unchanged.
+- **Why (Vue idiom + reasonableness > parity — see "Why align to Ink"):** Vue's `prop-name-casing`
+  mandates camelCase, and — run-verified with `tsc`/`vue-tsc` — **camelCase is the only spelling
+  type-checked** (value/typo/compound mistakes compile-error in both TSX and templates), while
+  kebab `aria-*` is not (Vue/Volar treat it as a global attr). So `ariaRole` is the type-safe
+  spelling and `aria-role` the runtime-only porting escape; the rejected kebab-only `$attrs`
+  alternative loses typing + Boolean coercion for nothing the checker doesn't already give.
+  Maintainer decision (2026-06-14): KEEP.
+- **Edges:** a future compound aria word must be declared as its mechanical camelize
+  (`ariaHaspopup`, not `ariaHasPopup`) or folded into `ariaState`; `aria-hidden` is modeled
+  boolean (bare → true), but the string `aria-hidden="false"` wrongly hides (recorded edge).
+
 ## Intentional Divergence Choices
 
 These divergences are deliberate, but they are not strict supersets and are not primarily
@@ -418,7 +452,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   an Ink app holding a `useInput` already does not). The "render and auto-exit" pattern
   (Ink's inline-output use) is `rawMode: 'auto'`. Tests: `raw-mode-lifecycle.test.tsx`
   (`'always'` holds raw with no input hook; `'auto'` stays cooked; no mid-session
-  oscillation).
+  oscillation). Maintainer decision (2026-06-13): KEEP.
 
 ### `useCursor()` re-asserts the declared caret every commit (persistent declaration)
 

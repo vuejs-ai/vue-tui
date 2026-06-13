@@ -28,6 +28,16 @@ export interface RenderToStringOptions {
    * @default 80
    */
   columns?: number;
+}
+
+/**
+ * Options for the internal, screen-reader-capable render-to-string used by the
+ * accessibility test suite. NOT part of the public API: Ink likewise keeps
+ * screen-reader string rendering out of its public `renderToString` (layout
+ * only) and reaches it through a private test helper. Exposed via
+ * `@vue-tui/runtime/internal` as `renderToStringWithScreenReader`.
+ */
+interface RenderToStringInternalOptions extends RenderToStringOptions {
   /**
    * Enable screen reader mode. When enabled, the output is plain text
    * suitable for screen readers (no ANSI styling, with role/state annotations).
@@ -58,6 +68,26 @@ export interface RenderToStringOptions {
  * caller after cleanup.
  */
 export function renderToString(component: Component, options?: RenderToStringOptions): string {
+  return renderToStringInternal(component, options);
+}
+
+/**
+ * Screen-reader-capable variant of {@link renderToString}, for the accessibility
+ * test suite only (exported from `@vue-tui/runtime/internal`). The public
+ * `renderToString` is layout-only, matching Ink, which keeps screen-reader
+ * string rendering in a private test helper rather than its public API.
+ */
+export function renderToStringWithScreenReader(
+  component: Component,
+  options?: RenderToStringInternalOptions,
+): string {
+  return renderToStringInternal(component, options);
+}
+
+function renderToStringInternal(
+  component: Component,
+  options?: RenderToStringInternalOptions,
+): string {
   const columns = options?.columns ?? 80;
   const isScreenReaderEnabled = options?.isScreenReaderEnabled ?? false;
 

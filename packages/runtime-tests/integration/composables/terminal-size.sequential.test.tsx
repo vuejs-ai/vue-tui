@@ -7,7 +7,7 @@ import { PassThrough } from "node:stream";
 import process from "node:process";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useTerminalSize } from "@vue-tui/runtime";
+import { createApp, Text, useWindowSize } from "@vue-tui/runtime";
 
 function makeTtyStream(columns: number): NodeJS.WriteStream {
   const s = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -36,7 +36,7 @@ function makeFakeStdin(): NodeJS.ReadStream {
 // when stdout.rows is missing"). With the mount stdout reporting columns 0 and
 // no rows, resolveSize() calls terminal-size, which — after we zero out the real
 // process.stdout/stderr dimensions — resolves rows from process.env.LINES.
-test.sequential("useTerminalSize falls back to terminal-size rows from env.LINES when stdout.rows is missing", async () => {
+test.sequential("useWindowSize falls back to terminal-size rows from env.LINES when stdout.rows is missing", async () => {
   const stdout = makeTtyStream(0);
   const stderr = makeTtyStream(0);
   const stdin = makeFakeStdin();
@@ -50,7 +50,7 @@ test.sequential("useTerminalSize falls back to terminal-size rows from env.LINES
 
   let capturedRows = -1;
   const App = defineComponent(() => {
-    const { rows } = useTerminalSize();
+    const { rows } = useWindowSize();
     capturedRows = rows.value;
     return () => <Text>{String(rows.value)}</Text>;
   });

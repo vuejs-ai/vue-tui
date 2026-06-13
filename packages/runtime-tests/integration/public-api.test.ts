@@ -20,7 +20,6 @@ test("public API exposes documented members", () => {
     "useStdin",
     "useStdout",
     "useStderr",
-    "useTerminalSize",
     "useWindowSize",
     "useCursor",
     "useIsScreenReaderEnabled",
@@ -37,10 +36,6 @@ test("public API exposes documented members", () => {
   ]) {
     expect(api).toHaveProperty(k);
   }
-});
-
-test("useWindowSize is an alias for useTerminalSize", () => {
-  expect(api.useWindowSize).toBe(api.useTerminalSize);
 });
 
 // Ink keeps its `measure-text` module internal and does not re-export it. vue-tui

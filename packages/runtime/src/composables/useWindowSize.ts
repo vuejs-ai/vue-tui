@@ -7,8 +7,8 @@ import { AppContextKey } from "../context.ts";
  * (`columns`/`rows`, not `width`/`height`).
  *
  * Note the Vue-vs-React shape: Ink's `useWindowSize()` returns a `WindowSize`
- * snapshot, whereas vue-tui's `useWindowSize()` / `useTerminalSize()` return
- * reactive **refs** of these dimensions
+ * snapshot, whereas vue-tui's `useWindowSize()` returns reactive **refs** of
+ * these dimensions
  * (`{ columns: ShallowRef<number>; rows: ShallowRef<number> }`). The data shape
  * is the same; the reactivity wrapper is the framework difference.
  */
@@ -36,9 +36,9 @@ export function resolveSize(stdout: NodeJS.WriteStream): WindowSize {
   };
 }
 
-export function useTerminalSize(): { columns: ShallowRef<number>; rows: ShallowRef<number> } {
+export function useWindowSize(): { columns: ShallowRef<number>; rows: ShallowRef<number> } {
   const ctx = inject(AppContextKey);
-  if (!ctx) throw new Error("useTerminalSize() must be called inside a vue-tui render tree");
+  if (!ctx) throw new Error("useWindowSize() must be called inside a vue-tui render tree");
   const initial = resolveSize(ctx.stdout);
   const columns = shallowRef(initial.columns);
   const rows = shallowRef(initial.rows);
@@ -51,6 +51,3 @@ export function useTerminalSize(): { columns: ShallowRef<number>; rows: ShallowR
   onScopeDispose(() => ctx.stdout.off("resize", onResize));
   return { columns, rows };
 }
-
-/** Alias for `useTerminalSize`. */
-export const useWindowSize = useTerminalSize;

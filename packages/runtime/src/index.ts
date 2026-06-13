@@ -22,7 +22,7 @@ export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
-export { useTerminalSize, useWindowSize, type WindowSize } from "./composables/useTerminalSize.ts";
+export { useWindowSize, type WindowSize } from "./composables/useWindowSize.ts";
 export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
 export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
@@ -37,7 +37,6 @@ export {
   type UseBoxMetricsReturn,
 } from "./composables/useBoxMetrics.ts";
 export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
-export type { DevState, DevErrorInfo } from "./hmr.ts";
 export {
   kittyFlags,
   kittyModifiers,
