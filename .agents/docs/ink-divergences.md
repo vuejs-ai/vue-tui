@@ -182,7 +182,7 @@ current-props model, or API conventions.
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
   follows this — `useFocusManager().activeId` is a single ref read as `.value`, while a
-  composable may instead return an **object of refs** (`useTerminalSize()` returns
+  composable may instead return an **object of refs** (`useWindowSize()` returns
   `{ columns, rows }`, read as `.columns.value` / `.rows.value`). An empty single-ref state
   holds `null` (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`),
   where Ink's plain value is `undefined`.
@@ -611,7 +611,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
-- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useTerminalSize`,
+- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useWindowSize`,
   `useFocus`, `useFocusManager`, `useInput`, `usePaste`, `useCursor`, and
   `useIsScreenReaderEnabled` **throw** when their context is absent ("... must be called
   inside a vue-tui render tree"). `useBoxMetrics` and `useAnimation` do **not** throw:

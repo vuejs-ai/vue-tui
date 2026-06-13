@@ -1,10 +1,11 @@
 # Accessibility (ARIA + screen-reader) API
 
-How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the terse
-blessed entries in [[ink-divergences]] (aria props are camelCase; `renderToString` is layout-only;
-`useWindowSize`); this file keeps the _why_ and the researched / run-verified findings the ledger
-entries deliberately omit, so they are not re-derived expensively. The exported aria types are
-part of the public contract — see [[api-contract]].
+How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the
+aria-camelCase blessed entry in [[ink-divergences]]; `renderToString` being layout-only and the
+`useWindowSize` name are now Ink parity (not divergences), and the reactive-refs return shape is
+covered by the shallowRef entry there. This file keeps the _why_ and the researched / run-verified
+findings those entries deliberately omit, so they are not re-derived expensively. The exported aria
+types are part of the public contract — see [[api-contract]].
 
 ## The constraint that shapes everything
 

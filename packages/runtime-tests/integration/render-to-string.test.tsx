@@ -42,6 +42,18 @@ describe("renderToString", () => {
     expect(output).toBe("test");
   });
 
+  // Contract guard: `isScreenReaderEnabled` is INTERNAL-only — the public `renderToString` must
+  // reject it at the type level (SR rendering goes through `renderToStringWithScreenReader` in
+  // `@vue-tui/runtime/internal`). If the option is ever re-added to the public `RenderToStringOptions`,
+  // the `@ts-expect-error` below goes unused and `tsc --noEmit` fails. (At runtime the unknown option
+  // is harmlessly ignored — only `columns` is read — so the frame still renders.)
+  test("public renderToString rejects the internal isScreenReaderEnabled option (type-level)", () => {
+    const App = defineComponent(() => () => <Text>x</Text>);
+    // @ts-expect-error - isScreenReaderEnabled is internal-only (use renderToStringWithScreenReader from /internal)
+    const output = renderToString(App, { isScreenReaderEnabled: true });
+    expect(output).toBe("x");
+  });
+
   test("rethrows component errors after cleanup", () => {
     const App = defineComponent(() => {
       throw new Error("boom");
