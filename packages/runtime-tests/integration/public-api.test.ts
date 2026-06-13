@@ -71,3 +71,6 @@ test("does not expose the screen-reader linearizer publicly (Ink keeps it intern
 // It DOES type-check from `/internal`, which the runtime guard above already proves is the home.
 // @ts-expect-error - ScreenReaderOptions is exported only from @vue-tui/runtime/internal
 export type _ScreenReaderOptionsIsInternalOnly = import("@vue-tui/runtime").ScreenReaderOptions;
+
+// The parallel guard for the public `renderToString`'s dropped `isScreenReaderEnabled` OPTION lives
+// in render-to-string.test.tsx (a call-site `@ts-expect-error`), next to the renderToString tests.

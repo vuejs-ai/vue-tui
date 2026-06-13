@@ -31,8 +31,9 @@ Because it is contract, it is **tested, not merely shipped**:
 
 `@vue-tui/runtime/internal` is an explicitly internal / advanced surface — host-node types
 (`TuiNode`, …), test-only helpers (`renderToStringWithScreenReader`), dev/HMR types (`DevState`,
-`DevErrorInfo`), kitty-controller internals, etc. It carries **no stability guarantee**, is not
-covered by `public-api.test.ts`, and may change freely between releases.
+`DevErrorInfo`), kitty-controller internals, etc. It carries **no stability guarantee**: its
+surface is not snapshotted by `public-api.test.ts` (a member may be tripwired there to prove it is
+internal, but the surface itself carries no contract), and may change freely between releases.
 
 Placement rule for any export:
 

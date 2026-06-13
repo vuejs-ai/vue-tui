@@ -74,7 +74,7 @@ useInput((input) => {
 | `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                |
 | `useFocusManager()`        | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`       |
 | `useApp()`                 | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`            |
-| `useTerminalSize()`        | Reactive terminal dimensions — `{ columns, rows }`                    |
+| `useWindowSize()`          | Reactive terminal dimensions — `{ columns, rows }`                    |
 | `useAnimation(opts?)`      | Frame-based animation loop — returns `{ frame, time, delta, reset }`  |
 | `useBoxMetrics(ref)`       | Reactive layout metrics — `{ width, height, left, top, hasMeasured }` |
 | `measureElement(node)`     | Imperative read of computed `{ width, height }` from a yoga node      |
