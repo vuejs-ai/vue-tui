@@ -2,6 +2,35 @@ import cliBoxes from "cli-boxes";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import type { BoxProps, BoxStyle } from "./box-props.ts";
 
+// The exact glyph keys paint's drawBorder reads off a resolved BoxStyle:
+// `top`/`bottom`/`left`/`right` are read unconditionally for any drawn edge, and
+// the four corners are read when their adjacent sides are drawn (edges default to
+// drawn). Validating ALL of them here guarantees no malformed object can reach
+// paint and throw `<glyph>.repeat(...)` / string-concat a non-string mid-commit,
+// regardless of which per-edge toggles are set. Keep in sync with drawBorder.
+const BOX_STYLE_GLYPHS = [
+  "top",
+  "bottom",
+  "left",
+  "right",
+  "topLeft",
+  "topRight",
+  "bottomLeft",
+  "bottomRight",
+] as const;
+
+/**
+ * True only when `value` is a real BoxStyle: an object carrying every glyph
+ * paint reads, each a string. Rejects undefined (unknown preset name), the
+ * cli-boxes `default` self-key / prototype members (objects without string
+ * glyphs), partial custom objects, and truthy non-objects (e.g. a number).
+ */
+function isValidBoxStyleShape(value: unknown): value is BoxStyle {
+  if (typeof value !== "object" || value === null) return false;
+  const box = value as Record<string, unknown>;
+  return BOX_STYLE_GLYPHS.every((glyph) => typeof box[glyph] === "string");
+}
+
 /**
  * Eager render-time validation for `<Box>`. Runs every render and throws into the
  * error boundary on invalid input — exactly as box.ts's render fn did. Returns
@@ -106,41 +135,58 @@ export function assertBoxValid(props: BoxProps): true {
   // rather than throwing (a throw in the post-flush paint pass wedges Vue's
   // scheduler). Same accepted limitation as the borderStyle fix (#124).
 
-  // Validate borderStyle during RENDER so an unknown name is caught by
+  // Validate borderStyle during RENDER so an invalid value is caught by
   // vue-tui's error boundary (onErrorCaptured → ErrorOverview), exactly like
   // any other component render error. Ink crashes on an unknown borderStyle
   // with a raw TypeError during paint (render-border.ts reads box.topLeft off
-  // cliBoxes[name] === undefined); we align to that "throw on unknown" contract
-  // but do it here rather than in paint, where a throw would unwind through
-  // Vue's post-flush commit and wedge its scheduler. Only a NON-EMPTY unknown
-  // STRING throws: a falsy value (false/undefined/"" = no border) and a custom
-  // BoxStyle OBJECT are both valid and pass through. (audit 2.3)
-  // `borderStyle.length > 0` (not `!== ""`): once `typeof === "string"` narrows
-  // the prop to the BorderStyle keyof union, an `!== ""` literal comparison has
-  // "no overlap" per TS (the union has no `""` member). The empty string is only
-  // reachable via a TS-bypass; `.length > 0` excludes it without tripping that.
+  // cliBoxes[name] === undefined); we align to that "throw on bad input"
+  // contract but do it here rather than in paint, where a throw would unwind
+  // through Vue's post-flush commit and wedge its scheduler. A falsy value
+  // (false/undefined/"" = no border) is valid and passes through. (audit 2.3)
   //
-  // We validate the RESOLVED box has a real BoxStyle SHAPE rather than testing
-  // `borderStyle in cliBoxes`, because `in` has two false-accept holes that let
-  // a non-box value reach paint (which then reads `.top`/`.topLeft` glyph
-  // strings off it):
+  // borderStyle has TWO valid prop forms (Ink types it `keyof Boxes | BoxStyle`):
+  // a preset-name STRING, or a custom BoxStyle OBJECT. We resolve the value to a
+  // BoxStyle exactly the way paint's drawBorder does — string → cliBoxes[name],
+  // object → use directly — then shape-check the RESULT. Both forms must produce
+  // a real BoxStyle so paint never reads a glyph off a malformed value.
+  //
+  // Why shape-check the RESOLVED box rather than `borderStyle in cliBoxes`: `in`
+  // has two false-accept holes that let a non-box value reach paint (which then
+  // reads `.top`/`.topLeft` glyph strings off it):
   //   1. cli-boxes' default export carries a CJS-interop `default` self-key, so
   //      `"default" in cliBoxes` is true — but cliBoxes.default is the WHOLE
   //      boxes object, not a BoxStyle (it has no string `top`).
   //   2. `in` walks the prototype chain, so Object.prototype members
   //      ("toString", "constructor", "hasOwnProperty", …) report as "in
   //      cliBoxes" while resolving to a function/undefined — never a BoxStyle.
-  // Resolving `cliBoxes[name]` and requiring an object with a string `top`
-  // rejects unknown names (undefined), "default" (whole object, no string
-  // `top`), and inherited props, while accepting every real preset.
+  // Resolving and requiring a real BoxStyle shape rejects unknown names
+  // (undefined), "default" (whole object), and inherited props.
+  //
+  // Why this also covers the OBJECT form: previously only the STRING form was
+  // shape-checked, so a malformed custom OBJECT (missing `top`, or a truthy
+  // non-string non-object like a number from a JS caller) bypassed validation,
+  // reached drawBorder, and threw `Cannot read properties of undefined (reading
+  // 'repeat')` in the post-flush PAINT pass — wedging Vue's scheduler. Resolving
+  // both forms and shape-checking here routes every invalid value to a clean
+  // render-time error instead.
   const borderStyle = props.borderStyle;
-  if (typeof borderStyle === "string" && borderStyle.length > 0) {
-    // Cast via `unknown` to add a string index signature: cliBoxes is typed as
-    // the `Boxes` keyof object (no index signature), so a direct cast is a TS2352
-    // "insufficient overlap" error. Same cast paint.ts uses to look up by name.
-    const resolved = (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[borderStyle];
-    if (typeof resolved !== "object" || resolved === null || typeof resolved.top !== "string") {
-      throw new Error(`Unknown borderStyle: ${JSON.stringify(borderStyle)}`);
+  // Truthy gate: empty string / undefined / false ("no border") pass through
+  // unchanged, matching paint's `if (!style) return`.
+  if (borderStyle) {
+    if (typeof borderStyle === "string") {
+      // Cast via `unknown` to add a string index signature: cliBoxes is typed as
+      // the `Boxes` keyof object (no index signature), so a direct cast is a
+      // TS2352 "insufficient overlap" error. Same cast paint.ts uses by name.
+      const resolved = (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[borderStyle];
+      // Preserve the existing "Unknown borderStyle" wording for the string case.
+      if (!isValidBoxStyleShape(resolved)) {
+        throw new Error(`Unknown borderStyle: ${JSON.stringify(borderStyle)}`);
+      }
+    } else if (!isValidBoxStyleShape(borderStyle)) {
+      // Object form (or a truthy non-string non-object, e.g. a number from a JS
+      // caller): if it isn't a real BoxStyle, reject at render rather than let
+      // paint read a missing glyph and throw mid-commit.
+      throw new Error(`Invalid borderStyle: ${JSON.stringify(borderStyle)}`);
     }
   }
 

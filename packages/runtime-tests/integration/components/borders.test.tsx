@@ -1675,6 +1675,141 @@ test("non-throwing borderStyle (false/undefined/valid/object) renders normally",
   expect(objectFrame).toContain("H");
 });
 
+// A MALFORMED custom BoxStyle OBJECT (missing a glyph paint reads, e.g. `top`)
+// must REJECT at RENDER with a clean error — exactly like an unknown STRING —
+// rather than slipping past validation and throwing an opaque TypeError
+// (`Cannot read properties of undefined (reading 'repeat')`) deep in the
+// post-flush PAINT pass, where a throw wedges Vue's scheduler. Before the fix,
+// assertBoxValid only shape-checked STRING borderStyles, so an object form
+// bypassed the check entirely and reached `chars.top.repeat(...)` in
+// drawBorder. (companion of audit 2.3 — same paint-wedge failure mode.)
+test("MALFORMED borderStyle OBJECT (missing glyph) rejects at render", async ({ expect }) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        // Missing `top` (and the other edges/glyphs paint reads). Reachable in
+        // JS or via a partial object the consumer believes is a full BoxStyle.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Box borderStyle={{ topLeft: "A", topRight: "C" } as any} alignSelf="flex-start">
+          <Text>Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/Invalid borderStyle/);
+  // It must NOT surface the opaque paint-phase TypeError.
+  await expect(
+    render(
+      defineComponent(() => () => (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Box borderStyle={{ topLeft: "A", topRight: "C" } as any} alignSelf="flex-start">
+          <Text>Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.not.toThrow(/Cannot read properties of undefined/);
+});
+
+// A truthy NON-STRING NON-OBJECT borderStyle (e.g. a number from a JS caller)
+// hits the same validation gap and must also reject cleanly at render rather
+// than crash in paint.
+test("non-string non-object borderStyle (number) rejects at render", async ({ expect }) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Box borderStyle={42 as any} alignSelf="flex-start">
+          <Text>Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/Invalid borderStyle/);
+});
+
+// Exercise the FULL "every one of the 8 glyphs paint reads must be a string"
+// contract: an object that is complete EXCEPT one glyph (each, table-driven)
+// must reject at render — paint reads top/bottom/left/right unconditionally and
+// the four corners when an adjacent side is drawn, so any one missing glyph can
+// reach a `.repeat(...)`/concat on a non-string mid-commit.
+const COMPLETE_GLYPHS = {
+  topLeft: "A",
+  top: "B",
+  topRight: "C",
+  right: "D",
+  bottomRight: "E",
+  bottom: "F",
+  bottomLeft: "G",
+  left: "H",
+} as const;
+for (const glyph of Object.keys(COMPLETE_GLYPHS)) {
+  test(`borderStyle OBJECT missing only "${glyph}" rejects at render`, async ({ expect }) => {
+    const partial = { ...COMPLETE_GLYPHS } as Record<string, string>;
+    delete partial[glyph];
+    await expect(
+      render(
+        defineComponent(() => () => (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          <Box borderStyle={partial as any} alignSelf="flex-start">
+            <Text>Hi</Text>
+          </Box>
+        )),
+        { columns: 100 },
+      ),
+    ).rejects.toThrow(/Invalid borderStyle/);
+  });
+}
+
+// A glyph that is PRESENT but NON-STRING (e.g. a number) must also reject — the
+// shape check requires `typeof === "string"`, not mere presence, since paint
+// calls `.repeat(...)`/concatenates the glyph as a string.
+test("borderStyle OBJECT with a non-string glyph rejects at render", async ({ expect }) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        <Box borderStyle={{ ...COMPLETE_GLYPHS, top: 5 } as any} alignSelf="flex-start">
+          <Text>Hi</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/Invalid borderStyle/);
+});
+
+// Regression guard: a COMPLETE custom BoxStyle object (all 8 glyphs paint reads,
+// as strings) must still render its border, never rejecting. This pins that the
+// shape check accepts a genuinely valid object.
+test("COMPLETE custom borderStyle OBJECT renders a border (regression)", async ({ expect }) => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        borderStyle={{
+          topLeft: "A",
+          top: "B",
+          topRight: "C",
+          right: "D",
+          bottomRight: "E",
+          bottom: "F",
+          bottomLeft: "G",
+          left: "H",
+        }}
+        alignSelf="flex-start"
+      >
+        <Text>Hi</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  const frame = stripAnsi(lastFrame()!);
+  const lines = frame.split("\n");
+  // Top row: A + B...B + C ; content row: H...D ; bottom row: G + F...F + E
+  expect(lines[0]).toMatch(/^AB+C$/);
+  expect(lines[1]).toMatch(/^H.*D$/);
+  expect(lines[2]).toMatch(/^GF+E$/);
+});
+
 // borderDimColor should not dim styled child Text touching left edge
 test("borderDimColor does not dim styled child Text touching left edge", async ({ expect }) => {
   const { lastFrame } = await render(
