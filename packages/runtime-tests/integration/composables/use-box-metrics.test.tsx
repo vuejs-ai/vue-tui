@@ -1,7 +1,15 @@
 import { defineComponent, nextTick, ref, shallowRef, watchEffect, watchPostEffect } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useBoxMetrics, measureElement, useWindowSize } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  useBoxMetrics,
+  measureElement,
+  useWindowSize,
+  createApp,
+} from "@vue-tui/runtime";
+import { makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 describe("useBoxMetrics", () => {
   test("returns layout dimensions after render", async () => {
@@ -799,5 +807,183 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     await nextTick();
     await nextTick();
     expect(lastFrame()).toContain("Metrics: 0,0,0,0,false");
+  });
+});
+
+// The template-authored `<Box>` SFC has a root `v-if`, so it renders as a Vue
+// Fragment whose `$el` is the fragment's BOUNDARY anchor (an empty `text-leaf`
+// with no `.yoga`), NOT the real `box` host node. Resolving a ref to that anchor
+// would collapse metrics to 0 — or, worse, drill the wrong node. The subTree
+// drill in useBoxMetrics (commit 801739d) walks the component's vnode subTree to
+// the first genuine host node. These tests guard the tricky drill cases the
+// basic single-Box tests above do NOT cover: each is a genuine RED if the drill
+// is reverted to the old `$el`-only resolver.
+describe("useBoxMetrics - subtree drill (fragment-rooted Box resolution)", () => {
+  // Sibling isolation: two ref'd <Box>es with DIFFERENT explicit sizes must each
+  // resolve to their OWN box, not the first box found by a naive tree walk.
+  // A "first host node in the tree" resolver would silently pass both refs to
+  // box A's node and report 10x2 twice.
+  test("two sibling ref'd Boxes each resolve to their own dimensions", async () => {
+    const a = shallowRef({ width: -1, height: -1 });
+    const b = shallowRef({ width: -1, height: -1 });
+    const App = defineComponent(() => {
+      const aRef = ref(null);
+      const bRef = ref(null);
+      watchPostEffect(() => {
+        void nextTick(() => {
+          a.value = measureElement(aRef.value);
+          b.value = measureElement(bRef.value);
+        });
+      });
+      return () => (
+        <Box flexDirection="column">
+          <Box ref={aRef} width={10} height={2}>
+            <Text>A</Text>
+          </Box>
+          <Box ref={bRef} width={30} height={6}>
+            <Text>B</Text>
+          </Box>
+        </Box>
+      );
+    });
+    await render(App, { columns: 100 });
+    await nextTick();
+    await nextTick();
+    // Each ref resolves to ITS OWN box, not the first box in the tree.
+    expect(a.value).toEqual({ width: 10, height: 2 });
+    expect(b.value).toEqual({ width: 30, height: 6 });
+  });
+
+  // Same isolation via the reactive useBoxMetrics path (not just imperative
+  // measureElement), so both code paths through resolveYogaNode are guarded.
+  test("two sibling ref'd Boxes report distinct useBoxMetrics dimensions", async () => {
+    const a = shallowRef({ w: -1, h: -1 });
+    const b = shallowRef({ w: -1, h: -1 });
+    const App = defineComponent(() => {
+      const aRef = ref(null);
+      const bRef = ref(null);
+      const ma = useBoxMetrics(aRef);
+      const mb = useBoxMetrics(bRef);
+      watchEffect(() => {
+        a.value = { w: ma.width.value, h: ma.height.value };
+        b.value = { w: mb.width.value, h: mb.height.value };
+      });
+      return () => (
+        <Box flexDirection="column">
+          <Box ref={aRef} width={10} height={2}>
+            <Text>A</Text>
+          </Box>
+          <Box ref={bRef} width={30} height={6}>
+            <Text>B</Text>
+          </Box>
+        </Box>
+      );
+    });
+    await render(App, { columns: 100 });
+    await nextTick();
+    await nextTick();
+    expect(a.value).toEqual({ w: 10, h: 2 });
+    expect(b.value).toEqual({ w: 30, h: 6 });
+  });
+
+  // Deep nesting: a ref'd <Box> wrapped a couple of component levels deep still
+  // resolves. The drill must descend through nested component subTrees, not just
+  // the immediate one.
+  test("a Box nested two component levels deep still resolves", async () => {
+    const dims = shallowRef({ width: -1, height: -1 });
+
+    const Inner = defineComponent({
+      props: { boxRef: { type: Object, default: null } },
+      setup(props) {
+        return () => (
+          <Box ref={props.boxRef as never} width={13} height={7}>
+            <Text>deep</Text>
+          </Box>
+        );
+      },
+    });
+
+    const Middle = defineComponent({
+      props: { boxRef: { type: Object, default: null } },
+      setup(props) {
+        return () => (
+          <Box>
+            <Inner boxRef={props.boxRef} />
+          </Box>
+        );
+      },
+    });
+
+    const App = defineComponent(() => {
+      const boxRef = ref(null);
+      watchPostEffect(() => {
+        void nextTick(() => {
+          dims.value = measureElement(boxRef.value);
+        });
+      });
+      return () => <Middle boxRef={boxRef} />;
+    });
+    await render(App, { columns: 100 });
+    await nextTick();
+    await nextTick();
+    expect(dims.value).toEqual({ width: 13, height: 7 });
+  });
+
+  // SR-hidden returns clean zeros: a ref'd <Box ariaHidden> under screen-reader
+  // mode renders NOTHING (the root `v-if="!srHidden && ..."` is false), so its
+  // subTree has no host `box` node. measureElement must return {width:0,height:0}
+  // WITHOUT crashing and WITHOUT drilling to a visible sibling's node.
+  //
+  // Uses the createApp + app.mount({ isScreenReaderEnabled: true }) pattern
+  // (the repo's working SR-enable path for a live, ref-measurable mount; the
+  // testing `render()` helper does not expose isScreenReaderEnabled).
+  test("SR-hidden Box returns clean zero metrics without crashing", async () => {
+    const hidden = shallowRef({ width: -1, height: -1 });
+    const visible = shallowRef({ width: -1, height: -1 });
+    const App = defineComponent(() => {
+      const hiddenRef = ref(null);
+      const visibleRef = ref(null);
+      watchPostEffect(() => {
+        void nextTick(() => {
+          hidden.value = measureElement(hiddenRef.value);
+          visible.value = measureElement(visibleRef.value);
+        });
+      });
+      return () => (
+        <Box flexDirection="column">
+          <Box ref={hiddenRef} ariaHidden width={25} height={9}>
+            <Text>secret</Text>
+          </Box>
+          <Box ref={visibleRef} width={12} height={4}>
+            <Text>shown</Text>
+          </Box>
+        </Box>
+      );
+    });
+
+    const app = createApp(App);
+    const stdout = makeFakeWritable({ columns: 100 });
+    const stderr = makeFakeWritable({ columns: 100 });
+    const { stream: stdin } = makeFakeStdin();
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      exitOnCtrlC: false,
+      isScreenReaderEnabled: true,
+    });
+    try {
+      await nextTick();
+      await nextTick();
+      await nextTick();
+      // The aria-hidden Box rendered nothing under SR → no host node → clean zeros,
+      // NOT the hidden Box's 25x9 and NOT the visible sibling's dimensions.
+      expect(hidden.value).toEqual({ width: 0, height: 0 });
+      // Sanity: the visible sibling still resolves to its own node (proves the
+      // hidden ref returning 0 isn't because measurement was globally broken).
+      expect(visible.value).toEqual({ width: 12, height: 4 });
+    } finally {
+      app.unmount();
+    }
   });
 });

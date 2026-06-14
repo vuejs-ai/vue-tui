@@ -40,3 +40,15 @@ test("Newline count=2 adds two blank lines standalone", async () => {
   // "above", 2 blank lines, "below" = at least 4 lines
   expect(lines.length).toBeGreaterThanOrEqual(4);
 });
+
+test("Newline inside Text renders inline (virtual-text), not a standalone line", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        a<Newline />b
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()!.split("\n")).toEqual(["a", "b"]);
+});

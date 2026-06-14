@@ -629,7 +629,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Principle:** vue-tui validates the covered invalid render inputs — a
   chalk-**modifier** `backgroundColor` like `"bold"`, a foreground color key that exists
   on chalk but is not callable like `"level"`, and an unknown `borderStyle` — at the
-  **component-render layer** (`box.ts` / `text.ts`), not down at the **paint layer**. A bad
+  **component-render layer** (`box-validate.ts` for `<Box>`, `text.vue` for `<Text>`), not
+  down at the **paint layer**. A bad
   value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
   clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
   reports the error instead of crashing.
@@ -659,6 +660,14 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
   chalk implementation message. Tests: `background-color.test.tsx`, plus the `borderStyle`
   validation tests.
+- **Text validates regardless of content (2026-06-13, user-blessed):** `<Text>` now
+  validates `color` and `backgroundColor` on every render, not only when its content is
+  non-empty — matching `<Box>`, which already validates its own colors unconditionally. Ink
+  does not throw for empty text only because its colorize call is lazy (an incidental
+  implementation artifact, not a design choice); an invalid value is invalid regardless of
+  content, and content-gated validation is a latent footgun. Principle: reasonable behavior
+  over incidental Ink parity. The former `wouldRenderNonEmptyText` gate was removed.
+  Screen-reader-hidden Text still returns before validation (matches Box).
 
 ## Non-Behavioral Notes
 

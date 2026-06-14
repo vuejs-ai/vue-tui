@@ -900,3 +900,28 @@ test("Static container vertical padding adds blank rows to the painted static fr
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toBe("\n\nX\n\n");
 });
+
+// Regression: an EMPTY padded <Static> must emit NO stray blank-line frame.
+//
+// A template `v-for` over an empty `items` leaves an inert text-leaf anchor in
+// `stat.children`, so `fresh` is anchor-only (length 1) rather than empty. Before
+// the fix, that anchor-only `fresh` passed the `fresh.length > 0` gate and
+// paintIsolated painted the container's copied PADDING (paddingTop/Bottom) as
+// stray blank lines. The static channel must skip inert anchors so an anchor-only
+// child set paints nothing — mirroring findStatics' own text-leaf/comment skip.
+test("empty Static with padding emits no stray blank-line frame (template anchor skip)", async () => {
+  const { frames } = await render(
+    defineComponent(() => () => (
+      <Static items={[] as string[]} style={{ paddingTop: 2, paddingBottom: 1 }}>
+        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+      </Static>
+    )),
+    { columns: 20 },
+  );
+  // The static channel must not paint the container padding for an anchor-only
+  // child set. A stray padding frame is NON-empty (e.g. "\n\n\n") yet blank once
+  // trimmed; the empty "" frames are fine. So assert no frame is blank-but-
+  // non-empty — that is exactly the stray blank-line frame the bug produces.
+  const strayBlank = frames.filter((f) => f !== "" && f.trim() === "");
+  expect(strayBlank).toEqual([]);
+});

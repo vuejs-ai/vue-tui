@@ -1,6 +1,6 @@
 import { defineComponent, h, inject, type Component, type PropType } from "@vue/runtime-core";
-import { Box } from "./components/box.ts";
-import { Text } from "./components/text.ts";
+import Box from "./components/box.vue";
+import Text from "./components/text.vue";
 import { DevStateKey, type DevState } from "./hmr.ts";
 
 const ErrorDisplay = defineComponent({

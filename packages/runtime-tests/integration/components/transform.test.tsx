@@ -12,6 +12,21 @@ test("Transform uppercases descendant text", async () => {
   expect(lastFrame()).toContain("ABC");
 });
 
+test("Newline inside Transform renders inline (text context via provide)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Transform transform={(line) => line.toUpperCase()}>
+        x<Newline />y
+      </Transform>
+    )),
+    { columns: 100 },
+  );
+  // Newline injects Transform's TextContextKey → inline virtual-text → "x","y" on
+  // two lines (both uppercased by the transform). Without Transform's provide,
+  // Newline would render as a standalone yoga `text` node and the output differs.
+  expect(lastFrame()).toBe("X\nY");
+});
+
 // --- Ink transform tests ---
 
 test("transform children — <Transform> inside <Text>", async () => {
@@ -379,6 +394,30 @@ test("G52: null sibling does not shift measured width (measurement)", async () =
     { columns: 100 },
   );
   expect(lastFrame()).toBe("A1:B|");
+});
+
+// G52 sibling case — an EMPTY-STRING child (`{''}`) is not a counted childNode in
+// Ink either: React renders neither `null` nor `''` as a DOM childNode, so an empty
+// `''` sibling must NOT shift a following <Transform>'s positional line index. Vue
+// materializes `''` as an EMPTY text-leaf host node that DOES occupy a positional
+// slot, so the squash/transform-index loops must skip it exactly like a comment.
+// This is the same anchor a template `<slot/>` boundary inserts, which is why a
+// template-authored <Text> needs this fix. Verified against real Ink v7.0.4:
+// `a{''}<Transform>b` → "a1:b" (index 1, after "a"), NOT "a2:b".
+test("empty-string child does not shift a sibling Transform's line index (Ink parity)", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        {"a"}
+        {""}
+        <Transform transform={(line, i) => `${i}:${line}`}>b</Transform>
+      </Text>
+    )),
+    { columns: 40 },
+  );
+  // Ink v7.0.4: the empty "" is not a counted child, so the Transform sees line
+  // index 1 (after "a"), giving "1:b" → "a1:b".
+  expect(lastFrame()).toBe("a1:b");
 });
 
 // G52 (recursive twin): the comment-skip must also apply to the RECURSIVE

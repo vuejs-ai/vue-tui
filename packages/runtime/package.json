@@ -19,7 +19,7 @@
     "build": "vp pack",
     "dev": "vp pack --watch",
     "test": "vp test",
-    "check:type": "tsc --noEmit",
+    "check:type": "vue-tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
@@ -45,8 +45,10 @@
     "@types/stack-utils": "^2.0.3",
     "@vitejs/plugin-vue-jsx": "catalog:",
     "typescript": "^6.0.3",
+    "unplugin-vue": "catalog:",
     "vite-plus": "^0.1.20",
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "vue-tsc": "catalog:"
   },
   "peerDependencies": {
     "vue": "^3.4.0"

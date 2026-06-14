@@ -1,5 +1,6 @@
 import Yoga from "yoga-layout";
 import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts";
+import { advancesLineIndex } from "../host/nodes.ts";
 import { sanitizeAnsi } from "./sanitize-ansi.ts";
 
 /**
@@ -23,13 +24,14 @@ function squashChildSR(child: TuiNode, index: number): string {
   if (child.type === "transform") {
     let innerText = "";
     // Recurse into the transform's children (each may itself be a transform,
-    // recursed to any depth), skipping Vue comment nodes for the index basis
-    // (G52), then apply THIS child transform's own fn (it is a child). Matches
+    // recursed to any depth), skipping Vue comment nodes and empty text-leaves
+    // for the index basis (G52), then apply THIS child transform's own fn (it is a
+    // child). Matches
     // Ink squash-text-nodes.ts:34 (`internal_transform(nodeText, index)`).
     let grandIndex = 0;
     for (const grandchild of child.children) {
       innerText += squashChildSR(grandchild, grandIndex);
-      if (grandchild.type !== "comment") grandIndex++;
+      if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
       innerText = child.transform(innerText, index);
@@ -58,9 +60,10 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
   let index = 0;
   for (const child of node.children) {
     text += squashChildSR(child, index);
-    // Comments (Vue's null/v-if/false renders) contribute nothing and, like
-    // React's absent childNodes, must NOT advance the transform index.
-    if (child.type !== "comment") index++;
+    // Comments (Vue's null/v-if/false renders) and EMPTY text-leaves (`{''}` /
+    // template <slot/> anchors) contribute nothing and, like React's absent
+    // childNodes, must NOT advance the transform index.
+    if (advancesLineIndex(child)) index++;
   }
   // Strip cursor/erase control sequences (keep SGR/OSC) from the squashed text,
   // exactly as Ink's squashTextNodes returns sanitizeAnsi(text)
@@ -196,7 +199,7 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
     let squashed = "";
     for (const childNode of node.children) {
       squashed += squashChildSR(childNode, index);
-      if (childNode.type !== "comment") index++;
+      if (advancesLineIndex(childNode)) index++;
     }
     // A standalone <Transform> is an `ink-text` node in Ink, squashed via
     // squashTextNodes which returns sanitizeAnsi(text) (squash-text-nodes.ts:45).

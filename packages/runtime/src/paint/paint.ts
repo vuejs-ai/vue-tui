@@ -22,7 +22,11 @@ import type {
   TuiBox,
 } from "../host/nodes.ts";
 import { transformHasYogaChild } from "../host/yoga.ts";
-import { createRoot as createIsoRoot, createBox as createIsoBox } from "../host/nodes.ts";
+import {
+  createRoot as createIsoRoot,
+  createBox as createIsoBox,
+  advancesLineIndex,
+} from "../host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
 import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
@@ -388,9 +392,10 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
   let transformIndex = 0;
   for (const child of children) {
     out += squashTransformChild(child, transformIndex, inheritedBg);
-    // Comments (Vue's null/v-if/false renders) contribute "" and, like React's
-    // absent childNodes, must NOT advance the transform index.
-    if (child.type !== "comment") transformIndex++;
+    // Comments (Vue's null/v-if/false renders) and EMPTY text-leaves (`{''}` /
+    // template <slot/> anchors) contribute "" and, like React's absent childNodes,
+    // must NOT advance the transform index.
+    if (advancesLineIndex(child)) transformIndex++;
   }
   return out;
 }
@@ -445,7 +450,7 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
     let grandIndex = 0;
     for (const grandchild of child.children) {
       innerText += squashTransformChild(grandchild, grandIndex, inheritedBg);
-      if (grandchild.type !== "comment") grandIndex++;
+      if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
       innerText = child.transform(innerText, index);
