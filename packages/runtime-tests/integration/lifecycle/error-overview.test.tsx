@@ -258,6 +258,39 @@ test("unparsable stack frame falls back to literal backslash-t (not a real TAB)"
   expect(fallbackLine).not.toContain("\t");
 });
 
+test("throwing .stack getter renders ERROR header with no synthetic stack (hardened read)", async () => {
+  // A pathological thrown value with a THROWING `.stack` getter. ErrorOverview
+  // reads `.stack` during render; an unguarded read would throw, Vue would catch
+  // it and re-route a NEW Error (with a real `.stack` pointing into Vue/dist
+  // internals), and the boundary would re-render an overview that LEAKS those
+  // internal frames — the same synthetic-stack corruption the primitive test
+  // guards against. With the guarded single `.stack` read, the throw is swallowed
+  // and the overview renders header-only (the primitive-throw path).
+  const StackGetterThrower = defineComponent(() => {
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- non-Error value with a throwing .stack getter, exercising the hardened read
+      throw {
+        message: "stack getter boom",
+        get stack(): string {
+          throw new Error("inner stack boom");
+        },
+      };
+    };
+  });
+
+  const frame = await renderErrorFrame(StackGetterThrower);
+
+  // The header shows the string .message (read via messageForNonError).
+  expect(frame).toContain(" ERROR  stack getter boom");
+
+  // No synthetic stack leaked: the unguarded-read regression surfaces as
+  // dist/render-to-string/runtime-core frames and "- " stack lines. None appear.
+  expect(frame).not.toContain("render-to-string");
+  expect(frame).not.toContain("runtime-core");
+  expect(frame).not.toContain("dist/");
+  expect(frame).not.toMatch(/^\s*- /m);
+});
+
 test("primitive (non-Error) throw renders ERROR header with no synthetic stack", async () => {
   const frame = await renderErrorFrame(PrimitiveThrower);
 

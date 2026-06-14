@@ -22,6 +22,20 @@ const stackUtils = new StackUtils({
   internals: StackUtils.nodeInternals(),
 });
 
+// String() coercion that can NEVER throw. A pathological thrown value can carry
+// a throwing Symbol.toPrimitive/toString/valueOf, so bare String(value) is not
+// safe here — and this feeds the error-display / reject path (render.ts's
+// onErrorCaptured wraps `new Error(messageForNonError(err))` with NO surrounding
+// try/catch). If coercion throws, fall back to a fixed placeholder so the caller
+// always gets a string.
+const safeString = (value: unknown): string => {
+  try {
+    return String(value);
+  } catch {
+    return "[unserializable value]";
+  }
+};
+
 // The user-facing message for a NON-Error thrown value. SINGLE source of truth
 // shared by the ErrorOverview header (what the user SEES) and render.ts's
 // reject-wrap (`new Error(messageForNonError(value))`, what waitUntilExit()
@@ -34,14 +48,17 @@ export function messageForNonError(value: unknown): string {
   // the SAME read, and the read is guarded because this feeds the error-display
   // / reject path — it must not itself throw on a pathological thrown object
   // (e.g. a `.message` getter that throws), which the old `String(value)` form
-  // never touched. Fall back to `String(value)` on any failure, as before.
+  // never touched. Both String() fallbacks go through safeString: the coercion
+  // itself can also throw (a throwing Symbol.toPrimitive/toString), so guarding
+  // only the `.message` read left two unguarded throw sites that wedged the
+  // error boundary. This function must NEVER throw, per its contract above.
   let message: unknown;
   try {
     message = (value as { message?: unknown })?.message;
   } catch {
-    return String(value);
+    return safeString(value);
   }
-  return typeof message === "string" ? message : String(value);
+  return typeof message === "string" ? message : safeString(value);
 }
 
 export const ErrorOverview = defineComponent({
@@ -59,10 +76,19 @@ export const ErrorOverview = defineComponent({
       const error = props.error;
 
       // Pull `.stack`/`.message` defensively: the value may be a primitive.
-      const errorStack =
-        typeof (error as { stack?: unknown })?.stack === "string"
-          ? (error as { stack: string }).stack
-          : undefined;
+      // Read `.stack` exactly ONCE under try/catch (mirroring how
+      // messageForNonError reads `.message` once under guard): a pathological
+      // thrown value can carry a throwing `.stack` getter, and this render runs
+      // on the error-display path where a throw would re-fault the boundary. If
+      // the read throws or isn't a string, treat it as no-stack — the overview
+      // then renders header-only, which is already the primitive-throw path.
+      let errorStack: string | undefined;
+      try {
+        const rawStack = (error as { stack?: unknown })?.stack;
+        errorStack = typeof rawStack === "string" ? rawStack : undefined;
+      } catch {
+        errorStack = undefined;
+      }
       // Ink renders `{error.message}`. A cross-realm Error has a different
       // prototype and fails `instanceof Error`, so read a string `.message`
       // structurally; primitives still fall back to String(value). The same

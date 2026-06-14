@@ -203,7 +203,19 @@ const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 // result values (string/number/plain object) brand as e.g. `[object String]`,
 // so they still RESOLVE — exactly Ink's contract.
 function isErrorInput(value: unknown): value is Error {
-  return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
+  // `instanceof Error` first: fast and CANNOT throw. The brand check is a
+  // fallback for cross-realm Errors only, and it must be guarded: a pathological
+  // thrown value can carry a throwing `Symbol.toStringTag` getter (which
+  // `Object.prototype.toString.call` READS), and isErrorInput runs in the
+  // error-exit path (onErrorCaptured / errorHandler) with NO surrounding
+  // try/catch — an unguarded throw here wedges the boundary. On throw, treat the
+  // value as a non-Error (false), so it routes through messageForNonError.
+  if (value instanceof Error) return true;
+  try {
+    return Object.prototype.toString.call(value) === "[object Error]";
+  } catch {
+    return false;
+  }
 }
 
 type MaybeWritableStream = NodeJS.WriteStream & {
