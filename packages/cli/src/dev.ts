@@ -11,6 +11,44 @@ async function waitForBundle(env: { memoryFiles: MemoryFiles }): Promise<void> {
   }
 }
 
+export interface ReloadRequestDeps {
+  // Startup guard: reload requests fired before the app is ready are ignored.
+  // A predicate (read at event time) rather than a value, so the live flag in
+  // dev() is observed when each request arrives.
+  shouldAccept: () => boolean;
+  memoryFiles: MemoryFiles;
+  outDir: string;
+  pm: { setBundlePath(p: string): void; restart(): Promise<void> | void };
+  logger: { error(msg: string): void };
+  // Injected for testability (lets a test supply a rejecting extractor); the
+  // dev() caller passes the real `extractBundle`.
+  extractBundle?: (memoryFiles: MemoryFiles, outDir: string) => Promise<string>;
+}
+
+// Handle a `vue-tui:request-reload`: re-extract the freshly built bundle and
+// restart the child process.
+//
+// WHY the try/catch: Vite's hot event emitter does NOT catch async handler
+// rejections, so a rejected promise here escapes as an unhandledRejection that
+// can take down the whole dev process. extractBundle throws ("No JS bundle
+// found in Vite memoryFiles") on a transient/broken build — exactly the case
+// the crash-respawn interval already guards against. On failure we log and KEEP
+// the previous bundle (no setBundlePath/restart), so a momentarily broken build
+// doesn't kill the dev server; it just waits for the next good build.
+export async function handleReloadRequest(deps: ReloadRequestDeps): Promise<void> {
+  if (!deps.shouldAccept()) return;
+  const extract = deps.extractBundle ?? extractBundle;
+  try {
+    const newPath = await extract(deps.memoryFiles, deps.outDir);
+    deps.pm.setBundlePath(newPath);
+    await deps.pm.restart();
+  } catch (err) {
+    deps.logger.error(
+      `Reload failed, keeping previous bundle: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export async function dev(entry?: string) {
   const logger = createLogger();
   logger.info("Starting vue-tui dev server...");
@@ -65,10 +103,13 @@ export async function dev(entry?: string) {
 
   // Listen for full reload requests from child
   server.hot.on("vue-tui:request-reload", async () => {
-    if (!acceptReloads) return;
-    const newPath = await extractBundle(clientEnv.memoryFiles, outDir);
-    pm.setBundlePath(newPath);
-    void pm.restart();
+    await handleReloadRequest({
+      shouldAccept: () => acceptReloads,
+      memoryFiles: clientEnv.memoryFiles,
+      outDir,
+      pm,
+      logger,
+    });
   });
 
   // Re-spawn after crash on next successful bundle update
