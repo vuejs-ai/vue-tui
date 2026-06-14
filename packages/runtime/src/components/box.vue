@@ -21,7 +21,7 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
        Box is screen-reader-hidden (mirrors box.ts ordering: a non-emitted node never
        colorizes). Under a screen reader with an ariaLabel, render the label text
        instead of the slot. The root `v-if` makes this a fragment, but $el still
-       resolves to the real `box` host node, so measureElement/useBoxMetrics work. -->
+       resolves to the real `tui-box` host node, so measureElement/useBoxMetrics work. -->
   <tui-box v-if="!srHidden && assertBoxValid(props)" v-bind="props">
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />

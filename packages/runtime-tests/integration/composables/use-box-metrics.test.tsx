@@ -812,7 +812,7 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
 
 // The template-authored `<Box>` SFC has a root `v-if`, so it renders as a Vue
 // Fragment whose `$el` is the fragment's BOUNDARY anchor (an empty `text-leaf`
-// with no `.yoga`), NOT the real `box` host node. Resolving a ref to that anchor
+// with no `.yoga`), NOT the real `tui-box` host node. Resolving a ref to that anchor
 // would collapse metrics to 0 — or, worse, drill the wrong node. The subTree
 // drill in useBoxMetrics (commit 801739d) walks the component's vnode subTree to
 // the first genuine host node. These tests guard the tricky drill cases the
