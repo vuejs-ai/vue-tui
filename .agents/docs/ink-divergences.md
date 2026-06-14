@@ -519,6 +519,17 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   diverging from Ink in the sibling direction; that rationale was overturned when running
   real terminal apps showed Ink itself zombies the caret there, so matching Ink was matching
   a defect, not parity.
+- **`app.clear()` consequence (same model, manual refresh):** `app.clear()` (interactive,
+  non-debug only) runs `writer.clear()` then `writer.sync(lastOutputToRender || lastOutput +
+"\n")`; `sync()` reads the **persistent** declaration via `getActiveCursor()`, so an active
+  caret is re-emitted (`buildCursorSuffix` → reposition + `\x1b[?25h`) on the refreshed frame.
+  After `clear()` the caret therefore stays **shown** at its edit point, whereas Ink's
+  cursorDirty gate (established above) leaves it **hidden** until the next render re-marks dirty.
+  This is the sibling-repaint behavior applied to a manual refresh: correct for a still-focused
+  input (a real terminal re-places its caret after a repaint), transient (the next commit
+  re-seats it), and bounded by the same `onScopeDispose` clear — an unmounted owner has already
+  declared `undefined`, so a later `clear()` shows no caret. Surfaced by the 2026-06-14 runtime
+  audit; KEEP, covered by the same vouch. [VOUCHED @hyf0]
 
 ### Resize unconditionally cancels the pending trailing commit
 
