@@ -42,7 +42,7 @@ import {
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
-import { devState, DevStateKey, initHmrBridge } from "./hmr.ts";
+import { devState, DevStateKey, initHmrBridge, resetDevState } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview, messageForNonError } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useWindowSize.ts";
@@ -531,6 +531,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   );
   if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
     initHmrBridge();
+    // Clear any dev status left in the module-global `devState` by a previous
+    // app in this dev process, so this fresh app never renders a stale Build
+    // Error / HMR-update overlay instead of its own content.
+    resetDevState();
     root = createDevOverlayWrapper(root, rootProps ?? undefined);
     rootProps = undefined;
   }
