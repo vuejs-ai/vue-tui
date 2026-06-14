@@ -91,15 +91,32 @@ export function calculateLayoutWithContentGuards(
   direction: Direction = Yoga.DIRECTION_LTR,
 ): () => void {
   const guarded = new Map<YogaNode, number>();
-
-  for (;;) {
-    root.yoga.calculateLayout(width, height, direction);
-    if (!applyZeroContentGuards(root, guarded)) break;
-  }
-
-  return () => {
+  // Restore in reverse insertion order so a parent hidden after its child is
+  // un-hidden first — mirror of how the success closure restores.
+  const restore = () => {
     for (const [node, display] of [...guarded].reverse()) {
       node.setDisplay(display);
     }
   };
+
+  try {
+    for (;;) {
+      root.yoga.calculateLayout(width, height, direction);
+      if (!applyZeroContentGuards(root, guarded)) break;
+    }
+  } catch (err) {
+    // WHY: nodes are hidden (setDisplay DISPLAY_NONE) INSIDE the loop, but the
+    // restore closure is only handed back on the normal path. If a later
+    // iteration's calculateLayout (or a measure func it invokes) throws after an
+    // earlier iteration already hid one or more nodes, the throw would leak that
+    // DISPLAY_NONE onto the LIVE yoga tree — applyZeroContentGuards treats any
+    // already-DISPLAY_NONE node as legitimately hidden, so it is never un-hidden
+    // and the subtree stays permanently invisible. The callers' try/finally
+    // can't help: the closure was never returned. Un-hide what we hid before
+    // propagating, leaving the tree clean. The original error is rethrown as-is.
+    restore();
+    throw err;
+  }
+
+  return restore;
 }
