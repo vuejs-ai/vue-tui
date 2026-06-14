@@ -975,8 +975,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // string) so synchronization survives log-update's line diffing.
         if (synchronize) stdout.write(bsu);
         stdout.write(ansiEscapes.clearTerminal + frameState.fullStaticOutput + output);
-        // Sync log-update state so next render computes correct erase
-        writer.sync(outputToRender);
+        // Sync log-update with the SAME bytes we just wrote (raw `output`), NOT
+        // `outputToRender`. The direct write above emits raw `output` (no
+        // appended "\n"), so sync()'s recorded state — line count AND the
+        // hasTrailingNewline basis it feeds buildCursorSuffix — must reflect
+        // `output`, not the "\n"-suffixed `outputToRender`. They DIVERGE only
+        // when leaving fullscreen (a fullscreen frame shrinking below the
+        // viewport): there `outputToRender = output + "\n"` while the screen has
+        // raw `output`. Syncing `outputToRender` would (a) place the persistent
+        // caret one row too HIGH (sync emits buildCursorSuffix with
+        // hasTrailingNewline=true, basing the caret on row `visibleLineCount`
+        // instead of the real `visibleLineCount - 1`), and (b) record
+        // previousLineCount off by one so the next frame's return-to-bottom /
+        // erase is eraseLines(N+1) (G46 residue). This is the
+        // fullscreen→non-fullscreen sibling of #198. For the steady-state
+        // fullscreen and screen-reader sub-cases `outputToRender === output`, so
+        // this is byte-for-byte unchanged (G17: an empty SR frame still syncs ""
+        // → zero lines, no spurious blank line).
+        writer.sync(output);
         if (synchronize) stdout.write(esu);
       } else if (hasStaticOutput) {
         // Clear frame -> write static -> re-render frame via log-update
