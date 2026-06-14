@@ -162,6 +162,22 @@ function dirtyTextMeasureOwner(parent: TuiNode): void {
   else if (owner?.type === "tui-text") markTextDirty(owner);
 }
 
+/**
+ * Whether a text-leaf carrying `value` would be REJECTED by the text-context
+ * guard if inserted into `parent`. A bare string must live inside a <Text>
+ * context; an EMPTY text-leaf is exempt (Vue uses empty text-leaves as fragment
+ * anchors / its common clear path). Shared by `insert()` (its existing guard)
+ * and `setElementText()` (its pre-remove validation) so the two cannot drift —
+ * the condition must stay identical in both call sites.
+ */
+function rejectsTextLeaf(parent: TuiContainer, value: string): boolean {
+  return (
+    value !== "" &&
+    (parent.type === "tui-box" || parent.type === "root" || parent.type === "tui-static") &&
+    !isInsideTextOrTransformContext(parent)
+  );
+}
+
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
   const { onCommit } = options;
 
@@ -228,6 +244,15 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
 
   function setElementText(el: TuiNode, text: string): void {
     if (!isContainer(el)) return;
+    // Validate the target context BEFORE the destructive remove below: the
+    // text-leaf we're about to insert would otherwise hit insert()'s
+    // text-context guard and throw AFTER the children are already gone, leaving
+    // the node half-cleared (children removed, nothing inserted). Throw the same
+    // error up-front instead — shares rejectsTextLeaf() with insert() so the
+    // condition + message cannot drift.
+    if (rejectsTextLeaf(el, text)) {
+      throw new Error(`Text string "${text}" must be rendered inside <Text> component`);
+    }
     // Remove existing children first (copy since remove mutates the array).
     for (const child of Array.from(el.children)) remove(child);
     insert(createTextLeaf(text), el, null);
@@ -253,14 +278,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       throw new Error("<Box> can’t be nested inside <Text> component");
     }
 
-    // Text-leaf nodes must live inside a <Text> context.
-    // Skip empty text-leaves — Vue uses them as fragment anchors.
-    if (
-      child.type === "text-leaf" &&
-      child.value !== "" &&
-      (parentC.type === "tui-box" || parentC.type === "root" || parentC.type === "tui-static") &&
-      !isInsideTextOrTransformContext(parentC)
-    ) {
+    // Text-leaf nodes must live inside a <Text> context. The rejection condition
+    // (incl. the empty-text-leaf fragment-anchor exemption) lives in
+    // rejectsTextLeaf() so setElementText()'s pre-remove pre-check stays in sync.
+    if (child.type === "text-leaf" && rejectsTextLeaf(parentC, child.value)) {
       throw new Error(`Text string "${child.value}" must be rendered inside <Text> component`);
     }
 
