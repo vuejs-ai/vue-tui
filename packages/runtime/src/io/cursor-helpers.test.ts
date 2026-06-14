@@ -120,4 +120,50 @@ describe("cursor-helpers", () => {
     expect(result).not.toContain(hideCursorEscape);
     expect(result).toContain(showCursorEscape);
   });
+
+  // Fullscreen frames are written WITHOUT a trailing newline (render.ts:962
+  // `isFullscreen ? output : output + "\n"`), so the cursor rests on the LAST
+  // visible row (visibleLineCount - 1), not one row below the content like the
+  // trailing-newline case. buildCursorSuffix must move up from that real row, or
+  // it overshoots by one — misplacing a declared caret and then making the next
+  // frame's buildReturnToBottom undershoot the true bottom (stale-row corruption).
+  test("buildCursorSuffix - no trailing newline moves up from the last visible row", () => {
+    // hasTrailingNewline=false: cursor rests at row 2 (visibleLineCount-1), so
+    // moveUp = 2 - 1 = 1 (NOT 3 - 1 = 2 as the trailing-newline case computes).
+    const result = buildCursorSuffix(3, { x: 5, y: 1 }, undefined, false);
+    expect(result).toBe(ansiEscapes.cursorUp(1) + ansiEscapes.cursorTo(5) + showCursorEscape);
+  });
+
+  test("buildCursorSuffix - no trailing newline, single-line frame needs no cursorUp", () => {
+    // Single visible line, no trailing newline: cursor already on row 0, caret y=0,
+    // moveUp = 0 - 0 = 0 → no cursorUp (the trailing-newline case would emit up(1)).
+    const result = buildCursorSuffix(1, { x: 4, y: 0 }, undefined, false);
+    expect(result).toBe(ansiEscapes.cursorTo(4) + showCursorEscape);
+  });
+
+  test("buildCursorSuffix - trailing-newline default is unchanged (no regression)", () => {
+    // Omitting the flag (or passing true) keeps the original behavior exactly.
+    expect(buildCursorSuffix(3, { x: 5, y: 1 })).toBe(
+      buildCursorSuffix(3, { x: 5, y: 1 }, undefined, true),
+    );
+    expect(buildCursorSuffix(3, { x: 5, y: 1 })).toBe(
+      ansiEscapes.cursorUp(2) + ansiEscapes.cursorTo(5) + showCursorEscape,
+    );
+  });
+
+  test("buildCursorOnlySequence - no trailing newline threads the flag to the suffix", () => {
+    const result = buildCursorOnlySequence({
+      cursorWasShown: true,
+      previousLineCount: 3,
+      previousCursorPosition: { x: 0, y: 0 },
+      visibleLineCount: 3,
+      cursorPosition: { x: 3, y: 1 },
+      hasTrailingNewline: false,
+    });
+    const expected =
+      hideCursorEscape +
+      buildReturnToBottom(3, { x: 0, y: 0 }) +
+      buildCursorSuffix(3, { x: 3, y: 1 }, undefined, false);
+    expect(result).toBe(expected);
+  });
 });

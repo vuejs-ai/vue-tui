@@ -21,14 +21,23 @@ export const cursorPositionChanged = (
 /**
  * Build escape sequence to move cursor from bottom of output to the target
  * position and show it.
- * Assumes cursor is at (col 0, line visibleLineCount) — i.e. just after the
- * last output line.
+ *
+ * The starting row depends on the trailing newline. A frame written WITH a
+ * trailing newline leaves the cursor on the blank row just past the content
+ * (row `visibleLineCount`); a fullscreen frame is written WITHOUT a trailing
+ * newline (render.ts:962 `isFullscreen ? output : output + "\n"`), so the cursor
+ * stays on the LAST visible row (`visibleLineCount - 1`). `hasTrailingNewline`
+ * selects the correct basis — using `visibleLineCount` for a no-trailing-newline
+ * frame would move up one row too many, misplacing the declared caret and then
+ * desyncing the next frame's buildReturnToBottom (it would undershoot the true
+ * bottom, leaving stale rows). Defaults to true to preserve the trailing-newline
+ * callers byte-for-byte.
  *
  * The position is clamped to the visible region before emitting: under the
  * persistent-declaration re-emit (the caret is re-asserted every commit until
  * the declaration changes), a stale {x,y} left over from a larger frame —
  * after a resize, overflow, or content shrink — must not produce an
- * out-of-range move. `y` is clamped to `[0, visibleLineCount]` (so a y past the
+ * out-of-range move. `y` is clamped to `[0, cursorRow]` (so a y past the
  * shrunk content lands on the last visible line, never below it) and `x` to
  * `[0, width - 1]` when `width` is known (so a column past the terminal edge
  * lands at the rightmost cell, not beyond it). This is D5 in the cursor design
@@ -39,18 +48,21 @@ export const buildCursorSuffix = (
   visibleLineCount: number,
   cursorPosition: CursorPosition | undefined,
   width?: number,
+  hasTrailingNewline = true,
 ): string => {
   if (!cursorPosition) {
     return "";
   }
 
-  const clampedY = Math.max(0, Math.min(cursorPosition.y, visibleLineCount));
+  // The row the cursor actually rests on after the frame is written (see above).
+  const cursorRow = hasTrailingNewline ? visibleLineCount : Math.max(0, visibleLineCount - 1);
+  const clampedY = Math.max(0, Math.min(cursorPosition.y, cursorRow));
   const clampedX =
     width !== undefined && width > 0
       ? Math.max(0, Math.min(cursorPosition.x, width - 1))
       : Math.max(0, cursorPosition.x);
 
-  const moveUp = visibleLineCount - clampedY;
+  const moveUp = cursorRow - clampedY;
   return (
     (moveUp > 0 ? ansiEscapes.cursorUp(moveUp) : "") +
     ansiEscapes.cursorTo(clampedX) +
@@ -92,6 +104,10 @@ export type CursorOnlyInput = {
   visibleLineCount: number;
   cursorPosition: CursorPosition | undefined;
   width?: number;
+  // Whether the (unchanged) output ends with a newline; threaded to
+  // buildCursorSuffix so a fullscreen frame's caret lands on the right row.
+  // Defaults to true (trailing-newline) when omitted.
+  hasTrailingNewline?: boolean;
 };
 
 /**
@@ -102,7 +118,12 @@ export type CursorOnlyInput = {
 export const buildCursorOnlySequence = (input: CursorOnlyInput): string => {
   const hidePrefix = input.cursorWasShown ? hideCursorEscape : "";
   const returnToBottom = buildReturnToBottom(input.previousLineCount, input.previousCursorPosition);
-  const cursorSuffix = buildCursorSuffix(input.visibleLineCount, input.cursorPosition, input.width);
+  const cursorSuffix = buildCursorSuffix(
+    input.visibleLineCount,
+    input.cursorPosition,
+    input.width,
+    input.hasTrailingNewline ?? true,
+  );
   return hidePrefix + returnToBottom + cursorSuffix;
 };
 

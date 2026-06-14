@@ -709,6 +709,51 @@ describe("incremental rendering - no trailing newline (fullscreen)", () => {
     const lastCursorNextLine = thirdCall.lastIndexOf(ansiEscapes.cursorNextLine);
     expect(lastCursorNextLine).toBe(-1);
   });
+
+  // Regression: a fullscreen frame has NO trailing newline, so the cursor rests
+  // on the last visible row, not one below it. The declared-caret suffix must
+  // move up from that real row. Before the fix it used the trailing-newline
+  // basis and moved up one row too many — placing the caret a row too high and
+  // then making the next frame's return-to-bottom undershoot (stale-row
+  // corruption). Found by differential fuzzing the incremental renderer.
+  test("declared caret lands on the correct row on a fullscreen first render", () => {
+    const stdout = createStdout();
+    const render = logUpdate.create(stdout, {
+      showCursor: true,
+      incremental: true,
+    });
+
+    // 3 visible rows, no trailing newline; caret on row 1. Cursor rests on row 2
+    // (last visible), so moveUp must be 2 - 1 = 1 (NOT 3 - 1 = 2).
+    render.setCursorPosition({ x: 5, y: 1 });
+    render("L1\nL2\nL3");
+
+    const written = stdout.write.firstCall.args[0] as string;
+    expect(
+      written.endsWith(ansiEscapes.cursorUp(1) + ansiEscapes.cursorTo(5) + showCursorEscape),
+    ).toBe(true);
+  });
+
+  test("declared caret lands on the correct row on a fullscreen diff update", () => {
+    const stdout = createStdout();
+    const render = logUpdate.create(stdout, {
+      showCursor: true,
+      incremental: true,
+    });
+
+    render.setCursorPosition({ x: 5, y: 1 });
+    render("L1\nL2\nL3");
+
+    // Diff path (a line changed). 3 visible rows, no trailing newline, caret on
+    // row 0 → moveUp must be 2 - 0 = 2 (the real last row, not 3).
+    render.setCursorPosition({ x: 2, y: 0 });
+    render("X1\nL2\nL3");
+
+    const second = stdout.write.secondCall.args[0] as string;
+    expect(
+      second.endsWith(ansiEscapes.cursorUp(2) + ansiEscapes.cursorTo(2) + showCursorEscape),
+    ).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
