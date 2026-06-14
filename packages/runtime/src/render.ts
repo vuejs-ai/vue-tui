@@ -418,16 +418,36 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stdoutWritable = stdout
       ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
       : false;
-    // Final-frame re-emit at unmount. Ink's settleThrottle path (ink.tsx:749-762)
-    // runs a final onRender when shouldRenderFinalFrame is true; for the DEBUG
-    // path throttledOnRender is undefined, so `!this.throttledOnRender` makes
-    // shouldRenderFinalFrame unconditionally true and Ink re-emits the last frame
-    // before the unmount-time trailing write. Mirror that here: both interactive
-    // and debug get a final mountedCommit() (debug commits are unthrottled, so a
-    // re-commit always re-writes `fullStaticOutput + frame`). Non-interactive-
-    // non-debug stays excluded — its frame is deferred to the trailing-write block
-    // below, matching Ink's `this.lastOutput + '\n'` branch (ink.tsx:817-818).
-    if ((mountedInteractive || mountedDebug) && mountedCommit && stdoutWritable) {
+    // Final commit at unmount, mirroring Ink's settleThrottle path
+    // (ink.tsx:749-762): unmount FLUSHES the throttled render so lastOutput
+    // reflects the CURRENT tree before any teardown write. We just cancel()ed
+    // the scheduler, which DISCARDS a pending trailing-edge commit — so a
+    // reactive change deferred to that trailing edge would be lost. Re-running
+    // commit() here recomputes the frame against the live tree and refreshes
+    // frameState.lastOutput, in EVERY mode:
+    //   - interactive: re-emits the last frame via the writer (Ink ink.tsx:756);
+    //   - debug: unthrottled, so a re-commit re-writes `fullStaticOutput + frame`
+    //     (the debug branch's stdout.write — gated !teardownStarted so it doesn't
+    //     push a spurious live frames[] entry);
+    //   - non-interactive non-debug: the commit only refreshes frameState
+    //     (lastOutput/lastOutputToRender) and writes write-once <Static>; it
+    //     DEFERS the dynamic frame to the trailing-write block below. So this
+    //     refresh feeds the correct, latest `lastFrame + "\n"` into that write
+    //     (matching Ink's `this.lastOutput + '\n'`, ink.tsx:817-818) WITHOUT
+    //     double-writing the dynamic frame. Before this, a deferred trailing
+    //     change unmounted within the throttle window emitted the STALE
+    //     last-committed frame instead of the latest tree.
+    // EXCEPTION — non-interactive non-debug ERROR teardown: do NOT re-commit. A
+    // re-commit would refresh frameState.lastOutput to the ErrorOverview and the
+    // trailing-write block would then emit it, but the non-interactive error
+    // path paints NO overview (only the trailing newline), matching Ink/main
+    // (see error-capture-race.test.tsx). Interactive/debug still commit on error
+    // (the overview IS shown on screen there), so they keep the unconditional path.
+    if (
+      mountedCommit &&
+      stdoutWritable &&
+      (mountedInteractive || mountedDebug || !isErrorInput(pendingExitError))
+    ) {
       try {
         mountedCommit();
       } catch {
@@ -461,7 +481,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // final-frame re-emit above re-wrote the last one), so only a trailing
       // newline is owed — Ink writes a bare "\n" here unconditionally. In
       // non-debug non-interactive mode the dynamic frame was deferred during
-      // rendering, so write it now as `lastFrame + "\n"`.
+      // rendering; the final commit() above refreshed lastOutput to the current
+      // tree, so write that latest frame now as `lastFrame + "\n"`.
       if (mountedDebug) {
         writeBestEffort(mountedAppContext.stdout, "\n");
       } else {
