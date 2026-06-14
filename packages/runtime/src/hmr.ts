@@ -92,3 +92,17 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
     hot.send("vue-tui:request-reload");
   });
 }
+
+// Reset the shared dev status to "ok". `devState` is a module-global that a
+// PREVIOUS app in the same dev process may have left in an error/update state
+// (createApp() can run multiple times: two apps, unmount + re-create, a tool
+// that restarts the UI, a test run). Nothing else clears it on the create path,
+// so without this a freshly-mounted app injects the stale state and renders the
+// old "Build Error" / "[HMR] updated" overlay instead of its own content.
+// render()'s `__VUE_TUI_DEV__` block calls this once per app setup. We don't
+// touch `pendingResetTimer` here: its firing is guarded on `type === "update"`,
+// which this reset clears, and the vite:beforeUpdate handler clears any prior
+// timer before arming a new one — so a stale timer can't clobber a later app.
+export function resetDevState(): void {
+  devState.value = { type: "ok" };
+}
