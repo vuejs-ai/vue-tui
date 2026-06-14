@@ -37,6 +37,15 @@ const realHot = (import.meta as { hot?: HotContext }).hot;
 // calls would leak N copies of every handler — firing each HMR event N times.
 let initialized = false;
 
+// Handle for the pending "update → ok" reset. At most ONE may be live at a time:
+// rapid successive updates would otherwise STACK independent timers, and an
+// earlier update's timer firing while a later update is still showing would wipe
+// the newer status line early (its guard only checks type === "update", which is
+// still true for the newer update). We therefore clear the previous timer before
+// scheduling a new one. setTimeout's return type differs (number in DOM,
+// Timeout in Node), so use ReturnType<typeof setTimeout>.
+let pendingResetTimer: ReturnType<typeof setTimeout> | undefined;
+
 // `hot` is injectable (defaulting to the real import.meta.hot) purely for tests:
 // import.meta.hot is undefined under vitest, so the body is otherwise unreachable.
 export function initHmrBridge(hot: HotContext | undefined = realHot): void {
@@ -45,21 +54,38 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
   initialized = true;
 
   hot.on("vite:error", (payload: unknown) => {
+    // An error supersedes any pending update → ok reset; clear it so a stale
+    // timer can't later overwrite the error status with "ok".
+    if (pendingResetTimer !== undefined) {
+      clearTimeout(pendingResetTimer);
+      pendingResetTimer = undefined;
+    }
     const p = payload as { err: DevErrorInfo };
     devState.value = { type: "error", error: p.err };
   });
 
   hot.on("vite:beforeUpdate", (payload: unknown) => {
+    // Cancel the previous update's reset so only the LATEST update's timer is
+    // live — otherwise a stacked earlier timer resets this newer status early.
+    if (pendingResetTimer !== undefined) {
+      clearTimeout(pendingResetTimer);
+      pendingResetTimer = undefined;
+    }
     const p = payload as { updates: Array<{ path: string }> };
     devState.value = {
       type: "update",
       paths: p.updates.map((u) => u.path),
     };
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      pendingResetTimer = undefined;
       if (devState.value.type === "update") {
         devState.value = { type: "ok" };
       }
     }, 2000);
+    pendingResetTimer = timer;
+    // Don't hold the event loop open for a transient status reset. .unref() only
+    // exists on Node's Timeout (not the DOM number), so call it optionally.
+    timer.unref?.();
   });
 
   hot.on("vite:beforeFullReload", () => {
