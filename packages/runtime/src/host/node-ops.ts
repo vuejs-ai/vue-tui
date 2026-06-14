@@ -21,6 +21,10 @@ import {
   isYogaProp,
   BORDER_PROPS,
   reconcileBorderEdges,
+  MARGIN_PROPS,
+  PADDING_PROPS,
+  reconcileMarginEdges,
+  reconcilePaddingEdges,
   bindTextMeasure,
   markTextDirty,
   markTransformDirty,
@@ -70,6 +74,26 @@ const STYLE_PROPS = new Set([
   "overflow",
   "overflowX",
   "overflowY",
+  // Margin/padding families are yoga-only (not visual), but each physical edge
+  // depends on up to three of these props together, so reconcileMargin/PaddingEdges
+  // must read the full set from el.props. Storing them here is how they get there;
+  // no paint-pass consumer reads margin/padding from el.props (verified), so this
+  // is purely the reconcile's data source — same role STYLE_PROPS plays for the
+  // border per-edge toggles above.
+  "margin",
+  "marginX",
+  "marginY",
+  "marginTop",
+  "marginBottom",
+  "marginLeft",
+  "marginRight",
+  "padding",
+  "paddingX",
+  "paddingY",
+  "paddingTop",
+  "paddingBottom",
+  "paddingLeft",
+  "paddingRight",
 ]);
 
 /** Walk up the DOM tree to find the root node. */
@@ -427,6 +451,19 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // border drawn).
         if (BORDER_PROPS.has(key)) {
           reconcileBorderEdges(el, (el as { props: Record<string, unknown> }).props);
+        }
+        // Margin/padding edges depend jointly on the specific edge + axis + all-edges
+        // shorthands (a yoga setter sees one value, and a more-specific edge overrides
+        // a shorthand even at 0), so any family-prop change triggers a full recompute
+        // from el.props — same pattern as border. The per-prop yoga setters are no-ops;
+        // these reconcilers are the single source of truth. el.props was just updated
+        // above (margin/padding keys are in STYLE_PROPS), so a withdrawn override
+        // correctly falls back to the surviving shorthand. (G19)
+        if (MARGIN_PROPS.has(key)) {
+          reconcileMarginEdges(el, (el as { props: Record<string, unknown> }).props);
+        }
+        if (PADDING_PROPS.has(key)) {
+          reconcilePaddingEdges(el, (el as { props: Record<string, unknown> }).props);
         }
       } else if (STYLE_PROPS.has(key)) {
         (el as { props: Record<string, unknown> }).props[key] = next;

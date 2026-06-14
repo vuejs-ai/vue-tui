@@ -309,6 +309,35 @@ current-props model, or API conventions.
   The cost is limited to explicit nullish public bindings; true omission remains Ink-parity.
   Tests: `prop-reset.test.tsx`.
 
+#### Withdrawing a `margin`/`padding` edge override falls back to the surviving shorthand
+
+- **Ink:** when a box has both a shorthand and a more-specific override of the same family
+  (`margin={5} marginTop={8}`, `margin={5} marginX={2}`, padding equivalents) and the override
+  is later withdrawn, the edge **collapses to 0**, not back to the surviving shorthand
+  (run-verified vs v7.0.4, both spread-removal and explicit `marginTop={undefined}`: with
+  `margin:5 marginTop:8` the top margin renders 8 cells, and after removing `marginTop` it
+  renders **0**, not 5). The cause is yoga edge precedence — a per-edge value (`EDGE_TOP`)
+  overrides the all-edges shorthand (`EDGE_ALL`) **even when reset to 0** — combined with
+  Ink's `applyMarginStyles`/`applyPaddingStyles` emitting one yoga setter per prop, so a
+  withdrawn `marginTop` becomes `setMargin(EDGE_TOP, 0)` that still beats the surviving
+  `EDGE_ALL=5`.
+- **vue-tui:** the withdrawn override falls back to whatever shorthand still applies
+  (`marginTop` removed from `margin={5} marginTop={8}` → top margin = 5). On any margin/padding
+  prop change, `reconcileMarginEdges`/`reconcilePaddingEdges` recompute **all four physical
+  edges** from the box's full current props with most-specific-wins precedence
+  (`top = marginTop ?? marginY ?? margin ?? 0`, etc.) and zero the composite edges, so no stale
+  per-edge value can shadow the shorthand. This mirrors the existing `reconcileBorderEdges`
+  pattern (an edge that depends on several props can't be set correctly by a single
+  per-prop yoga setter).
+- **Why:** render = f(current props): with current props `{margin: 5}` the top margin is 5, full
+  stop — a value that is no longer set must not linger via yoga's edge layering (G19, the same
+  declarative-reset principle as the `display` and `flexDirection`/`flexWrap` entries above).
+  This is NOT an Ink-parity item: Ink and pre-fix vue-tui both collapsed to 0 (the identical
+  bug); the fix diverges from Ink by being declaratively correct. Verified against
+  yoga-layout@3.2.1 that the recompute produces identical computed edges as the old per-setter
+  code for the SET path (no layout regression), and the correct fallback on removal.
+  Tests: `prop-reset.test.tsx`, `unit/yoga-prop-reset.test.ts`.
+
 #### Public composable naming follows Vue conventions
 
 - **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...), but return-type naming

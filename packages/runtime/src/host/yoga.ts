@@ -278,30 +278,34 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Ink default: rowGap=0 (yoga default). Reset to 0 on removal. (G19)
   rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v == null ? 0 : (v as number)),
 
-  // Ink default: margin=0 (yoga default). Reset all margin edges to 0 on removal. (G19)
-  margin: (n, v) => n.setMargin(Yoga.EDGE_ALL, v == null ? 0 : (v as number)),
-  // marginX/marginY map to the HORIZONTAL/VERTICAL axis edges (matching Ink
-  // styles.ts applyMarginStyles). These compose with the specific edges per
-  // yoga precedence (EDGE_START/END/TOP/BOTTOM override the axis), so removing
-  // the axis resets only the axis edge and never clobbers a surviving
-  // marginLeft/Right/Top/Bottom. (Blocker 1)
-  marginX: (n, v) => n.setMargin(Yoga.EDGE_HORIZONTAL, v == null ? 0 : (v as number)),
-  marginY: (n, v) => n.setMargin(Yoga.EDGE_VERTICAL, v == null ? 0 : (v as number)),
-  marginTop: (n, v) => n.setMargin(Yoga.EDGE_TOP, v == null ? 0 : (v as number)),
-  marginBottom: (n, v) => n.setMargin(Yoga.EDGE_BOTTOM, v == null ? 0 : (v as number)),
-  marginLeft: (n, v) => n.setMargin(Yoga.EDGE_START, v == null ? 0 : (v as number)),
-  marginRight: (n, v) => n.setMargin(Yoga.EDGE_END, v == null ? 0 : (v as number)),
+  // margin/padding families do NOT compute their own edge widths here. Each
+  // PHYSICAL edge depends on up to three props together (the specific edge, the
+  // axis shorthand, the all-edges shorthand), and per yoga precedence the
+  // more-specific edge OVERRIDES the shorthand even when set to 0 — so a single
+  // yoga setter that sees one value can't reconcile the family. In particular,
+  // withdrawing `marginTop` from `margin={5} marginTop={8}` used to setMargin(
+  // EDGE_TOP,0), and EDGE_TOP=0 still overrides EDGE_ALL=5, collapsing the top
+  // margin to 0 instead of falling back to the surviving margin={5}. patchProp
+  // owns the joint reconciliation via reconcileMarginEdges / reconcilePaddingEdges
+  // (below), which read the full el.props and resolve each physical edge with
+  // explicit precedence. These no-op entries exist only so isYogaProp still routes
+  // margin/padding props through the yoga branch (which also stores them into
+  // el.props for the reconcile). (G19; mirrors the border reconcile pattern.)
+  margin: () => {},
+  marginX: () => {},
+  marginY: () => {},
+  marginTop: () => {},
+  marginBottom: () => {},
+  marginLeft: () => {},
+  marginRight: () => {},
 
-  // Ink default: padding=0 (yoga default). Reset all padding edges to 0 on removal. (G19)
-  padding: (n, v) => n.setPadding(Yoga.EDGE_ALL, v == null ? 0 : (v as number)),
-  // paddingX/paddingY map to the HORIZONTAL/VERTICAL axis edges (matching Ink
-  // styles.ts applyPaddingStyles); same composition/reset semantics as margin.
-  paddingX: (n, v) => n.setPadding(Yoga.EDGE_HORIZONTAL, v == null ? 0 : (v as number)),
-  paddingY: (n, v) => n.setPadding(Yoga.EDGE_VERTICAL, v == null ? 0 : (v as number)),
-  paddingTop: (n, v) => n.setPadding(Yoga.EDGE_TOP, v == null ? 0 : (v as number)),
-  paddingBottom: (n, v) => n.setPadding(Yoga.EDGE_BOTTOM, v == null ? 0 : (v as number)),
-  paddingLeft: (n, v) => n.setPadding(Yoga.EDGE_LEFT, v == null ? 0 : (v as number)),
-  paddingRight: (n, v) => n.setPadding(Yoga.EDGE_RIGHT, v == null ? 0 : (v as number)),
+  padding: () => {},
+  paddingX: () => {},
+  paddingY: () => {},
+  paddingTop: () => {},
+  paddingBottom: () => {},
+  paddingLeft: () => {},
+  paddingRight: () => {},
 
   // borderStyle and the per-edge toggles do NOT compute their own edge widths
   // here: an edge's width depends on BOTH borderStyle and that edge's per-edge
@@ -467,6 +471,103 @@ export function reconcileBorderEdges(node: YogaCarrier, props: Record<string, un
   y.setBorder(Yoga.EDGE_BOTTOM, props["borderBottom"] === false ? 0 : borderWidth);
   y.setBorder(Yoga.EDGE_LEFT, props["borderLeft"] === false ? 0 : borderWidth);
   y.setBorder(Yoga.EDGE_RIGHT, props["borderRight"] === false ? 0 : borderWidth);
+}
+
+/** Props whose change requires recomputing the yoga margin edges. */
+export const MARGIN_PROPS = new Set([
+  "margin",
+  "marginX",
+  "marginY",
+  "marginTop",
+  "marginBottom",
+  "marginLeft",
+  "marginRight",
+]);
+
+/** Props whose change requires recomputing the yoga padding edges. */
+export const PADDING_PROPS = new Set([
+  "padding",
+  "paddingX",
+  "paddingY",
+  "paddingTop",
+  "paddingBottom",
+  "paddingLeft",
+  "paddingRight",
+]);
+
+// A prop counts as "present" only when its el.props value is a FINITE number.
+// Require finiteness, not merely non-null: a withdrawn prop (null/undefined) OR a
+// present-but-non-finite value (NaN/±Infinity from a bad user calc like 0/0) must
+// FALL THROUGH to the next precedence level (axis → all → 0), not resolve to 0.
+// This preserves the prior setMargin(EDGE_TOP, NaN) → yoga-fallback behavior:
+// yoga treated NaN as unset so the edge fell back to the surviving shorthand, but
+// the composite edges are now zeroed and can no longer provide that fallback
+// implicitly — so it must be made explicit here. (An explicit 0 is finite, so it
+// still counts as present and correctly overrides the shorthand to 0.)
+function present(props: Record<string, unknown>, key: string): boolean {
+  const v = props[key];
+  return v != null && Number.isFinite(Number(v));
+}
+
+/**
+ * Recompute all four PHYSICAL margin edges from a box's full prop set. Each edge
+ * resolves with most-specific-wins precedence (specific edge → axis → all → 0):
+ *   top = marginTop ?? marginY ?? margin ?? 0   (etc.)
+ * then the four physical edges are set and the composite edges (ALL/HORIZONTAL/
+ * VERTICAL) are ZEROED so nothing layers on top of them.
+ *
+ * Why this and not the obvious per-setter mapping (margin→EDGE_ALL, marginX→
+ * EDGE_HORIZONTAL, marginTop→EDGE_TOP, …): an edge depends on up to THREE props
+ * together and a single yoga setter sees only one. Per yoga edge precedence a more
+ * specific edge OVERRIDES a composite EVEN WHEN SET TO 0, so resetting a withdrawn
+ * `marginTop` to 0 (the old code) still beats a surviving `margin={5}` →
+ * `getComputedMargin(TOP)` collapsed to 0 instead of 5. Resolving every physical
+ * edge from el.props and zeroing the composites removes that layering entirely, so
+ * a withdrawn override falls back to whatever shorthand still applies. Verified
+ * against yoga-layout@3.2.1 to produce identical getComputedMargin for the SET path
+ * as the old per-setter code across representative combinations. (G19)
+ *
+ * NOTE the EDGE_START/END (not LEFT/RIGHT) mapping for left/right is preserved from
+ * the prior margin setters — margin uses start/end edges, padding uses left/right.
+ */
+export function reconcileMarginEdges(node: YogaCarrier, props: Record<string, unknown>): void {
+  const y = node.yoga as YogaNode;
+  const pick = (specific: string, axis: string): number => {
+    if (present(props, specific)) return Number(props[specific]);
+    if (present(props, axis)) return Number(props[axis]);
+    if (present(props, "margin")) return Number(props["margin"]);
+    return 0;
+  };
+  y.setMargin(Yoga.EDGE_TOP, pick("marginTop", "marginY"));
+  y.setMargin(Yoga.EDGE_BOTTOM, pick("marginBottom", "marginY"));
+  y.setMargin(Yoga.EDGE_START, pick("marginLeft", "marginX"));
+  y.setMargin(Yoga.EDGE_END, pick("marginRight", "marginX"));
+  // Zero the composites so the four physical edges above are authoritative.
+  y.setMargin(Yoga.EDGE_ALL, 0);
+  y.setMargin(Yoga.EDGE_HORIZONTAL, 0);
+  y.setMargin(Yoga.EDGE_VERTICAL, 0);
+}
+
+/**
+ * Padding analogue of {@link reconcileMarginEdges}. Same precedence and composite-
+ * zeroing, but padding maps left/right to EDGE_LEFT/EDGE_RIGHT (margin uses
+ * START/END) — preserving the prior padding setters' edge mapping. (G19)
+ */
+export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, unknown>): void {
+  const y = node.yoga as YogaNode;
+  const pick = (specific: string, axis: string): number => {
+    if (present(props, specific)) return Number(props[specific]);
+    if (present(props, axis)) return Number(props[axis]);
+    if (present(props, "padding")) return Number(props["padding"]);
+    return 0;
+  };
+  y.setPadding(Yoga.EDGE_TOP, pick("paddingTop", "paddingY"));
+  y.setPadding(Yoga.EDGE_BOTTOM, pick("paddingBottom", "paddingY"));
+  y.setPadding(Yoga.EDGE_LEFT, pick("paddingLeft", "paddingX"));
+  y.setPadding(Yoga.EDGE_RIGHT, pick("paddingRight", "paddingX"));
+  y.setPadding(Yoga.EDGE_ALL, 0);
+  y.setPadding(Yoga.EDGE_HORIZONTAL, 0);
+  y.setPadding(Yoga.EDGE_VERTICAL, 0);
 }
 
 const RESETTABLE_PROPS = new Set([
