@@ -91,6 +91,13 @@ export function createProcessManager(options: ProcessManagerOptions) {
     async shutdown() {
       if (restartTimer) clearTimeout(restartTimer);
       if (child) {
+        // Ask the child to stop gracefully FIRST, mirroring restart(). The dev
+        // process gets SIGINT/SIGTERM directly, but the child is a plain spawn
+        // with no shared signal — it never sees the parent's signal. Without
+        // this SIGTERM, waitForExit blocks the full 2000ms and then SIGKILL
+        // (uncatchable) skips the child's teardown: cursor stays hidden, the
+        // alternate screen/kitty keyboard/raw mode are never restored.
+        child.kill("SIGTERM");
         await waitForExit(child, 2000);
         if (child) child.kill("SIGKILL");
       }
