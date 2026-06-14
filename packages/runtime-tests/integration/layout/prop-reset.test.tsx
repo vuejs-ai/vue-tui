@@ -283,6 +283,124 @@ test("marginX composes with marginLeft (specific edge wins) (Blocker 1)", async 
   expect(lastFrame({ trimLines: true })).toBe("     X  Y");
 });
 
+// Withdrawing a more-specific edge override must fall back to the surviving
+// shorthand, NOT collapse to 0. With `margin={5} marginTop={8}`, the per-edge
+// EDGE_TOP overrides EDGE_ALL; the old per-setter code reset EDGE_TOP to 0 on
+// removal, and EDGE_TOP=0 still overrides EDGE_ALL=5, so the top margin wrongly
+// collapsed to 0 instead of falling back to the surviving margin={5}. The
+// family-recompute (reconcileMarginEdges) resolves each physical edge from the
+// full prop set, so the withdrawn marginTop correctly falls back to 5.
+
+test("removing marginTop falls back to surviving margin shorthand (G19 family-recompute)", async () => {
+  // margin={5} marginTop={8}: top=8 while set. Remove marginTop → top must fall
+  // back to margin=5 (5 blank lines above 'x'), NOT collapse to 0.
+  const hasTop = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="column" margin={5} {...(hasTop.value ? { marginTop: 8 } : {})}>
+      <Text>x</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // margin=5 left + marginTop=8 → 8 blank rows then "     x"
+  expect(lastFrame({ trimLines: true })).toBe("\n\n\n\n\n\n\n\n     x\n\n\n\n\n");
+
+  hasTop.value = false;
+  await nextTick();
+  // marginTop withdrawn → top falls back to margin=5 (5 blank rows), NOT 0
+  expect(lastFrame({ trimLines: true })).toBe("\n\n\n\n\n     x\n\n\n\n\n");
+});
+
+test("removing marginX falls back to surviving margin shorthand (G19 family-recompute)", async () => {
+  // margin={5} marginX={2}: left/right=2 while set. Remove marginX → left/right
+  // must fall back to margin=5, NOT collapse to 0.
+  const hasX = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="row">
+      <Box margin={5} {...(hasX.value ? { marginX: 2 } : {})}>
+        <Text>X</Text>
+      </Box>
+      <Text>Y</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // Inner box has top/bottom margin 5 and left/right margin 2 (marginX). In the
+  // row, sibling Y has no margin so it sits at row 0 col 5 (after the inner box's
+  // 2-left + X + 2-right = 5 wide); X sits at row 5 col 2.
+  expect(lastFrame({ trimLines: true })).toBe("     Y\n\n\n\n\n  X\n\n\n\n\n");
+
+  hasX.value = false;
+  await nextTick();
+  // marginX withdrawn → left/right fall back to margin=5. Inner box is now
+  // 5 + X + 5 = 11 wide, so Y moves to col 11; X sits at row 5 col 5. NOT col 0.
+  expect(lastFrame({ trimLines: true })).toBe("           Y\n\n\n\n\n     X\n\n\n\n\n");
+});
+
+test("removing paddingTop falls back to surviving padding shorthand (G19 family-recompute)", async () => {
+  // padding={4} paddingTop={8}: top pad=8 while set. Remove paddingTop → top must
+  // fall back to padding=4, NOT collapse to 0.
+  const hasTop = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="column" padding={4} {...(hasTop.value ? { paddingTop: 8 } : {})}>
+      <Text>x</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // top pad 8 → 8 blank rows then "    x" (4 left pad)
+  expect(lastFrame({ trimLines: true })).toBe("\n\n\n\n\n\n\n\n    x\n\n\n\n");
+
+  hasTop.value = false;
+  await nextTick();
+  // paddingTop withdrawn → top pad falls back to padding=4 (4 blank rows), NOT 0
+  expect(lastFrame({ trimLines: true })).toBe("\n\n\n\n    x\n\n\n\n");
+});
+
+test("removing paddingX falls back to surviving padding shorthand (G19 family-recompute)", async () => {
+  // padding={4} paddingX={1}: left/right pad=1 while set. Remove paddingX →
+  // left/right must fall back to padding=4, NOT collapse to 0.
+  const hasX = shallowRef(true);
+
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="row">
+      <Box padding={4} {...(hasX.value ? { paddingX: 1 } : {})}>
+        <Text>X</Text>
+      </Box>
+      <Text>Y</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // Inner box has top/bottom padding 4 and left/right padding 1 (paddingX). The
+  // box is 1 + X + 1 = 3 wide, so sibling Y sits at row 0 col 3; X at row 4 col 1.
+  expect(lastFrame({ trimLines: true })).toBe("   Y\n\n\n\n X\n\n\n\n");
+
+  hasX.value = false;
+  await nextTick();
+  // paddingX withdrawn → left/right pad fall back to padding=4. Inner box is now
+  // 4 + X + 4 = 9 wide, so Y moves to col 9; X sits at row 4 col 4. NOT col 0.
+  expect(lastFrame({ trimLines: true })).toBe("         Y\n\n\n\n    X\n\n\n\n");
+});
+
+test("keeping marginTop over margin shorthand still wins (no-regression)", async () => {
+  // Control: with BOTH margin={5} and marginTop={8} present and nothing removed,
+  // the more-specific marginTop=8 must win for the top edge while the other edges
+  // stay at margin=5. Guards against the family-recompute over-zeroing.
+  const Dynamic = defineComponent(() => () => (
+    <Box flexDirection="column" margin={5} marginTop={8}>
+      <Text>x</Text>
+    </Box>
+  ));
+
+  const { lastFrame } = await render(Dynamic, { columns: 100 });
+  // 8 blank rows above, 5 left margin, then trailing 5 below
+  expect(lastFrame({ trimLines: true })).toBe("\n\n\n\n\n\n\n\n     x\n\n\n\n\n");
+});
+
 // Removing `display` resets to the DEFAULT (visible / DISPLAY_FLEX), not persist
 // and not hide. This is a DELIBERATE divergence from Ink documented in
 // .agents/docs/ink-divergences.md ("Removing `display` resets to the default"):
