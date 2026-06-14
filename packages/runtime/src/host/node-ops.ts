@@ -19,6 +19,8 @@ import {
   removeYogaChild,
   applyYogaProp,
   isYogaProp,
+  BORDER_PROPS,
+  reconcileBorderEdges,
   bindTextMeasure,
   markTextDirty,
   markTransformDirty,
@@ -392,25 +394,18 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         if (STYLE_PROPS.has(key)) {
           (el as { props: Record<string, unknown> }).props[key] = next;
         }
-        // Special case: borderStyle resets all four yoga border-edge widths to
-        // 1 (or 0). If per-edge toggles (borderTop/Bottom/Left/Right) were
-        // already applied before this patch, their values were clobbered.
-        // Re-apply any per-edge toggles that are stored in el.props so that
-        // yoga reflects the user's explicit per-edge settings.
-        //
-        // Only re-apply when `next` is truthy (i.e. a border style is actually
-        // being set). When borderStyle is cleared/undefined, applyYogaProp sets
-        // all edges to 0 which is the correct final state — there is nothing to
-        // restore, and re-applying per-edge defaults (e.g. borderTop:true from
-        // Box component defaults) would incorrectly reserve border space even
-        // though no border is drawn.
-        if (key === "borderStyle" && next) {
-          const props = (el as { props: Record<string, unknown> }).props;
-          for (const edge of ["borderTop", "borderBottom", "borderLeft", "borderRight"] as const) {
-            if (props[edge] !== undefined) {
-              applyYogaProp(el, edge, props[edge]);
-            }
-          }
+        // Border edge widths depend jointly on borderStyle AND each per-edge prop
+        // (a yoga setter sees only one value), so any border-prop change triggers a
+        // full recompute from el.props — mirroring Ink's applyBorderStyles, which
+        // rewrites all four edges on any border change. The per-edge yoga setters
+        // are intentional no-ops; this is the single source of truth. Reading
+        // el.props (just updated above for STYLE_PROPS) means borderStyle flipping
+        // in EITHER direction is handled: unset→set re-reserves, set→unset zeroes,
+        // and a per-edge toggle while borderStyle stays unset reserves nothing (so
+        // the borderTop/Left/etc defaults of `true` never inset content with no
+        // border drawn).
+        if (BORDER_PROPS.has(key)) {
+          reconcileBorderEdges(el, (el as { props: Record<string, unknown> }).props);
         }
       } else if (STYLE_PROPS.has(key)) {
         (el as { props: Record<string, unknown> }).props[key] = next;

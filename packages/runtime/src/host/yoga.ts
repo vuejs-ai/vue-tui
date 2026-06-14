@@ -303,18 +303,18 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   paddingLeft: (n, v) => n.setPadding(Yoga.EDGE_LEFT, v == null ? 0 : (v as number)),
   paddingRight: (n, v) => n.setPadding(Yoga.EDGE_RIGHT, v == null ? 0 : (v as number)),
 
-  borderStyle: (n, v) => {
-    // Border occupies 1 cell on every side when a style is set.
-    const w = v ? 1 : 0;
-    n.setBorder(Yoga.EDGE_TOP, w);
-    n.setBorder(Yoga.EDGE_BOTTOM, w);
-    n.setBorder(Yoga.EDGE_LEFT, w);
-    n.setBorder(Yoga.EDGE_RIGHT, w);
-  },
-  borderTop: (n, v) => n.setBorder(Yoga.EDGE_TOP, v ? 1 : 0),
-  borderBottom: (n, v) => n.setBorder(Yoga.EDGE_BOTTOM, v ? 1 : 0),
-  borderLeft: (n, v) => n.setBorder(Yoga.EDGE_LEFT, v ? 1 : 0),
-  borderRight: (n, v) => n.setBorder(Yoga.EDGE_RIGHT, v ? 1 : 0),
+  // borderStyle and the per-edge toggles do NOT compute their own edge widths
+  // here: an edge's width depends on BOTH borderStyle and that edge's per-edge
+  // prop together, and a yoga setter only sees one value. patchProp owns the
+  // joint reconciliation via reconcileBorderEdges (below), which reads the full
+  // el.props and mirrors Ink's applyBorderStyles. These no-op entries exist only
+  // so isYogaProp still routes border props through the yoga branch (which also
+  // stores them into el.props for the paint pass).
+  borderStyle: () => {},
+  borderTop: () => {},
+  borderBottom: () => {},
+  borderLeft: () => {},
+  borderRight: () => {},
 
   // Ink styles.ts applyDisplayStyles: `display === 'flex' ? DISPLAY_FLEX : DISPLAY_NONE`,
   // so ANY present value that isn't 'flex' (incl. off-spec strings reachable via a TS
@@ -437,6 +437,36 @@ function toJustify(v: string): Justify {
 
 export function isYogaProp(key: string): boolean {
   return Object.hasOwn(YOGA_PROP_SETTERS, key);
+}
+
+/** Props whose change requires recomputing the yoga border-edge widths. */
+export const BORDER_PROPS = new Set([
+  "borderStyle",
+  "borderTop",
+  "borderBottom",
+  "borderLeft",
+  "borderRight",
+]);
+
+/**
+ * Recompute all four yoga border-edge widths from a box's full prop set, mirroring
+ * Ink's applyBorderStyles (styles.ts:729-763): the per-side width is
+ * `borderStyle ? 1 : 0`, then each edge is forced to 0 when that edge's per-edge
+ * prop is explicitly `false`. So a per-edge toggle can only SUBTRACT an edge — it
+ * can NEVER add width without a borderStyle. This is the joint computation a
+ * single yoga setter cannot do (it sees only one value), and it must run on ANY
+ * border-prop change, including borderStyle flipping in EITHER direction
+ * (set→unset re-zeroes, unset→set re-reserves) — otherwise a per-edge toggle made
+ * while borderStyle stays unset would leave a spurious 1-cell inset with no border
+ * drawn (the per-edge props default to `true`).
+ */
+export function reconcileBorderEdges(node: YogaCarrier, props: Record<string, unknown>): void {
+  const y = node.yoga as YogaNode;
+  const borderWidth = props["borderStyle"] ? 1 : 0;
+  y.setBorder(Yoga.EDGE_TOP, props["borderTop"] === false ? 0 : borderWidth);
+  y.setBorder(Yoga.EDGE_BOTTOM, props["borderBottom"] === false ? 0 : borderWidth);
+  y.setBorder(Yoga.EDGE_LEFT, props["borderLeft"] === false ? 0 : borderWidth);
+  y.setBorder(Yoga.EDGE_RIGHT, props["borderRight"] === false ? 0 : borderWidth);
 }
 
 const RESETTABLE_PROPS = new Set([

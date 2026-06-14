@@ -692,6 +692,115 @@ test("render border edge changes after update when borderStyle is unchanged", as
   `);
 });
 
+// Per-edge border props with NO borderStyle must reserve NO layout space.
+// box-props.ts defaults borderTop/Bottom/Left/Right to `true`, and box.vue
+// forwards them via v-bind="props". On an UPDATE that toggles a per-edge prop
+// while borderStyle stays unset, Vue patches ONLY the changed per-edge prop —
+// borderStyle is not re-patched — so a per-edge setter that reserves 1 cell
+// regardless of borderStyle would survive and inset content by 1 cell with no
+// border ever painted. Ink's applyBorderStyles gates edge width on borderStyle
+// (borderWidth = currentStyle.borderStyle ? 1 : 0; edge === false ? 0 :
+// borderWidth) — a per-edge toggle can only SUBTRACT, never add. Match that.
+test("per-edge border toggle with no borderStyle reserves no space", async ({ expect }) => {
+  const showEdges = shallowRef(false);
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box
+        width={20}
+        borderTop={showEdges.value}
+        borderBottom={showEdges.value}
+        borderLeft={showEdges.value}
+        borderRight={showEdges.value}
+      >
+        <Text>HELLO</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  // No borderStyle → no inset regardless of per-edge flags.
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`"HELLO"`);
+
+  // Toggling the per-edge flags on (with borderStyle still unset) must NOT add
+  // any layout inset — frame stays exactly "HELLO", no spurious blank row /
+  // leading space.
+  showEdges.value = true;
+  await nextTick();
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`"HELLO"`);
+
+  // And toggling back off stays clean too.
+  showEdges.value = false;
+  await nextTick();
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`"HELLO"`);
+});
+
+// Regression guard for the gate-on-borderStyle fix: a per-edge `false` toggled
+// AFTER borderStyle is already set must still SUBTRACT that edge (Ink parity),
+// and toggling it back on must restore it. borderStyle never changes here, so
+// only the per-edge prop is re-patched on update — exercising the gated setter's
+// "borderStyle present → edge reflects v" branch.
+test("per-edge false with borderStyle set still subtracts on update", async ({ expect }) => {
+  const showTop = shallowRef(true);
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box borderStyle="round" borderTop={showTop.value} alignSelf="flex-start">
+        <Text>Content</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`
+    "╭───────╮
+    │Content│
+    ╰───────╯"
+  `);
+
+  showTop.value = false;
+  await nextTick();
+  // borderTop=false subtracts the top edge → no top row, side rails start at row 0.
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`
+    "│Content│
+    ╰───────╯"
+  `);
+
+  showTop.value = true;
+  await nextTick();
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`
+    "╭───────╮
+    │Content│
+    ╰───────╯"
+  `);
+});
+
+// Regression guard: setting borderStyle on an EXISTING box (unset → set) must
+// reserve all four edges. With the fix re-applying edges on borderStyle change
+// in EITHER direction, an unset→set transition must add the border back even
+// though the per-edge props never changed.
+test("setting borderStyle after mount reserves all edges", async ({ expect }) => {
+  const style = shallowRef<string | undefined>(undefined);
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={20} borderStyle={style.value as never}>
+        <Text>HELLO</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`"HELLO"`);
+
+  style.value = "round";
+  await nextTick();
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`
+    "╭──────────────────╮
+    │HELLO             │
+    ╰──────────────────╯"
+  `);
+
+  // Clearing it again removes the border and the inset.
+  style.value = undefined;
+  await nextTick();
+  expect(stripAnsi(lastFrame()!)).toMatchInlineSnapshot(`"HELLO"`);
+});
+
 // hide top border
 test("hide top border", async ({ expect }) => {
   const { lastFrame } = await render(
