@@ -71,10 +71,10 @@ const TransformImpl = defineComponent({
       // When screen reader is enabled and accessibilityLabel is set,
       // render the label text instead of children.
       if (isScreenReaderEnabled && props.accessibilityLabel) {
-        return h("transform", { transform: props.transform }, props.accessibilityLabel);
+        return h("tui-transform", { transform: props.transform }, props.accessibilityLabel);
       }
 
-      return h("transform", { transform: props.transform }, children);
+      return h("tui-transform", { transform: props.transform }, children);
     };
   },
 });

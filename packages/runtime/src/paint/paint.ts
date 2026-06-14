@@ -404,7 +404,7 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
 // with no yoga-carrying children) as if it were an inline text node — its
 // direct text-leaf / virtual-text / <Newline> children are squashed into a
 // string. The transform's OWN fn is intentionally NOT applied here: it is pushed
-// as a line-transformer onto the Output write (paintNode "transform" case), so
+// as a line-transformer onto the Output write (paintNode "tui-transform" case), so
 // it applies per LINE at paint time, matching Ink where internal_transform runs
 // in the Output, never in squashTextNodes for the node it lives on. (G58)
 function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): string {
@@ -435,10 +435,10 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
   if (child.type === "text-leaf") {
     return child.value;
   }
-  if (child.type === "virtual-text" || child.type === "text") {
+  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
     return renderTextWithInlineStyles(child, inheritedBg);
   }
-  if (child.type === "transform") {
+  if (child.type === "tui-transform") {
     let innerText = "";
     // Recursive twin of the G52 fix in renderTextWithInlineStyles: a grandchild's
     // positional index must skip Vue comment nodes (null/v-if/false renders),
@@ -631,7 +631,7 @@ function paintNode(
       for (const child of node.children) paintNode(child, output, x0, y0, transformers);
       return;
     }
-    case "box": {
+    case "tui-box": {
       const layout = node.yoga.getComputedLayout();
       const x = x0 + layout.left;
       const y = y0 + layout.top;
@@ -709,7 +709,7 @@ function paintNode(
       if (clipped) output.unclip();
       return;
     }
-    case "text": {
+    case "tui-text": {
       const layout = node.yoga.getComputedLayout();
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
       // squash. The Text's own backgroundColor — including an explicit "" opt-out —
@@ -753,12 +753,12 @@ function paintNode(
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
       return;
     }
-    case "static": {
+    case "tui-static": {
       // Static is rendered through the static channel (written before frame), so
       // it does not contribute to the dynamic frame paint.
       return;
     }
-    case "transform": {
+    case "tui-transform": {
       const layout = node.yoga.getComputedLayout();
       const x = x0 + layout.left;
       const y = y0 + layout.top;
@@ -787,7 +787,7 @@ function paintNode(
       for (const child of node.children) paintNode(child, output, x, y, next, inheritedBg);
       return;
     }
-    case "virtual-text":
+    case "tui-virtual-text":
     case "text-leaf":
     case "comment":
       // virtual-text and text-leaf are handled inside renderTextWithInlineStyles.

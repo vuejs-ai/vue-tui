@@ -8,20 +8,20 @@ type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransfo
 function hasYoga(node: TuiNode): node is YogaCarrier {
   return (
     node.type === "root" ||
-    node.type === "box" ||
-    node.type === "text" ||
-    node.type === "static" ||
-    node.type === "transform"
+    node.type === "tui-box" ||
+    node.type === "tui-text" ||
+    node.type === "tui-static" ||
+    node.type === "tui-transform"
   );
 }
 
 function hasChildren(node: TuiNode): node is ContainerWithChildren {
   return (
     node.type === "root" ||
-    node.type === "box" ||
-    node.type === "text" ||
-    node.type === "static" ||
-    node.type === "transform"
+    node.type === "tui-box" ||
+    node.type === "tui-text" ||
+    node.type === "tui-static" ||
+    node.type === "tui-transform"
   );
 }
 
@@ -60,7 +60,7 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
   if (hasYoga(node) && node.yoga.getDisplay() === Yoga.DISPLAY_NONE) return false;
 
   let changed = false;
-  if (node.type === "box") {
+  if (node.type === "tui-box") {
     const inner = getBoxInnerSize(node);
     if (inner.width === 0 || inner.height === 0) {
       for (const child of node.children) {

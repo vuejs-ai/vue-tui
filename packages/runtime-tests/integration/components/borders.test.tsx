@@ -884,7 +884,7 @@ test("non-string host borderTopColor falls back to general borderColor", async (
   const { lastFrame } = await render(
     defineComponent(
       () => () =>
-        h("box", {
+        h("tui-box", {
           borderStyle: "single",
           borderColor: "red",
           borderTopColor: [0, 0, 255],
@@ -1189,7 +1189,7 @@ test("non-string host borderTopBackgroundColor falls back to general borderBackg
   const { lastFrame } = await render(
     defineComponent(
       () => () =>
-        h("box", {
+        h("tui-box", {
           borderStyle: "single",
           borderBackgroundColor: "red",
           borderTopBackgroundColor: [0, 0, 255],

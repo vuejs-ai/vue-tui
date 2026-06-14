@@ -18,10 +18,10 @@ function squashChildSR(child: TuiNode, index: number): string {
   if (child.type === "text-leaf") {
     return child.value;
   }
-  if (child.type === "virtual-text" || child.type === "text") {
+  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
     return squashTextContent(child);
   }
-  if (child.type === "transform") {
+  if (child.type === "tui-transform") {
     let innerText = "";
     // Recurse into the transform's children (each may itself be a transform,
     // recursed to any depth), skipping Vue comment nodes and empty text-leaves
@@ -119,16 +119,16 @@ export interface ScreenReaderOptions {
  */
 export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOptions = {}): string {
   // Skip static elements if requested
-  if (options.skipStaticElements && node.type === "static") {
+  if (options.skipStaticElements && node.type === "tui-static") {
     return "";
   }
 
   // If display: none, return empty
   if (
-    (node.type === "box" ||
-      node.type === "text" ||
+    (node.type === "tui-box" ||
+      node.type === "tui-text" ||
       node.type === "root" ||
-      node.type === "transform") &&
+      node.type === "tui-transform") &&
     node.yoga.getDisplay() === Yoga.DISPLAY_NONE
   ) {
     return "";
@@ -136,14 +136,15 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
 
   let output = "";
 
-  if (node.type === "text") {
+  if (node.type === "tui-text") {
     output = squashTextContent(node);
-  } else if (node.type === "box" || node.type === "root") {
+  } else if (node.type === "tui-box" || node.type === "root") {
     // Determine separator based on flex direction (resolved from yoga so the
     // Box default of row yields a space separator, matching Ink — see
     // resolveBoxFlexDirection / G39). Root keeps undefined → "\n" (Ink's column
     // default root).
-    const flexDirection = node.type === "box" ? resolveBoxFlexDirection(node as TuiBox) : undefined;
+    const flexDirection =
+      node.type === "tui-box" ? resolveBoxFlexDirection(node as TuiBox) : undefined;
 
     const separator = flexDirection === "row" || flexDirection === "row-reverse" ? " " : "\n";
 
@@ -170,7 +171,7 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
       )
       .filter(Boolean)
       .join(separator);
-  } else if (node.type === "transform") {
+  } else if (node.type === "tui-transform") {
     // Transform nodes: CONCATENATE children with "" (not newline-join), matching
     // Ink's squashTextNodes (squash-text-nodes.ts:42, `text += nodeText`). In Ink
     // a <Transform> is an `ink-text` node, so the SR path squashes it via
@@ -209,7 +210,7 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
   }
 
   // Add accessibility annotations
-  if (node.type === "box") {
+  if (node.type === "tui-box") {
     const accessibility = node.internal_accessibility;
     if (accessibility) {
       const { role, state } = accessibility;

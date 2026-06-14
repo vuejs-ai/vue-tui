@@ -52,10 +52,10 @@ export const yogaNodeTracker = {
 function hasYoga(node: TuiNode): node is YogaCarrier {
   return (
     node.type === "root" ||
-    node.type === "box" ||
-    node.type === "text" ||
-    node.type === "static" ||
-    node.type === "transform"
+    node.type === "tui-box" ||
+    node.type === "tui-text" ||
+    node.type === "tui-static" ||
+    node.type === "tui-transform"
   );
 }
 
@@ -63,7 +63,7 @@ export function attachYoga(node: YogaCarrier): void {
   node.yoga = createYogaNode();
   // Static nodes are painted via a separate channel (paintIsolated), so they
   // must not occupy space in the dynamic frame's yoga layout.
-  if (node.type === "static") {
+  if (node.type === "tui-static") {
     (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);
   }
   // Box nodes match Ink's defaults: row direction, shrinkable, no wrap.
@@ -71,7 +71,7 @@ export function attachYoga(node: YogaCarrier): void {
   // are passed through Vue's reactive system (which may include undefined
   // overrides or border defaults). User-provided props override these via
   // patchProp which runs after attachYoga.
-  if (node.type === "box") {
+  if (node.type === "tui-box") {
     (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
     (node.yoga as YogaNode).setFlexShrink(1);
     (node.yoga as YogaNode).setFlexWrap(Yoga.WRAP_NO_WRAP);
@@ -80,7 +80,7 @@ export function attachYoga(node: YogaCarrier): void {
   // Text nodes match Ink's <ink-text> defaults: row direction, shrinkable.
   // Although text nodes rarely have yoga-carrying children, this ensures
   // consistent layout behavior matching Ink.
-  if (node.type === "text") {
+  if (node.type === "tui-text") {
     (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
     (node.yoga as YogaNode).setFlexShrink(1);
     (node.yoga as YogaNode).setFlexGrow(0);
@@ -88,7 +88,7 @@ export function attachYoga(node: YogaCarrier): void {
   // Transform nodes match Ink's Transform which renders as ink-text:
   // flexShrink=1, flexDirection='row'. This makes transform a yoga carrier
   // so it participates in layout (multi-line text gets proper height).
-  if (node.type === "transform") {
+  if (node.type === "tui-transform") {
     (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
     (node.yoga as YogaNode).setFlexShrink(1);
     (node.yoga as YogaNode).setFlexGrow(0);
@@ -120,13 +120,15 @@ function yogaIndexFor(parent: TuiContainer, child: TuiNode): number {
   // ink-text), so a transform child of it is inline and excluded from yoga —
   // same as for a text/virtual-text parent. (G58 MF2)
   const isTextParent =
-    parent.type === "text" || parent.type === "virtual-text" || parent.type === "transform";
+    parent.type === "tui-text" ||
+    parent.type === "tui-virtual-text" ||
+    parent.type === "tui-transform";
   let yIdx = 0;
   for (const sibling of parent.children) {
     if (sibling === child) return yIdx;
     if (hasYoga(sibling)) {
       // Transform nodes inside text/transform parents are not in the yoga tree.
-      if (isTextParent && sibling.type === "transform") continue;
+      if (isTextParent && sibling.type === "tui-transform") continue;
       yIdx++;
     }
   }
@@ -145,14 +147,17 @@ export function insertYogaChild(parent: TuiContainer, child: TuiNode, _domIndex:
   // because a transform-in-transform inside a <Text> was already excluded as a
   // child of an inline transform here.)
   // (VirtualText parents are already excluded by the hasYoga check above.)
-  if (child.type === "transform" && (parent.type === "text" || parent.type === "transform")) {
+  if (
+    child.type === "tui-transform" &&
+    (parent.type === "tui-text" || parent.type === "tui-transform")
+  ) {
     return;
   }
   // A transform with a yoga-carrying child (e.g. <Transform><Text>…) lays out
   // from that child, not from a measure func. Yoga forbids a node having both a
   // measure func and children, so clear the standalone-transform measure func
   // before inserting the child. (G58)
-  if (parent.type === "transform") {
+  if (parent.type === "tui-transform") {
     (parent.yoga as YogaNode).unsetMeasureFunc();
   }
   const yIdx = yogaIndexFor(parent, child);
@@ -163,14 +168,17 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
   if (!hasYoga(parent) || !hasYoga(child)) return;
   // Transform nodes inside a text/transform parent were never inserted into yoga
   // (mirror of insertYogaChild's inline-transform skip). (G58 MF2)
-  if (child.type === "transform" && (parent.type === "text" || parent.type === "transform")) {
+  if (
+    child.type === "tui-transform" &&
+    (parent.type === "tui-text" || parent.type === "tui-transform")
+  ) {
     return;
   }
   (parent.yoga as YogaNode).removeChild(child.yoga as YogaNode);
   // If removing the last yoga child from a transform, restore the inline-text
   // measure func so the transform can still size its direct text-leaf children
   // (it has become a standalone inline-text transform again). (G58)
-  if (parent.type === "transform" && (parent.yoga as YogaNode).getChildCount() === 0) {
+  if (parent.type === "tui-transform" && (parent.yoga as YogaNode).getChildCount() === 0) {
     bindTransformMeasure(parent as TuiTransform);
   }
 }

@@ -69,10 +69,10 @@ function squashTransformChild(child: TuiNode, index: number): string {
   if (child.type === "text-leaf") {
     return child.value;
   }
-  if (child.type === "virtual-text" || child.type === "text") {
+  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
     return flattenLeaves(child);
   }
-  if (child.type === "transform") {
+  if (child.type === "tui-transform") {
     let innerText = "";
     // Recursive twin of the G52 fix in flattenLeaves: a grandchild's positional
     // index must skip Vue comment nodes (null/v-if/false renders) so a `{null}`
