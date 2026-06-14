@@ -104,14 +104,25 @@ export const ErrorOverview = defineComponent({
       let excerpt: CodeExcerpt[] | undefined;
       let lineWidth = 0;
 
+      // Guard the source read: a crafted/stale `.stack` can parse to an existing
+      // DIRECTORY (fs.existsSync true → fs.readFileSync throws EISDIR) or an
+      // unreadable path, and this runs on the error-DISPLAY path. An unguarded
+      // throw would re-fault the boundary and repaint the overview for THAT error
+      // while waitUntilExit() rejects with the original — a displayed-vs-rejected
+      // disagreement (e17). On any failure, treat it as "no excerpt": leave
+      // `excerpt` undefined so only the header/origin render (the no-excerpt path).
       if (filePath && origin?.line && fs.existsSync(filePath)) {
-        const sourceCode = fs.readFileSync(filePath, "utf8");
-        excerpt = codeExcerpt(sourceCode, origin.line);
+        try {
+          const sourceCode = fs.readFileSync(filePath, "utf8");
+          excerpt = codeExcerpt(sourceCode, origin.line);
 
-        if (excerpt) {
-          for (const { line } of excerpt) {
-            lineWidth = Math.max(lineWidth, String(line).length);
+          if (excerpt) {
+            for (const { line } of excerpt) {
+              lineWidth = Math.max(lineWidth, String(line).length);
+            }
           }
+        } catch {
+          excerpt = undefined;
         }
       }
 

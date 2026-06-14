@@ -83,3 +83,21 @@ test("a throwing .stack getter (ErrorOverview path) does not wedge the boundary"
     },
   });
 });
+
+test("a Proxy with a throwing getPrototypeOf trap (isErrorInput path) does not wedge the boundary", async () => {
+  // isErrorInput() does `value instanceof Error`, which invokes the value's
+  // [[GetPrototypeOf]]. A Proxy with a throwing getPrototypeOf trap makes that
+  // `instanceof` re-throw on the error-exit path — a GENUINE wedge, since
+  // isErrorInput runs in onErrorCaptured / resolveExit / appContext.exit with no
+  // outer guard. Guarded by wrapping the whole isErrorInput body in try/catch.
+  await expectMountDoesNotWedge(
+    new Proxy(
+      {},
+      {
+        getPrototypeOf(): never {
+          throw new Error("proto boom");
+        },
+      },
+    ),
+  );
+});

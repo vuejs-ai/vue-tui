@@ -203,16 +203,17 @@ const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 // result values (string/number/plain object) brand as e.g. `[object String]`,
 // so they still RESOLVE — exactly Ink's contract.
 function isErrorInput(value: unknown): value is Error {
-  // `instanceof Error` first: fast and CANNOT throw. The brand check is a
-  // fallback for cross-realm Errors only, and it must be guarded: a pathological
-  // thrown value can carry a throwing `Symbol.toStringTag` getter (which
-  // `Object.prototype.toString.call` READS), and isErrorInput runs in the
-  // error-exit path (onErrorCaptured / errorHandler) with NO surrounding
-  // try/catch — an unguarded throw here wedges the boundary. On throw, treat the
-  // value as a non-Error (false), so it routes through messageForNonError.
-  if (value instanceof Error) return true;
+  // Must NEVER throw: runs in the error-exit/capture path (onErrorCaptured,
+  // appContext.exit, resolveExit) with NO surrounding try/catch — an unguarded
+  // throw here wedges the boundary. BOTH checks can throw on a pathological thrown
+  // value, so BOTH are inside the try: `instanceof` invokes the value's
+  // [[GetPrototypeOf]] (a Proxy's throwing getPrototypeOf trap re-throws), and
+  // `Object.prototype.toString.call` READS a throwing `Symbol.toStringTag` getter.
+  // On any throw, treat the value as a non-Error (false) so it routes through
+  // messageForNonError. The brand check is the cross-realm-Error fallback (see
+  // the rationale above the function); `instanceof` short-circuits the common case.
   try {
-    return Object.prototype.toString.call(value) === "[object Error]";
+    return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
   } catch {
     return false;
   }

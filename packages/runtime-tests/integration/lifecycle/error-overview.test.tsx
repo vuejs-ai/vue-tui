@@ -1,3 +1,4 @@
+import { cwd } from "node:process";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stripAnsi from "strip-ansi";
@@ -181,6 +182,40 @@ test("non-Error throw: overview message and rejected Error message are identical
   expect(reject.message).toBe(overviewMessage(frame));
 });
 
+test("non-Error throw: '[unserializable value]' is shown AND rejected with, and they agree", async () => {
+  // A pathological thrown value whose `.message` is a non-string AND whose
+  // primitive coercion throws: messageForNonError selects the String(value)
+  // branch, String(value) throws (Symbol.toPrimitive), and safeString() falls
+  // back to the fixed "[unserializable value]" placeholder. The SAME helper feeds
+  // the overview header and render.ts's reject-wrap, so the displayed and rejected
+  // messages must BOTH be "[unserializable value]" — they cannot drift (e17).
+  const Thrower = defineComponent(() => {
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- non-Error value whose primitive coercion throws, exercising the unserializable placeholder (e17)
+      throw {
+        get message(): number {
+          return 42;
+        },
+        [Symbol.toPrimitive](): never {
+          throw new Error("toPrimitive boom");
+        },
+      };
+    };
+  });
+
+  const { frame, reject } = await renderFrameAndReject(Thrower);
+
+  // Display: the overview surfaces the placeholder.
+  expect(frame).toContain(" ERROR  [unserializable value]");
+  // Reject: the SAME placeholder string on a real Error.
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  expect(reject.isError).toBe(true);
+  expect(reject.message).toBe("[unserializable value]");
+  // Consistency: display === reject.
+  expect(reject.message).toBe(overviewMessage(frame));
+});
+
 test("non-Error throw: non-string .message falls back to String on BOTH paths and they agree", async () => {
   const Thrower = defineComponent(() => {
     return () => {
@@ -289,6 +324,44 @@ test("throwing .stack getter renders ERROR header with no synthetic stack (harde
   expect(frame).not.toContain("runtime-core");
   expect(frame).not.toContain("dist/");
   expect(frame).not.toMatch(/^\s*- /m);
+});
+
+test("stack origin pointing at a DIRECTORY renders header-only without leaking EISDIR", async () => {
+  // A crafted/stale `.stack` can parse to an existing DIRECTORY path. Before the
+  // fix, ErrorOverview's excerpt block did `fs.existsSync(dir)` (true for a dir) →
+  // `fs.readFileSync(dir)` throws EISDIR DURING render. The boundary then re-faults
+  // and repaints an overview for the EISDIR error while waitUntilExit() rejects with
+  // the ORIGINAL message — a displayed-vs-rejected DISAGREEMENT (violates e17). With
+  // the excerpt read guarded, the read failure is swallowed (no excerpt) and the
+  // overview renders the header/origin for the original error.
+  //
+  // We point the first frame at process.cwd() (a real directory on disk) so
+  // fs.existsSync passes but fs.readFileSync throws EISDIR.
+  const dirPath = cwd();
+  const DirStackThrower = defineComponent(() => {
+    return () => {
+      const e = new Error("Dir stack boom");
+      const firstLine = (e.stack ?? "").split("\n")[0] ?? "Error: Dir stack boom";
+      // A parseable frame whose file is an existing directory.
+      e.stack = `${firstLine}\n    at someFn (${dirPath}:1:1)`;
+      throw e;
+    };
+  });
+
+  const { frame, reject } = await renderFrameAndReject(DirStackThrower);
+
+  // Display: header shows the ORIGINAL message, not an EISDIR error.
+  expect(frame).toContain(" ERROR  Dir stack boom");
+  expect(frame).not.toContain("EISDIR");
+  expect(frame).not.toContain("illegal operation on a directory");
+
+  // Reject: waitUntilExit() rejects with the ORIGINAL Error.
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  expect(reject.isError).toBe(true);
+  expect(reject.message).toBe("Dir stack boom");
+  // Consistency: displayed message === rejected message (no EISDIR leakage).
+  expect(reject.message).toBe(overviewMessage(frame));
 });
 
 test("primitive (non-Error) throw renders ERROR header with no synthetic stack", async () => {
