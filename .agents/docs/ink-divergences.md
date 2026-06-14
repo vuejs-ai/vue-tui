@@ -748,6 +748,19 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   content, and content-gated validation is a latent footgun. Principle: reasonable behavior
   over incidental Ink parity. The former `wouldRenderNonEmptyText` gate was removed.
   Screen-reader-hidden Text still returns before validation (matches Box). [VOUCHED @hyf0]
+- **Global screen-reader mode is carved out (skipped) — ALIGNS to Ink, not a new
+  divergence:** all of the above validation is paint-time VISUAL input (color / bg /
+  border), and under GLOBAL screen-reader mode (`isScreenReaderEnabled`;
+  `INK_SCREEN_READER=true`) vue-tui — like Ink — linearizes the whole tree to PLAIN TEXT
+  and never colorizes / draws borders for any node. Ink's colorize path is bypassed
+  entirely under SR, so it never throws on an invalid color (run-verified against Ink
+  v7.0.4: `<Box backgroundColor="bold">` with `INK_SCREEN_READER=true` renders plain text
+  and does NOT throw; without it Ink throws in `colorize.js`). vue-tui previously still ran
+  the eager validation for non-`ariaHidden` boxes under SR and threw — crashing a
+  screen-reader user out of accessible content over a paint-only prop value. The validation
+  is now skipped when global SR is on (`box.vue` / `text.vue` v-if gate on `srEnabled`),
+  matching Ink. This removes a vue-tui over-throw and so is an alignment fix, not a new
+  divergence. Tests: the "GLOBAL SR" cases in `background-color.test.tsx`.
 
 ## Non-Behavioral Notes
 

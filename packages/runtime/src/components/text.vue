@@ -31,6 +31,13 @@ const hasContent = computed(() => srLabel.value != null || slots.default != null
 // a chalk-modifier-name backgroundColor, or a foreground key chalk has but can't
 // call like "level" — is caught by vue-tui's error boundary, not the post-flush
 // paint pass where a throw wedges the scheduler. Returns true for the v-if.
+//
+// Skipped under GLOBAL screen-reader mode (`srEnabled ||` in the v-if below): under
+// SR vue-tui (like Ink) linearizes the tree to PLAIN TEXT and never colorizes any
+// node, so these color props are never painted — validating them would throw
+// spuriously and crash a screen-reader user out of accessible content. Verified
+// against Ink v7.0.4 (INK_SCREEN_READER=true → modifier-name bg renders plain text,
+// does NOT throw; without it Ink throws in colorize). Mirrors box.vue.
 function validate(): true {
   assertValidForegroundColor(props.color);
   assertValidBackgroundColor(props.backgroundColor);
@@ -39,7 +46,7 @@ function validate(): true {
 </script>
 
 <template>
-  <template v-if="!srHidden && validate() && hasContent">
+  <template v-if="!srHidden && (srEnabled || validate()) && hasContent">
     <tui-virtual-text v-if="insideText" v-bind="props">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
