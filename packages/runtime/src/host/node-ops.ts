@@ -480,6 +480,21 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         }
       } else if (STYLE_PROPS.has(key)) {
         (el as { props: Record<string, unknown> }).props[key] = next;
+        // `wrap` is the one STYLE_PROP that changes a text node's MEASURED height
+        // (the measure func reads el.props.wrap to pick wrap/truncate/hard layout)
+        // yet is NOT a yoga prop — so it skips applyYogaProp and never invalidates
+        // yoga's cached measurement above. Without re-marking dirty, yoga keeps the
+        // OLD wrap mode's height while paint renders with the NEW wrap → layout and
+        // paint disagree (stale blank rows on wrap→truncate; overflow / overwritten
+        // siblings on truncate→wrap). markTextDirty forces a re-measure. Every other
+        // STYLE_PROP here (color/bold/border colors/…) is paint-only and never alters
+        // measured dimensions, so `wrap` is the sole case. NOTE: this also fixes a
+        // latent bug present in Ink v7.0.4 itself — Ink's applyStyles ignores
+        // textWrap and never markDirty()s, so a wrap-only change goes stale there too
+        // (a deliberate divergence pending a human vouch; see ink-divergences.md).
+        if (key === "wrap" && el.type === "tui-text") {
+          markTextDirty(el);
+        }
       } else if (key === "aria-role" || key === "ariaRole") {
         if (el.type === "tui-box") {
           el.internal_accessibility ??= {};

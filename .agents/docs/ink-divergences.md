@@ -455,6 +455,33 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (`throw {message:'x'}` once displayed `x` but rejected `[object Object]`). Introduced
   2026-05-31; consistency fixed 2026-06-12. KEEP. [VOUCHED @hyf0]
 
+### Re-measure text when the `wrap` prop changes at runtime
+
+- **Ink:** a runtime `wrap` (style `textWrap`) change goes through `commitUpdate` →
+  `applyStyles`, but `applyStyles` **ignores `textWrap` entirely** (styles.ts) and never
+  calls `yogaNode.markDirty()`. Only `setTextNodeValue` (a text-CONTENT change) dirties the
+  measure func. So when ONLY `wrap` toggles, yoga keeps the previously-measured height while
+  paint renders with the new wrap mode → layout and paint disagree. Run-verified vs v7.0.4
+  (`/tmp/ink-verify`, debug-mode frame capture): a width-6 column `<Box>` with
+  `<Text wrap>` over `"aaaa bbbb cccc"` and a `ZZZZ` sentinel below, toggled wrap→truncate,
+  yields `"aaaa …\n\n\nZZZZ"` — the truncated text paints on row 1 but yoga still reserves 3
+  rows, stranding `ZZZZ` on row 4 with blank rows. Toggling text content alongside `wrap`
+  (which DOES `markDirty`) gives the correct `"aaaa …\nZZZZ"`, proving the cause.
+- **vue-tui:** the host `patchProp` (`node-ops.ts`) calls `markTextDirty(el)` when the changed
+  STYLE_PROP is `wrap` on a `tui-text` node, so yoga re-measures and layout matches paint:
+  wrap→truncate collapses to `"aaaa …\nZZZZ"`, truncate→wrap grows to
+  `"aaaa\nbbbb\ncccc\nZZZZ"`. `wrap` is the only STYLE_PROP that affects measured height (the
+  measure func reads `text.props.wrap`); the rest (color/bold/border colors/…) are paint-only,
+  so this is the sole case.
+- **Why:** aligning to Ink reduces bugs only where Ink is correct. Here Ink is itself
+  buggy — a stale cached measure that contradicts paint — so vue-tui deliberately diverges to
+  the obviously-correct behavior: render = f(current props), layout and paint agree. The fix
+  is minimal (one `markDirty`) and matches the layout Ink ALREADY produces whenever its measure
+  func happens to be invalidated. KEEP — proposed divergence, PENDING @hyf0 vouch (Ink is buggy
+  here; awaiting human bless before this is settled). Tests:
+  `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's
+  stale frame).
+
 ### Second `mount()` on a live stdout is an inert no-op
 
 - **Ink:** `render()` keeps one instance per stdout (`WeakMap<WriteStream, Ink>`); a second
