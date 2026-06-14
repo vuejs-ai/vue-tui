@@ -767,26 +767,62 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     });
     mountedStdinController = stdinController;
 
-    // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
-    // the refcount floor never drops to 0 while the app runs — raw mode is held
-    // continuously regardless of which input composables come and go, and there
-    // is no cooked-mode oscillation between input and no-input screens. Gated on
-    // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
-    // must not seize raw mode. The matching release happens in the controller's
-    // dispose() at teardown. (Diverges from Ink's lazy default — see
-    // .agents/docs/ink-divergences.md.)
-    if (rawMode === "always" && interactive && stdinController.isRawModeSupported) {
-      stdinController.holdRawModeForLifetime();
+    // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
+    // terminal: holdRawModeForLifetime() → stdin.setRawMode(true) raises
+    // ERR_TTY_INIT_FAILED when the ioctl fails (real on some SSH/container PTYs
+    // that still report isTTY=true); kittyController.init() may stdout.write()
+    // to enable the protocol (throws on a broken stream); attachYoga() allocates
+    // a WASM yoga node. liveInstances.set(stdout, app) already ran above, so a
+    // throw HERE — before the originalMount try/catch and before the process-
+    // exit / signal-exit handlers are wired — would leak the registry entry
+    // (poisoning the stdout: every later mount() hits the reuse guard and
+    // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
+    // the same teardown-then-rethrow guard as originalMount so teardown()
+    // (idempotent; safe at this early stage — it derives all cleanup from the
+    // wired state set so far) restores everything and frees the registry entry,
+    // while the caller still sees the original error.
+    let kittyController: ReturnType<typeof createKittyKeyboardController>;
+    let tuiRoot: ReturnType<typeof createRoot>;
+    try {
+      // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
+      // the refcount floor never drops to 0 while the app runs — raw mode is held
+      // continuously regardless of which input composables come and go, and there
+      // is no cooked-mode oscillation between input and no-input screens. Gated on
+      // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
+      // must not seize raw mode. The matching release happens in the controller's
+      // dispose() at teardown. (Diverges from Ink's lazy default — see
+      // .agents/docs/ink-divergences.md.)
+      if (rawMode === "always" && interactive && stdinController.isRawModeSupported) {
+        stdinController.holdRawModeForLifetime();
+      }
+
+      kittyController = createKittyKeyboardController(stdin, stdout);
+      // Register BEFORE init(): in auto mode, init() installs a stdin 'data'
+      // listener + a 200ms detection timer and only THEN writes the support
+      // query ("\x1b[?u") — which can throw on a broken stream. Assigning
+      // mountedKittyController first lets teardown's dispose() (which calls
+      // cancelDetection: removes the listener, clears the timer) run on that
+      // throw, instead of leaking a dangling stdin listener until the timer fires.
+      mountedKittyController = kittyController;
+      kittyController.init(options.kittyKeyboard, interactive);
+
+      tuiRoot = createRoot(appContext);
+      attachYoga(tuiRoot);
+      // Record the root BEFORE setWidth so teardown's `if (mountedRoot)
+      // detachYoga(mountedRoot)` frees the just-allocated yoga node even if
+      // setWidth (or anything below) throws.
+      mountedRoot = tuiRoot;
+      tuiRoot.yoga.setWidth(resolveSize(stdout).columns);
+    } catch (err) {
+      try {
+        teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
+      } catch {
+        // A failing best-effort restore must NOT replace `err` — the ORIGINAL
+        // pre-mount error must survive and be rethrown (mirrors the
+        // originalMount catch below).
+      }
+      throw err;
     }
-
-    const kittyController = createKittyKeyboardController(stdin, stdout);
-    kittyController.init(options.kittyKeyboard, interactive);
-    mountedKittyController = kittyController;
-
-    const tuiRoot = createRoot(appContext);
-    attachYoga(tuiRoot);
-    tuiRoot.yoga.setWidth(resolveSize(stdout).columns);
-    mountedRoot = tuiRoot;
 
     // Reset accumulated static output when the <Static> identity changes
     // (unmount, remount via key change) so stale items are not replayed.
