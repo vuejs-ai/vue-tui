@@ -624,6 +624,24 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   width and height. The default remains border-box-like, matching Ink's current public
   sizing model.
 
+### `measureElement` coerces a non-finite (pre-layout) dimension to `0`, not `NaN`
+
+- **Ink:** `measureElement` returns `{ width: node.yogaNode.getComputedWidth() ?? 0, height: ... ?? 0 }`.
+  Before the first layout pass yoga's `getComputedWidth()`/`getComputedHeight()` return **`NaN`**, and
+  `?? 0` does **not** catch `NaN` (`NaN ?? 0 === NaN`), so a pre-layout / mis-timed read returns
+  `{ width: NaN, height: NaN }`.
+- **vue-tui:** coerces a non-finite computed dimension to `0` (`Number.isFinite(v) ? v : 0`), so the same
+  pre-layout read returns a finite `{ width: 0, height: 0 }`. (The detached-ref case already returns
+  `{0,0}`; this extends the same safe fallback to the attached-but-not-yet-laid-out case.)
+- **Why:** `0` is a **safe sentinel** meaning "not yet computed", not the box's true size — the genuinely
+  correct usage is to read _after_ layout (the JSDoc already steers callers to defer via `nextTick`). It is
+  chosen because it is Ink's clear intent (`?? 0`) and it matches the **DOM precedent**:
+  `getBoundingClientRect()` on a `display:none` element and `img.naturalWidth` before load both return `0`,
+  not `NaN`. Leaking `NaN` instead poisons user layout math (`terminalWidth - measured.width` → `NaN` → a
+  `NaN` width prop), so a mis-timed read degrades gracefully rather than corrupting the layout. A low-risk
+  robustness divergence from Ink's `NaN`-leaking `?? 0`. KEEP. [VOUCHED @hyf0] Tests: "returns finite
+  { width: 0, height: 0 } for a node not yet laid out (no NaN leak)" in `use-box-metrics.test.tsx`.
+
 ### Out-of-type style values are forwarded, not defensively coerced
 
 - **Ink:** several flex/align setters coerce an invalid runtime value to a default:
