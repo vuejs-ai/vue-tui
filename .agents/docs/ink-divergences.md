@@ -23,7 +23,7 @@ alignment.
 It follows that **alignment is not the top priority**. When Ink's behavior is itself a defect,
 is unreasonable, or is un-idiomatic for Vue, **conformance to Vue's philosophy and the plain
 reasonableness/correctness of the behavior outrank parity.** There vue-tui deliberately diverges,
-and records it here so the choice is conscious and blessed, not drift.
+and records it here so the choice is conscious and vouched, not drift.
 
 This guards against two opposite failure modes:
 
@@ -33,11 +33,11 @@ This guards against two opposite failure modes:
   as defects, not contracts.)
 - **Lazy divergence** — inventing a different behavior and rationalizing it as "Vue's way is
   better" with no genuine Vue-philosophy or correctness reason. Mere presence in this file is
-  **not** a blessing; every kept divergence needs a real reason and a maintainer decision.
+  **not** a vouch; every kept divergence needs a real reason and an explicit `[VOUCHED @handle]` stamp.
 
 So the test for any difference is never just "does it match Ink?" but "is this the most
 reasonable, most Vue-idiomatic behavior — and where it diverges from Ink, is that because Ink is
-wrong or un-Vue, recorded with a maintainer decision?" Reasonableness and Vue idiom come first;
+wrong or un-Vue, recorded with a `[VOUCHED @handle]` stamp?" Reasonableness and Vue idiom come first;
 alignment is simply the cheapest way to get there whenever Ink is already right.
 
 ## How to Classify a Divergence
@@ -62,7 +62,7 @@ sections are narrower, while later sections are broader fallbacks.
 4. If the note is not a divergence, put it in **Non-Behavioral Notes**.
 
 Each divergence entry states what Ink does, what vue-tui does, and why the difference is
-deliberate. Some entries also record consequences, costs, tests, or maintainer decisions
+deliberate. Some entries also record consequences, costs, tests, or the reasoning behind a vouch
 where those details are needed to understand the decision.
 
 ---
@@ -76,8 +76,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 
 - **Ink:** keeps a single `staticNode`; only one `<Static>` is honored.
 - **vue-tui:** `findStatics(root)` renders **every** `<Static>` in the tree.
-- **Why:** a tree with two `<Static>` regions renders both. Maintainer decision
-  (2026-05-30): KEEP.
+- **Why:** a tree with two `<Static>` regions renders both. KEEP. [VOUCHED @hyf0]
 
 ### Ctrl+C exits under the kitty protocol too
 
@@ -90,7 +89,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   `useFocus` / `usePaste`, or none).
 - **Why:** `exitOnCtrlC` is defined in terms of Ctrl+C, not one byte encoding. Keeping the
   exit at the single always-on layer avoids splitting the behavior across two places. Opt
-  out with `exitOnCtrlC: false`. Maintainer decision (2026-05-30): KEEP. Tests:
+  out with `exitOnCtrlC: false`. KEEP. [VOUCHED @hyf0] Tests:
   `usePaste-only app exits on {legacy,kitty} Ctrl+C` in `input-kitty.test.ts`.
 
 ### `parseKeypress` filters kitty query-responses
@@ -136,9 +135,9 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   node is reached via `$el`. Because `<Box>` is a `defineComponent`, the `$el` path is in
   fact the **primary** path a normal `ref` on `<Box>` takes — the bare host-node ref is the
   rarer raw-host case. Supporting both is a strict superset that matches how Vue refs behave;
-  a bare host-node ref still works identically to Ink. Maintainer decision (2026-06-13): KEEP
+  a bare host-node ref still works identically to Ink. KEEP
   — a reasonable Vue-idiomatic adoption (the component-instance ref is the natural Vue path;
-  the bare host-node ref stays Ink-identical).
+  the bare host-node ref stays Ink-identical). [VOUCHED @hyf0]
 
 ### Two apps sharing one stdin both receive input
 
@@ -159,7 +158,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   race, and a shared raw-mode refcount matches the ownership model when several renderers
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
-  sharing one stdin both receive input..."). Maintainer decision (2026-06-07): KEEP.
+  sharing one stdin both receive input..."). KEEP. [VOUCHED @hyf0]
 
 ## Vue API and Mental Model Divergences
 
@@ -190,7 +189,7 @@ current-props model, or API conventions.
   value by re-running the hook; Vue wraps it in a ref the template subscribes to. This is
   the general rule, not a per-API choice. `useFocusManager().activeId` is just one
   instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
-  not as a one-time snapshot. Maintainer decision (2026-06-07): KEEP.
+  not as a one-time snapshot. KEEP. [VOUCHED @hyf0]
 
 #### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
 
@@ -210,7 +209,7 @@ current-props model, or API conventions.
   the stray warn is not mistaken for vue-tui behavior: it is Vue's framework diagnostics.
   The prefix filter may also drop user-authored stderr logs that intentionally reuse the
   reserved `[Vue warn]` prefix; use a different application prefix when that output must be
-  preserved. Maintainer decision (2026-06-06): KEEP.
+  preserved. KEEP. [VOUCHED @hyf0]
 
 #### React concurrent mode
 
@@ -256,8 +255,8 @@ current-props model, or API conventions.
   `() => []` collapse alone is **not** model-forced (Vue can see the empty array); it is
   a deliberate consistency rider — in each engine `() => []` and `() => [false]` behave
   alike (Ink renders a node for both, vue-tui omits both), and aligning only `[]` would
-  create an asymmetry that exists in neither engine without reaching parity. Maintainer
-  decision (2026-06-07): KEEP. Test: `transform.test.tsx`.
+  create an asymmetry that exists in neither engine without reaching parity. KEEP. [VOUCHED @hyf0]
+  Test: `transform.test.tsx`.
 
 ### Vue-Idiomatic Choices
 
@@ -271,7 +270,7 @@ current-props model, or API conventions.
   app handle are therefore Vue-shaped (`MountOptions` / `TuiApp`), not `render()`-shaped
   (`RenderOptions` / `Instance`). Do not add Ink-compatible aliases here: aliases would
   make the public API look render-shaped while the actual runtime contract is app-shaped.
-  Maintainer decision (2026-06-07): KEEP.
+  KEEP. [VOUCHED @hyf0]
 
 #### Removing `display` resets to the default (visible)
 
@@ -287,8 +286,8 @@ current-props model, or API conventions.
 - **vue-tui:** a removed/undefined `display` resets to the Box default `DISPLAY_FLEX`
   (visible): the same state as if the prop had never been set.
 - **Why:** render = f(current props): no `display` set means the default (visible).
-  Persisting a withdrawn prop, or flipping it to hidden, does not match that model. Maintainer
-  decision (2026-05-31): KEEP.
+  Persisting a withdrawn prop, or flipping it to hidden, does not match that model. KEEP.
+  [VOUCHED @hyf0]
 
 #### Nullish `flexDirection` / `flexWrap` reset to Box defaults
 
@@ -334,15 +333,15 @@ current-props model, or API conventions.
   `UsePasteOptions`, `UseFocusOptions`, `UseAnimationOptions`. `useAnimation`'s options type
   originally shipped as `AnimationOptions` — the lone holdout — and was renamed to
   `UseAnimationOptions` (a hard rename, no alias) while the package is pre-1.0 (`0.0.x`, no
-  stability promise yet). **Maintainer decision (2026-06-13): export composable options types
-  as `UseXOptions`; renamed `AnimationOptions` → `UseAnimationOptions`.**
+  stability promise yet). **Export composable options types
+  as `UseXOptions`; renamed `AnimationOptions` → `UseAnimationOptions`.** [VOUCHED @hyf0]
 - **Why:** the public surface should read like Vue code: named composable return types get a
   single convention (`UseXReturn`) instead of Ink's mix of `XProps`, result names, and bare
   names, and `XProps` keeps its Vue meaning (component props). Return shapes still mirror
   Ink field-for-field where the same public state exists; reactive state is represented as
   refs for the model-implied reason documented above. Do not export Ink-compatible alias
   names for these types: Vue-first naming is more important than making type imports look
-  portable across React and Vue. Maintainer decision (2026-06-07): KEEP.
+  portable across React and Vue. KEEP. [VOUCHED @hyf0]
 
 #### Function-valued composable inputs use `MaybeRef`, not getters
 
@@ -358,7 +357,7 @@ current-props model, or API conventions.
   with `unref()` when input/paste occurs. It deliberately does **not** accept
   `MaybeRefOrGetter<Handler>` because a handler is itself a function:
   `useInput(() => {})` must remain an input handler, not be reinterpreted as a getter that
-  returns one. Maintainer decision (2026-06-06): KEEP.
+  returns one. KEEP. [VOUCHED @hyf0]
 
 #### `<Static>` uses a scoped slot object instead of positional render arguments
 
@@ -370,11 +369,11 @@ current-props model, or API conventions.
 - **Why:** this is the framework-native match for React render children. Vue scoped slots
   pass one props object, not multiple positional arguments, and that object form is what
   Vue users expect for slot payloads. The rendered item/index values remain equivalent.
-  Maintainer decision (2026-06-06): KEEP.
+  KEEP. [VOUCHED @hyf0]
 
 #### ARIA props are typed camelCase; kebab still works but is not type-checked
 
-Full design, type-safety findings, and precedent survey: [[accessibility-api]].
+Full design, type-safety findings, and precedent survey: [accessibility-api](./accessibility-api.md).
 
 - **Ink:** kebab string-literal prop keys (`'aria-label'`, `'aria-hidden'`, `'aria-role'` union,
   `'aria-state'` object); JSX keys never camelize.
@@ -387,7 +386,7 @@ Full design, type-safety findings, and precedent survey: [[accessibility-api]].
   kebab `aria-*` is not (Vue/Volar treat it as a global attr). So `ariaRole` is the type-safe
   spelling and `aria-role` the runtime-only porting escape; the rejected kebab-only `$attrs`
   alternative loses typing + Boolean coercion for nothing the checker doesn't already give.
-  Maintainer decision (2026-06-14): KEEP.
+  KEEP. [VOUCHED @hyf0]
 - **Edges:** a future compound aria word must be declared as its mechanical camelize
   (`ariaHaspopup`, not `ariaHasPopup`) or folded into `ariaState`; `aria-hidden` is modeled
   boolean (bare → true), but the string `aria-hidden="false"` wrongly hides (recorded edge).
@@ -418,7 +417,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (string `.message` else `String(value)`) is useful for the lint-discouraged non-`Error`
   throw, and matching the rejected message to it removes a confusing internal inconsistency
   (`throw {message:'x'}` once displayed `x` but rejected `[object Object]`). Introduced
-  2026-05-31; consistency fixed 2026-06-12. Maintainer decision (2026-06-12): KEEP.
+  2026-05-31; consistency fixed 2026-06-12. KEEP. [VOUCHED @hyf0]
 
 ### Second `mount()` on a live stdout is an inert no-op
 
@@ -443,7 +442,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   public path to it (`createApp` binds the tree to the app, so an Ink-style rerender would
   mean reaching into the live app's container or tearing it down first), and on a misuse path
   keeping the running app stable beats auto-tearing it down (which would churn on a re-render
-  glitch). Maintainer decision (2026-06-04): KEEP. Test: `instance-reuse-guard.test.tsx`.
+  glitch). KEEP. [VOUCHED @hyf0] Test: `instance-reuse-guard.test.tsx`.
 
 ### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
 
@@ -474,7 +473,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   an Ink app holding a `useInput` already does not). The "render and auto-exit" pattern
   (Ink's inline-output use) is `rawMode: 'auto'`. Tests: `raw-mode-lifecycle.test.tsx`
   (`'always'` holds raw with no input hook; `'auto'` stays cooked; no mid-session
-  oscillation). Maintainer decision (2026-06-13): KEEP.
+  oscillation). KEEP. [VOUCHED @hyf0]
 
 ### `useCursor()` re-asserts the declared caret every commit (persistent declaration)
 
@@ -515,8 +514,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   frame) would dissolve that residue. Tests: PTY `cursor-sibling-repaint.test.ts` (a
   sibling-topology spinner tick re-asserts the caret, not the corner) and unit
   `frame-writer.test.ts` (a non-dirty changed-output re-render re-emits the declared suffix;
-  D5 clamp). **Maintainer decision (2026-06-12): OVERRIDE prior KEEP — adopt per-commit
-  re-assert.** The prior KEEP (2026-06-01) had kept the reactivity-tied behavior to avoid
+  D5 clamp). **OVERRIDE prior KEEP — adopt per-commit
+  re-assert.** [VOUCHED @hyf0] The prior KEEP (2026-06-01) had kept the reactivity-tied behavior to avoid
   diverging from Ink in the sibling direction; that rationale was overturned when running
   real terminal apps showed Ink itself zombies the caret there, so matching Ink was matching
   a defect, not parity.
@@ -579,8 +578,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   children with child width/height after subtracting the border. Bubble Tea's viewport
   follows the same separation at the component level: content keeps its natural size while
   the viewport exposes a bounded visible window and offsets. The behavior also prevents
-  negative repeat/count math and paint crashes in tiny legal boxes. Maintainer decision
-  (2026-06-07): KEEP. Tests: `text-wrap-width.test.tsx`, `flex.test.tsx`,
+  negative repeat/count math and paint crashes in tiny legal boxes. KEEP. [VOUCHED @hyf0]
+  Tests: `text-wrap-width.test.tsx`, `flex.test.tsx`,
   `text.test.tsx`, `absolute-in-degenerate-box.test.tsx`.
 - **Future `content-box`:** this does not block adding an explicit content-box option
   later. That option would change how a requested size is expanded into an outer box size
@@ -622,7 +621,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   exceptions fall back because they have a meaningful standalone behavior (zero metrics / a
   working animation), so throwing would remove a useful capability. Required app,
   terminal, focus, and input context should fail fast when absent; no-op defaults hide bugs.
-  Maintainer decision (2026-06-07): KEEP.
+  KEEP. [VOUCHED @hyf0]
 
 ### Invalid input is validated at the component layer, not the paint layer
 
@@ -655,19 +654,19 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
   over-throws in a few degenerate, invalid-input-only cases Ink never reaches. For the
   covered public inputs in normal reachable cases, both libraries error; only the channel
-  (recoverable reject vs crash) differs. Maintainer decision (2026-06-07): KEEP. vue-tui
+  (recoverable reject vs crash) differs. KEEP. [VOUCHED @hyf0] vue-tui
   makes the more reliable library choice here: reject the same invalid input with a
   recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
   chalk implementation message. Tests: `background-color.test.tsx`, plus the `borderStyle`
   validation tests.
-- **Text validates regardless of content (2026-06-13, user-blessed):** `<Text>` now
+- **Text validates regardless of content:** `<Text>` now
   validates `color` and `backgroundColor` on every render, not only when its content is
   non-empty — matching `<Box>`, which already validates its own colors unconditionally. Ink
   does not throw for empty text only because its colorize call is lazy (an incidental
   implementation artifact, not a design choice); an invalid value is invalid regardless of
   content, and content-gated validation is a latent footgun. Principle: reasonable behavior
   over incidental Ink parity. The former `wouldRenderNonEmptyText` gate was removed.
-  Screen-reader-hidden Text still returns before validation (matches Box).
+  Screen-reader-hidden Text still returns before validation (matches Box). [VOUCHED @hyf0]
 
 ## Non-Behavioral Notes
 

@@ -26,21 +26,29 @@
 - Behavior claims must be **run, not reasoned**: a parity assertion or `ink-divergences.md` "what Ink does" line is a hypothesis until a real harness against the pinned version (real frames/stderr/exit) confirms it. Source-reading and memory can mislead; when a run contradicts the code you read, trust the run.
 - When documenting an intentional Ink divergence, update `.agents/docs/ink-divergences.md` and follow its "How to Classify a Divergence" flow. Do not add placeholder or unsorted entries; if the classification is unclear, state that uncertainty in the entry's rationale.
 
-# Context Engineering
+## Project Context Records (PCR)
 
-Long-lived design context lives in `.agents/docs/` (committed — distinct from the
-uncommitted `docs/` working-notes folder). Convention, borrowed from rolldown:
+This project follows **Project Context Records (PCR)** —
+methodology: https://github.com/hyf0/project-context-records. PCR keeps the
+project's durable design context — the _why_, the decisions, the architecture —
+so you inherit it instead of re-deriving or re-litigating what's already settled.
 
-- One concept per file; files cross-link with `[[other-doc]]`.
-- If a design doc covers the area you're about to work in, **read it first**.
-- If your change affects a design doc, **update it in the same change**. Docs that drift
-  from reality are worse than no docs.
-- Capture the _why_ — trade-offs considered, alternatives rejected, known pitfalls — not
-  just what the code does.
-- Be concise and direct: the essential what + why, led by the principle or intuition. Lose no
-  information, but don't write essays or exhaustive mechanism dumps. When a behavior is the
-  correct default (e.g. render = f(current props)), state the principle — don't dress it up as
-  a framework limitation.
+When working here:
+
+- **Where they live.** Records are in `.agents/docs/` — one topic per file,
+  cross-linked with relative Markdown links (`[name](./name.md)`).
+- **Read first.** If a record covers the area you're touching, read it before acting.
+- **Record as you go.** Proactively write down context worth keeping — and whenever
+  a human asks you to. No required format, no fixed list of what qualifies: if it's
+  true about this project, not visible in the code, and useful beyond the moment,
+  it's worth a record.
+- **Keep it fresh.** If your change affects a record, update it in the same change —
+  a stale record is a trap, not an asset.
+- **Provenance.** An unstamped line is AI-accumulated: challenge and verify it freely.
+  A `[VOUCHED @handle]` stamp (on a line, or at the top of a file) means a human
+  vouched for it — treat it as settled; reopen or re-verify only on new evidence, a
+  changed constraint, or a human's say-so. Add a stamp only on a human's explicit
+  instruction; reading past a line, or not objecting, is not a stamp.
 
 <!--VITE PLUS START-->
 

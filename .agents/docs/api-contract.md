@@ -1,7 +1,7 @@
 # Public API contract & surface
 
 What is — and isn't — part of `@vue-tui/runtime`'s public contract, and how the contract is
-tested. (Behavioral _divergences_ from Ink live in [[ink-divergences]]; this file is about the
+tested. (Behavioral _divergences_ from Ink live in [ink-divergences](./ink-divergences.md); this file is about the
 SHAPE of the public surface itself.)
 
 ## The contract = public exports **and their user-consumable types**
@@ -24,7 +24,7 @@ Because it is contract, it is **tested, not merely shipped**:
   `@ts-expect-error`. Type-only exports are erased at runtime, so the _type_ surface is guarded
   individually rather than exhaustively snapshotted.
 - Type-_safety_ behavior is established by RUNNING the type-checker against real usage (`tsc` for
-  TSX, `vue-tsc` for templates), never assumed. See [[accessibility-api]] for a worked example —
+  TSX, `vue-tsc` for templates), never assumed. See [accessibility-api](./accessibility-api.md) for a worked example —
   which aria spellings the compiler does and does not catch, proven with both tools.
 
 ## `/internal` is NOT the contract
@@ -42,7 +42,7 @@ Placement rule for any export:
 
 Packaging/build internals (the `exports` field shape, `.mjs` paths, `dist` layout) are likewise
 **not** part of the behavioral/type contract and are not aligned to Ink — see the alignment-scope
-note in [[ink-divergences]].
+note in [ink-divergences](./ink-divergences.md).
 
 ### Accepted incidental exposure: `TuiNode` via `TuiApp`
 
@@ -53,4 +53,4 @@ non-fix, not a contract**: `_container` is a Vue-internal field no consumer uses
 is cosmetic (zero functional impact), and type-only surface isn't held to strict SemVer. Narrowing
 it (`App<unknown>` / a `Pick<App, …>` allowlist) was considered and skipped as ceremony for a
 cosmetic gain on a pre-1.0 library. Treat `TuiNode`-through-`TuiApp` as out-of-contract; don't
-re-flag it. (Decision recorded after review surfaced it.)
+re-flag it. [VOUCHED @hyf0]
