@@ -149,6 +149,96 @@ test("explicit marginTop=0 overrides the margin shorthand → top is 0, not 5 (G
   detachYoga(box);
 });
 
+// --- spacing value contract (PR #184) ------------------------------------
+//
+// Spacing props are typed `number` (box-props.ts) and Ink's margin/padding are
+// number-only. The family recompute resolves an edge from a value only when it
+// coerces to a FINITE number, with one carve-out for template ergonomics: a Vue
+// STATIC template attribute (`<Box margin="5">`) arrives as the numeric STRING
+// "5", which must still resolve to 5. Any OTHER non-numeric value ("50%", "foo",
+// "") is treated as not-set and falls through to the surviving shorthand — the
+// reconcile drops the OLD per-setter code's incidental, off-contract string
+// forwarding (setMargin(edge, "50%") → yoga percent; setMargin(edge, "foo") →
+// throw). These pin that contract so it can't silently drift.
+
+test('numeric string margin="5" resolves to 5 (static template attribute ergonomics)', () => {
+  const box = freshBox();
+  // `<Box margin="5">` reaches the host renderer as the string "5"; the family
+  // recompute coerces it like the numeric prop margin={5}.
+  reconcileMarginEdges(box, { margin: "5" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(5);
+  expect(box.yoga.getComputedMargin(EDGE_LEFT as never)).toBe(5);
+
+  detachYoga(box);
+});
+
+test('numeric string marginTop="8" resolves to 8 and overrides the shorthand', () => {
+  const box = freshBox();
+  reconcileMarginEdges(box, { margin: 5, marginTop: "8" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(8);
+
+  detachYoga(box);
+});
+
+test('non-numeric string marginTop="50%" falls through to the surviving margin shorthand (PR #184: no longer a yoga percent)', () => {
+  const box = freshBox();
+  // OLD per-setter code forwarded "50%" raw → yoga read it as a 50% percent
+  // margin. The typed contract is number-only, so "50%" is now off-contract /
+  // not-set and the edge falls back to the surviving margin shorthand.
+  reconcileMarginEdges(box, { margin: 5, marginTop: "50%" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(5);
+
+  detachYoga(box);
+});
+
+test('non-numeric string paddingLeft="50%" falls through to the surviving padding shorthand (PR #184: no longer a yoga percent)', () => {
+  const box = freshBox();
+  reconcilePaddingEdges(box, { padding: 4, paddingLeft: "50%" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedPadding(EDGE_LEFT as never)).toBe(4);
+
+  detachYoga(box);
+});
+
+test('junk string marginTop="foo" falls through to the surviving margin shorthand (PR #184: no longer throws)', () => {
+  const box = freshBox();
+  // OLD per-setter code did setMargin(EDGE_TOP, "foo") which threw; now it is
+  // not-set and falls back to the shorthand without throwing.
+  expect(() => {
+    reconcileMarginEdges(box, { margin: 5, marginTop: "foo" });
+  }).not.toThrow();
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(5);
+
+  detachYoga(box);
+});
+
+// Empty-string tweak (PR #184): `Number("") === 0` would otherwise make
+// marginTop="" resolve to 0 (overriding the shorthand) while every other
+// non-numeric string falls through — `present()` excludes "" so the contract is
+// uniform: only numeric strings are coerced, all other strings fall through.
+
+test('empty string marginTop="" falls through to the surviving margin shorthand, not 0 (PR #184 "" tweak)', () => {
+  const box = freshBox();
+  reconcileMarginEdges(box, { margin: 5, marginTop: "" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(5);
+
+  detachYoga(box);
+});
+
+test('empty string paddingLeft="" falls through to the surviving padding shorthand, not 0 (PR #184 "" tweak)', () => {
+  const box = freshBox();
+  reconcilePaddingEdges(box, { padding: 4, paddingLeft: "" });
+  box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
+  expect(box.yoga.getComputedPadding(EDGE_LEFT as never)).toBe(4);
+
+  detachYoga(box);
+});
+
 // display: removing/undefining `display` resets to the DEFAULT (DISPLAY_FLEX =
 // visible), a DELIBERATE divergence from Ink (which hides on present-undefined).
 // See .agents/docs/ink-divergences.md ("Removing `display` resets to the

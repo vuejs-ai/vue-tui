@@ -495,18 +495,30 @@ export const PADDING_PROPS = new Set([
   "paddingRight",
 ]);
 
-// A prop counts as "present" only when its el.props value is a FINITE number.
-// Require finiteness, not merely non-null: a withdrawn prop (null/undefined) OR a
-// present-but-non-finite value (NaN/±Infinity from a bad user calc like 0/0) must
-// FALL THROUGH to the next precedence level (axis → all → 0), not resolve to 0.
-// This preserves the prior setMargin(EDGE_TOP, NaN) → yoga-fallback behavior:
-// yoga treated NaN as unset so the edge fell back to the surviving shorthand, but
-// the composite edges are now zeroed and can no longer provide that fallback
-// implicitly — so it must be made explicit here. (An explicit 0 is finite, so it
-// still counts as present and correctly overrides the shorthand to 0.)
+// A prop counts as "present" only when its el.props value coerces to a FINITE
+// number. Spacing props are typed `number` (box-props.ts), matching Ink, whose
+// margin/padding are number-only; numeric STRINGS are still accepted because Vue
+// delivers a static template attribute (`<Box margin="5">`) as the string "5".
+//
+// Three reasons a value FALLS THROUGH (not present → next precedence level
+// axis → all → 0, instead of resolving to 0):
+//   1. withdrawn prop (null/undefined),
+//   2. present-but-non-finite number (NaN/±Infinity from a bad user calc like 0/0)
+//      — preserves the prior setMargin(EDGE_TOP, NaN) → yoga-treats-as-unset
+//      fallback, which the now-zeroed composite edges can no longer provide
+//      implicitly, so it is made explicit here, and
+//   3. an off-contract non-numeric string ("50%", "foo", …). The old per-setter
+//      code forwarded such strings raw to yoga (so "50%" incidentally became a
+//      yoga percent and "foo" threw); normalizing them to not-set is consistent
+//      with the typed number contract + Ink. The empty string "" is excluded too,
+//      since `Number("") === 0` would otherwise make `marginTop=""` resolve to 0
+//      while every other non-numeric string falls through — an inconsistency, not
+//      a contract worth keeping.
+// (An explicit 0 is finite, so it still counts as present and correctly overrides
+// the shorthand to 0 — distinct from the fall-through cases above.)
 function present(props: Record<string, unknown>, key: string): boolean {
   const v = props[key];
-  return v != null && Number.isFinite(Number(v));
+  return v != null && v !== "" && Number.isFinite(Number(v));
 }
 
 /**

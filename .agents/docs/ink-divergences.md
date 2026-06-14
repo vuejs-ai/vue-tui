@@ -329,6 +329,13 @@ current-props model, or API conventions.
   per-edge value can shadow the shorthand. This mirrors the existing `reconcileBorderEdges`
   pattern (an edge that depends on several props can't be set correctly by a single
   per-prop yoga setter).
+- **Spacing value contract:** an edge resolves from a prop only when it is a **finite number**
+  (matching the `number` prop type + Ink's number-only margin/padding); a numeric **string**
+  (`margin="5"`) is coerced for Vue **static-template attribute** ergonomics, but any other
+  non-numeric value (`"50%"`, junk, `""`) is treated as **not-set** and falls through to the
+  surviving shorthand rather than being forwarded to yoga. So the family recompute drops the
+  OLD per-setter code's incidental, off-contract string forwarding — `marginTop="50%"` no longer
+  becomes a yoga percent and `marginTop="foo"` no longer throws.
 - **Why:** render = f(current props): with current props `{margin: 5}` the top margin is 5, full
   stop — a value that is no longer set must not linger via yoga's edge layering (G19, the same
   declarative-reset principle as the `display` and `flexDirection`/`flexWrap` entries above).
