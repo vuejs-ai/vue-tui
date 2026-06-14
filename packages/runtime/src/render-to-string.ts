@@ -144,10 +144,12 @@ function renderToStringInternal(
   };
 
   let teardownSucceeded = false;
+  let mounted = false;
 
   try {
     // Synchronously render the Vue tree into the root.
     app.mount(root);
+    mounted = true;
 
     const restoreLayoutGuards = calculateLayoutWithContentGuards(
       root,
@@ -198,12 +200,28 @@ function renderToStringInternal(
 
     return normalizedStaticOutput || output;
   } finally {
+    // If layout/paint threw, the happy-path app.unmount() above was skipped. Unmount
+    // here so the tree's onScopeDispose cleanups ALWAYS run — otherwise a composable
+    // that registered an external listener (e.g. useWindowSize's `resize` listener on
+    // the shared process.stdout) leaks one per failed call, accumulating toward Node's
+    // MaxListenersExceededWarning. Guard with `mounted` (never unmount a tree that
+    // never mounted) and `teardownSucceeded` (the happy path already unmounted — no
+    // double-unmount). app.unmount() also frees the CHILD yoga nodes via the node-ops
+    // remove handler, leaving only the root for freeRecursive below.
+    if (mounted && !teardownSucceeded) {
+      try {
+        app.unmount();
+      } catch {
+        // Best-effort teardown: a throw here must not mask the original error.
+      }
+    }
+
     // Ensure native yoga memory is freed even if rendering or teardown threw.
-    // Yoga nodes are WASM-backed and not garbage collected.
+    // Yoga nodes are WASM-backed and not garbage collected. In the happy path
+    // detachYoga(root) already freed the root; here (error path) freeRecursive
+    // cleans up the root and any child nodes the unmount above couldn't free.
     if (!teardownSucceeded) {
       try {
-        // If unmount failed, some child nodes may not have been freed.
-        // Use freeRecursive to clean up the entire tree as best-effort.
         root.yoga.freeRecursive();
       } catch {
         // Best-effort: node may already be partially freed
