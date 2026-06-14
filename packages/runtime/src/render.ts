@@ -477,7 +477,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedBeforeExitHandler = null;
     }
     if (mountedStdinController) {
-      mountedStdinController.dispose();
+      // Pass sync through so the bracketed-paste-disable escape flushes
+      // synchronously on the signal-exit path (Finding A), mirroring the
+      // kitty/cursor/alt-screen restores above.
+      mountedStdinController.dispose(sync);
     }
   }
 
@@ -1571,7 +1574,11 @@ function createFocusController(): FocusContext {
 // --- Stdin controller ----------------------------------------------------
 
 interface StdinController extends StdinContext {
-  dispose: () => void;
+  // sync (Finding A): on the signal-exit teardown path the restore escapes — here
+  // the bracketed-paste-disable `\x1b[?2004l` — must be flushed synchronously
+  // (fs.writeSync) so they reach the fd before signal-exit re-raises the signal.
+  // Defaults to the async stdout.write path for normal unmount/exit.
+  dispose: (sync?: boolean) => void;
   // rawMode 'always': take a lifetime raw-mode hold (raw on + keep-alive + input
   // listener) that input composables stack on top of, with the per-consumer
   // input-state cleanup re-based to this floor.
@@ -1615,15 +1622,41 @@ function createStdinController(
   const FLUSH_DELAY = 20; // ms, matching Ink
   let bracketedPasteModeCount = 0;
 
+  // True once bracketed paste has been enabled at least once on this controller
+  // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
+  // paste-OFF even after Vue's unmount already ran the async disable and zeroed
+  // bracketedPasteModeCount (see dispose(sync) below).
+  let everEnabledBracketedPaste = false;
+
   // Write the bracketed-paste-disable escape only when stdout can still take it.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
   // the paste-OFF write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
   // where stdout is already gone. Mirror Ink's `canWriteToStdout` guard
   // (App.tsx:620/633-635): isTTY AND `!destroyed && !writableEnded`. Matches the
   // render-level writeBestEffort helper, which isn't in this function's scope.
-  function disableBracketedPaste() {
+  //
+  // sync (Finding A): on the signal-exit path signal-exit re-raises the signal
+  // IMMEDIATELY after the teardown callback returns (`{alwaysLast:false}`), so a
+  // buffered async `stdout.write` of `\x1b[?2004l` (CSI ? 2004 l — bracketed-
+  // paste OFF) can be lost before the process dies, leaving the shell wrapping
+  // later pastes in \x1b[200~…\x1b[201~. A synchronous fd write guarantees the
+  // bytes reach the fd first — same rationale (and mechanism) as the show-cursor
+  // / leave-alt-screen / disable-kitty restores. Falls back to fd 1 when the
+  // stream has no numeric fd.
+  function disableBracketedPaste(sync = false) {
     const stdout = appCtx.stdout;
     if (!stdout.isTTY || stdout.destroyed || stdout.writableEnded) return;
+    if (sync) {
+      try {
+        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
+        const streamFd = (stdout as { fd?: number }).fd;
+        const fd = typeof streamFd === "number" ? streamFd : 1;
+        fsWriteSync(fd, "\x1b[?2004l");
+      } catch {
+        // Best-effort restore during abrupt shutdown.
+      }
+      return;
+    }
     stdout.write("\x1b[?2004l");
   }
 
@@ -1848,6 +1881,7 @@ function createStdinController(
       if (enabled) {
         if (bracketedPasteModeCount === 0 && appCtx.stdout.isTTY) {
           appCtx.stdout.write("\x1b[?2004h");
+          everEnabledBracketedPaste = true;
         }
         bracketedPasteModeCount++;
       } else {
@@ -1903,12 +1937,26 @@ function createStdinController(
         });
       }
     },
-    dispose() {
+    dispose(sync = false) {
       clearPendingFlush();
       stdin.off("readable", handleReadable);
       stdin.off("data", handleData);
       emitter.off("input", focusInputListener);
-      if (bracketedPasteModeCount > 0) {
+      if (sync) {
+        // Signal-exit path (Finding A): the paste-OFF escape must flush
+        // synchronously. By the time dispose() runs, Vue's unmount has usually
+        // already fired usePaste's onScopeDispose → detach → setBracketedPasteMode
+        // (false), which wrote `\x1b[?2004l` ASYNC and zeroed the count — and that
+        // async write is exactly what signal-exit's immediate re-raise can drop.
+        // So re-issue it SYNCHRONOUSLY here whenever paste was ever enabled, not
+        // gated on the (now-zero) live count. Re-sending paste-OFF is idempotent:
+        // disabling an already-disabled mode is a terminal no-op, so a redundant
+        // sync write after a surviving async one is harmless. If detach hasn't run
+        // yet (count still > 0), this single sync write still covers it.
+        if (everEnabledBracketedPaste) {
+          disableBracketedPaste(true);
+        }
+      } else if (bracketedPasteModeCount > 0) {
         disableBracketedPaste();
       }
       bracketedPasteModeCount = 0;
