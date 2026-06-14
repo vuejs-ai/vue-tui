@@ -34,8 +34,17 @@ function isValidBoxStyleShape(value: unknown): value is BoxStyle {
 /**
  * Eager render-time validation for `<Box>`. Runs every render and throws into the
  * error boundary on invalid input — exactly as box.ts's render fn did. Returns
- * `true` so it can gate a `v-if`. Callers must skip it for a screen-reader-hidden
- * Box (a non-emitted node never colorizes — same ordering as box.ts).
+ * `true` so it can gate a `v-if`.
+ *
+ * Everything validated here is PAINT-TIME VISUAL input (own/border background colors,
+ * per-edge border foreground colors, borderStyle shape) — it only matters when the
+ * Box is actually painted. There is no structural validation here. So callers must
+ * skip it whenever the Box's visuals are never painted:
+ *   - a screen-reader-HIDDEN Box (a non-emitted node never colorizes — same ordering
+ *     as box.ts), and
+ *   - GLOBAL screen-reader mode (the whole tree is linearized to plain text; vue-tui,
+ *     like Ink, never colorizes / draws borders for ANY node, so it never throws on an
+ *     invalid color — verified against Ink v7.0.4). See box.vue's v-if.
  */
 export function assertBoxValid(props: BoxProps): true {
   // --- backgroundColor validation (A12) ---

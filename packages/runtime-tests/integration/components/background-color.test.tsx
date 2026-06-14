@@ -1101,3 +1101,82 @@ test("screen-reader-hidden Text with modifier-name backgroundColor does NOT thro
   ));
   expect(() => renderToString(App, { columns: 100, isScreenReaderEnabled: true })).not.toThrow();
 });
+
+// GLOBAL screen-reader mode (Ink parity): even a NON-aria-hidden <Box>/<Text> with
+// a modifier-name backgroundColor must NOT throw when global SR mode is on. Under
+// SR, vue-tui (like Ink) linearizes the whole tree to PLAIN TEXT — it never
+// colorizes and never draws borders for ANY node — so there is nothing to validate
+// and the eager visual validation is spurious. A screen-reader user must get the
+// accessible plain-text content, not a crash, because of a paint-only prop value.
+// Verified against Ink v7.0.4: with INK_SCREEN_READER=true, <Box backgroundColor="bold">
+// renders plain text and does NOT throw; without it, Ink throws in colorize.
+test("GLOBAL SR: non-hidden Box with modifier-name backgroundColor renders text, does NOT throw", ({
+  expect,
+}) => {
+  const App = defineComponent(() => () => (
+    <Box backgroundColor="bold" alignSelf="flex-start">
+      <Text>accessible content</Text>
+    </Box>
+  ));
+  let out = "<unset>";
+  expect(() => {
+    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+  }).not.toThrow();
+  // The accessible plain-text content is rendered (not crashed away).
+  expect(out).toContain("accessible content");
+});
+
+test("GLOBAL SR: non-hidden Text with modifier-name backgroundColor renders text, does NOT throw", ({
+  expect,
+}) => {
+  const App = defineComponent(() => () => (
+    <Box alignSelf="flex-start">
+      <Text backgroundColor="bold">accessible text</Text>
+    </Box>
+  ));
+  let out = "<unset>";
+  expect(() => {
+    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+  }).not.toThrow();
+  expect(out).toContain("accessible text");
+});
+
+test("GLOBAL SR: non-hidden Box with invalid borderStyle renders text, does NOT throw", ({
+  expect,
+}) => {
+  const App = defineComponent(() => () => (
+    // Cast through unknown: an unknown borderStyle name is invalid by the public
+    // type, but a JS caller can pass it — under SR the border is never drawn, so it
+    // must not throw. (box-validate's borderStyle shape-check is skipped under SR.)
+    <Box borderStyle={"not-a-border" as unknown as "single"} alignSelf="flex-start">
+      <Text>bordered content</Text>
+    </Box>
+  ));
+  let out = "<unset>";
+  expect(() => {
+    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+  }).not.toThrow();
+  expect(out).toContain("bordered content");
+});
+
+// Regression guard: WITHOUT global SR mode, the same invalid backgroundColor MUST
+// still throw at render — the eager visual validation is preserved for the normal
+// (painted) path. (Twin of the throw-on-modifier tests above; pins that the SR
+// carve-out does not weaken validation off the SR path.)
+test("regression: non-SR Box with modifier-name backgroundColor STILL throws", ({ expect }) => {
+  const App = defineComponent(() => () => (
+    <Box backgroundColor="bold" alignSelf="flex-start">
+      <Text>painted content</Text>
+    </Box>
+  ));
+  expect(() => renderToString(App, { columns: 100 })).toThrow(/backgroundColor/i);
+});
+
+test("regression: non-SR Text with modifier-name backgroundColor STILL throws", ({ expect }) => {
+  const App = defineComponent(() => () => (
+    <Box alignSelf="flex-start">
+      <Text backgroundColor="bold">painted text</Text>
+    </Box>
+  ));
+  expect(() => renderToString(App, { columns: 100 })).toThrow(/backgroundColor/i);
+});
