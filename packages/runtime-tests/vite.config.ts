@@ -17,6 +17,6 @@ export default defineConfig({
     exclude: ["integration/pty/**", "node_modules/**"],
   },
   lint: {
-    ignorePatterns: ["integration/pty/fixtures/**"],
+    ignorePatterns: ["integration/pty/fixtures/**", "integration/subprocess-fixtures/*.mjs"],
   },
 });
