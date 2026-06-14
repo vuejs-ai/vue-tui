@@ -252,6 +252,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // Used by the error boundary to route errors through exit().
   let exitWithError: (e: Error) => void = () => {};
 
+  // Record-exit-error bridge, wired alongside exitWithError after mount. The
+  // error boundary calls this SYNCHRONOUSLY (before the deferred exitWithError)
+  // to set pendingExitError up front, so a racing unmount() that runs
+  // resolveExit() before the deferred exit rejects with the thrown error instead
+  // of resolving clean (BUG #2). Mirrors exitWithError's after-mount indirection
+  // because pendingExitError/exitInitiated/teardownStarted are all in this scope.
+  let recordExitError: (e: Error) => void = () => {};
+
   // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
   // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
   // captures the value/error and initiates teardown while any subsequent
@@ -526,20 +534,48 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const errored = shallowRef(false);
 
       onErrorCaptured((err) => {
-        // Preserve a genuine Error — including a cross-realm one (fails
-        // `instanceof Error`, passes the `[object Error]` brand check) — so the
-        // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
-        // matching Ink's ErrorBoundary (rejects with the thrown value itself).
-        // A true non-Error throw (`throw "x"`, `throw 0`, `throw {message:'x'}`)
-        // is wrapped with the SAME message ErrorOverview displays
-        // (messageForNonError), so the shown and rejected messages agree (e17).
-        const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
-        caught.value = err;
-        errored.value = true;
-        // Flush the ErrorOverview frame, then exit
-        void nextTick(() => {
-          exitWithError(e);
-        });
+        // First-wins: only the FIRST captured error is recorded and routed to
+        // exit(). If two descendants throw in the SAME synchronous flush, the
+        // displayed `caught` and the rejected exit error must stay the SAME
+        // error — `caught` is last-wins by assignment, while exit() is
+        // first-wins, so without this guard the overview would show error #2
+        // while waitUntilExit() rejects with error #1 (e17 display/reject
+        // mismatch). Guarding on `errored` keeps both on the first thrown value.
+        if (!errored.value) {
+          // Preserve a genuine Error — including a cross-realm one (fails
+          // `instanceof Error`, passes the `[object Error]` brand check) — so the
+          // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
+          // matching Ink's ErrorBoundary (rejects with the thrown value itself).
+          // A true non-Error throw (`throw "x"`, `throw 0`, `throw {message:'x'}`)
+          // is wrapped with the SAME message ErrorOverview displays
+          // (messageForNonError), so the shown and rejected messages agree (e17).
+          const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
+          caught.value = err;
+          errored.value = true;
+          // Record the exit error SYNCHRONOUSLY, but keep the teardown DEFERRED.
+          // Two distinct concerns, decoupled:
+          //   1. recordExitError(e) sets pendingExitError NOW (first-wins). A host
+          //      that throws during a flush and then synchronously unmounts in the
+          //      SAME task would otherwise have its racing unmount() run
+          //      resolveExit() while pendingExitError is still undefined —
+          //      resolving CLEAN and swallowing the error (the deferred-exit race,
+          //      BUG #2). Recording it up front makes that resolveExit() reject
+          //      with the thrown error.
+          //   2. exitWithError(e) stays on nextTick so teardown is DEFERRED until
+          //      AFTER the current flush. teardown() runs the final mountedCommit()
+          //      that paints the ErrorOverview frame (on interactive/debug mounts),
+          //      and the boundary's errored→true re-render must commit BEFORE that
+          //      final commit. A synchronous exit here would let teardown's
+          //      microtask run before the re-render, dropping the overview frame.
+          //      Deferring keeps frame/paint timing byte-identical to main. (In the
+          //      racing-unmount case the unmount sets teardownStarted, so this
+          //      later exit() no-ops via the exitInitiated||teardownStarted guard;
+          //      with no race it proceeds normally.)
+          recordExitError(e);
+          void nextTick(() => {
+            exitWithError(e);
+          });
+        }
         return false; // stop propagation
       });
 
@@ -1202,6 +1238,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Wire exit-with-error for the error boundary (must be set before mount).
     exitWithError = (e: Error) => appContext.exit(e);
+    recordExitError = (e: Error) => {
+      // First-wins: don't overwrite an exit already decided (a clean exit() or a
+      // prior error). Records the error so a racing unmount()'s resolveExit()
+      // rejects with it instead of resolving clean (BUG #2). Mirrors the
+      // synchronous record in appContext.exit() — pendingExitError is set here,
+      // then the deferred exitWithError() drives teardown/resolveExit().
+      if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
+        pendingExitError = e;
+      }
+    };
 
     // Alternate screen: enter BEFORE rendering starts (matching Ink ink.tsx:428).
     // Requires alternateScreen option + interactive + isTTY.

@@ -1,0 +1,249 @@
+import { PassThrough } from "node:stream";
+import { defineComponent, h, nextTick, shallowRef } from "vue";
+import { expect, test } from "vite-plus/test";
+import stripAnsi from "strip-ansi";
+import { createApp, Text } from "@vue-tui/runtime";
+import {
+  captureWrites,
+  getContentWrites,
+  makeFakeStdin,
+  makeFakeWritable,
+} from "./test-streams.ts";
+
+// A NON-TTY writable (isTTY=false). makeFakeWritable() forces isTTY=true, which
+// makes the app interactive; for the non-interactive non-debug race below we need
+// a piped stream so `interactive` derives false (render.ts:
+// `options.interactive ?? (!isInCi && Boolean(stdout.isTTY))`). We also pass
+// `interactive: false` explicitly so the case is deterministic regardless of CI.
+function makeNonTtyWritable(): NodeJS.WriteStream {
+  const s = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(s, { columns: 100, rows: 100, isTTY: false });
+  return s;
+}
+
+// These two tests pin down the error-capture/exit-race contract. They mount
+// directly (not via @vue-tui/testing's render(), which re-throws and discards
+// the painted frame) so we can read the ErrorOverview frame AND inspect what
+// waitUntilExit() settles with from a single mount.
+
+// --- BUG #2: error swallowed when unmount() races the deferred exit ---
+// When a render-flush throw queues the boundary's exit and host code calls
+// app.unmount() synchronously in the SAME task (before the deferred exit runs),
+// the thrown error must still reject waitUntilExit(). Before the fix the
+// pendingExitError was recorded only inside the deferred exit, so the racing
+// unmount's resolveExit() read undefined and RESOLVED clean — swallowing the
+// error. The fix (Option B) records pendingExitError SYNCHRONOUSLY in
+// onErrorCaptured (recordExitError) while keeping teardown DEFERRED, so the race
+// rejects with the error without disturbing frame/paint timing.
+test("update-flush throw then synchronous unmount(): waitUntilExit REJECTS with the thrown error", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  const trigger = shallowRef(false);
+  const ThrowsOnUpdate = defineComponent(() => {
+    return () => {
+      if (trigger.value) {
+        throw new Error("UPDATE_FLUSH_BOOM");
+      }
+      return h(Text, null, "ok");
+    };
+  });
+
+  const app = createApp(ThrowsOnUpdate);
+  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+
+  type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
+  const done: Promise<Settled> = app.waitUntilExit().then(
+    (value: unknown): Settled => ({ kind: "resolved", value }),
+    (e: unknown): Settled => ({ kind: "rejected", message: (e as Error)?.message }),
+  );
+
+  // Let the initial mount flush.
+  await nextTick();
+
+  // Flip a ref that throws on render. The throw happens INSIDE the flush this
+  // await waits on, which queues the boundary's deferred exit.
+  trigger.value = true;
+  await nextTick();
+
+  // Race: synchronously unmount in the SAME task, before the queued exit runs.
+  app.unmount();
+
+  const settled = await done;
+
+  expect(settled.kind).toBe("rejected");
+  if (settled.kind !== "rejected") throw new Error("expected rejection, got resolve");
+  expect(settled.message).toBe("UPDATE_FLUSH_BOOM");
+});
+
+// --- BUG #5: two throws in one flush — overlay vs reject must AGREE ---
+// If two siblings throw in the same synchronous flush, the DISPLAYED overview
+// and the REJECTED error must be the SAME (first-thrown) error. Before the fix
+// `caught` was last-wins (displayed B) while the exit path was first-wins
+// (rejected A) — a display/reject mismatch.
+test("two sibling throws in one flush: displayed overview and rejected error AGREE (both first-thrown)", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const ThrowerA = defineComponent(() => {
+    return () => {
+      throw new Error("ERROR_A_FIRST");
+    };
+  });
+  const ThrowerB = defineComponent(() => {
+    return () => {
+      throw new Error("ERROR_B_SECOND");
+    };
+  });
+  // Two siblings under one parent: both render (and throw) in the same flush.
+  const Root = defineComponent(() => {
+    return () => h(Text, null, [h(ThrowerA), h(ThrowerB)]);
+  });
+
+  const app = createApp(Root);
+  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+
+  type Reject = { kind: "rejected"; message: unknown } | { kind: "resolved" };
+  const settled: Promise<Reject> = app.waitUntilExit().then(
+    (): Reject => ({ kind: "resolved" }),
+    (e: unknown): Reject => ({ kind: "rejected", message: (e as Error)?.message }),
+  );
+
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+  const reject = await settled;
+
+  const content = getContentWrites(writes);
+  const lastContentWrite = content.at(-1);
+  if (lastContentWrite === undefined) throw new Error("no content write captured");
+  const frame = stripAnsi(lastContentWrite);
+
+  // Reject is first-wins.
+  expect(reject.kind).toBe("rejected");
+  if (reject.kind !== "rejected") throw new Error("expected rejection");
+  expect(reject.message).toBe("ERROR_A_FIRST");
+
+  // Display agrees: the overview shows the SAME (first-thrown) error, not B.
+  expect(frame).toContain("ERROR_A_FIRST");
+  expect(frame).not.toContain("ERROR_B_SECOND");
+});
+
+// --- BUG #2, the NON-INTERACTIVE NON-DEBUG case ---
+// This is the exact case the discarded synchronous-exit approach broke and the
+// case Option B must handle: a piped (non-TTY) stdout with no debug flag. The
+// racing app.unmount() runs teardown() + resolveExit() SYNCHRONOUSLY (only the
+// boundary's deferred exitWithError teardown is microtask-driven), so resolveExit
+// reads pendingExitError in the same task. The synchronous record
+// (recordExitError) is what makes the race reject; remove it and this test goes
+// RED (resolves clean — the original swallow).
+test("non-interactive non-debug: update-flush throw + synchronous unmount() still REJECTS", async () => {
+  const stdout = makeNonTtyWritable();
+  const stderr = makeNonTtyWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  const trigger = shallowRef(false);
+  const ThrowsOnUpdate = defineComponent(() => {
+    return () => {
+      if (trigger.value) {
+        throw new Error("NONINTERACTIVE_BOOM");
+      }
+      return h(Text, null, "ok");
+    };
+  });
+
+  const app = createApp(ThrowsOnUpdate);
+  // Non-interactive (piped stdout), non-debug, interactive:false pinned.
+  app.mount({ stdout, stdin, stderr, interactive: false, exitOnCtrlC: false });
+
+  type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
+  const done: Promise<Settled> = app.waitUntilExit().then(
+    (value: unknown): Settled => ({ kind: "resolved", value }),
+    (e: unknown): Settled => ({ kind: "rejected", message: (e as Error)?.message }),
+  );
+
+  await nextTick();
+
+  // Throw inside the update flush, then race the unmount in the SAME task.
+  trigger.value = true;
+  await nextTick();
+  app.unmount();
+
+  const settled = await done;
+
+  expect(settled.kind).toBe("rejected");
+  if (settled.kind !== "rejected") throw new Error("expected rejection, got resolve");
+  expect(settled.message).toBe("NONINTERACTIVE_BOOM");
+});
+
+// --- FRAME-PAINTING regression guard (the synchronous approach would have
+// broken the interactive/debug paint by letting teardown run before the
+// errored→true re-render committed) ---
+//
+// Two mode-specific assertions, both pinned to MAIN's empirically-measured
+// behavior (Option B keeps teardown timing byte-identical to main):
+//   - interactive/debug: main DOES paint the ErrorOverview frame (the last
+//     content write contains the error message). Option B must preserve that.
+//   - non-interactive non-debug: main does NOT paint ErrorOverview — its only
+//     content write is a bare trailing "\n" (Ink's `this.lastOutput + '\n'`
+//     branch, and lastOutput is empty because the dynamic frame was deferred and
+//     the boundary's error frame is never committed on this path). We assert the
+//     fix MATCHES main: no error message reaches stdout, just the trailing
+//     newline. (Verified by probe: main writes ["\n",""]; Option B writes the
+//     same.)
+test("interactive/debug: an error STILL paints the ErrorOverview frame", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const Throws = defineComponent(() => {
+    return () => {
+      throw new Error("PAINTED_BOOM");
+    };
+  });
+
+  const app = createApp(Throws);
+  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.waitUntilExit().catch(() => {});
+
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+
+  const content = getContentWrites(writes);
+  const lastContentWrite = content.at(-1);
+  if (lastContentWrite === undefined) throw new Error("no content write captured");
+  const frame = stripAnsi(lastContentWrite);
+  expect(frame).toContain("PAINTED_BOOM");
+});
+
+test("non-interactive non-debug: error paint MATCHES main (no overview frame, just trailing newline)", async () => {
+  const stdout = makeNonTtyWritable();
+  const stderr = makeNonTtyWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const Throws = defineComponent(() => {
+    return () => {
+      throw new Error("UNPAINTED_BOOM");
+    };
+  });
+
+  const app = createApp(Throws);
+  app.mount({ stdout, stdin, stderr, interactive: false, exitOnCtrlC: false });
+  app.waitUntilExit().catch(() => {});
+
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+  await new Promise<void>((r) => setImmediate(r));
+
+  // Main paints NO ErrorOverview here: the error message never reaches stdout.
+  const allContent = writes.join("");
+  expect(stripAnsi(allContent)).not.toContain("UNPAINTED_BOOM");
+  // The only content write is the trailing newline teardown owes (lastFrame is
+  // empty + "\n"), matching Ink's non-interactive non-debug branch.
+  const content = getContentWrites(writes);
+  expect(content).toEqual(["\n"]);
+});
