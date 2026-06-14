@@ -1530,7 +1530,14 @@ interface Focusable {
   isActive: boolean;
 }
 
-function createFocusController(): FocusContext {
+// Test-only probe: lets a unit test observe the internal `subs` Map size to prove
+// auto-id focusables don't leak empty Sets (see focus-subs-leak test). The double
+// underscore + this comment mark it internal; nothing in production reads it.
+export interface FocusControllerForTest extends FocusContext {
+  __subscriberMapSize: () => number;
+}
+
+export function createFocusController(): FocusControllerForTest {
   const focusables: Focusable[] = [];
   const subs = new Map<string, Set<(focused: boolean) => void>>();
   let activeFocusable: Focusable | null = null;
@@ -1638,6 +1645,11 @@ function createFocusController(): FocusContext {
         setActiveFocusable(entry);
       }
     },
+    // remove() intentionally does NOT touch `subs`: a consumer's unsubscribe
+    // (see subscribe()) is what frees its Set entry, and useFocus unsubscribes
+    // before calling remove(). Deleting the Set here would also break duplicate
+    // ids — two components sharing one id share one Set, and removing one entry
+    // must not silence the survivor's focus notifications.
     remove(id) {
       const removingActive = activeFocusable?.id === id;
       for (let i = focusables.length - 1; i >= 0; i--) {
@@ -1669,11 +1681,27 @@ function createFocusController(): FocusContext {
         subs.set(id, set);
       }
       set.add(fn);
-      return () => set!.delete(fn);
+      return () => {
+        set!.delete(fn);
+        // Drop the now-empty Set so the Map doesn't accumulate dead entries.
+        // useFocus() with no explicit id mints a fresh `__auto-N` id per mount,
+        // so without this every mount/unmount cycle would leak one empty Set —
+        // unbounded growth over a long session. A later subscribe() for the same
+        // id re-creates the Set (the `if (!set)` branch above), so re-subscription
+        // still works.
+        //
+        // `subs.get(id) === set` keeps this idempotent across a re-subscribe: a
+        // stale call to THIS closure (e.g. unsubscribe invoked twice) must not
+        // delete a fresh Set created by a later subscribe(id) for the same id —
+        // only the Set this closure actually owns is eligible for removal.
+        if (set!.size === 0 && subs.get(id) === set) subs.delete(id);
+      };
     },
   };
 
-  return ctx;
+  return Object.assign(ctx, {
+    __subscriberMapSize: () => subs.size,
+  });
 }
 
 // --- Stdin controller ----------------------------------------------------
