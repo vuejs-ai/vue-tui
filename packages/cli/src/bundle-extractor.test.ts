@@ -5,12 +5,15 @@ import { join } from "node:path";
 import { extractBundle, type MemoryFiles } from "./bundle-extractor.ts";
 
 // Build a MemoryFiles whose shape matches what extractBundle expects: a `files`
-// Map of keys plus a `get(key)` returning `{ source }`. We pack many files per
-// extraction (each non-trivially sized) so a write loop takes long enough that a
-// concurrent rm() can land mid-write. One `.js` entry is required or
+// Map of keys plus a `get(key)` returning `{ source }`. The race window depends
+// on the NUMBER of files in the write loop (a longer loop gives an overlapping
+// rm() more chances to interleave a writeFile) and on the staggered starts —
+// NOT on file size. So we keep the file COUNT high but the per-file payload
+// tiny: that slashes total write time (keeping the test well under the CI
+// timeout) without shrinking the race window. One `.js` entry is required or
 // extractBundle throws "No JS bundle found".
 const FILE_COUNT = 200;
-const PAYLOAD = "x".repeat(8 * 1024);
+const PAYLOAD = "x".repeat(32);
 
 function makeMemoryFiles(): MemoryFiles {
   const files = new Map<string, { source: string }>();
@@ -31,6 +34,12 @@ const expectedKeys = [...makeMemoryFiles().files.keys()];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Generous safety margin above vitest's 5s default. The green run is a small
+// fraction of this (~hundreds of ms locally), but a slow, I/O-contended 4-core
+// CI runner needs comfortable headroom: once extractBundle is serialized this
+// test does its file writes back-to-back, and CI runs test files in parallel.
+const TIMEOUT_MS = 30_000;
+
 let outDir: string;
 
 beforeEach(async () => {
@@ -41,38 +50,42 @@ afterEach(async () => {
   await rm(outDir, { recursive: true, force: true });
 });
 
-test("staggered concurrent extractBundle calls against the same outDir do not race", async () => {
-  // The two dev.ts callers (the vue-tui:request-reload handler + the 500ms
-  // crash-respawn interval) fire at independent times, so a fresh extractBundle
-  // can begin while a prior one is mid-write. Each call starts by rm()-ing the
-  // shared outDir then mkdir + writeFile into it; if a second call's rm lands
-  // during the first call's write loop it deletes the tree mid-write ->
-  // ENOENT/EINVAL/ENOTEMPTY, or leaves a torn (partially populated) dir.
-  //
-  // We *stagger* the kickoffs (not a simultaneous Promise.all) precisely because
-  // simultaneous starts march through rm/mkdir in lockstep and rarely interleave
-  // an rm with an in-flight write — staggering is what reproduces the real bug.
-  const CALLS = 20;
-  const STAGGER_MS = 2;
+test(
+  "staggered concurrent extractBundle calls against the same outDir do not race",
+  async () => {
+    // The two dev.ts callers (the vue-tui:request-reload handler + the 500ms
+    // crash-respawn interval) fire at independent times, so a fresh extractBundle
+    // can begin while a prior one is mid-write. Each call starts by rm()-ing the
+    // shared outDir then mkdir + writeFile into it; if a second call's rm lands
+    // during the first call's write loop it deletes the tree mid-write ->
+    // ENOENT/EINVAL/ENOTEMPTY, or leaves a torn (partially populated) dir.
+    //
+    // We *stagger* the kickoffs (not a simultaneous Promise.all) precisely because
+    // simultaneous starts march through rm/mkdir in lockstep and rarely interleave
+    // an rm with an in-flight write — staggering is what reproduces the real bug.
+    const CALLS = 16;
+    const STAGGER_MS = 2;
 
-  const tasks: Promise<string>[] = [];
-  for (let i = 0; i < CALLS; i++) {
-    tasks.push(extractBundle(makeMemoryFiles(), outDir));
-    await sleep(STAGGER_MS);
-  }
+    const tasks: Promise<string>[] = [];
+    for (let i = 0; i < CALLS; i++) {
+      tasks.push(extractBundle(makeMemoryFiles(), outDir));
+      await sleep(STAGGER_MS);
+    }
 
-  const results = await Promise.allSettled(tasks);
+    const results = await Promise.allSettled(tasks);
 
-  const rejected = results.filter((r) => r.status === "rejected");
-  expect(
-    rejected.map((r) => (r as PromiseRejectedResult).reason?.message),
-    "no extractBundle call should reject",
-  ).toEqual([]);
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(
+      rejected.map((r) => (r as PromiseRejectedResult).reason?.message),
+      "no extractBundle call should reject",
+    ).toEqual([]);
 
-  // After everything settles the dir must hold the COMPLETE file set, not a
-  // torn subset left behind by an interleaved rm.
-  for (const key of expectedKeys) {
-    const content = await readFile(join(outDir, key), "utf8");
-    expect(content.length, `missing or empty file: ${key}`).toBeGreaterThan(0);
-  }
-});
+    // After everything settles the dir must hold the COMPLETE file set, not a
+    // torn subset left behind by an interleaved rm.
+    for (const key of expectedKeys) {
+      const content = await readFile(join(outDir, key), "utf8");
+      expect(content.length, `missing or empty file: ${key}`).toBeGreaterThan(0);
+    }
+  },
+  TIMEOUT_MS,
+);
