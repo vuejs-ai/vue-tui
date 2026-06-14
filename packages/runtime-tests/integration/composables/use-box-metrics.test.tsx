@@ -9,6 +9,9 @@ import {
   useWindowSize,
   createApp,
 } from "@vue-tui/runtime";
+// Internal host primitives — build a node + attach yoga WITHOUT a layout pass so
+// the pre-layout read below is deterministic (no render/commit timing involved).
+import { createBox, attachYoga } from "@vue-tui/runtime/internal";
 import { makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 describe("useBoxMetrics", () => {
@@ -204,6 +207,24 @@ describe("measureElement", () => {
     expect(measureElement({ yoga: fakeYoga })).toEqual({ width: 42, height: 17 });
   });
 
+  // A node whose yoga node exists but has NOT been through a layout pass:
+  // yoga.getComputedWidth()/Height() return NaN, and the old `?? 0` did NOT
+  // catch NaN (NaN ?? 0 === NaN). The pre-layout / mis-timed read must degrade
+  // to a finite {0,0} (a safe sentinel) instead of leaking NaN into user layout
+  // math (e.g. terminalWidth - measured.width → NaN → a NaN width prop).
+  test("returns finite { width: 0, height: 0 } for a node not yet laid out (no NaN leak)", () => {
+    const box = createBox();
+    attachYoga(box); // attaches a yoga node but does NOT calculateLayout
+    // Guard the premise: pre-layout yoga genuinely reports NaN (not 0), so this
+    // test exercises the real coercion, not a no-op.
+    expect(Number.isNaN(box.yoga.getComputedWidth())).toBe(true);
+
+    const result = measureElement(box);
+    expect(Number.isFinite(result.width)).toBe(true);
+    expect(Number.isFinite(result.height)).toBe(true);
+    expect(result).toEqual({ width: 0, height: 0 });
+  });
+
   test("resolves through $el for component instances", () => {
     const fakeYoga = {
       getComputedWidth: () => 30,
@@ -354,10 +375,13 @@ describe("measureElement", () => {
     // The deferred (documented-correct) read returns the real terminal width.
     expect(deferredWidth.value).toBe(80);
     // The bare read is the uncomputed pre-layout value. On this first-render path
-    // yoga's getComputedWidth() is NaN (and measureElement's `?? 0` does not
-    // coalesce NaN), so pin exactly that — a plain `!== 80` would also pass if the
-    // watcher never ran or returned 0, which would not prove the bare path is stale.
-    expect(Number.isNaN(bareWidth.value)).toBe(true);
+    // yoga's getComputedWidth() is NaN; measureElement coerces non-finite dims to
+    // the safe sentinel 0, so the bare read is a FINITE 0 — not NaN and not the
+    // real 80. Pin all three facts: it ran (not the -1 seed), it is finite (the
+    // NaN-leak fix), and it is stale (0 ≠ 80, proving the bare path is pre-layout).
+    expect(bareWidth.value).not.toBe(-1);
+    expect(Number.isFinite(bareWidth.value)).toBe(true);
+    expect(bareWidth.value).toBe(0);
   });
 
   test("measureElement works when render is throttled", async () => {

@@ -117,7 +117,12 @@ function findRootNode(node: TuiNode | null): TuiRoot | null {
 /**
  * Imperative function that reads yoga computed dimensions from a TUI node.
  *
- * Returns `{ width: 0, height: 0 }` when the ref is not attached to an element.
+ * Returns `{ width: 0, height: 0 }` when the ref is not attached to an element,
+ * and also as a safe fallback when the node's computed dimension is non-finite —
+ * i.e. it has a yoga node but has not been through a layout pass yet (yoga
+ * reports `NaN` pre-layout). `0` here is a sentinel meaning "not yet computed",
+ * NOT the box's true size; the correct pattern is to read *after* layout (see the
+ * timing note below).
  *
  * Timing matters: layout is computed inside the commit scheduler's post-flush
  * callback, which can run *after* your own `watchPostEffect`/render-time code in
@@ -145,9 +150,19 @@ function findRootNode(node: TuiNode | null): TuiRoot | null {
 export function measureElement(node: unknown): { width: number; height: number } {
   const tuiNode = resolveYogaNode(node);
   if (!tuiNode) return { width: 0, height: 0 };
+  // yoga returns NaN for a node not yet through a layout pass, and `?? 0` does
+  // NOT catch NaN (NaN ?? 0 === NaN). Coerce non-finite dims to 0 so a pre-layout
+  // / mis-timed read degrades to {0,0} instead of leaking NaN into user layout
+  // math. 0 is a SAFE SENTINEL, not the true size (which is "not yet computed");
+  // the correct usage is to read AFTER layout (see the timing note in the JSDoc).
+  // Matches the DOM precedent (getBoundingClientRect on display:none /
+  // img.naturalWidth pre-load → 0, not NaN). Deliberate divergence from Ink
+  // v7.0.4's NaN-leaking `?? 0`.
+  const width = tuiNode.yoga.getComputedWidth();
+  const height = tuiNode.yoga.getComputedHeight();
   return {
-    width: tuiNode.yoga.getComputedWidth() ?? 0,
-    height: tuiNode.yoga.getComputedHeight() ?? 0,
+    width: Number.isFinite(width) ? width : 0,
+    height: Number.isFinite(height) ? height : 0,
   };
 }
 
