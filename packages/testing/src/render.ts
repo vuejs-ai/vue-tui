@@ -122,8 +122,10 @@ export async function render(
     earlyError = e as Error;
   });
 
-  // Flush the Vue queue. Chain: onErrorCaptured → nextTick → exit → queueMicrotask
-  // → teardown → resolveExit() → stdout.write("", callback) → reject.
+  // Flush the Vue queue. Chain: onErrorCaptured (records pendingExitError
+  // synchronously) → nextTick → exit → queueMicrotask → teardown → resolveExit()
+  // → stdout.write("", callback) → reject. The error is recorded up front so a
+  // racing unmount() still rejects; teardown stays deferred so the overview paints.
   // The stdout write barrier fires via process.nextTick (inside stream internals),
   // so we need setImmediate (runs after all process.nextTick callbacks), then one
   // more microtask yield so the .catch() handler on exitPromise can set earlyError.
