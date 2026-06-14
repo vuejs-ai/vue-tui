@@ -16,6 +16,10 @@ export interface ReloadRequestDeps {
   // A predicate (read at event time) rather than a value, so the live flag in
   // dev() is observed when each request arrives.
   shouldAccept: () => boolean;
+  // True once shutdown() has begun. Re-checked AFTER the async extractBundle so a
+  // reload accepted before Ctrl+C, but still extracting when teardown starts,
+  // doesn't restart and orphan a child. Symmetric with respawnTick's guard.
+  isShuttingDown: () => boolean;
   memoryFiles: MemoryFiles;
   outDir: string;
   pm: { setBundlePath(p: string): void; restart(): Promise<void> | void };
@@ -40,6 +44,11 @@ export async function handleReloadRequest(deps: ReloadRequestDeps): Promise<void
   const extract = deps.extractBundle ?? extractBundle;
   try {
     const newPath = await extract(deps.memoryFiles, deps.outDir);
+    // Re-check AFTER the await: shutdown may have begun while we were
+    // extracting. pm.shutdown() has already cleared its restart timer by then,
+    // so a pm.restart() here would schedule a NEW one that fires post-teardown
+    // and spawns an orphan child the parent never kills. Mirrors respawnTick.
+    if (deps.isShuttingDown()) return;
     deps.pm.setBundlePath(newPath);
     await deps.pm.restart();
   } catch (err) {
@@ -179,29 +188,35 @@ export async function dev(entry?: string) {
     acceptReloads = true;
   }, 3000);
 
-  // Listen for full reload requests from child
-  server.hot.on("vue-tui:request-reload", async () => {
-    await handleReloadRequest({
-      shouldAccept: () => acceptReloads,
-      memoryFiles: clientEnv.memoryFiles,
-      outDir,
-      pm,
-      logger,
-    });
-  });
-
   // Declared before the interval so clearRespawn (below) can capture it; the
   // closure reads it at call time, after the assignment.
   let respawnInterval: ReturnType<typeof setInterval>;
 
   // Graceful shutdown. createShutdown owns the re-entrancy guard and clears the
-  // respawn interval first; isShuttingDown is read by the respawn tick so an
-  // in-flight tick can't spawn a child mid-teardown. See createShutdown.
+  // respawn interval first; isShuttingDown is read by the respawn tick AND the
+  // reload handler so neither can spawn/restart a child mid-teardown. See
+  // createShutdown. Created before the hot handler is registered so a reload
+  // event can never fire before `shutdown` exists.
   const shutdown = createShutdown({
     pm,
     closeServer: () => server.close(),
     clearRespawn: () => clearInterval(respawnInterval),
     exit: (code) => process.exit(code),
+  });
+
+  // Listen for full reload requests from child
+  server.hot.on("vue-tui:request-reload", async () => {
+    await handleReloadRequest({
+      // Fast gate: ignore reloads before startup is ready OR once Ctrl+C
+      // shutdown has begun (the post-await re-check below covers the case where
+      // shutdown starts mid-extraction).
+      shouldAccept: () => acceptReloads && !shutdown.isShuttingDown(),
+      isShuttingDown: shutdown.isShuttingDown,
+      memoryFiles: clientEnv.memoryFiles,
+      outDir,
+      pm,
+      logger,
+    });
   });
 
   // Re-spawn after crash on next successful bundle update
