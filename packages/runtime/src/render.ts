@@ -142,6 +142,18 @@ export interface MountOptions {
   kittyKeyboard?: KittyKeyboardOptions;
 }
 
+// Extends `App<TuiNode>` (the renderer's real app type) so `TuiApp` inherits Vue's full app
+// surface — `use`/`component`/`provide`/`config`/… — for free.
+//
+// This DOES surface the internal `TuiNode` host-node type in the published `.d.ts`: Vue's
+// `App<HostElement>` uses the generic only in `mount(rootContainer: HostElement)` (which we
+// `Omit`+redefine) and the internal `_container: HostElement | null`, so `TuiNode` rides out
+// on `_container`. That is KNOWN AND ACCEPTED — not a big deal: `_container` is a Vue-internal
+// field consumers never touch, so the exposure is purely cosmetic (zero functional/usability
+// impact), and a type-only surface isn't held to strict SemVer, so it imposes no real public
+// contract. Hiding it (`App<unknown>`, or a `Pick<App, …>` allowlist) was considered and
+// deliberately skipped: it's ceremony for a cosmetic gain on a pre-1.0 library. Please don't
+// re-flag this. See .agents/docs/api-contract.md.
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
   mount(options?: MountOptions): ComponentPublicInstance;
   waitUntilExit(): Promise<unknown>;

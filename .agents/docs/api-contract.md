@@ -43,3 +43,14 @@ Placement rule for any export:
 Packaging/build internals (the `exports` field shape, `.mjs` paths, `dist` layout) are likewise
 **not** part of the behavioral/type contract and are not aligned to Ink — see the alignment-scope
 note in [[ink-divergences]].
+
+### Accepted incidental exposure: `TuiNode` via `TuiApp`
+
+`TuiNode` is an `/internal` type, but it is **incidentally reachable** through the public
+`TuiApp`, which `extends Omit<App<TuiNode>, "mount">` to inherit Vue's full app surface — Vue's
+`App<HostElement>` carries the host type on its internal `_container` field. This is a **conscious
+non-fix, not a contract**: `_container` is a Vue-internal field no consumer uses, so the exposure
+is cosmetic (zero functional impact), and type-only surface isn't held to strict SemVer. Narrowing
+it (`App<unknown>` / a `Pick<App, …>` allowlist) was considered and skipped as ceremony for a
+cosmetic gain on a pre-1.0 library. Treat `TuiNode`-through-`TuiApp` as out-of-contract; don't
+re-flag it. (Decision recorded after review surfaced it.)
