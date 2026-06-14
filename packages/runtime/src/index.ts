@@ -1,25 +1,57 @@
+import BoxSfc from "./components/box.vue";
+import TextSfc from "./components/text.vue";
+import StaticSfc from "./components/static.vue";
+import SpacerSfc from "./components/spacer.vue";
+import type { WithChildren } from "./components/with-children.ts";
+import type { StaticChildren, StaticProps, StaticSlot } from "./components/static-props.ts";
+import type { SpacerProps } from "./components/spacer-props.ts";
+
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
-export {
-  Box,
-  type AriaRole,
-  type AriaState,
-  type BoxLayoutStyle,
-  type BoxStyle,
-  type BoxProps,
-} from "./components/box.ts";
-export { Text, type TextProps } from "./components/text.ts";
-export { Newline, type NewlineProps } from "./components/newline.ts";
-export { Spacer, type SpacerProps } from "./components/spacer.ts";
-export {
-  Static,
-  type StaticChildren,
-  type StaticProps,
-  type StaticSlot,
-  type StaticSlotProps,
-  type StaticStyle,
-} from "./components/static.ts";
+export const Box = BoxSfc as WithChildren<typeof BoxSfc>;
+export type {
+  AriaRole,
+  AriaState,
+  BoxLayoutStyle,
+  BoxStyle,
+  BoxProps,
+} from "./components/box-props.ts";
+export const Text = TextSfc as WithChildren<typeof TextSfc>;
+export type { TextProps } from "./components/text-props.ts";
+export { default as Newline } from "./components/newline.vue";
+export type { NewlineProps } from "./components/newline-props.ts";
+// Spacer takes no props and no children; the `children?: never` cast makes
+// `<Spacer>x</Spacer>` a type error under the automatic JSX runtime (parity with
+// main's spacer.ts typing). `as unknown as` (like Static) REPLACES the SFC type:
+// the empty `.vue`'s DefineComponent carries an `any` that would make a `typeof
+// SpacerSfc & {…}` intersection redundant (lint: no-redundant-type-constituents).
+export const Spacer = SpacerSfc as unknown as {
+  new (): { $props: SpacerProps & { children?: never } };
+};
+export type { SpacerProps } from "./components/spacer-props.ts";
+// Static exposes typed scoped slots: children receive `{ item, index }` with
+// `item` inferred from `items: T[]` (parity with main's static.ts generic cast).
+// `as unknown as` REPLACES the SFC's type rather than intersecting it: a `.vue`
+// with a scoped `<slot>` emits an extra `__VLS_WithSlots` construct signature that
+// bakes a NON-generic `default?: (p: { item: unknown }) => …`. Intersecting (or
+// keeping `typeof StaticSfc` in the target) leaves that competing signature in
+// place and blocks `T` inference (item → any). A clean generic construct signature
+// is all JSX/template resolution needs, and it is exactly the public shape main's
+// defineComponent-based cast produced.
+export const Static = StaticSfc as unknown as {
+  new <T = unknown>(): {
+    $props: StaticProps<T> & { children?: StaticChildren<T> };
+    $slots: { default?: StaticSlot<T> };
+  };
+};
+export type {
+  StaticChildren,
+  StaticProps,
+  StaticSlot,
+  StaticSlotProps,
+  StaticStyle,
+} from "./components/static-props.ts";
 export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";

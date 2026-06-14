@@ -223,3 +223,15 @@ export function createComment(value: string): TuiComment {
 export function isContainer(node: TuiNode): node is TuiContainer {
   return node.type !== "text-leaf" && node.type !== "comment";
 }
+
+/**
+ * Whether a child counts as a positional line for transform/squash indexing.
+ * Mirrors Ink: `null`/`''` children are not rendered as childNodes, so neither a
+ * `comment` (Vue's null/false/v-if placeholder) nor an EMPTY `text-leaf` (an
+ * empty-string `{''}` child, or a template `<slot/>` boundary anchor) advances the
+ * index. Verified against real Ink v7.0.4 (`a{''}<Transform>b` → `ab[1]`, not
+ * `ab[2]`). The inverse of static-channel's `isInertStaticAnchor`.
+ */
+export function advancesLineIndex(child: TuiNode): boolean {
+  return child.type !== "comment" && !(child.type === "text-leaf" && child.value === "");
+}

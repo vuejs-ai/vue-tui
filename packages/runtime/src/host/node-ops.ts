@@ -418,7 +418,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         key === "ariaHidden" ||
         key === "accessibilityLabel"
       ) {
-        // Handled at the Vue component level (box.ts / text.ts / transform.ts),
+        // Handled at the Vue component level (box.vue / text.vue / transform.ts),
         // not stored on the DOM node. Silently ignore so we don't warn.
       } else if (key === "key" || key === "ref" || key.startsWith("on")) {
         // Reserved by Vue / event keys, ignore.

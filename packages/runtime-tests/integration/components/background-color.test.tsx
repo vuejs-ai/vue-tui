@@ -1022,22 +1022,48 @@ test("non-string border edge background does not suppress invalid general fallba
   ).rejects.toThrow(/borderTopBackgroundColor/i);
 });
 
-// Empty <Text backgroundColor="bold">{""}</Text>: Ink's Text returns null for
-// empty children BEFORE attaching its colorizing transform, so colorize never
-// runs. vue-tui validates AFTER the empty early-return, so this must NOT throw.
-test('empty <Text backgroundColor="bold">{""}</Text> does NOT throw (Ink: returns null first)', async ({
+// Divergence (user-blessed 2026-06-13): vue-tui validates an invalid backgroundColor
+// (a chalk-MODIFIER name) on EVERY render regardless of content, exactly as <Box>
+// already does for its own bg (box-validate.ts). Ink colorizes lazily so it happens not to
+// throw for empty text — an incidental artifact, not a design choice. An invalid value is
+// invalid regardless of content; content-gated validation is a latent footgun. See
+// .agents/docs/component-authoring.md and the ink-divergences "Invalid input is
+// validated at the component layer" entry.
+test('empty <Text backgroundColor="bold">{""}</Text> THROWS (always-validate divergence)', async ({
   expect,
 }) => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box alignSelf="flex-start">
-        <Text backgroundColor="bold">{""}</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  // Empty text renders nothing and never colorizes.
-  expect(lastFrame()).toBe("");
+  await expect(
+    render(
+      defineComponent(() => () => (
+        <Box alignSelf="flex-start">
+          <Text backgroundColor="bold">{""}</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/backgroundColor/i);
+});
+
+// The always-validate divergence covers FOREGROUND color too: text.vue's validate() runs
+// assertValidForegroundColor(props.color) before the content gate, so a childless <Text>
+// with an invalid color (a chalk key that exists but is not a callable color method, like
+// "level") throws regardless of content — the foreground half of the same divergence. The
+// pre-refactor text.ts gated both color and backgroundColor behind wouldRenderNonEmptyText;
+// this pins that the foreground gate is gone for good. (Control: color="red" with no content
+// does NOT throw — see the foreground non-throw cases above.)
+test('empty <Text color="level">{""}</Text> THROWS (always-validate divergence, foreground)', async ({
+  expect,
+}) => {
+  await expect(
+    render(
+      defineComponent(() => () => (
+        <Box alignSelf="flex-start">
+          <Text color="level">{""}</Text>
+        </Box>
+      )),
+      { columns: 100 },
+    ),
+  ).rejects.toThrow(/color/i);
 });
 
 // A screen-reader-hidden <Box> / <Text> with a modifier-name bg must NOT throw:

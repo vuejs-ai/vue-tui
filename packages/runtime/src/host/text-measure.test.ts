@@ -5,8 +5,8 @@ import wrapAnsi from "wrap-ansi";
 import { createText, createTextLeaf, createTransform, createVirtualText } from "./nodes.ts";
 import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
-import { Box } from "../components/box.ts";
-import { Text } from "../components/text.ts";
+import Box from "../components/box.vue";
+import Text from "../components/text.vue";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {

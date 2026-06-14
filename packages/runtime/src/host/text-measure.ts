@@ -5,6 +5,7 @@ import wrapAnsi from "wrap-ansi";
 import { tokenizeAnsi } from "../paint/ansi-tokenizer.ts";
 import { sanitizeAnsi } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
+import { advancesLineIndex } from "./nodes.ts";
 
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   if (!node.children || node.children.length === 0) return "";
@@ -21,7 +22,7 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   let transformIndex = 0;
   for (const child of node.children) {
     out += squashTransformChild(child, transformIndex);
-    if (child.type !== "comment") transformIndex++;
+    if (advancesLineIndex(child)) transformIndex++;
   }
   // Sanitize the measured string so MEASURE+WRAP operate on the SAME bytes PAINT
   // emits — parity gap #9. Ink's squashTextNodes returns sanitizeAnsi(text)
@@ -82,7 +83,7 @@ function squashTransformChild(child: TuiNode, index: number): string {
     let grandIndex = 0;
     for (const grandchild of child.children) {
       innerText += squashTransformChild(grandchild, grandIndex);
-      if (grandchild.type !== "comment") grandIndex++;
+      if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) innerText = child.transform(innerText, index);
     return innerText;
@@ -103,7 +104,7 @@ export function flattenTransformLeaves(node: TuiTransform): string {
   let transformIndex = 0;
   for (const child of node.children) {
     out += squashTransformChild(child, transformIndex);
-    if (child.type !== "comment") transformIndex++;
+    if (advancesLineIndex(child)) transformIndex++;
   }
   // Sanitize for the same reason as flattenLeaves (parity gap #9; see that comment
   // for the two distinct width/wrap mechanisms): the standalone <Transform> measure

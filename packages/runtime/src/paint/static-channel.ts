@@ -34,6 +34,10 @@ export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   return out;
 }
 
+function isInertStaticAnchor(child: TuiNode): boolean {
+  return child.type === "comment" || (child.type === "text-leaf" && child.value === "");
+}
+
 /**
  * Paint the not-yet-written children of a single <Static> node and record them
  * as written. Returns the painted frame (without trailing "\n"), or "" when
@@ -54,6 +58,7 @@ export function paintStaticNode(
   isScreenReaderEnabled = false,
 ): string {
   const fresh = stat.children.filter((child) => !stat.writtenNodes.has(child));
+  const paintableFresh = fresh.filter((child) => !isInertStaticAnchor(child));
   // Paint (and record as written) only when there is something fresh — but the
   // prune and onWritten steps below run on EVERY commit, including the empty
   // commit that follows a cursor advance (children sliced to []). That empty
@@ -62,7 +67,7 @@ export function paintStaticNode(
   // paints, yet Ink's `useLayoutEffect(setIndex(items.length))` still fires and
   // lowers the cursor so subsequent grows ([A,C]) render and write the new item.
   let frame = "";
-  if (fresh.length > 0) {
+  if (paintableFresh.length > 0) {
     if (isScreenReaderEnabled) {
       // SR mode: linearize the fresh static children to flat plain text instead
       // of the 2D grid painter — otherwise bordered static items would emit box
@@ -76,7 +81,7 @@ export function paintStaticNode(
       // exactly how screen-reader.ts linearizes a box/root container of these
       // children (screen-reader.ts:73-82): the separator and child order derive
       // from the container's resolved flexDirection (defaulting to the
-      // <Static> "column" default set in static.ts).
+      // <Static> "column" default set in static.vue's `merged` computed).
       const flexDirection = resolvedFlexDirection(stat);
       // Match screen-reader.ts:76 exactly — row/row-reverse use a space, all
       // other directions (incl. the column default) use a newline.
@@ -84,16 +89,22 @@ export function paintStaticNode(
       // Match screen-reader.ts:79-82 — *-reverse directions reverse child order.
       const ordered =
         flexDirection === "row-reverse" || flexDirection === "column-reverse"
-          ? [...fresh].reverse()
-          : fresh;
+          ? [...paintableFresh].reverse()
+          : paintableFresh;
       frame = ordered
         .map((child) => renderScreenReaderOutput(child, { skipStaticElements: false }))
         .filter(Boolean)
         .join(separator);
     } else {
-      frame = paintIsolated(fresh, columns, stat);
+      frame = paintIsolated(paintableFresh, columns, stat);
     }
-    for (const child of fresh) stat.writtenNodes.add(child);
+    for (const child of paintableFresh) stat.writtenNodes.add(child);
+  }
+  // Empty text leaves and comments can be framework anchors around a template
+  // v-for. They render no content, but still need write-once bookkeeping so
+  // the cursor/prune path behaves like a normal painted batch.
+  for (const child of fresh) {
+    if (isInertStaticAnchor(child)) stat.writtenNodes.add(child);
   }
   // Prune entries that are no longer mounted so the set can't grow unbounded
   // over a long-running app (written children get unmounted on the next render).

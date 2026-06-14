@@ -4,11 +4,12 @@ import {
   h,
   inject,
   isVNode,
+  provide,
   type ExtractPublicPropTypes,
   type PropType,
   type VNode,
 } from "vue";
-import { AppContextKey } from "../context.ts";
+import { AppContextKey, TextContextKey } from "../context.ts";
 import type { WithChildren } from "./with-children.ts";
 
 type TransformFn = (line: string, lineIndex: number) => string;
@@ -26,6 +27,10 @@ const TransformImpl = defineComponent({
   props: transformProps,
   setup(props, { slots }) {
     const appCtx = inject(AppContextKey, null);
+    // A <Transform> is a text context: Ink models it as an ink-text host, so
+    // descendant <Text>/<Newline> render inline (squashed into the transform's
+    // text). It only provides — it never injects. (G58)
+    provide(TextContextKey, true);
 
     return () => {
       const children = slots.default?.();

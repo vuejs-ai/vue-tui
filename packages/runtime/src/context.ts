@@ -56,3 +56,8 @@ export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
 export const FocusContextKey: InjectionKey<FocusContext> = Symbol("vue-tui:focus");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");
 export const AnimationSchedulerKey: InjectionKey<AnimationScheduler> = Symbol("vue-tui:animation");
+// Provided by <Text> and <Transform>; injected by <Text> and <Newline> to decide
+// whether they render inline `virtual-text` (inside a text context) or a standalone
+// yoga `text`. Replaces the former getCurrentInstance() parent-walk — see
+// .agents/docs/component-authoring.md.
+export const TextContextKey: InjectionKey<true> = Symbol("vue-tui:text-context");

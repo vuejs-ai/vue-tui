@@ -30,9 +30,46 @@ export interface UseBoxMetricsReturn {
 }
 
 /**
+ * A component whose root is a `v-if`/`v-else` (e.g. the template-authored `<Box>`)
+ * renders as a Vue Fragment, so its `$el` resolves to the fragment's BOUNDARY anchor
+ * (an empty `text-leaf`), NOT the real `box` host node. The actual host node lives in
+ * the component's `subTree`. Walk that vnode tree to the first `el` that is a genuine
+ * host node — skipping the comment and empty-`text-leaf` anchors a fragment inserts —
+ * so a ref to a fragment-rooted Box still resolves to its `box` host node.
+ */
+function hostElFromSubTree(instance: unknown): Record<string, unknown> | null {
+  const subTree = (instance as { subTree?: unknown })?.subTree;
+  return findHostEl(subTree);
+}
+
+function findHostEl(vnode: unknown): Record<string, unknown> | null {
+  if (!vnode || typeof vnode !== "object") return null;
+  const vn = vnode as { el?: unknown; component?: { subTree?: unknown }; children?: unknown };
+  const el = vn.el as Record<string, unknown> | undefined;
+  // A real host node carries a string `type` AND is not an empty boundary anchor.
+  if (el && typeof el.type === "string" && el.type !== "comment") {
+    if (!(el.type === "text-leaf" && el.value === "")) return el;
+  }
+  // A nested component (e.g. <Box> wrapping another component): descend its subTree.
+  if (vn.component?.subTree) {
+    const nested = findHostEl(vn.component.subTree);
+    if (nested) return nested;
+  }
+  // A fragment carries its real children in an array; the box vnode is among them.
+  if (Array.isArray(vn.children)) {
+    for (const child of vn.children) {
+      const found = findHostEl(child);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve a ref value to the underlying TUI node with a yoga property.
- * Handles both direct TUI node refs and Vue component instance refs (where
- * the TUI node is accessible via `$el`).
+ * Handles direct TUI node refs, component instance refs whose `$el` IS the host
+ * node, and fragment-rooted component refs (whose `$el` is a boundary anchor, so
+ * the host node is found via the component's subTree).
  */
 function resolveYogaNode(value: unknown): { yoga: YogaNode } | null {
   if (!value) return null;
@@ -43,6 +80,9 @@ function resolveYogaNode(value: unknown): { yoga: YogaNode } | null {
   if (obj.$el && (obj.$el as Record<string, unknown>).yoga) {
     return obj.$el as { yoga: YogaNode };
   }
+  // Fragment-rooted component (template <Box> with a root v-if): drill the subTree.
+  const host = hostElFromSubTree(obj.$);
+  if (host?.yoga) return host as { yoga: YogaNode };
   return null;
 }
 
@@ -51,10 +91,16 @@ function resolveTuiNode(value: unknown): TuiNode | null {
   if (!value) return null;
   const obj = value as Record<string, unknown>;
   if (typeof obj.type === "string") return obj as unknown as TuiNode;
-  // Vue component instance — root host element is on $el
-  if (obj.$el && typeof (obj.$el as Record<string, unknown>).type === "string") {
-    return obj.$el as unknown as TuiNode;
+  // Vue component instance whose `$el` IS a real host node (non-template/unconditional
+  // root). An empty `text-leaf` `$el` is a fragment boundary anchor, not the element —
+  // fall through to the subTree drill below so we anchor traversal on the real node.
+  const el = obj.$el as Record<string, unknown> | undefined;
+  if (el && typeof el.type === "string" && !(el.type === "text-leaf" && el.value === "")) {
+    return el as unknown as TuiNode;
   }
+  // Fragment-rooted component (template <Box> with a root v-if): drill the subTree.
+  const host = hostElFromSubTree(obj.$);
+  if (host && typeof host.type === "string") return host as unknown as TuiNode;
   return null;
 }
 

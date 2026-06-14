@@ -8,7 +8,7 @@
     "test:integration": "vp test",
     "test:pty": "vp test run --config vitest.pty.config.ts --passWithNoTests",
     "check:type": "tsc --noEmit && vp run check:fixtures",
-    "check:fixtures": "tsc -p integration/pty/fixtures/tsconfig.json --noEmit"
+    "check:fixtures": "vue-tsc -p integration/pty/fixtures/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
@@ -24,6 +24,7 @@
     "tsx": "catalog:",
     "typescript": "^6.0.3",
     "vite-plus": "^0.1.22",
-    "vue": "^3.5.34"
+    "vue": "^3.5.34",
+    "vue-tsc": "catalog:"
   }
 }
