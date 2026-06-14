@@ -12,11 +12,21 @@ import {
 
 export type { CursorPosition } from "./cursor-helpers.ts";
 
+export type SyncOptions = {
+  // When false, sync re-seats only the OUTPUT bookkeeping and emits NO cursor
+  // escape (no reposition, no show, and — because clear() has already set
+  // cursorWasShown=false — no hide either). Used by app.clear(): clear() erases
+  // the lines WITHOUT redrawing them, so re-asserting the persistent caret would
+  // float it on a blank screen. Defaults to true (the restoreLastOutput path,
+  // which DOES redraw, still re-shows the caret). See render.ts mountedClear.
+  cursor?: boolean;
+};
+
 export type LogUpdate = {
   clear: () => void;
   done: () => void;
   reset: () => void;
-  sync: (str: string) => void;
+  sync: (str: string, options?: SyncOptions) => void;
   setCursorPosition: (position: CursorPosition | undefined) => void;
   isCursorDirty: () => boolean;
   willRender: (str: string) => boolean;
@@ -171,11 +181,20 @@ const createStandard = (
     cursorWasShown = false;
   };
 
-  render.sync = (str: string) => {
+  render.sync = (str: string, options?: SyncOptions) => {
     // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
     // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
     // at the declared point too.
-    const activeCursor = getActiveCursor();
+    //
+    // options.cursor === false suppresses the cursor emit for THIS sync (the
+    // app.clear() path). clear() erased the lines WITHOUT redrawing them, so
+    // re-asserting the persistent caret would float it on a blank screen — Ink
+    // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
+    // emits no caret either). We do NOT touch cursorPosition (the declaration
+    // persists), so the NEXT real render re-shows the caret normally. Treating
+    // the active cursor as undefined here also drives previousCursorPosition/
+    // cursorWasShown to the true post-clear blank state.
+    const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
     cursorDirty = false;
 
     const lines = str.split("\n");
@@ -185,6 +204,8 @@ const createStandard = (
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
     // unlike render()/done()'s hide/show which DO route through cli-cursor.
+    // After clear() cursorWasShown is already false, so the clear() path (which
+    // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);
     }
@@ -372,11 +393,20 @@ const createIncremental = (
     cursorWasShown = false;
   };
 
-  render.sync = (str: string) => {
+  render.sync = (str: string, options?: SyncOptions) => {
     // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
     // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
     // at the declared point too.
-    const activeCursor = getActiveCursor();
+    //
+    // options.cursor === false suppresses the cursor emit for THIS sync (the
+    // app.clear() path). clear() erased the lines WITHOUT redrawing them, so
+    // re-asserting the persistent caret would float it on a blank screen — Ink
+    // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
+    // emits no caret either). We do NOT touch cursorPosition (the declaration
+    // persists), so the NEXT real render re-shows the caret normally. Treating
+    // the active cursor as undefined here also drives previousCursorPosition/
+    // cursorWasShown to the true post-clear blank state.
+    const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
     cursorDirty = false;
 
     const lines = str.split("\n");
@@ -386,6 +416,8 @@ const createIncremental = (
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
     // unlike render()/done()'s hide/show which DO route through cli-cursor.
+    // After clear() cursorWasShown is already false, so the clear() path (which
+    // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);
     }

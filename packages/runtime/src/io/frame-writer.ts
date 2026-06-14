@@ -1,11 +1,11 @@
-import logUpdate, { type LogUpdate } from "./log-update.ts";
+import logUpdate, { type LogUpdate, type SyncOptions } from "./log-update.ts";
 import type { CursorPosition } from "./cursor-helpers.ts";
 
 export interface FrameWriter {
   write: (frame: string) => void;
   done: () => void;
   clear: () => void;
-  sync: (frame: string) => void;
+  sync: (frame: string, options?: SyncOptions) => void;
   setCursorPosition: (pos: CursorPosition | undefined) => void;
   isCursorDirty: () => boolean;
   willRender: (frame: string) => boolean;
@@ -46,14 +46,16 @@ export function createFrameWriter(
       lastFrame = null;
       if (log) log.clear();
     },
-    sync(frame: string) {
+    sync(frame: string, options?: SyncOptions) {
       // Keep this writer's dedup baseline aligned with log-update's internal
       // previousOutput. Without this, a later write() of `frame` is skipped by
       // log-update (state synced) while a write() of the *pre-sync* lastFrame
       // passes this layer's dedup but is dropped by log-update — desyncing the
       // two dedup layers and dropping a legitimately-changed frame.
+      // `options` (e.g. { cursor: false } from app.clear()) is forwarded so the
+      // caller can suppress the cursor emit on this sync — see log-update.sync.
       lastFrame = frame;
-      if (log) log.sync(frame);
+      if (log) log.sync(frame, options);
     },
     setCursorPosition(pos) {
       if (log) log.setCursorPosition(pos);

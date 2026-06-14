@@ -841,7 +841,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedClear = () => {
       if (!interactive || debug) return;
       writer.clear();
-      writer.sync(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+      // cursor:false — leave the caret HIDDEN after clear() (Ink parity:
+      // ink.js clear() -> log.clear() then log.sync(...) where cursorDirty is
+      // already false, so its sync emits no caret). clear() erased the lines
+      // WITHOUT redrawing them, so re-asserting the persistent caret would float
+      // it on a now-blank screen. The declared position is NOT discarded (sync
+      // doesn't touch it), so the next real commit re-shows the caret normally.
+      // This is scoped to clear() ONLY: restoreLastOutput()'s writer.write()
+      // (the external-write path) still REDRAWS the content and re-shows the
+      // caret, so it must keep the default cursor:true behavior.
+      writer.sync(frameState.lastOutputToRender || frameState.lastOutput + "\n", {
+        cursor: false,
+      });
     };
     const synchronize = shouldSynchronize(stdout, interactive);
 
