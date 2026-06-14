@@ -26,3 +26,7 @@ export { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.
 export { messageForNonError } from "./components/error-overview.ts";
+// Exposed for unit testing the focus-subscriber leak fix: the returned controller
+// carries a `__subscriberMapSize()` probe so a test can assert empty subscriber
+// Sets are dropped on unsubscribe. See render.ts createFocusController.
+export { createFocusController, type FocusControllerForTest } from "./render.ts";
