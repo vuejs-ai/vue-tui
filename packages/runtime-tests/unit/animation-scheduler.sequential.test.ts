@@ -152,6 +152,39 @@ describe.sequential("createAnimationScheduler", () => {
     s.dispose();
   });
 
+  test("a throwing subscriber callback does not wedge the shared scheduler", () => {
+    // Regression: onTick set `isDispatching = true`, ran the subscriber
+    // callbacks, then reset the flag / flushed `pending` / rescheduled with NO
+    // try/finally. A throwing callback skipped all three, leaving isDispatching
+    // stuck true forever — every later subscribe/unsubscribe queued into
+    // `pending` and never ran, and no timer was ever rescheduled. One bad tick
+    // permanently killed EVERY useAnimation instance sharing this scheduler.
+    const s = createAnimationScheduler();
+    const boom = vi.fn(() => {
+      throw new Error("boom in tick");
+    });
+    const boomHandle = s.subscribe(boom, 50);
+
+    // The throw propagates out of the timer callback (house idiom: restore the
+    // scheduler invariants, then rethrow — mirrors scheduler.ts doCommit). That
+    // is expected; what must NOT happen is the scheduler wedging.
+    expect(() => vi.advanceTimersByTime(50)).toThrow("boom in tick");
+    expect(boom).toHaveBeenCalledTimes(1);
+
+    // Remove the thrower (must run synchronously — proves isDispatching was
+    // reset; on the buggy code this op was queued into `pending` and never ran).
+    boomHandle.unsubscribe();
+
+    // A subscriber added after the throw must still tick. On the buggy code its
+    // add() was queued into `pending` (isDispatching never reset) and no timer
+    // was ever scheduled, so it never fired.
+    const recovered = vi.fn();
+    s.subscribe(recovered, 50);
+    vi.advanceTimersByTime(50);
+    expect(recovered).toHaveBeenCalledTimes(1);
+    s.dispose();
+  });
+
   test("dispose clears everything", () => {
     const s = createAnimationScheduler();
     s.subscribe(vi.fn(), 50);
