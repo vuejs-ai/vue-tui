@@ -61,12 +61,13 @@ test("counter responds to + and - keys", async () => {
 
 Mounts a component in a fake terminal environment. Returns a `RenderResult`.
 
-| Option        | Type      | Default | Description                        |
-| ------------- | --------- | ------- | ---------------------------------- |
-| `columns`     | `number`  | `100`   | Terminal width in columns          |
-| `rows`        | `number`  | `100`   | Terminal height in rows            |
-| `props`       | `object`  | —       | Props passed to the root component |
-| `exitOnCtrlC` | `boolean` | `false` | Enable Ctrl+C exit handling        |
+| Option        | Type      | Default | Description                                                                                                          |
+| ------------- | --------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `columns`     | `number`  | `100`   | Terminal width in columns                                                                                            |
+| `rows`        | `number`  | `100`   | Terminal height in rows                                                                                              |
+| `props`       | `object`  | —       | Props passed to the root component                                                                                   |
+| `exitOnCtrlC` | `boolean` | `false` | Enable Ctrl+C exit handling                                                                                          |
+| `interactive` | `boolean` | `true`  | Run interactively so `terminal.resize()` re-lays-out and raw mode engages. `false` to test non-interactive behavior. |
 
 ### `RenderResult`
 
