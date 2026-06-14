@@ -247,6 +247,19 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // (dom.ts: `if (typeof text !== 'string') text = String(text)`). Guard on
     // typeof so normal string values are stored as-is (no double-work).
     node.value = typeof text === "string" ? text : String(text);
+    // An empty text-leaf can mount as a Vue fragment anchor (insert() exempts empty
+    // leaves), then become non-empty content via setText. Re-validate with the SAME
+    // rejectsTextLeaf() check insert()/setElementText() use, so non-empty bare text
+    // directly under a <Box>/root/<Static> throws HERE (patch/render phase, consistent
+    // with "validate at render, not paint") instead of silently vanishing at paint
+    // (paintNode only renders a text-leaf via a <Text>/<Transform> parent). A leaf
+    // inside a <Text> isn't rejected, a leaf cleared back to "" isn't rejected, and a
+    // detached leaf (parent null) is skipped. isContainer narrows parent to the
+    // TuiContainer rejectsTextLeaf expects.
+    const parent = node.parent;
+    if (parent != null && isContainer(parent) && rejectsTextLeaf(parent, node.value)) {
+      throw new Error(`Text string "${node.value}" must be rendered inside <Text> component`);
+    }
     // Bubble dirty up to the node that OWNS the yoga measure func so yoga
     // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248):
     // climb to the nearest node carrying the MEASURE func and mark it. The catch

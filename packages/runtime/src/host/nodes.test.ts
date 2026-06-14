@@ -87,3 +87,67 @@ test("setElementText on a tui-text replaces its children with the text", () => {
   expect(text.children.length).toBe(1);
   expect((text.children[0] as ReturnType<typeof createTextLeaf>).value).toBe("hi");
 });
+
+test("setText re-validates a leaf that mounts empty then becomes non-empty under a box", () => {
+  // Bug (setText hole): an empty text-leaf mounts as a Vue fragment anchor —
+  // insert() exempts empty leaves — directly inside a <Box>. When it LATER becomes
+  // non-empty via setText, it must be re-validated with the SAME rejectsTextLeaf
+  // check insert()/setElementText() use, or non-empty bare text would sit under the
+  // box and paint would silently drop it. (The same content mounted non-empty
+  // throws at insert — setText must agree.)
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  const leaf = ops.createText("") as ReturnType<typeof createTextLeaf>;
+
+  // Empty leaf is exempt → mounts fine as an anchor.
+  expect(() => ops.insert(leaf, box, null)).not.toThrow();
+  expect(box.children.length).toBe(1);
+
+  // Going non-empty must throw the SAME error insert() throws for non-empty text.
+  expect(() => ops.setText(leaf, "hi")).toThrow(
+    /^Text string "hi" must be rendered inside <Text> component$/,
+  );
+});
+
+test("non-empty text directly under a box still throws at insert (control)", () => {
+  // Sanity anchor for the bug above: identical content mounted non-empty is
+  // rejected at insert — so setText going ''->'hi' must reject too.
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  expect(() => ops.insert(ops.createText("hi"), box, null)).toThrow(
+    /^Text string "hi" must be rendered inside <Text> component$/,
+  );
+});
+
+test("setText to non-empty inside a tui-text does NOT throw", () => {
+  // A leaf inside a <Text> is valid inline text (rejectsTextLeaf returns false for
+  // a tui-text parent), so the new re-validation must be a no-op here.
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const text = ops.createElement("tui-text") as ReturnType<typeof createBox>;
+  const leaf = ops.createText("") as ReturnType<typeof createTextLeaf>;
+  ops.insert(leaf, text, null);
+
+  expect(() => ops.setText(leaf, "hi")).not.toThrow();
+  expect(leaf.value).toBe("hi");
+});
+
+test("setText back to empty under a box does NOT throw", () => {
+  // Clearing a leaf to "" is the fragment-anchor case again — exempt, no throw.
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  const leaf = ops.createText("") as ReturnType<typeof createTextLeaf>;
+  ops.insert(leaf, box, null);
+
+  expect(() => ops.setText(leaf, "")).not.toThrow();
+  expect(leaf.value).toBe("");
+});
+
+test("setText on a detached leaf (no parent) does NOT throw", () => {
+  // A leaf with parent === null has no context to validate against; the guard
+  // must skip it rather than crash.
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const leaf = ops.createText("") as ReturnType<typeof createTextLeaf>;
+  expect(leaf.parent).toBe(null);
+  expect(() => ops.setText(leaf, "hi")).not.toThrow();
+  expect(leaf.value).toBe("hi");
+});
