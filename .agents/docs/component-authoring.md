@@ -30,8 +30,8 @@ The deciding distinction — get this right and the split falls out:
   → **provide/inject**, never parent-walking or `.name` matching. `Text` and `Transform`
   `provide(TextContextKey, true)`; `Text` and `Newline` `inject` it. Template-friendly,
   matches vue-tui's existing `AppContextKey` / `FocusContext` style, and is the
-  maintainer-endorsed Vue idiom (provide/inject outnumbers slot inspection 4–20× in the
-  libraries surveyed). It replaced the old, duplicated `getCurrentInstance()` parent walk.
+  well-established Vue idiom (provide/inject outnumbers slot inspection 4–20× in the
+  libraries surveyed). It replaced the old, duplicated `getCurrentInstance()` parent walk. [VOUCHED @hyf0]
 - **"What are my children's actual contents?"** (filter inert/`Comment` vnodes, detect
   emptiness) → **render function** + `slots.default()`. A `<template>` can't reach the vnode
   array; forcing it means calling the slot twice per render — an accepted-but-unsanctioned
@@ -57,7 +57,7 @@ Ink, which colorizes lazily). That gate is **dissolved**: `Text` now validates `
 invalid value (`backgroundColor="bold"` — a chalk _modifier_, not a color; or `color="level"`
 — a chalk key that exists but is not a callable color method) is invalid regardless of
 content; content-dependent validation is a latent footgun (it throws only once content
-appears). This completes the [[ink-divergences]] "Invalid input is validated at the component
+appears). This completes the [ink-divergences](./ink-divergences.md) "Invalid input is validated at the component
 layer" principle — `Text` was the inconsistent holdout. Removing the gate is also what let
 `Text` stop inspecting children and become a template.
 

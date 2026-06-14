@@ -1,11 +1,11 @@
 # Accessibility (ARIA + screen-reader) API
 
 How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the
-aria-camelCase blessed entry in [[ink-divergences]]; `renderToString` being layout-only and the
+aria-camelCase vouched entry in [ink-divergences](./ink-divergences.md); `renderToString` being layout-only and the
 `useWindowSize` name are now Ink parity (not divergences), and the reactive-refs return shape is
 covered by the shallowRef entry there. This file keeps the _why_ and the researched / run-verified
 findings those entries deliberately omit, so they are not re-derived expensively. The exported aria
-types are part of the public contract — see [[api-contract]].
+types are part of the public contract — see [api-contract](./api-contract.md).
 
 ## The constraint that shapes everything
 
@@ -29,7 +29,7 @@ to receive them and no browser to read them.
   `aria-role` ports from Ink/HTML unchanged — it is the runtime-compatible escape, not the
   type-safe path.
 - This is a Vue-idiom + reasonableness choice, **not parity** (Ink is kebab). See the
-  "Why align to Ink — and when not to" principle in [[ink-divergences]].
+  "Why align to Ink — and when not to" principle in [ink-divergences](./ink-divergences.md).
 
 ## Type-safety boundary (run-verified: `tsc` + `vue-tsc`)
 
@@ -80,7 +80,7 @@ sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` h
   suite — the public string API does not surface SR (Ink also keeps its SR-string rendering
   test-internal).
 - **`renderScreenReaderOutput(node)`:** the linearizer that walks the host tree's
-  `internal_accessibility`. **`/internal`-only** (maintainer decision 2026-06-14). Ink keeps its
+  `internal_accessibility`. **`/internal`-only** [VOUCHED @hyf0]. Ink keeps its
   counterpart (`renderNodeToScreenReaderOutput`) module-internal and never exports it; we match
   that. It was never usefully public anyway — its only parameter type (`TuiNode`) and the
   node-construction primitives needed to build one are not in the public barrel, so a public
