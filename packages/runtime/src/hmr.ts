@@ -37,6 +37,11 @@ const realHot = (import.meta as { hot?: HotContext }).hot;
 // calls would leak N copies of every handler — firing each HMR event N times.
 let initialized = false;
 
+// The single pending "update → ok" reset timer. Tracked at module scope (safe
+// because `initialized` makes initHmrBridge run at most once per module lifetime)
+// so each new update can clear the prior update's timer before scheduling its own.
+let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
 // `hot` is injectable (defaulting to the real import.meta.hot) purely for tests:
 // import.meta.hot is undefined under vitest, so the body is otherwise unreachable.
 export function initHmrBridge(hot: HotContext | undefined = realHot): void {
@@ -55,7 +60,14 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
       type: "update",
       paths: p.updates.map((u) => u.path),
     };
-    setTimeout(() => {
+    // Only the most recent update's reset window is honored: clear any prior
+    // pending reset so an earlier update's timer can't reset devState while a
+    // newer update's status line is still showing (rapid saves within 2s).
+    if (resetTimer !== undefined) clearTimeout(resetTimer);
+    resetTimer = setTimeout(() => {
+      resetTimer = undefined;
+      // Guard preserved: if a vite:error arrived after the update, devState is
+      // no longer "update" and we must NOT clobber the error back to ok.
       if (devState.value.type === "update") {
         devState.value = { type: "ok" };
       }
