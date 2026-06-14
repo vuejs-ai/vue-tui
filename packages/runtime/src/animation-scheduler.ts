@@ -68,18 +68,32 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
     scheduledDueTime = Number.POSITIVE_INFINITY;
     const now = performance.now();
     isDispatching = true;
-    for (const s of subscribers) {
-      if (s.cancelled || now < s.nextDueTime) continue;
-      s.callback(now);
-      if (s.cancelled) continue;
-      const elapsedFrames = Math.floor((now - s.startTime) / s.interval) + 1;
-      s.nextDueTime = s.startTime + elapsedFrames * s.interval;
+    try {
+      for (const s of subscribers) {
+        if (s.cancelled || now < s.nextDueTime) continue;
+        // Advance nextDueTime BEFORE invoking the callback. If the callback
+        // throws, leaving nextDueTime in the past would make the post-throw
+        // schedule() re-arm a 0ms timer that re-fires and re-throws on a tight
+        // loop. A subscriber that cancels itself inside the callback is filtered
+        // by the cancelled checks here and in schedule(), so pre-advancing a
+        // then-cancelled sub is harmless (matches the old post-callback advance).
+        const elapsedFrames = Math.floor((now - s.startTime) / s.interval) + 1;
+        s.nextDueTime = s.startTime + elapsedFrames * s.interval;
+        s.callback(now);
+      }
+    } finally {
+      // A throwing subscriber callback must never wedge the SHARED scheduler.
+      // Without this finally, isDispatching stays true forever: every later
+      // subscribe/unsubscribe queues into `pending` and never runs, and no timer
+      // is rescheduled — one bad tick silently kills every useAnimation instance
+      // app-wide. Restore the invariants here (mirroring scheduler.ts doCommit's
+      // try/finally) and let the error propagate — restore, then rethrow.
+      isDispatching = false;
+      if (pending.length > 0) {
+        for (const op of pending.splice(0)) op();
+      }
+      schedule();
     }
-    isDispatching = false;
-    if (pending.length > 0) {
-      for (const op of pending.splice(0)) op();
-    }
-    schedule();
   }
 
   function subscribe(callback: (currentTime: number) => void, intervalRaw: number) {
