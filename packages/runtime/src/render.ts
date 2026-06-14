@@ -763,7 +763,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // teardown microtask) so a re-entrant exit() — which is blocked above
         // anyway — and the eventual resolveExit() always settle on this value.
         if (isErrorInput(errorOrResult)) {
-          pendingExitError = errorOrResult;
+          // Don't clobber an error already recorded synchronously by
+          // recordExitError() (the boundary captured first): first-wins keeps the
+          // displayed and rejected error the SAME. pendingExitError is undefined on
+          // a normal first exit(), so `??=` is identical to `=` in every other case.
+          // (The race: a descendant throws Error1 → onErrorCaptured shows Error1 and
+          // recordExitError sets pendingExitError=Error1 WITHOUT setting exitInitiated,
+          // then app code calls exit(Error2) before the deferred exitWithError(Error1)
+          // microtask runs — exitInitiated is still false so we reach here. `=` would
+          // overwrite to Error2, making the overview show Error1 while waitUntilExit()
+          // rejects Error2.)
+          pendingExitError ??= errorOrResult;
         } else {
           pendingExitResult = errorOrResult;
         }

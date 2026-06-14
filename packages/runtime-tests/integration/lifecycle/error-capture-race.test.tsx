@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import stripAnsi from "strip-ansi";
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import {
   captureWrites,
   getContentWrites,
@@ -129,6 +129,89 @@ test("two sibling throws in one flush: displayed overview and rejected error AGR
   // Display agrees: the overview shows the SAME (first-thrown) error, not B.
   expect(frame).toContain("ERROR_A_FIRST");
   expect(frame).not.toContain("ERROR_B_SECOND");
+});
+
+// --- BUG #5, through the exit() door: a captured throw then a racing exit(err) ---
+// Same display/reject contract as the two-sibling case, but the SECOND error
+// arrives via host code calling useApp().exit(Error2) — not a second throw.
+// Sequence: a descendant throws Error1 during a flush → the boundary's
+// onErrorCaptured shows Error1 in the overview AND calls recordExitError(Error1),
+// which sets pendingExitError=Error1 WITHOUT setting exitInitiated, then defers
+// nextTick(exitWithError(Error1)). Before that microtask runs, host code calls
+// exit(Error2) synchronously in the same task: exitInitiated is still false so
+// exit() proceeds. With `pendingExitError = errorOrResult` it CLOBBERS to Error2,
+// so the overview shows Error1 while waitUntilExit() rejects Error2 — the exact
+// display/reject disagreement BUG #5 forbids. With `pendingExitError ??=` exit()
+// keeps the already-recorded Error1, so display and reject AGREE.
+test("captured throw then racing exit(err): displayed overview and rejected error AGREE (both Error1)", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  const trigger = shallowRef(false);
+  // A non-throwing sibling retains exit() (via useApp()) so the host can call it
+  // synchronously from the test, after the boundary has captured but before the
+  // deferred exitWithError microtask runs.
+  // Held in an object so TS doesn't narrow it to `never`: the assignment happens
+  // inside Retainer's setup closure, which control-flow analysis can't see, so a
+  // plain `let` read after the await would narrow to its `null` initializer.
+  const retainer: { exit: ((errorOrResult?: unknown) => void) | null } = { exit: null };
+  const Retainer = defineComponent(() => {
+    retainer.exit = useApp().exit;
+    return () => h(Text, null, "retainer");
+  });
+  const ThrowsOnUpdate = defineComponent(() => {
+    return () => {
+      if (trigger.value) {
+        throw new Error("ERROR_1_THROWN");
+      }
+      return h(Text, null, "ok");
+    };
+  });
+  const Root = defineComponent(() => {
+    return () => h(Text, null, [h(Retainer), h(ThrowsOnUpdate)]);
+  });
+
+  const app = createApp(Root);
+  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+
+  type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
+  const done: Promise<Settled> = app.waitUntilExit().then(
+    (value: unknown): Settled => ({ kind: "resolved", value }),
+    (e: unknown): Settled => ({ kind: "rejected", message: (e as Error)?.message }),
+  );
+
+  // Let the initial mount flush so the Retainer has captured exit().
+  await nextTick();
+  const retainedExit = retainer.exit;
+  if (retainedExit === null) throw new Error("exit() was not retained from useApp()");
+
+  // Throw Error1 inside the update flush: onErrorCaptured runs synchronously
+  // during this flush — it shows Error1 in the overview and records it via
+  // recordExitError(Error1), then queues nextTick(exitWithError(Error1)).
+  trigger.value = true;
+  await nextTick();
+
+  // Race: host calls exit(Error2) in the SAME task, before the deferred
+  // exitWithError(Error1) microtask runs. With `=` this clobbers pendingExitError
+  // to Error2; with `??=` it leaves Error1 intact.
+  retainedExit(new Error("EXIT_ERROR_2"));
+
+  const settled = await done;
+
+  // Reject keeps the first (thrown, displayed) error.
+  expect(settled.kind).toBe("rejected");
+  if (settled.kind !== "rejected") throw new Error("expected rejection, got resolve");
+  expect(settled.message).toBe("ERROR_1_THROWN");
+
+  // Display agrees: the overview painted the SAME first error, never Error2.
+  const content = getContentWrites(writes);
+  const lastContentWrite = content.at(-1);
+  if (lastContentWrite === undefined) throw new Error("no content write captured");
+  const frame = stripAnsi(lastContentWrite);
+  expect(frame).toContain("ERROR_1_THROWN");
+  expect(frame).not.toContain("EXIT_ERROR_2");
 });
 
 // --- BUG #2, the NON-INTERACTIVE NON-DEBUG case ---
