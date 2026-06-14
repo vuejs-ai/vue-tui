@@ -49,6 +49,84 @@ export async function handleReloadRequest(deps: ReloadRequestDeps): Promise<void
   }
 }
 
+export interface RespawnTickDeps {
+  // True after a crash; false once a respawn succeeds.
+  crashed: () => boolean;
+  setCrashed: (value: boolean) => void;
+  pm: { running: boolean; setBundlePath(p: string): void; spawn(): void };
+  memoryFiles: MemoryFiles;
+  outDir: string;
+  // True once shutdown() has begun; the tick must not spawn during teardown.
+  isShuttingDown: () => boolean;
+  extractBundle?: (memoryFiles: MemoryFiles, outDir: string) => Promise<string>;
+}
+
+// One iteration of the crash-respawn interval: when the child has crashed and a
+// fresh good build is available, re-extract it and respawn the child.
+//
+// WHY the two isShuttingDown() checks: the body is async (awaits extractBundle
+// before pm.spawn()). The interval is cleared at the top of shutdown(), but a
+// tick already mid-`await` when that happens would still reach pm.spawn() and
+// orphan a brand-new child as the parent exits. The first check skips ticks that
+// start during teardown; the second re-checks AFTER the await, since shutdown
+// may have begun while we were extracting.
+export async function respawnTick(deps: RespawnTickDeps): Promise<void> {
+  if (deps.isShuttingDown()) return;
+  if (!deps.crashed() || deps.pm.running) return;
+  const extract = deps.extractBundle ?? extractBundle;
+  try {
+    const newPath = await extract(deps.memoryFiles, deps.outDir);
+    if (deps.isShuttingDown()) return;
+    deps.pm.setBundlePath(newPath);
+    deps.setCrashed(false);
+    deps.pm.spawn();
+  } catch {
+    // Build still broken, keep waiting.
+  }
+}
+
+export interface ShutdownDeps {
+  pm: { shutdown(): Promise<void> };
+  closeServer: () => Promise<void>;
+  // Clears the crash-respawn setInterval. Called FIRST so no new respawn tick
+  // can be scheduled once teardown starts.
+  clearRespawn: () => void;
+  exit: (code: number) => void;
+}
+
+// Build the SIGINT/SIGTERM handler. Factored out (not inlined in dev()) so the
+// re-entrancy guard and teardown ordering are unit-testable without a real
+// process.exit / Vite server.
+//
+// WHY a `shuttingDown` flag:
+//  - Re-entrancy: this is registered directly on SIGINT/SIGTERM. Pressing Ctrl+C
+//    twice (common when shutdown feels slow) invokes the handler twice
+//    concurrently. Without the guard that means double pm.shutdown()/closeServer
+//    and two racing exit() calls. The flag makes the 2nd+ invocation a no-op.
+//  - Orphan child: the crash-respawn interval is async (it awaits extractBundle
+//    before pm.spawn()). clearRespawn() stops new ticks, but a tick already
+//    in flight when shutdown starts could still reach pm.spawn() AFTER
+//    pm.shutdown() finished — orphaning a brand-new child as the parent exits.
+//    That in-flight tick checks the same `shuttingDown` flag (exposed via
+//    isShuttingDown) and bails before spawning. See the respawn interval body.
+export function createShutdown(deps: ShutdownDeps): {
+  handler: () => Promise<void>;
+  isShuttingDown: () => boolean;
+} {
+  let shuttingDown = false;
+  const handler = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // Stop the respawn interval BEFORE the async teardown window so no fresh
+    // child is spawned while we're tearing the old one down.
+    deps.clearRespawn();
+    await deps.pm.shutdown();
+    await deps.closeServer();
+    deps.exit(0);
+  };
+  return { handler, isShuttingDown: () => shuttingDown };
+}
+
 export async function dev(entry?: string) {
   const logger = createLogger();
   logger.info("Starting vue-tui dev server...");
@@ -112,26 +190,34 @@ export async function dev(entry?: string) {
     });
   });
 
+  // Declared before the interval so clearRespawn (below) can capture it; the
+  // closure reads it at call time, after the assignment.
+  let respawnInterval: ReturnType<typeof setInterval>;
+
+  // Graceful shutdown. createShutdown owns the re-entrancy guard and clears the
+  // respawn interval first; isShuttingDown is read by the respawn tick so an
+  // in-flight tick can't spawn a child mid-teardown. See createShutdown.
+  const shutdown = createShutdown({
+    pm,
+    closeServer: () => server.close(),
+    clearRespawn: () => clearInterval(respawnInterval),
+    exit: (code) => process.exit(code),
+  });
+
   // Re-spawn after crash on next successful bundle update
-  setInterval(async () => {
-    if (!crashed || pm.running) return;
-    try {
-      const newPath = await extractBundle(clientEnv.memoryFiles, outDir);
-      pm.setBundlePath(newPath);
-      crashed = false;
-      pm.spawn();
-    } catch {
-      // Build still broken, keep waiting
-    }
+  respawnInterval = setInterval(() => {
+    void respawnTick({
+      crashed: () => crashed,
+      setCrashed: (value) => {
+        crashed = value;
+      },
+      pm,
+      memoryFiles: clientEnv.memoryFiles,
+      outDir,
+      isShuttingDown: shutdown.isShuttingDown,
+    });
   }, 500);
 
-  // Graceful shutdown
-  const shutdown = async () => {
-    await pm.shutdown();
-    await server.close();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown.handler);
+  process.on("SIGTERM", shutdown.handler);
 }
