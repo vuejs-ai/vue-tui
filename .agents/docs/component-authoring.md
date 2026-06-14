@@ -19,7 +19,7 @@ not a reason to abandon the template. Two of the fixes also corrected latent inc
 | `Newline`   | template SFC                | `"\n".repeat(count)` interpolation + a context branch  |
 | `Static`    | template SFC                | reactive cursor + `v-for` scoped slot                  |
 | `Box`       | template SFC                | root `v-if` validation guard + `<slot/>`               |
-| `Text`      | template SFC                | `<slot/>` + `virtual-text`/`text` branch               |
+| `Text`      | template SFC                | `<slot/>` + `tui-virtual-text`/`tui-text` branch       |
 | `Transform` | **render function (`.ts`)** | inspects children: all-inert children → render nothing |
 
 ## Two questions, two idioms

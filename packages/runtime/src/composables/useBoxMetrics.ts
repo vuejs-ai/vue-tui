@@ -32,10 +32,10 @@ export interface UseBoxMetricsReturn {
 /**
  * A component whose root is a `v-if`/`v-else` (e.g. the template-authored `<Box>`)
  * renders as a Vue Fragment, so its `$el` resolves to the fragment's BOUNDARY anchor
- * (an empty `text-leaf`), NOT the real `box` host node. The actual host node lives in
+ * (an empty `text-leaf`), NOT the real `tui-box` host node. The actual host node lives in
  * the component's `subTree`. Walk that vnode tree to the first `el` that is a genuine
  * host node — skipping the comment and empty-`text-leaf` anchors a fragment inserts —
- * so a ref to a fragment-rooted Box still resolves to its `box` host node.
+ * so a ref to a fragment-rooted Box still resolves to its `tui-box` host node.
  */
 function hostElFromSubTree(instance: unknown): Record<string, unknown> | null {
   const subTree = (instance as { subTree?: unknown })?.subTree;
