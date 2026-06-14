@@ -12,6 +12,6 @@ const content = computed(() => "\n".repeat(props.count));
 </script>
 
 <template>
-  <virtual-text v-if="insideText">{{ content }}</virtual-text>
-  <text v-else>{{ content }}</text>
+  <tui-virtual-text v-if="insideText">{{ content }}</tui-virtual-text>
+  <tui-text v-else>{{ content }}</tui-text>
 </template>

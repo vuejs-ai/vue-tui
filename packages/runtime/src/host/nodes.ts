@@ -40,7 +40,7 @@ export interface TuiRoot extends NodeBase {
 }
 
 export interface TuiBox extends NodeBase {
-  type: "box";
+  type: "tui-box";
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
@@ -52,7 +52,7 @@ export interface TuiBox extends NodeBase {
 }
 
 export interface TuiText extends NodeBase {
-  type: "text";
+  type: "tui-text";
   children: TuiInlineNode[];
   yoga: YogaNodeRef;
   props: TextProps;
@@ -60,7 +60,7 @@ export interface TuiText extends NodeBase {
 }
 
 export interface TuiVirtualText extends NodeBase {
-  type: "virtual-text";
+  type: "tui-virtual-text";
   // A <Newline>/<Text> directly inside a standalone <Transform> renders inline,
   // so a virtual-text can also be parented by a transform (G58).
   parent: TuiText | TuiVirtualText | TuiTransform | null;
@@ -83,7 +83,7 @@ export interface TuiComment extends NodeBase {
 }
 
 export interface TuiStatic extends NodeBase {
-  type: "static";
+  type: "tui-static";
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
@@ -109,7 +109,7 @@ export interface TuiStatic extends NodeBase {
 }
 
 export interface TuiTransform extends NodeBase {
-  type: "transform";
+  type: "tui-transform";
   children: TuiNode[];
   yoga: YogaNodeRef;
   transform: (line: string, lineIndex: number) => string;
@@ -154,7 +154,7 @@ export function emitLayoutListeners(root: TuiRoot): void {
 
 export function createBox(): TuiBox {
   return {
-    type: "box",
+    type: "tui-box",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
@@ -165,7 +165,7 @@ export function createBox(): TuiBox {
 
 export function createText(): TuiText {
   return {
-    type: "text",
+    type: "tui-text",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
@@ -175,7 +175,7 @@ export function createText(): TuiText {
 
 export function createVirtualText(): TuiVirtualText {
   return {
-    type: "virtual-text",
+    type: "tui-virtual-text",
     parent: null,
     children: [],
     props: {},
@@ -197,7 +197,7 @@ export function createTextLeaf(value: string): TuiTextLeaf {
 
 export function createStatic(): TuiStatic {
   return {
-    type: "static",
+    type: "tui-static",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
@@ -208,7 +208,7 @@ export function createStatic(): TuiStatic {
 
 export function createTransform(fn: (line: string, lineIndex: number) => string): TuiTransform {
   return {
-    type: "transform",
+    type: "tui-transform",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,

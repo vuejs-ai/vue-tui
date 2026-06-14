@@ -97,7 +97,11 @@ function findRoot(node: TuiNode): TuiRoot | null {
 function isInsideTextOrTransformContext(node: TuiContainer): boolean {
   let current: TuiContainer | null = node;
   while (current) {
-    if (current.type === "text" || current.type === "virtual-text" || current.type === "transform")
+    if (
+      current.type === "tui-text" ||
+      current.type === "tui-virtual-text" ||
+      current.type === "tui-transform"
+    )
       return true;
     current = current.parent;
   }
@@ -121,8 +125,8 @@ function isInsideTextOrTransformContext(node: TuiContainer): boolean {
 function findMeasureOwner(start: TuiNode | null): TuiNode | null {
   let p: TuiNode | null = start;
   while (p) {
-    if (p.type === "text") return p;
-    if (p.type === "transform") {
+    if (p.type === "tui-text") return p;
+    if (p.type === "tui-transform") {
       const inlineInTextContext =
         p.parent != null &&
         isContainer(p.parent) &&
@@ -144,12 +148,16 @@ function findMeasureOwner(start: TuiNode | null): TuiNode | null {
  * directly, no measure func to invalidate).
  */
 function dirtyTextMeasureOwner(parent: TuiNode): void {
-  if (parent.type !== "text" && parent.type !== "virtual-text" && parent.type !== "transform") {
+  if (
+    parent.type !== "tui-text" &&
+    parent.type !== "tui-virtual-text" &&
+    parent.type !== "tui-transform"
+  ) {
     return;
   }
   const owner = findMeasureOwner(parent);
-  if (owner?.type === "transform") markTransformDirty(owner);
-  else if (owner?.type === "text") markTextDirty(owner);
+  if (owner?.type === "tui-transform") markTransformDirty(owner);
+  else if (owner?.type === "tui-text") markTextDirty(owner);
 }
 
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
@@ -157,25 +165,25 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
 
   function createElement(type: string): TuiNode {
     switch (type) {
-      case "box": {
+      case "tui-box": {
         const n = createBox();
         attachYoga(n);
         return n;
       }
-      case "text": {
+      case "tui-text": {
         const n = createText();
         attachYoga(n);
         bindTextMeasure(n);
         return n;
       }
-      case "virtual-text":
+      case "tui-virtual-text":
         return createVirtualText();
-      case "static": {
+      case "tui-static": {
         const n = createStatic();
         attachYoga(n);
         return n;
       }
-      case "transform": {
+      case "tui-transform": {
         const n = createTransform((line) => line); // overwritten by patchProp
         attachYoga(n);
         return n;
@@ -208,9 +216,9 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // transform (inside a <Text> or another <Transform>) does NOT, so we must keep
     // climbing to the enclosing <Text>/standalone-transform measure owner. (G58)
     const owner = findMeasureOwner(node.parent as TuiNode | null);
-    if (owner?.type === "text") {
+    if (owner?.type === "tui-text") {
       markTextDirty(owner);
-    } else if (owner?.type === "transform") {
+    } else if (owner?.type === "tui-transform") {
       markTransformDirty(owner);
     }
     onCommit();
@@ -221,7 +229,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // Remove existing children first (copy since remove mutates the array).
     for (const child of Array.from(el.children)) remove(child);
     insert(createTextLeaf(text), el, null);
-    if (el.type === "text") {
+    if (el.type === "tui-text") {
       markTextDirty(el);
     }
   }
@@ -239,7 +247,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // `hostContext.isInsideText && originalType === 'ink-box'`). A standalone
     // <Transform> is a text context here (G58), so we use the transform-aware
     // context check to mirror Ink exactly. (G58 should-fix)
-    if (child.type === "box" && isInsideTextOrTransformContext(parentC)) {
+    if (child.type === "tui-box" && isInsideTextOrTransformContext(parentC)) {
       throw new Error("<Box> can’t be nested inside <Text> component");
     }
 
@@ -248,7 +256,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (
       child.type === "text-leaf" &&
       child.value !== "" &&
-      (parentC.type === "box" || parentC.type === "root" || parentC.type === "static") &&
+      (parentC.type === "tui-box" || parentC.type === "root" || parentC.type === "tui-static") &&
       !isInsideTextOrTransformContext(parentC)
     ) {
       throw new Error(`Text string "${child.value}" must be rendered inside <Text> component`);
@@ -288,7 +296,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     dirtyTextMeasureOwner(parentC);
 
     // Track static node identity on the root (mirrors Ink's reconciler).
-    if (child.type === "static") {
+    if (child.type === "tui-static") {
       const root = findRoot(child);
       if (root) root.staticNode = child;
     }
@@ -303,7 +311,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // Track static node removal: clear root.staticNode only if it still
     // points at this node. On key-driven remounts, insert() already
     // registered the new instance before the old one is removed.
-    if (child.type === "static") {
+    if (child.type === "tui-static") {
       const root = findRoot(child);
       if (root && root.staticNode === child) {
         root.staticNode = undefined;
@@ -336,10 +344,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       }
     }
     if (
-      node.type === "box" ||
-      node.type === "text" ||
-      node.type === "static" ||
-      node.type === "transform"
+      node.type === "tui-box" ||
+      node.type === "tui-text" ||
+      node.type === "tui-static" ||
+      node.type === "tui-transform"
     ) {
       detachYoga(node);
     }
@@ -358,21 +366,26 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   }
 
   function patchProp(el: TuiNode, key: string, prev: unknown, next: unknown): void {
-    if (el.type === "transform") {
+    if (el.type === "tui-transform") {
       if (key === "transform" && typeof next === "function") {
         el.transform = next as (line: string, idx: number) => string;
       }
       onCommit();
       return;
     }
-    if (el.type === "static" && key === "internal_onWritten") {
+    if (el.type === "tui-static" && key === "internal_onWritten") {
       // Callback the renderer invokes post-commit to advance the <Static>
       // component's cursor so written items unmount. Not styling/layout.
       el.onWritten = typeof next === "function" ? (next as () => void) : undefined;
       onCommit();
       return;
     }
-    if (el.type === "box" || el.type === "text" || el.type === "static" || el.type === "root") {
+    if (
+      el.type === "tui-box" ||
+      el.type === "tui-text" ||
+      el.type === "tui-static" ||
+      el.type === "root"
+    ) {
       if (isYogaProp(key)) {
         applyYogaProp(el, key, next, prev);
         // Some yoga props also need to be stored in el.props for the paint pass.
@@ -402,12 +415,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       } else if (STYLE_PROPS.has(key)) {
         (el as { props: Record<string, unknown> }).props[key] = next;
       } else if (key === "aria-role" || key === "ariaRole") {
-        if (el.type === "box") {
+        if (el.type === "tui-box") {
           el.internal_accessibility ??= {};
           el.internal_accessibility.role = next as string;
         }
       } else if (key === "aria-state" || key === "ariaState") {
-        if (el.type === "box") {
+        if (el.type === "tui-box") {
           el.internal_accessibility ??= {};
           el.internal_accessibility.state = next as Record<string, boolean>;
         }
@@ -429,7 +442,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       onCommit();
       return;
     }
-    if (el.type === "virtual-text" && STYLE_PROPS.has(key)) {
+    if (el.type === "tui-virtual-text" && STYLE_PROPS.has(key)) {
       (el.props as Record<string, unknown>)[key] = next;
       onCommit();
     }

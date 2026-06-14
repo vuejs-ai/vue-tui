@@ -4,9 +4,10 @@ import { AppContextKey, TextContextKey } from "../context.ts";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
 
-// Internal name != "Text" to avoid vue-tsc self-recursion on the `<text>` host tag.
-// The public export name "Text" comes from index.ts.
-defineOptions({ name: "TextImpl" });
+// Renders the `<tui-text>` / `<tui-virtual-text>` host primitives. The `tui-` prefix
+// keeps the host tags out of the component namespace, so the component can take its
+// real name "Text" with no vue-tsc self-recursion. Public export wired in index.ts.
+defineOptions({ name: "Text" });
 const props = defineProps(textProps);
 const slots = defineSlots<{ default?: () => unknown }>();
 
@@ -39,15 +40,15 @@ function validate(): true {
 
 <template>
   <template v-if="!srHidden && validate() && hasContent">
-    <virtual-text v-if="insideText" v-bind="props">
+    <tui-virtual-text v-if="insideText" v-bind="props">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
-    </virtual-text>
+    </tui-virtual-text>
     <!-- Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when they
          overflow their container (e.g. in no-wrap flex rows). -->
-    <text v-else v-bind="{ ...props, flexShrink: 1 }">
+    <tui-text v-else v-bind="{ ...props, flexShrink: 1 }">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
-    </text>
+    </tui-text>
   </template>
 </template>

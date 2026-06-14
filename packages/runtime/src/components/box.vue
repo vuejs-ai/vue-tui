@@ -4,9 +4,10 @@ import { AppContextKey } from "../context.ts";
 import { boxProps } from "./box-props.ts";
 import { assertBoxValid } from "./box-validate.ts";
 
-// Internal name != "Box" to avoid vue-tsc self-recursion on the `<box>` host tag.
-// The public export name "Box" comes from index.ts.
-defineOptions({ name: "BoxImpl" });
+// Renders the `<tui-box>` host primitive. The host tag's `tui-` prefix keeps it out
+// of the component namespace, so the component can take its real name "Box" with no
+// vue-tsc self-recursion on the tag. Public export wired in index.ts.
+defineOptions({ name: "Box" });
 const props = defineProps(boxProps);
 defineSlots<{ default?: () => unknown }>();
 const appCtx = inject(AppContextKey, null);
@@ -21,8 +22,8 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
        colorizes). Under a screen reader with an ariaLabel, render the label text
        instead of the slot. The root `v-if` makes this a fragment, but $el still
        resolves to the real `box` host node, so measureElement/useBoxMetrics work. -->
-  <box v-if="!srHidden && assertBoxValid(props)" v-bind="props">
-    <text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</text>
+  <tui-box v-if="!srHidden && assertBoxValid(props)" v-bind="props">
+    <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />
-  </box>
+  </tui-box>
 </template>

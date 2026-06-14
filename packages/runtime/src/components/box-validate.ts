@@ -101,7 +101,7 @@ export function assertBoxValid(props: BoxProps): true {
   }
 
   // NOTE: this component-level validation covers the public `<Box>`/`<Text>`
-  // API only. A raw host-op call (`h("box", { backgroundColor: "bold" })`)
+  // API only. A raw host-op call (`h("tui-box", { backgroundColor: "bold" })`)
   // bypasses it; the paint layer keeps its silent degrade-to-bare-text there
   // rather than throwing (a throw in the post-flush paint pass wedges Vue's
   // scheduler). Same accepted limitation as the borderStyle fix (#124).

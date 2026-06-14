@@ -2,10 +2,10 @@
 import { computed, shallowRef, watch } from "vue";
 import { staticProps } from "./static-props.ts";
 
-// Internal name deliberately != "Static": vue-tsc 3.3.4 would bind the `<static>`
-// host tag below to this component (self-recursion) if they matched. Public export
-// name is "Static" (index.ts).
-defineOptions({ name: "StaticImpl" });
+// Renders the `<tui-static>` host primitive. The host tag's `tui-` prefix keeps it out
+// of the component namespace, so the component can take its real name "Static" with no
+// vue-tsc self-recursion on the tag. Public export wired in index.ts.
+defineOptions({ name: "Static" });
 const props = defineProps(staticProps);
 defineSlots<{ default?: (slotProps: { item: unknown; index: number }) => unknown }>();
 
@@ -36,9 +36,9 @@ const itemsToRender = computed(() => (props.items as unknown[]).slice(cursor.val
 </script>
 
 <template>
-  <static v-bind="merged">
+  <tui-static v-bind="merged">
     <template v-for="(item, i) in itemsToRender" :key="cursor + i">
       <slot :item="item" :index="cursor + i" />
     </template>
-  </static>
+  </tui-static>
 </template>

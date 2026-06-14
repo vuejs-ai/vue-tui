@@ -73,7 +73,7 @@ and fixed at the root:
   `fresh.length > 0` gate and `paintIsolated` painted the container's **padding** as stray
   blank lines — while `findStatics` in the same file already skipped `text-leaf`/`comment`.
   Fix: `paintStaticNode` skips inert anchors too (safe: `node-ops.ts` forbids non-empty bare
-  text under `<static>`, so the only `text-leaf` there is an empty anchor).
+  text under `<tui-static>`, so the only `text-leaf` there is an empty anchor).
 - **Text — `<slot/>` fragment anchors shifted the transform line-index, exposing an Ink-parity
   bug.** A `<slot/>` mounts as a Fragment whose boundary anchors are empty `text-leaf`s; the
   squash loops that give a nested `<Transform>` its positional line index counted every
@@ -98,18 +98,23 @@ and fixed at the root:
   verbatim — so `:flex-grow="1"` reaches the renderer as `flex-grow` and is rejected. Use
   `:flexGrow="1"`, or `v-bind="someObject"` (object keys are preserved). `Box`/`Text`/`Static`
   bind a whole props/style object with `v-bind`; `Spacer` uses explicit camelCase.
-- **Name a component differently from any host tag it renders** (`BoxImpl`/`TextImpl`/
-  `StaticImpl` via `defineOptions`). vue-tsc 3.3.4 self-recurses a `<box>` tag to a component
-  named "Box" (it has no `isCustomElement` at the type layer). Public names (`Box`/`Text`/
-  `Static`) come from `index.ts`.
+- **Host primitive tags are `tui-`-prefixed** (`tui-box`/`tui-text`/`tui-virtual-text`/
+  `tui-static`/`tui-transform`), mirroring Ink's `ink-box`/`ink-text`. The prefix keeps the
+  renderer's intrinsic elements in their own namespace, so a template `<tui-box>` never
+  resolves to the public `<Box>` component — the components keep their real `name`
+  (`Box`/`Text`/`Static`) with no vue-tsc self-recursion. (Earlier the tags were bare
+  `box`/`text`/…, which collided with the same-named components and forced an `*Impl` internal
+  rename to dodge it; the prefix removed that workaround. vue-tsc has no `isCustomElement` at
+  the type layer, so a bare lowercase tag would PascalCase-resolve to the component — the
+  hyphenated `tui-` name sidesteps that entirely.)
 - **Don't reintroduce parent-walking or `parent.type.name` matching for context** — use
   provide/inject (`.name` is also fragile under minification).
 - **Don't force child-vnode inspection into a template** (the double-materialization wart). If
   a new component needs it, make it a render function — where the whole ecosystem draws the line.
-- The host elements (`box`, `text`, `virtual-text`, `static`, `transform`) compile to raw
-  element vnodes via the build's `isCustomElement` option and are an **internal** detail.
-  Consumers use `<Box>` / `<Text>`, never `<box>`. SFC templates may reference the host tags
-  directly; their loose typing under `vue-tsc` (no `strictTemplates`) is intentional.
+- The host elements (`tui-box`, `tui-text`, `tui-virtual-text`, `tui-static`, `tui-transform`)
+  compile to raw element vnodes via the build's `isCustomElement` option and are an **internal**
+  detail. Consumers use `<Box>` / `<Text>`, never `<tui-box>`. SFC templates may reference the
+  host tags directly; their loose typing under `vue-tsc` (no `strictTemplates`) is intentional.
 - Components export typed props (`ExtractPublicPropTypes` over the runtime props object) and
   keep the `WithChildren` shim (`with-children.ts`): Vue's automatic JSX runtime routes
   children to a `children` prop that declared slots do NOT provide, so the shim is required for

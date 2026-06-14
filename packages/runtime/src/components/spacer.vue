@@ -3,5 +3,5 @@ defineOptions({ name: "Spacer" });
 </script>
 
 <template>
-  <box :flexGrow="1" :flexShrink="1" />
+  <tui-box :flexGrow="1" :flexShrink="1" />
 </template>

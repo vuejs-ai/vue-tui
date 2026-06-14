@@ -26,7 +26,7 @@ function resolvedFlexDirection(stat: TuiStatic): string {
 }
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
-  if (root.type === "static") out.push(root);
+  if (root.type === "tui-static") out.push(root);
   if (root.type !== "text-leaf" && root.type !== "comment") {
     const containerChildren = (root as { children: TuiNode[] }).children;
     for (const child of containerChildren) findStatics(child, out);

@@ -455,7 +455,7 @@ function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" }) {
     useInput((input) => {
       inputs.push(input);
     });
-    return () => h("text", null, "x");
+    return () => h("tui-text", null, "x");
   });
 
   const app = createApp(App);

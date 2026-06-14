@@ -3,7 +3,11 @@ import vueJsx from "@vitejs/plugin-vue-jsx";
 import Vue from "unplugin-vue/rolldown";
 import VueVite from "unplugin-vue/vite";
 
-const HOST_TAGS = ["box", "text", "virtual-text", "static", "transform"];
+// Host primitive tags carry a `tui-` prefix (mirroring Ink's `ink-box`/`ink-text`):
+// it keeps the renderer's intrinsic elements out of the component namespace so a
+// template `<tui-box>` never collides with the public `<Box>` component (no vue-tsc
+// self-recursion). The hyphen also makes them valid custom-element names.
+const HOST_TAGS = ["tui-box", "tui-text", "tui-virtual-text", "tui-static", "tui-transform"];
 
 export default defineConfig({
   // `VueVite` parses `.vue` SFCs in the TEST/dev graph (unit tests may import the

@@ -809,8 +809,10 @@ test("non-string host Box backgroundColor does not override inherited background
   const { lastFrame } = await render(
     defineComponent(
       () => () =>
-        h("box", { backgroundColor: "red", width: 5, height: 2 }, [
-          h("box", { backgroundColor: [0, 0, 255], width: 5, height: 2 }, [h("text", null, "Hi")]),
+        h("tui-box", { backgroundColor: "red", width: 5, height: 2 }, [
+          h("tui-box", { backgroundColor: [0, 0, 255], width: 5, height: 2 }, [
+            h("tui-text", null, "Hi"),
+          ]),
         ]),
     ),
     { columns: 100 },
@@ -828,8 +830,8 @@ test("non-string host Text backgroundColor does not override inherited backgroun
   const { lastFrame } = await render(
     defineComponent(
       () => () =>
-        h("box", { backgroundColor: "red", alignSelf: "flex-start" }, [
-          h("text", { backgroundColor: [0, 0, 255] }, "Hi"),
+        h("tui-box", { backgroundColor: "red", alignSelf: "flex-start" }, [
+          h("tui-text", { backgroundColor: [0, 0, 255] }, "Hi"),
         ]),
     ),
     { columns: 100 },
