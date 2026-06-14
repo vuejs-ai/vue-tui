@@ -18,10 +18,11 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 <template>
   <!-- assertBoxValid runs every render and throws into the error boundary, exactly
        as the former render fn did; `!srHidden &&` short-circuits validation when the
-       Box is screen-reader-hidden (mirrors box.ts ordering: a non-emitted node never
-       colorizes). Under a screen reader with an ariaLabel, render the label text
-       instead of the slot. The root `v-if` makes this a fragment, but $el still
-       resolves to the real `tui-box` host node, so measureElement/useBoxMetrics work. -->
+       Box is screen-reader-hidden (mirrors box-validate.ts ordering: a non-emitted node
+       never colorizes). Under a screen reader with an ariaLabel, render the label text
+       instead of the slot. The root `v-if` makes this component a Vue Fragment, so its
+       `$el` is the fragment's boundary anchor — NOT the `tui-box` host node; a Box ref is
+       resolved to its host node by drilling the component subTree (see useBoxMetrics). -->
   <tui-box v-if="!srHidden && assertBoxValid(props)" v-bind="props">
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />
