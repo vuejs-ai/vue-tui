@@ -20,6 +20,7 @@ import {
   type StdinContext,
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
+import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -138,9 +139,20 @@ function renderToStringInternal(
   // Capture the first uncaught error so we can re-throw after cleanup.
   // Vue's error handling catches component errors internally; for a
   // synchronous utility like renderToString, callers expect errors to throw.
-  let uncaughtError: unknown;
+  //
+  // Track occurrence with a SEPARATE boolean — NOT a `uncaughtError !== undefined`
+  // sentinel. A component can throw literal `undefined` (e.g.
+  // `onMounted(() => { throw undefined })`); a sentinel can't tell that apart from
+  // "no error", so it would SWALLOW the error and return the normal frame,
+  // violating the documented "errors propagate to the caller" contract. First-wins
+  // (guarded by `errored`) matches the live renderer's onErrorCaptured.
+  let errored = false;
+  let caught: unknown;
   app.config.errorHandler = (err) => {
-    uncaughtError ??= err;
+    if (!errored) {
+      errored = true;
+      caught = err;
+    }
   };
 
   let teardownSucceeded = false;
@@ -176,10 +188,14 @@ function renderToStringInternal(
     // Free the root yoga node itself (children already freed by unmount).
     detachYoga(root);
 
-    // Re-throw after full cleanup so callers see the original error.
-    if (uncaughtError !== undefined) {
-      // eslint-disable-next-line @typescript-eslint/no-base-to-string
-      throw uncaughtError instanceof Error ? uncaughtError : new Error(String(uncaughtError));
+    // Re-throw after full cleanup so callers see the original error. Mirrors the
+    // live renderer's exit-error path: a genuine Error — including a cross-realm
+    // one (fails `instanceof Error`, passes the `[object Error]` brand check) — is
+    // re-thrown AS-IS so its stack/message survive; a true non-Error throw
+    // (`throw "x"`, `throw {message:'x'}`) is wrapped with messageForNonError, so
+    // `{message:"detail"}` surfaces "detail" rather than the lossy "[object Object]".
+    if (errored) {
+      throw isErrorInput(caught) ? caught : new Error(messageForNonError(caught));
     }
 
     // The static channel appends a trailing newline for terminal rendering
