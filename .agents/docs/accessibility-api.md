@@ -29,7 +29,8 @@ to receive them and no browser to read them.
   `aria-role` ports from Ink/HTML unchanged — it is the runtime-compatible escape, not the
   type-safe path.
 - This is a Vue-idiom + reasonableness choice, **not parity** (Ink is kebab). See the
-  "Why align to Ink — and when not to" principle in [ink-divergences](./ink-divergences.md).
+  "The governing principle: correctness first, alignment is only a means" section in
+  [ink-divergences](./ink-divergences.md).
 
 ## Type-safety boundary (run-verified: `tsc` + `vue-tsc`)
 

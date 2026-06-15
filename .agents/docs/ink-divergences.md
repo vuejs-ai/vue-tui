@@ -1,31 +1,53 @@
-# vue-tui - Intentional Divergences from Ink
+# vue-tui ↔ Ink — Relationship Record
 
 vue-tui started as a Vue 3 port of [Ink](https://github.com/vadimdemedes/ink), and it
-still tracks Ink closely: the aim is behavioral parity except where a difference is
-deliberate. It is no longer only a port, though. It has its own design decisions,
-additive features, and Vue-native choices.
+still tracks Ink closely. It is no longer only a port, though: it has its own design
+decisions, additive features, and Vue-native choices.
 
-This document records the places vue-tui intentionally differs from Ink by design. A
-difference that is not listed here is treated as a bug, or simply unverified behavior,
-not a design choice.
+This document is the single record point for **how vue-tui relates to Ink** — not only
+where it differs. It records three kinds of relationship, each treated as a conscious
+decision:
+
+- **Deliberate alignments** — places vue-tui consciously _matches_ Ink (including where it
+  could easily have diverged, or where it keeps an Ink quirk on purpose) because matching is
+  the most reasonable behavior. A load-bearing alignment is worth recording so a later
+  "improvement" knows the match was a choice, not an accident.
+- **Intentional divergences** — places vue-tui deliberately _differs_ from Ink, each with a
+  real reason; a kept (human-blessed) divergence also carries an explicit `[VOUCHED @handle]`
+  stamp.
+- **Non-behavioral notes** — Vue-facing conventions and internal mechanics that are not
+  behavioral claims but are easy to mistake for parity gaps.
+
+A behavioral difference that is **not** recorded here as a deliberate divergence is treated
+as a bug, or as simply unverified behavior — never as an implicit design choice. An
+alignment, conversely, earns an entry only when it is load-bearing or non-obvious; the vast,
+unremarkable majority of parity needs no record.
 
 Reference baseline: Ink **v7.0.4** (commit
 `40b3a7578811fd616341ca4e31cc7748aeeff12f`). When bumping the target Ink version,
 re-validate every entry below against the new source.
 
-## Why align to Ink — and when not to
+## The governing principle: correctness first, alignment is only a means
 
-Aligning to Ink is a **means, not an end**. Ink is a mature, battle-tested implementation, so
-matching its public surface and behavior lets vue-tui inherit years of bug-fixes and edge-case
-handling for free. That — reducing bugs by reusing proven behavior — is the entire point of
-alignment.
+**Aligning to Ink is a means, never the goal.** The goal is the _most correct, most
+Vue-idiomatic behavior_. Ink is a mature, battle-tested implementation, so wherever Ink is
+already right, matching it is simply the **cheapest way to be correct** — vue-tui inherits years
+of bug-fixes and edge-case handling for free. Reducing bugs by reusing proven behavior is the
+_entire_ reason alignment has any value here.
 
-It follows that **alignment is not the top priority**. When Ink's behavior is itself a defect,
-is unreasonable, or is un-idiomatic for Vue, **conformance to Vue's philosophy and the plain
-reasonableness/correctness of the behavior outrank parity.** There vue-tui deliberately diverges,
-and records it here so the choice is conscious and vouched, not drift.
+It follows directly that **parity never outranks correctness.** When Ink's behavior is itself a
+defect, is unreasonable, or is un-idiomatic for Vue, **the plain correctness/reasonableness of the
+behavior and conformance to Vue's philosophy win — and vue-tui deliberately diverges.** "Ink does
+it this way" is never, on its own, a justification; it is only shorthand for "Ink is already
+correct here, so matching is the cheap path to correctness."
 
-This guards against two opposite failure modes:
+This priority ordering is _why this file records alignments too_. If alignment were the goal,
+matching Ink would need no record — it would be "the right thing" by definition. Because alignment
+is only a _means_, a deliberate match is a genuine decision ("Ink is correct here, so we match")
+exactly as much as a deliberate divergence is — and a load-bearing one deserves the same written
+rationale, so a future change that would break it knows it was chosen, not stumbled into.
+
+The principle guards against two opposite failure modes:
 
 - **Blind alignment** — copying Ink even where Ink is wrong, or where matching would force
   un-Vue machinery, merely to match. (Rejected e.g. in the `useCursor` corner-zombie, the
@@ -35,37 +57,81 @@ This guards against two opposite failure modes:
   better" with no genuine Vue-philosophy or correctness reason. Mere presence in this file is
   **not** a vouch; every kept divergence needs a real reason and an explicit `[VOUCHED @handle]` stamp.
 
-So the test for any difference is never just "does it match Ink?" but "is this the most
-reasonable, most Vue-idiomatic behavior — and where it diverges from Ink, is that because Ink is
-wrong or un-Vue, recorded with a `[VOUCHED @handle]` stamp?" Reasonableness and Vue idiom come first;
-alignment is simply the cheapest way to get there whenever Ink is already right.
+So the test for any behavior is never "does it match Ink?" but: **"is this the most reasonable,
+most Vue-idiomatic behavior?"** — and then, separately, "is the relationship to Ink (a match or a
+divergence) a conscious, recorded decision?" Correctness and Vue idiom come first; alignment is
+just the cheapest route to them whenever Ink is already right.
 
-## How to Classify a Divergence
+## How to Classify an Entry
 
-Classify each divergence by the first rule that applies. The order matters: earlier
-sections are narrower, while later sections are broader fallbacks.
+Classify each entry by the first rule that applies; the order matters.
 
-1. If Ink's supported subset still behaves the same and vue-tui only accepts more inputs,
-   supports more contexts, or exposes an extra capability, put it in **Additive
-   Supersets**.
-2. If the primary reason is alignment with Vue's API shape, framework model, mental
-   model, or user expectations, put it in **Vue API and Mental Model Divergences**.
-   - Use **Model-Implied Differences** when the difference comes from the React/Vue
-     framework-model boundary. Matching Ink would require React-shaped machinery inside
-     Vue, changing a core Vue-facing contract, or dealing with a React-only concept that
-     has no Vue equivalent.
-   - Use **Vue-Idiomatic Choices** when Ink could be copied, but vue-tui chooses the
-     behavior or public surface that better fits Vue's reactivity, lifecycle, component
-     boundaries, current-props model, or API conventions.
-3. If the divergence is intentional but is not additive and is not primarily Vue-aligned,
-   put it in **Intentional Divergence Choices**.
-4. If the note is not a divergence, put it in **Non-Behavioral Notes**.
+1. If it is **not a behavioral claim** — a Vue-facing naming convention or an internal
+   mechanic that is only easy to mistake for a parity gap — put it in **Non-Behavioral
+   Notes**.
+2. If it is a **deliberate decision to _match_ Ink** that is worth recording — a load-bearing
+   parity point, a place vue-tui could easily have diverged but consciously did not, or an
+   Ink quirk kept on purpose — put it in **Deliberate Alignments**.
+3. Otherwise it is a **deliberate _divergence_**. Classify it by the first sub-rule that
+   applies (earlier sections are narrower, later ones broader fallbacks):
+   1. If Ink's supported subset still behaves the same and vue-tui only accepts more inputs,
+      supports more contexts, or exposes an extra capability → **Additive Supersets**.
+   2. If the primary reason is alignment with Vue's API shape, framework model, mental model,
+      or user expectations → **Vue API and Mental Model Divergences**.
+      - **Model-Implied Differences** when the difference comes from the React/Vue
+        framework-model boundary: matching Ink would require React-shaped machinery inside
+        Vue, changing a core Vue-facing contract, or dealing with a React-only concept that
+        has no Vue equivalent.
+      - **Vue-Idiomatic Choices** when Ink could be copied, but vue-tui chooses the behavior
+        or public surface that better fits Vue's reactivity, lifecycle, component boundaries,
+        current-props model, or API conventions.
+   3. If the divergence is intentional but is neither additive nor primarily Vue-aligned →
+      **Intentional Divergence Choices**.
 
-Each divergence entry states what Ink does, what vue-tui does, and why the difference is
-deliberate. Some entries also record consequences, costs, tests, or the reasoning behind a vouch
-where those details are needed to understand the decision.
+Each **divergence** entry states what Ink does, what vue-tui does, and why the difference is
+deliberate; a kept divergence also carries an explicit `[VOUCHED @handle]` stamp. Each
+**alignment** entry states what is shared, that the match is deliberate, and why matching is the
+most reasonable behavior — not merely "because Ink does it". Some entries also record
+consequences, costs, tests, or the reasoning behind a vouch where those details aid understanding.
 
 ---
+
+## Deliberate Alignments
+
+These are places vue-tui consciously **matches** Ink — recorded not because every parity point
+needs an entry (the unremarkable majority does not), but because each is a _decision_: a behavior
+vue-tui could plausibly have done differently, or an Ink quirk kept on purpose, where matching is
+the most reasonable choice. Recording it means a later change that breaks the match knows it was
+chosen, not accidental. Per the governing principle, the justification is always "this is the
+correct/reasonable behavior and Ink already has it," never "because Ink does it." Alignment
+carve-outs that are tightly bound to a specific divergence are noted inline within that divergence
+entry instead (e.g. the global screen-reader carve-out under "Invalid input is validated at the
+component layer").
+
+### Commit timing (throttle cadence, FPS, synchronous resize)
+
+Commit timing is deliberately Ink-aligned: leading+trailing throttle at
+`Math.max(1, Math.ceil(1000/maxFps))` ms behind a `maxFps > 0` guard (34ms at the default
+`maxFps=30` — both engines compute exactly this), synchronous resize. The scheduler mirrors the
+observable timing of Ink's es-toolkit throttle (run-verified vs v7.0.4): the trailing timer
+re-arms on every deferred call, so the trailing commit fires at `lastCall+wait` (not
+`windowStart+wait`), and a call arriving a full window after the first deferral commits
+synchronously (es-toolkit's `maxWait`), keeping a ~`wait` cadence under sustained updates. This
+remains true even though re-renders come from Vue's fine-grained reactivity, not a React subtree
+re-render. Matching Ink's well-tuned cadence buys the same perceived responsiveness and flush
+guarantees without re-deriving them. One deliberate exception: resize cancels the pending trailing
+commit — see the divergence "Resize unconditionally cancels the pending trailing commit".
+
+### Literal tabs in `<Text>` are not normalized (measure vs paint width)
+
+Tabs in `<Text>` aren't normalized — measured width can disagree with painted width (shared with
+Ink, KEEP). `string-width` counts `\t` as 0 columns, but paint expands it to the next 8-column tab
+stop (`wrap-ansi` / terminal), so a `<Text>` with a literal tab reserves fewer columns than it
+draws (`ab\tcd` measures 4, paints ~10). Ink v7.0.4 does the same, so vue-tui is aligned here;
+KEEP — literal tabs in TUI text are vanishingly rare, so inheriting the quirk costs less than
+re-deriving tab handling for input that essentially never occurs. If ever fixed, expand tabs to
+spaces at the shared squash step (the only place with the column context an isolated tab lacks),
+upstream of `string-width` — and that fix would then become a divergence entry. [VOUCHED @hyf0]
 
 ## Additive Supersets
 
@@ -416,7 +482,7 @@ Full design, type-safety findings, and precedent survey: [accessibility-api](./a
 - **vue-tui:** the same vocabulary as typed **camelCase** props (`ariaLabel`/`ariaHidden`/
   `ariaRole`/`ariaState`; `AriaRole`/`AriaState` exported, identical to Ink's). Ink's kebab still
   works at runtime (Vue camelizes onto the declared prop), so `aria-role` ports unchanged.
-- **Why (Vue idiom + reasonableness > parity — see "Why align to Ink"):** Vue's `prop-name-casing`
+- **Why (Vue idiom + reasonableness > parity — see "The governing principle"):** Vue's `prop-name-casing`
   mandates camelCase, and — run-verified with `tsc`/`vue-tsc` — **camelCase is the only spelling
   type-checked** (value/typo/compound mistakes compile-error in both TSX and templates), while
   kebab `aria-*` is not (Vue/Volar treat it as a global attr). So `ariaRole` is the type-safe
@@ -769,8 +835,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 ## Non-Behavioral Notes
 
-These notes are not divergence entries. They document Vue-facing conventions or internal
-mechanics so they are not mistaken for parity gaps.
+These notes are neither divergence nor alignment entries. They document Vue-facing conventions
+or internal mechanics so they are not mistaken for parity gaps.
 
 - The exported host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
   from `@vue-tui/runtime/internal`), not Ink's DOM-emulation `DOMElement`
@@ -784,21 +850,3 @@ mechanics so they are not mistaken for parity gaps.
   `screen-reader.ts`; `G52`). This is renderer mechanics, not a divergence entry by
   itself. The observable `<Transform>` literal-`false` edge is documented above as a
   **model-implied divergence**.
-- Commit timing is deliberately Ink-aligned: leading+trailing throttle at
-  `Math.max(1, Math.ceil(1000/maxFps))` ms behind a `maxFps > 0` guard (34ms at the
-  default `maxFps=30` — both engines compute exactly this), synchronous resize. The
-  scheduler mirrors the observable timing of Ink's es-toolkit throttle (run-verified vs
-  v7.0.4): the trailing timer re-arms on every deferred call, so the trailing commit
-  fires at `lastCall+wait` (not `windowStart+wait`), and a call arriving a full window
-  after the first deferral commits synchronously (es-toolkit's `maxWait`), keeping a
-  ~`wait` cadence under sustained updates. This remains true even though re-renders come
-  from Vue's fine-grained reactivity, not a React subtree re-render. One deliberate
-  exception: resize cancels the pending trailing commit — see the divergence entry
-  "Resize unconditionally cancels the pending trailing commit".
-- **Tabs in `<Text>` aren't normalized — measured width can disagree with painted width
-  (shared with Ink, KEEP).** `string-width` counts `\t` as 0 columns, but paint expands it to
-  the next 8-column tab stop (`wrap-ansi` / terminal), so a `<Text>` with a literal tab reserves
-  fewer columns than it draws (`ab\tcd` measures 4, paints ~10). Ink v7.0.4 does the same, so
-  vue-tui is aligned here; KEEP — literal tabs in TUI text are vanishingly rare. If ever fixed,
-  expand tabs to spaces at the shared squash step (the only place with the column context an
-  isolated tab lacks), upstream of `string-width`. [VOUCHED @hyf0]
