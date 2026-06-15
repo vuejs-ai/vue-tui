@@ -473,14 +473,19 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `"aaaa\nbbbb\ncccc\nZZZZ"`. `wrap` is the only STYLE_PROP that affects measured height (the
   measure func reads `text.props.wrap`); the rest (color/bold/border colors/…) are paint-only,
   so this is the sole case.
-- **Why:** aligning to Ink reduces bugs only where Ink is correct. Here Ink is itself
-  buggy — a stale cached measure that contradicts paint — so vue-tui deliberately diverges to
-  the obviously-correct behavior: render = f(current props), layout and paint agree. The fix
-  is minimal (one `markDirty`) and matches the layout Ink ALREADY produces whenever its measure
-  func happens to be invalidated. KEEP — proposed divergence, PENDING @hyf0 vouch (Ink is buggy
-  here; awaiting human bless before this is settled). Tests:
-  `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's
-  stale frame).
+- **Why:** the correct behavior is the declarative invariant — a runtime `wrap` change must
+  produce the EXACT SAME frame as a fresh mount with that `wrap` (measure == paint, render =
+  f(current props)). This is VERIFIED across the full 6-mode transition matrix (`wrap`, `hard`,
+  `truncate`, `truncate-end`, `truncate-middle`, `truncate-start` → all 30 ordered transitions):
+  each toggled frame equals the fresh-mount frame for the target mode. Ink v7.0.4 diverges from
+  this correct behavior — a run-verified latent bug where `applyStyles` ignores `textWrap` and
+  never `markDirty`s, leaving a stale cached measure that contradicts paint. Aligning to Ink
+  reduces bugs only where Ink is correct; here Ink is buggy, so vue-tui keeps the correct
+  invariant. The fix is minimal (one `markDirty`) and matches the layout Ink ALREADY produces
+  whenever its measure func happens to be invalidated. KEEP. [VOUCHED @hyf0] Tests:
+  `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's stale
+  frame) and `text-wrap-remeasure-matrix.test.tsx` (full 6-mode / 30-transition matrix proving
+  the invariant; 16 transitions go RED without the fix).
 
 ### Second `mount()` on a live stdout is an inert no-op
 
