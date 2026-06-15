@@ -491,7 +491,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // measured dimensions, so `wrap` is the sole case. NOTE: this also fixes a
         // latent bug present in Ink v7.0.4 itself — Ink's applyStyles ignores
         // textWrap and never markDirty()s, so a wrap-only change goes stale there too
-        // (a deliberate divergence pending a human vouch; see ink-divergences.md).
+        // (a deliberate, vouched divergence; see ink-divergences.md).
         if (key === "wrap" && el.type === "tui-text") {
           markTextDirty(el);
         }
