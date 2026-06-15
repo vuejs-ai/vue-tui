@@ -795,27 +795,10 @@ mechanics so they are not mistaken for parity gaps.
   from Vue's fine-grained reactivity, not a React subtree re-render. One deliberate
   exception: resize cancels the pending trailing commit — see the divergence entry
   "Resize unconditionally cancels the pending trailing commit".
-- **Tabs in `<Text>` are not normalized; measured width can disagree with painted width
-  (shared with Ink — KEEP aligned, not a divergence).** `measureTextNatural` measures with
-  `string-width`, which counts `\t` as **0** columns. A tab has no intrinsic width — it jumps
-  to the next 8-column tab stop, so its real width depends on the cursor column (e.g. after
-  `ab` a tab spans 6 cells; after `abcdef`, 2), which `string-width` cannot know from an
-  isolated tab. But paint expands the tab to its tab-stop width — `wrap-ansi` when the line
-  wraps, and the terminal itself for a literal tab on the fits fast-path. So a `<Text>`
-  containing a literal tab reserves fewer columns in yoga than it draws (`ab\tcd` measures 4,
-  paints ~10), overrunning its box or shifting wrap points. This is a **shared upstream quirk**:
-  Ink v7.0.4 uses the same `string-width` measure + `wrap-ansi`/terminal paint and likewise does
-  not normalize tabs, so vue-tui is **aligned with Ink here**. We KEEP it: a literal tab in
-  `<Text>` is vanishingly rare in TUIs (alignment uses `<Box>` flex / padding), so the seam is
-  effectively unreachable — not worth the cost of a fix that would itself become a divergence.
-  **If ever fixed**, the change lives UPSTREAM of `string-width`, not inside it (an isolated tab
-  lacks the column context to be measured — only the squash step, which holds the whole string,
-  has it): expand tabs to spaces once at the squash chokepoint shared by the measure and paint
-  twins — tab-stop 8, tracking display columns (CJK = 2), resetting at `\n`, skipping ANSI
-  escapes — so measure, wrap, and paint all see the identical expanded string. That makes
-  measurement faithful to what is drawn (a correctness fix; `wrap-ansi` re-expanding already-
-  spaces is a no-op, so painted output is unchanged). The one behavior change — a literal tab on
-  the fits-path aligning to a text-relative tab stop instead of the terminal's absolute column —
-  would be the actual divergence to bless then. True absolute-column semantics is impractical
-  (it needs the post-layout screen position, which is itself an input to measurement). KEEP.
-  [VOUCHED @hyf0]
+- **Tabs in `<Text>` aren't normalized — measured width can disagree with painted width
+  (shared with Ink, KEEP).** `string-width` counts `\t` as 0 columns, but paint expands it to
+  the next 8-column tab stop (`wrap-ansi` / terminal), so a `<Text>` with a literal tab reserves
+  fewer columns than it draws (`ab\tcd` measures 4, paints ~10). Ink v7.0.4 does the same, so
+  vue-tui is aligned here; KEEP — literal tabs in TUI text are vanishingly rare. If ever fixed,
+  expand tabs to spaces at the shared squash step (the only place with the column context an
+  isolated tab lacks), upstream of `string-width`. [VOUCHED @hyf0]
