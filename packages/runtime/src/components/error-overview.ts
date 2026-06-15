@@ -61,6 +61,37 @@ export function messageForNonError(value: unknown): string {
   return typeof message === "string" ? message : safeString(value);
 }
 
+// Classify a thrown/exit() value as error-vs-result, matching Ink's isErrorInput
+// (ink.tsx:154-159 @ v7.0.4). Co-located with messageForNonError because the two
+// are always paired (a genuine Error is re-thrown/rejected as-is; a non-Error is
+// wrapped with messageForNonError) — shared by render.ts (exit/onErrorCaptured)
+// and render-to-string.ts (re-throw after cleanup) so the brand check is a SINGLE
+// source of truth. The plain `instanceof Error` check fails for a cross-realm
+// Error — one created in a different VM context (e.g.
+// `vm.runInNewContext("new Error()")`) has a prototype from the OTHER realm, so
+// it isn't an instance of THIS realm's Error even though it is a genuine Error.
+// The `[object Error]` brand (Symbol.toStringTag, not prototype-based) crosses
+// realms, so it catches those foreign Errors and they REJECT waitUntilExit()
+// (or re-throw from renderToString) instead of being silently swallowed as a
+// resolved result value. Non-Error result values (string/number/plain object)
+// brand as e.g. `[object String]`, so they still RESOLVE — exactly Ink's contract.
+export function isErrorInput(value: unknown): value is Error {
+  // Must NEVER throw: runs in the error-exit/capture path (onErrorCaptured,
+  // appContext.exit, resolveExit) with NO surrounding try/catch — an unguarded
+  // throw here wedges the boundary. BOTH checks can throw on a pathological thrown
+  // value, so BOTH are inside the try: `instanceof` invokes the value's
+  // [[GetPrototypeOf]] (a Proxy's throwing getPrototypeOf trap re-throws), and
+  // `Object.prototype.toString.call` READS a throwing `Symbol.toStringTag` getter.
+  // On any throw, treat the value as a non-Error (false) so it routes through
+  // messageForNonError. The brand check is the cross-realm-Error fallback (see
+  // the rationale above the function); `instanceof` short-circuits the common case.
+  try {
+    return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
+  } catch {
+    return false;
+  }
+}
+
 export const ErrorOverview = defineComponent({
   name: "ErrorOverview",
   props: {

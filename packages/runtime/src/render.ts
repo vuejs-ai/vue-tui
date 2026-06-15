@@ -44,7 +44,7 @@ import {
 } from "./context.ts";
 import { devState, DevStateKey, initHmrBridge, resetDevState } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
-import { ErrorOverview, messageForNonError } from "./components/error-overview.ts";
+import { ErrorOverview, isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useWindowSize.ts";
 
 export interface MountOptions {
@@ -192,32 +192,9 @@ function shouldClearTerminalForFrame(opts: {
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 
-// Classify an exit() input as error-vs-result, matching Ink's isErrorInput
-// (ink.tsx:154-159 @ v7.0.4). The plain `instanceof Error` check fails for a
-// cross-realm Error — one created in a different VM context (e.g.
-// `vm.runInNewContext("new Error()")`) has a prototype from the OTHER realm, so
-// it isn't an instance of THIS realm's Error even though it is a genuine Error.
-// The `[object Error]` brand (Symbol.toStringTag, not prototype-based) crosses
-// realms, so it catches those foreign Errors and they REJECT waitUntilExit()
-// instead of being silently swallowed as a resolved result value. Non-Error
-// result values (string/number/plain object) brand as e.g. `[object String]`,
-// so they still RESOLVE — exactly Ink's contract.
-function isErrorInput(value: unknown): value is Error {
-  // Must NEVER throw: runs in the error-exit/capture path (onErrorCaptured,
-  // appContext.exit, resolveExit) with NO surrounding try/catch — an unguarded
-  // throw here wedges the boundary. BOTH checks can throw on a pathological thrown
-  // value, so BOTH are inside the try: `instanceof` invokes the value's
-  // [[GetPrototypeOf]] (a Proxy's throwing getPrototypeOf trap re-throws), and
-  // `Object.prototype.toString.call` READS a throwing `Symbol.toStringTag` getter.
-  // On any throw, treat the value as a non-Error (false) so it routes through
-  // messageForNonError. The brand check is the cross-realm-Error fallback (see
-  // the rationale above the function); `instanceof` short-circuits the common case.
-  try {
-    return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
-  } catch {
-    return false;
-  }
-}
+// `isErrorInput` (the cross-realm Error brand check) now lives in
+// ./components/error-overview.ts, co-located with messageForNonError and shared
+// with render-to-string.ts so the classification is a single source of truth.
 
 type MaybeWritableStream = NodeJS.WriteStream & {
   writable?: boolean;
@@ -1985,8 +1962,18 @@ function createStdinController(
         const alreadyEnabled = state.pendingDisable;
         state.pendingDisable = false;
         if (!alreadyEnabled) {
-          if (typeof stdin.ref === "function") stdin.ref();
+          // setRawMode(true) BEFORE stdin.ref(). setRawMode can throw
+          // ERR_TTY_INIT_FAILED on a hostile SSH/container PTY (reports isTTY=true
+          // but the ioctl fails); a throw must leave NOTHING ref'd. If ref() ran
+          // first, the throw would abort before `state.refs++/localRefs++`, so
+          // dispose's unref (gated on those counts) would never fire — a ref'd
+          // stdin keeps the event loop alive and a caller that catches the mount
+          // error hangs at exit. With setRawMode first, a throw leaves ref()
+          // un-called and the counts untouched, so there is nothing to unbalance.
+          // On the success path both still run; order is irrelevant when both
+          // succeed.
           appCtx.setRawMode(true);
+          if (typeof stdin.ref === "function") stdin.ref();
         }
         if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
       }
