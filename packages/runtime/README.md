@@ -1,6 +1,6 @@
 # @vue-tui/runtime
 
-> **Early stage** — under active development. Bug reports welcome, but not recommended for production use yet.
+> **Public beta (0.1)** — the `@vue-tui/runtime` API is entering stabilization: usable and broadly stable, but may still change before 1.0. The CLI and dev tooling remain experimental and may change between releases. Feedback and bug reports are very welcome — they directly shape what we lock down next. Not yet recommended for production use.
 
 Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with the same component model you use on the web.
 
@@ -68,21 +68,22 @@ useInput((input) => {
 
 ## Composables
 
-| Composable                 | Description                                                           |
-| -------------------------- | --------------------------------------------------------------------- |
-| `useInput(handler, opts?)` | Keyboard input — `(input, key)` with modifier and arrow key detection |
-| `useFocus(opts?)`          | Component-level focus — returns `{ isFocused, focus }`                |
-| `useFocusManager()`        | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`       |
-| `useApp()`                 | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`            |
-| `useWindowSize()`          | Reactive terminal dimensions — `{ columns, rows }`                    |
-| `useAnimation(opts?)`      | Frame-based animation loop — returns `{ frame, time, delta, reset }`  |
-| `useBoxMetrics(ref)`       | Reactive layout metrics — `{ width, height, left, top, hasMeasured }` |
-| `measureElement(node)`     | Imperative read of computed `{ width, height }` from a yoga node      |
-| `useCursor()`              | Control terminal cursor visibility                                    |
-| `usePaste(handler, opts?)` | Handle clipboard paste events                                         |
-| `useStdin()`               | Access stdin stream and raw mode control                              |
-| `useStdout()`              | Write directly to stdout                                              |
-| `useStderr()`              | Write directly to stderr                                              |
+| Composable                   | Description                                                                                  |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`   | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
+| `useFocus(opts?)`            | Component-level focus — returns `{ isFocused, focus }`                                       |
+| `useFocusManager()`          | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
+| `useApp()`                   | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
+| `useWindowSize()`            | Reactive terminal dimensions — `{ columns, rows }`                                           |
+| `useAnimation(opts?)`        | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
+| `useBoxMetrics(ref)`         | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
+| `measureElement(node)`       | Imperative read of computed `{ width, height }` from a yoga node                             |
+| `useCursor()`                | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
+| `usePaste(handler, opts?)`   | Handle clipboard paste events                                                                |
+| `useStdin()`                 | Access stdin stream and raw mode control                                                     |
+| `useStdout()`                | Write directly to stdout                                                                     |
+| `useStderr()`                | Write directly to stderr                                                                     |
+| `useIsScreenReaderEnabled()` | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
 
 ## App Lifecycle
 
@@ -99,6 +100,16 @@ await app.waitUntilExit();
 
 // Custom streams (for testing):
 createApp(App).mount({ stdout, stdin, stderr });
+```
+
+## Render to String
+
+Render a component to a single output frame without driving a live terminal — useful for snapshots, logging, or non-interactive output:
+
+```ts
+import { renderToString } from "@vue-tui/runtime";
+
+const frame = renderToString(App); // synchronous, returns a string
 ```
 
 ## Links
