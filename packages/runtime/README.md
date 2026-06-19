@@ -1,6 +1,6 @@
 # @vue-tui/runtime
 
-> **Public beta (0.1)** — the `@vue-tui/runtime` API is entering stabilization: usable and broadly stable, but may still change before 1.0. The CLI and dev tooling remain experimental and may change between releases. Feedback and bug reports are very welcome — they directly shape what we lock down next. Not yet recommended for production use.
+> **Public beta** — the `@vue-tui/runtime` API is stabilizing, and we're now seeking public feedback to lock it down before 1.0. The CLI and dev tooling remain experimental and may change. Feedback and bug reports are very welcome.
 
 Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with the same component model you use on the web.
 
