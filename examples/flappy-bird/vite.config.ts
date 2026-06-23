@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -20,9 +21,13 @@ export default defineConfig({
       fileName: () => "game.mjs",
     },
     rollupOptions: {
-      // Bundle anything resolved as a relative / absolute path (the .vue
-      // file + its `?vue` virtual modules); externalize bare specifiers.
-      external: (id) => !id.startsWith(".") && !id.startsWith("/") && !id.startsWith("\0"),
+      // Bundle anything resolved as a relative / absolute path — the .vue file
+      // and its `?vue` virtual modules. `node:path`'s isAbsolute() matches the
+      // build host's absolute paths, including Windows drive-letter paths (D:\…)
+      // when building on Windows, so the resolved SFC is bundled wherever you
+      // build; a bare `id.startsWith("/")` check would miss Windows paths
+      // (vue-tui#209). Externalize bare specifiers.
+      external: (id) => !id.startsWith(".") && !id.startsWith("\0") && !isAbsolute(id),
     },
   },
 });
