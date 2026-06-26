@@ -3,11 +3,8 @@ import { isRunnableDevEnvironment } from "vite";
 import { bridgeHmrEventsToRunner } from "./bridge-hmr.ts";
 import { DEV_VMOD_ID } from "./dev-vmod.ts";
 
-const ENTRY_CONVENTIONS = ["/src/main.ts", "/src/main.tsx", "/src/index.ts", "/src/index.tsx"];
-
 export function devPlugin(opts: { entry?: string }): Plugin {
   const entry = opts.entry ?? "/src/main.ts";
-  const injectInto = new Set(ENTRY_CONVENTIONS.concat(entry));
   return {
     name: "vue-tui:dev",
     apply: "serve",
@@ -17,11 +14,14 @@ export function devPlugin(opts: { entry?: string }): Plugin {
       return { clearScreen: false, logLevel: "error", server: { ws: false } };
     },
     transform(code, id) {
-      // Inject the dev connector at the TOP of the entry (a transformed module → its
-      // import.meta.hot is live). Runs before createApp().mount(), so isDevConnected()
-      // is already true when the overlay gate is checked.
+      // Inject the dev connector at the TOP of the configured entry (a transformed
+      // module → its import.meta.hot is live). Runs before createApp().mount(), so
+      // isDevConnected() is already true when the overlay gate is checked. `id` is an
+      // ABSOLUTE fs path while `entry` is root-relative (starts with "/"), so endsWith
+      // matches both the default and a custom entry — and must inject into exactly the
+      // entry that configureServer's runner.import(entry) loads, nothing else.
       const path = id.split("?")[0];
-      if (injectInto.has(path) || ENTRY_CONVENTIONS.some((c) => path.endsWith(c))) {
+      if (path.endsWith(entry)) {
         return { code: `import ${JSON.stringify(DEV_VMOD_ID)};\n` + code, map: null };
       }
     },

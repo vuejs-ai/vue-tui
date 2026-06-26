@@ -29,6 +29,9 @@ afterEach(async () => {
 
 function capture() {
   let buf = "";
+  // Only write + isTTY:false are needed: a non-TTY stdout disables the renderer's
+  // interactive path (cursor moves, ANSI erases, resize listener), so the mock can
+  // be a minimal sink that just accumulates the emitted frames.
   (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__ = {
     write: (s: string) => ((buf += s), true),
     isTTY: false,
