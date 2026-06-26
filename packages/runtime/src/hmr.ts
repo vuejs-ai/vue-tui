@@ -93,6 +93,23 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
   });
 }
 
+// Whether the dev integration has been connected (replaces the old __VUE_TUI_DEV__
+// build-define gate). createApp() reads this to decide whether to install the dev
+// overlay. Set by connectDevtools(), which @vue-tui/vite calls (via an injected
+// transformed module) with a LIVE import.meta.hot — the runtime is externalized in
+// dev, so its own import.meta.hot is undefined and cannot drive the bridge.
+let devConnected = false;
+export function isDevConnected(): boolean {
+  return devConnected;
+}
+
+// Public dev entry point for @vue-tui/vite (exposed via @vue-tui/runtime/internal).
+// Hands a live Vite hot context to the HMR bridge and flips the dev flag.
+export function connectDevtools(hot: HotContext): void {
+  devConnected = true;
+  initHmrBridge(hot);
+}
+
 // Reset the shared dev status to "ok". `devState` is a module-global that a
 // PREVIOUS app in the same dev process may have left in an error/update state
 // (createApp() can run multiple times: two apps, unmount + re-create, a tool
