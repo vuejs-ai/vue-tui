@@ -1,0 +1,5 @@
+export { forceClientCompile } from "./force-client-compile.ts";
+export interface VueTuiOptions {
+  vue?: import("@vitejs/plugin-vue").Options;
+  entry?: string;
+}
