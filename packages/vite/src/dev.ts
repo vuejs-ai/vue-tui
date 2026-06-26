@@ -27,6 +27,18 @@ export function devPlugin(opts: { entry?: string }): Plugin {
     },
     configureServer(server) {
       bridgeHmrEventsToRunner(server);
+      // App-exit → server teardown. The app runs in-process, so the dev server
+      // holds the event loop open (ports, watchers, the module runner). When the
+      // app genuinely exits (useApp().exit(), waitUntilExit() drain, error exit)
+      // the runtime calls this global; close the server so the process can exit
+      // cleanly instead of hanging on the still-open server. A full reload does
+      // NOT settle the app's exit promise, so it never reaches here — only a real
+      // exit does. (No re-import handler is needed for full reloads: Vite's SSR
+      // runner auto-re-imports the entry, and the runtime unmounts the old app on
+      // vite:beforeFullReload — verified by run.)
+      (globalThis as { __VUE_TUI_TEARDOWN__?: () => void }).__VUE_TUI_TEARDOWN__ = () => {
+        void server.close();
+      };
       return () => {
         const env = server.environments.ssr;
         if (!isRunnableDevEnvironment(env)) {

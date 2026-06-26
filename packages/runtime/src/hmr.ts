@@ -37,6 +37,32 @@ const realHot = (import.meta as { hot?: HotContext }).hot;
 // calls would leak N copies of every handler — firing each HMR event N times.
 let initialized = false;
 
+// Teardown of the dev app currently mounted in this process. In dev an
+// entry-level edit that Vite can't hot-accept emits a FULL RELOAD: Vite's SSR
+// module runner re-executes the entry, which calls createApp().mount() again.
+// The old app must be unmounted FIRST — otherwise mount()'s instance-reuse
+// guard rejects the new app (the reload silently no-ops) and the old app's
+// renderer, timers and stdout writes leak as a zombie writing over the new one.
+// render.ts registers the active app here on mount and clears it on unmount;
+// the vite:beforeFullReload handler below runs it just before the runner
+// re-imports the entry. Verified by a real run: beforeFullReload fires BEFORE
+// the re-import, and the runner auto-re-imports the entry, so we tear down here
+// and let Vite do the re-import (no manual re-import). Crucially this tears down
+// WITHOUT settling the app's exit promise, so a reload is never mistaken for a
+// genuine app exit (which is what triggers the dev-server-close hook).
+let currentDevAppTeardown: (() => void) | undefined;
+
+export function registerDevApp(teardown: () => void): void {
+  currentDevAppTeardown = teardown;
+}
+
+export function unregisterDevApp(teardown: () => void): void {
+  // Identity-guard the clear: during a reload the old app's teardown runs and
+  // unregisters before the new app registers, so a stale teardown can never
+  // wipe a newer app's registration.
+  if (currentDevAppTeardown === teardown) currentDevAppTeardown = undefined;
+}
+
 // Handle for the pending "update → ok" reset. At most ONE may be live at a time:
 // rapid successive updates would otherwise STACK independent timers, and an
 // earlier update's timer firing while a later update is still showing would wipe
@@ -89,6 +115,15 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
   });
 
   hot.on("vite:beforeFullReload", () => {
+    // Unmount the current app before the module runner re-executes the entry, so
+    // the fresh createApp().mount() isn't blocked by the instance-reuse guard and
+    // the old renderer/timers don't leak. The runner auto-re-imports the entry on
+    // full reload (verified by run), so we do NOT re-import here.
+    currentDevAppTeardown?.();
+    currentDevAppTeardown = undefined;
+    // Retained for the documented dev protocol/observability. In-process there is
+    // no child to restart, so nothing consumes this today; the teardown above plus
+    // Vite's auto re-import are what actually perform the reload.
     hot.send("vue-tui:request-reload");
   });
 }
