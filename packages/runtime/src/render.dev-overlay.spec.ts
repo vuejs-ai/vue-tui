@@ -1,4 +1,4 @@
-import { test, expect, vi } from "vite-plus/test";
+import { test, expect } from "vite-plus/test";
 import { connectDevtools, devState } from "./hmr.ts";
 import { createApp } from "./render.ts";
 import { Text } from "./index.ts";
