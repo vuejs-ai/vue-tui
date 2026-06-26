@@ -8,7 +8,7 @@ import { afterEach, expect, test, vi } from "vite-plus/test";
 // dynamic import() path must be a string LITERAL so the bundler resolves it
 // relative to this file. (overlay.ts is NOT imported here: it pulls in .vue SFCs
 // the unit-test pipeline can't transform. resetDevState lives in hmr.ts, and
-// render()'s dev block calls it — see render.ts's `__VUE_TUI_DEV__` block.)
+// render()'s dev block calls it — see render.ts's isDevConnected() gate.)
 
 type FakeHot = {
   on: ReturnType<typeof vi.fn<(event: string, cb: (payload: unknown) => void) => void>>;

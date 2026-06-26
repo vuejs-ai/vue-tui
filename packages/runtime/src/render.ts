@@ -42,7 +42,7 @@ import {
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
-import { devState, DevStateKey, initHmrBridge, resetDevState } from "./hmr.ts";
+import { devState, DevStateKey, isDevConnected, resetDevState } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview, isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useWindowSize.ts";
@@ -506,8 +506,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({ onCommit: () => scheduledCommit() }),
   );
-  if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
-    initHmrBridge();
+  if (isDevConnected()) {
+    // initHmrBridge already ran inside connectDevtools() with a live hot.
     // Clear any dev status left in the module-global `devState` by a previous
     // app in this dev process, so this fresh app never renders a stale Build
     // Error / HMR-update overlay instead of its own content.
@@ -1260,7 +1260,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const animationScheduler = createAnimationScheduler(renderThrottleMs);
     mountedAnimationScheduler = animationScheduler;
     baseApp.provide(AnimationSchedulerKey, animationScheduler);
-    if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
+    if (isDevConnected()) {
       baseApp.provide(DevStateKey, devState);
     }
 

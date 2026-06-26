@@ -35,9 +35,6 @@ export function vueTuiDevPlugin(_options?: VueTuiDevPluginOptions): Plugin[] {
           build: {
             modulePreload: false,
           },
-          define: {
-            __VUE_TUI_DEV__: "true",
-          },
           server: {
             strictPort: true,
           },
