@@ -39,6 +39,11 @@ export function devPlugin(opts: { entry?: string }): Plugin {
       }
     },
     configureServer(server) {
+      // The in-process TUI owns process.stdin (raw mode). Vite's CLI keyboard shortcuts
+      // (q=quit, r=restart, …) attach their own readline 'line' listener to process.stdin, so a
+      // submitted "q"/"r"/… line would run a dev-server action out from under the running app
+      // (q = server.close()). Neutralize them — the terminal app, not the CLI, owns the keys.
+      server.bindCLIShortcuts = () => {};
       bridgeHmrEventsToRunner(server);
       // App-exit → server teardown. The app runs in-process, so the dev server
       // holds the event loop open (ports, watchers, the module runner). When the
