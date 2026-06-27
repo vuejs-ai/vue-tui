@@ -50,3 +50,14 @@ test("vueTui normalizes a './'-prefixed custom entry so the dev module still inj
   const out = dev.transform("export const x = 1;", "/Users/proj/src/app.ts");
   expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
 });
+
+// A Windows-absolute entry ("C:/proj/src/main.ts") must be left absolute: Vite's Windows
+// module ids are drive-letter paths, so dev matches via endsWith on "C:/...". Prefixing a
+// "/" (-> "/C:/...") would never match. Regression guard for normalizeEntry().
+test("vueTui preserves a Windows-absolute entry so dev still matches the drive-letter id", () => {
+  const dev = vueTui({ entry: "C:/proj/src/main.ts" }).find(
+    (p) => p.name === "vue-tui:dev",
+  ) as unknown as { transform: TransformFn };
+  const out = dev.transform("export const x = 1;", "C:/proj/src/main.ts");
+  expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
+});

@@ -20,19 +20,25 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   // plugin-vue here (and any plugin-vue-jsx the user adds) is force-client-compiled in
   // devPlugin's configResolved, so it runs in the SSR dev environment but emits CLIENT
   // render functions for the terminal renderer.
-  const entry = normalizeEntry(options.entry);
+  const { dev, build } = normalizeEntry(options.entry);
   return [
-    devPlugin({ entry: `/${entry}` }),
-    buildConfigPlugin({ entry }),
+    devPlugin({ entry: dev }),
+    buildConfigPlugin({ entry: build }),
     devVmodPlugin(),
     vue(options.vue) as Plugin,
   ];
 }
 
-// Accept "/src/main.ts", "src/main.ts", or "./src/main.ts" interchangeably; return the bare
-// root-relative form. dev re-adds the leading slash, build uses the bare form as-is.
-function normalizeEntry(entry?: string): string {
-  return (entry ?? "src/main.ts").replace(/^(?:\.?\/)+/, "");
+// Reconcile the entry for dev (matched against the absolute module id via endsWith, so it
+// needs a leading slash) and build (fed bare to rollupOptions.input). "/x", "x", and "./x"
+// collapse to the same pair. A Windows-absolute drive-letter entry ("C:/x" / "C:\\x") is left
+// absolute — dev's endsWith matches the drive-letter module id, and prefixing "/" (-> "/C:/x")
+// would never match.
+function normalizeEntry(entry?: string): { dev: string; build: string } {
+  const e = (entry ?? "src/main.ts").replace(/\\/g, "/");
+  if (/^[a-zA-Z]:\//.test(e)) return { dev: e, build: e };
+  const bare = e.replace(/^(?:\.?\/)+/, "");
+  return { dev: `/${bare}`, build: bare };
 }
 
 export default vueTui;
