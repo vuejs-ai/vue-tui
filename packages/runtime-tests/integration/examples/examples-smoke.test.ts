@@ -1,0 +1,96 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { test, expect, afterEach } from "vite-plus/test";
+import {
+  CJS_REQUIRE_SHIM,
+  exampleDir,
+  launch,
+  viteBin,
+  type Launched,
+} from "./helpers/run-example.ts";
+
+// End-to-end smoke test for the shipped examples (#212). The 0.1.0 crash —
+// `Calling \`require\` for "node:module" in an environment that doesn't expose \`require\`` — came
+// from the old @vue-tui/cli's bundledDev step, which folded CJS into a single ESM bundle. The
+// @vue-tui/vite plugin (#215) deleted that path: dev runs in-process through Vite's SSR module
+// runner and the production build externalizes every bare dep. This guards that the shipped
+// examples still launch and paint, so a regression that reintroduces a module-system crash fails
+// CI on every change.
+//
+// Why a real PTY: a TUI gates its full paint on an interactive TTY (`interactive = !isInCi && isTTY`),
+// so a piped/non-TTY child renders nothing — a non-PTY smoke test would be a false negative. Each
+// runnable example is launched under a pseudo-terminal and we wait for its title to paint.
+//
+// What each path actually guards (be precise, don't oversell):
+//   - dev (`vite`): the in-process dev server boots and paints. In THIS monorepo the dev path
+//     BUNDLES @vue-tui/runtime (the workspace symlink's real path is outside node_modules, so Vite's
+//     SSR runner re-executes it), so it can't reproduce #212's externalized-load crash — it guards
+//     the dev plugin itself (client-compile, CLI-shortcut neutralization, HMR bridge, blank paint).
+//   - build (`node dist/main.js`): the bundle externalizes @vue-tui/runtime and Node loads it via
+//     native ESM. This is the externalized launch guard; if a regression let a CJS `require` survive
+//     into the ESM bundle (the #212 fault class), the shim throws at startup and this goes red
+//     (verified by injecting a bare `require()` into an entry — it reproduces #212 exactly).
+//
+// Coverage boundary: the externalized *dev* path a published `npm install` takes (runtime resolved
+// through the SSR runner's externalize/conditions, not bundled) cannot be reproduced from an
+// in-repo example because the workspace symlink forces bundling. It is NOT covered here; guarding it
+// would need a packed-install fixture and belongs with @vue-tui/vite's own suite.
+
+// Both the template and JSX apps title themselves "vue-tui basic (…)". Letters-only this is
+// "vuetuibasic", which the wrap-robust matcher in run-example.ts finds regardless of where the
+// box's `width="20"` wraps the title. NB: basic-template must keep `flexDirection="column"` — the
+// default row layout interleaves its sibling Texts column-by-column and breaks this contiguous
+// token (the test then fails via timeout), so that prop is load-bearing here, not cosmetic.
+const TITLE_TOKEN = "vue-tui basic";
+
+// The two "hello world" apps are deterministic and key-free, so they get the full dev + build paint
+// check. coding-agent uses the same @vue-tui/vite build but needs a live LLM key to RUN, so it gets
+// a build-only guard below. flappy-bird is intentionally absent: it doesn't use @vue-tui/vite at all
+// (it builds via `vp build` to dist/game.mjs), so it's outside the dev/build path #212 is about.
+const RUNNABLE = [
+  { name: "basic-template", dir: exampleDir("basic-template") },
+  { name: "basic-jsx", dir: exampleDir("basic-jsx") },
+] as const;
+
+// `vite build` needs no TTY; a plain child process is enough. Bounded so a wedged build can't hang
+// the worker (execFileSync blocks synchronously, so vitest's testTimeout can't preempt it).
+function buildExample(dir: string): string {
+  execFileSync("node", [viteBin(dir), "build"], {
+    cwd: dir,
+    stdio: "pipe",
+    timeout: 60000,
+    killSignal: "SIGKILL",
+    env: { ...process.env, CI: "false" },
+  });
+  return readFileSync(path.join(dir, "dist", "main.js"), "utf8");
+}
+
+let running: Launched | undefined;
+afterEach(() => {
+  running?.kill();
+  running = undefined;
+});
+
+for (const ex of RUNNABLE) {
+  test(`${ex.name}: dev server (vite) launches and paints a frame`, async () => {
+    running = launch("node", [viteBin(ex.dir)], ex.dir);
+    await running.waitForRenderOrCrash(TITLE_TOKEN);
+    expect(running.output()).not.toMatch(CJS_REQUIRE_SHIM);
+  });
+
+  test(`${ex.name}: production build runs (node dist/main.js) and paints a frame`, async () => {
+    const bundle = buildExample(ex.dir);
+    expect(bundle).not.toMatch(CJS_REQUIRE_SHIM);
+    running = launch("node", ["dist/main.js"], ex.dir);
+    await running.waitForRenderOrCrash(TITLE_TOKEN);
+  });
+}
+
+// coding-agent shares the @vue-tui/vite build path but needs an API key to run, so we can't paint
+// it in CI. The build itself is key-free, so we still lock the #212 invariant where it matters: the
+// bundle builds and contains no un-externalized CJS `require` shim.
+test("coding-agent: production build succeeds with no bundled CJS require (#212)", () => {
+  const bundle = buildExample(exampleDir("coding-agent"));
+  expect(bundle).not.toMatch(CJS_REQUIRE_SHIM);
+});

@@ -65,6 +65,15 @@ export default defineConfig({
         command: "vp run @vue-tui/vite#test",
         dependsOn: ["ci:build"],
       },
+      // Examples smoke suite (#212): launch examples/basic-template and basic-jsx through a real
+      // PTY — both the dev server and the `node dist/main.js` build — and assert each paints a
+      // frame with no module-system crash. This is the regression guard for "the shipped examples
+      // actually run". Depends on ci:build for the built @vue-tui/runtime + @vue-tui/vite dist the
+      // examples consume; its own PTY pool keeps it on a separate parallel branch.
+      "ci:test:examples": {
+        command: "vp run @vue-tui/runtime-tests#test:examples",
+        dependsOn: ["ci:build"],
+      },
       ci: {
         command: "echo ci ok",
         dependsOn: [
@@ -76,6 +85,7 @@ export default defineConfig({
           "ci:test:integration",
           "ci:test:pty",
           "ci:test:vite-plugin",
+          "ci:test:examples",
         ],
       },
     },
