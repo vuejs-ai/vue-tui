@@ -1,6 +1,10 @@
-// SEQUENTIAL: writes/removes the fixture's dist/ directory on the real fs. Two test files
-// building the same fixture concurrently would race on dist/ (one's rmSync could delete the
-// other's output mid-build), so the build tests are pinned to a *.sequential.test.ts file.
+// SEQUENTIAL: writes/removes the fixture's dist/ directory on the real fs, so concurrent
+// builds racing on dist/ are pinned to a *.sequential.test.ts file.
+//
+// Uses a DEDICATED `build` fixture (a copy of `basic`): dev.sequential MUTATES
+// fixtures/basic/src/app.vue (its hot-swap test swaps LABEL-A out), and file-parallelism
+// (fileParallelism: true) would otherwise let that edit land in this build's output mid-run
+// and break the toContain("LABEL-A") assertion. A private fixture removes the shared file.
 //
 // NOTE: We pass configFile: false and provide vueTui() plugins inline rather than loading the
 // fixture's vite.config.ts. rolldown v0.2.1 (used by vite-plus-core) has a bug where bundling a
@@ -14,7 +18,7 @@ import { existsSync, rmSync } from "node:fs";
 import { build, type Rollup } from "vite";
 import { vueTui } from "../src/index.ts";
 
-const root = fileURLToPath(new URL("./fixtures/basic", import.meta.url));
+const root = fileURLToPath(new URL("./fixtures/build", import.meta.url));
 const dist = `${root}/dist`;
 
 afterEach(() => {
