@@ -21,7 +21,7 @@ export default defineConfig({
   "scripts": {
     "dev": "vite", // in-process terminal dev server with HMR
     "build": "vite build", // bundles src/main.ts -> dist/main.js
-    "start": "vite build && node dist/main.js",
+    "preview": "vite build && node dist/main.js",
   },
 }
 ```
