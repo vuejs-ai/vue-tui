@@ -6,5 +6,5 @@ import { vueTui } from "@vue-tui/vite";
 // is added alongside vueTui(); the `entry` option points both the dev launcher and
 // the production build at src/main.tsx instead of the default src/main.ts.
 export default defineConfig({
-  plugins: [...vueTui({ entry: "/src/main.tsx" }), vueJsx()],
+  plugins: [vueTui({ entry: "/src/main.tsx" }), vueJsx()],
 });
