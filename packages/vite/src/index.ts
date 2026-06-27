@@ -1,9 +1,7 @@
 import vue from "@vitejs/plugin-vue";
 import type { Plugin } from "vite";
 import { forceClientCompile } from "./force-client-compile.ts";
-import { bridgeHmrEventsToRunner } from "./bridge-hmr.ts";
-import { isExternalId } from "./external.ts";
-import { devVmodPlugin, DEV_VMOD_ID, RESOLVED_DEV_VMOD_ID } from "./dev-vmod.ts";
+import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { buildConfigPlugin } from "./build.ts";
 
@@ -31,6 +29,3 @@ function stripLeadingSlash(p?: string): string | undefined {
 }
 
 export default vueTui;
-export { forceClientCompile, bridgeHmrEventsToRunner, isExternalId };
-export { buildConfigPlugin };
-export { DEV_VMOD_ID, RESOLVED_DEV_VMOD_ID };

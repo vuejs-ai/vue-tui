@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
 import { vueTui } from "../src/index.ts";
+import { capture, waitUntil } from "./helpers.ts";
 
 const root = fileURLToPath(new URL("./fixtures/reload", import.meta.url));
 const exitRoot = fileURLToPath(new URL("./fixtures/exit", import.meta.url));
@@ -29,26 +30,6 @@ afterEach(async () => {
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
   delete (globalThis as Record<string, unknown>).__VUE_TUI_TEARDOWN__;
 });
-
-function capture() {
-  let buf = "";
-  // Only write + isTTY:false are needed: a non-TTY stdout disables the renderer's
-  // interactive path, so the mock can be a minimal sink that accumulates frames.
-  (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__ = {
-    write: (s: string) => ((buf += s), true),
-    isTTY: false,
-  };
-  return () => buf;
-}
-
-async function waitUntil(cond: () => boolean, ms = 8000): Promise<void> {
-  const start = performance.now();
-  while (performance.now() - start < ms) {
-    if (cond()) return;
-    await new Promise((r) => setTimeout(r, 30));
-  }
-  throw new Error("timeout");
-}
 
 // Parse the `count=N` values from a captured chunk, in emit order.
 function counts(chunk: string): number[] {

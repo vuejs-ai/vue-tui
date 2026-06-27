@@ -20,7 +20,8 @@ export function devPlugin(opts: { entry?: string }): Plugin {
       // ABSOLUTE fs path while `entry` is root-relative (starts with "/"), so endsWith
       // matches both the default and a custom entry — and must inject into exactly the
       // entry that configureServer's runner.import(entry) loads, nothing else.
-      const path = id.split("?")[0];
+      const q = id.indexOf("?");
+      const path = q === -1 ? id : id.slice(0, q);
       if (path.endsWith(entry)) {
         return { code: `import ${JSON.stringify(DEV_VMOD_ID)};\n` + code, map: null };
       }

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
 import { vueTui } from "../src/index.ts";
+import { capture, waitFor } from "./helpers.ts";
 
 const root = fileURLToPath(new URL("./fixtures/basic", import.meta.url));
 const appVue = fileURLToPath(new URL("./fixtures/basic/src/app.vue", import.meta.url));
@@ -26,27 +27,6 @@ afterEach(async () => {
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
 });
-
-function capture() {
-  let buf = "";
-  // Only write + isTTY:false are needed: a non-TTY stdout disables the renderer's
-  // interactive path (cursor moves, ANSI erases, resize listener), so the mock can
-  // be a minimal sink that just accumulates the emitted frames.
-  (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__ = {
-    write: (s: string) => ((buf += s), true),
-    isTTY: false,
-  };
-  return () => buf;
-}
-
-async function waitFor(read: () => string, needle: string, ms = 8000) {
-  const start = performance.now();
-  while (performance.now() - start < ms) {
-    if (read().includes(needle)) return;
-    await new Promise((r) => setTimeout(r, 30));
-  }
-  throw new Error(`timeout waiting for ${JSON.stringify(needle)}; got:\n${read().slice(-400)}`);
-}
 
 test("boots the app in-process and renders a frame", async () => {
   const read = capture();
