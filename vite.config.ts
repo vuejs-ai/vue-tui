@@ -61,7 +61,7 @@ export default defineConfig({
       // @vue-tui/vite (the Vite plugin: in-process dev server + production
       // build) carries its own unit suite; run it on its own parallel branch
       // like the other packages.
-      "ci:test:vite": {
+      "ci:test:vite-plugin": {
         command: "vp run @vue-tui/vite#test",
         dependsOn: ["ci:build"],
       },
@@ -75,7 +75,7 @@ export default defineConfig({
           "ci:test:testing",
           "ci:test:integration",
           "ci:test:pty",
-          "ci:test:vite",
+          "ci:test:vite-plugin",
         ],
       },
     },
