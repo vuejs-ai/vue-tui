@@ -29,16 +29,18 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   ];
 }
 
-// Reconcile the entry for dev (matched against the absolute module id via endsWith, so it
-// needs a leading slash) and build (fed bare to rollupOptions.input). "/x", "x", and "./x"
-// collapse to the same pair. A Windows-ABSOLUTE entry — drive-letter ("C:/x", "C:\\x") or UNC
-// ("\\\\server\\share\\x" -> "//server/share/x") — is left absolute: dev's endsWith matches the
-// real module id, and stripping/prefixing would corrupt it into a relative entry (which is also
-// what external.ts treats as bundled). Backslashes are normalized to "/" first.
+// Reconcile the entry for dev (matched against the absolute module id via endsWith) and build
+// (fed to rollupOptions.input). Anything already ROOTED passes through unchanged — a leading "/"
+// (root-relative "/src/main.ts", a POSIX-absolute "/Users/x/…", or a UNC "//server/share/…") or a
+// Windows drive-letter "C:/x": dev's endsWith matches the module id, and build accepts a "/"-input
+// as root-relative and an absolute path as-is. Only the RELATIVE forms ("src/main.ts",
+// "./src/main.ts") get a leading slash added for dev and the bare form for build. Backslashes are
+// normalized to "/" first. (Stripping the slash off a POSIX/UNC absolute broke `vite build` with
+// UNRESOLVED_ENTRY while dev still worked.)
 function normalizeEntry(entry?: string): { dev: string; build: string } {
   const e = (entry ?? "src/main.ts").replace(/\\/g, "/");
-  if (/^[a-zA-Z]:\//.test(e) || /^\/\/[^/]+\/[^/]+\//.test(e)) return { dev: e, build: e };
-  const bare = e.replace(/^(?:\.?\/)+/, "");
+  if (e.startsWith("/") || /^[a-zA-Z]:\//.test(e)) return { dev: e, build: e };
+  const bare = e.replace(/^(?:\.\/)+/, "");
   return { dev: `/${bare}`, build: bare };
 }
 

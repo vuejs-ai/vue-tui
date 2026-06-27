@@ -78,3 +78,21 @@ test("vueTui preserves a Windows UNC entry for both dev match and build input", 
   };
   expect(build.config().build.rollupOptions.input).toBe("//server/share/src/main.ts");
 });
+
+// A POSIX-absolute entry — the standard `fileURLToPath(new URL("./src/main.ts", import.meta.url))`
+// idiom — must stay absolute for BUILD: stripping its leading slash made rollup get a project-
+// relative path and fail with UNRESOLVED_ENTRY (dev's endsWith still matched, so only build
+// broke). Regression guard: build must receive the absolute path.
+test("vueTui preserves a POSIX-absolute entry so vite build can resolve it", () => {
+  const plugins = vueTui({ entry: "/Users/proj/app/src/main.ts" });
+  const build = plugins.find((p) => p.name === "vue-tui:build") as unknown as {
+    config: () => { build: { rollupOptions: { input: string } } };
+  };
+  expect(build.config().build.rollupOptions.input).toBe("/Users/proj/app/src/main.ts");
+  const dev = plugins.find((p) => p.name === "vue-tui:dev") as unknown as {
+    transform: TransformFn;
+  };
+  expect(dev.transform("export const x = 1;", "/Users/proj/app/src/main.ts")?.code).toBe(
+    `${injectPrefix}export const x = 1;`,
+  );
+});
