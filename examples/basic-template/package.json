@@ -4,18 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vue-tui dev",
-    "build": "vp build",
-    "preview": "vp build && node dist/game.mjs"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && node dist/main.js"
   },
   "dependencies": {
-    "@vue-tui/cli": "workspace:*",
     "@vue-tui/runtime": "workspace:*",
     "vue": "^3.4.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "^6",
+    "@vue-tui/vite": "workspace:*",
     "vite": "catalog:"
   }
 }

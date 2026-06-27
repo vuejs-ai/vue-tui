@@ -4,12 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vue-tui dev",
-    "build": "vp build",
-    "preview": "vp build && node dist/agent.mjs"
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && node dist/main.js"
   },
   "dependencies": {
-    "@vue-tui/cli": "workspace:*",
     "@vue-tui/runtime": "workspace:*",
     "openai": "^4.98.0",
     "vue": "^3.4.0"
@@ -17,6 +16,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@vitejs/plugin-vue": "^6",
+    "@vue-tui/vite": "workspace:*",
     "vite": "catalog:"
   }
 }

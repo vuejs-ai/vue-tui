@@ -1,6 +1,6 @@
 # @vue-tui/runtime
 
-> **Public beta** — the `@vue-tui/runtime` API is stabilizing, and we're now seeking public feedback to lock it down before 1.0. The CLI and dev tooling remain experimental and may change. Feedback and bug reports are very welcome.
+> **Public beta** — the `@vue-tui/runtime` API is stabilizing, and we're now seeking public feedback to lock it down before 1.0. The Vite plugin and dev tooling remain experimental and may change. Feedback and bug reports are very welcome.
 
 Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with the same component model you use on the web.
 
@@ -115,7 +115,7 @@ const frame = renderToString(App); // synchronous, returns a string
 ## Links
 
 - [vue-tui](https://github.com/vuejs-ai/vue-tui) — monorepo root
-- [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli) — dev server with HMR
+- [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite) — Vite plugin with terminal HMR
 - [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) — test harness for terminal components
 
 ## License

@@ -89,7 +89,7 @@ Unmounts all rendered apps. Auto-registered as a Vitest `afterEach` hook when `g
 
 - [vue-tui](https://github.com/vuejs-ai/vue-tui) — monorepo root
 - [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) — the core framework
-- [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli) — dev server with HMR
+- [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite) — Vite plugin with terminal HMR
 
 ## License
 
