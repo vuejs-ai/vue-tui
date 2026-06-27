@@ -11,8 +11,9 @@ catalog:
   ansi-escapes: ^7.3.0
   "@types/node": ^24.12.4
   typescript: ^5
-  vite: npm:@voidzero-dev/vite-plus-core@latest
-  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  # vite: npm:@voidzero-dev/vite-plus-core@latest # Vite+ engine (disabled; on vanilla vite)
+  vite: 8.1.0
+  vitest: ^4.1.5
   vite-plus: ^0.1.22
   "@vitejs/plugin-vue-jsx": ^5.1.5
   chalk: ^5.6.2
@@ -26,8 +27,12 @@ catalog:
   unplugin-vue: ^7.2.0
   vue-tsc: ^3.3.4
 overrides:
+  # Pin vite's version spec tree-wide (incl. third-party peer ranges) to the catalog version.
+  # "catalog:" tracks catalog.vite — vanilla 8.1.0 now, NOT Vite+ core (core is the commented
+  # catalog line above). This is the canonical Vite+ override pattern, just pointed at vanilla.
   vite: "catalog:"
-  vitest: "catalog:"
+  # Keep @types/node single too, for stable types across the workspace.
+  "@types/node": "catalog:"
 peerDependencyRules:
   allowAny:
     - vite

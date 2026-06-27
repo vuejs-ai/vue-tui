@@ -58,11 +58,11 @@ export default defineConfig({
         command: "vp run @vue-tui/runtime-tests#test:pty",
         dependsOn: ["ci:build"],
       },
-      // cli has no tests yet (test passes with --passWithNoTests), but wiring
-      // the branch now means future CLI tests are covered automatically rather
-      // than silently skipped.
-      "ci:test:cli": {
-        command: "vp run @vue-tui/cli#test",
+      // @vue-tui/vite (the Vite plugin: in-process dev server + production
+      // build) carries its own unit suite; run it on its own parallel branch
+      // like the other packages.
+      "ci:test:vite-plugin": {
+        command: "vp run @vue-tui/vite#test",
         dependsOn: ["ci:build"],
       },
       ci: {
@@ -75,7 +75,7 @@ export default defineConfig({
           "ci:test:testing",
           "ci:test:integration",
           "ci:test:pty",
-          "ci:test:cli",
+          "ci:test:vite-plugin",
         ],
       },
     },

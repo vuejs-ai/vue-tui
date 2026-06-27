@@ -21,7 +21,11 @@ const ErrorDisplay = defineComponent({
           borderColor: "red",
           paddingX: 1,
         },
-        [
+        // Pass children as a slot FUNCTION, not an array: a component (Box) that
+        // receives array children triggers Vue's "Non-function value encountered
+        // for default slot" warning, which the runtime routes to the frame writer
+        // and is therefore visible in a real terminal.
+        () => [
           h(Text, { color: "red", bold: true }, () => "Build Error"),
           h(Text, {}, () => props.error.error.message),
           props.error.error.loc
@@ -64,8 +68,12 @@ export function createDevOverlayWrapper(
           return h(ErrorDisplay, { error: state.value });
         }
 
-        return h(Box, { flexDirection: "column", flexGrow: 1 }, [
-          h(Box, { flexGrow: 1 }, [h(rootComponent, rootProps)]),
+        // Children as slot FUNCTIONS (not arrays): a component receiving array
+        // children triggers Vue's "Non-function value encountered for default
+        // slot" warning. This wrapper renders on EVERY dev session, so an array
+        // here would surface that warning in the terminal on every dev boot.
+        return h(Box, { flexDirection: "column", flexGrow: 1 }, () => [
+          h(Box, { flexGrow: 1 }, () => [h(rootComponent, rootProps)]),
           state.value.type === "update" ? h(StatusLine, { paths: state.value.paths }) : null,
         ]);
       };

@@ -1,17 +1,17 @@
 # vue-tui
 
-> **Public beta** — the `@vue-tui/runtime` API is stabilizing, and we're now seeking public feedback to lock it down before 1.0. The CLI and dev tooling remain experimental and may change. Feedback and bug reports are very welcome.
+> **Public beta** — the `@vue-tui/runtime` API is stabilizing toward 1.0; dev-mode HMR is still experimental. Bug reports welcome.
 
 The Vue framework for terminal UIs.
 Build with components, develop with HMR, test with confidence.
 
 <p align="center">
-  <a href="https://npmx.dev/@vue-tui/runtime"><code>@vue-tui/runtime</code></a> · <a href="https://npmx.dev/@vue-tui/cli"><code>@vue-tui/cli</code></a> · <a href="https://npmx.dev/@vue-tui/testing"><code>@vue-tui/testing</code></a>
+  <a href="https://npmx.dev/@vue-tui/runtime"><code>@vue-tui/runtime</code></a> · <a href="https://npmx.dev/@vue-tui/vite"><code>@vue-tui/vite</code></a> · <a href="https://npmx.dev/@vue-tui/testing"><code>@vue-tui/testing</code></a>
 </p>
 
 - **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
-- **Dev toolkit** _(experimental)_ — **HMR** in the terminal via `vue-tui dev`
+- **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`npm run dev`)
 - **Input & focus** — keyboard handling, focus management, Tab navigation, Kitty keyboard protocol
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 
@@ -29,7 +29,7 @@ Build with components, develop with HMR, test with confidence.
 npx tiged vuejs-ai/vue-tui-starter my-app
 cd my-app
 npm install
-npm run dev
+npm run dev      # vite + @vue-tui/vite plugin, in-process terminal HMR
 ```
 
 Edit `app.vue` and watch the terminal update instantly.
@@ -94,7 +94,7 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 | Package                                                              | Description                                                                                                                                                                                                   |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._ |
-| [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli)         | Development tool — `vue-tui dev` starts your app with Vite-powered HMR. _Experimental; may change._                                                                                                           |
+| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)       | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`) plus a production build (`vite build`). _Experimental; may change._                           |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                              |
 
 ## Examples
@@ -183,8 +183,9 @@ pnpm install          # install dependencies
 vp run ready          # lint, typecheck, test, and build (the full check)
 vp run -r test        # run tests across all packages
 vp run -r build       # build all packages
-vue-tui dev           # start an example with HMR
 ```
+
+To run an example with terminal HMR, use vanilla `vite@8` (the recommended setup): `cd examples/basic-template && npm run dev`. See that example's `README.md` for the in-monorepo caveat.
 
 ## Contributing
 
