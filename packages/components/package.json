@@ -40,13 +40,16 @@
   },
   "scripts": {
     "build": "vp pack",
+    "build:example": "vp pack examples/index.ts -d dist-example --no-exports",
     "dev": "vp pack --watch",
+    "dev:example": "vp pack && (vp pack --no-clean --watch & vp pack examples/index.ts -d dist-example --no-clean --no-exports --watch)",
     "test": "vp test",
     "check:type": "vue-tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
-    "@vue-tui/runtime": "workspace:*"
+    "@vue-tui/runtime": "workspace:*",
+    "string-width": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^25.6.2",

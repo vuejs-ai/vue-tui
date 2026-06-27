@@ -45,31 +45,33 @@
         <!-- Cells with interspersed separators -->
         <template v-for="(cell, idx) in row.cells" :key="`${row.key}-cell-${idx}`">
           <!-- Header cell -->
-          <slot
-            v-if="cell.type === 'header'"
-            name="header"
-            :text="cell.text"
-            :column="cell.column.column"
-            :column-index="cell.columnIndex"
-            :width="cell.column.width"
-          >
-            <Text bold color="blue">{{ cell.text }}</Text>
-          </slot>
+          <Box v-if="cell.type === 'header'" :width="cell.column.width">
+            <slot
+              name="header"
+              :text="cell.text"
+              :column="cell.column.column"
+              :column-index="cell.columnIndex"
+              :width="cell.column.width"
+            >
+              <Text bold color="blue">{{ cell.text }}</Text>
+            </slot>
+          </Box>
 
           <!-- Data cell -->
-          <slot
-            v-else
-            name="cell"
-            :text="cell.text"
-            :value="cell.value"
-            :column="cell.column.column"
-            :column-index="cell.columnIndex"
-            :width="cell.column.width"
-            :row="cell.row"
-            :row-index="cell.rowIndex"
-          >
-            <Text>{{ cell.text }}</Text>
-          </slot>
+          <Box v-else :width="cell.column.width">
+            <slot
+              name="cell"
+              :text="cell.text"
+              :value="cell.value"
+              :column="cell.column.column"
+              :column-index="cell.columnIndex"
+              :width="cell.column.width"
+              :row="cell.row"
+              :row-index="cell.rowIndex"
+            >
+              <Text>{{ cell.text }}</Text>
+            </slot>
+          </Box>
 
           <!-- Separator between cells (skip after last) -->
           <slot
@@ -95,6 +97,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Box, Text } from "@vue-tui/runtime";
+import stringWidth from "string-width";
 import type { Scalar, ScalarDict } from "../types.ts";
 
 // =========================================================================
@@ -190,10 +193,10 @@ const resolvedColumns = computed(() => props.columns ?? getDataKeys(props.data))
 
 const tableColumns = computed<Column[]>(() =>
   resolvedColumns.value.map((key) => {
-    const headerWidth = String(key).length;
+    const headerWidth = stringWidth(key);
     const dataWidths = props.data.map((row) => {
       const value = row[key];
-      return value === undefined || value === null ? 0 : String(value).length;
+      return value === undefined || value === null ? 0 : stringWidth(String(value));
     });
 
     return {
@@ -212,7 +215,7 @@ const headerCells = computed<RowCell[]>(() =>
   tableColumns.value.map((column, columnIndex) => ({
     type: "header" as const,
     text: `${" ".repeat(props.padding)}${column.column}${" ".repeat(
-      column.width - column.column.length - props.padding,
+      column.width - stringWidth(column.column) - props.padding,
     )}`,
     column,
     columnIndex,
@@ -237,7 +240,7 @@ const dataRows = computed<RowCell[][]>(() =>
       }
 
       const stringValue = String(value);
-      const rightPadding = column.width - stringValue.length - props.padding;
+      const rightPadding = column.width - stringWidth(stringValue) - props.padding;
 
       return {
         type: "data" as const,
