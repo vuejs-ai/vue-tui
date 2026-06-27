@@ -102,6 +102,11 @@ await app.waitUntilExit();
 createApp(App).mount({ stdout, stdin, stderr });
 ```
 
+> **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
+> server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the
+> entry module's evaluation — which wedges Vite's HMR full-reload queue after the first reload.
+> Reserve `await app.waitUntilExit()` for standalone/production entries (`node dist/main.js`).
+
 ## Render to String
 
 Render a component to a single output frame without driving a live terminal — useful for snapshots, logging, or non-interactive output:
