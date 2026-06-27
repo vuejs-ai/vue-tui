@@ -2,13 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test, expect, afterEach } from "vite-plus/test";
-import {
-  CJS_REQUIRE_SHIM,
-  exampleDir,
-  launch,
-  viteBin,
-  type Launched,
-} from "./helpers/run-example.ts";
+import { exampleDir, launch, viteBin, type Launched } from "./helpers/run-example.ts";
 
 // End-to-end smoke test for the shipped examples (#212). The 0.1.0 crash —
 // `Calling \`require\` for "node:module" in an environment that doesn't expose \`require\`` — came
@@ -53,9 +47,16 @@ const RUNNABLE = [
   { name: "basic-jsx", dir: exampleDir("basic-jsx") },
 ] as const;
 
+// The fingerprint #212 leaves in a built bundle: rolldown couldn't externalize a CJS `require`, so
+// it emitted the runtime shim that throws on call. Asserting the bundle is free of this is a fast,
+// deterministic #212 guard that needs no PTY and no API key — usable even for examples we can't run.
+const CJS_REQUIRE_SHIM = /doesn't expose the `require` function|Calling `require` for/;
+
+// Build an example and assert the bundle carries no #212 shim — the single home for that invariant,
+// shared by the runnable apps (before they're launched) and the build-only coding-agent guard.
 // `vite build` needs no TTY; a plain child process is enough. Bounded so a wedged build can't hang
 // the worker (execFileSync blocks synchronously, so vitest's testTimeout can't preempt it).
-function buildExample(dir: string): string {
+function buildAndExpectNoCjsRequire(dir: string): void {
   execFileSync("node", [viteBin(dir), "build"], {
     cwd: dir,
     stdio: "pipe",
@@ -63,7 +64,7 @@ function buildExample(dir: string): string {
     killSignal: "SIGKILL",
     env: { ...process.env, CI: "false" },
   });
-  return readFileSync(path.join(dir, "dist", "main.js"), "utf8");
+  expect(readFileSync(path.join(dir, "dist", "main.js"), "utf8")).not.toMatch(CJS_REQUIRE_SHIM);
 }
 
 let running: Launched | undefined;
@@ -80,17 +81,14 @@ for (const ex of RUNNABLE) {
   });
 
   test(`${ex.name}: production build runs (node dist/main.js) and paints a frame`, async () => {
-    const bundle = buildExample(ex.dir);
-    expect(bundle).not.toMatch(CJS_REQUIRE_SHIM);
+    buildAndExpectNoCjsRequire(ex.dir);
     running = launch("node", ["dist/main.js"], ex.dir);
     await running.waitForRenderOrCrash(TITLE_TOKEN);
   });
 }
 
 // coding-agent shares the @vue-tui/vite build path but needs an API key to run, so we can't paint
-// it in CI. The build itself is key-free, so we still lock the #212 invariant where it matters: the
-// bundle builds and contains no un-externalized CJS `require` shim.
+// it in CI. The build itself is key-free, so we still lock the #212 invariant where it matters.
 test("coding-agent: production build succeeds with no bundled CJS require (#212)", () => {
-  const bundle = buildExample(exampleDir("coding-agent"));
-  expect(bundle).not.toMatch(CJS_REQUIRE_SHIM);
+  buildAndExpectNoCjsRequire(exampleDir("coding-agent"));
 });
