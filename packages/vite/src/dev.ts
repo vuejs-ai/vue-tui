@@ -29,9 +29,9 @@ export function devPlugin(opts: { entry?: string }): Plugin {
       // Inject the dev connector at the TOP of the configured entry (a transformed
       // module → its import.meta.hot is live). Runs before createApp().mount(), so
       // isDevConnected() is already true when the overlay gate is checked. `id` is an
-      // ABSOLUTE fs path while `entry` is root-relative (starts with "/"), so endsWith
-      // matches both the default and a custom entry — and must inject into exactly the
-      // entry that configureServer's runner.import(entry) loads, nothing else.
+      // ABSOLUTE fs path and `entry` is the rooted form normalizeEntry() produced (a leading
+      // "/" or a drive-letter path), so endsWith matches both the default and a custom entry —
+      // and must inject into exactly the entry configureServer's runner.import(entry) loads.
       const q = id.indexOf("?");
       const path = q === -1 ? id : id.slice(0, q);
       if (path.endsWith(entry)) {

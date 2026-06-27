@@ -11,12 +11,7 @@ export interface VueTuiOptions {
 
 export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   // devPlugin (apply:"serve") and buildConfigPlugin (apply:"build") never run together — Vite
-  // picks the right set per mode. devPlugin wants a root-relative entry (leading "/", its
-  // transform matches the absolute module id via endsWith); the build plugin feeds entry to
-  // rollupOptions.input, which must have no leading slash. normalizeEntry() reconciles the two
-  // so "/src/main.ts", "src/main.ts", and "./src/main.ts" all behave the same — a "./" entry
-  // used to slip past dev's match (no dev module injected -> no HMR/overlay) while build
-  // still succeeded.
+  // picks the right set per mode. normalizeEntry() (below) derives the entry string each needs.
   // plugin-vue here (and any plugin-vue-jsx the user adds) is force-client-compiled in
   // devPlugin's configResolved, so it runs in the SSR dev environment but emits CLIENT
   // render functions for the terminal renderer.
