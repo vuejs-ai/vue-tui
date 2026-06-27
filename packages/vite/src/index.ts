@@ -31,12 +31,13 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
 
 // Reconcile the entry for dev (matched against the absolute module id via endsWith, so it
 // needs a leading slash) and build (fed bare to rollupOptions.input). "/x", "x", and "./x"
-// collapse to the same pair. A Windows-absolute drive-letter entry ("C:/x" / "C:\\x") is left
-// absolute — dev's endsWith matches the drive-letter module id, and prefixing "/" (-> "/C:/x")
-// would never match.
+// collapse to the same pair. A Windows-ABSOLUTE entry — drive-letter ("C:/x", "C:\\x") or UNC
+// ("\\\\server\\share\\x" -> "//server/share/x") — is left absolute: dev's endsWith matches the
+// real module id, and stripping/prefixing would corrupt it into a relative entry (which is also
+// what external.ts treats as bundled). Backslashes are normalized to "/" first.
 function normalizeEntry(entry?: string): { dev: string; build: string } {
   const e = (entry ?? "src/main.ts").replace(/\\/g, "/");
-  if (/^[a-zA-Z]:\//.test(e)) return { dev: e, build: e };
+  if (/^[a-zA-Z]:\//.test(e) || /^\/\/[^/]+\/[^/]+\//.test(e)) return { dev: e, build: e };
   const bare = e.replace(/^(?:\.?\/)+/, "");
   return { dev: `/${bare}`, build: bare };
 }

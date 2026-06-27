@@ -61,3 +61,20 @@ test("vueTui preserves a Windows-absolute entry so dev still matches the drive-l
   const out = dev.transform("export const x = 1;", "C:/proj/src/main.ts");
   expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
 });
+
+// A Windows UNC entry ("\\\\server\\share\\…") must stay absolute too. Vite normalizes UNC
+// ids to forward slashes ("//server/share/…"); collapsing it to a relative "server/share/…"
+// makes the BUILD resolve the wrong file. Regression guard for normalizeEntry's UNC handling.
+test("vueTui preserves a Windows UNC entry for both dev match and build input", () => {
+  const plugins = vueTui({ entry: "\\\\server\\share\\src\\main.ts" });
+  const dev = plugins.find((p) => p.name === "vue-tui:dev") as unknown as {
+    transform: TransformFn;
+  };
+  expect(dev.transform("export const x = 1;", "//server/share/src/main.ts")?.code).toBe(
+    `${injectPrefix}export const x = 1;`,
+  );
+  const build = plugins.find((p) => p.name === "vue-tui:build") as unknown as {
+    config: () => { build: { rollupOptions: { input: string } } };
+  };
+  expect(build.config().build.rollupOptions.input).toBe("//server/share/src/main.ts");
+});
