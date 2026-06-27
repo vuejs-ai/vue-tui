@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vp run test:integration && vp run test:pty",
+    "test": "vp run test:integration && vp run test:pty && vp run test:examples",
     "test:integration": "vp test",
     "test:pty": "vp test run --config vitest.pty.config.ts --passWithNoTests",
+    "test:examples": "vp test run --config vitest.examples.config.ts --passWithNoTests",
     "check:type": "tsc --noEmit && vp run check:fixtures",
     "check:fixtures": "vue-tsc -p integration/pty/fixtures/tsconfig.json --noEmit"
   },
