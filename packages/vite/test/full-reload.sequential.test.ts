@@ -88,6 +88,57 @@ test("an entry-level (non-HMR) change restarts the app in-process with no zombie
   }
 });
 
+test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the published-install path)", async () => {
+  const read = capture();
+  // A real `npm install` puts @vue-tui/runtime in node_modules, which Vite's SSR runner
+  // EXTERNALIZES — so the runtime's module-globals persist across full reloads. The
+  // workspace-bundled monorepo path (the test above) re-executes the runtime each reload,
+  // so it can NOT catch a process-lifetime bridge guard; force externalization here to
+  // cover the default published path. middlewareMode + watcher.emit => no port, no file
+  // writes (cannot race sibling fixtures).
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: vueTui(),
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
+    server: { middlewareMode: true },
+  });
+  const env = server.environments.ssr as unknown as {
+    runner: { import: (id: string) => Promise<unknown> };
+  };
+  await env.runner.import("/src/main.ts");
+  await waitUntil(() => counts(read()).some((c) => c >= 3));
+
+  const freshReload = async () => {
+    const before = read().length;
+    server!.watcher.emit("change", mainTs);
+    await waitUntil(() => {
+      const after = read().slice(before);
+      const i = after.lastIndexOf("count=0");
+      return i !== -1 && counts(after.slice(i)).length >= 4;
+    });
+  };
+
+  // Reload #1 is clean even with the bug. Reload #2 is where a process-lifetime bridge
+  // guard bites: after reload #1 the re-imported dev module's connectDevtools() can't
+  // re-register listeners, so vite:beforeFullReload never fires, the old app is never
+  // torn down, and the new mount hits the instance-reuse guard — a zombie counter keeps
+  // climbing with no fresh count=0.
+  await freshReload();
+  const before2 = read().length;
+  server.watcher.emit("change", mainTs);
+  await waitUntil(() => {
+    const a2 = read().slice(before2);
+    const i = a2.lastIndexOf("count=0");
+    return i !== -1 && counts(a2.slice(i)).length >= 4;
+  });
+  const after2 = read().slice(before2);
+  const fresh2 = counts(after2.slice(after2.lastIndexOf("count=0")));
+  expect(fresh2[0]).toBe(0);
+  for (let k = 1; k < fresh2.length; k++) expect(fresh2[k]).toBe(fresh2[k - 1] + 1);
+});
+
 test("a genuine app exit closes the in-process dev server", async () => {
   const read = capture();
   server = await createServer({

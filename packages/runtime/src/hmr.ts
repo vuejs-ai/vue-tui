@@ -30,12 +30,21 @@ interface HotContext {
 // cast so the default param below type-checks anywhere this module is imported.
 const realHot = (import.meta as { hot?: HotContext }).hot;
 
-// Registration must happen AT MOST ONCE per module lifetime. createApp() can run
-// multiple times in one dev process (two apps, unmount + re-create, a tool that
-// restarts the UI, a test run) and each call reaches here. Vite's Node HMR
-// runtime APPENDS listeners with no dedup, so without this guard N createApp()
-// calls would leak N copies of every handler — firing each HMR event N times.
-let initialized = false;
+// Register listeners once PER hot context, not once per process. connectDevtools()
+// is the sole caller (the injected dev module calls it with import.meta.hot); on a
+// full reload Vite re-executes that module and hands us a NEW hot whose constructor
+// already stripped the previous hot's listeners, so we must re-arm the new one.
+// A process-lifetime flag would break this on the DEFAULT published install: a real
+// `npm install` puts @vue-tui/runtime in node_modules, which Vite's SSR runner
+// EXTERNALIZES, so this module's globals persist across reloads — the flag would
+// stay set and skip re-registration, leaving the bridge dead after the first reload
+// (overlay + reload-teardown silently stop, and the next reload leaks a zombie app).
+// The monorepo bundles the runtime (workspace real-path outside node_modules), so it
+// re-executes each reload and a flag would reset — which is exactly why the bundled
+// test path can't catch this. Tracking hot identity re-arms each new hot while still
+// ignoring a redundant re-call on the SAME hot (Vite appends listeners with no dedup,
+// so re-registering the same hot would double-fire every event).
+let bridgedHot: HotContext | undefined;
 
 // Teardown of the dev app currently mounted in this process. In dev an
 // entry-level edit that Vite can't hot-accept emits a FULL RELOAD: Vite's SSR
@@ -76,8 +85,8 @@ let pendingResetTimer: ReturnType<typeof setTimeout> | undefined;
 // import.meta.hot is undefined under vitest, so the body is otherwise unreachable.
 export function initHmrBridge(hot: HotContext | undefined = realHot): void {
   if (!hot) return;
-  if (initialized) return;
-  initialized = true;
+  if (hot === bridgedHot) return;
+  bridgedHot = hot;
 
   hot.on("vite:error", (payload: unknown) => {
     // An error supersedes any pending update → ok reset; clear it so a stale
