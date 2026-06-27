@@ -8,7 +8,14 @@ import type { Plugin } from "vite";
 type Hook = (this: unknown, ...args: unknown[]) => unknown;
 type HookSlot = Hook | { handler?: Hook } | undefined;
 
+// Idempotent: a plugin can be handed here more than once (the configResolved sweep may
+// revisit our own plugin-vue). Re-wrapping would flip ssr:false twice — harmless but
+// pointless — so skip plugins already patched.
+const patched = new WeakSet<object>();
+
 export function forceClientCompile(plugin: Plugin): void {
+  if (patched.has(plugin)) return;
+  patched.add(plugin);
   const slots = plugin as unknown as Record<"transform" | "load", HookSlot>;
   const wrap = (orig: Hook): Hook =>
     function (this: unknown, ...args: unknown[]): unknown {

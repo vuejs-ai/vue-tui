@@ -1,6 +1,5 @@
 import vue from "@vitejs/plugin-vue";
 import type { Plugin } from "vite";
-import { forceClientCompile } from "./force-client-compile.ts";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { buildConfigPlugin } from "./build.ts";
@@ -11,16 +10,17 @@ export interface VueTuiOptions {
 }
 
 export function vueTui(options: VueTuiOptions = {}): Plugin[] {
-  const vuePlugin = vue(options.vue) as Plugin;
-  forceClientCompile(vuePlugin);
   // devPlugin (apply:"serve") and buildConfigPlugin (apply:"build") never run together — Vite
   // picks the right set per mode. devPlugin wants a root-relative entry (leading "/"); the build
   // plugin feeds entry to rollupOptions.input, which must be a path with no leading slash.
+  // plugin-vue here (and any plugin-vue-jsx the user adds) is force-client-compiled in
+  // devPlugin's configResolved, so it runs in the SSR dev environment but emits CLIENT
+  // render functions for the terminal renderer.
   return [
     devPlugin({ entry: options.entry }),
     buildConfigPlugin({ entry: stripLeadingSlash(options.entry) }),
     devVmodPlugin(),
-    vuePlugin,
+    vue(options.vue) as Plugin,
   ];
 }
 

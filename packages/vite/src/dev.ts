@@ -2,12 +2,24 @@ import type { Plugin } from "vite";
 import { isRunnableDevEnvironment } from "vite";
 import { bridgeHmrEventsToRunner } from "./bridge-hmr.ts";
 import { DEV_VMOD_ID } from "./dev-vmod.ts";
+import { forceClientCompile } from "./force-client-compile.ts";
 
 export function devPlugin(opts: { entry?: string }): Plugin {
   const entry = opts.entry ?? "/src/main.ts";
   return {
     name: "vue-tui:dev",
     apply: "serve",
+    configResolved(config) {
+      // The app runs in Vite's SSR runnable environment but renders with the CLIENT
+      // (terminal) renderer, so the Vue compilers must emit CLIENT render functions, not
+      // SSR output. Force-client-compile our own plugin-vue AND any plugin-vue /
+      // plugin-vue-jsx the user added alongside vueTui() (e.g. @vitejs/plugin-vue-jsx for
+      // .tsx); otherwise those compile in SSR mode and the terminal renderer — which is a
+      // client renderer — gets SSR-shaped output and paints a blank frame (no error).
+      for (const p of config.plugins) {
+        if (p.name === "vite:vue" || p.name === "vite:vue-jsx") forceClientCompile(p);
+      }
+    },
     config() {
       // Terminal renderer owns the screen; keep Vite quiet and skip the browser HMR
       // socket (HMR flows through the module runner's in-process channel instead).
