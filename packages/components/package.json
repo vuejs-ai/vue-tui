@@ -1,0 +1,66 @@
+{
+  "name": "@vue-tui/components",
+  "version": "0.1.0",
+  "description": "Higher-level Vue 3 terminal UI components built on @vue-tui/runtime.",
+  "keywords": [
+    "ansi",
+    "cli",
+    "console",
+    "flexbox",
+    "ink",
+    "renderer",
+    "terminal",
+    "tui",
+    "vue",
+    "yoga"
+  ],
+  "homepage": "https://github.com/vuejs-ai/vue-tui/tree/main/packages/components#readme",
+  "bugs": {
+    "url": "https://github.com/vuejs-ai/vue-tui/issues"
+  },
+  "license": "MIT",
+  "author": "Yunfei He <i.heyunfei@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vuejs-ai/vue-tui.git",
+    "directory": "packages/components"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check:type": "vue-tsc --noEmit",
+    "prepublishOnly": "vp run build"
+  },
+  "dependencies": {
+    "@vue-tui/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "typescript": "^6.0.3",
+    "unplugin-vue": "catalog:",
+    "vite-plus": "^0.1.20",
+    "vue": "^3.4.0",
+    "vue-tsc": "catalog:"
+  },
+  "peerDependencies": {
+    "vue": "^3.4.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

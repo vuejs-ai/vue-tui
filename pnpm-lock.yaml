@@ -81,10 +81,10 @@ importers:
         version: 24.12.4
       '@vitejs/plugin-vue-jsx':
         specifier: ^5
-        version: 5.1.5(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
+        version: 5.1.5(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
 
   examples/basic-template:
     dependencies:
@@ -103,10 +103,10 @@ importers:
         version: 24.12.4
       '@vitejs/plugin-vue':
         specifier: ^6
-        version: 6.0.7(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
 
   examples/coding-agent:
     dependencies:
@@ -128,10 +128,10 @@ importers:
         version: 24.12.4
       '@vitejs/plugin-vue':
         specifier: ^6
-        version: 6.0.7(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
 
   examples/flappy-bird:
     dependencies:
@@ -150,16 +150,16 @@ importers:
         version: 24.12.4
       '@vitejs/plugin-vue':
         specifier: ^6
-        version: 6.0.7(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
+        version: 6.0.7(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
 
   packages/cli:
     dependencies:
       vite:
         specifier: npm:@voidzero-dev/vite-plus-core@latest
-        version: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+        version: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -169,7 +169,35 @@ importers:
         version: 6.0.3
       vite-plus:
         specifier: 'catalog:'
-        version: 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)
+        version: 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)
+
+  packages/components:
+    dependencies:
+      '@vue-tui/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+    devDependencies:
+      '@types/node':
+        specifier: ^25.6.2
+        version: 25.9.1
+      '@vitejs/plugin-vue-jsx':
+        specifier: 'catalog:'
+        version: 5.1.5(vite@8.0.13(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3))(vue@3.5.34(typescript@6.0.3))
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      unplugin-vue:
+        specifier: 'catalog:'
+        version: 7.2.0(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)(vue@3.5.34(typescript@6.0.3))
+      vite-plus:
+        specifier: ^0.1.20
+        version: 0.1.22(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)(vite@8.0.13(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3))
+      vue:
+        specifier: ^3.4.0
+        version: 3.5.34(typescript@6.0.3)
+      vue-tsc:
+        specifier: 'catalog:'
+        version: 3.3.4(typescript@6.0.3)
 
   packages/runtime:
     dependencies:
@@ -631,8 +659,8 @@ packages:
     resolution: {integrity: sha512-0+S67blQakgeNqoKGozOUp5rQBrz2ynXZ2QIINXZPiafsD0YL0UogB9hAWc1S7k6VSNwKYC/N7MqT0V6IzpHkQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
-  '@oxc-project/runtime@0.133.0':
-    resolution: {integrity: sha512-PkvjA1Lq5++V5S1E6Patr92ZVcieE6EalDr1VJTqv4BnjZdOUC4W3p8k1wMXSd5/2aFP4b/A6N5sg2Bkzcr9vQ==}
+  '@oxc-project/runtime@0.136.0':
+    resolution: {integrity: sha512-u0EutjK5y6NHJkl5jNJCs8zbup1z6A/UEWgajrYzqcEU3UX05HjqybhMQOLhSM0eKGISyM6WfSMMuklYSmH2wA==}
     engines: {node: ^20.19.0 || >=22.12.0}
 
   '@oxc-project/types@0.129.0':
@@ -641,8 +669,8 @@ packages:
   '@oxc-project/types@0.130.0':
     resolution: {integrity: sha512-ibD2usx9JRu7f5pu2tMKMI4cpA4NgXJQoYRP4pQ7Pxmn1l6k/53qWtQWZayhYy3X4QZkt90Ot+mJEaeXouio6Q==}
 
-  '@oxc-project/types@0.133.0':
-    resolution: {integrity: sha512-KzkdCd6Uxqnf6l3HOw1xfatAlUURA0g14cvBYFyJ5SaNOQbOUvBr9PKArcPcrNIeRsBdgcUzOGrhKveVpvOIGA==}
+  '@oxc-project/types@0.136.0':
+    resolution: {integrity: sha512-39Al/B3v9esnHCX7S8l9Se2+s2tb9b2jcMd+bZ2L659VG73kNyGPpPrL5Zi/p0ty7p4pTTU2/Dd+g27hv94XCg==}
 
   '@oxfmt/binding-android-arm-eabi@0.48.0':
     resolution: {integrity: sha512-uwqk+/KhQvBIpULD8SMM/zAafMRC/+DV/xsEQjkkIsJ/kLmEI/2bxonVowcYTiXqqZ/a0FEW8DPkZY3VvwELDA==}
@@ -1193,13 +1221,13 @@ packages:
       yaml:
         optional: true
 
-  '@voidzero-dev/vite-plus-core@0.1.24':
-    resolution: {integrity: sha512-iXPGBABnQnrDMx89H6MOCGcTZp+QW+3rY4YMVKdE6ydchSvPk2O3MI2vgaRVfOtWJ2IjnxSnf1n2yjP67ZBRFQ==}
-    engines: {node: ^20.19.0 || >=22.12.0}
+  '@voidzero-dev/vite-plus-core@0.2.1':
+    resolution: {integrity: sha512-iWdtOlLezgYcDqIzxZx1yOUhY93vUB+ob+mRYBNr7/3Hf80uRyTQbqVD1WtsYaANbzeUi81SQ1ZoUraXHO+u8A==}
+    engines: {node: ^20.19.0 || ^22.18.0 || >=24.11.0}
     peerDependencies:
       '@arethetypeswrong/core': ^0.18.1
-      '@tsdown/css': 0.22.1
-      '@tsdown/exe': 0.22.1
+      '@tsdown/css': 0.22.3
+      '@tsdown/exe': 0.22.3
       '@types/node': ^20.19.0 || >=22.12.0
       '@vitejs/devtools': ^0.1.18
       esbuild: ^0.27.0 || ^0.28.0
@@ -2428,13 +2456,13 @@ snapshots:
 
   '@oxc-project/runtime@0.129.0': {}
 
-  '@oxc-project/runtime@0.133.0': {}
+  '@oxc-project/runtime@0.136.0': {}
 
   '@oxc-project/types@0.129.0': {}
 
   '@oxc-project/types@0.130.0': {}
 
-  '@oxc-project/types@0.133.0': {}
+  '@oxc-project/types@0.136.0': {}
 
   '@oxfmt/binding-android-arm-eabi@0.48.0':
     optional: true
@@ -2660,14 +2688,14 @@ snapshots:
 
   '@types/stack-utils@2.0.3': {}
 
-  '@vitejs/plugin-vue-jsx@5.1.5(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))':
+  '@vitejs/plugin-vue-jsx@5.1.5(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))':
     dependencies:
       '@babel/core': 7.29.0
       '@babel/plugin-syntax-typescript': 7.28.6(@babel/core@7.29.0)
       '@babel/plugin-transform-typescript': 7.28.6(@babel/core@7.29.0)
       '@rolldown/pluginutils': 1.0.1
       '@vue/babel-plugin-jsx': 2.0.1(@babel/core@7.29.0)
-      vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
       vue: 3.5.34(typescript@6.0.3)
     transitivePeerDependencies:
       - supports-color
@@ -2696,10 +2724,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vitejs/plugin-vue@6.0.7(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))':
+  '@vitejs/plugin-vue@6.0.7(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(vue@3.5.34(typescript@6.0.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
       vue: 3.5.34(typescript@6.0.3)
 
   '@voidzero-dev/vite-plus-core@0.1.21(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
@@ -2754,10 +2782,10 @@ snapshots:
       tsx: 4.22.3
       typescript: 6.0.3
 
-  '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
+  '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
     dependencies:
-      '@oxc-project/runtime': 0.133.0
-      '@oxc-project/types': 0.133.0
+      '@oxc-project/runtime': 0.136.0
+      '@oxc-project/types': 0.136.0
       lightningcss: 1.32.0
       postcss: 8.5.14
     optionalDependencies:
@@ -2767,14 +2795,27 @@ snapshots:
       tsx: 4.22.3
       typescript: 6.0.3
 
-  '@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
+  '@voidzero-dev/vite-plus-core@0.2.1(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
     dependencies:
-      '@oxc-project/runtime': 0.133.0
-      '@oxc-project/types': 0.133.0
+      '@oxc-project/runtime': 0.136.0
+      '@oxc-project/types': 0.136.0
       lightningcss: 1.32.0
       postcss: 8.5.14
     optionalDependencies:
       '@types/node': 25.8.0
+      esbuild: 0.28.0
+      fsevents: 2.3.3
+      tsx: 4.22.3
+      typescript: 6.0.3
+
+  '@voidzero-dev/vite-plus-core@0.2.1(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
+    dependencies:
+      '@oxc-project/runtime': 0.136.0
+      '@oxc-project/types': 0.136.0
+      lightningcss: 1.32.0
+      postcss: 8.5.14
+    optionalDependencies:
+      '@types/node': 25.9.1
       esbuild: 0.28.0
       fsevents: 2.3.3
       tsx: 4.22.3
@@ -2856,7 +2897,7 @@ snapshots:
       - utf-8-validate
       - yaml
 
-  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
+  '@voidzero-dev/vite-plus-test@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/chai': 5.2.3
@@ -2870,7 +2911,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 1.2.2
       tinyglobby: 0.2.16
-      vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
       ws: 8.21.0
     optionalDependencies:
       '@types/node': 24.12.4
@@ -3584,7 +3625,37 @@ snapshots:
       '@vue/reactivity': 3.5.34
       obug: 2.1.1
       unplugin: 3.0.0
-      vite: '@voidzero-dev/vite-plus-core@0.1.24(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@25.8.0)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
+      vue: 3.5.34(typescript@6.0.3)
+    transitivePeerDependencies:
+      - '@arethetypeswrong/core'
+      - '@tsdown/css'
+      - '@tsdown/exe'
+      - '@types/node'
+      - '@vitejs/devtools'
+      - esbuild
+      - jiti
+      - less
+      - publint
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - terser
+      - tsx
+      - typescript
+      - unplugin-unused
+      - unrun
+      - yaml
+
+  unplugin-vue@7.2.0(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)(vue@3.5.34(typescript@6.0.3)):
+    dependencies:
+      '@jridgewell/gen-mapping': 0.3.13
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vue/reactivity': 3.5.34
+      obug: 2.1.1
+      unplugin: 3.0.0
+      vite: '@voidzero-dev/vite-plus-core@0.2.1(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)'
       vue: 3.5.34(typescript@6.0.3)
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
@@ -3667,12 +3738,12 @@ snapshots:
       - vite
       - yaml
 
-  vite-plus@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3):
+  vite-plus@0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3):
     dependencies:
       '@oxc-project/types': 0.129.0
       '@oxlint/plugins': 1.61.0
       '@voidzero-dev/vite-plus-core': 0.1.22(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)
-      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.1.24(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)
+      '@voidzero-dev/vite-plus-test': 0.1.22(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.2.1(@types/node@24.12.4)(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3))(esbuild@0.28.0)(tsx@4.22.3)(typescript@6.0.3)
       oxfmt: 0.48.0
       oxlint: 1.63.0(oxlint-tsgolint@0.22.1)
       oxlint-tsgolint: 0.22.1
