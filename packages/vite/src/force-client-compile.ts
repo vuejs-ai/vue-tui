@@ -20,7 +20,13 @@ export function forceClientCompile(plugin: Plugin): void {
   const wrap = (orig: Hook): Hook =>
     function (this: unknown, ...args: unknown[]): unknown {
       const opt = args[args.length - 1];
-      if (opt && typeof opt === "object") (opt as { ssr?: boolean }).ssr = false;
+      if (opt && typeof opt === "object") {
+        // Clone — do NOT mutate. Vite reuses this options object for the transform hooks of
+        // plugins ordered AFTER vue/vue-jsx, so flipping ssr in place would leak ssr:false to
+        // them. The Vue hook gets client output; the shared object stays untouched.
+        const patched = { ...(opt as Record<string, unknown>), ssr: false };
+        return orig.apply(this, [...args.slice(0, -1), patched]);
+      }
       return orig.apply(this, args);
     };
   for (const name of ["transform", "load"] as const) {
