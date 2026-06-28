@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { test, expect, afterEach } from "vite-plus/test";
 import { exampleDir, launch, viteBin, type Launched } from "./helpers/run-example.ts";
@@ -40,8 +41,9 @@ const TITLE_TOKEN = "vue-tui basic";
 
 // The two "hello world" apps are deterministic and key-free, so they get the full dev + build paint
 // check. coding-agent uses the same @vue-tui/vite build but needs a live LLM key to RUN, so it gets
-// a build-only guard below. flappy-bird is intentionally absent: it doesn't use @vue-tui/vite at all
-// (it builds via `vp build` to dist/game.mjs), so it's outside the dev/build path #212 is about.
+// a build-only guard below. flappy-bird is absent from THIS pair because it doesn't use @vue-tui/vite
+// — it's the SELF-CONTAINED example (raw vite, everything bundled into one dist/game.mjs), guarded by
+// its own dedicated test at the bottom of this file instead of this plugin-shaped dev/build pair.
 const RUNNABLE = [
   { name: "basic-template", dir: exampleDir("basic-template") },
   { name: "basic-jsx", dir: exampleDir("basic-jsx") },
@@ -91,4 +93,36 @@ for (const ex of RUNNABLE) {
 // it in CI. The build itself is key-free, so we still lock the #212 invariant where it matters.
 test("coding-agent: production build succeeds with no bundled CJS require (#212)", () => {
   buildAndExpectNoCjsRequire(exampleDir("coding-agent"));
+});
+
+// flappy-bird builds a SELF-CONTAINED dist/game.mjs (everything bundled but Node builtins; the
+// stepping stone toward a distributable binary). Guard the property that actually matters — the
+// single file runs with NO node_modules — by building it, copying ONLY game.mjs into a fresh temp
+// dir, and launching it there. Running from the example's own dir (like the apps above) couldn't
+// catch a regression that re-externalized a dep: those deps are still present in node_modules. Here
+// a re-externalized dep is ERR_MODULE_NOT_FOUND in the empty sandbox, and dropping platform:"node"
+// brings back the throwing require shim — both are launch-failure signatures, so this goes red fast.
+test("flappy-bird: self-contained game.mjs runs with no node_modules", async () => {
+  const dir = exampleDir("flappy-bird");
+  execFileSync("node", [viteBin(dir), "build"], {
+    cwd: dir,
+    stdio: "pipe",
+    timeout: 60000,
+    killSignal: "SIGKILL",
+    env: { ...process.env, CI: "false" },
+  });
+  const bundlePath = path.join(dir, "dist", "game.mjs");
+  expect(readFileSync(bundlePath, "utf8")).not.toMatch(CJS_REQUIRE_SHIM);
+
+  // Isolate the bundle from the workspace: a dir with the single file and no node_modules at all.
+  const sandbox = mkdtempSync(path.join(tmpdir(), "flappy-selfcontained-"));
+  try {
+    copyFileSync(bundlePath, path.join(sandbox, "game.mjs"));
+    running = launch("node", ["game.mjs"], sandbox);
+    await running.waitForRenderOrCrash("press space to start");
+  } finally {
+    running?.kill();
+    running = undefined;
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 });
