@@ -29,7 +29,6 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(mainTs, origMain);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
-  delete (globalThis as Record<string, unknown>).__VUE_TUI_TEARDOWN__;
 });
 
 // Parse the `count=N` values from a captured chunk, in emit order.
@@ -164,8 +163,8 @@ test("a genuine app exit closes the in-process dev server", async () => {
   await server.listen();
 
   await waitUntil(() => read().includes("EXIT-FIXTURE"));
-  // The app calls useApp().exit() ~50ms after mount; the runtime then invokes the
-  // dev plugin's __VUE_TUI_TEARDOWN__ hook, which closes the server.
+  // The app calls useApp().exit() ~50ms after mount; the runtime then emits
+  // "vue-tui:exit" over the hot channel and the dev plugin's listener closes the server.
   await waitUntil(() => closed);
   expect(closed).toBe(true);
 });
