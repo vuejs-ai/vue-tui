@@ -6,7 +6,7 @@ The Vue framework for terminal UIs.
 Build with components, develop with HMR, test with confidence.
 
 <p align="center">
-  <a href="https://npmx.dev/@vue-tui/runtime"><code>@vue-tui/runtime</code></a> · <a href="https://npmx.dev/@vue-tui/vite"><code>@vue-tui/vite</code></a> · <a href="https://npmx.dev/@vue-tui/testing"><code>@vue-tui/testing</code></a>
+  <a href="https://npmx.dev/@vue-tui/runtime"><code>@vue-tui/runtime</code></a> · <a href="https://npmx.dev/@vue-tui/components"><code>@vue-tui/components</code></a> · <a href="https://npmx.dev/@vue-tui/vite"><code>@vue-tui/vite</code></a> · <a href="https://npmx.dev/@vue-tui/testing"><code>@vue-tui/testing</code></a>
 </p>
 
 - **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
@@ -82,6 +82,7 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 - [Packages](#packages)
 - [Examples](#examples)
 - [Components](#components)
+- [High-level Components](#high-level-components)
 - [Composables (Hooks)](#composables-hooks)
 - [Testing](#testing)
 - [Development](#development)
@@ -91,11 +92,12 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 
 ## Packages
 
-| Package                                                              | Description                                                                                                                                                                                                   |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._ |
-| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)       | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`) plus a production build (`vite build`). _Experimental; may change._                           |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                              |
+| Package                                                                    | Description                                                                                                                                                                                                   |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._ |
+| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`) plus a production build (`vite build`). _Experimental; may change._                           |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                              |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<Spinner>` (animated loading), with more to come.                                                                                          |
 
 ## Examples
 
@@ -116,6 +118,14 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
 | [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
+
+## High-level Components
+
+The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core.
+
+| Component                            | Description                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [`<Spinner>`](./packages/components) | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label |
 
 ## Composables (Hooks)
 

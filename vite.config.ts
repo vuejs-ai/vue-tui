@@ -74,6 +74,14 @@ export default defineConfig({
         command: "vp run @vue-tui/runtime-tests#test:examples",
         dependsOn: ["ci:build"],
       },
+      // @vue-tui/components (high-level components composed from runtime
+      // primitives) carries its own unit suite; run it on its own parallel
+      // branch like the other packages. Depends on ci:build because its tests
+      // resolve @vue-tui/runtime + @vue-tui/testing from their built dist.
+      "ci:test:components": {
+        command: "vp run @vue-tui/components#test",
+        dependsOn: ["ci:build"],
+      },
       ci: {
         command: "echo ci ok",
         dependsOn: [
@@ -86,6 +94,7 @@ export default defineConfig({
           "ci:test:pty",
           "ci:test:vite-plugin",
           "ci:test:examples",
+          "ci:test:components",
         ],
       },
     },
