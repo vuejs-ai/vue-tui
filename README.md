@@ -25,30 +25,20 @@ Build with components, develop with HMR, test with confidence.
 
 ## Quick Start
 
+There are two ways to use vue-tui — scaffold a full project, or drop the runtime into an existing one.
+
+### 1. Scaffold a project (recommended)
+
+A ready-to-develop setup: Vue SFCs and a terminal HMR dev server via the `@vue-tui/vite` plugin.
+
 ```bash
 npx tiged vuejs-ai/vue-tui-starter/vite my-app
 cd my-app
 npm install
-npm run dev      # vite + @vue-tui/vite plugin, in-process terminal HMR
+npm run dev      # in-process terminal dev server with HMR
 ```
 
-Edit `src/app.vue` and watch the terminal update instantly.
-
-### Add to an existing project
-
-```bash
-npm install @vue-tui/runtime
-```
-
-## Example
-
-```ts
-// src/main.ts
-import { createApp } from "@vue-tui/runtime";
-import App from "./app.vue";
-
-createApp(App).mount();
-```
+Edit `src/app.vue` and watch the terminal update instantly. `npm run build` bundles the app to a single file, and `npm run type-check` runs `vue-tsc` over your components.
 
 ```vue
 <!-- src/app.vue -->
@@ -59,7 +49,8 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((input) => {
-  if (input === "+") count.value++;
+  // "+" is Shift+"=" on most keyboards, so accept the bare "=" too.
+  if (input === "+" || input === "=") count.value++;
   if (input === "-") count.value--;
 });
 </script>
@@ -68,17 +59,49 @@ useInput((input) => {
   <Box>
     <Text>Count: </Text>
     <Text bold color="green">{{ count }}</Text>
-    <Text dimColor> (+/- to change)</Text>
+    <Text dimColor> (+/= and - to change)</Text>
   </Box>
 </template>
 ```
 
-For non-interactive output — snapshots, CI logs, piped commands — `renderToString(App)` renders a single frame to a string instead of mounting.
+### 2. Use the runtime standalone
+
+`@vue-tui/runtime` is a self-contained Vue renderer — **no plugin and no build step**. Install it into any Node project and write components as `h()` render functions.
+
+```bash
+npm install @vue-tui/runtime vue
+```
+
+```js
+// app.mjs — run it with: node app.mjs
+import { defineComponent, h, shallowRef } from "vue";
+import { Box, Text, createApp, useInput } from "@vue-tui/runtime";
+
+const App = defineComponent(() => {
+  const count = shallowRef(0);
+
+  useInput((input) => {
+    if (input === "+" || input === "=") count.value++;
+    if (input === "-") count.value--;
+  });
+
+  return () =>
+    h(Box, null, [
+      h(Text, null, `Count: ${count.value} `),
+      h(Text, { dimColor: true }, "(+/= and - to change, Ctrl+C to exit)"),
+    ]);
+});
+
+createApp(App).mount();
+```
+
+Without SFC tooling you compose the UI with `h()` instead of `<template>`. Prefer TypeScript? With `"type": "module"` in `package.json`, Node runs `.ts` files directly — `node app.ts` (Node ≥ 23.6) or `node --experimental-strip-types app.ts` (Node ≥ 22.18).
+
+For one-shot, non-interactive output — snapshots, CI logs, piped commands — `renderToString(App)` renders a single frame to a string instead of mounting.
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [Example](#example)
 - [Packages](#packages)
 - [Examples](#examples)
 - [Components](#components)
