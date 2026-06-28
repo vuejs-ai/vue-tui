@@ -77,7 +77,7 @@ createApp(App).mount();
 ```
 
 - Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
-- For hot-reload (HMR) while developing, add the `@vue-tui/vite` plugin.
+- For hot-reload (HMR) while developing, add the `@vue-tui/vite` plugin: `plugins: [vue(), vueTui()]`.
 
 ## Table of Contents
 
