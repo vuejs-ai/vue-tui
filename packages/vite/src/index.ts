@@ -25,7 +25,7 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
 }
 
 // Reconcile the entry for dev (matched against the absolute module id via endsWith) and build
-// (fed to rollupOptions.input). Anything already ROOTED passes through unchanged — a leading "/"
+// (fed to rolldownOptions.input). Anything already ROOTED passes through unchanged — a leading "/"
 // (root-relative "/src/main.ts", a POSIX-absolute "/Users/x/…", or a UNC "//server/share/…") or a
 // Windows drive-letter "C:/x": dev's endsWith matches the module id, and build accepts a "/"-input
 // as root-relative and an absolute path as-is. Only the RELATIVE forms ("src/main.ts",

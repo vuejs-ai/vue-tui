@@ -81,8 +81,8 @@ test.each(ENTRY_CASES)(
       `${injectPrefix}export const x = 1;`,
     );
     const build = plugins.find((p) => p.name === "vue-tui:build") as unknown as {
-      config: () => { build: { rollupOptions: { input: string } } };
+      config: () => { build: { rolldownOptions: { input: string } } };
     };
-    expect(build.config().build.rollupOptions.input).toBe(buildInput);
+    expect(build.config().build.rolldownOptions.input).toBe(buildInput);
   },
 );
