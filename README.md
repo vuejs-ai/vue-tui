@@ -25,33 +25,27 @@ Build with components, develop with HMR, test with confidence.
 
 ## Quick Start
 
+There are two ways to use vue-tui — scaffold a full project, or drop the runtime into an existing one.
+
+### 1. Scaffold a project (recommended)
+
+A ready-to-develop setup: Vue SFCs and a terminal HMR dev server via the `@vue-tui/vite` plugin.
+
 ```bash
 npx tiged vuejs-ai/vue-tui-starter/vite my-app
 cd my-app
 npm install
-npm run dev      # vite + @vue-tui/vite plugin, in-process terminal HMR
+npm run dev      # in-process terminal dev server with HMR
 ```
 
 Edit `src/app.vue` and watch the terminal update instantly.
 
-### Add to an existing project
+### 2. Use the runtime standalone
 
-```bash
-npm install @vue-tui/runtime
-```
-
-## Example
-
-```ts
-// src/main.ts
-import { createApp } from "@vue-tui/runtime";
-import App from "./app.vue";
-
-createApp(App).mount();
-```
+`@vue-tui/runtime` is a standalone Vue renderer, independent of the `@vue-tui/vite` plugin. Author components as SFCs and mount them with `createApp`, using your own build:
 
 ```vue
-<!-- src/app.vue -->
+<!-- app.vue -->
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -59,7 +53,8 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((input) => {
-  if (input === "+") count.value++;
+  // "+" is Shift+"=" on most keyboards, so accept the bare "=" too.
+  if (input === "+" || input === "=") count.value++;
   if (input === "-") count.value--;
 });
 </script>
@@ -68,17 +63,25 @@ useInput((input) => {
   <Box>
     <Text>Count: </Text>
     <Text bold color="green">{{ count }}</Text>
-    <Text dimColor> (+/- to change)</Text>
+    <Text dimColor> (+/= and - to change)</Text>
   </Box>
 </template>
 ```
 
-For non-interactive output — snapshots, CI logs, piped commands — `renderToString(App)` renders a single frame to a string instead of mounting.
+```ts
+// main.ts
+import { createApp } from "@vue-tui/runtime";
+import App from "./app.vue";
+
+createApp(App).mount();
+```
+
+- Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
+- For hot-reload (HMR) support while developing, add the `@vue-tui/vite` plugin: `plugins: [vue(), vueTui()]`.
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [Example](#example)
 - [Packages](#packages)
 - [Examples](#examples)
 - [Components](#components)
