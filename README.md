@@ -38,7 +38,7 @@ npm install
 npm run dev      # in-process terminal dev server with HMR
 ```
 
-Edit `src/app.vue` and watch the terminal update instantly. `npm run build` bundles the app to a single file, and `npm run type-check` runs `vue-tsc` over your components.
+Edit `src/app.vue` and watch the terminal update instantly.
 
 ```vue
 <!-- src/app.vue -->
@@ -66,7 +66,7 @@ useInput((input) => {
 
 ### 2. Use the runtime standalone
 
-`@vue-tui/runtime` is a self-contained Vue renderer — **no plugin and no build step**. Install it into any Node project and write components as `h()` render functions.
+`@vue-tui/runtime` is a self-contained Vue renderer — no plugin, no build step. Write components as `h()` render functions and run them with `node`.
 
 ```bash
 npm install @vue-tui/runtime vue
@@ -95,9 +95,7 @@ const App = defineComponent(() => {
 createApp(App).mount();
 ```
 
-Without SFC tooling you compose the UI with `h()` instead of `<template>`. Prefer TypeScript? With `"type": "module"` in `package.json`, Node runs `.ts` files directly — `node app.ts` (Node ≥ 23.6) or `node --experimental-strip-types app.ts` (Node ≥ 22.18).
-
-For one-shot, non-interactive output — snapshots, CI logs, piped commands — `renderToString(App)` renders a single frame to a string instead of mounting.
+For non-interactive output, `renderToString(App)` renders a single frame to a string instead of mounting.
 
 ## Table of Contents
 
