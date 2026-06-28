@@ -5,6 +5,7 @@
   "license": "MIT",
   "files": [
     "dist",
+    "CHANGELOG.md",
     "LICENSE",
     "README.md"
   ],
