@@ -10,7 +10,7 @@ import {
 import chalk from "chalk";
 import { applyChalk, applyColor } from "./text-style.ts";
 import { sanitizeAnsi } from "./sanitize-ansi.ts";
-import Yoga from "yoga-layout";
+import Yoga from "better-yoga-layout";
 import type {
   TuiNode,
   TuiContainer,
@@ -874,10 +874,10 @@ export function paintIsolated(
   // they lay out within the absolute, auto-width static node — exactly the tree
   // Ink builds. We temporarily move only the yoga parentage (never the DOM
   // .parent — see below) and restore it in the finally block.
-  type YogaCarrier = { yoga: import("yoga-layout").Node };
+  type YogaCarrier = { yoga: import("better-yoga-layout").Node };
   const yogaAdded: Array<{
     yc: YogaCarrier;
-    origParent: import("yoga-layout").Node | null;
+    origParent: import("better-yoga-layout").Node | null;
     origIndex: number;
   }> = [];
 
@@ -899,9 +899,12 @@ export function paintIsolated(
 
     // If the node already has a yoga parent, temporarily remove it so we can
     // re-insert it under the inner box for layout calculation.
-    const yParent = (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null })
-      .getParent
-      ? (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null }).getParent()
+    const yParent = (
+      yCarrier.yoga as unknown as { getParent(): import("better-yoga-layout").Node | null }
+    ).getParent
+      ? (
+          yCarrier.yoga as unknown as { getParent(): import("better-yoga-layout").Node | null }
+        ).getParent()
       : null;
     const origIndex = yParent ? findYogaIndex(yParent, yCarrier.yoga) : 0;
     if (yParent) {
@@ -966,10 +969,10 @@ function paintUnderRoot(
   attachYoga(iso);
   configureRoot(iso);
 
-  type YogaCarrier = { yoga: import("yoga-layout").Node };
+  type YogaCarrier = { yoga: import("better-yoga-layout").Node };
   const yogaAdded: Array<{
     yc: YogaCarrier;
-    origParent: import("yoga-layout").Node | null;
+    origParent: import("better-yoga-layout").Node | null;
     origIndex: number;
   }> = [];
 
@@ -981,9 +984,12 @@ function paintUnderRoot(
     const yCarrier = node as unknown as YogaCarrier;
     if (!yCarrier.yoga || typeof yCarrier.yoga === "symbol") continue;
 
-    const yParent = (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null })
-      .getParent
-      ? (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null }).getParent()
+    const yParent = (
+      yCarrier.yoga as unknown as { getParent(): import("better-yoga-layout").Node | null }
+    ).getParent
+      ? (
+          yCarrier.yoga as unknown as { getParent(): import("better-yoga-layout").Node | null }
+        ).getParent()
       : null;
     const origIndex = yParent ? findYogaIndex(yParent, yCarrier.yoga) : 0;
     if (yParent) {
@@ -1017,8 +1023,8 @@ function paintUnderRoot(
 }
 
 function findYogaIndex(
-  parent: import("yoga-layout").Node,
-  child: import("yoga-layout").Node,
+  parent: import("better-yoga-layout").Node,
+  child: import("better-yoga-layout").Node,
 ): number {
   for (let i = 0; i < parent.getChildCount(); i++) {
     if (parent.getChild(i) === child) return i;

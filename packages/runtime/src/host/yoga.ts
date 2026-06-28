@@ -1,5 +1,5 @@
-import Yoga from "yoga-layout";
-import type { Node as YogaNode, Align, FlexDirection, Justify, Wrap } from "yoga-layout";
+import Yoga from "better-yoga-layout";
+import type { Node as YogaNode, Align, FlexDirection, Justify, Wrap } from "better-yoga-layout";
 import type {
   TuiBox,
   TuiContainer,

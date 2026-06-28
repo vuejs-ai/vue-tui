@@ -1,5 +1,5 @@
 import { nextTick, shallowRef, watchPostEffect, type Ref, type ShallowRef } from "vue";
-import type { Node as YogaNode } from "yoga-layout";
+import type { Node as YogaNode } from "better-yoga-layout";
 import { addLayoutListener, type TuiNode, type TuiRoot } from "../host/nodes.ts";
 
 // Yoga's `right`/`bottom` are omitted: always `0` for flow layout and

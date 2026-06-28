@@ -1,14 +1,14 @@
 import { expect, test } from "vite-plus/test";
 // Internal modules not in package exports — import via relative source path,
-// matching the convention in unit/yoga-prop-reset.test.ts. yoga-layout is a
-// dependency of @vue-tui/runtime (not of runtime-tests), so we reference the
+// matching the convention in unit/yoga-prop-reset.test.ts. better-yoga-layout is
+// a dependency of @vue-tui/runtime (not of runtime-tests), so we reference the
 // stable yoga enum value numerically rather than importing it here.
 import { calculateLayoutWithContentGuards } from "../../runtime/src/host/layout-guards.ts";
 import { attachYoga } from "../../runtime/src/host/yoga.ts";
 import { createBox, createRoot, createText } from "../../runtime/src/host/nodes.ts";
 import type { AppContext } from "../../runtime/src/context.ts";
 
-// yoga-layout YGEnums (generated/YGEnums.ts) — Display: Flex=0 (visible), None=1.
+// better-yoga-layout YGEnums (generated/YGEnums.ts) — Display: Flex=0 (visible), None=1.
 const DISPLAY_NONE = 1;
 const DIRECTION_LTR = 1;
 

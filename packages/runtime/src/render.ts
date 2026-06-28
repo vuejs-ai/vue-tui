@@ -1,4 +1,4 @@
-import Yoga from "yoga-layout";
+import Yoga from "better-yoga-layout";
 import {
   type Component,
   type ComponentPublicInstance,

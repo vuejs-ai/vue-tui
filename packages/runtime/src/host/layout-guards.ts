@@ -1,5 +1,5 @@
-import Yoga from "yoga-layout";
-import type { Direction, Node as YogaNode } from "yoga-layout";
+import Yoga from "better-yoga-layout";
+import type { Direction, Node as YogaNode } from "better-yoga-layout";
 import type { TuiBox, TuiNode, TuiRoot, TuiStatic, TuiText, TuiTransform } from "./nodes.ts";
 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;

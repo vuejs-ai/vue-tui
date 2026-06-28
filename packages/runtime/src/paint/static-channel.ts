@@ -1,4 +1,4 @@
-import Yoga from "yoga-layout";
+import Yoga from "better-yoga-layout";
 import type { TuiNode, TuiStatic } from "../host/nodes.ts";
 import { paintIsolated } from "./paint.ts";
 import { renderScreenReaderOutput } from "./screen-reader.ts";

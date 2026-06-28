@@ -1,5 +1,5 @@
 import type { AppContext } from "../context.ts";
-import type { Node as YogaNode } from "yoga-layout";
+import type { Node as YogaNode } from "better-yoga-layout";
 
 export type YogaNodeRef = YogaNode;
 
