@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/vite",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Vite plugin for vue-tui: in-process terminal dev server with HMR + production build.",
   "license": "MIT",
   "files": [
@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     }
   },
