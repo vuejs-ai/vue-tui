@@ -95,8 +95,6 @@ const App = defineComponent(() => {
 createApp(App).mount();
 ```
 
-For non-interactive output, `renderToString(App)` renders a single frame to a string instead of mounting.
-
 ## Table of Contents
 
 - [Quick Start](#quick-start)
