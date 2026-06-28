@@ -46,6 +46,7 @@ import {
   devState,
   DevStateKey,
   isDevConnected,
+  notifyDevExit,
   registerDevApp,
   resetDevState,
   unregisterDevApp,
@@ -1292,21 +1293,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Vite dev server, which holds the event loop open (ports, watchers, the
       // module runner). When the app genuinely exits (useApp().exit(),
       // waitUntilExit() drain, error exit) the exit promise settles; signal the
-      // dev plugin so it can close the server and let the process exit cleanly.
-      // A full reload tears down via teardown() above and never settles this
-      // promise, so it cannot reach here.
-      //
-      // Snapshot the hook NOW (at mount), not at exit time. The dev plugin sets it
-      // per-server during configureServer (before mount), so at mount it is THIS
-      // server's hook; reading it at exit — potentially much later — would instead
-      // pick up whichever server last wrote the process-global slot (the same
-      // capture-at-mount discipline the __VT_TEST_STDOUT__ seam already relies on).
-      const devExitHook = (globalThis as { __VUE_TUI_TEARDOWN__?: () => void })
-        .__VUE_TUI_TEARDOWN__;
+      // dev plugin over the in-process hot channel (notifyDevExit → the plugin's
+      // ssr.hot listener closes the server) so the process exits cleanly. A full
+      // reload tears down via teardown() above and never settles this promise, so
+      // it cannot reach here. The hot channel routes to THIS app's connected server
+      // (bridgedHot), so there's no cross-server ambiguity — no process-global.
       // .finally derives a NEW promise that re-rejects on an error-exit; .catch it
       // so that chain can't surface as an unhandled rejection (the original
       // exitPromise is already .catch()-guarded above).
-      void exitPromise.finally(() => devExitHook?.()).catch(() => {});
+      void exitPromise.finally(() => notifyDevExit()).catch(() => {});
     }
 
     // Wire exit-with-error for the error boundary (must be set before mount).
