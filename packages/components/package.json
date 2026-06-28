@@ -1,0 +1,39 @@
+{
+  "name": "@vue-tui/components",
+  "version": "0.0.0",
+  "private": true,
+  "description": "High-level Vue components for vue-tui, composed from @vue-tui/runtime primitives.",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check:type": "vue-tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/testing": "workspace:*",
+    "chalk": "catalog:",
+    "string-width": "catalog:",
+    "strip-ansi": "catalog:",
+    "typescript": "^6.0.3",
+    "unplugin-vue": "catalog:",
+    "vite-plus": "catalog:",
+    "vue": "^3.4.0",
+    "vue-tsc": "catalog:"
+  },
+  "peerDependencies": {
+    "@vue-tui/runtime": "workspace:*",
+    "vue": "^3.4.0"
+  }
+}
