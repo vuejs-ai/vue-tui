@@ -82,6 +82,7 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 - [Packages](#packages)
 - [Examples](#examples)
 - [Components](#components)
+- [High-level Components](#high-level-components)
 - [Composables (Hooks)](#composables-hooks)
 - [Testing](#testing)
 - [Development](#development)
@@ -109,15 +110,22 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 
 ## Components
 
-| Component                            | Description                                                                                                             |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime)        | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background                          |
-| [`<Text>`](./packages/runtime)       | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes                              |
-| [`<Spacer>`](./packages/runtime)     | Expands to fill available space (`flex-grow: 1`)                                                                        |
-| [`<Newline>`](./packages/runtime)    | Inserts line breaks (configurable `count`)                                                                              |
-| [`<Static>`](./packages/runtime)     | Renders a list of items once, above the redrawn region                                                                  |
-| [`<Transform>`](./packages/runtime)  | Applies a string transform function to each rendered line                                                               |
-| [`<Spinner>`](./packages/components) | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label _(in `@vue-tui/components`)_ |
+| Component                           | Description                                                                                    |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime)       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
+| [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
+| [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
+| [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
+| [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |
+| [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
+
+## High-level Components
+
+The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core. _New; early._
+
+| Component                            | Description                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| [`<Spinner>`](./packages/components) | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label |
 
 ## Composables (Hooks)
 
