@@ -40,8 +40,12 @@ npm run dev      # in-process terminal dev server with HMR
 
 Edit `src/app.vue` and watch the terminal update instantly.
 
+### 2. Use the runtime standalone
+
+`@vue-tui/runtime` is a standalone Vue renderer, independent of the `@vue-tui/vite` plugin. Author components as SFCs and mount them with `createApp`, using your own build:
+
 ```vue
-<!-- src/app.vue -->
+<!-- app.vue -->
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -64,36 +68,15 @@ useInput((input) => {
 </template>
 ```
 
-### 2. Use the runtime standalone
-
-`@vue-tui/runtime` is a standalone Vue renderer — the `@vue-tui/vite` plugin only adds the SFC + HMR dev workflow on top. Use the runtime on its own, in any existing project, writing components as `h()` render functions:
-
-```bash
-npm install @vue-tui/runtime vue
-```
-
-```js
-// app.mjs — run it with: node app.mjs
-import { defineComponent, h, shallowRef } from "vue";
-import { Box, Text, createApp, useInput } from "@vue-tui/runtime";
-
-const App = defineComponent(() => {
-  const count = shallowRef(0);
-
-  useInput((input) => {
-    if (input === "+" || input === "=") count.value++;
-    if (input === "-") count.value--;
-  });
-
-  return () =>
-    h(Box, null, [
-      h(Text, null, `Count: ${count.value} `),
-      h(Text, { dimColor: true }, "(+/= and - to change, Ctrl+C to exit)"),
-    ]);
-});
+```ts
+// main.ts
+import { createApp } from "@vue-tui/runtime";
+import App from "./app.vue";
 
 createApp(App).mount();
 ```
+
+Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx). The `@vue-tui/vite` plugin bundles this wiring plus terminal HMR.
 
 ## Table of Contents
 
