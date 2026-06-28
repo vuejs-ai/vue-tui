@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vue 3 terminal renderer with Yoga flexbox layout, inspired by React Ink.",
   "keywords": [
     "ansi",
