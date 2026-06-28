@@ -5,8 +5,8 @@
 > issue, not here. It records how components in `@vue-tui/components` should be _shaped_ and
 > _styled_, and the bar for adding one in the first place.
 >
-> **Status:** planned — no `@vue-tui/components` code exists yet. This is design intent, not a
-> description of shipped code.
+> **Status:** active — the package now ships its first component, `Spinner` (see per-component
+> records below). The principles here are design intent for the package as a whole.
 >
 > **Per-component records:** [spinner](./components/spinner.md).
 

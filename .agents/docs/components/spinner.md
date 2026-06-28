@@ -23,7 +23,8 @@ A pure composition of `<Text>` + `useAnimation` — no new runtime export needed
 
 - **Always animates.** It does NOT gate on app interactivity — there is no public signal for
   `interactive` (it lives only on the internal `AppContext`), and reaching for it would break the
-  pure-composition rule. This matches Ink's Spinner, which also just animates; the runtime governs
+  pure-composition rule. This mirrors the third-party `ink-spinner`, which likewise just animates
+  (unverified parity — not run-checked); the runtime governs
   non-interactive output one layer down. (If a static-when-non-interactive affordance is ever
   wanted, it needs the runtime to expose interactivity publicly first.)
 - Switching `type` changes the preset interval; `useAnimation` resets `frame` to 0 on a live
