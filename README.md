@@ -26,13 +26,13 @@ Build with components, develop with HMR, test with confidence.
 ## Quick Start
 
 ```bash
-npx tiged vuejs-ai/vue-tui-starter my-app
+npx tiged vuejs-ai/vue-tui-starter/vite my-app
 cd my-app
 npm install
 npm run dev      # vite + @vue-tui/vite plugin, in-process terminal HMR
 ```
 
-Edit `app.vue` and watch the terminal update instantly.
+Edit `src/app.vue` and watch the terminal update instantly.
 
 ### Add to an existing project
 
