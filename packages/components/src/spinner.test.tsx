@@ -45,4 +45,35 @@ describe("Spinner", () => {
     expect((r.lastFrame() ?? "").includes("@")).toBe(true);
     r.unmount();
   });
+
+  test("color tints the glyph but not the label", async () => {
+    const chalk = (await import("chalk")).default;
+    const r = await render(Spinner, {
+      interactive: false,
+      props: { frames: ["⠋"], color: "green", label: "Loading" },
+    });
+    await delay(20);
+    const out = r.lastFrame() ?? "";
+    expect(out).toContain(chalk.green("⠋"));
+    expect(out).toContain(" Loading");
+    expect(out).not.toContain(chalk.green("Loading"));
+    r.unmount();
+  });
+
+  test("label renders after the glyph with a separating space", async () => {
+    const r = await render(Spinner, {
+      interactive: false,
+      props: { frames: ["⠋"], label: "Done" },
+    });
+    await delay(20);
+    expect(r.lastFrame() ?? "").toContain("⠋ Done");
+    r.unmount();
+  });
+
+  test("no label renders the glyph only", async () => {
+    const r = await render(Spinner, { interactive: false, props: { frames: ["⠋"] } });
+    await delay(20);
+    expect((r.lastFrame() ?? "").trim()).toBe("⠋");
+    r.unmount();
+  });
 });
