@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, rmSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { build, type Rollup } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 
 const root = fileURLToPath(new URL("./fixtures/build", import.meta.url));
@@ -28,7 +29,12 @@ afterEach(() => {
 
 test("vite build emits a single self-contained Node entry with deps externalized", async () => {
   rmSync(dist, { recursive: true, force: true });
-  const output = await build({ root, configFile: false, plugins: vueTui(), logLevel: "silent" });
+  const output = await build({
+    root,
+    configFile: false,
+    plugins: [...vueTui(), vue()],
+    logLevel: "silent",
+  });
 
   // A single, named input resolves to one RollupOutput (not a watcher).
   const result = (Array.isArray(output) ? output[0] : output) as Rollup.RollupOutput;
@@ -57,7 +63,7 @@ test("a consumer's own rolldownOptions.external overrides the plugin default (se
   const output = await build({
     root,
     configFile: false,
-    plugins: vueTui(),
+    plugins: [...vueTui(), vue()],
     logLevel: "silent",
     build: {
       rolldownOptions: {

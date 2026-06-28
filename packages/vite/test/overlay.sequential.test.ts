@@ -16,6 +16,7 @@ import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitFor } from "./helpers.ts";
 
@@ -37,7 +38,7 @@ test("a build error renders the in-process dev overlay", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: vueTui(),
+    plugins: [...vueTui(), vue()],
   });
   await server.listen();
   await waitFor(read, "LABEL-A");

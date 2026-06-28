@@ -4,6 +4,7 @@
 import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitFor } from "./helpers.ts";
 
@@ -24,7 +25,12 @@ afterEach(async () => {
 // server._shortcutsState (the readline). Assert vueTui leaves no _shortcutsState.
 test("vueTui disables Vite's CLI keyboard shortcuts so they can't hijack the TUI's stdin", async () => {
   const read = capture();
-  server = await createServer({ root, logLevel: "silent", configFile: false, plugins: vueTui() });
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: [...vueTui(), vue()],
+  });
   await server.listen(); // a real httpServer is required for bindCLIShortcuts to act
   await waitFor(read, "count="); // let the app mount with the normal (non-TTY) stdin first
 
