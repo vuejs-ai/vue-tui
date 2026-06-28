@@ -97,7 +97,7 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._ |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`) plus a production build (`vite build`). _Experimental; may change._                           |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                              |
-| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<Spinner>` (animated loading), with more to come. _New; early._                                                                            |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<Spinner>` (animated loading), with more to come.                                                                                          |
 
 ## Examples
 
@@ -121,7 +121,7 @@ For non-interactive output — snapshots, CI logs, piped commands — `renderToS
 
 ## High-level Components
 
-The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core. _New; early._
+The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core.
 
 | Component                            | Description                                                                                |
 | ------------------------------------ | ------------------------------------------------------------------------------------------ |
