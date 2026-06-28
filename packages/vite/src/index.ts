@@ -11,8 +11,8 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   // devPlugin (apply:"serve") and buildConfigPlugin (apply:"build") never run together — Vite
   // picks the right set per mode. normalizeEntry() (below) derives the entry string each needs.
   //
-  // Bring your own SFC/JSX compiler alongside vueTui() — `[vueTui(), vue()]` for SFCs, or
-  // `[vueTui(), vueJsx()]` for JSX. devPlugin's configResolved finds whichever is present (by
+  // Bring your own SFC/JSX compiler alongside vueTui() — `[vue(), vueTui()]` for SFCs, or
+  // `[vueJsx(), vueTui()]` for JSX. devPlugin's configResolved finds whichever is present (by
   // plugin name) and force-client-compiles it, so it emits CLIENT render functions for the
   // terminal renderer even in Vite's SSR dev environment. vueTui deliberately does NOT bundle
   // @vitejs/plugin-vue: the app's authoring format is the consumer's choice, kept explicit.

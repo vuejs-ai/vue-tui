@@ -42,7 +42,7 @@ test("#214: dev-mode <Text color> emits real ANSI color", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "COLORTEST");

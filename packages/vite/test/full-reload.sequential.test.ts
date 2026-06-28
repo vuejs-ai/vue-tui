@@ -43,7 +43,7 @@ test("an entry-level (non-HMR) change restarts the app in-process with no zombie
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
 
@@ -106,7 +106,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
     ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
     server: { middlewareMode: true },
   });
@@ -151,7 +151,7 @@ test("a genuine app exit closes the in-process dev server", async () => {
     root: exitRoot,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   // Spy on close so we can detect the runtime-driven teardown. dev.ts captured
   // `server` and calls server.close() at exit time, so it sees this wrapper.

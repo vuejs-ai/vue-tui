@@ -35,7 +35,7 @@ test("boots the app in-process and renders a frame", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "LABEL-A");
@@ -48,7 +48,7 @@ test("template-only edit hot-swaps with state preserved (no reload)", async () =
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "count=3"); // let the counter tick

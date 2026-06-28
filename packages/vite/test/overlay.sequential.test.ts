@@ -38,7 +38,7 @@ test("a build error renders the in-process dev overlay", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui(), vue()],
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "LABEL-A");
