@@ -76,7 +76,8 @@ import App from "./app.vue";
 createApp(App).mount();
 ```
 
-Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx). The `@vue-tui/vite` plugin bundles this wiring plus terminal HMR.
+- Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
+- The `@vue-tui/vite` plugin does all this setup for you and adds terminal HMR — that's option 1.
 
 ## Table of Contents
 
