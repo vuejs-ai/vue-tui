@@ -7,6 +7,8 @@
 >
 > **Status:** planned — no `@vue-tui/components` code exists yet. This is design intent, not a
 > description of shipped code.
+>
+> **Per-component records:** [spinner](./components/spinner.md).
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
