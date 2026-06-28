@@ -66,7 +66,7 @@ useInput((input) => {
 
 ### 2. Use the runtime standalone
 
-`@vue-tui/runtime` is a self-contained Vue renderer — no plugin, no build step. Write components as `h()` render functions and run them with `node`.
+`@vue-tui/runtime` is a standalone Vue renderer — the `@vue-tui/vite` plugin only adds the SFC + HMR dev workflow on top. Use the runtime on its own, in any existing project, writing components as `h()` render functions:
 
 ```bash
 npm install @vue-tui/runtime vue
