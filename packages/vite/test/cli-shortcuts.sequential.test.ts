@@ -29,7 +29,7 @@ test("vueTui disables Vite's CLI keyboard shortcuts so they can't hijack the TUI
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [...vueTui(), vue()],
+    plugins: [vueTui(), vue()],
   });
   await server.listen(); // a real httpServer is required for bindCLIShortcuts to act
   await waitFor(read, "count="); // let the app mount with the normal (non-TTY) stdin first

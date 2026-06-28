@@ -32,7 +32,7 @@ test("vite build emits a single self-contained Node entry with deps externalized
   const output = await build({
     root,
     configFile: false,
-    plugins: [...vueTui(), vue()],
+    plugins: [vueTui(), vue()],
     logLevel: "silent",
   });
 
@@ -63,7 +63,7 @@ test("a consumer's own rolldownOptions.external overrides the plugin default (se
   const output = await build({
     root,
     configFile: false,
-    plugins: [...vueTui(), vue()],
+    plugins: [vueTui(), vue()],
     logLevel: "silent",
     build: {
       rolldownOptions: {
