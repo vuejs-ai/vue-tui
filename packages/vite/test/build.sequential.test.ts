@@ -15,6 +15,7 @@
 import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { existsSync, rmSync } from "node:fs";
+import { isBuiltin } from "node:module";
 import { build, type Rollup } from "vite";
 import { vueTui } from "../src/index.ts";
 
@@ -43,5 +44,33 @@ test("vite build emits a single self-contained Node entry with deps externalized
   expect(code).toMatch(/from\s*["']@vue-tui\/runtime["']/);
   expect([...entryChunk!.imports]).toContain("@vue-tui/runtime");
   // The relative app.vue id was bundled in, so its rendered content is present in the entry.
+  expect(code).toContain("LABEL-A");
+});
+
+test("vite build with { bundle: true } emits a self-contained entry (deps bundled, only builtins external)", async () => {
+  rmSync(dist, { recursive: true, force: true });
+  const output = await build({
+    root,
+    configFile: false,
+    plugins: vueTui({ bundle: true }),
+    logLevel: "silent",
+  });
+
+  const result = (Array.isArray(output) ? output[0] : output) as Rollup.RollupOutput;
+  const entryChunk = result.output.find(
+    (c): c is Rollup.OutputChunk => c.type === "chunk" && c.isEntry,
+  );
+
+  expect(entryChunk?.fileName).toBe("main.js");
+  const code = entryChunk!.code;
+  // Deps are bundled IN, not externalized — nothing to resolve from node_modules at runtime.
+  expect([...entryChunk!.imports]).not.toContain("@vue-tui/runtime");
+  expect([...entryChunk!.imports]).not.toContain("vue");
+  // Every surviving external import is a Node builtin (the only thing that can't be bundled).
+  for (const imp of entryChunk!.imports) expect(isBuiltin(imp)).toBe(true);
+  // platform:"node" gave the bundle a real createRequire, so no throwing CJS-require stub survived
+  // (a bundled CJS dep like stack-utils does `require("module")` at module load — the #212 class).
+  expect(code).not.toMatch(/doesn't expose the `require` function|Calling `require` for/);
+  // The app's own content is still bundled in.
   expect(code).toContain("LABEL-A");
 });

@@ -7,6 +7,17 @@ import { buildConfigPlugin } from "./build.ts";
 export interface VueTuiOptions {
   vue?: Parameters<typeof vue>[0];
   entry?: string;
+  /**
+   * Production build output shape (`vite build`).
+   *
+   * - `false` (default): externalize bare dependencies — Node resolves `vue`, `@vue-tui/runtime`,
+   *   etc. from `node_modules` at runtime. Right for a library, or an app shipped alongside its
+   *   `node_modules`. Smaller output; Node handles CJS/ESM interop natively.
+   * - `true`: bundle everything into a single self-contained file, externalizing only Node
+   *   builtins. The output runs with no `node_modules` present — for standalone / single-binary
+   *   distribution.
+   */
+  bundle?: boolean;
 }
 
 export function vueTui(options: VueTuiOptions = {}): Plugin[] {
@@ -18,7 +29,7 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   const { dev, build } = normalizeEntry(options.entry);
   return [
     devPlugin({ entry: dev }),
-    buildConfigPlugin({ entry: build }),
+    buildConfigPlugin({ entry: build, bundle: options.bundle }),
     devVmodPlugin(),
     vue(options.vue) as Plugin,
   ];
