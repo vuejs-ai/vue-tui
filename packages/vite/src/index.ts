@@ -1,27 +1,23 @@
-import vue from "@vitejs/plugin-vue";
 import type { Plugin } from "vite";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { buildConfigPlugin } from "./build.ts";
 
 export interface VueTuiOptions {
-  vue?: Parameters<typeof vue>[0];
   entry?: string;
 }
 
 export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   // devPlugin (apply:"serve") and buildConfigPlugin (apply:"build") never run together — Vite
   // picks the right set per mode. normalizeEntry() (below) derives the entry string each needs.
-  // plugin-vue here (and any plugin-vue-jsx the user adds) is force-client-compiled in
-  // devPlugin's configResolved, so it runs in the SSR dev environment but emits CLIENT
-  // render functions for the terminal renderer.
+  //
+  // Bring your own SFC/JSX compiler alongside vueTui() — `[vue(), vueTui()]` for SFCs, or
+  // `[vueJsx(), vueTui()]` for JSX. devPlugin's configResolved finds whichever is present (by
+  // plugin name) and force-client-compiles it, so it emits CLIENT render functions for the
+  // terminal renderer even in Vite's SSR dev environment. vueTui deliberately does NOT bundle
+  // @vitejs/plugin-vue: the app's authoring format is the consumer's choice, kept explicit.
   const { dev, build } = normalizeEntry(options.entry);
-  return [
-    devPlugin({ entry: dev }),
-    buildConfigPlugin({ entry: build }),
-    devVmodPlugin(),
-    vue(options.vue) as Plugin,
-  ];
+  return [devPlugin({ entry: dev }), buildConfigPlugin({ entry: build }), devVmodPlugin()];
 }
 
 // Reconcile the entry for dev (matched against the absolute module id via endsWith) and build

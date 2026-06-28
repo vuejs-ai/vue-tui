@@ -6,19 +6,23 @@ with HMR, plus a production build, for Vue apps that render to the terminal via 
 ## Install
 
 ```sh
-npm install -D @vue-tui/vite
+npm install -D @vue-tui/vite @vitejs/plugin-vue
 # peer deps: vite ^8, @vue-tui/runtime
 ```
 
 ## Usage
 
+`vueTui()` adds the terminal dev server (HMR) and the production build. Bring your own SFC/JSX
+compiler alongside it — `@vitejs/plugin-vue` for SFCs (or `@vitejs/plugin-vue-jsx` for JSX):
+
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({
-  plugins: [vueTui()],
+  plugins: [vue(), vueTui()],
 });
 ```
 
@@ -31,20 +35,16 @@ export default defineConfig({
 ```ts
 vueTui({
   entry: "src/main.ts", // default; the app entry (a .ts/.tsx file, not an index.html)
-  vue: {
-    // options forwarded to @vitejs/plugin-vue
-    /* … */
-  },
 });
 ```
 
-For a JSX/TSX entry, add `@vitejs/plugin-vue-jsx` alongside it and point `entry` at the `.tsx` file:
+For a JSX/TSX entry, use `@vitejs/plugin-vue-jsx` and point `entry` at the `.tsx` file:
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
 
 export default defineConfig({
-  plugins: [vueTui({ entry: "/src/main.tsx" }), vueJsx()],
+  plugins: [vueJsx(), vueTui({ entry: "/src/main.tsx" })],
 });
 ```
 
@@ -59,10 +59,11 @@ bundled but Node builtins — e.g. toward a standalone binary), set your own bui
 `vite.config.ts` and the plugin yields to them:
 
 ```ts
+import vue from "@vitejs/plugin-vue";
 import { isBuiltin } from "node:module";
 
 export default defineConfig({
-  plugins: [vueTui()],
+  plugins: [vue(), vueTui()],
   build: {
     // Vite 8 is Rolldown-powered: the field is `rolldownOptions` (`rollupOptions` is the alias).
     rolldownOptions: {
