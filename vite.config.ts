@@ -58,11 +58,28 @@ export default defineConfig({
         command: "vp run @vue-tui/runtime-tests#test:pty",
         dependsOn: ["ci:build"],
       },
-      // cli has no tests yet (test passes with --passWithNoTests), but wiring
-      // the branch now means future CLI tests are covered automatically rather
-      // than silently skipped.
-      "ci:test:cli": {
-        command: "vp run @vue-tui/cli#test",
+      // @vue-tui/vite (the Vite plugin: in-process dev server + production
+      // build) carries its own unit suite; run it on its own parallel branch
+      // like the other packages.
+      "ci:test:vite-plugin": {
+        command: "vp run @vue-tui/vite#test",
+        dependsOn: ["ci:build"],
+      },
+      // Examples smoke suite (#212): launch examples/basic-template and basic-jsx through a real
+      // PTY — both the dev server and the `node dist/main.js` build — and assert each paints a
+      // frame with no module-system crash. This is the regression guard for "the shipped examples
+      // actually run". Depends on ci:build for the built @vue-tui/runtime + @vue-tui/vite dist the
+      // examples consume; its own PTY pool keeps it on a separate parallel branch.
+      "ci:test:examples": {
+        command: "vp run @vue-tui/runtime-tests#test:examples",
+        dependsOn: ["ci:build"],
+      },
+      // @vue-tui/components (high-level components composed from runtime
+      // primitives) carries its own unit suite; run it on its own parallel
+      // branch like the other packages. Depends on ci:build because its tests
+      // resolve @vue-tui/runtime + @vue-tui/testing from their built dist.
+      "ci:test:components": {
+        command: "vp run @vue-tui/components#test",
         dependsOn: ["ci:build"],
       },
       ci: {
@@ -75,7 +92,9 @@ export default defineConfig({
           "ci:test:testing",
           "ci:test:integration",
           "ci:test:pty",
-          "ci:test:cli",
+          "ci:test:vite-plugin",
+          "ci:test:examples",
+          "ci:test:components",
         ],
       },
     },

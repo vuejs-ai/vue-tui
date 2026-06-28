@@ -1,5 +1,3 @@
-import TableSfc from "./components/Table.vue";
-import SpinnerSfc from "./components/Spinner.vue";
-export const Table = TableSfc;
-export const Spinner = SpinnerSfc;
-export type { Scalar, ScalarDict } from "./types.ts";
+export { default as Spinner } from "./spinner.vue";
+export type { SpinnerProps } from "./spinner-props.ts";
+export { default as Table } from "./components/Table.vue";

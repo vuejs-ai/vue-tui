@@ -42,7 +42,14 @@ import {
   type FocusContext,
   type StdinContext,
 } from "./context.ts";
-import { devState, DevStateKey, initHmrBridge, resetDevState } from "./hmr.ts";
+import {
+  devState,
+  DevStateKey,
+  isDevConnected,
+  registerDevApp,
+  resetDevState,
+  unregisterDevApp,
+} from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview, isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import { resolveSize } from "./composables/useWindowSize.ts";
@@ -259,6 +266,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedDebug = false;
   let mountedInteractive = true;
+  // Dev-only: the teardown registered with the HMR bridge so a full reload
+  // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
+  // re-imports the entry. Held per-app so teardown() can unregister exactly its
+  // own registration. null in production / when the dev integration is off.
+  let mountedDevTeardown: (() => void) | null = null;
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
@@ -501,13 +513,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // kitty/cursor/alt-screen restores above.
       mountedStdinController.dispose(sync);
     }
+    // Drop this app's full-reload registration so a stale teardown can't run on
+    // the next reload. Identity-guarded inside unregisterDevApp: during a reload
+    // the old app unregisters here before the new app registers.
+    if (mountedDevTeardown) {
+      unregisterDevApp(mountedDevTeardown);
+      mountedDevTeardown = null;
+    }
   }
 
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({ onCommit: () => scheduledCommit() }),
   );
-  if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
-    initHmrBridge();
+  if (isDevConnected()) {
+    // initHmrBridge already ran inside connectDevtools() with a live hot.
     // Clear any dev status left in the module-global `devState` by a previous
     // app in this dev process, so this fresh app never renders a stale Build
     // Error / HMR-update overlay instead of its own content.
@@ -1260,8 +1279,34 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const animationScheduler = createAnimationScheduler(renderThrottleMs);
     mountedAnimationScheduler = animationScheduler;
     baseApp.provide(AnimationSchedulerKey, animationScheduler);
-    if (typeof __VUE_TUI_DEV__ !== "undefined" && __VUE_TUI_DEV__) {
+    if (isDevConnected()) {
       baseApp.provide(DevStateKey, devState);
+      // Register this app's INTERNAL teardown (not unmount()) with the HMR
+      // bridge: on a full reload the bridge runs it to unmount this app before
+      // the runner re-imports the entry. Using teardown() — not unmount() —
+      // deliberately does NOT settle the exit promise, so a reload is not seen
+      // as an app exit and the dev-server-close hook below stays untriggered.
+      mountedDevTeardown = () => teardown();
+      registerDevApp(mountedDevTeardown);
+      // App-exit → dev-server teardown. In dev the app runs in-process under the
+      // Vite dev server, which holds the event loop open (ports, watchers, the
+      // module runner). When the app genuinely exits (useApp().exit(),
+      // waitUntilExit() drain, error exit) the exit promise settles; signal the
+      // dev plugin so it can close the server and let the process exit cleanly.
+      // A full reload tears down via teardown() above and never settles this
+      // promise, so it cannot reach here.
+      //
+      // Snapshot the hook NOW (at mount), not at exit time. The dev plugin sets it
+      // per-server during configureServer (before mount), so at mount it is THIS
+      // server's hook; reading it at exit — potentially much later — would instead
+      // pick up whichever server last wrote the process-global slot (the same
+      // capture-at-mount discipline the __VT_TEST_STDOUT__ seam already relies on).
+      const devExitHook = (globalThis as { __VUE_TUI_TEARDOWN__?: () => void })
+        .__VUE_TUI_TEARDOWN__;
+      // .finally derives a NEW promise that re-rejects on an error-exit; .catch it
+      // so that chain can't surface as an unhandled rejection (the original
+      // exitPromise is already .catch()-guarded above).
+      void exitPromise.finally(() => devExitHook?.()).catch(() => {});
     }
 
     // Wire exit-with-error for the error boundary (must be set before mount).

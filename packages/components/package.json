@@ -1,34 +1,12 @@
 {
   "name": "@vue-tui/components",
-  "version": "0.1.0",
-  "description": "Higher-level Vue 3 terminal UI components built on @vue-tui/runtime.",
-  "keywords": [
-    "ansi",
-    "cli",
-    "console",
-    "flexbox",
-    "ink",
-    "renderer",
-    "terminal",
-    "tui",
-    "vue",
-    "yoga"
-  ],
-  "homepage": "https://github.com/vuejs-ai/vue-tui/tree/main/packages/components#readme",
-  "bugs": {
-    "url": "https://github.com/vuejs-ai/vue-tui/issues"
-  },
+  "version": "0.1.1",
+  "description": "High-level Vue components for vue-tui, composed from @vue-tui/runtime primitives.",
   "license": "MIT",
-  "author": "Yunfei He <i.heyunfei@gmail.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/vuejs-ai/vue-tui.git",
-    "directory": "packages/components"
-  },
   "files": [
     "dist",
-    "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "README.md"
   ],
   "type": "module",
   "exports": {
@@ -40,30 +18,27 @@
   },
   "scripts": {
     "build": "vp pack",
-    "build:example": "vp pack examples/index.ts -d dist-example --no-exports",
     "dev": "vp pack --watch",
-    "dev:example": "vp pack && (vp pack --no-clean --watch & vp pack examples/index.ts -d dist-example --no-clean --no-exports --watch)",
     "test": "vp test",
     "check:type": "vue-tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
-  "dependencies": {
-    "@vue-tui/runtime": "workspace:*",
-    "string-width": "catalog:"
-  },
   "devDependencies": {
     "@types/node": "^25.6.2",
     "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/testing": "workspace:*",
+    "chalk": "catalog:",
+    "string-width": "catalog:",
+    "strip-ansi": "catalog:",
     "typescript": "^6.0.3",
     "unplugin-vue": "catalog:",
-    "vite-plus": "^0.1.20",
+    "vite-plus": "catalog:",
     "vue": "^3.4.0",
     "vue-tsc": "catalog:"
   },
   "peerDependencies": {
+    "@vue-tui/runtime": "workspace:^",
     "vue": "^3.4.0"
-  },
-  "engines": {
-    "node": ">=22.18.0"
   }
 }

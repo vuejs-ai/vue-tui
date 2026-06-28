@@ -1,6 +1,6 @@
 # @vue-tui/runtime
 
-> **Public beta** — the `@vue-tui/runtime` API is stabilizing, and we're now seeking public feedback to lock it down before 1.0. The CLI and dev tooling remain experimental and may change. Feedback and bug reports are very welcome.
+> **Public beta** — the `@vue-tui/runtime` API is stabilizing toward 1.0; dev-mode HMR is still experimental. Bug reports welcome.
 
 Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with the same component model you use on the web.
 
@@ -102,6 +102,11 @@ await app.waitUntilExit();
 createApp(App).mount({ stdout, stdin, stderr });
 ```
 
+> **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
+> server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the
+> entry module's evaluation — which wedges Vite's HMR full-reload queue after the first reload.
+> Reserve `await app.waitUntilExit()` for standalone/production entries (`node dist/main.js`).
+
 ## Render to String
 
 Render a component to a single output frame without driving a live terminal — useful for snapshots, logging, or non-interactive output:
@@ -115,7 +120,7 @@ const frame = renderToString(App); // synchronous, returns a string
 ## Links
 
 - [vue-tui](https://github.com/vuejs-ai/vue-tui) — monorepo root
-- [`@vue-tui/cli`](https://www.npmjs.com/package/@vue-tui/cli) — dev server with HMR
+- [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite) — Vite plugin with terminal HMR
 - [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) — test harness for terminal components
 
 ## License

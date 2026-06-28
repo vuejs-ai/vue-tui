@@ -1,23 +1,10 @@
 import { defineConfig } from "vite";
 import vueJsx from "@vitejs/plugin-vue-jsx";
-import { fileURLToPath } from "node:url";
+import { vueTui } from "@vue-tui/vite";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
-
+// This example's entry is a .tsx file, so the JSX transform (@vitejs/plugin-vue-jsx)
+// is added alongside vueTui(); the `entry` option points both the dev launcher and
+// the production build at src/main.tsx instead of the default src/main.ts.
 export default defineConfig({
-  plugins: [vueJsx()],
-  build: {
-    target: "node22",
-    outDir: "dist",
-    emptyOutDir: true,
-    minify: false,
-    lib: {
-      entry: `${here}src/main.tsx`,
-      formats: ["es"],
-      fileName: () => "game.mjs",
-    },
-    rollupOptions: {
-      external: (id) => !id.startsWith(".") && !id.startsWith("/") && !id.startsWith("\0"),
-    },
-  },
+  plugins: [vueTui({ entry: "/src/main.tsx" }), vueJsx()],
 });

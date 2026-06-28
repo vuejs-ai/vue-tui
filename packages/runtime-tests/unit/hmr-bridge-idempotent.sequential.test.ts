@@ -1,6 +1,7 @@
-// SEQUENTIAL: initHmrBridge guards registration with a MODULE-LEVEL boolean.
-// Each test re-imports the module via vi.resetModules() so the guard starts
-// fresh; the module cache is process-global, so this must not run concurrently.
+// SEQUENTIAL: initHmrBridge guards registration with a module-level HOT-IDENTITY guard
+// (re-arms each new hot, skips a repeat of the same hot). Each test re-imports the module via
+// vi.resetModules() so the guard starts fresh; the module cache is process-global, so this
+// must not run concurrently.
 import { afterEach, expect, test, vi } from "vite-plus/test";
 
 // Internal module not in package exports — import via relative source path,
@@ -46,6 +47,23 @@ test("initHmrBridge registers each listener AT MOST ONCE across repeated createA
 
   // Exactly 3 = one each for vite:error, vite:beforeUpdate, vite:beforeFullReload.
   expect(hot.on).toHaveBeenCalledTimes(3);
+});
+
+test("initHmrBridge RE-ARMS each new hot (a full reload hands the runtime a fresh hot)", async () => {
+  vi.resetModules();
+  const { initHmrBridge } = await import("../../runtime/src/hmr.ts");
+  const hotA = makeFakeHot();
+  const hotB = makeFakeHot();
+
+  // Boot connects hotA; a full reload re-executes the injected dev module with a NEW hot.
+  // A per-PROCESS boolean guard would skip hotB entirely (the bridge dies after the first
+  // reload on externalized/published installs, where module-globals persist); the hot-identity
+  // guard must re-register on each new hot.
+  initHmrBridge(hotA);
+  initHmrBridge(hotB);
+
+  expect(hotA.on).toHaveBeenCalledTimes(3);
+  expect(hotB.on).toHaveBeenCalledTimes(3); // re-armed on the fresh hot
 });
 
 test("a registered handler still works after the idempotency refactor", async () => {

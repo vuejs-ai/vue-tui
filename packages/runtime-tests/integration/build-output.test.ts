@@ -35,8 +35,8 @@ function collectTargets(value: Exports, out: string[] = []): string[] {
 /**
  * For a TYPED library entry, the declaration sibling sits next to the runtime
  * `.mjs` with a `.d.mts` extension (tsdown/`vp pack` emits `index.mjs` +
- * `index.d.mts`). We assert it explicitly for runtime/testing — cli has no
- * public type surface (no `index.d.mts`), so it is excluded.
+ * `index.d.mts`). We assert it explicitly for runtime/testing — the vite plugin
+ * has no public type surface (no `index.d.mts`), so it is excluded.
  */
 function declarationSibling(mjsTarget: string): string {
   return mjsTarget.replace(/\.mjs$/, ".d.mts");
@@ -51,7 +51,7 @@ type PackageCase = {
 
 const cases: PackageCase[] = [
   { dir: "runtime", typed: true },
-  { dir: "cli", typed: false },
+  { dir: "vite", typed: false },
   { dir: "testing", typed: true },
 ];
 
