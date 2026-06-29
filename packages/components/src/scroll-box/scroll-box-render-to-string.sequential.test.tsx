@@ -1,7 +1,8 @@
 // This test patches process.stdout, a process-global stream, so it must stay sequential.
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { renderToString, ScrollBox, Text } from "@vue-tui/runtime";
+import { renderToString, Text } from "@vue-tui/runtime";
+import { ScrollBox } from "../index.ts";
 
 test("ScrollBox does not enable mouse mode during renderToString", () => {
   const writes: string[] = [];

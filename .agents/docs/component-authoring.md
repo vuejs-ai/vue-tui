@@ -1,6 +1,6 @@
 # Component Authoring: SFC vs Render Function
 
-vue-tui's public components (`Box`, `Text`, `Spacer`, `Static`, `Newline`, `ScrollBox`, `Transform`) are
+vue-tui's public components (`Box`, `Text`, `Spacer`, `Static`, `Newline`, `Transform`) are
 authored as **Vue `<script setup>` template SFCs by default**. Exactly one — `Transform` —
 is a `defineComponent` render function (`.ts`), because it must **inspect its own materialized
 slot-child vnodes at render time** (the line every major Vue library draws: naive-ui,
@@ -20,7 +20,6 @@ not a reason to abandon the template. Two of the fixes also corrected latent inc
 | `Static`    | template SFC                | reactive cursor + `v-for` scoped slot                  |
 | `Box`       | template SFC                | root `v-if` validation guard + `<slot/>`               |
 | `Text`      | template SFC                | `<slot/>` + `tui-virtual-text`/`tui-text` branch       |
-| `ScrollBox` | template SFC                | measured viewport/content boxes + app-managed offset   |
 | `Transform` | **render function (`.ts`)** | inspects children: all-inert children → render nothing |
 
 ## Two questions, two idioms

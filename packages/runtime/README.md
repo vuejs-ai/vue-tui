@@ -61,7 +61,6 @@ useInput((input) => {
 | ------------- | ---------------------------------------------------------------------------------------------- |
 | `<Box>`       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
 | `<Text>`      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
-| `<ScrollBox>` | Bounded scroll viewport with mouse-wheel scrolling and sticky-bottom behavior                  |
 | `<Spacer>`    | Expands to fill available space (`flex-grow: 1`)                                               |
 | `<Newline>`   | Inserts line breaks (configurable `count`)                                                     |
 | `<Static>`    | Renders a list of items once, above the redrawn region                                         |

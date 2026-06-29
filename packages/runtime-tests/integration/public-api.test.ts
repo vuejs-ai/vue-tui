@@ -14,7 +14,6 @@ const PUBLIC_VALUE_EXPORTS = [
   // Components
   "Box",
   "Newline",
-  "ScrollBox",
   "Spacer",
   "Static",
   "Text",

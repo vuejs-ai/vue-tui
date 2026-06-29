@@ -5,13 +5,6 @@ All notable changes to `@vue-tui/runtime` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/). While on
 `0.x`, minor versions may include breaking changes.
 
-## Unreleased
-
-### Features
-
-- Add `ScrollBox`, a bounded app-managed scroll viewport with SGR mouse-wheel
-  support and sticky-bottom behavior for streaming output.
-
 ## 0.1.0 - 2026-06-19
 
 First public release of `@vue-tui/runtime` — Vue 3 for the terminal. Build CLI

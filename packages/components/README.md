@@ -3,7 +3,7 @@
 High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), composed from
 `@vue-tui/runtime` primitives.
 
-> Early days — the component set is small and growing. Currently: `Spinner`.
+> Early days — the component set is small and growing. Currently: `ScrollBox`, `Spinner`.
 
 ## Install
 
@@ -35,6 +35,34 @@ import { Spinner } from "@vue-tui/components";
 | `interval` | `number`                              | preset's | ms between frames                          |
 | `color`    | `string`                              | —        | chalk color for the spinner glyph          |
 | `label`    | `string`                              | —        | text shown next to the spinner             |
+
+## ScrollBox
+
+A bounded scroll viewport for long, updating content. Mouse-wheel scrolling is enabled by
+default, and sticky-bottom behavior keeps streaming output at the bottom only until the user
+scrolls up.
+
+```vue
+<script setup lang="ts">
+import { ScrollBox } from "@vue-tui/components";
+import { Text } from "@vue-tui/runtime";
+</script>
+
+<template>
+  <ScrollBox>
+    <Text v-for="line in lines" :key="line">{{ line }}</Text>
+  </ScrollBox>
+</template>
+```
+
+### Props
+
+| prop             | type      | default | description                                      |
+| ---------------- | --------- | ------- | ------------------------------------------------ |
+| `isActive`       | `boolean` | `true`  | whether input handling is active                 |
+| `enableMouse`    | `boolean` | `true`  | whether to enable SGR mouse-wheel scrolling      |
+| `enableKeyboard` | `boolean` | `false` | whether PageUp/PageDown/Home/End scrolling works |
+| `wheelLines`     | `number`  | `3`     | lines to scroll per wheel event                  |
 
 ## License
 

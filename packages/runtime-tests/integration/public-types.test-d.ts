@@ -2,7 +2,7 @@
 //
 // vue-tui tracks Ink, and Ink re-exports its component prop types and a couple of
 // framework-neutral data shapes under stable names. These names (BoxProps, TextProps,
-// ScrollBoxProps, …, WindowSize, CursorPosition) have nothing to do with React vs Vue — a <Box> has
+// …, WindowSize, CursorPosition) have nothing to do with React vs Vue — a <Box> has
 // props in Vue exactly as in React — so vue-tui re-exports them too, letting consumers
 // name a component's props the same way they would in Ink. This is parity, not a
 // divergence, so it is deliberately absent from `.agents/docs/ink-divergences.md` (which
@@ -17,7 +17,6 @@ import { useApp, useInput, usePaste, useStdin, useStdout, useStderr } from "@vue
 import type {
   BoxProps,
   BoxLayoutStyle,
-  ScrollBoxProps,
   TextProps,
   StaticChildren,
   StaticProps,
@@ -47,10 +46,6 @@ expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<string | undefined>()
 expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<ScrollBoxProps["isActive"]>().toEqualTypeOf<boolean | undefined>();
-expectTypeOf<ScrollBoxProps["enableMouse"]>().toEqualTypeOf<boolean | undefined>();
-expectTypeOf<ScrollBoxProps["enableKeyboard"]>().toEqualTypeOf<boolean | undefined>();
-expectTypeOf<ScrollBoxProps["wheelLines"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
 expectTypeOf<StaticProps<string>["items"]>().toEqualTypeOf<string[]>();
 expectTypeOf<StaticProps["style"]>().toEqualTypeOf<StaticStyle | undefined>();

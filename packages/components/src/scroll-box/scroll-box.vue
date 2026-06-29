@@ -1,18 +1,6 @@
 <script setup lang="ts">
-import {
-  computed,
-  inject,
-  onMounted,
-  onUnmounted,
-  shallowRef,
-  watch,
-  type WatchStopHandle,
-} from "vue";
-import Box from "./box.vue";
-import { useBoxMetrics } from "../composables/useBoxMetrics.ts";
-import { useInput, type Key } from "../composables/useInput.ts";
-import { useStdout } from "../composables/useStdout.ts";
-import { AppContextKey } from "../context.ts";
+import { computed, onMounted, onUnmounted, shallowRef, watch, type WatchStopHandle } from "vue";
+import { Box, useBoxMetrics, useInput, useStdin, useStdout, type Key } from "@vue-tui/runtime";
 import { scrollBoxProps } from "./scroll-box-props.ts";
 
 defineOptions({ name: "ScrollBox" });
@@ -27,8 +15,8 @@ const viewportRef = shallowRef<unknown>();
 const contentRef = shallowRef<unknown>();
 const viewport = useBoxMetrics(viewportRef);
 const content = useBoxMetrics(contentRef);
-const appCtx = inject(AppContextKey, null);
 const { stdout } = useStdout();
+const { isRawModeSupported } = useStdin();
 const scrollTop = shallowRef(0);
 const sticky = shallowRef(true);
 const sgrMouseEnabled = shallowRef(false);
@@ -52,7 +40,9 @@ const contentStyle = computed(() => ({
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
 );
-const inputActive = computed(() => props.isActive && (props.enableMouse || props.enableKeyboard));
+const inputActive = computed(
+  () => props.isActive && isRawModeSupported && (props.enableMouse || props.enableKeyboard),
+);
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
@@ -119,7 +109,7 @@ function handleKey(input: string, key: Key): void {
 }
 
 function canWriteMouseMode(): boolean {
-  return Boolean(appCtx?.interactive && stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
+  return Boolean(isRawModeSupported && stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
 }
 
 function setSgrMouseMode(enabled: boolean): void {

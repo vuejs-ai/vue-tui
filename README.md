@@ -117,7 +117,6 @@ createApp(App).mount();
 | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | [`<Box>`](./packages/runtime)       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
 | [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
-| [`<ScrollBox>`](./packages/runtime) | Bounded scroll viewport with mouse-wheel scrolling and sticky-bottom behavior                  |
 | [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
 | [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |
@@ -127,9 +126,10 @@ createApp(App).mount();
 
 The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core.
 
-| Component                            | Description                                                                                |
-| ------------------------------------ | ------------------------------------------------------------------------------------------ |
-| [`<Spinner>`](./packages/components) | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label |
+| Component                              | Description                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [`<ScrollBox>`](./packages/components) | Bounded scroll viewport with mouse-wheel scrolling and sticky-bottom behavior              |
+| [`<Spinner>`](./packages/components)   | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label |
 
 ## Composables (Hooks)
 
