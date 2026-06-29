@@ -117,6 +117,7 @@ createApp(App).mount();
 | ----------------------------------- | ---------------------------------------------------------------------------------------------- |
 | [`<Box>`](./packages/runtime)       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
 | [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
+| [`<ScrollBox>`](./packages/runtime) | Bounded scroll viewport with mouse-wheel scrolling and sticky-bottom behavior                  |
 | [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
 | [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |

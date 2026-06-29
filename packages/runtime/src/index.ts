@@ -1,5 +1,6 @@
 import BoxSfc from "./components/box.vue";
 import TextSfc from "./components/text.vue";
+import ScrollBoxSfc from "./components/scroll-box.vue";
 import StaticSfc from "./components/static.vue";
 import SpacerSfc from "./components/spacer.vue";
 import type { WithChildren } from "./components/with-children.ts";
@@ -19,6 +20,8 @@ export type {
 } from "./components/box-props.ts";
 export const Text = TextSfc as WithChildren<typeof TextSfc>;
 export type { TextProps } from "./components/text-props.ts";
+export const ScrollBox = ScrollBoxSfc as WithChildren<typeof ScrollBoxSfc>;
+export type { ScrollBoxProps } from "./components/scroll-box-props.ts";
 export { default as Newline } from "./components/newline.vue";
 export type { NewlineProps } from "./components/newline-props.ts";
 // Spacer takes no props and no children; the `children?: never` cast makes
