@@ -1,4 +1,4 @@
-const SGR_MOUSE_INPUT = /^\x1b?\[<(\d+);(\d+);(\d+)([mM])$/;
+const SGR_MOUSE_INPUT = /^\x1b\[<(\d+);(\d+);(\d+)([mM])$/;
 const SHIFT_MASK = 4;
 const META_MASK = 8;
 const CTRL_MASK = 16;

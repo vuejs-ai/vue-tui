@@ -172,3 +172,29 @@ test("useMouseInput consumes unsupported SGR mouse events before keyboard input"
 
   app.unmount();
 });
+
+test("useMouseInput does not consume bare CSI-like text", async () => {
+  const mouseEvents: MouseInputEvent[] = [];
+  const keyboardEvents: string[] = [];
+  const App = defineComponent(() => {
+    useMouseInput((event) => mouseEvents.push(event));
+    useInput((input) => keyboardEvents.push(input));
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  stdin.emit("data", "[<64;10;5M");
+  await settle();
+
+  expect(mouseEvents).toEqual([]);
+  expect(keyboardEvents).toEqual(["[<64;10;5M"]);
+
+  app.unmount();
+});
