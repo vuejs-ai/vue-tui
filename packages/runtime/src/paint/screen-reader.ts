@@ -1,4 +1,4 @@
-import Yoga from "yoga-layout";
+import Yoga from "better-yoga-layout";
 import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts";
 import { advancesLineIndex } from "../host/nodes.ts";
 import { sanitizeAnsi } from "./sanitize-ansi.ts";

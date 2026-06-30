@@ -202,6 +202,9 @@ importers:
       ansi-escapes:
         specifier: 'catalog:'
         version: 7.3.0
+      better-yoga-layout:
+        specifier: ^0.2.2
+        version: 0.2.2
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
@@ -238,9 +241,6 @@ importers:
       wrap-ansi:
         specifier: ^10.0.0
         version: 10.0.0
-      yoga-layout:
-        specifier: ^3.1.0
-        version: 3.2.1
     devDependencies:
       '@types/node':
         specifier: ^24.12.4
@@ -1479,6 +1479,9 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
+  better-yoga-layout@0.2.2:
+    resolution: {integrity: sha512-GfqzhMtIFpqWSveHSwgUKCCsq+JAj4Ror5sV1y/+NGtn3FaiUK/apbH+lk7f/Fnpxdk3mONNjaTWN4JdDpc5mg==}
+
   browserslist@4.28.2:
     resolution: {integrity: sha512-48xSriZYYg+8qXna9kwqjIVzuQxi+KYWp2+5nCYnYKPTr0LvD89Jqk2Or5ogxz0NUMfIjhh2lIUX/LyX9B4oIg==}
     engines: {node: ^6 || ^7 || ^8 || ^9 || ^10 || ^11 || ^12 || >=13.7}
@@ -2091,9 +2094,6 @@ packages:
 
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
-
-  yoga-layout@3.2.1:
-    resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
 
 snapshots:
 
@@ -2908,6 +2908,8 @@ snapshots:
 
   baseline-browser-mapping@2.10.32: {}
 
+  better-yoga-layout@0.2.2: {}
+
   browserslist@4.28.2:
     dependencies:
       baseline-browser-mapping: 2.10.32
@@ -3554,5 +3556,3 @@ snapshots:
   ws@8.21.0: {}
 
   yallist@3.1.1: {}
-
-  yoga-layout@3.2.1: {}

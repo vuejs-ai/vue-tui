@@ -2,7 +2,7 @@ import type { Component } from "vue";
 import { shallowRef } from "vue";
 import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
-import Yoga from "yoga-layout";
+import Yoga from "better-yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";

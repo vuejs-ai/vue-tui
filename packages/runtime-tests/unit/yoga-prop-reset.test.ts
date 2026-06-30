@@ -1,10 +1,10 @@
 import { expect, test } from "vite-plus/test";
 // Internal modules not in package exports — import via relative source path,
 // matching the convention in unit/animation-scheduler.sequential.test.ts.
-// NOTE: yoga-layout is a dependency of @vue-tui/runtime, not of runtime-tests,
-// so it cannot be imported here directly. We reference the stable yoga enum
-// values numerically (EDGE_LEFT=0, EDGE_TOP=1, DIRECTION_LTR=1) and inspect the
-// computed layout via the node's own getComputedMargin/Padding.
+// NOTE: better-yoga-layout is a dependency of @vue-tui/runtime, not of
+// runtime-tests, so it cannot be imported here directly. We reference the stable
+// yoga enum values numerically (EDGE_LEFT=0, EDGE_TOP=1, DIRECTION_LTR=1) and
+// inspect the computed layout via the node's own getComputedMargin/Padding.
 import {
   applyYogaProp,
   attachYoga,
@@ -14,7 +14,7 @@ import {
 } from "../../runtime/src/host/yoga.ts";
 import { createBox } from "../../runtime/src/host/nodes.ts";
 
-// yoga-layout YGEnums (generated/YGEnums.ts) — stable values.
+// better-yoga-layout YGEnums (generated/YGEnums.ts) — stable values.
 const EDGE_LEFT = 0;
 const EDGE_TOP = 1;
 const DIRECTION_LTR = 1;
