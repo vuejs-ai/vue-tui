@@ -133,21 +133,22 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 ## Composables (Hooks)
 
-| Composable                   | Description                                                                                                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `useInput(handler, opts?)`   | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection                                                                        |
-| `usePaste(handler, opts?)`   | Handle bracketed paste — receives the pasted `text` as a single event                                                                                        |
-| `useFocus(opts?)`            | Component-level focus — returns `{ isFocused, focus }`                                                                                                       |
-| `useFocusManager()`          | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                                                                                      |
-| `useApp()`                   | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                                                   |
-| `useWindowSize()`            | Reactive terminal dimensions — `{ columns, rows }`                                                                                                           |
-| `useStdin()`                 | Access stdin stream and raw mode control                                                                                                                     |
-| `useStdout()`                | Write directly to stdout                                                                                                                                     |
-| `useStderr()`                | Write directly to stderr                                                                                                                                     |
-| `useBoxMetrics(ref)`         | Measure a `<Box>` via a template ref — reactive `{ width, height, left, top, hasMeasured }` (or `measureElement(el)` for a one-off `{ width, height }` read) |
-| `useCursor()`                | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates                                                                                 |
-| `useIsScreenReaderEnabled()` | Whether a screen reader is active — returns a boolean for adapting accessible output                                                                         |
-| `useAnimation(opts?)`        | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                                                 |
+| Composable                      | Description                                                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `useInput(handler, opts?)`      | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection                                                                        |
+| `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                                               |
+| `usePaste(handler, opts?)`      | Handle bracketed paste — receives the pasted `text` as a single event                                                                                        |
+| `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                                                                                       |
+| `useFocusManager()`             | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                                                                                      |
+| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                                                   |
+| `useWindowSize()`               | Reactive terminal dimensions — `{ columns, rows }`                                                                                                           |
+| `useStdin()`                    | Access stdin stream and raw mode control                                                                                                                     |
+| `useStdout()`                   | Write directly to stdout                                                                                                                                     |
+| `useStderr()`                   | Write directly to stderr                                                                                                                                     |
+| `useBoxMetrics(ref)`            | Measure a `<Box>` via a template ref — reactive `{ width, height, left, top, hasMeasured }` (or `measureElement(el)` for a one-off `{ width, height }` read) |
+| `useCursor()`                   | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates                                                                                 |
+| `useIsScreenReaderEnabled()`    | Whether a screen reader is active — returns a boolean for adapting accessible output                                                                         |
+| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                                                 |
 
 ## Testing
 

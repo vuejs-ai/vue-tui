@@ -9,10 +9,10 @@ such as streaming agent output.
 ## Package placement
 
 - `ScrollBox` lives in `@vue-tui/components`, not `@vue-tui/runtime`.
-- It is built only from the runtime public barrel: `Box`, `useBoxMetrics`, `useInput`,
-  `useStdin`, and `useStdout`.
-- It deliberately does not import `@vue-tui/runtime/internal`; if future behavior needs renderer
-  internals or general mouse decoding, that should surface as runtime work first.
+- It is built only from the runtime public barrel: `Box`, `useBoxMetrics`, `useInput`, and
+  `useMouseInput`.
+- It deliberately does not import `@vue-tui/runtime/internal`; SGR mouse-mode ownership and mouse
+  input decoding live in the runtime public `useMouseInput` capability.
 
 ## Behavior
 
@@ -30,4 +30,5 @@ such as streaming agent output.
 - The viewport and content boxes are measured with `useBoxMetrics`.
 - Scrolling is represented as `scrollTop` state and applied as negative `marginTop` on the inner
   content box while the outer box clips with `overflowY:"hidden"`.
-- SGR mouse mode is toggled only when stdin raw mode is supported and stdout is a live TTY.
+- SGR mouse mode is owned by runtime `useMouseInput`; `ScrollBox` only consumes wheel events and
+  updates its app-managed scroll offset.
