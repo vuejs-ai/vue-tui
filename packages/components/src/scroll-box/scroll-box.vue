@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from "vue";
-import { Box, useBoxMetrics, useInput, useMouseInput, type Key } from "@vue-tui/runtime";
+import { Box, useBoxMetrics, useInput, useMouseInput, useStdin, type Key } from "@vue-tui/runtime";
 import { scrollBoxProps } from "./scroll-box-props.ts";
 
 defineOptions({ name: "ScrollBox" });
@@ -11,6 +11,7 @@ const viewportRef = shallowRef<unknown>();
 const contentRef = shallowRef<unknown>();
 const viewport = useBoxMetrics(viewportRef);
 const content = useBoxMetrics(contentRef);
+const { isRawModeSupported } = useStdin();
 const scrollTop = shallowRef(0);
 const sticky = shallowRef(true);
 
@@ -32,8 +33,8 @@ const contentStyle = computed(() => ({
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
 );
-const mouseActive = computed(() => props.isActive && props.enableMouse);
-const keyboardActive = computed(() => props.isActive && props.enableKeyboard);
+const mouseActive = computed(() => props.isActive && props.enableMouse && isRawModeSupported);
+const keyboardActive = computed(() => props.isActive && props.enableKeyboard && isRawModeSupported);
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
