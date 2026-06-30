@@ -1,6 +1,13 @@
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useMouseInput, type MouseInputEvent } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  createApp,
+  useInput,
+  useMouseInput,
+  type MouseInputEvent,
+} from "@vue-tui/runtime";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
@@ -134,6 +141,34 @@ test("useMouseInput respects isActive", async () => {
   active.value = false;
   await settle();
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+
+  app.unmount();
+});
+
+test("useMouseInput consumes unsupported SGR mouse events before keyboard input", async () => {
+  const mouseEvents: MouseInputEvent[] = [];
+  const keyboardEvents: string[] = [];
+  const App = defineComponent(() => {
+    useMouseInput((event) => mouseEvents.push(event));
+    useInput((input) => keyboardEvents.push(input));
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;10;5M\x1b[<0;10;5m\x1b[<64;10;5M");
+  await settle();
+
+  expect(mouseEvents).toEqual([
+    { type: "wheel", direction: "up", x: 10, y: 5, shift: false, meta: false, ctrl: false },
+  ]);
+  expect(keyboardEvents).toEqual([]);
 
   app.unmount();
 });

@@ -18,7 +18,7 @@ import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
-import { parseMouseInput } from "./io/parse-mouse.ts";
+import { isSgrMouseInput, parseMouseInput } from "./io/parse-mouse.ts";
 import { parseKeypress } from "./io/parse-keypress.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -1879,9 +1879,11 @@ function createStdinController(
         }
       }
     }
-    const mouse = parseMouseInput(input);
-    if (mouse && emitter.listenerCount("mouse") > 0) {
-      emitter.emit("mouse", mouse);
+    if (sgrMouseModeTokens.size > 0 && isSgrMouseInput(input)) {
+      const mouse = parseMouseInput(input);
+      if (mouse && emitter.listenerCount("mouse") > 0) {
+        emitter.emit("mouse", mouse);
+      }
       return;
     }
 
