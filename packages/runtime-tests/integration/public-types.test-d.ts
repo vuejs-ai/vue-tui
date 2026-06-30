@@ -13,7 +13,15 @@
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
 import { shallowRef } from "vue";
-import { useApp, useInput, usePaste, useStdin, useStdout, useStderr } from "@vue-tui/runtime";
+import {
+  useApp,
+  useInput,
+  useMouseInput,
+  usePaste,
+  useStdin,
+  useStdout,
+  useStderr,
+} from "@vue-tui/runtime";
 import type {
   BoxProps,
   BoxLayoutStyle,
@@ -27,6 +35,7 @@ import type {
   NewlineProps,
   SpacerProps,
   Key,
+  MouseInputEvent,
   WindowSize,
   CursorPosition,
   UseAppReturn,
@@ -74,8 +83,9 @@ expectTypeOf<CursorPosition>().toEqualTypeOf<{ x: number; y: number }>();
 // Composable return types: named per VueUse's `UseXReturn` convention, and shape-locked to
 // Ink's public hook returns. useStdin() in particular must expose ONLY Ink's `PublicProps`
 // (stdin/setRawMode/isRawModeSupported) — never the internal raw-mode/paste controller
-// (acquireRawMode/releaseRawMode/setBracketedPasteMode/internal_*), which the framework's
-// own composables reach via inject(StdinContextKey).
+// (acquireRawMode/releaseRawMode/setBracketedPasteMode/acquireSgrMouseMode/
+// releaseSgrMouseMode/internal_*), which the framework's own composables reach via
+// inject(StdinContextKey).
 expectTypeOf<UseStdinReturn>().toEqualTypeOf<{
   readonly stdin: NodeJS.ReadStream;
   readonly setRawMode: (mode: boolean) => void;
@@ -109,3 +119,15 @@ expectTypeOf(inputHandler).toMatchTypeOf<Parameters<typeof useInput>[0]>();
 
 const pasteHandler = shallowRef((_text: string) => {});
 expectTypeOf(pasteHandler).toMatchTypeOf<Parameters<typeof usePaste>[0]>();
+
+expectTypeOf<MouseInputEvent>().toEqualTypeOf<{
+  readonly type: "wheel";
+  readonly direction: "up" | "down";
+  readonly x: number;
+  readonly y: number;
+  readonly shift: boolean;
+  readonly meta: boolean;
+  readonly ctrl: boolean;
+}>();
+const mouseHandler = shallowRef((_event: MouseInputEvent) => {});
+expectTypeOf(mouseHandler).toMatchTypeOf<Parameters<typeof useMouseInput>[0]>();

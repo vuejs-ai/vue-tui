@@ -68,22 +68,23 @@ useInput((input) => {
 
 ## Composables
 
-| Composable                   | Description                                                                                  |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`   | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
-| `useFocus(opts?)`            | Component-level focus — returns `{ isFocused, focus }`                                       |
-| `useFocusManager()`          | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
-| `useApp()`                   | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
-| `useWindowSize()`            | Reactive terminal dimensions — `{ columns, rows }`                                           |
-| `useAnimation(opts?)`        | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
-| `useBoxMetrics(ref)`         | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
-| `measureElement(node)`       | Imperative read of computed `{ width, height }` from a yoga node                             |
-| `useCursor()`                | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
-| `usePaste(handler, opts?)`   | Handle clipboard paste events                                                                |
-| `useStdin()`                 | Access stdin stream and raw mode control                                                     |
-| `useStdout()`                | Write directly to stdout                                                                     |
-| `useStderr()`                | Write directly to stderr                                                                     |
-| `useIsScreenReaderEnabled()` | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
+| Composable                      | Description                                                                                  |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`      | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
+| `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
+| `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
+| `useFocusManager()`             | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
+| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
+| `useWindowSize()`               | Reactive terminal dimensions — `{ columns, rows }`                                           |
+| `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
+| `useBoxMetrics(ref)`            | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
+| `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
+| `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
+| `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
+| `useStdin()`                    | Access stdin stream and raw mode control                                                     |
+| `useStdout()`                   | Write directly to stdout                                                                     |
+| `useStderr()`                   | Write directly to stderr                                                                     |
+| `useIsScreenReaderEnabled()`    | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
 
 ## App Lifecycle
 

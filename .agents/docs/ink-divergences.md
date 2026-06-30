@@ -763,7 +763,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
 - **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useWindowSize`,
-  `useFocus`, `useFocusManager`, `useInput`, `usePaste`, `useCursor`, and
+  `useFocus`, `useFocusManager`, `useInput`, `useMouseInput`, `usePaste`, `useCursor`, and
   `useIsScreenReaderEnabled` **throw** when their context is absent ("... must be called
   inside a vue-tui render tree"). `useBoxMetrics` and `useAnimation` do **not** throw:
   they fall back. `useBoxMetrics` reports zero metrics, and `useAnimation` drives a
