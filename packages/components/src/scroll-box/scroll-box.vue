@@ -1,26 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, shallowRef, watch, type WatchStopHandle } from "vue";
-import { Box, useBoxMetrics, useInput, useStdin, useStdout, type Key } from "@vue-tui/runtime";
+import { computed, shallowRef, watch } from "vue";
+import { Box, useBoxMetrics, useInput, useMouseInput, type Key } from "@vue-tui/runtime";
 import { scrollBoxProps } from "./scroll-box-props.ts";
 
 defineOptions({ name: "ScrollBox" });
 const props = defineProps(scrollBoxProps);
 defineSlots<{ default?: () => unknown }>();
 
-const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
-const SGR_MOUSE_INPUT = /^\[<(\d+);\d+;\d+[mM]$/;
-
 const viewportRef = shallowRef<unknown>();
 const contentRef = shallowRef<unknown>();
 const viewport = useBoxMetrics(viewportRef);
 const content = useBoxMetrics(contentRef);
-const { stdout } = useStdout();
-const { isRawModeSupported } = useStdin();
 const scrollTop = shallowRef(0);
 const sticky = shallowRef(true);
-const sgrMouseEnabled = shallowRef(false);
-let stopMouseModeWatch: WatchStopHandle | undefined;
 
 const viewportStyle = {
   flexDirection: "column",
@@ -40,9 +32,8 @@ const contentStyle = computed(() => ({
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
 );
-const inputActive = computed(
-  () => props.isActive && isRawModeSupported && (props.enableMouse || props.enableKeyboard),
-);
+const mouseActive = computed(() => props.isActive && props.enableMouse);
+const keyboardActive = computed(() => props.isActive && props.enableKeyboard);
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
@@ -70,27 +61,7 @@ function wheelLines(): number {
   return Math.max(1, Math.floor(props.wheelLines));
 }
 
-function handleMouse(input: string): boolean {
-  const match = SGR_MOUSE_INPUT.exec(input);
-  if (!match) return false;
-
-  const button = Number(match[1]);
-  if (button === 64) {
-    scrollBy(-wheelLines());
-    return true;
-  }
-  if (button === 65) {
-    scrollBy(wheelLines());
-    return true;
-  }
-  return true;
-}
-
-function handleKey(input: string, key: Key): void {
-  if (!props.isActive) return;
-  if (props.enableMouse && handleMouse(input)) return;
-  if (!props.enableKeyboard) return;
-
+function handleKey(_input: string, key: Key): void {
   if (key.pageUp) {
     scrollBy(-pageSize());
     return;
@@ -108,24 +79,13 @@ function handleKey(input: string, key: Key): void {
   }
 }
 
-function canWriteMouseMode(): boolean {
-  return Boolean(isRawModeSupported && stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
-}
-
-function setSgrMouseMode(enabled: boolean): void {
-  if (enabled) {
-    if (sgrMouseEnabled.value || !canWriteMouseMode()) return;
-    stdout.write(ENABLE_SGR_MOUSE);
-    sgrMouseEnabled.value = true;
-    return;
-  }
-
-  if (!sgrMouseEnabled.value) return;
-  sgrMouseEnabled.value = false;
-  if (canWriteMouseMode()) stdout.write(DISABLE_SGR_MOUSE);
-}
-
-useInput(handleKey, { isActive: inputActive });
+useMouseInput(
+  (event) => {
+    scrollBy(event.direction === "up" ? -wheelLines() : wheelLines());
+  },
+  { isActive: mouseActive },
+);
+useInput(handleKey, { isActive: keyboardActive });
 
 watch(
   () => [content.height.value, viewport.height.value, maxScroll.value] as const,
@@ -135,19 +95,6 @@ watch(
   },
   { flush: "sync" },
 );
-
-onMounted(() => {
-  stopMouseModeWatch = watch(
-    () => props.isActive && props.enableMouse,
-    (enabled) => setSgrMouseMode(enabled),
-    { immediate: true, flush: "sync" },
-  );
-});
-
-onUnmounted(() => {
-  stopMouseModeWatch?.();
-  setSgrMouseMode(false);
-});
 </script>
 
 <template>
