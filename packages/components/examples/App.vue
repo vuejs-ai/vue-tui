@@ -1,24 +1,19 @@
 <template>
-  <Table :data="rows">
-    <template #header="{ column }">
-      <Text color="yellow" bold>{{ getColumnCnName(column) }}</Text>
-    </template>
-  </Table>
+  <Table :data="rows" :columns="columns"> </Table>
 </template>
 
 <script setup lang="ts">
-import { Text } from "@vue-tui/runtime";
-import { Table } from "@vue-tui/components";
-
-const rows = [{ name: "黎明", age: 18 }];
-
-const getColumnCnName = (rawKey: string) => {
-  if (rawKey === "name") {
-    return "姓名";
-  }
-  if (rawKey === "age") {
-    return "年龄";
-  }
-  return rawKey;
-};
+import { Table, defineColumns } from "@vue-tui/components";
+const rows = [{ name: "Michael Jackson", age: 18 }];
+const columns = defineColumns([
+  {
+    label: "姓名",
+    key: "name",
+    align: "center",
+  },
+  {
+    label: "年龄",
+    key: "age",
+  },
+]);
 </script>
