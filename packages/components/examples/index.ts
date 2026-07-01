@@ -1,4 +1,5 @@
-import { createApp } from "@vue-tui/runtime";
+import { renderToString } from "@vue-tui/runtime";
 import App from "./App.vue";
 
-createApp(App).mount();
+const html = renderToString(App);
+console.log(html);

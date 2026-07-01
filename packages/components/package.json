@@ -19,6 +19,7 @@
   "scripts": {
     "build": "vp pack",
     "dev": "vp pack --watch",
+    "dev:example": "vp pack && (vp pack --no-clean --watch & vp pack examples/index.ts -d dist-example --no-clean --no-exports --watch)",
     "test": "vp test",
     "check:type": "vue-tsc --noEmit",
     "prepublishOnly": "vp run build"
@@ -40,5 +41,14 @@
   "peerDependencies": {
     "@vue-tui/runtime": "workspace:^",
     "vue": "^3.4.0"
+  },
+  "inlinedDependencies": {
+    "@vue/reactivity": "3.5.34",
+    "@vue/runtime-core": "3.5.34",
+    "@vue/shared": "3.5.34",
+    "ansi-regex": "6.2.2",
+    "get-east-asian-width": "1.6.0",
+    "string-width": "8.2.1",
+    "strip-ansi": "7.2.0"
   }
 }
