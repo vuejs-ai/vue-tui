@@ -7,10 +7,10 @@ export const scrollBoxProps = {
    * (users bypass with Shift).
    */
   wheel: Boolean,
-  /** Enable keyboard scrolling (PageUp / PageDown, Ctrl|Meta+Home / End). */
+  /** Enable keyboard scrolling (PageUp / PageDown). */
   keyboard: Boolean,
   /** Lines to scroll per wheel event. */
-  wheelLines: { type: Number, default: 3 },
+  linesPerWheel: { type: Number, default: 3 },
 };
 
 /** Props accepted by `<ScrollBox>`. */

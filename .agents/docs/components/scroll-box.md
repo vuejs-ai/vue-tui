@@ -22,9 +22,9 @@ such as streaming agent output.
 - Sticky-bottom is the core semantic: while sticky, content growth follows the bottom; after the
   user scrolls up, content growth preserves the current viewport instead of jumping to the latest
   output.
-- Keyboard scrolling (`PageUp` / `PageDown` / `Ctrl|Meta+Home` / `Ctrl|Meta+End`) is opt-in via
+- Keyboard scrolling (`PageUp` / `PageDown`) is opt-in via
   `keyboard` (default `false`).
-- `wheelLines` (default `3`) sets how many lines each wheel event scrolls.
+- `linesPerWheel` (default `3`) sets how many lines each wheel event scrolls.
 - `renderToString()` must not emit SGR mouse-mode sequences.
 
 ## Input routing

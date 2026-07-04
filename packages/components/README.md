@@ -56,11 +56,11 @@ import { Text } from "@vue-tui/runtime";
 
 ### Props
 
-| prop         | type      | default | description                                            |
-| ------------ | --------- | ------- | ------------------------------------------------------ |
-| `wheel`      | `boolean` | `false` | enable mouse-wheel scrolling (turns on mouse tracking) |
-| `keyboard`   | `boolean` | `false` | enable PageUp/PageDown/Home/End scrolling              |
-| `wheelLines` | `number`  | `3`     | lines to scroll per wheel event                        |
+| prop            | type      | default | description                                            |
+| --------------- | --------- | ------- | ------------------------------------------------------ |
+| `wheel`         | `boolean` | `false` | enable mouse-wheel scrolling (turns on mouse tracking) |
+| `keyboard`      | `boolean` | `false` | enable PageUp/PageDown scrolling                       |
+| `linesPerWheel` | `number`  | `3`     | lines to scroll per wheel event                        |
 
 ## License
 

@@ -50,16 +50,12 @@ function scrollBy(delta: number): void {
   scrollTo(scrollTop.value + delta);
 }
 
-function scrollToBottom(): void {
-  scrollTo(maxScroll.value, true);
-}
-
 function pageSize(): number {
   return Math.max(1, Math.floor(Math.max(1, viewport.height.value) / 2));
 }
 
-function wheelLines(): number {
-  return Math.max(1, Math.floor(props.wheelLines));
+function linesPerWheel(): number {
+  return Math.max(1, Math.floor(props.linesPerWheel));
 }
 
 function handleKey(_input: string, key: Key): void {
@@ -69,20 +65,12 @@ function handleKey(_input: string, key: Key): void {
   }
   if (key.pageDown) {
     scrollBy(pageSize());
-    return;
-  }
-  if (key.home && (key.ctrl || key.meta)) {
-    scrollTo(0);
-    return;
-  }
-  if (key.end && (key.ctrl || key.meta)) {
-    scrollToBottom();
   }
 }
 
 useMouseInput(
   (event) => {
-    scrollBy(event.direction === "up" ? -wheelLines() : wheelLines());
+    scrollBy(event.direction === "up" ? -linesPerWheel() : linesPerWheel());
   },
   { isActive: wheelActive },
 );

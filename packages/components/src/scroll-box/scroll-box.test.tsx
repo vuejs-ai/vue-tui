@@ -6,6 +6,10 @@ import { Box, Text, createApp } from "@vue-tui/runtime";
 import { ScrollBox } from "../index.ts";
 
 const WHEEL_UP = "\x1b[<64;1;1M";
+// Escape sequences parseKeypress maps to pageUp/pageDown/home/end
+// (see packages/runtime/src/io/parse-keypress.ts and the use-input tests).
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
 
 function messages(count: number): string[] {
   return Array.from({ length: count }, (_, index) => `message ${index}`);
@@ -107,6 +111,38 @@ test("ScrollBox keeps the viewport detached after mouse wheel scroll while conte
     const updatedFrame = result.lastFrame()!;
     expect(updatedFrame).toContain(anchor);
     expect(updatedFrame).not.toContain("streaming latest");
+  } finally {
+    result.unmount();
+  }
+});
+
+test("ScrollBox scrolls with keyboard paging", async () => {
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox keyboard>
+          {messages(12).map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    // Sticky at the bottom: the last message is visible.
+    expect(result.lastFrame()).toContain("message 11");
+
+    // PageUp scrolls up, so the last message leaves the viewport.
+    await result.stdin.write(PAGE_UP);
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).not.toContain("message 11");
+
+    // PageDown scrolls back down to the bottom.
+    await result.stdin.write(PAGE_DOWN);
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toContain("message 11");
   } finally {
     result.unmount();
   }
