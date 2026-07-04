@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/vite",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Vite plugin for vue-tui: in-process terminal dev server with HMR + production build.",
   "license": "MIT",
   "files": [
@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": {
+      "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
     }
   },
@@ -24,11 +25,9 @@
     "check:type": "tsc --noEmit",
     "prepublishOnly": "vp run build"
   },
-  "dependencies": {
-    "@vitejs/plugin-vue": "^6"
-  },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^6",
     "@vitejs/plugin-vue-jsx": "catalog:",
     "@vue-tui/runtime": "workspace:*",
     "typescript": "^6.0.3",
@@ -36,10 +35,14 @@
     "vue": "^3.4.0"
   },
   "peerDependencies": {
+    "@vitejs/plugin-vue": "^6",
     "@vue-tui/runtime": "workspace:^",
     "vite": "^8"
   },
   "peerDependenciesMeta": {
+    "@vitejs/plugin-vue": {
+      "optional": true
+    },
     "vite": {
       "optional": true
     }

@@ -18,6 +18,7 @@ import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
+import { isSgrMouseInput, parseMouseInput } from "./io/parse-mouse.ts";
 import { parseKeypress } from "./io/parse-keypress.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -46,6 +47,7 @@ import {
   devState,
   DevStateKey,
   isDevConnected,
+  notifyDevExit,
   registerDevApp,
   resetDevState,
   unregisterDevApp,
@@ -1292,21 +1294,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Vite dev server, which holds the event loop open (ports, watchers, the
       // module runner). When the app genuinely exits (useApp().exit(),
       // waitUntilExit() drain, error exit) the exit promise settles; signal the
-      // dev plugin so it can close the server and let the process exit cleanly.
-      // A full reload tears down via teardown() above and never settles this
-      // promise, so it cannot reach here.
-      //
-      // Snapshot the hook NOW (at mount), not at exit time. The dev plugin sets it
-      // per-server during configureServer (before mount), so at mount it is THIS
-      // server's hook; reading it at exit — potentially much later — would instead
-      // pick up whichever server last wrote the process-global slot (the same
-      // capture-at-mount discipline the __VT_TEST_STDOUT__ seam already relies on).
-      const devExitHook = (globalThis as { __VUE_TUI_TEARDOWN__?: () => void })
-        .__VUE_TUI_TEARDOWN__;
+      // dev plugin over the in-process hot channel (notifyDevExit → the plugin's
+      // ssr.hot listener closes the server) so the process exits cleanly. A full
+      // reload tears down via teardown() above and never settles this promise, so
+      // it cannot reach here. The hot channel routes to THIS app's connected server
+      // (bridgedHot), so there's no cross-server ambiguity — no process-global.
       // .finally derives a NEW promise that re-rejects on an error-exit; .catch it
       // so that chain can't surface as an unhandled rejection (the original
       // exitPromise is already .catch()-guarded above).
-      void exitPromise.finally(() => devExitHook?.()).catch(() => {});
+      void exitPromise.finally(() => notifyDevExit()).catch(() => {});
     }
 
     // Wire exit-with-error for the error boundary (must be set before mount).
@@ -1792,20 +1788,46 @@ function createStdinController(
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
   const FLUSH_DELAY = 20; // ms, matching Ink
   let bracketedPasteModeCount = 0;
+  const sgrMouseModeTokens = new Set<symbol>();
 
   // True once bracketed paste has been enabled at least once on this controller
   // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
   // paste-OFF even after Vue's unmount already ran the async disable and zeroed
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
+  let everEnabledSgrMouse = false;
 
-  // Write the bracketed-paste-disable escape only when stdout can still take it.
+  const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
+  const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
+
+  // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
-  // the paste-OFF write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
+  // the restore write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
   // where stdout is already gone. Mirror Ink's `canWriteToStdout` guard
   // (App.tsx:620/633-635): isTTY AND `!destroyed && !writableEnded`. Matches the
   // render-level writeBestEffort helper, which isn't in this function's scope.
-  //
+  function canWriteTerminalMode(): boolean {
+    const stdout = appCtx.stdout;
+    return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
+  }
+
+  function writeTerminalMode(data: string, sync = false): void {
+    if (!canWriteTerminalMode()) return;
+    const stdout = appCtx.stdout;
+    if (sync) {
+      try {
+        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
+        const streamFd = (stdout as { fd?: number }).fd;
+        const fd = typeof streamFd === "number" ? streamFd : 1;
+        fsWriteSync(fd, data);
+      } catch {
+        // Best-effort restore during abrupt shutdown.
+      }
+      return;
+    }
+    stdout.write(data);
+  }
+
   // sync (Finding A): on the signal-exit path signal-exit re-raises the signal
   // IMMEDIATELY after the teardown callback returns (`{alwaysLast:false}`), so a
   // buffered async `stdout.write` of `\x1b[?2004l` (CSI ? 2004 l — bracketed-
@@ -1815,20 +1837,11 @@ function createStdinController(
   // / leave-alt-screen / disable-kitty restores. Falls back to fd 1 when the
   // stream has no numeric fd.
   function disableBracketedPaste(sync = false) {
-    const stdout = appCtx.stdout;
-    if (!stdout.isTTY || stdout.destroyed || stdout.writableEnded) return;
-    if (sync) {
-      try {
-        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
-        const streamFd = (stdout as { fd?: number }).fd;
-        const fd = typeof streamFd === "number" ? streamFd : 1;
-        fsWriteSync(fd, "\x1b[?2004l");
-      } catch {
-        // Best-effort restore during abrupt shutdown.
-      }
-      return;
-    }
-    stdout.write("\x1b[?2004l");
+    writeTerminalMode("\x1b[?2004l", sync);
+  }
+
+  function disableSgrMouse(sync = false) {
+    writeTerminalMode(DISABLE_SGR_MOUSE, sync);
   }
 
   function clearPendingFlush() {
@@ -1866,6 +1879,14 @@ function createStdinController(
         }
       }
     }
+    if (sgrMouseModeTokens.size > 0 && isSgrMouseInput(input)) {
+      const mouse = parseMouseInput(input);
+      if (mouse && emitter.listenerCount("mouse") > 0) {
+        emitter.emit("mouse", mouse);
+      }
+      return;
+    }
+
     // Esc resets focus when focus is enabled
     if (input === "\x1b" && focusContext.enabled) {
       focusContext.blur();
@@ -2073,6 +2094,21 @@ function createStdinController(
         }
       }
     },
+    acquireSgrMouseMode() {
+      const token = Symbol("sgr-mouse");
+      if (sgrMouseModeTokens.size === 0) {
+        writeTerminalMode(ENABLE_SGR_MOUSE);
+        everEnabledSgrMouse = true;
+      }
+      sgrMouseModeTokens.add(token);
+      return token;
+    },
+    releaseSgrMouseMode(token: symbol) {
+      if (!sgrMouseModeTokens.delete(token)) return;
+      if (sgrMouseModeTokens.size === 0) {
+        disableSgrMouse();
+      }
+    },
     releaseRawMode() {
       if (!appCtx.isRawModeSupported) return;
       if (localRefs === 0) return;
@@ -2137,10 +2173,19 @@ function createStdinController(
         if (everEnabledBracketedPaste) {
           disableBracketedPaste(true);
         }
-      } else if (bracketedPasteModeCount > 0) {
-        disableBracketedPaste();
+        if (everEnabledSgrMouse) {
+          disableSgrMouse(true);
+        }
+      } else {
+        if (bracketedPasteModeCount > 0) {
+          disableBracketedPaste();
+        }
+        if (sgrMouseModeTokens.size > 0) {
+          disableSgrMouse();
+        }
       }
       bracketedPasteModeCount = 0;
+      sgrMouseModeTokens.clear();
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already

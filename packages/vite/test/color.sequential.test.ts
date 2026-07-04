@@ -18,6 +18,7 @@
 import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitFor } from "./helpers.ts";
 
@@ -37,7 +38,12 @@ afterEach(async () => {
 
 test("#214: dev-mode <Text color> emits real ANSI color", async () => {
   const read = capture();
-  server = await createServer({ root, logLevel: "silent", configFile: false, plugins: vueTui() });
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: [vue(), vueTui()],
+  });
   await server.listen();
   await waitFor(read, "COLORTEST");
   // Asserting the SGR (not just the text) is what distinguishes the fix from #214 — under the

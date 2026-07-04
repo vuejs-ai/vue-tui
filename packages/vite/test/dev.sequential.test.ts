@@ -13,6 +13,7 @@ import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitFor } from "./helpers.ts";
 
@@ -34,7 +35,7 @@ test("boots the app in-process and renders a frame", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: vueTui(),
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "LABEL-A");
@@ -47,7 +48,7 @@ test("template-only edit hot-swaps with state preserved (no reload)", async () =
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: vueTui(),
+    plugins: [vue(), vueTui()],
   });
   await server.listen();
   await waitFor(read, "count=3"); // let the counter tick

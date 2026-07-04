@@ -27,7 +27,7 @@ test("JSX (.tsx) components render in the in-process dev server", async () => {
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: [vueTui({ entry: "/src/main.tsx" }), vueJsx()],
+    plugins: [vueJsx(), vueTui({ entry: "/src/main.tsx" })],
   });
   await server.listen();
   await waitFor(read, "JSX-LABEL");

@@ -12,6 +12,7 @@ import { test, expect, afterEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitUntil } from "./helpers.ts";
 
@@ -28,7 +29,6 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(mainTs, origMain);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
-  delete (globalThis as Record<string, unknown>).__VUE_TUI_TEARDOWN__;
 });
 
 // Parse the `count=N` values from a captured chunk, in emit order.
@@ -38,7 +38,12 @@ function counts(chunk: string): number[] {
 
 test("an entry-level (non-HMR) change restarts the app in-process with no zombie", async () => {
   const read = capture();
-  server = await createServer({ root, logLevel: "silent", configFile: false, plugins: vueTui() });
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: [vue(), vueTui()],
+  });
   await server.listen();
 
   // Let the original app boot and tick a few times.
@@ -100,7 +105,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
     root,
     logLevel: "silent",
     configFile: false,
-    plugins: vueTui(),
+    plugins: [vue(), vueTui()],
     ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
     server: { middlewareMode: true },
   });
@@ -145,7 +150,7 @@ test("a genuine app exit closes the in-process dev server", async () => {
     root: exitRoot,
     logLevel: "silent",
     configFile: false,
-    plugins: vueTui(),
+    plugins: [vue(), vueTui()],
   });
   // Spy on close so we can detect the runtime-driven teardown. dev.ts captured
   // `server` and calls server.close() at exit time, so it sees this wrapper.
@@ -158,8 +163,8 @@ test("a genuine app exit closes the in-process dev server", async () => {
   await server.listen();
 
   await waitUntil(() => read().includes("EXIT-FIXTURE"));
-  // The app calls useApp().exit() ~50ms after mount; the runtime then invokes the
-  // dev plugin's __VUE_TUI_TEARDOWN__ hook, which closes the server.
+  // The app calls useApp().exit() ~50ms after mount; the runtime then emits
+  // "vue-tui:exit" over the hot channel and the dev plugin's listener closes the server.
   await waitUntil(() => closed);
   expect(closed).toBe(true);
 });

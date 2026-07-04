@@ -154,6 +154,16 @@ export function connectDevtools(hot: HotContext): void {
   initHmrBridge(hot);
 }
 
+// Signal the @vue-tui/vite dev plugin that the app has GENUINELY exited
+// (useApp().exit(), waitUntilExit() drain, error exit) so it can close the dev
+// server that holds the event loop open. Sent over the SAME in-process hot channel
+// as the rest of the dev bridge — no process-global. A full reload tears down via
+// the beforeFullReload handler WITHOUT settling the exit promise, so this only
+// fires on a real exit. No-ops when dev isn't connected (bridgedHot is undefined).
+export function notifyDevExit(): void {
+  bridgedHot?.send("vue-tui:exit");
+}
+
 // Reset the shared dev status to "ok". `devState` is a module-global that a
 // PREVIOUS app in the same dev process may have left in an error/update state
 // (createApp() can run multiple times: two apps, unmount + re-create, a tool

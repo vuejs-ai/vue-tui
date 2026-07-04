@@ -50,6 +50,8 @@ export interface StdinContext {
   acquireRawMode: () => void;
   releaseRawMode: () => void;
   setBracketedPasteMode: (enabled: boolean) => void;
+  acquireSgrMouseMode: () => symbol;
+  releaseSgrMouseMode: (token: symbol) => void;
 }
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");

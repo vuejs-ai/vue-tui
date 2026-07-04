@@ -27,6 +27,7 @@ const PUBLIC_VALUE_EXPORTS = [
   "useFocusManager",
   "useInput",
   "useIsScreenReaderEnabled",
+  "useMouseInput",
   "usePaste",
   "useStderr",
   "useStdin",
