@@ -1,0 +1,22 @@
+{
+  "name": "@vue-tui/example-scroll-box",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite build && node dist/main.js"
+  },
+  "dependencies": {
+    "@vue-tui/components": "workspace:*",
+    "@vue-tui/runtime": "workspace:*",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^6",
+    "@vue-tui/vite": "workspace:*",
+    "vite": "catalog:"
+  }
+}
