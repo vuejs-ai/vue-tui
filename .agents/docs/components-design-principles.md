@@ -45,8 +45,9 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
   expose.
 
 Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
-input decoding lives in the runtime, and it is currently absent (#207) — whereas anything driven
-by existing keyboard input plus measured layout is a pure composition. (`overflow:"hidden"`
+input decoding lives in the runtime (`useMouseInput`, added in #237; wider mouse support
+still tracked in #207) — whereas anything driven by existing keyboard input plus measured
+layout is a pure composition. (`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
 
