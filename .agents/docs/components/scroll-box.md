@@ -16,14 +16,23 @@ such as streaming agent output.
 
 ## Behavior
 
-- Mouse-wheel scrolling is enabled by default because it is the natural way users browse terminal
-  history.
+- Mouse-wheel scrolling is opt-in via `wheel` (default `false`). Enabling it turns on terminal
+  mouse tracking, which suppresses the terminal's native text selection window-wide (users bypass
+  with Shift) — so it defaults off rather than on.
 - Sticky-bottom is the core semantic: while sticky, content growth follows the bottom; after the
   user scrolls up, content growth preserves the current viewport instead of jumping to the latest
   output.
-- Keyboard scrolling (`PageUp` / `PageDown` / `Ctrl|Meta+Home` / `Ctrl|Meta+End`) is optional via
-  `enableKeyboard`.
+- Keyboard scrolling (`PageUp` / `PageDown` / `Ctrl|Meta+Home` / `Ctrl|Meta+End`) is opt-in via
+  `keyboard` (default `false`).
+- `wheelLines` (default `3`) sets how many lines each wheel event scrolls.
 - `renderToString()` must not emit SGR mouse-mode sequences.
+
+## Input routing
+
+Wheel and keyboard input are global and gated per-input-type by the `wheel` and `keyboard` props;
+there is no built-in pointer routing. With multiple `<ScrollBox>`es on screen, the app decides
+which one responds by binding `wheel` / `keyboard` to app state (e.g. the focused pane) rather than
+enabling every box at once.
 
 ## Implementation notes
 

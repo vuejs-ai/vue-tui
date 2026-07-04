@@ -80,7 +80,7 @@ test("ScrollBox keeps the viewport detached after mouse wheel scroll while conte
   const App = defineComponent(() => {
     return () => (
       <Box height={4} width={20}>
-        <ScrollBox>
+        <ScrollBox wheel>
           {items.value.map((item) => (
             <Text key={item}>{item}</Text>
           ))}
@@ -115,7 +115,7 @@ test("ScrollBox keeps the viewport detached after mouse wheel scroll while conte
 test("ScrollBox does not acquire raw mode when stdin does not support it", async () => {
   const App = defineComponent(() => {
     return () => (
-      <ScrollBox>
+      <ScrollBox wheel keyboard>
         <Text>content</Text>
       </ScrollBox>
     );

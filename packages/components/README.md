@@ -38,9 +38,8 @@ import { Spinner } from "@vue-tui/components";
 
 ## ScrollBox
 
-A bounded scroll viewport for long, updating content. Mouse-wheel scrolling is enabled by
-default, and sticky-bottom behavior keeps streaming output at the bottom only until the user
-scrolls up.
+A bounded scroll viewport for long, updating content. Opt into mouse-wheel scrolling with `wheel`,
+and sticky-bottom behavior keeps streaming output at the bottom only until the user scrolls up.
 
 ```vue
 <script setup lang="ts">
@@ -57,12 +56,11 @@ import { Text } from "@vue-tui/runtime";
 
 ### Props
 
-| prop             | type      | default | description                                      |
-| ---------------- | --------- | ------- | ------------------------------------------------ |
-| `isActive`       | `boolean` | `true`  | whether input handling is active                 |
-| `enableMouse`    | `boolean` | `true`  | whether to enable SGR mouse-wheel scrolling      |
-| `enableKeyboard` | `boolean` | `false` | whether PageUp/PageDown/Home/End scrolling works |
-| `wheelLines`     | `number`  | `3`     | lines to scroll per wheel event                  |
+| prop         | type      | default | description                                            |
+| ------------ | --------- | ------- | ------------------------------------------------------ |
+| `wheel`      | `boolean` | `false` | enable mouse-wheel scrolling (turns on mouse tracking) |
+| `keyboard`   | `boolean` | `false` | enable PageUp/PageDown/Home/End scrolling              |
+| `wheelLines` | `number`  | `3`     | lines to scroll per wheel event                        |
 
 ## License
 

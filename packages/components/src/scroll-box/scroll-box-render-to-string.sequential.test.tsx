@@ -17,7 +17,7 @@ test("ScrollBox does not enable mouse mode during renderToString", () => {
   try {
     const App = defineComponent(() => {
       return () => (
-        <ScrollBox>
+        <ScrollBox wheel>
           <Text>content</Text>
         </ScrollBox>
       );

@@ -33,8 +33,8 @@ const contentStyle = computed(() => ({
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
 );
-const mouseActive = computed(() => props.isActive && props.enableMouse && isRawModeSupported);
-const keyboardActive = computed(() => props.isActive && props.enableKeyboard && isRawModeSupported);
+const wheelActive = computed(() => props.wheel && isRawModeSupported);
+const keyboardActive = computed(() => props.keyboard && isRawModeSupported);
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
@@ -84,7 +84,7 @@ useMouseInput(
   (event) => {
     scrollBy(event.direction === "up" ? -wheelLines() : wheelLines());
   },
-  { isActive: mouseActive },
+  { isActive: wheelActive },
 );
 useInput(handleKey, { isActive: keyboardActive });
 
