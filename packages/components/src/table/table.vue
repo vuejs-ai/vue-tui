@@ -1,133 +1,38 @@
-<template>
-  <Box flexDirection="column">
-    <template v-for="row in allRows" :key="row.key">
-      <!-- ===== Border row (top / separator / bottom) ===== -->
-      <Box v-if="row.type === 'border'" flexDirection="row">
-        <!-- Left edge -->
-        <slot name="skeleton" :text="row.left" :kind="row.kind" :part="'left'">
-          <Text bold>{{ row.left }}</Text>
-        </slot>
-
-        <!-- Columns with interspersed crosses -->
-        <template v-for="(column, idx) in tableColumns" :key="`${row.key}-line-${idx}`">
-          <slot
-            name="skeleton"
-            :text="row.line.repeat(column.width)"
-            :kind="row.kind"
-            :part="'line'"
-          >
-            <Text bold>{{ row.line.repeat(column.width) }}</Text>
-          </slot>
-          <slot
-            v-if="idx < tableColumns.length - 1"
-            name="skeleton"
-            :text="row.cross"
-            :kind="row.kind"
-            :part="'cross'"
-          >
-            <Text bold>{{ row.cross }}</Text>
-          </slot>
-        </template>
-
-        <!-- Right edge -->
-        <slot name="skeleton" :text="row.right" :kind="row.kind" :part="'right'">
-          <Text bold>{{ row.right }}</Text>
-        </slot>
-      </Box>
-
-      <!-- ===== Content row (header / data) ===== -->
-      <Box v-else flexDirection="row">
-        <!-- Left border -->
-        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'left'">
-          <Text bold>│</Text>
-        </slot>
-
-        <!-- Cells with interspersed separators -->
-        <template v-for="(cell, idx) in row.cells" :key="`${row.key}-cell-${idx}`">
-          <!-- Header cell -->
-          <Box v-if="cell.type === 'header'" :width="cell.column.width">
-            <slot
-              name="header"
-              :text="cell.text"
-              :column="cell.column.config"
-              :column-index="cell.columnIndex"
-              :width="cell.column.width"
-            >
-              <Text v-if="cell.hasFormatter">{{ cell.text }}</Text>
-              <Text v-else bold color="blue">{{ cell.text }}</Text>
-            </slot>
-          </Box>
-
-          <!-- Data cell -->
-          <Box v-else :width="cell.column.width">
-            <slot
-              name="cell"
-              :text="cell.text"
-              :value="cell.value"
-              :column="cell.column.config"
-              :column-index="cell.columnIndex"
-              :width="cell.column.width"
-              :row="cell.row"
-              :row-index="cell.rowIndex"
-            >
-              <Text>{{ cell.text }}</Text>
-            </slot>
-          </Box>
-
-          <!-- Separator between cells (skip after last) -->
-          <slot
-            v-if="idx < row.cells.length - 1"
-            name="skeleton"
-            :text="'│'"
-            :kind="row.kind"
-            :part="'cross'"
-          >
-            <Text bold>│</Text>
-          </slot>
-        </template>
-
-        <!-- Right border -->
-        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'right'">
-          <Text bold>│</Text>
-        </slot>
-      </Box>
-    </template>
-  </Box>
-</template>
-
 <script setup lang="ts">
 import { computed } from "vue";
 import { Box, Text } from "@vue-tui/runtime";
 import stringWidth from "string-width";
+import { tableProps, type ColumnConfig, type Scalar, type ScalarDict } from "./table-props.ts";
+
+defineOptions({ name: "Table" });
+const props = defineProps(tableProps);
+
+defineSlots<{
+  skeleton?: (props: {
+    text: string;
+    kind: "top" | "header" | "separator" | "data" | "bottom";
+    part: "left" | "line" | "cross" | "right";
+  }) => unknown;
+  header?: (props: {
+    text: string;
+    column: ColumnConfig;
+    columnIndex: number;
+    width: number;
+  }) => unknown;
+  cell?: (props: {
+    text: string;
+    value: Scalar;
+    column: ColumnConfig;
+    columnIndex: number;
+    width: number;
+    row: ScalarDict;
+    rowIndex: number;
+  }) => unknown;
+}>();
 
 // =========================================================================
 // Internal types
 // =========================================================================
-
-/** A single cell value in a table data row. */
-type Scalar = string | number | boolean | null | undefined;
-
-/** A dictionary of scalar values representing one row of table data. */
-type ScalarDict = Record<string, Scalar>;
-
-/** Alignment of cell content within a table column. */
-type ColumnAlign = "left" | "center" | "right";
-
-/** Configuration for a single table column. */
-interface ColumnConfig {
-  /** Display name shown in the header row. */
-  label: string;
-  /** Key used to look up values from each data row. */
-  key: string;
-  /** Horizontal alignment of cell content. Defaults to `"left"`. */
-  align?: ColumnAlign;
-  /**
-   * Optional formatter that receives this column's config and returns a
-   * formatted string. Applied to header text (replacing the default bold-blue
-   * rendering) and to each data cell's string value.
-   */
-  formatter?: (column: ColumnConfig) => string;
-}
 
 type Column = {
   key: string;
@@ -175,21 +80,6 @@ type ContentRow = {
 };
 
 type TableRow = BorderRow | ContentRow;
-
-// =========================================================================
-// Props
-// =========================================================================
-
-const props = withDefaults(
-  defineProps<{
-    data: ScalarDict[];
-    columns?: ColumnConfig[];
-    padding?: number;
-  }>(),
-  {
-    padding: 1,
-  },
-);
 
 // =========================================================================
 // Helpers
@@ -375,3 +265,100 @@ const allRows = computed<TableRow[]>(() => [
   } as BorderRow,
 ]);
 </script>
+
+<template>
+  <Box flexDirection="column">
+    <template v-for="row in allRows" :key="row.key">
+      <!-- ===== Border row (top / separator / bottom) ===== -->
+      <Box v-if="row.type === 'border'" flexDirection="row">
+        <!-- Left edge -->
+        <slot name="skeleton" :text="row.left" :kind="row.kind" :part="'left'">
+          <Text bold>{{ row.left }}</Text>
+        </slot>
+
+        <!-- Columns with interspersed crosses -->
+        <template v-for="(column, idx) in tableColumns" :key="`${row.key}-line-${idx}`">
+          <slot
+            name="skeleton"
+            :text="row.line.repeat(column.width)"
+            :kind="row.kind"
+            :part="'line'"
+          >
+            <Text bold>{{ row.line.repeat(column.width) }}</Text>
+          </slot>
+          <slot
+            v-if="idx < tableColumns.length - 1"
+            name="skeleton"
+            :text="row.cross"
+            :kind="row.kind"
+            :part="'cross'"
+          >
+            <Text bold>{{ row.cross }}</Text>
+          </slot>
+        </template>
+
+        <!-- Right edge -->
+        <slot name="skeleton" :text="row.right" :kind="row.kind" :part="'right'">
+          <Text bold>{{ row.right }}</Text>
+        </slot>
+      </Box>
+
+      <!-- ===== Content row (header / data) ===== -->
+      <Box v-else flexDirection="row">
+        <!-- Left border -->
+        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'left'">
+          <Text bold>│</Text>
+        </slot>
+
+        <!-- Cells with interspersed separators -->
+        <template v-for="(cell, idx) in row.cells" :key="`${row.key}-cell-${idx}`">
+          <!-- Header cell -->
+          <Box v-if="cell.type === 'header'" :width="cell.column.width">
+            <slot
+              name="header"
+              :text="cell.text"
+              :column="cell.column.config"
+              :column-index="cell.columnIndex"
+              :width="cell.column.width"
+            >
+              <Text v-if="cell.hasFormatter">{{ cell.text }}</Text>
+              <Text v-else bold color="blue">{{ cell.text }}</Text>
+            </slot>
+          </Box>
+
+          <!-- Data cell -->
+          <Box v-else :width="cell.column.width">
+            <slot
+              name="cell"
+              :text="cell.text"
+              :value="cell.value"
+              :column="cell.column.config"
+              :column-index="cell.columnIndex"
+              :width="cell.column.width"
+              :row="cell.row"
+              :row-index="cell.rowIndex"
+            >
+              <Text>{{ cell.text }}</Text>
+            </slot>
+          </Box>
+
+          <!-- Separator between cells (skip after last) -->
+          <slot
+            v-if="idx < row.cells.length - 1"
+            name="skeleton"
+            :text="'│'"
+            :kind="row.kind"
+            :part="'cross'"
+          >
+            <Text bold>│</Text>
+          </slot>
+        </template>
+
+        <!-- Right border -->
+        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'right'">
+          <Text bold>│</Text>
+        </slot>
+      </Box>
+    </template>
+  </Box>
+</template>
