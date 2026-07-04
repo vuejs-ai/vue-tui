@@ -5,10 +5,10 @@
 > issue, not here. It records how components in `@vue-tui/components` should be _shaped_ and
 > _styled_, and the bar for adding one in the first place.
 >
-> **Status:** active — the package now ships its first component, `Spinner` (see per-component
+> **Status:** active — the package now ships `ScrollBox` and `Spinner` (see per-component
 > records below). The principles here are design intent for the package as a whole.
 >
-> **Per-component records:** [spinner](./components/spinner.md).
+> **Per-component records:** [scroll-box](./components/scroll-box.md), [spinner](./components/spinner.md).
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
@@ -118,6 +118,17 @@ consistent and to flag real authoring traps:
   when a component must inspect its own child vnodes. (That doc is mostly about the runtime's
   _primitives_ — `tui-*` host tags, `isCustomElement`, camelCase host-prop binding — which a
   composition author, using only `<Box>` / `<Text>`, never touches.)
+
+## Boolean prop naming & defaults
+
+[VOUCHED @hyf0]
+
+Component boolean props follow Vue-ecosystem and terminal-UI convention — not verb-prefixed toggles.
+
+- **A boolean prop is a noun or an adjective, never a verb.** `bordered`, `clearable`, `mouse`, `keys` — not `enableBorder` / `enableMouse`. None of the major Vue libraries (Element Plus, Naive UI, Vuetify, Ant Design Vue, PrimeVue) use an `enable*` boolean prop; the terminal-UI precedent (blessed) is bare `mouse` / `keys`. (`enable*` is a React-library pattern, e.g. TanStack Table — not idiomatic in Vue or in TUIs.)
+- **Booleans default to `false`.** `<Comp foo>` then reads as "turn foo on." A feature that must be on by default is named as its negative (`disabled`) so the prop still defaults `false`; avoid a verb-boolean that defaults `true`, which forces the backwards `:enable-foo="false"`. (Matches MUI's published API-design guidance.)
+- **Name for precision — what is toggled, not the device.** A bare device noun reads ambiguously; prefer the specific behavior it controls (e.g. `wheel` for mouse-wheel scrolling rather than `mouse`, which would also imply clicks).
+- **A prop with a global / terminal-wide side effect is opt-in (`false` by default), and the side effect is documented.** Example: enabling terminal mouse tracking suppresses the terminal's native text selection window-wide (users bypass with Shift) — so such a prop must be opt-in, not on by default.
 
 ## Deliberately omitted
 

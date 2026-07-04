@@ -57,7 +57,7 @@ interface RenderToStringInternalOptions extends RenderToStringOptions {
  * any scenario where you need the rendered output as a string without
  * starting a persistent terminal application.
  *
- * Terminal-specific composables (`useInput`, `useStdin`, `useStdout`,
+ * Terminal-specific composables (`useInput`, `useMouseInput`, `useStdin`, `useStdout`,
  * `useStderr`, `useApp`, `useFocus`, `useFocusManager`) return default
  * no-op values since there is no terminal session. They will not throw, but
  * they will not function as in a live terminal.
@@ -296,5 +296,7 @@ function createNoOpStdinContext(): StdinContext {
     acquireRawMode: () => {},
     releaseRawMode: () => {},
     setBracketedPasteMode: () => {},
+    acquireSgrMouseMode: () => Symbol("noop-sgr-mouse"),
+    releaseSgrMouseMode: () => {},
   };
 }
