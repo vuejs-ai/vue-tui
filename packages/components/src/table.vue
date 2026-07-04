@@ -38,8 +38,8 @@
       <!-- ===== Content row (header / data) ===== -->
       <Box v-else flexDirection="row">
         <!-- Left border -->
-        <slot name="skeleton" :text="'|'" :kind="row.kind" :part="'left'">
-          <Text bold>|</Text>
+        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'left'">
+          <Text bold>│</Text>
         </slot>
 
         <!-- Cells with interspersed separators -->
@@ -78,17 +78,17 @@
           <slot
             v-if="idx < row.cells.length - 1"
             name="skeleton"
-            :text="'|'"
+            :text="'│'"
             :kind="row.kind"
             :part="'cross'"
           >
-            <Text bold>|</Text>
+            <Text bold>│</Text>
           </slot>
         </template>
 
         <!-- Right border -->
-        <slot name="skeleton" :text="'|'" :kind="row.kind" :part="'right'">
-          <Text bold>|</Text>
+        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'right'">
+          <Text bold>│</Text>
         </slot>
       </Box>
     </template>
@@ -295,7 +295,16 @@ const dataRows = computed<RowCell[][]>(() =>
 // Computed: flat row list for the template to iterate
 // =========================================================================
 
-const BORDER_CHARS = { left: "+", line: "-", cross: "+", right: "+" } as const;
+const BORDER_CHARS: Record<
+  SkeletonKind,
+  { left: string; line: string; cross: string; right: string }
+> = {
+  top: { left: "┌", line: "─", cross: "┬", right: "┐" },
+  separator: { left: "├", line: "─", cross: "┼", right: "┤" },
+  bottom: { left: "└", line: "─", cross: "┴", right: "┘" },
+  header: { left: "", line: "", cross: "", right: "" },
+  data: { left: "", line: "", cross: "", right: "" },
+};
 
 const allRows = computed<TableRow[]>(() => [
   // --- top border ---
@@ -303,7 +312,7 @@ const allRows = computed<TableRow[]>(() => [
     type: "border",
     kind: "top",
     key: "top",
-    ...BORDER_CHARS,
+    ...BORDER_CHARS.top,
   } as BorderRow,
 
   // --- header ---
@@ -322,7 +331,7 @@ const allRows = computed<TableRow[]>(() => [
         type: "border",
         kind: "separator",
         key: `separator-${rowKey}`,
-        ...BORDER_CHARS,
+        ...BORDER_CHARS.separator,
       } as BorderRow,
       {
         type: "content",
@@ -338,7 +347,7 @@ const allRows = computed<TableRow[]>(() => [
     type: "border",
     kind: "bottom",
     key: "bottom",
-    ...BORDER_CHARS,
+    ...BORDER_CHARS.bottom,
   } as BorderRow,
 ]);
 </script>
