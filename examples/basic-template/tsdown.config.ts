@@ -1,5 +1,5 @@
 import { defineConfig } from "tsdown";
-import Vue from "unplugin-vue/rolldown";
+import vue from "unplugin-vue/rolldown";
 
 // Production build: bundle the whole app into one self-contained Node file (dist/main.mjs) that
 // `node` runs with no node_modules present. `platform: "node"` keeps Node builtins external and
@@ -12,5 +12,5 @@ export default defineConfig({
   platform: "node",
   format: "esm",
   deps: { alwaysBundle: [/./], onlyBundle: false },
-  plugins: [Vue()],
+  plugins: [vue()],
 });

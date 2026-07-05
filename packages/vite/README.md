@@ -56,14 +56,14 @@ bundles the whole app into one self-contained Node file that runs with no `node_
 ```ts
 // tsdown.config.ts
 import { defineConfig } from "tsdown";
-import Vue from "unplugin-vue/rolldown"; // or unplugin-vue-jsx/rolldown for a .tsx entry
+import vue from "unplugin-vue/rolldown"; // or unplugin-vue-jsx/rolldown for a .tsx entry
 
 export default defineConfig({
   entry: ["src/main.ts"],
   platform: "node", // keep Node builtins external; real createRequire for CJS deps
   format: "esm",
   deps: { alwaysBundle: [/./], onlyBundle: false }, // inline every dep into the one file
-  plugins: [Vue()],
+  plugins: [vue()],
 });
 ```
 
