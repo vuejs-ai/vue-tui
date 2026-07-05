@@ -150,7 +150,7 @@ interface MouseEventShared {
   readonly metaKey: boolean;
 
   // Coordinates — DOM-exact names, all 0-based.
-  readonly offsetX: number; // relative to `currentTarget`'s box; re-based as the event bubbles
+  readonly offsetX: number; // relative to `currentTarget`'s rendered box, not its content box; re-based as the event bubbles
   readonly offsetY: number;
   readonly screenX: number; // absolute terminal cell (1-based SGR wire value − 1)
   readonly screenY: number;
@@ -257,7 +257,7 @@ the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the 
 export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, options?): void;
 
 /** VueUse `useDraggable`, adapted to the terminal: the element tracks the pointer during a drag,
- *  owning pointer capture internally. Returns cell coords + drag state; onMove's step = movementX/Y. */
+ *  owning pointer capture internally. Returns pointer cell coords + drag state; onMove's step = movementX/Y. */
 export function useDraggable(
   target: MaybeRefOrGetter<unknown>, // a normal <Box>/<Text> template ref
   options?: {
@@ -277,19 +277,30 @@ lets a drag survive leaving the element. `useDraggable` acquires it on button-do
 button-up, so apps never touch capture directly in v1; the dispatch layer must support "bypass
 hit-testing, route to node X" (§8).
 
+`useDraggable` deliberately accepts a normal template ref, the same shape as `useBoxMetrics(ref)`,
+and resolves it internally to a TUI node. `MouseTarget` is not an input handle and there is no
+`useMouseTarget`: `MouseTarget` only appears on delivered events as the public `target` /
+`currentTarget` wrapper. This keeps the author surface aligned with VueUse and avoids exposing a
+second ref type just to start dragging.
+
+The returned `x` / `y` are the pointer's absolute screen cell coordinates, not the element's layout
+position. A draggable element usually stores its own `left` / `top` and updates them from
+`event.screenX/Y` or `event.movementX/Y`; deciding whether v2 should add element-position helpers,
+`initialValue`, `axis`, or `handle` stays in §8.
+
 ## 5. Forward-compatibility contract — fix now vs add later
 
-| Get right NOW (breaking to change later)                                                              | Add LATER (purely additive)                                         |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `offsetX/offsetY` (target-relative) **and** `screenX/screenY` (absolute), all 0-based, always present | new `type` members (`move`, `enter`, `leave`)                       |
-| `movementX/movementY` on `TuiMouseEvent`, `deltaX/deltaY` on `TuiWheelEvent` (never mixed)            | new handler props (`onMousemove`, `onMouseenter`, `onMouseleave`)   |
-| `button` an **open** string union; wheel is `TuiWheelEvent`, not a button                             | populating `movementX/Y`, `buttons`, `detail` as gestures gain them |
-| flat DOM modifier names (`ctrlKey/shiftKey/altKey/metaKey`)                                           | emitting side buttons (`back`/`forward`/8–11)                       |
-| `type` an **open** discriminator                                                                      | `useElementHover` + hover via mode `1003`                           |
-| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event                            | additive event methods                                              |
-| `offsetX/offsetY` stay relative-to-`currentTarget` and re-base while bubbling                         | switching the default motion level (config)                         |
-| `MouseTarget` exposes an **absolute** rect and does **not** expose the internal `TuiNode`             | an in-app selection + OSC 52 clipboard layer                        |
-| type names `TuiMouseEvent`/`TuiWheelEvent` (prefixed)                                                 | —                                                                   |
+| Get right NOW (breaking to change later)                                                                           | Add LATER (purely additive)                                         |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `offsetX/offsetY` (target rendered-box-relative) **and** `screenX/screenY` (absolute), all 0-based, always present | new `type` members (`move`, `enter`, `leave`)                       |
+| `movementX/movementY` on `TuiMouseEvent`, `deltaX/deltaY` on `TuiWheelEvent` (never mixed)                         | new handler props (`onMousemove`, `onMouseenter`, `onMouseleave`)   |
+| `button` an **open** string union; wheel is `TuiWheelEvent`, not a button                                          | populating `movementX/Y`, `buttons`, `detail` as gestures gain them |
+| flat DOM modifier names (`ctrlKey/shiftKey/altKey/metaKey`)                                                        | emitting side buttons (`back`/`forward`/8–11)                       |
+| `type` an **open** discriminator                                                                                   | `useElementHover` + hover via mode `1003`                           |
+| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event                                         | additive event methods                                              |
+| `offsetX/offsetY` stay relative-to-`currentTarget`'s rendered box and re-base while bubbling                       | switching the default motion level (config)                         |
+| `MouseTarget` exposes an **absolute** rect and does **not** expose the internal `TuiNode`                          | an in-app selection + OSC 52 clipboard layer                        |
+| type names `TuiMouseEvent`/`TuiWheelEvent` (prefixed)                                                              | —                                                                   |
 
 ## 6. Dispatch infrastructure (the hit map)
 
@@ -311,6 +322,12 @@ Invariants from Ink's failure (§3): the map is built **only** in full-screen (k
 content flushed outside the tracked layout (`<Static>`) is excluded so screen rows and layout rows
 can't disagree.
 
+The correctness gate is about dispatch and terminal mode: targeted handlers / `useDraggable` arm
+mouse tracking only when there is a mouse registration and the app is full-screen. Building a
+full-screen hit map on frames without a current mouse registration is allowed as an implementation
+detail; gating that work on the controller's armed state is only a performance optimization, and it
+must not change the public event / `MouseTarget.rect` contract.
+
 **⚠️ Teardown must disable the actual mouse level (correctness bug if missed).** Today's disable
 string is `\x1b[?1000l\x1b[?1006l`, used by both the async and the synchronous signal-exit paths.
 `\x1b[?1000l` does **not** turn off `1002`/`1003`. Once v1 enables `1002`, exit / Ctrl-C / SIGINT
@@ -330,19 +347,23 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 - Both the low-level `useMouseInput` and the high-level dispatch acquire the **same** underlying mode
   through the shared refcount (§2) — one switch, not two.
 
-## 8. Open implementation questions (how, not what — no effect on §5)
+## 8. Settled implementation notes and follow-ups (no effect on §5)
 
-- **`MouseTarget` surface** — a thin public wrapper for event `target` / `currentTarget`: stable
-  identity + an **absolute** rect accessor from the paint walk. Must not re-export `TuiNode`, and
-  must not be required for ordinary template-ref composables such as `useDraggable`.
+- **`MouseTarget` surface** — settled for v1: a thin public wrapper for event `target` /
+  `currentTarget`: stable identity + an **absolute** rect accessor from the paint walk. It must not
+  re-export `TuiNode`, must not be accepted as a way to recover a `TuiNode`, and must not be required
+  for ordinary template-ref composables such as `useDraggable`.
 - **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
   the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
   "compatible" widening.
-- **`useDraggable` shape** — VueUse `useDraggable` also exposes `style`, `handle`, `axis`, an
-  `initialValue`; decide which of those carry over to a terminal (cell coords, no CSS `style` string).
-- **Handler storage on the node**, **capture ownership across unmount**, and the **`fullscreen`
-  rename rollout** (alias + whether it ships in this PR).
+- **`useDraggable` follow-ups** — VueUse `useDraggable` also exposes `style`, `handle`, `axis`, an
+  `initialValue`; decide which of those carry over to a terminal (cell coords, no CSS `style`
+  string). In v1, its returned `x` / `y` are pointer coordinates, not element position, so examples
+  do their own element-position math.
+- **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
+  by `useDraggable`, including when the capturing node unmounts; `fullscreen` is the primary mount
+  option and `alternateScreen` remains only as a deprecated alias.
 
 ## 9. Deliberately out of scope (v1)
 
