@@ -1,17 +1,16 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch } from "vue";
-import { Box, useBoxMetrics, useInput, useMouseInput, useStdin, type Key } from "@vue-tui/runtime";
-import { scrollBoxProps } from "./scroll-box-props.ts";
+import { Box, useBoxMetrics } from "@vue-tui/runtime";
+import { scrollBoxProps, type ScrollBoxExpose } from "./scroll-box-props.ts";
 
 defineOptions({ name: "ScrollBox" });
-const props = defineProps(scrollBoxProps);
+defineProps(scrollBoxProps);
 defineSlots<{ default?: () => unknown }>();
 
 const viewportRef = shallowRef<unknown>();
 const contentRef = shallowRef<unknown>();
 const viewport = useBoxMetrics(viewportRef);
 const content = useBoxMetrics(contentRef);
-const { isRawModeSupported } = useStdin();
 const scrollTop = shallowRef(0);
 const sticky = shallowRef(true);
 
@@ -33,48 +32,31 @@ const contentStyle = computed(() => ({
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
 );
-const wheelActive = computed(() => props.wheel && isRawModeSupported);
-const keyboardActive = computed(() => props.keyboard && isRawModeSupported);
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
 }
 
-function scrollTo(value: number, nextSticky = false): void {
+function scrollToLine(value: number, nextSticky = false): void {
   const next = clampScrollTop(value);
   scrollTop.value = next;
   sticky.value = nextSticky || next >= maxScroll.value;
 }
 
-function scrollBy(delta: number): void {
-  scrollTo(scrollTop.value + delta);
+function scrollByLines(delta: number): void {
+  scrollToLine(scrollTop.value + delta);
 }
 
-function pageSize(): number {
-  return Math.max(1, Math.floor(Math.max(1, viewport.height.value) / 2));
+function scrollToTop(): void {
+  scrollToLine(0);
 }
 
-function linesPerWheel(): number {
-  return Math.max(1, Math.floor(props.linesPerWheel));
+function scrollToBottom(): void {
+  scrollToLine(maxScroll.value, true);
 }
 
-function handleKey(_input: string, key: Key): void {
-  if (key.pageUp) {
-    scrollBy(-pageSize());
-    return;
-  }
-  if (key.pageDown) {
-    scrollBy(pageSize());
-  }
-}
-
-useMouseInput(
-  (event) => {
-    scrollBy(event.direction === "up" ? -linesPerWheel() : linesPerWheel());
-  },
-  { isActive: wheelActive },
-);
-useInput(handleKey, { isActive: keyboardActive });
+const exposed: ScrollBoxExpose = { scrollToLine, scrollByLines, scrollToTop, scrollToBottom };
+defineExpose(exposed);
 
 watch(
   () => [content.height.value, viewport.height.value, maxScroll.value] as const,
