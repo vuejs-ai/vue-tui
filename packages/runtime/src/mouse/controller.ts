@@ -91,9 +91,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   let rawModeAcquired = false;
   let mouseModeToken: symbol | undefined;
   let lastPointer: { screenX: number; screenY: number } | undefined;
-  let lastDown:
-    | { node: TuiNode; button: MouseButton; screenX: number; screenY: number }
-    | undefined;
+  let lastDown: { node: TuiNode; button: MouseButton } | undefined;
   let lastClick:
     | {
         node: TuiNode;
@@ -325,9 +323,9 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     if (!targetNode) return;
 
     if (raw.type === "down") {
-      lastDown = { node: targetNode, button: raw.button, screenX, screenY };
+      lastDown = { node: targetNode, button: raw.button };
       dispatchMouseEvent("down", targetNode, raw, 0, 0, 0);
-      const draggable = raw.button === "left" ? findDraggable(targetNode) : undefined;
+      const draggable = findDraggable(targetNode);
       if (draggable) {
         capturedNode = draggable.node;
         activeDrag = { ...draggable, x: screenX, y: screenY };
@@ -357,13 +355,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       capturedNode = undefined;
     }
 
-    if (
-      lastDown &&
-      lastDown.node === targetNode &&
-      lastDown.button === raw.button &&
-      lastDown.screenX === screenX &&
-      lastDown.screenY === screenY
-    ) {
+    if (lastDown && lastDown.node === targetNode && lastDown.button === raw.button) {
       const time = now();
       const detail =
         lastClick &&

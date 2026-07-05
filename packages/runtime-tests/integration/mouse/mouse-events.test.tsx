@@ -31,11 +31,18 @@ async function settle() {
   await Promise.resolve();
 }
 
-function mountMouseApp(component: ReturnType<typeof defineComponent>, fullscreen = true) {
+function mountMouseApp(
+  component: ReturnType<typeof defineComponent>,
+  options: boolean | { fullscreen?: boolean; stdinIsTTY?: boolean } = true,
+) {
+  const fullscreen = typeof options === "boolean" ? options : (options.fullscreen ?? true);
   const app = createApp(component);
   const stdout = makeFakeWritable({ columns: 20, rows: 8 });
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
+  if (typeof options === "object" && options.stdinIsTTY === false) {
+    (stdin as { isTTY?: boolean }).isTTY = false;
+  }
   const writes = captureWrites(stdout);
   app.mount({
     stdout,
@@ -133,6 +140,40 @@ test("click detail increments for repeated clicks at the same target and cell", 
   app.unmount();
 });
 
+test("click synthesis only requires down and up on the same target", async () => {
+  const clicks: TuiMouseEvent[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={4} height={2} onClick={(event) => clicks.push(event)} />
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;4;2m");
+  await settle();
+
+  expect(clicks).toHaveLength(1);
+  expect(clicks[0]!.screenX).toBe(3);
+  expect(clicks[0]!.screenY).toBe(1);
+  expect(clicks[0]!.offsetX).toBe(3);
+  expect(clicks[0]!.offsetY).toBe(1);
+  app.unmount();
+});
+
+test("click detail does not increment across cells on the same target", async () => {
+  const details: number[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={4} height={2} onClick={(event) => details.push(event.detail)} />
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m\x1b[<0;4;2M\x1b[<0;4;2m");
+  await settle();
+
+  expect(details).toEqual([1, 1]);
+  app.unmount();
+});
+
 test("wheel events use DOM-shaped delta fields and no button", async () => {
   const wheels: TuiWheelEvent[] = [];
   const App = defineComponent(() => () => (
@@ -156,8 +197,9 @@ test("wheel events use DOM-shaped delta fields and no button", async () => {
 
 test("inline element mouse handlers warn once and do not arm SGR mouse", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const target = shallowRef<MouseTarget | null>(null);
   const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={() => {}}>
+    <Box ref={target} width={4} height={2} onClick={() => {}}>
       <Text>inline</Text>
     </Box>
   ));
@@ -168,6 +210,7 @@ test("inline element mouse handlers warn once and do not arm SGR mouse", async (
   expect(warn.mock.calls[0]![0]).toContain("app.mount({ fullscreen: true })");
   expect(warn.mock.calls[0]![0]).toContain("useMouseInput()");
   expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
+  expect(target.value?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 });
 
   warn.mockRestore();
   app.unmount();
@@ -199,6 +242,29 @@ test("TERM=dumb does not arm SGR mouse or deliver element handlers", async () =>
     process.env["TERM"] = "xterm-256color";
     warn.mockRestore();
   }
+});
+
+test("non-TTY stdin does not arm SGR mouse or throw for fullscreen handlers", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const clicks: TuiMouseEvent[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={4} height={2} onClick={(event) => clicks.push(event)}>
+      <Text>pipe</Text>
+    </Box>
+  ));
+
+  const { app, stdin, writes } = mountMouseApp(App, { stdinIsTTY: false });
+  await settle();
+
+  expect(warn).toHaveBeenCalledTimes(1);
+  expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+
+  expect(clicks).toEqual([]);
+  warn.mockRestore();
+  app.unmount();
 });
 
 test("nested Text handlers receive virtual-text hit-test events", async () => {
@@ -272,4 +338,41 @@ test("useDraggable captures pointer movement until release", async () => {
     ["dragend", 7, 3, 0, 0],
   ]);
   app.unmount();
+});
+
+test("useDraggable captures middle and right button drags", async () => {
+  const cases = [
+    { button: "middle", sequence: "\x1b[<1;1;1M\x1b[<33;6;2M\x1b[<1;6;2m" },
+    { button: "right", sequence: "\x1b[<2;1;1M\x1b[<34;6;2M\x1b[<2;6;2m" },
+  ] as const;
+
+  for (const item of cases) {
+    const dragTarget = shallowRef<MouseTarget | null>(null);
+    const moves: Array<[string, TuiMouseEvent["button"], number, number]> = [];
+    const App = defineComponent(() => {
+      useDraggable(dragTarget, {
+        onStart: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
+        onMove: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
+        onEnd: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
+      });
+      return () => (
+        <Box width={4} height={2} ref={dragTarget}>
+          <Text>drag</Text>
+        </Box>
+      );
+    });
+    const { app, stdin } = mountMouseApp(App);
+    await settle();
+
+    stdin.emit("data", item.sequence);
+    await settle();
+
+    expect(moves).toEqual([
+      ["dragstart", item.button, 0, 0],
+      ["drag", item.button, 5, 1],
+      ["dragend", item.button, 5, 1],
+    ]);
+    app.unmount();
+    await settle();
+  }
 });

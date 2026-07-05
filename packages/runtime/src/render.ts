@@ -692,7 +692,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       Boolean(options.fullscreen ?? options.alternateScreen) &&
       interactive &&
       Boolean(stdout.isTTY);
-    const mouseFullscreen = fullscreen && supportsTerminalMouse();
+    const mouseFullscreen =
+      fullscreen && supportsTerminalMouse() && Boolean((stdin as { isTTY?: boolean }).isTTY);
 
     // Frame coordination state — tracks the last rendered output so
     // writeToStdout/writeToStderr can clear and restore the active frame.

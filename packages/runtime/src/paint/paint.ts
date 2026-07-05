@@ -633,6 +633,7 @@ function recordHit(
   rect: HitRect,
   clip: HitRect | undefined,
 ) {
+  if (!hitMap) return;
   const visible = intersectHitRect(rect, clip);
   if (!visible) {
     clearMouseTargetRect(node);
@@ -761,7 +762,7 @@ function paintNode(
   // early-return) so hidden content never leaks onto visible siblings.
   const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
-    clearSubtreeHitRects(node);
+    if (hitMap) clearSubtreeHitRects(node);
     return;
   }
 
