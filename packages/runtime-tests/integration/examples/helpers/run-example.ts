@@ -25,6 +25,16 @@ export const viteBin = (cwd: string): string => {
   return path.join(path.dirname(pkgPath), rel);
 };
 
+// Resolve an example's local tsdown CLI the same way — production builds go through tsdown (a
+// self-contained Node bundle), not `vite build`.
+export const tsdownBin = (cwd: string): string => {
+  const pkgPath = require.resolve("tsdown/package.json", { paths: [cwd] });
+  const pkg = require(pkgPath) as { bin?: string | Record<string, string> };
+  const rel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.tsdown;
+  if (!rel) throw new Error(`could not locate tsdown's CLI bin from ${pkgPath}`);
+  return path.join(path.dirname(pkgPath), rel);
+};
+
 // Launch-failure signatures, so a broken example fails fast with a useful message instead of
 // burning the whole render timeout. Two families:
 //   - module-system crashes (#212's `Calling \`require\` ... doesn't expose the \`require\``, plus the

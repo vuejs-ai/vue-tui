@@ -1,7 +1,7 @@
 # @vue-tui/vite
 
 Vite plugin for [vue-tui](https://github.com/vuejs-ai/vue-tui): an in-process terminal dev server
-with HMR, plus a production build, for Vue apps that render to the terminal via `@vue-tui/runtime`.
+with HMR, for Vue apps that render to the terminal via `@vue-tui/runtime`.
 
 ## Install
 
@@ -12,8 +12,8 @@ npm install -D @vue-tui/vite @vitejs/plugin-vue
 
 ## Usage
 
-`vueTui()` adds the terminal dev server (HMR) and the production build. Bring your own SFC/JSX
-compiler alongside it — `@vitejs/plugin-vue` for SFCs (or `@vitejs/plugin-vue-jsx` for JSX):
+`vueTui()` adds the terminal dev server (HMR). Bring your own SFC/JSX compiler alongside it —
+`@vitejs/plugin-vue` for SFCs (or `@vitejs/plugin-vue-jsx` for JSX):
 
 ```ts
 // vite.config.ts
@@ -28,7 +28,6 @@ export default defineConfig({
 
 - `vite` (dev) — boots the app in-process through Vite's SSR module runner and renders it to the
   terminal, with state-preserving HMR.
-- `vite build` — bundles a single Node entry (`dist/main.js`).
 
 ### Options
 
@@ -48,32 +47,33 @@ export default defineConfig({
 });
 ```
 
-## Build output
+## Production build
 
-By default the production build **externalizes** bare dependencies (`vue`, `@vue-tui/runtime`, …) —
-Node resolves them from `node_modules` at runtime. This is the right shape for a library, or an app
-shipped alongside its `node_modules`.
-
-Distribution shape is yours to choose: to produce a **self-contained** single file (everything
-bundled but Node builtins — e.g. toward a standalone binary), set your own build options in
-`vite.config.ts` and the plugin yields to them:
+`vueTui()` is **dev only** — it does not touch the production build. `vite build` is browser-first
+and the wrong tool for a Node program, so build with [`tsdown`](https://tsdown.dev) instead: it
+bundles the whole app into one self-contained Node file that runs with no `node_modules` present.
 
 ```ts
-import vue from "@vitejs/plugin-vue";
-import { isBuiltin } from "node:module";
+// tsdown.config.ts
+import { defineConfig } from "tsdown";
+import vue from "unplugin-vue/rolldown"; // or unplugin-vue-jsx/rolldown for a .tsx entry
 
 export default defineConfig({
-  plugins: [vue(), vueTui()],
-  build: {
-    // Vite 8 is Rolldown-powered: the field is `rolldownOptions` (`rollupOptions` is the alias).
-    rolldownOptions: {
-      external: (id) => isBuiltin(id), // only Node builtins stay external
-      platform: "node", // real createRequire for any CJS dependency
-      output: { inlineDynamicImports: true }, // fold into one file
-    },
-  },
+  entry: ["src/main.ts"],
+  platform: "node", // keep Node builtins external; real createRequire for CJS deps
+  format: "esm",
+  deps: { alwaysBundle: [/./], onlyBundle: false }, // inline every dep into the one file
+  plugins: [vue()],
 });
 ```
+
+```sh
+npm install -D tsdown unplugin-vue
+tsdown # → dist/main.mjs, self-contained
+```
+
+See the [starter](https://github.com/vuejs-ai/vue-tui-starter) and this repo's `examples/` for
+complete setups.
 
 ## License
 

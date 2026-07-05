@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vp build",
-    "preview": "vp build && node dist/game.mjs"
+    "build": "tsdown",
+    "preview": "tsdown && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@vitejs/plugin-vue": "^6",
-    "vite": "catalog:"
+    "tsdown": "catalog:",
+    "unplugin-vue": "catalog:"
   }
 }
