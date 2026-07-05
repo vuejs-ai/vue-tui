@@ -12,7 +12,7 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { shallowRef } from "vue";
+import { shallowRef, type Ref } from "vue";
 import {
   useApp,
   useDraggable,
@@ -44,6 +44,9 @@ import type {
   TuiMouseEvent,
   TuiMouseEventType,
   TuiWheelEvent,
+  UseDraggableAxis,
+  UseDraggableOptions,
+  UseDraggablePosition,
   UseDraggableReturn,
   WindowSize,
   CursorPosition,
@@ -174,3 +177,14 @@ expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
 const dragTarget = shallowRef<unknown>(null);
 expectTypeOf(dragTarget).toMatchTypeOf<Parameters<typeof useDraggable>[0]>();
 expectTypeOf<ReturnType<typeof useDraggable>>().toEqualTypeOf<UseDraggableReturn>();
+expectTypeOf<UseDraggableAxis>().toEqualTypeOf<"x" | "y" | "both">();
+expectTypeOf<UseDraggableOptions["initialValue"]>().toEqualTypeOf<
+  UseDraggablePosition | undefined
+>();
+expectTypeOf<UseDraggableOptions["axis"]>().toEqualTypeOf<UseDraggableAxis | undefined>();
+expectTypeOf<UseDraggableOptions["onStart"]>().toEqualTypeOf<
+  ((position: UseDraggablePosition, event: TuiMouseEvent) => void) | undefined
+>();
+expectTypeOf<UseDraggableReturn["x"]>().toEqualTypeOf<Ref<number>>();
+expectTypeOf<UseDraggableReturn["y"]>().toEqualTypeOf<Ref<number>>();
+expectTypeOf<UseDraggableReturn["position"]>().toMatchTypeOf<Readonly<Ref<UseDraggablePosition>>>();

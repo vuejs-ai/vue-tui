@@ -18,7 +18,7 @@ export interface MouseHitMapEntry {
 }
 
 export interface DraggableRegistration {
-  readonly onStart?: (event: TuiMouseEvent) => void;
+  readonly onStart?: (event: TuiMouseEvent) => void | false;
   readonly onMove?: (event: TuiMouseEvent) => void;
   readonly onEnd?: (event: TuiMouseEvent) => void;
 }
@@ -328,9 +328,13 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       dispatchMouseEvent("down", targetNode, raw, 0, 0, 0);
       const draggable = findDraggable(targetNode);
       if (draggable) {
+        const startResult = draggable.registration.onStart?.(
+          makeDragEvent("dragstart", draggable.node, raw, 0, 0),
+        );
+        if (startResult === false) return;
+        if (!draggables.get(draggable.node)?.has(draggable.registration)) return;
         capturedNode = draggable.node;
         activeDrag = { ...draggable, x: screenX, y: screenY, moved: false };
-        draggable.registration.onStart?.(makeDragEvent("dragstart", draggable.node, raw, 0, 0));
       }
       return;
     }

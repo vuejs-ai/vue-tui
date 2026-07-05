@@ -8,37 +8,18 @@ import {
   type TuiWheelEvent,
 } from "@vue-tui/runtime";
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 export default defineComponent(() => {
   const clicks = shallowRef(0);
   const lastClick = shallowRef("none");
   const lastWheel = shallowRef("none");
   const dragRef = shallowRef<unknown>(null);
-  const dragLeft = shallowRef(2);
-  const dragTop = shallowRef(7);
-  let dragStartLeft = 0;
-  let dragStartTop = 0;
-  let dragStartX = 0;
-  let dragStartY = 0;
 
   useInput((input) => {
     if (input === "q") process.exit(0);
   });
 
-  useDraggable(dragRef, {
-    onStart(event: TuiMouseEvent) {
-      dragStartLeft = dragLeft.value;
-      dragStartTop = dragTop.value;
-      dragStartX = event.screenX;
-      dragStartY = event.screenY;
-    },
-    onMove(event: TuiMouseEvent) {
-      dragLeft.value = clamp(dragStartLeft + event.screenX - dragStartX, 0, 42);
-      dragTop.value = clamp(dragStartTop + event.screenY - dragStartY, 4, 12);
-    },
+  const { x: dragLeft, y: dragTop } = useDraggable(dragRef, {
+    initialValue: { x: 2, y: 7 },
   });
 
   function onPanelClick(event: TuiMouseEvent) {

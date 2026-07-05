@@ -63,7 +63,9 @@ export {
 } from "./composables/useMouseInput.ts";
 export {
   useDraggable,
+  type UseDraggableAxis,
   type UseDraggableOptions,
+  type UseDraggablePosition,
   type UseDraggableReturn,
 } from "./composables/useDraggable.ts";
 export type {

@@ -256,18 +256,21 @@ the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the 
  *  The inline escape hatch. Its coords are 1-based (unchanged); see §8 for the base mismatch. */
 export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, options?): void;
 
-/** VueUse `useDraggable`, adapted to the terminal: the element tracks the pointer during a drag,
- *  owning pointer capture internally. Returns pointer cell coords + drag state; onMove's step = movementX/Y. */
+/** VueUse `useDraggable`, adapted to the terminal: the element position tracks the pointer during
+ *  a drag, owning pointer capture internally. Returns element cell position + drag state. */
 export function useDraggable(
   target: MaybeRefOrGetter<unknown>, // a normal <Box>/<Text> template ref
   options?: {
-    onStart?: (e: TuiMouseEvent) => void;
-    onMove?: (e: TuiMouseEvent) => void; // e.movementX/movementY = movement this step
-    onEnd?: (e: TuiMouseEvent) => void;
+    initialValue?: { x: number; y: number };
+    axis?: "x" | "y" | "both";
+    onStart?: (position: { x: number; y: number }, e: TuiMouseEvent) => void; // strict false cancels
+    onMove?: (position: { x: number; y: number }, e: TuiMouseEvent) => void;
+    onEnd?: (position: { x: number; y: number }, e: TuiMouseEvent) => void;
   },
 ): {
-  readonly x: Readonly<Ref<number>>;
-  readonly y: Readonly<Ref<number>>;
+  readonly x: Ref<number>;
+  readonly y: Ref<number>;
+  readonly position: Readonly<Ref<{ x: number; y: number }>>;
   readonly isDragging: Readonly<Ref<boolean>>;
 };
 ```
@@ -283,10 +286,11 @@ and resolves it internally to a TUI node. `MouseTarget` is not an input handle a
 `currentTarget` wrapper. This keeps the author surface aligned with VueUse and avoids exposing a
 second ref type just to start dragging.
 
-The returned `x` / `y` are the pointer's absolute screen cell coordinates, not the element's layout
-position. A draggable element usually stores its own `left` / `top` and updates them from
-`event.screenX/Y` or `event.movementX/Y`; deciding whether v2 should add element-position helpers,
-`initialValue`, `axis`, or `handle` stays in §8.
+The returned `x` / `y` are the draggable element's `left` / `top` cell position, initialized from
+`initialValue` and updated by pointer delta during the drag. This is the part of VueUse
+`useDraggable` that carries directly to vue-tui; terminal apps bind `x.value` / `y.value` to
+`left` / `top` instead of binding a CSS `style` string. The event still exposes `screenX/Y` and
+`movementX/Y` for custom gesture math.
 
 ## 5. Forward-compatibility contract — fix now vs add later
 
@@ -357,10 +361,12 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
   the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
   "compatible" widening.
-- **`useDraggable` follow-ups** — VueUse `useDraggable` also exposes `style`, `handle`, `axis`, an
-  `initialValue`; decide which of those carry over to a terminal (cell coords, no CSS `style`
-  string). In v1, its returned `x` / `y` are pointer coordinates, not element position, so examples
-  do their own element-position math.
+- **`useDraggable` follow-ups** — v1 carries over VueUse's element-position semantics,
+  `initialValue`, `axis`, and strict `false` from `onStart` to cancel a drag. The public TypeScript
+  callback return is `void` so normal expression callbacks like `onStart: () => calls.push(...)`
+  remain valid; runtime still checks the actual return value. VueUse's CSS `style`
+  helper does not map directly to terminal props; a future helper can return a vue-tui layout-prop
+  object if real examples need it. `handle` also remains additive.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
   by `useDraggable`, including when the capturing node unmounts; `fullscreen` is the primary mount
   option and `alternateScreen` remains only as a deprecated alias.

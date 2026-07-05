@@ -495,17 +495,42 @@ test("MouseTarget rect is cleared when a mounted node stops painting", async () 
   app.unmount();
 });
 
-test("useDraggable captures pointer movement until release", async () => {
+test("useDraggable tracks element position until release", async () => {
   const dragTarget = shallowRef<unknown>(null);
-  const moves: Array<[string, number, number, number, number]> = [];
+  const moves: Array<[string, number, number, number, number, number, number]> = [];
   const App = defineComponent(() => {
     useDraggable(dragTarget, {
-      onStart: (event) =>
-        moves.push([event.type, event.screenX, event.screenY, event.movementX, event.movementY]),
-      onMove: (event) =>
-        moves.push([event.type, event.screenX, event.screenY, event.movementX, event.movementY]),
-      onEnd: (event) =>
-        moves.push([event.type, event.screenX, event.screenY, event.movementX, event.movementY]),
+      initialValue: { x: 2, y: 1 },
+      onStart: (position, event) =>
+        moves.push([
+          event.type,
+          position.x,
+          position.y,
+          event.screenX,
+          event.screenY,
+          event.movementX,
+          event.movementY,
+        ]),
+      onMove: (position, event) =>
+        moves.push([
+          event.type,
+          position.x,
+          position.y,
+          event.screenX,
+          event.screenY,
+          event.movementX,
+          event.movementY,
+        ]),
+      onEnd: (position, event) =>
+        moves.push([
+          event.type,
+          position.x,
+          position.y,
+          event.screenX,
+          event.screenY,
+          event.movementX,
+          event.movementY,
+        ]),
     });
     return () => (
       <Box width={4} height={2} ref={dragTarget}>
@@ -520,10 +545,67 @@ test("useDraggable captures pointer movement until release", async () => {
   await settle();
 
   expect(moves).toEqual([
-    ["dragstart", 0, 0, 0, 0],
-    ["drag", 7, 3, 7, 3],
-    ["dragend", 7, 3, 0, 0],
+    ["dragstart", 2, 1, 0, 0, 0, 0],
+    ["drag", 9, 4, 7, 3, 7, 3],
+    ["dragend", 9, 4, 7, 3, 0, 0],
   ]);
+  app.unmount();
+});
+
+test("useDraggable honors axis", async () => {
+  const dragTarget = shallowRef<unknown>(null);
+  const positions: Array<[number, number]> = [];
+  const App = defineComponent(() => {
+    useDraggable(dragTarget, {
+      initialValue: { x: 10, y: 20 },
+      axis: "x",
+      onMove: (position) => positions.push([position.x, position.y]),
+      onEnd: (position) => positions.push([position.x, position.y]),
+    });
+    return () => (
+      <Box width={4} height={2} ref={dragTarget}>
+        <Text>drag</Text>
+      </Box>
+    );
+  });
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;6;4M\x1b[<0;6;4m");
+  await settle();
+
+  expect(positions).toEqual([
+    [15, 20],
+    [15, 20],
+  ]);
+  app.unmount();
+});
+
+test("useDraggable lets onStart cancel capture", async () => {
+  const dragTarget = shallowRef<unknown>(null);
+  const moves: string[] = [];
+  const App = defineComponent(() => {
+    useDraggable(dragTarget, {
+      onStart: () => {
+        moves.push("start");
+        return false;
+      },
+      onMove: () => moves.push("move"),
+      onEnd: () => moves.push("end"),
+    });
+    return () => (
+      <Box width={4} height={2} ref={dragTarget}>
+        <Text>drag</Text>
+      </Box>
+    );
+  });
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;8;4M\x1b[<0;8;4m");
+  await settle();
+
+  expect(moves).toEqual(["start"]);
   app.unmount();
 });
 
@@ -604,9 +686,12 @@ test("useDraggable captures middle and right button drags", async () => {
     const moves: Array<[string, TuiMouseEvent["button"], number, number]> = [];
     const App = defineComponent(() => {
       useDraggable(dragTarget, {
-        onStart: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
-        onMove: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
-        onEnd: (event) => moves.push([event.type, event.button, event.screenX, event.screenY]),
+        onStart: (_position, event) =>
+          moves.push([event.type, event.button, event.screenX, event.screenY]),
+        onMove: (_position, event) =>
+          moves.push([event.type, event.button, event.screenX, event.screenY]),
+        onEnd: (_position, event) =>
+          moves.push([event.type, event.button, event.screenX, event.screenY]),
       });
       return () => (
         <Box width={4} height={2} ref={dragTarget}>
