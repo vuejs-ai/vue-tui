@@ -254,10 +254,7 @@ the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the 
 ```ts
 /** Existing (#237). The raw broadcast stream (§2): absolute coords, you hit-test yourself, any mode.
  *  The inline escape hatch. Its coords are 1-based (unchanged); see §8 for the base mismatch. */
-export function useMouseInput(
-  handler: MaybeRefOrGetter<(e: MouseInputEvent) => void>,
-  options?,
-): void;
+export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, options?): void;
 
 /** VueUse `useDraggable`, adapted to the terminal: the element position tracks the pointer during
  *  a drag, owning pointer capture internally. Returns element cell position + drag state. */
@@ -366,9 +363,9 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 - **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
   the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
-  "compatible" widening. Its handler source accepts `MaybeRefOrGetter`; because handler functions
-  and getter functions overlap at runtime, the implementation calls a direct handler normally and
-  also calls a function returned by a zero-argument getter source.
+  "compatible" widening. Its handler source intentionally stays `MaybeRef`, not
+  `MaybeRefOrGetter`, because function handlers and getter functions have the same runtime shape.
+  Reactive handler replacement should pass a ref to the handler.
 - **`useDraggable` follow-ups** — v1 carries over VueUse's element-position semantics,
   `initialValue`, `axis`, and strict `false` from `onStart` to cancel a drag. The public TypeScript
   callback return is `void` so normal expression callbacks like `onStart: () => calls.push(...)`

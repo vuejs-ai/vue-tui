@@ -12,7 +12,13 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { shallowRef, type ComponentPublicInstance, type MaybeRefOrGetter, type Ref } from "vue";
+import {
+  shallowRef,
+  type ComponentPublicInstance,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+  type Ref,
+} from "vue";
 import {
   Box,
   useApp,
@@ -177,10 +183,7 @@ expectTypeOf<TuiWheelEvent["deltaX"]>().toEqualTypeOf<number>();
 expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
 
 expectTypeOf<Parameters<typeof useMouseInput>[0]>().toEqualTypeOf<
-  MaybeRefOrGetter<(event: MouseInputEvent) => void>
->();
-expectTypeOf<() => (event: MouseInputEvent) => void>().toMatchTypeOf<
-  Parameters<typeof useMouseInput>[0]
+  MaybeRef<(event: MouseInputEvent) => void>
 >();
 
 const dragTarget = shallowRef<InstanceType<typeof Box> | null>(null);

@@ -69,12 +69,12 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
 });
 
-test("useMouseInput accepts a getter handler", async () => {
+test("useMouseInput accepts a handler ref", async () => {
   const first: MouseInputEvent[] = [];
   const second: MouseInputEvent[] = [];
   const currentHandler = shallowRef((event: MouseInputEvent) => first.push(event));
   const App = defineComponent(() => {
-    useMouseInput(() => currentHandler.value);
+    useMouseInput(currentHandler);
     return () => <Text>listening</Text>;
   });
 
