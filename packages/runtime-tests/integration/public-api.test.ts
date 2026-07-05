@@ -23,6 +23,7 @@ const PUBLIC_VALUE_EXPORTS = [
   "useApp",
   "useBoxMetrics",
   "useCursor",
+  "useDraggable",
   "useFocus",
   "useFocusManager",
   "useInput",

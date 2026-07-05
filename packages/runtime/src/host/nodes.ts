@@ -1,5 +1,6 @@
 import type { AppContext } from "../context.ts";
 import type { Node as YogaNode } from "yoga-layout";
+import type { MouseHandlerProps } from "../mouse/events.ts";
 
 export type YogaNodeRef = YogaNode;
 
@@ -44,6 +45,7 @@ export interface TuiBox extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
+  mouseHandlers?: Partial<MouseHandlerProps>;
   paintDirty: boolean;
   internal_accessibility?: {
     role?: string;
@@ -56,6 +58,7 @@ export interface TuiText extends NodeBase {
   children: TuiInlineNode[];
   yoga: YogaNodeRef;
   props: TextProps;
+  mouseHandlers?: Partial<MouseHandlerProps>;
   measuredCache?: string;
 }
 
@@ -66,6 +69,7 @@ export interface TuiVirtualText extends NodeBase {
   parent: TuiText | TuiVirtualText | TuiTransform | null;
   children: TuiInlineNode[];
   props: TextProps;
+  mouseHandlers?: Partial<MouseHandlerProps>;
 }
 
 export interface TuiTextLeaf extends NodeBase {

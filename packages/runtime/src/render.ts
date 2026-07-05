@@ -18,7 +18,7 @@ import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
 import { createInputParser, type InputEvent } from "./io/input-parser.ts";
-import { isSgrMouseInput, parseMouseInput } from "./io/parse-mouse.ts";
+import { isSgrMouseInput, parseMouseInput, parseSgrMouseInput } from "./io/parse-mouse.ts";
 import { parseKeypress } from "./io/parse-keypress.ts";
 import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -33,6 +33,7 @@ import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
+import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
   AppContextKey,
   FocusContextKey,
@@ -41,6 +42,7 @@ import {
   type AppContext,
   type CursorPosition,
   type FocusContext,
+  type SgrMouseMode,
   type StdinContext,
 } from "./context.ts";
 import {
@@ -132,13 +134,20 @@ export interface MountOptions {
    */
   incrementalRendering?: boolean;
   /**
-   * Render in the terminal's alternate screen buffer. When enabled, the
-   * terminal switches to a clean buffer on mount and restores the original
-   * content on unmount — no rendering artifacts are left behind.
+   * Render as a fullscreen terminal app in the alternate screen buffer. When
+   * enabled, the terminal switches to a clean buffer on mount and restores the
+   * original content on unmount — no rendering artifacts are left behind.
+   *
+   * Element mouse handlers (`@click`, `@wheel`, etc.) only fire in fullscreen
+   * mode because terminal mouse coordinates are absolute screen cells.
    *
    * Requires interactive mode and a TTY stdout. Silently ignored otherwise.
    *
    * @default false
+   */
+  fullscreen?: boolean;
+  /**
+   * @deprecated Use `fullscreen` instead.
    */
   alternateScreen?: boolean;
   /**
@@ -192,6 +201,10 @@ function shouldClearTerminalForFrame(opts: {
     isLeavingFullscreen ||
     shouldClearOnUnmount
   );
+}
+
+function supportsTerminalMouse(): boolean {
+  return process.env["TERM"] !== "dumb";
 }
 
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
@@ -675,6 +688,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // correctly handles piped streams where the property is absent.
     const interactive = options.interactive ?? (!isInCi && Boolean(stdout.isTTY));
     mountedInteractive = interactive;
+    const fullscreen =
+      Boolean(options.fullscreen ?? options.alternateScreen) &&
+      interactive &&
+      Boolean(stdout.isTTY);
+    const mouseFullscreen = fullscreen && supportsTerminalMouse();
 
     // Frame coordination state — tracks the last rendered output so
     // writeToStdout/writeToStderr can clear and restore the active frame.
@@ -1045,9 +1063,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
     // <Static> channel is excluded here (skipStaticElements) just like
     // render-to-string.ts; static output is handled separately by commit().
-    function renderFrame(width: number): string {
+    function renderFrame(width: number, hitMap?: MouseHitMapEntry[]): string {
       if (!isScreenReaderEnabled) {
-        return paint(tuiRoot);
+        return paint(tuiRoot, { hitMap });
       }
       const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
       return wrapAnsi(linear, width, { trim: false, hard: true });
@@ -1127,7 +1145,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       );
       try {
         emitLayoutListeners(tuiRoot);
-        const frame = renderFrame(w);
+        const hitMap = mouseFullscreen ? [] : undefined;
+        const frame = renderFrame(w, hitMap);
+        mouseController.updateHitMap(hitMap ?? []);
         const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
         if (debug) {
@@ -1263,6 +1283,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       immediate: unthrottled,
       throttleMs: renderThrottleMs,
     });
+    const mouseController = createMouseController({
+      stdin: stdinController,
+      fullscreen: mouseFullscreen,
+      now: scheduler.now,
+    });
+    appContext.internal_mouse = mouseController;
     mountedScheduler = scheduler;
     mountedCommit = commit;
     scheduledCommit = scheduler.schedule;
@@ -1318,15 +1344,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     };
 
-    // Alternate screen: enter BEFORE rendering starts (matching Ink ink.tsx:428).
-    // Requires alternateScreen option + interactive + isTTY.
-    const alternateScreen =
-      Boolean(options.alternateScreen) && interactive && Boolean(stdout.isTTY);
-    if (alternateScreen) {
-      writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen);
+    // Fullscreen: enter the alternate screen BEFORE rendering starts (matching Ink ink.tsx:428).
+    // Requires fullscreen option + interactive + isTTY. Emit home explicitly so
+    // targeted mouse hit-testing can treat the frame origin as screen (0,0).
+    if (fullscreen) {
+      writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H");
       writeBestEffort(stdout, "\x1b[?25l");
     }
-    mountedAlternateScreen = alternateScreen;
+    mountedAlternateScreen = fullscreen;
 
     // Patch console.log/warn/error etc. to route through writeToStdout /
     // writeToStderr so console output doesn't corrupt the rendered frame.
@@ -1788,7 +1813,8 @@ function createStdinController(
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
   const FLUSH_DELAY = 20; // ms, matching Ink
   let bracketedPasteModeCount = 0;
-  const sgrMouseModeTokens = new Set<symbol>();
+  const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
+  let activeSgrMouseMode: SgrMouseMode | undefined;
 
   // True once bracketed paste has been enabled at least once on this controller
   // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
@@ -1797,8 +1823,7 @@ function createStdinController(
   let everEnabledBracketedPaste = false;
   let everEnabledSgrMouse = false;
 
-  const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
-  const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
+  const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
 
   // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
@@ -1809,6 +1834,10 @@ function createStdinController(
   function canWriteTerminalMode(): boolean {
     const stdout = appCtx.stdout;
     return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
+  }
+
+  function canUseSgrMouseMode(): boolean {
+    return canWriteTerminalMode() && supportsTerminalMouse();
   }
 
   function writeTerminalMode(data: string, sync = false): void {
@@ -1842,6 +1871,61 @@ function createStdinController(
 
   function disableSgrMouse(sync = false) {
     writeTerminalMode(DISABLE_SGR_MOUSE, sync);
+  }
+
+  function enableSgrMouse(level: SgrMouseMode) {
+    switch (level) {
+      case "button":
+        writeTerminalMode("\x1b[?1000h\x1b[?1006h");
+        return;
+      case "drag":
+        writeTerminalMode("\x1b[?1002h\x1b[?1006h");
+        return;
+      case "hover":
+        writeTerminalMode("\x1b[?1003h\x1b[?1006h");
+    }
+  }
+
+  function sgrMouseModeRank(level: SgrMouseMode): number {
+    switch (level) {
+      case "button":
+        return 1;
+      case "drag":
+        return 2;
+      case "hover":
+        return 3;
+    }
+  }
+
+  function highestRequestedSgrMouseMode(): SgrMouseMode | undefined {
+    let highest: SgrMouseMode | undefined;
+    for (const level of sgrMouseModeTokens.values()) {
+      if (!highest || sgrMouseModeRank(level) > sgrMouseModeRank(highest)) {
+        highest = level;
+      }
+    }
+    return highest;
+  }
+
+  function reconcileSgrMouseMode() {
+    const next = highestRequestedSgrMouseMode();
+    if (!canUseSgrMouseMode()) {
+      activeSgrMouseMode = undefined;
+      return;
+    }
+    if (next === activeSgrMouseMode) return;
+    if (!next) {
+      disableSgrMouse();
+      activeSgrMouseMode = undefined;
+      return;
+    }
+
+    if (activeSgrMouseMode) {
+      disableSgrMouse();
+    }
+    enableSgrMouse(next);
+    everEnabledSgrMouse = true;
+    activeSgrMouseMode = next;
   }
 
   function clearPendingFlush() {
@@ -1879,7 +1963,11 @@ function createStdinController(
         }
       }
     }
-    if (sgrMouseModeTokens.size > 0 && isSgrMouseInput(input)) {
+    if (activeSgrMouseMode && isSgrMouseInput(input)) {
+      const rawMouse = parseSgrMouseInput(input);
+      if (rawMouse && emitter.listenerCount("internal_mouse") > 0) {
+        emitter.emit("internal_mouse", rawMouse);
+      }
       const mouse = parseMouseInput(input);
       if (mouse && emitter.listenerCount("mouse") > 0) {
         emitter.emit("mouse", mouse);
@@ -2094,20 +2182,15 @@ function createStdinController(
         }
       }
     },
-    acquireSgrMouseMode() {
+    acquireSgrMouseMode(level: SgrMouseMode = "button") {
       const token = Symbol("sgr-mouse");
-      if (sgrMouseModeTokens.size === 0) {
-        writeTerminalMode(ENABLE_SGR_MOUSE);
-        everEnabledSgrMouse = true;
-      }
-      sgrMouseModeTokens.add(token);
+      sgrMouseModeTokens.set(token, level);
+      reconcileSgrMouseMode();
       return token;
     },
     releaseSgrMouseMode(token: symbol) {
       if (!sgrMouseModeTokens.delete(token)) return;
-      if (sgrMouseModeTokens.size === 0) {
-        disableSgrMouse();
-      }
+      reconcileSgrMouseMode();
     },
     releaseRawMode() {
       if (!appCtx.isRawModeSupported) return;
@@ -2175,6 +2258,7 @@ function createStdinController(
         }
         if (everEnabledSgrMouse) {
           disableSgrMouse(true);
+          activeSgrMouseMode = undefined;
         }
       } else {
         if (bracketedPasteModeCount > 0) {
@@ -2182,6 +2266,7 @@ function createStdinController(
         }
         if (sgrMouseModeTokens.size > 0) {
           disableSgrMouse();
+          activeSgrMouseMode = undefined;
         }
       }
       bracketedPasteModeCount = 0;

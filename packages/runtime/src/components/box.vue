@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed, inject, shallowRef } from "vue";
 import { AppContextKey } from "../context.ts";
+import { useMouseTarget } from "../composables/useMouseTarget.ts";
 import { boxProps } from "./box-props.ts";
 import { assertBoxValid } from "./box-validate.ts";
 
@@ -13,6 +14,9 @@ defineSlots<{ default?: () => unknown }>();
 const appCtx = inject(AppContextKey, null);
 const srEnabled = computed(() => appCtx?.isScreenReaderEnabled ?? false);
 const srHidden = computed(() => srEnabled.value && props.ariaHidden);
+const hostRef = shallowRef<unknown>();
+const mouseTarget = useMouseTarget(hostRef);
+defineExpose(mouseTarget);
 </script>
 
 <template>
@@ -33,7 +37,7 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
        The root `v-if` makes this component a Vue Fragment, so its `$el` is the fragment's
        boundary anchor — NOT the `tui-box` host node; a Box ref is resolved to its host node
        by drilling the component subTree (see useBoxMetrics). -->
-  <tui-box v-if="!srHidden && (srEnabled || assertBoxValid(props))" v-bind="props">
+  <tui-box v-if="!srHidden && (srEnabled || assertBoxValid(props))" ref="hostRef" v-bind="props">
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />
   </tui-box>

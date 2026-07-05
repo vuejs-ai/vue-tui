@@ -36,7 +36,7 @@ export function useMouseInput(
     if (attached) return;
     stdin!.acquireRawMode();
     try {
-      mouseModeToken = stdin!.acquireSgrMouseMode();
+      mouseModeToken = stdin!.acquireSgrMouseMode("button");
       stdin!.internal_eventEmitter.on("mouse", listener);
       attached = true;
     } catch (error) {

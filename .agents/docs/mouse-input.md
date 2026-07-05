@@ -65,8 +65,8 @@ piece is the hit-test.
 To convert an absolute click coordinate into "which box," the runtime must know where the frame's
 top-left sits on the physical screen.
 
-- **Inline:** vue-tui writes each frame at the cursor's current position and updates it *relative to
-  the previous frame* (log-update-style line diffing — verified: `eraseLines`, `cursorUp`,
+- **Inline:** vue-tui writes each frame at the cursor's current position and updates it _relative to
+  the previous frame_ (log-update-style line diffing — verified: `eraseLines`, `cursorUp`,
   `cursorTo(0)`, never an absolute home in steady state). It never tracks the frame's absolute top
   row, so an absolute click cannot be reliably mapped to a node. This is verbatim why Ink's
   maintainer rejected `onClick`:
@@ -75,10 +75,11 @@ top-left sits on the physical screen.
   > … SGR mouse coordinates are absolute screen coordinates. So clicks will be offset or just hit the
   > wrong element."
 
-  (Precise claim: the origin is *not stably knowable* inline — a `clearTerminal` branch does home the
+  (Precise claim: the origin is _not stably knowable_ inline — a `clearTerminal` branch does home the
   cursor occasionally, but not frame-to-frame. Content flushed outside the tracked layout, à la
   `<Static>`, shifts rows too. So the conservative gate is a full-app full-screen declaration.)
-- **Full-screen (alternate buffer):** vue-tui enters the alt buffer *before the first render* and
+
+- **Full-screen (alternate buffer):** vue-tui enters the alt buffer _before the first render_ and
   paints from its top, so the frame's top-left **is** screen origin `(0,0)` and the conversion is
   exact. (Robustness: emit `\x1b[H` before the first alt frame so origin `(0,0)` is guaranteed, not
   reliant on the terminal homing on alt-buffer entry.)
@@ -98,7 +99,7 @@ via the existing ref-counted SGR-mode ownership (`acquireSgrMouseMode`). Rationa
 
 - **No explicit opt-in needed, because in full-screen there is no side effect to opt into.** The
   reason mouse tracking is normally "opt-in with a warning" (it suppresses native selection) does not
-  apply once the app owns the whole screen. Declaring `fullscreen` *is* the opt-in.
+  apply once the app owns the whole screen. Declaring `fullscreen` _is_ the opt-in.
 - **On-when-used, not blanket-on.** A full-screen app that uses no mouse never enables tracking, so
   its users keep native selection. Only apps that actually wire mouse pay the selection tradeoff.
 
@@ -164,7 +165,16 @@ interface MouseEventShared {
 }
 
 export interface TuiMouseEvent extends MouseEventShared {
-  readonly type: "down" | "up" | "click" | "move" | "drag" | "dragstart" | "dragend" | "enter" | "leave";
+  readonly type:
+    | "down"
+    | "up"
+    | "click"
+    | "move"
+    | "drag"
+    | "dragstart"
+    | "dragend"
+    | "enter"
+    | "leave";
   readonly movementX: number; // movement since the previous event of this gesture — DOM's name
   readonly movementY: number;
 }
@@ -179,33 +189,32 @@ export interface TuiWheelEvent extends MouseEventShared {
 ```
 
 Applying the DOM lens fixed a real design trap for free: pointer movement is `movementX/movementY`
-(DOM) and wheel scroll is `deltaX/deltaY` (DOM `WheelEvent`) — two *different* DOM names, so the
+(DOM) and wheel scroll is `deltaX/deltaY` (DOM `WheelEvent`) — two _different_ DOM names, so the
 "one event with two conflicting deltas" problem from an earlier draft disappears.
 
 Every author-facing name maps to a real precedent, none invented:
 
-| name | precedent |
-| --- | --- |
-| `@mousedown` `@mouseup` `@click` `@wheel` (props `onMousedown`…`onWheel`) | DOM / Vue native event names, exact |
-| every event field (`ctrlKey`, `offsetX`, `screenX`, `movementX`, `deltaX`, `detail`, `target`, `stopPropagation`…) | DOM `MouseEvent` / `WheelEvent`, exact |
-| type names `TuiMouseEvent` / `TuiWheelEvent` | DOM `MouseEvent`/`WheelEvent`, `Tui`-prefixed like PixiJS's `Federated…`; also matches vue-tui's own `TuiApp` |
-| `useDraggable` | VueUse `useDraggable`, exact |
-| `useElementHover` (deferred) | VueUse `useElementHover`, exact |
-| `useMouseInput`, `MouseInputEvent` | existing vue-tui exports (#237), unchanged |
-| `fullscreen` mount option | intent-named; renames the mechanism-named `alternateScreen` |
+| name                                                                                                               | precedent                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `@mousedown` `@mouseup` `@click` `@wheel` (props `onMousedown`…`onWheel`)                                          | DOM / Vue native event names, exact                                                                           |
+| every event field (`ctrlKey`, `offsetX`, `screenX`, `movementX`, `deltaX`, `detail`, `target`, `stopPropagation`…) | DOM `MouseEvent` / `WheelEvent`, exact                                                                        |
+| type names `TuiMouseEvent` / `TuiWheelEvent`                                                                       | DOM `MouseEvent`/`WheelEvent`, `Tui`-prefixed like PixiJS's `Federated…`; also matches vue-tui's own `TuiApp` |
+| `useDraggable`                                                                                                     | VueUse `useDraggable`, exact                                                                                  |
+| `useElementHover` (deferred)                                                                                       | VueUse `useElementHover`, exact                                                                               |
+| `useMouseInput`, `MouseInputEvent`                                                                                 | existing vue-tui exports (#237), unchanged                                                                    |
+| `fullscreen` mount option                                                                                          | intent-named; renames the mechanism-named `alternateScreen`                                                   |
 
 Only the two names that collide with a DOM global are prefixed. `Tui` — not the brand `VueTui`, and
 not a namespace — is the deliberate call: it matches PixiJS (a non-DOM renderer with DOM-shaped
-events prefixes `Federated…`, a *concept* word, never the brand) and vue-tui's own existing `TuiApp` /
+events prefixes `Federated…`, a _concept_ word, never the brand) and vue-tui's own existing `TuiApp` /
 `TuiNode` / `TuiRoot`. A namespace (`VueTui.MouseEvent`, React's `@types` pattern) was rejected
 because modern TS discourages namespaces — the handbook prefers ES modules,
 `@typescript-eslint/recommended` bans them in source (`no-namespace`), and TS 5.8 `erasableSyntaxOnly`
-+ Node's native type-stripping treat `namespace` as non-erasable (React gets away with it only because
-its namespace lives in `.d.ts` files). `MouseButton`,
-`MouseTarget`, and `MouseHandlerProps` have no DOM global to collide with, so they stay unprefixed
-(prefix only where there is an actual clash — verified: vue-tui compiles with `lib: ["es2023"]`, so
-these names are clean internally; the prefix is purely to protect a consumer whose own project pulls
-in the DOM lib).
+\+ Node's native type-stripping treat `namespace` as non-erasable (React gets away with it only
+because its namespace lives in `.d.ts` files). `MouseButton`, `MouseTarget`, and `MouseHandlerProps`
+have no DOM global to collide with, so they stay unprefixed (prefix only where there is an actual
+clash — verified: vue-tui compiles with `lib: ["es2023"]`, so these names are clean internally; the
+prefix is purely to protect a consumer whose own project pulls in the DOM lib).
 
 ### 4.2 High-level — element handler props (the 90% path)
 
@@ -235,7 +244,7 @@ catch-all), and `useMouse(ref, handlers)` just re-expressed `@click`. `useDragga
 survive because they add something element props can't (gesture state, capture, a reactive
 `hovered`) and match VueUse.
 
-**This is net-new renderer work:** `patchProp` currently *ignores* `on*` props on host nodes. v1
+**This is net-new renderer work:** `patchProp` currently _ignores_ `on*` props on host nodes. v1
 records mouse handlers on the node so the dispatch layer finds them (this is also the hook that fires
 the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the host node, typed so
 `@click` type-checks in templates.
@@ -270,22 +279,22 @@ hit-testing, route to node X" (§8).
 
 ## 5. Forward-compatibility contract — fix now vs add later
 
-| Get right NOW (breaking to change later) | Add LATER (purely additive) |
-| --- | --- |
-| `offsetX/offsetY` (target-relative) **and** `screenX/screenY` (absolute), all 0-based, always present | new `type` members (`move`, `enter`, `leave`) |
-| `movementX/movementY` on `TuiMouseEvent`, `deltaX/deltaY` on `TuiWheelEvent` (never mixed) | new handler props (`onMousemove`, `onMouseenter`, `onMouseleave`) |
-| `button` an **open** string union; wheel is `TuiWheelEvent`, not a button | populating `movementX/Y`, `buttons`, `detail` as gestures gain them |
-| flat DOM modifier names (`ctrlKey/shiftKey/altKey/metaKey`) | emitting side buttons (`back`/`forward`/8–11) |
-| `type` an **open** discriminator | `useElementHover` + hover via mode `1003` |
-| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event | additive event methods |
-| `offsetX/offsetY` stay relative-to-`currentTarget` and re-base while bubbling | switching the default motion level (config) |
-| `MouseTarget` exposes an **absolute** rect and does **not** expose the internal `TuiNode` | an in-app selection + OSC 52 clipboard layer |
-| type names `TuiMouseEvent`/`TuiWheelEvent` (prefixed) | — |
+| Get right NOW (breaking to change later)                                                              | Add LATER (purely additive)                                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `offsetX/offsetY` (target-relative) **and** `screenX/screenY` (absolute), all 0-based, always present | new `type` members (`move`, `enter`, `leave`)                       |
+| `movementX/movementY` on `TuiMouseEvent`, `deltaX/deltaY` on `TuiWheelEvent` (never mixed)            | new handler props (`onMousemove`, `onMouseenter`, `onMouseleave`)   |
+| `button` an **open** string union; wheel is `TuiWheelEvent`, not a button                             | populating `movementX/Y`, `buttons`, `detail` as gestures gain them |
+| flat DOM modifier names (`ctrlKey/shiftKey/altKey/metaKey`)                                           | emitting side buttons (`back`/`forward`/8–11)                       |
+| `type` an **open** discriminator                                                                      | `useElementHover` + hover via mode `1003`                           |
+| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event                            | additive event methods                                              |
+| `offsetX/offsetY` stay relative-to-`currentTarget` and re-base while bubbling                         | switching the default motion level (config)                         |
+| `MouseTarget` exposes an **absolute** rect and does **not** expose the internal `TuiNode`             | an in-app selection + OSC 52 clipboard layer                        |
+| type names `TuiMouseEvent`/`TuiWheelEvent` (prefixed)                                                 | —                                                                   |
 
 ## 6. Dispatch infrastructure (the hit map)
 
 Each committed frame, build a map of every node's **absolute** cell rectangle in **paint order**
-(vue-tui has no z-index; later paint ops overwrite earlier, so paint order *is* stacking order — a
+(vue-tui has no z-index; later paint ops overwrite earlier, so paint order _is_ stacking order — a
 hit is the last-painted node covering the cell). The absolute rects come from the paint walk's
 existing origin accumulation, captured by a new recording pass (the paint op-list keeps no node
 identity today). The map **must honor** `overflow: "hidden"` clip rects and `position: "absolute"`
@@ -344,4 +353,3 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 - **In-app text selection + clipboard (OSC 52).** A whole subsystem (Textual/opencode ship their own);
   the full-screen gate contains the tradeoff meanwhile, and Shift bypasses tracking for a native
   selection in most terminals.
-```
