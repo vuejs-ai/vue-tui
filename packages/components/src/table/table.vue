@@ -49,6 +49,8 @@ type RowCell =
       text: string;
       /** Whether the header text comes from a user-provided formatter. */
       hasFormatter: boolean;
+      /** Column-level header color override (undefined = use default blue). */
+      headerColor: string | undefined;
       column: Column;
       columnIndex: number;
     }
@@ -166,6 +168,7 @@ const headerCells = computed<RowCell[]>(() =>
       type: "header" as const,
       text,
       hasFormatter,
+      headerColor: column.config.headerColor,
       column,
       columnIndex,
     };
@@ -321,8 +324,8 @@ const allRows = computed<TableRow[]>(() => [
               :column-index="cell.columnIndex"
               :width="cell.column.width"
             >
-              <Text v-if="cell.hasFormatter">{{ cell.text }}</Text>
-              <Text v-else bold color="blue">{{ cell.text }}</Text>
+              <Text v-if="cell.hasFormatter" :color="cell.headerColor">{{ cell.text }}</Text>
+              <Text v-else bold :color="cell.headerColor ?? 'blue'">{{ cell.text }}</Text>
             </slot>
           </Box>
 

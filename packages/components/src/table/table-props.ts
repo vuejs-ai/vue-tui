@@ -23,6 +23,11 @@ export interface ColumnConfig {
    * rendering) and to each data cell's string value.
    */
   formatter?: (column: ColumnConfig) => string;
+  /**
+   * Color of the header text. Overrides the default blue.
+   * Has no effect when the `header` slot is used.
+   */
+  headerColor?: string;
 }
 
 export const tableProps = {

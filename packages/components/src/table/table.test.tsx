@@ -271,4 +271,95 @@ describe("Table", () => {
       result.unmount();
     }
   });
+
+  // -------------------------------------------------------------------------
+  // 11. headerColor on columns
+  // -------------------------------------------------------------------------
+  test("headerColor overrides the default blue header color", async () => {
+    const columnsDefault = [{ label: "Name", key: "name" }];
+    const columnsGreen = [{ label: "Name", key: "name", headerColor: "green" }];
+    const resultDefault = await render(Table, {
+      interactive: false,
+      props: { data: simpleData, columns: columnsDefault },
+    });
+    const resultGreen = await render(Table, {
+      interactive: false,
+      props: { data: simpleData, columns: columnsGreen },
+    });
+    try {
+      const outDefault = resultDefault.lastFrame() ?? "";
+      const outGreen = resultGreen.lastFrame() ?? "";
+      // Both render the header text
+      expect(outDefault).toContain("Name");
+      expect(outGreen).toContain("Name");
+      // Output differs because the color changed (blue → green)
+      expect(outDefault).not.toBe(outGreen);
+    } finally {
+      resultDefault.unmount();
+      resultGreen.unmount();
+    }
+  });
+
+  test("headerColor applies to formatted headers", async () => {
+    const colsPlain = [
+      {
+        label: "Name",
+        key: "name",
+        formatter: (col: { label: string }) => `[${col.label}]`,
+      },
+    ];
+    const colsColored = [
+      {
+        label: "Name",
+        key: "name",
+        headerColor: "green",
+        formatter: (col: { label: string }) => `[${col.label}]`,
+      },
+    ];
+    const r1 = await render(Table, {
+      interactive: false,
+      props: { data: simpleData, columns: colsPlain },
+    });
+    const r2 = await render(Table, {
+      interactive: false,
+      props: { data: simpleData, columns: colsColored },
+    });
+    try {
+      const out1 = r1.lastFrame() ?? "";
+      const out2 = r2.lastFrame() ?? "";
+      expect(out1).toContain("[Name]");
+      expect(out2).toContain("[Name]");
+      // With headerColor the output should differ (color applied)
+      expect(out1).not.toBe(out2);
+    } finally {
+      r1.unmount();
+      r2.unmount();
+    }
+  });
+
+  test("headerColor renders without error on mixed columns", async () => {
+    const columns = [
+      { label: "Name", key: "name", headerColor: "red" },
+      { label: "Age", key: "age" },
+      { label: "City", key: "city", headerColor: "green" },
+    ];
+    const data = [{ name: "Alice", age: 30, city: "NYC" }];
+    const result = await render(Table, {
+      interactive: false,
+      props: { data, columns },
+    });
+    try {
+      const out = result.lastFrame() ?? "";
+      expect(out).toContain("Name");
+      expect(out).toContain("Age");
+      expect(out).toContain("City");
+      expect(out).toContain("Alice");
+      expect(out).toContain("30");
+      expect(out).toContain("NYC");
+      // ANSI codes are present (FORCE_COLOR=3 in vitest config)
+      expect(out).toContain("\x1b[");
+    } finally {
+      result.unmount();
+    }
+  });
 });
