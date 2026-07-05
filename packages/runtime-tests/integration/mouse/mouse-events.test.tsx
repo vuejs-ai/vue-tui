@@ -14,6 +14,7 @@ import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/tes
 
 const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
 const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+type BoxInstance = InstanceType<typeof Box>;
 let previousTerm: string | undefined;
 
 beforeEach(() => {
@@ -151,6 +152,44 @@ test("mouse events rebase offsets while bubbling", async () => {
     ["child", 0, 0],
     ["parent", 1, 0],
   ]);
+  app.unmount();
+});
+
+test("mouse events keep per-handler rebased event objects stable after bubbling", async () => {
+  let childEvent: TuiMouseEvent | undefined;
+  let parentEvent: TuiMouseEvent | undefined;
+  const App = defineComponent(() => () => (
+    <Box
+      marginLeft={2}
+      width={5}
+      height={1}
+      onClick={(event) => {
+        parentEvent = event;
+      }}
+    >
+      <Box
+        marginLeft={1}
+        width={2}
+        height={1}
+        onClick={(event) => {
+          childEvent = event;
+        }}
+      />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m");
+  await settle();
+
+  if (!childEvent || !parentEvent) throw new Error("expected bubbling click events");
+  expect(childEvent).not.toBe(parentEvent);
+  expect(childEvent.currentTarget).not.toBe(parentEvent.currentTarget);
+  expect(childEvent.offsetX).toBe(0);
+  expect(childEvent.offsetY).toBe(0);
+  expect(parentEvent.offsetX).toBe(1);
+  expect(parentEvent.offsetY).toBe(0);
   app.unmount();
 });
 
@@ -496,7 +535,7 @@ test("MouseTarget rect is cleared when a mounted node stops painting", async () 
 });
 
 test("useDraggable tracks element position until release", async () => {
-  const dragTarget = shallowRef<unknown>(null);
+  const dragTarget = shallowRef<BoxInstance | null>(null);
   const moves: Array<[string, number, number, number, number, number, number]> = [];
   const App = defineComponent(() => {
     useDraggable(dragTarget, {
@@ -553,7 +592,7 @@ test("useDraggable tracks element position until release", async () => {
 });
 
 test("useDraggable honors axis", async () => {
-  const dragTarget = shallowRef<unknown>(null);
+  const dragTarget = shallowRef<BoxInstance | null>(null);
   const positions: Array<[number, number]> = [];
   const App = defineComponent(() => {
     useDraggable(dragTarget, {
@@ -582,7 +621,7 @@ test("useDraggable honors axis", async () => {
 });
 
 test("useDraggable lets onStart cancel capture", async () => {
-  const dragTarget = shallowRef<unknown>(null);
+  const dragTarget = shallowRef<BoxInstance | null>(null);
   const moves: string[] = [];
   const App = defineComponent(() => {
     useDraggable(dragTarget, {
@@ -610,7 +649,7 @@ test("useDraggable lets onStart cancel capture", async () => {
 });
 
 test("useDraggable suppresses click after a drag movement", async () => {
-  const dragTarget = shallowRef<unknown>(null);
+  const dragTarget = shallowRef<BoxInstance | null>(null);
   const clicks: string[] = [];
   const drags: string[] = [];
   const App = defineComponent(() => {
@@ -637,7 +676,7 @@ test("useDraggable suppresses click after a drag movement", async () => {
 });
 
 test("useDraggable releases pointer capture when the target unmounts", async () => {
-  const dragTarget = shallowRef<unknown>(null);
+  const dragTarget = shallowRef<BoxInstance | null>(null);
   const mounted = shallowRef(true);
   const moves: string[] = [];
   const App = defineComponent(() => {
@@ -682,7 +721,7 @@ test("useDraggable captures middle and right button drags", async () => {
   ] as const;
 
   for (const item of cases) {
-    const dragTarget = shallowRef<unknown>(null);
+    const dragTarget = shallowRef<BoxInstance | null>(null);
     const moves: Array<[string, TuiMouseEvent["button"], number, number]> = [];
     const App = defineComponent(() => {
       useDraggable(dragTarget, {

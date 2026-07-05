@@ -1,14 +1,7 @@
-import {
-  inject,
-  onScopeDispose,
-  toValue,
-  unref,
-  watch,
-  type MaybeRef,
-  type MaybeRefOrGetter,
-} from "vue";
+import { inject, isRef, toValue, watch, type MaybeRefOrGetter } from "vue";
 import { StdinContextKey } from "../context.ts";
 import type { MouseInputEvent } from "../io/parse-mouse.ts";
+import { tryOnScopeDispose } from "./scope.ts";
 
 export type { MouseInputEvent } from "../io/parse-mouse.ts";
 
@@ -19,7 +12,7 @@ export interface UseMouseInputOptions {
 type MouseInputHandler = (event: MouseInputEvent) => void;
 
 export function useMouseInput(
-  handler: MaybeRef<MouseInputHandler>,
+  handler: MaybeRefOrGetter<MouseInputHandler>,
   options: UseMouseInputOptions = {},
 ): void {
   const stdin = inject(StdinContextKey);
@@ -29,7 +22,11 @@ export function useMouseInput(
   let mouseModeToken: symbol | undefined;
 
   function listener(event: MouseInputEvent) {
-    unref(handler)(event);
+    const source = isRef(handler) ? handler.value : handler;
+    // Function handlers and getter functions overlap; zero-arg getters return
+    // the real handler, while direct handlers usually consume the event here.
+    const result = (source as (event: MouseInputEvent) => void | MouseInputHandler)(event);
+    if (source.length === 0 && typeof result === "function") result(event);
   }
 
   function attach() {
@@ -67,5 +64,5 @@ export function useMouseInput(
     { immediate: true, flush: "sync" },
   );
 
-  onScopeDispose(detach);
+  tryOnScopeDispose(detach);
 }

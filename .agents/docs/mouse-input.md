@@ -254,12 +254,17 @@ the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the 
 ```ts
 /** Existing (#237). The raw broadcast stream (§2): absolute coords, you hit-test yourself, any mode.
  *  The inline escape hatch. Its coords are 1-based (unchanged); see §8 for the base mismatch. */
-export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, options?): void;
+export function useMouseInput(
+  handler: MaybeRefOrGetter<(e: MouseInputEvent) => void>,
+  options?,
+): void;
 
 /** VueUse `useDraggable`, adapted to the terminal: the element position tracks the pointer during
  *  a drag, owning pointer capture internally. Returns element cell position + drag state. */
+export type UseDraggableTarget = MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
+
 export function useDraggable(
-  target: MaybeRefOrGetter<unknown>, // a normal <Box>/<Text> template ref
+  target: UseDraggableTarget, // a normal <Box>/<Text> template ref
   options?: {
     initialValue?: { x: number; y: number };
     axis?: "x" | "y" | "both";
@@ -280,11 +285,11 @@ lets a drag survive leaving the element. `useDraggable` acquires it on button-do
 button-up, so apps never touch capture directly in v1; the dispatch layer must support "bypass
 hit-testing, route to node X" (§8).
 
-`useDraggable` deliberately accepts a normal template ref, the same shape as `useBoxMetrics(ref)`,
-and resolves it internally to a TUI node. `MouseTarget` is not an input handle and there is no
-`useMouseTarget`: `MouseTarget` only appears on delivered events as the public `target` /
-`currentTarget` wrapper. This keeps the author surface aligned with VueUse and avoids exposing a
-second ref type just to start dragging.
+`useDraggable` deliberately accepts a normal typed template ref, the same shape as
+`shallowRef<InstanceType<typeof Box> | null>(null)`, and resolves it internally to a TUI node.
+`MouseTarget` is not an input handle and there is no `useMouseTarget`: `MouseTarget` only appears on
+delivered events as the public `target` / `currentTarget` wrapper. This keeps the author surface
+aligned with VueUse and avoids exposing a second ref type just to start dragging.
 
 The returned `x` / `y` are the draggable element's `left` / `top` cell position, initialized from
 `initialValue` and updated by pointer delta during the drag. This is the part of VueUse
@@ -317,10 +322,11 @@ placement, or it reports hits on clipped/mispositioned nodes.
 
 Per raw event: `hitTest(screenX, screenY)` → topmost node → build the event with `offsetX/offsetY`
 re-based into that node's box → dispatch to its handlers, then **bubble up the parent chain until
-`stopPropagation()`**. `click` is synthesized when `up` lands on the same target as the preceding
-`down`; `detail` increments on repeat clicks at the same cell within a short window — driven by the
-commit scheduler's timing hooks (not a bare timer), so tests stay deterministic. Capture bypasses
-`hitTest`.
+`stopPropagation()`**. Each bubbling hop receives its own event object with that hop's
+`currentTarget` and re-based offsets; the shared `stopPropagation()` closure is the only mutable
+dispatch state. `click` is synthesized when `up` lands on the same target as the preceding `down`;
+`detail` increments on repeat clicks at the same cell within a short window — driven by the commit
+scheduler's timing hooks (not a bare timer), so tests stay deterministic. Capture bypasses `hitTest`.
 
 Invariants from Ink's failure (§3): the map is built **only** in full-screen (known origin), and
 content flushed outside the tracked layout (`<Static>`) is excluded so screen rows and layout rows
@@ -360,7 +366,9 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 - **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
   the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
-  "compatible" widening.
+  "compatible" widening. Its handler source accepts `MaybeRefOrGetter`; because handler functions
+  and getter functions overlap at runtime, the implementation calls a direct handler normally and
+  also calls a function returned by a zero-argument getter source.
 - **`useDraggable` follow-ups** — v1 carries over VueUse's element-position semantics,
   `initialValue`, `axis`, and strict `false` from `onStart` to cancel a drag. The public TypeScript
   callback return is `void` so normal expression callbacks like `onStart: () => calls.push(...)`
@@ -368,8 +376,9 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
   helper does not map directly to terminal props; a future helper can return a vue-tui layout-prop
   object if real examples need it. `handle` also remains additive.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
-  by `useDraggable`, including when the capturing node unmounts; `fullscreen` is the primary mount
-  option and `alternateScreen` remains only as a deprecated alias.
+  by `useDraggable`, including when the capturing node unmounts; mouse composables use a local
+  `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the primary mount option and
+  `alternateScreen` remains only as a deprecated alias.
 
 ## 9. Deliberately out of scope (v1)
 

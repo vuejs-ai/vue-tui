@@ -69,6 +69,39 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
 });
 
+test("useMouseInput accepts a getter handler", async () => {
+  const first: MouseInputEvent[] = [];
+  const second: MouseInputEvent[] = [];
+  const currentHandler = shallowRef((event: MouseInputEvent) => first.push(event));
+  const App = defineComponent(() => {
+    useMouseInput(() => currentHandler.value);
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  stdin.emit("data", "\x1b[<64;1;1M");
+  await settle();
+
+  currentHandler.value = (event: MouseInputEvent) => second.push(event);
+  stdin.emit("data", "\x1b[<65;2;3M");
+  await settle();
+
+  expect(first).toEqual([
+    { type: "wheel", direction: "up", x: 1, y: 1, shift: false, meta: false, ctrl: false },
+  ]);
+  expect(second).toEqual([
+    { type: "wheel", direction: "down", x: 2, y: 3, shift: false, meta: false, ctrl: false },
+  ]);
+  app.unmount();
+});
+
 test("useMouseInput keeps SGR mouse mode enabled until the last consumer releases it", async () => {
   const showA = shallowRef(true);
   const showB = shallowRef(true);

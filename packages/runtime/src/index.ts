@@ -67,6 +67,7 @@ export {
   type UseDraggableOptions,
   type UseDraggablePosition,
   type UseDraggableReturn,
+  type UseDraggableTarget,
 } from "./composables/useDraggable.ts";
 export type {
   MouseButton,

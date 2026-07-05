@@ -12,8 +12,9 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { shallowRef, type Ref } from "vue";
+import { shallowRef, type ComponentPublicInstance, type MaybeRefOrGetter, type Ref } from "vue";
 import {
+  Box,
   useApp,
   useDraggable,
   useInput,
@@ -48,6 +49,7 @@ import type {
   UseDraggableOptions,
   UseDraggablePosition,
   UseDraggableReturn,
+  UseDraggableTarget,
   WindowSize,
   CursorPosition,
   UseAppReturn,
@@ -174,8 +176,19 @@ expectTypeOf<TuiWheelEvent["button"]>().toEqualTypeOf<null>();
 expectTypeOf<TuiWheelEvent["deltaX"]>().toEqualTypeOf<number>();
 expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
 
-const dragTarget = shallowRef<unknown>(null);
+expectTypeOf<Parameters<typeof useMouseInput>[0]>().toEqualTypeOf<
+  MaybeRefOrGetter<(event: MouseInputEvent) => void>
+>();
+expectTypeOf<() => (event: MouseInputEvent) => void>().toMatchTypeOf<
+  Parameters<typeof useMouseInput>[0]
+>();
+
+const dragTarget = shallowRef<InstanceType<typeof Box> | null>(null);
 expectTypeOf(dragTarget).toMatchTypeOf<Parameters<typeof useDraggable>[0]>();
+expectTypeOf<Parameters<typeof useDraggable>[0]>().toEqualTypeOf<UseDraggableTarget>();
+expectTypeOf<UseDraggableTarget>().toEqualTypeOf<
+  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
+>();
 expectTypeOf<ReturnType<typeof useDraggable>>().toEqualTypeOf<UseDraggableReturn>();
 expectTypeOf<UseDraggableAxis>().toEqualTypeOf<"x" | "y" | "both">();
 expectTypeOf<UseDraggableOptions["initialValue"]>().toEqualTypeOf<

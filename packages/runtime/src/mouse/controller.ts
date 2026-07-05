@@ -225,14 +225,17 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     return { event, stopped: () => stopped };
   }
 
-  function rebaseToCurrentTarget(
-    event: MutableMouseEvent | MutableWheelEvent,
+  function withCurrentTarget<Event extends MutableMouseEvent | MutableWheelEvent>(
+    event: Event,
     currentTarget: MouseTarget,
-  ) {
+  ): Event {
     const rect = currentTarget.rect;
-    event.currentTarget = currentTarget;
-    event.offsetX = event.screenX - rect.x;
-    event.offsetY = event.screenY - rect.y;
+    return {
+      ...event,
+      currentTarget,
+      offsetX: event.screenX - rect.x,
+      offsetY: event.screenY - rect.y,
+    } as Event;
   }
 
   function dispatchMouseEvent(
@@ -250,8 +253,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       const handlers = (current as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;
       const handler = handlers?.[handlerName] as ((event: TuiMouseEvent) => void) | undefined;
       if (handler) {
-        rebaseToCurrentTarget(event, getMouseTarget(current));
-        handler(event);
+        handler(withCurrentTarget<MutableMouseEvent>(event, getMouseTarget(current)));
         if (stopped()) return;
       }
       current = parentOf(current);
@@ -265,8 +267,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       const handlers = (current as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;
       const handler = handlers?.onWheel;
       if (handler) {
-        rebaseToCurrentTarget(event, getMouseTarget(current));
-        handler(event);
+        handler(withCurrentTarget<MutableWheelEvent>(event, getMouseTarget(current)));
         if (stopped()) return;
       }
       current = parentOf(current);
@@ -281,8 +282,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     movementY: number,
   ): TuiMouseEvent {
     const { event } = makeMouseEvent(type, node, raw, movementX, movementY, 0);
-    rebaseToCurrentTarget(event, getMouseTarget(node));
-    return event;
+    return withCurrentTarget<MutableMouseEvent>(event, getMouseTarget(node));
   }
 
   function findDraggable(

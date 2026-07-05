@@ -2,16 +2,17 @@ import {
   computed,
   inject,
   nextTick,
-  onScopeDispose,
   shallowRef,
   toValue,
   watch,
+  type ComponentPublicInstance,
   type MaybeRefOrGetter,
   type Ref,
 } from "vue";
 import { AppContextKey } from "../context.ts";
 import { resolveTuiNode } from "../host/resolve-node.ts";
 import type { TuiMouseEvent } from "../mouse/events.ts";
+import { tryOnScopeDispose } from "./scope.ts";
 
 export interface UseDraggablePosition {
   readonly x: number;
@@ -19,6 +20,7 @@ export interface UseDraggablePosition {
 }
 
 export type UseDraggableAxis = "x" | "y" | "both";
+export type UseDraggableTarget = MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
 
 export interface UseDraggableOptions {
   initialValue?: UseDraggablePosition;
@@ -36,7 +38,7 @@ export interface UseDraggableReturn {
 }
 
 export function useDraggable(
-  target: MaybeRefOrGetter<unknown>,
+  target: UseDraggableTarget,
   options: UseDraggableOptions = {},
 ): UseDraggableReturn {
   const app = inject(AppContextKey);
@@ -103,7 +105,7 @@ export function useDraggable(
     { immediate: true, flush: "post" },
   );
 
-  onScopeDispose(clearRegistration);
+  tryOnScopeDispose(clearRegistration);
 
   return { x, y, position, isDragging };
 }
