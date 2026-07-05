@@ -36,6 +36,8 @@ export function clearMouseTargetRect(node: TuiNode): void {
 }
 
 export function forgetMouseTarget(node: TuiNode): void {
+  const target = nodeToTarget.get(node);
+  if (target) internalTargetNodes.delete(target);
   nodeRects.delete(node);
   nodeToTarget.delete(node);
 }

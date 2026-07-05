@@ -1911,6 +1911,9 @@ function createStdinController(
   function reconcileSgrMouseMode() {
     const next = highestRequestedSgrMouseMode();
     if (!canUseSgrMouseMode()) {
+      if (activeSgrMouseMode) {
+        disableSgrMouse();
+      }
       activeSgrMouseMode = undefined;
       return;
     }

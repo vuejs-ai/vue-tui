@@ -190,6 +190,33 @@ test("useMouseInput respects isActive", async () => {
   app.unmount();
 });
 
+test("useMouseInput disables SGR mouse when support disappears before release", async () => {
+  const active = shallowRef(true);
+  const App = defineComponent(() => {
+    useMouseInput(() => {}, { isActive: active });
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(0);
+
+  process.env["TERM"] = "dumb";
+  active.value = false;
+  await settle();
+
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  app.unmount();
+});
+
 test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on removal", async () => {
   const showTarget = shallowRef(false);
 
