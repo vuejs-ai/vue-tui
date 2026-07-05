@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { shallowRef, onMounted, onUnmounted } from "vue";
 import { Box, Text, useApp, useInput, useWindowSize } from "@vue-tui/runtime";
-import { ScrollBox } from "@vue-tui/components";
+import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 
 const { exit } = useApp();
 const { rows } = useWindowSize();
 
-// Streaming log: a new line every ~350ms. ScrollBox sticks to the bottom while
-// you're at the bottom; scroll up (wheel / PageUp) and it holds your position
-// while new lines keep arriving.
+const box = shallowRef<ScrollBoxExpose>();
+
+// ScrollBox follows the bottom on its own. It ships no built-in input — this app
+// wires its own keys to the exposed handle: ↑/↓ scroll a line, Home/End jump to
+// the ends, q quits.
 const lines = shallowRef<string[]>([]);
 let n = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -26,8 +28,12 @@ onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
 
-useInput((input) => {
+useInput((input, key) => {
   if (input === "q") exit();
+  else if (key.upArrow) box.value?.scrollByLines(-1);
+  else if (key.downArrow) box.value?.scrollByLines(1);
+  else if (key.home) box.value?.scrollToTop();
+  else if (key.end) box.value?.scrollToBottom();
 });
 </script>
 
@@ -35,11 +41,11 @@ useInput((input) => {
   <Box flexDirection="column" :height="rows">
     <Box borderStyle="round" :paddingX="1">
       <Text bold color="cyan">ScrollBox demo</Text>
-      <Text dimColor> — wheel · PageUp/PageDown · q to quit</Text>
+      <Text dimColor> — ↑/↓ · Home/End · q to quit</Text>
     </Box>
 
     <Box :flexGrow="1" :minHeight="0" flexDirection="column" borderStyle="round" :paddingX="1">
-      <ScrollBox wheel keyboard>
+      <ScrollBox ref="box">
         <Text v-for="line in lines" :key="line">{{ line }}</Text>
       </ScrollBox>
     </Box>
