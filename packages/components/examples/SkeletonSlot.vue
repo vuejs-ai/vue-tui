@@ -14,8 +14,7 @@
 
 <script setup lang="ts">
 import { Text } from "@vue-tui/runtime";
-import type { ColumnConfig } from "@vue-tui/components";
-import { Table } from "@vue-tui/components";
+import { Table, defineTableColumns } from "@vue-tui/components";
 
 // `skeleton` slot demo: customize border characters.
 // The slot receives { text, kind, part } props.
@@ -28,8 +27,8 @@ const rows = [
   { name: "Charlie", role: "Manager" },
 ];
 
-const columns: ColumnConfig[] = [
+const columns = defineTableColumns([
   { label: "Name", key: "name" },
   { label: "Role", key: "role" },
-];
+]);
 </script>

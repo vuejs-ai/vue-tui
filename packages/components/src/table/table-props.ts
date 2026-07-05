@@ -39,3 +39,12 @@ export const tableProps = {
 
 /** Props accepted by `<Table>`. */
 export type TableProps = ExtractPublicPropTypes<typeof tableProps>;
+
+/**
+ * Helper to define column configs with full type-checking.
+ * Enables excess property checking so typos like `align2` are caught early,
+ * and lets `align` work without `as const`.
+ */
+export function defineTableColumns(cols: ColumnConfig[]): ColumnConfig[] {
+  return cols;
+}

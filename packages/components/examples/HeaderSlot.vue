@@ -9,8 +9,7 @@
 
 <script setup lang="ts">
 import { Text } from "@vue-tui/runtime";
-import type { ColumnConfig } from "@vue-tui/components";
-import { Table } from "@vue-tui/components";
+import { Table, defineTableColumns } from "@vue-tui/components";
 
 // `header` slot demo: customize header cell rendering.
 // The slot receives { text, column, columnIndex, width } props.
@@ -22,8 +21,8 @@ const rows = [
   { city: "Tokyo", population: 13_960_000 },
 ];
 
-const columns: ColumnConfig[] = [
+const columns = defineTableColumns([
   { label: "City", key: "city" },
   { label: "Population", key: "population", align: "right" },
-];
+]);
 </script>

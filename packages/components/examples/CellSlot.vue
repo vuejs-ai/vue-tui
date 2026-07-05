@@ -21,7 +21,7 @@
 
 <script setup lang="ts">
 import { Text } from "@vue-tui/runtime";
-import { Table } from "@vue-tui/components";
+import { Table, defineTableColumns } from "@vue-tui/components";
 
 // `cell` slot demo: customize data cell rendering.
 // The slot receives { text, value, column, columnIndex, width, row, rowIndex }.
@@ -34,8 +34,8 @@ const rows = [
   { account: "Closed", balance: null },
 ];
 
-const columns = [
+const columns = defineTableColumns([
   { label: "Account", key: "account" },
-  { label: "Balance", key: "balance", align: "left" as const },
-];
+  { label: "Balance", key: "balance", align: "left" },
+]);
 </script>
