@@ -2,7 +2,7 @@ import type { Plugin } from "vite";
 
 export const DEV_VMOD_ID = "virtual:vue-tui/dev";
 // Rollup convention: a "\0"-prefixed id marks a virtual module so no other plugin /
-// the filesystem tries to resolve it. Kept in the bundle by isExternalId().
+// the filesystem tries to resolve it.
 export const RESOLVED_DEV_VMOD_ID = "\0" + DEV_VMOD_ID;
 
 // The snippet is TRANSFORMED by Vite (so its import.meta.hot is live, unlike the

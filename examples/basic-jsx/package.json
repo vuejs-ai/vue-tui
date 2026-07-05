@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite build && node dist/main.js"
+    "build": "tsdown",
+    "preview": "tsdown && node dist/main.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
@@ -16,6 +16,8 @@
     "@types/node": "catalog:",
     "@vitejs/plugin-vue-jsx": "^5",
     "@vue-tui/vite": "workspace:*",
+    "tsdown": "catalog:",
+    "unplugin-vue-jsx": "catalog:",
     "vite": "catalog:"
   }
 }
