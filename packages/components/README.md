@@ -38,29 +38,47 @@ import { Spinner } from "@vue-tui/components";
 
 ## ScrollBox
 
-A bounded scroll viewport for long, updating content. Opt into mouse-wheel scrolling with `wheel`,
-and sticky-bottom behavior keeps streaming output at the bottom only until the user scrolls up.
+A bounded viewport that follows the bottom of its content. The core behavior — clip overflow and
+stick to the latest line as content grows — needs no props. It listens to **no** input itself:
+scroll it through the exposed imperative handle, and bind your own keys / mouse to that.
 
 ```vue
 <script setup lang="ts">
-import { ScrollBox } from "@vue-tui/components";
-import { Text } from "@vue-tui/runtime";
+import { shallowRef } from "vue";
+import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
+import { Text, useInput } from "@vue-tui/runtime";
+
+const box = shallowRef<ScrollBoxExpose>();
+
+// ScrollBox ships no built-in wheel/keyboard — wire your own keys to the handle.
+useInput((_input, key) => {
+  if (key.upArrow) box.value?.scrollByLines(-1);
+  if (key.downArrow) box.value?.scrollByLines(1);
+});
 </script>
 
 <template>
-  <ScrollBox>
+  <ScrollBox ref="box">
     <Text v-for="line in lines" :key="line">{{ line }}</Text>
   </ScrollBox>
 </template>
 ```
 
-### Props
+### Imperative handle (`ScrollBoxExpose`)
 
-| prop            | type      | default | description                                            |
-| --------------- | --------- | ------- | ------------------------------------------------------ |
-| `wheel`         | `boolean` | `false` | enable mouse-wheel scrolling (turns on mouse tracking) |
-| `keyboard`      | `boolean` | `false` | enable PageUp/PageDown scrolling                       |
-| `linesPerWheel` | `number`  | `3`     | lines to scroll per wheel event                        |
+`ScrollBox` has no props; grab its handle with a template ref and drive scrolling:
+
+| action                 | description                                                     |
+| ---------------------- | --------------------------------------------------------------- |
+| `scrollToLine(line)`   | scroll so content line `line` is at the top (clamped)           |
+| `scrollByLines(lines)` | scroll by `lines` relative to the current position (`+` = down) |
+| `scrollToTop()`        | jump to the top                                                 |
+| `scrollToBottom()`     | jump to the bottom and resume following new content             |
+
+Why no built-in `wheel` / `keyboard`: the mouse wheel needs terminal mouse tracking, which breaks
+native text selection window-wide; keyboard input is global and collides with a focused field. So
+input policy is the app's to decide. For inline streaming output, prefer `Static` (let it flow into
+the terminal's own scrollback).
 
 ## License
 
