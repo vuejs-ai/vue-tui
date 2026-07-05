@@ -8,7 +8,7 @@
 > **Status:** active — the package now ships `ScrollBox` and `Spinner` (see per-component
 > records below). The principles here are design intent for the package as a whole.
 >
-> **Per-component records:** [scroll-box](./components/scroll-box.md), [spinner](./components/spinner.md).
+> **Per-component records:** [scroll-box](./components/scroll-box.md), [spinner](./components/spinner.md), [table](./components/table.md).
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
