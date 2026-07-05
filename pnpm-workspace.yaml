@@ -25,6 +25,8 @@ catalog:
   tsx: ^4.22.0
   string-width: ^8.0.0
   unplugin-vue: ^7.2.0
+  unplugin-vue-jsx: ^0.10.0
+  tsdown: ^0.22.3
   vue-tsc: ^3.3.4
 overrides:
   # Pin vite's version spec tree-wide (incl. third-party peer ranges) to the catalog version.

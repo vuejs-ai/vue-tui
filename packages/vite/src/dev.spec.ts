@@ -37,42 +37,30 @@ test("strips the query suffix before matching the entry", () => {
   expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
 });
 
-// vueTui() normalizes the `entry` option so dev (which matches the absolute module id via
-// endsWith) and build (which feeds rollupOptions.input) agree. Rooted forms — a leading "/"
-// (root-relative / POSIX-absolute / UNC) or a Windows drive-letter — pass through unchanged;
-// relative forms ("./src/x") get a leading slash for dev and the bare form for build. Each case
-// below previously broke ONE side ("./" missed dev injection -> no HMR/overlay; a POSIX/UNC
-// absolute had its slash stripped -> build UNRESOLVED_ENTRY), so assert dev AND build for all.
+// vueTui() normalizes the dev `entry` so the dev plugin (which matches the absolute module id via
+// endsWith) injects the HMR snippet on it. Rooted forms — a leading "/" (root-relative /
+// POSIX-absolute / UNC) or a Windows drive-letter — pass through unchanged; relative forms
+// ("./src/x") get a leading slash. The "./" case previously missed the module id (no HMR/overlay),
+// so this pins the normalization across all forms. (The production build is tsdown's job now, not
+// vueTui's, so there's no build-input side to assert here anymore.)
 const ENTRY_CASES = [
-  {
-    name: "'./'-relative",
-    entry: "./src/app.ts",
-    id: "/Users/proj/src/app.ts",
-    buildInput: "src/app.ts",
-  },
-  {
-    name: "Windows drive-letter",
-    entry: "C:/proj/src/main.ts",
-    id: "C:/proj/src/main.ts",
-    buildInput: "C:/proj/src/main.ts",
-  },
+  { name: "'./'-relative", entry: "./src/app.ts", id: "/Users/proj/src/app.ts" },
+  { name: "Windows drive-letter", entry: "C:/proj/src/main.ts", id: "C:/proj/src/main.ts" },
   {
     name: "Windows UNC",
     entry: "\\\\server\\share\\src\\main.ts",
     id: "//server/share/src/main.ts",
-    buildInput: "//server/share/src/main.ts",
   },
   {
     name: "POSIX-absolute",
     entry: "/Users/proj/app/src/main.ts",
     id: "/Users/proj/app/src/main.ts",
-    buildInput: "/Users/proj/app/src/main.ts",
   },
 ];
 
 test.each(ENTRY_CASES)(
-  "vueTui handles a $name entry: dev injects on the module id, build gets the right input",
-  ({ entry, id, buildInput }) => {
+  "vueTui normalizes a $name entry so dev injects on the module id",
+  ({ entry, id }) => {
     const plugins = vueTui({ entry });
     const dev = plugins.find((p) => p.name === "vue-tui:dev") as unknown as {
       transform: TransformFn;
@@ -80,9 +68,5 @@ test.each(ENTRY_CASES)(
     expect(dev.transform("export const x = 1;", id)?.code).toBe(
       `${injectPrefix}export const x = 1;`,
     );
-    const build = plugins.find((p) => p.name === "vue-tui:build") as unknown as {
-      config: () => { build: { rolldownOptions: { input: string } } };
-    };
-    expect(build.config().build.rolldownOptions.input).toBe(buildInput);
   },
 );
