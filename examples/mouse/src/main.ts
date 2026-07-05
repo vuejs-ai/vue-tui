@@ -1,4 +1,4 @@
 import { createApp } from "@vue-tui/runtime";
-import App from "./app.tsx";
+import App from "./app.vue";
 
 createApp(App).mount({ fullscreen: true });

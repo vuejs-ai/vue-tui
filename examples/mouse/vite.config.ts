@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
-import vueJsx from "@vitejs/plugin-vue-jsx";
+import vue from "@vitejs/plugin-vue";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({
-  plugins: [vueJsx(), vueTui({ entry: "/src/main.tsx" })],
+  plugins: [vue(), vueTui()],
 });
