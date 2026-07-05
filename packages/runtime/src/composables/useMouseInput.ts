@@ -1,14 +1,7 @@
-import {
-  inject,
-  onScopeDispose,
-  toValue,
-  unref,
-  watch,
-  type MaybeRef,
-  type MaybeRefOrGetter,
-} from "vue";
+import { inject, toValue, unref, watch, type MaybeRef, type MaybeRefOrGetter } from "vue";
 import { StdinContextKey } from "../context.ts";
 import type { MouseInputEvent } from "../io/parse-mouse.ts";
+import { tryOnScopeDispose } from "./scope.ts";
 
 export type { MouseInputEvent } from "../io/parse-mouse.ts";
 
@@ -36,7 +29,7 @@ export function useMouseInput(
     if (attached) return;
     stdin!.acquireRawMode();
     try {
-      mouseModeToken = stdin!.acquireSgrMouseMode();
+      mouseModeToken = stdin!.acquireSgrMouseMode("button");
       stdin!.internal_eventEmitter.on("mouse", listener);
       attached = true;
     } catch (error) {
@@ -67,5 +60,5 @@ export function useMouseInput(
     { immediate: true, flush: "sync" },
   );
 
-  onScopeDispose(detach);
+  tryOnScopeDispose(detach);
 }

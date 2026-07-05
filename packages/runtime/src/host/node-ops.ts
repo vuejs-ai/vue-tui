@@ -12,6 +12,7 @@ import {
   type TuiNode,
   type TuiRoot,
 } from "./nodes.ts";
+import type { MouseHandlerName, MouseHandlerProps } from "../mouse/events.ts";
 import {
   attachYoga,
   detachYoga,
@@ -95,6 +96,42 @@ const STYLE_PROPS = new Set([
   "paddingLeft",
   "paddingRight",
 ]);
+
+const MOUSE_HANDLER_PROPS = new Set<MouseHandlerName>([
+  "onMousedown",
+  "onMouseup",
+  "onClick",
+  "onWheel",
+]);
+
+function isMouseHandlerProp(key: string): key is MouseHandlerName {
+  return MOUSE_HANDLER_PROPS.has(key as MouseHandlerName);
+}
+
+function setStoredMouseHandler(node: TuiNode, key: MouseHandlerName, handler: unknown): void {
+  const withHandlers = node as { mouseHandlers?: Partial<MouseHandlerProps> };
+  const handlers = (withHandlers.mouseHandlers ??= {});
+  if (typeof handler === "function") {
+    handlers[key] = handler as never;
+    return;
+  }
+  delete handlers[key];
+}
+
+function registerStoredMouseHandlers(node: TuiNode, root: TuiRoot): void {
+  const controller = root.appContext.internal_mouse;
+  if (!controller) return;
+  const handlers = (node as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;
+  if (handlers) {
+    for (const key of MOUSE_HANDLER_PROPS) {
+      const handler = handlers[key];
+      if (handler) controller.setHandler(node, key, handler);
+    }
+  }
+  if (isContainer(node)) {
+    for (const child of node.children) registerStoredMouseHandlers(child, root);
+  }
+}
 
 /** Walk up the DOM tree to find the root node. */
 function findRoot(node: TuiNode): TuiRoot | null {
@@ -360,6 +397,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       const root = findRoot(child);
       if (root) root.staticNode = child;
     }
+    const root = findRoot(child);
+    if (root) registerStoredMouseHandlers(child, root);
 
     onCommit();
   }
@@ -367,6 +406,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   function remove(child: TuiNode): void {
     const parent = child.parent;
     if (!parent) return;
+    findRoot(child)?.appContext.internal_mouse?.removeNode(child);
 
     // Track static node removal: clear root.staticNode only if it still
     // points at this node. On key-driven remounts, insert() already
@@ -426,6 +466,19 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   }
 
   function patchProp(el: TuiNode, key: string, prev: unknown, next: unknown): void {
+    if (isMouseHandlerProp(key)) {
+      if (el.type === "tui-box" || el.type === "tui-text" || el.type === "tui-virtual-text") {
+        const root = findRoot(el);
+        if (root?.appContext.internal_mouse) {
+          root.appContext.internal_mouse.setHandler(el, key, next);
+        } else {
+          setStoredMouseHandler(el, key, next);
+        }
+      }
+      onCommit();
+      return;
+    }
+
     if (el.type === "tui-transform") {
       if (key === "transform" && typeof next === "function") {
         el.transform = next as (line: string, idx: number) => string;

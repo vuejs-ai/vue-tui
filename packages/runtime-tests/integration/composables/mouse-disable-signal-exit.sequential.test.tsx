@@ -12,8 +12,8 @@
 // callback returns (`{alwaysLast:false}`), so a buffered ASYNC `stdout.write` of
 // a terminal-restore escape can be lost before the process dies. `teardown(true)`
 // already writes show-cursor / leave-alt-screen / disable-kitty SYNCHRONOUSLY
-// (`fs.writeSync(fd, …)`). The SGR mouse-disable escape `\x1b[?1000l\x1b[?1006l`
-// (control sequences: CSI ? 1000 l and CSI ? 1006 l) must ALSO go out on the
+// (`fs.writeSync(fd, …)`). The SGR mouse-disable escape must disable every mouse
+// tracking level (`1003`, `1002`, `1000`) plus SGR coordinates (`1006`) and must ALSO go out on the
 // SYNCHRONOUS path — otherwise, when dropped, the terminal stays in mouse
 // tracking mode and keeps suppressing native text selection window-wide.
 import { PassThrough } from "node:stream";
@@ -21,12 +21,23 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defineComponent } from "vue";
-import { describe, test, expect, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, test, expect, vi } from "vite-plus/test";
 import { createApp, Text, useMouseInput } from "@vue-tui/runtime";
 
 const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l"; // CSI ? 1000 l + CSI ? 1006 l — SGR mouse OFF
+const MOUSE_OFF = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
 const SHOW_CURSOR = "\x1b[?25h";
+let previousTerm: string | undefined;
+
+beforeEach(() => {
+  previousTerm = process.env["TERM"];
+  process.env["TERM"] = "xterm-256color";
+});
+
+afterEach(() => {
+  if (previousTerm === undefined) delete process.env["TERM"];
+  else process.env["TERM"] = previousTerm;
+});
 
 function makeFakeStdin(): NodeJS.ReadStream {
   const s = new PassThrough() as unknown as NodeJS.ReadStream;
@@ -124,7 +135,7 @@ describe("SGR mouse disable on signal exit", () => {
     // not only the async stdout.write that signal-exit's re-raise can drop.
     expect(
       syncBytes,
-      "\\x1b[?1000l\\x1b[?1006l must be written via fs.writeSync on the signal-exit path",
+      "all SGR mouse levels must be disabled via fs.writeSync on the signal-exit path",
     ).toContain(MOUSE_OFF);
   });
 

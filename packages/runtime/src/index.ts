@@ -61,6 +61,23 @@ export {
   type MouseInputEvent,
   type UseMouseInputOptions,
 } from "./composables/useMouseInput.ts";
+export {
+  useDraggable,
+  type UseDraggableAxis,
+  type UseDraggableOptions,
+  type UseDraggablePosition,
+  type UseDraggableReturn,
+  type UseDraggableTarget,
+} from "./composables/useDraggable.ts";
+export type {
+  MouseButton,
+  MouseHandlerProps,
+  MouseTarget,
+  MouseTargetRect,
+  TuiMouseEvent,
+  TuiMouseEventType,
+  TuiWheelEvent,
+} from "./mouse/events.ts";
 export { usePaste, type UsePasteOptions } from "./composables/usePaste.ts";
 export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";
 export { useFocusManager } from "./composables/useFocusManager.ts";
