@@ -1,5 +1,5 @@
 /** Which button. String union, deliberately friendlier than DOM's numeric `button`. */
-export type MouseButton = "left" | "middle" | "right" | (string & {});
+export type MouseButton = "left" | "middle" | "right" | "back" | "forward" | (string & {});
 
 export type TuiMouseEventType =
   | "down"

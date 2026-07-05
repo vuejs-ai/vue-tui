@@ -54,6 +54,12 @@ describe("parseSgrMouseInput", () => {
     });
   });
 
+  test("drops unsupported side-button sequences", () => {
+    expect(parseSgrMouseInput("\x1b[<3;1;2M")).toBeUndefined();
+    expect(parseSgrMouseInput("\x1b[<35;1;2M")).toBeUndefined();
+    expect(parseSgrMouseInput("\x1b[<3;1;2m")).toBeUndefined();
+  });
+
   test("keeps the public useMouseInput parser wheel-only and vertical-only", () => {
     expect(parseMouseInput("\x1b[<64;1;2M")).toEqual({
       type: "wheel",

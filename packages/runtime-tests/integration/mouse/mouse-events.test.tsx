@@ -2,6 +2,7 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import {
   Box,
+  Static,
   Text,
   createApp,
   useDraggable,
@@ -123,6 +124,36 @@ test("mouse events bubble and stopPropagation stops ancestor handlers", async ()
   app.unmount();
 });
 
+test("mouse events rebase offsets while bubbling", async () => {
+  const calls: Array<[string, number, number]> = [];
+  const App = defineComponent(() => () => (
+    <Box
+      marginLeft={2}
+      width={5}
+      height={1}
+      onClick={(event) => calls.push(["parent", event.offsetX, event.offsetY])}
+    >
+      <Box
+        marginLeft={1}
+        width={2}
+        height={1}
+        onClick={(event) => calls.push(["child", event.offsetX, event.offsetY])}
+      />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m");
+  await settle();
+
+  expect(calls).toEqual([
+    ["child", 0, 0],
+    ["parent", 1, 0],
+  ]);
+  app.unmount();
+});
+
 test("click detail increments for repeated clicks at the same target and cell", async () => {
   const details: number[] = [];
   const App = defineComponent(() => () => (
@@ -174,6 +205,24 @@ test("click detail does not increment across cells on the same target", async ()
   app.unmount();
 });
 
+test("click is not synthesized when down and up hit different targets", async () => {
+  const clicks: string[] = [];
+  const App = defineComponent(() => () => (
+    <Box height={1}>
+      <Box width={2} height={1} onClick={() => clicks.push("left")} />
+      <Box width={2} height={1} onClick={() => clicks.push("right")} />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;4;1m");
+  await settle();
+
+  expect(clicks).toEqual([]);
+  app.unmount();
+});
+
 test("wheel events use DOM-shaped delta fields and no button", async () => {
   const wheels: TuiWheelEvent[] = [];
   const App = defineComponent(() => () => (
@@ -214,6 +263,29 @@ test("inline element mouse handlers warn once and do not arm SGR mouse", async (
 
   warn.mockRestore();
   app.unmount();
+});
+
+test("inline element mouse handlers warn in production too", async () => {
+  const previousNodeEnv = process.env["NODE_ENV"];
+  process.env["NODE_ENV"] = "production";
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const App = defineComponent(() => () => (
+    <Box width={4} height={2} onClick={() => {}}>
+      <Text>inline</Text>
+    </Box>
+  ));
+
+  try {
+    const { app } = mountMouseApp(App, false);
+    await settle();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    app.unmount();
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env["NODE_ENV"];
+    else process.env["NODE_ENV"] = previousNodeEnv;
+    warn.mockRestore();
+  }
 });
 
 test("TERM=dumb does not arm SGR mouse or deliver element handlers", async () => {
@@ -288,6 +360,114 @@ test("nested Text handlers receive virtual-text hit-test events", async () => {
   app.unmount();
 });
 
+test("hit-testing honors overflow hidden clipping", async () => {
+  const calls: TuiMouseEvent[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={4} height={1} overflow="hidden">
+      <Box marginLeft={3} width={3} height={1} onClick={(event) => calls.push(event)} />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m\x1b[<0;5;1M\x1b[<0;5;1m");
+  await settle();
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.screenX).toBe(3);
+  expect(calls[0]!.target?.rect).toEqual({ x: 3, y: 0, width: 1, height: 1 });
+  app.unmount();
+});
+
+test("hit-testing honors absolute positioning", async () => {
+  const calls: TuiMouseEvent[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={6} height={3}>
+      <Box
+        position="absolute"
+        left={2}
+        top={1}
+        width={2}
+        height={1}
+        onClick={(event) => calls.push(event)}
+      />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;3;2M\x1b[<0;3;2m\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.offsetX).toBe(0);
+  expect(calls[0]!.offsetY).toBe(0);
+  expect(calls[0]!.target?.rect).toEqual({ x: 2, y: 1, width: 2, height: 1 });
+  app.unmount();
+});
+
+test("hit-testing excludes Static content", async () => {
+  const staticClicks: string[] = [];
+  const dynamicClicks: string[] = [];
+  const App = defineComponent(() => () => (
+    <Box>
+      <Box width={6} height={1} onClick={() => dynamicClicks.push("dynamic")}>
+        <Text>dyn</Text>
+      </Box>
+      <Static items={["history"]}>
+        {{
+          default: ({ index }: { index: number }) => (
+            <Box key={index} width={6} height={1} onClick={() => staticClicks.push("static")}>
+              <Text>static</Text>
+            </Box>
+          ),
+        }}
+      </Static>
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await nextTick();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+
+  expect(staticClicks).toEqual([]);
+  expect(dynamicClicks).toEqual(["dynamic"]);
+  app.unmount();
+});
+
+test("hit-testing prefers the last-painted overlapping node", async () => {
+  const calls: string[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={4} height={2}>
+      <Box
+        position="absolute"
+        left={0}
+        top={0}
+        width={2}
+        height={1}
+        onClick={() => calls.push("first")}
+      />
+      <Box
+        position="absolute"
+        left={0}
+        top={0}
+        width={2}
+        height={1}
+        onClick={() => calls.push("second")}
+      />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+
+  expect(calls).toEqual(["second"]);
+  app.unmount();
+});
+
 test("MouseTarget rect is cleared when a mounted node stops painting", async () => {
   const target = shallowRef<MouseTarget | null>(null);
   const hidden = shallowRef(false);
@@ -329,7 +509,7 @@ test("useDraggable captures pointer movement until release", async () => {
   const { app, stdin } = mountMouseApp(App);
   await settle();
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;8;4M\x1b[<0;8;4m");
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<65;20;1M\x1b[<32;8;4M\x1b[<0;8;4m");
   await settle();
 
   expect(moves).toEqual([
@@ -337,6 +517,72 @@ test("useDraggable captures pointer movement until release", async () => {
     ["drag", 7, 3, 7, 3],
     ["dragend", 7, 3, 0, 0],
   ]);
+  app.unmount();
+});
+
+test("useDraggable suppresses click after a drag movement", async () => {
+  const dragTarget = shallowRef<MouseTarget | null>(null);
+  const clicks: string[] = [];
+  const drags: string[] = [];
+  const App = defineComponent(() => {
+    useDraggable(dragTarget, {
+      onStart: () => drags.push("start"),
+      onMove: () => drags.push("move"),
+      onEnd: () => drags.push("end"),
+    });
+    return () => (
+      <Box width={4} height={2} ref={dragTarget} onClick={() => clicks.push("click")}>
+        <Text>drag</Text>
+      </Box>
+    );
+  });
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;8;4M\x1b[<0;8;4m");
+  await settle();
+
+  expect(drags).toEqual(["start", "move", "end"]);
+  expect(clicks).toEqual([]);
+  app.unmount();
+});
+
+test("useDraggable releases pointer capture when the target unmounts", async () => {
+  const dragTarget = shallowRef<MouseTarget | null>(null);
+  const mounted = shallowRef(true);
+  const moves: string[] = [];
+  const App = defineComponent(() => {
+    useDraggable(dragTarget, {
+      onStart: () => moves.push("start"),
+      onMove: () => {
+        moves.push("move");
+        mounted.value = false;
+      },
+      onEnd: () => moves.push("end"),
+    });
+    return () => (
+      <Box width={8} height={2}>
+        {mounted.value ? (
+          <Box width={4} height={1} ref={dragTarget}>
+            <Text>drag</Text>
+          </Box>
+        ) : (
+          <Box width={4} height={1}>
+            <Text>gone</Text>
+          </Box>
+        )}
+      </Box>
+    );
+  });
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;6;1M");
+  await settle();
+  stdin.emit("data", "\x1b[<32;7;1M\x1b[<0;7;1m");
+  await settle();
+
+  expect(moves).toEqual(["start", "move"]);
   app.unmount();
 });
 

@@ -149,6 +149,7 @@ expectTypeOf(mouseHandler).toMatchTypeOf<Parameters<typeof useMouseInput>[0]>();
 
 expectTypeOf<string>().toMatchTypeOf<MouseButton>();
 expectTypeOf<MouseButton>().toMatchTypeOf<string>();
+expectTypeOf<"back" | "forward">().toMatchTypeOf<MouseButton>();
 expectTypeOf<string>().toMatchTypeOf<TuiMouseEventType>();
 expectTypeOf<TuiMouseEventType>().toMatchTypeOf<string>();
 expectTypeOf<MouseTargetRect>().toEqualTypeOf<{

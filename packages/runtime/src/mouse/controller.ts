@@ -104,7 +104,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     | undefined;
   let capturedNode: TuiNode | undefined;
   let activeDrag:
-    | { node: TuiNode; registration: DraggableRegistration; x: number; y: number }
+    | { node: TuiNode; registration: DraggableRegistration; x: number; y: number; moved: boolean }
     | undefined;
 
   function warnInlineOnce() {
@@ -303,15 +303,16 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   function onRawMouse(raw: SgrMouseEvent) {
     const screenX = raw.x - 1;
     const screenY = raw.y - 1;
-    const movementX = lastPointer ? screenX - lastPointer.screenX : 0;
-    const movementY = lastPointer ? screenY - lastPointer.screenY : 0;
-    lastPointer = { screenX, screenY };
 
     if (raw.type === "wheel") {
       const targetNode = capturedNode ?? hitTest(screenX, screenY);
       if (targetNode) dispatchWheelEvent(targetNode, raw);
       return;
     }
+
+    const movementX = lastPointer ? screenX - lastPointer.screenX : 0;
+    const movementY = lastPointer ? screenY - lastPointer.screenY : 0;
+    lastPointer = { screenX, screenY };
 
     if (raw.type === "down") {
       pressedButtons.add(raw.button);
@@ -328,7 +329,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       const draggable = findDraggable(targetNode);
       if (draggable) {
         capturedNode = draggable.node;
-        activeDrag = { ...draggable, x: screenX, y: screenY };
+        activeDrag = { ...draggable, x: screenX, y: screenY, moved: false };
         draggable.registration.onStart?.(makeDragEvent("dragstart", draggable.node, raw, 0, 0));
       }
       return;
@@ -336,6 +337,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
 
     if (raw.type === "drag") {
       if (activeDrag) {
+        activeDrag.moved = true;
         activeDrag.x = screenX;
         activeDrag.y = screenY;
         activeDrag.registration.onMove?.(
@@ -347,6 +349,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
 
     dispatchMouseEvent("up", targetNode, raw, movementX, movementY, 0);
 
+    const suppressClick = activeDrag?.moved === true;
     if (activeDrag) {
       activeDrag.registration.onEnd?.(
         makeDragEvent("dragend", activeDrag.node, raw, movementX, movementY),
@@ -355,7 +358,12 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       capturedNode = undefined;
     }
 
-    if (lastDown && lastDown.node === targetNode && lastDown.button === raw.button) {
+    if (
+      !suppressClick &&
+      lastDown &&
+      lastDown.node === targetNode &&
+      lastDown.button === raw.button
+    ) {
       const time = now();
       const detail =
         lastClick &&
