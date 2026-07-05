@@ -10,7 +10,7 @@ import type {
   TuiMouseEvent,
   TuiWheelEvent,
 } from "./events.ts";
-import { forgetMouseTarget, getMouseTarget, nodeFromMouseTarget } from "./target.ts";
+import { forgetMouseTarget, getMouseTarget } from "./target.ts";
 
 export interface MouseHitMapEntry {
   readonly node: TuiNode;
@@ -28,7 +28,7 @@ export interface MouseController {
   setHandler(node: TuiNode, name: MouseHandlerName, handler: unknown): void;
   updateHitMap(entries: readonly MouseHitMapEntry[]): void;
   removeNode(node: TuiNode): void;
-  registerDraggable(target: MouseTarget, registration: DraggableRegistration): () => void;
+  registerDraggable(node: TuiNode, registration: DraggableRegistration): () => void;
 }
 
 interface CreateMouseControllerOptions {
@@ -422,9 +422,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       removeNode(node);
       reconcileArmed();
     },
-    registerDraggable(target, registration) {
-      const node = nodeFromMouseTarget(target);
-      if (!node) return () => {};
+    registerDraggable(node, registration) {
       let registrations = draggables.get(node);
       if (!registrations) {
         registrations = new Set();

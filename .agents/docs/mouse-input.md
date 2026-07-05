@@ -259,7 +259,7 @@ export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, o
 /** VueUse `useDraggable`, adapted to the terminal: the element tracks the pointer during a drag,
  *  owning pointer capture internally. Returns cell coords + drag state; onMove's step = movementX/Y. */
 export function useDraggable(
-  target: MaybeRefOrGetter<MouseTarget | null>,
+  target: MaybeRefOrGetter<unknown>, // a normal <Box>/<Text> template ref
   options?: {
     onStart?: (e: TuiMouseEvent) => void;
     onMove?: (e: TuiMouseEvent) => void; // e.movementX/movementY = movement this step
@@ -332,9 +332,9 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 
 ## 8. Open implementation questions (how, not what — no effect on §5)
 
-- **`MouseTarget` surface** — a thin public wrapper: stable identity + an **absolute** rect accessor
-  from the paint walk. Must not re-export `TuiNode`, and must not reuse what `useBoxMetrics` resolves
-  to (raw `TuiNode`, parent-relative `left/top`).
+- **`MouseTarget` surface** — a thin public wrapper for event `target` / `currentTarget`: stable
+  identity + an **absolute** rect accessor from the paint walk. Must not re-export `TuiNode`, and
+  must not be required for ordinary template-ref composables such as `useDraggable`.
 - **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
   the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a

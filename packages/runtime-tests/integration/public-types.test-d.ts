@@ -171,6 +171,6 @@ expectTypeOf<TuiWheelEvent["button"]>().toEqualTypeOf<null>();
 expectTypeOf<TuiWheelEvent["deltaX"]>().toEqualTypeOf<number>();
 expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
 
-const dragTarget = shallowRef<MouseTarget | null>(null);
+const dragTarget = shallowRef<unknown>(null);
 expectTypeOf(dragTarget).toMatchTypeOf<Parameters<typeof useDraggable>[0]>();
 expectTypeOf<ReturnType<typeof useDraggable>>().toEqualTypeOf<UseDraggableReturn>();

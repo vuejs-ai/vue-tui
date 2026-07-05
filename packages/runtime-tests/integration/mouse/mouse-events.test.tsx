@@ -246,9 +246,8 @@ test("wheel events use DOM-shaped delta fields and no button", async () => {
 
 test("inline element mouse handlers warn once and do not arm SGR mouse", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const target = shallowRef<MouseTarget | null>(null);
   const App = defineComponent(() => () => (
-    <Box ref={target} width={4} height={2} onClick={() => {}}>
+    <Box width={4} height={2} onClick={() => {}}>
       <Text>inline</Text>
     </Box>
   ));
@@ -259,7 +258,6 @@ test("inline element mouse handlers warn once and do not arm SGR mouse", async (
   expect(warn.mock.calls[0]![0]).toContain("app.mount({ fullscreen: true })");
   expect(warn.mock.calls[0]![0]).toContain("useMouseInput()");
   expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
-  expect(target.value?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 });
 
   warn.mockRestore();
   app.unmount();
@@ -472,13 +470,22 @@ test("MouseTarget rect is cleared when a mounted node stops painting", async () 
   const target = shallowRef<MouseTarget | null>(null);
   const hidden = shallowRef(false);
   const App = defineComponent(() => () => (
-    <Box ref={target} width={4} height={2} display={hidden.value ? "none" : "flex"}>
+    <Box
+      width={4}
+      height={2}
+      display={hidden.value ? "none" : "flex"}
+      onClick={(event) => {
+        target.value = event.currentTarget;
+      }}
+    >
       <Text>box</Text>
     </Box>
   ));
-  const { app } = mountMouseApp(App);
+  const { app, stdin } = mountMouseApp(App);
   await settle();
 
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
   expect(target.value?.rect).toEqual({ x: 0, y: 0, width: 4, height: 2 });
 
   hidden.value = true;
@@ -489,7 +496,7 @@ test("MouseTarget rect is cleared when a mounted node stops painting", async () 
 });
 
 test("useDraggable captures pointer movement until release", async () => {
-  const dragTarget = shallowRef<import("@vue-tui/runtime").MouseTarget | null>(null);
+  const dragTarget = shallowRef<unknown>(null);
   const moves: Array<[string, number, number, number, number]> = [];
   const App = defineComponent(() => {
     useDraggable(dragTarget, {
@@ -521,7 +528,7 @@ test("useDraggable captures pointer movement until release", async () => {
 });
 
 test("useDraggable suppresses click after a drag movement", async () => {
-  const dragTarget = shallowRef<MouseTarget | null>(null);
+  const dragTarget = shallowRef<unknown>(null);
   const clicks: string[] = [];
   const drags: string[] = [];
   const App = defineComponent(() => {
@@ -548,7 +555,7 @@ test("useDraggable suppresses click after a drag movement", async () => {
 });
 
 test("useDraggable releases pointer capture when the target unmounts", async () => {
-  const dragTarget = shallowRef<MouseTarget | null>(null);
+  const dragTarget = shallowRef<unknown>(null);
   const mounted = shallowRef(true);
   const moves: string[] = [];
   const App = defineComponent(() => {
@@ -593,7 +600,7 @@ test("useDraggable captures middle and right button drags", async () => {
   ] as const;
 
   for (const item of cases) {
-    const dragTarget = shallowRef<MouseTarget | null>(null);
+    const dragTarget = shallowRef<unknown>(null);
     const moves: Array<[string, TuiMouseEvent["button"], number, number]> = [];
     const App = defineComponent(() => {
       useDraggable(dragTarget, {

@@ -1,6 +1,4 @@
 import type { Node as YogaNode } from "yoga-layout";
-import { nodeFromMouseTarget } from "../mouse/target.ts";
-import type { MouseTarget } from "../mouse/events.ts";
 import type { TuiNode, TuiRoot } from "./nodes.ts";
 
 function hasYoga(value: unknown): value is { yoga: YogaNode } {
@@ -33,8 +31,6 @@ function findHostEl(vnode: unknown): Record<string, unknown> | null {
 }
 
 export function resolveTuiNode(value: unknown): TuiNode | null {
-  const mouseTargetNode = nodeFromMouseTarget(value as MouseTarget | null | undefined);
-  if (mouseTargetNode) return mouseTargetNode;
   if (!value) return null;
   const obj = value as Record<string, unknown>;
   if (typeof obj.type === "string") return obj as unknown as TuiNode;

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, inject, provide, shallowRef } from "vue";
+import { computed, inject, provide } from "vue";
 import { AppContextKey, TextContextKey } from "../context.ts";
-import { useMouseTarget } from "../composables/useMouseTarget.ts";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
 
@@ -23,9 +22,6 @@ const srEnabled = computed(() => appCtx?.isScreenReaderEnabled ?? false);
 const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 const srLabel = computed(() => (srEnabled.value && props.ariaLabel ? props.ariaLabel : null));
 const hasContent = computed(() => srLabel.value != null || slots.default != null);
-const hostRef = shallowRef<unknown>();
-const mouseTarget = useMouseTarget(hostRef);
-defineExpose(mouseTarget);
 
 // Validate color + backgroundColor every render (matches Box); throws into the
 // error boundary. BEFORE the hasContent gate but after !srHidden, so a childless
@@ -51,13 +47,13 @@ function validate(): true {
 
 <template>
   <template v-if="!srHidden && (srEnabled || validate()) && hasContent">
-    <tui-virtual-text v-if="insideText" ref="hostRef" v-bind="props">
+    <tui-virtual-text v-if="insideText" v-bind="props">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
     </tui-virtual-text>
     <!-- Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when they
          overflow their container (e.g. in no-wrap flex rows). -->
-    <tui-text v-else ref="hostRef" v-bind="{ ...props, flexShrink: 1 }">
+    <tui-text v-else v-bind="{ ...props, flexShrink: 1 }">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
     </tui-text>

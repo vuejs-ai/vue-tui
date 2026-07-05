@@ -4,7 +4,6 @@ import {
   Text,
   useDraggable,
   useInput,
-  type MouseTarget,
   type TuiMouseEvent,
   type TuiWheelEvent,
 } from "@vue-tui/runtime";
@@ -17,7 +16,7 @@ export default defineComponent(() => {
   const clicks = shallowRef(0);
   const lastClick = shallowRef("none");
   const lastWheel = shallowRef("none");
-  const dragRef = shallowRef<MouseTarget | null>(null);
+  const dragRef = shallowRef<unknown>(null);
   const dragLeft = shallowRef(2);
   const dragTop = shallowRef(7);
   let dragStartLeft = 0;

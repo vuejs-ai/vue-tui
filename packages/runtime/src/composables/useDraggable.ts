@@ -9,7 +9,8 @@ import {
   type Ref,
 } from "vue";
 import { AppContextKey } from "../context.ts";
-import type { MouseTarget, TuiMouseEvent } from "../mouse/events.ts";
+import { resolveTuiNode } from "../host/resolve-node.ts";
+import type { TuiMouseEvent } from "../mouse/events.ts";
 
 export interface UseDraggableOptions {
   onStart?: (event: TuiMouseEvent) => void;
@@ -24,7 +25,7 @@ export interface UseDraggableReturn {
 }
 
 export function useDraggable(
-  target: MaybeRefOrGetter<MouseTarget | null>,
+  target: MaybeRefOrGetter<unknown>,
   options: UseDraggableOptions = {},
 ): UseDraggableReturn {
   const app = inject(AppContextKey);
@@ -55,7 +56,9 @@ export function useDraggable(
 
       void nextTick(() => {
         if (cancelled) return;
-        unregister = app.internal_mouse?.registerDraggable(value, {
+        const node = resolveTuiNode(value);
+        if (!node) return;
+        unregister = app.internal_mouse?.registerDraggable(node, {
           onStart(event) {
             x.value = event.screenX;
             y.value = event.screenY;
