@@ -49,6 +49,19 @@ test("text with standard color", async () => {
   expect(lastFrame()).toBe(chalk.green("Test"));
 });
 
+test('nested Text color="revert" resets foreground to terminal default', async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text color="red">
+        Red
+        <Text color="revert">Default</Text>
+      </Text>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("\x1b[31mRed\x1b[39mDefault");
+});
+
 test("text with dim+bold", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (

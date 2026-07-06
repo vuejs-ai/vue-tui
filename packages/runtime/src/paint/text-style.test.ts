@@ -4,6 +4,7 @@ import {
   applyChalk,
   assertValidBackgroundColor,
   assertValidForegroundColor,
+  finalizeForegroundResets,
   isInvalidBackgroundColor,
   isInvalidForegroundColor,
 } from "./text-style.ts";
@@ -43,6 +44,40 @@ test("unknown color name falls back to no color", () => {
   chalk.level = 1;
   try {
     expect(applyChalk("x", { color: "not-a-real-color" })).toBe("x");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
+test("revert and initial foreground colors reset to terminal default", () => {
+  const prev = chalk.level;
+  chalk.level = 1;
+  try {
+    expect(finalizeForegroundResets(applyChalk("x", { color: "revert" }))).toBe(
+      "\x1b[39mx\x1b[39m",
+    );
+    expect(finalizeForegroundResets(applyChalk("x", { color: "initial" }))).toBe(
+      "\x1b[39mx\x1b[39m",
+    );
+  } finally {
+    chalk.level = prev;
+  }
+});
+
+test("foreground reset child opts out without changing ordinary nested colors", () => {
+  const prev = chalk.level;
+  chalk.level = 1;
+  try {
+    expect(applyChalk(`A${applyChalk("B", { color: "green" })}C`, { color: "red" })).toBe(
+      chalk.red(`A${chalk.green("B")}C`),
+    );
+    expect(
+      finalizeForegroundResets(
+        applyChalk(`A${applyChalk("B", { color: "revert" })}C`, {
+          color: "red",
+        }),
+      ),
+    ).toBe(`${chalk.red("A")}\x1b[39mB\x1b[39m${chalk.red("C")}`);
   } finally {
     chalk.level = prev;
   }

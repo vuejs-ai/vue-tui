@@ -8,7 +8,7 @@ import {
   tokenize,
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
-import { applyChalk, applyColor } from "./text-style.ts";
+import { applyChalk, applyColor, finalizeForegroundResets } from "./text-style.ts";
 import { sanitizeAnsi } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -345,7 +345,8 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?
   // child wraps itself; the Box bg threads through unchanged), then wrap the whole
   // concatenation with THIS node's own style — Ink's parent-wraps-children model.
   const inner = squashInlineChildren(node.children, inheritedBg);
-  return sanitizeAnsi(applyOwnStyle(node.props, inner, inheritedBg));
+  const styled = applyOwnStyle(node.props, inner, inheritedBg);
+  return sanitizeAnsi(node.type === "tui-text" ? finalizeForegroundResets(styled) : styled);
 }
 
 // Apply a Text node's OWN chalk styling as a wrap around its already-composed
