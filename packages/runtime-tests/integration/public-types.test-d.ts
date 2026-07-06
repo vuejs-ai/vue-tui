@@ -12,9 +12,17 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { shallowRef } from "vue";
 import {
+  shallowRef,
+  type ComponentPublicInstance,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+  type Ref,
+} from "vue";
+import {
+  Box,
   useApp,
+  useDraggable,
   useInput,
   useMouseInput,
   usePaste,
@@ -35,7 +43,19 @@ import type {
   NewlineProps,
   SpacerProps,
   Key,
+  MouseButton,
+  MouseHandlerProps,
   MouseInputEvent,
+  MouseTarget,
+  MouseTargetRect,
+  TuiMouseEvent,
+  TuiMouseEventType,
+  TuiWheelEvent,
+  UseDraggableAxis,
+  UseDraggableOptions,
+  UseDraggablePosition,
+  UseDraggableReturn,
+  UseDraggableTarget,
   WindowSize,
   CursorPosition,
   UseAppReturn,
@@ -55,6 +75,12 @@ expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<string | undefined>()
 expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
+expectTypeOf<BoxProps["onMousedown"]>().toEqualTypeOf<MouseHandlerProps["onMousedown"]>();
+expectTypeOf<BoxProps["onMouseup"]>().toEqualTypeOf<MouseHandlerProps["onMouseup"]>();
+expectTypeOf<BoxProps["onClick"]>().toEqualTypeOf<MouseHandlerProps["onClick"]>();
+expectTypeOf<BoxProps["onWheel"]>().toEqualTypeOf<MouseHandlerProps["onWheel"]>();
+expectTypeOf<TextProps["onClick"]>().toEqualTypeOf<MouseHandlerProps["onClick"]>();
+expectTypeOf<TextProps["onWheel"]>().toEqualTypeOf<MouseHandlerProps["onWheel"]>();
 expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
 expectTypeOf<StaticProps<string>["items"]>().toEqualTypeOf<string[]>();
 expectTypeOf<StaticProps["style"]>().toEqualTypeOf<StaticStyle | undefined>();
@@ -131,3 +157,50 @@ expectTypeOf<MouseInputEvent>().toEqualTypeOf<{
 }>();
 const mouseHandler = shallowRef((_event: MouseInputEvent) => {});
 expectTypeOf(mouseHandler).toMatchTypeOf<Parameters<typeof useMouseInput>[0]>();
+
+expectTypeOf<string>().toMatchTypeOf<MouseButton>();
+expectTypeOf<MouseButton>().toMatchTypeOf<string>();
+expectTypeOf<"back" | "forward">().toMatchTypeOf<MouseButton>();
+expectTypeOf<string>().toMatchTypeOf<TuiMouseEventType>();
+expectTypeOf<TuiMouseEventType>().toMatchTypeOf<string>();
+expectTypeOf<MouseTargetRect>().toEqualTypeOf<{
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}>();
+expectTypeOf<MouseTarget["rect"]>().toEqualTypeOf<MouseTargetRect>();
+expectTypeOf<TuiMouseEvent["type"]>().toEqualTypeOf<TuiMouseEventType>();
+expectTypeOf<TuiMouseEvent["button"]>().toEqualTypeOf<MouseButton | null>();
+expectTypeOf<TuiMouseEvent["buttons"]>().toEqualTypeOf<ReadonlySet<MouseButton>>();
+expectTypeOf<TuiMouseEvent["target"]>().toEqualTypeOf<MouseTarget | null>();
+expectTypeOf<TuiMouseEvent["currentTarget"]>().toEqualTypeOf<MouseTarget | null>();
+expectTypeOf<TuiMouseEvent["movementX"]>().toEqualTypeOf<number>();
+expectTypeOf<TuiMouseEvent["movementY"]>().toEqualTypeOf<number>();
+expectTypeOf<TuiWheelEvent["type"]>().toEqualTypeOf<"wheel">();
+expectTypeOf<TuiWheelEvent["button"]>().toEqualTypeOf<null>();
+expectTypeOf<TuiWheelEvent["deltaX"]>().toEqualTypeOf<number>();
+expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
+
+expectTypeOf<Parameters<typeof useMouseInput>[0]>().toEqualTypeOf<
+  MaybeRef<(event: MouseInputEvent) => void>
+>();
+
+const dragTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+expectTypeOf(dragTarget).toMatchTypeOf<Parameters<typeof useDraggable>[0]>();
+expectTypeOf<Parameters<typeof useDraggable>[0]>().toEqualTypeOf<UseDraggableTarget>();
+expectTypeOf<UseDraggableTarget>().toEqualTypeOf<
+  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
+>();
+expectTypeOf<ReturnType<typeof useDraggable>>().toEqualTypeOf<UseDraggableReturn>();
+expectTypeOf<UseDraggableAxis>().toEqualTypeOf<"x" | "y" | "both">();
+expectTypeOf<UseDraggableOptions["initialValue"]>().toEqualTypeOf<
+  UseDraggablePosition | undefined
+>();
+expectTypeOf<UseDraggableOptions["axis"]>().toEqualTypeOf<UseDraggableAxis | undefined>();
+expectTypeOf<UseDraggableOptions["onStart"]>().toEqualTypeOf<
+  ((position: UseDraggablePosition, event: TuiMouseEvent) => void) | undefined
+>();
+expectTypeOf<UseDraggableReturn["x"]>().toEqualTypeOf<Ref<number>>();
+expectTypeOf<UseDraggableReturn["y"]>().toEqualTypeOf<Ref<number>>();
+expectTypeOf<UseDraggableReturn["position"]>().toMatchTypeOf<Readonly<Ref<UseDraggablePosition>>>();

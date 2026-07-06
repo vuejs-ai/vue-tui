@@ -3,8 +3,13 @@ const SHIFT_MASK = 4;
 const META_MASK = 8;
 const CTRL_MASK = 16;
 const MODIFIER_MASK = SHIFT_MASK | META_MASK | CTRL_MASK;
+const DRAG_MASK = 32;
 const WHEEL_UP = 64;
 const WHEEL_DOWN = 65;
+const WHEEL_LEFT = 66;
+const WHEEL_RIGHT = 67;
+
+export type SgrMouseButton = "left" | "middle" | "right";
 
 interface SgrMouseSequence {
   readonly button: number;
@@ -23,6 +28,32 @@ export interface MouseInputEvent {
   readonly ctrl: boolean;
 }
 
+export interface SgrMouseButtonEvent {
+  readonly type: "down" | "up" | "drag";
+  readonly button: SgrMouseButton;
+  /** 1-based SGR wire coordinate. */
+  readonly x: number;
+  /** 1-based SGR wire coordinate. */
+  readonly y: number;
+  readonly shift: boolean;
+  readonly meta: boolean;
+  readonly ctrl: boolean;
+}
+
+export interface SgrMouseWheelEvent {
+  readonly type: "wheel";
+  readonly direction: "up" | "down" | "left" | "right";
+  /** 1-based SGR wire coordinate. */
+  readonly x: number;
+  /** 1-based SGR wire coordinate. */
+  readonly y: number;
+  readonly shift: boolean;
+  readonly meta: boolean;
+  readonly ctrl: boolean;
+}
+
+export type SgrMouseEvent = SgrMouseButtonEvent | SgrMouseWheelEvent;
+
 function parseSgrMouseSequence(input: string): SgrMouseSequence | undefined {
   const match = SGR_MOUSE_INPUT.exec(input);
   if (!match) return undefined;
@@ -40,20 +71,98 @@ export function isSgrMouseInput(input: string): boolean {
   return parseSgrMouseSequence(input) !== undefined;
 }
 
-export function parseMouseInput(input: string): MouseInputEvent | undefined {
-  const sequence = parseSgrMouseSequence(input);
-  if (!sequence || sequence.final !== "M") return undefined;
+function readModifiers(button: number) {
+  return {
+    shift: Boolean(button & SHIFT_MASK),
+    meta: Boolean(button & META_MASK),
+    ctrl: Boolean(button & CTRL_MASK),
+  };
+}
 
-  const baseButton = sequence.button & ~MODIFIER_MASK;
-  if (baseButton !== WHEEL_UP && baseButton !== WHEEL_DOWN) return undefined;
+function decodeButton(button: number): SgrMouseButton | undefined {
+  switch (button) {
+    case 0:
+      return "left";
+    case 1:
+      return "middle";
+    case 2:
+      return "right";
+    default:
+      return undefined;
+  }
+}
+
+function decodeWheelDirection(button: number): SgrMouseWheelEvent["direction"] | undefined {
+  switch (button) {
+    case WHEEL_UP:
+      return "up";
+    case WHEEL_DOWN:
+      return "down";
+    case WHEEL_LEFT:
+      return "left";
+    case WHEEL_RIGHT:
+      return "right";
+    default:
+      return undefined;
+  }
+}
+
+export function parseSgrMouseInput(input: string): SgrMouseEvent | undefined {
+  const sequence = parseSgrMouseSequence(input);
+  if (!sequence) return undefined;
+
+  const modifiers = readModifiers(sequence.button);
+
+  if (sequence.final === "M") {
+    const wheelButton = sequence.button & ~MODIFIER_MASK;
+    const wheelDirection = decodeWheelDirection(wheelButton);
+    if (wheelDirection) {
+      return {
+        type: "wheel",
+        direction: wheelDirection,
+        x: sequence.x,
+        y: sequence.y,
+        ...modifiers,
+      };
+    }
+
+    const isDrag = Boolean(sequence.button & DRAG_MASK);
+    const button = decodeButton(sequence.button & ~(MODIFIER_MASK | DRAG_MASK));
+    if (!button) return undefined;
+
+    return {
+      type: isDrag ? "drag" : "down",
+      button,
+      x: sequence.x,
+      y: sequence.y,
+      ...modifiers,
+    };
+  }
+
+  const button = decodeButton(sequence.button & ~(MODIFIER_MASK | DRAG_MASK));
+  if (!button) return undefined;
+
+  return {
+    type: "up",
+    button,
+    x: sequence.x,
+    y: sequence.y,
+    ...modifiers,
+  };
+}
+
+export function parseMouseInput(input: string): MouseInputEvent | undefined {
+  const event = parseSgrMouseInput(input);
+  if (!event || event.type !== "wheel") return undefined;
+  if (event.direction !== "up" && event.direction !== "down") return undefined;
 
   return {
     type: "wheel",
-    direction: baseButton === WHEEL_UP ? "up" : "down",
-    x: sequence.x,
-    y: sequence.y,
-    shift: Boolean(sequence.button & SHIFT_MASK),
-    meta: Boolean(sequence.button & META_MASK),
-    ctrl: Boolean(sequence.button & CTRL_MASK),
+    direction: event.direction,
+    x: event.x,
+    y: event.y,
+    shift: event.shift,
+    meta: event.meta,
+    ctrl: event.ctrl,
   };
 }

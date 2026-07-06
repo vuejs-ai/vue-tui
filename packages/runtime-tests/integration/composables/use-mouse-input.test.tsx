@@ -1,5 +1,5 @@
 import { defineComponent, nextTick, shallowRef } from "vue";
-import { expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, expect, test } from "vite-plus/test";
 import {
   Box,
   Text,
@@ -11,7 +11,19 @@ import {
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
+const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
+const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+let previousTerm: string | undefined;
+
+beforeEach(() => {
+  previousTerm = process.env["TERM"];
+  process.env["TERM"] = "xterm-256color";
+});
+
+afterEach(() => {
+  if (previousTerm === undefined) delete process.env["TERM"];
+  else process.env["TERM"] = previousTerm;
+});
 
 async function settle() {
   await nextTick();
@@ -55,6 +67,39 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   await settle();
 
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+});
+
+test("useMouseInput accepts a handler ref", async () => {
+  const first: MouseInputEvent[] = [];
+  const second: MouseInputEvent[] = [];
+  const currentHandler = shallowRef((event: MouseInputEvent) => first.push(event));
+  const App = defineComponent(() => {
+    useMouseInput(currentHandler);
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  stdin.emit("data", "\x1b[<64;1;1M");
+  await settle();
+
+  currentHandler.value = (event: MouseInputEvent) => second.push(event);
+  stdin.emit("data", "\x1b[<65;2;3M");
+  await settle();
+
+  expect(first).toEqual([
+    { type: "wheel", direction: "up", x: 1, y: 1, shift: false, meta: false, ctrl: false },
+  ]);
+  expect(second).toEqual([
+    { type: "wheel", direction: "down", x: 2, y: 3, shift: false, meta: false, ctrl: false },
+  ]);
+  app.unmount();
 });
 
 test("useMouseInput keeps SGR mouse mode enabled until the last consumer releases it", async () => {
@@ -143,6 +188,87 @@ test("useMouseInput respects isActive", async () => {
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
 
   app.unmount();
+});
+
+test("useMouseInput disables SGR mouse when support disappears before release", async () => {
+  const active = shallowRef(true);
+  const App = defineComponent(() => {
+    useMouseInput(() => {}, { isActive: active });
+    return () => <Text>listening</Text>;
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  await settle();
+
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(0);
+
+  process.env["TERM"] = "dumb";
+  active.value = false;
+  await settle();
+
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  app.unmount();
+});
+
+test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on removal", async () => {
+  const showTarget = shallowRef(false);
+
+  const App = defineComponent(() => {
+    useMouseInput(() => {});
+    return () => (
+      <Box>
+        {showTarget.value ? <Box width={2} height={1} onClick={() => {}} /> : null}
+        <Text>raw</Text>
+      </Box>
+    );
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 20, rows: 4 });
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+
+  app.mount({
+    stdout,
+    stderr,
+    stdin,
+    debug: true,
+    exitOnCtrlC: false,
+    rawMode: "auto",
+    fullscreen: true,
+  });
+  await settle();
+
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(0);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(0);
+
+  showTarget.value = true;
+  await settle();
+
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+
+  showTarget.value = false;
+  await settle();
+
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(2);
+  expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(2);
+
+  app.unmount();
+  await settle();
+
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(3);
 });
 
 test("useMouseInput consumes unsupported SGR mouse events before keyboard input", async () => {

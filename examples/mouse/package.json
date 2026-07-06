@@ -1,0 +1,23 @@
+{
+  "name": "@vue-tui/example-mouse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsdown",
+    "preview": "tsdown && node dist/main.mjs"
+  },
+  "dependencies": {
+    "@vue-tui/runtime": "workspace:*",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "^6",
+    "@vue-tui/vite": "workspace:*",
+    "tsdown": "catalog:",
+    "unplugin-vue": "catalog:",
+    "vite": "catalog:"
+  }
+}

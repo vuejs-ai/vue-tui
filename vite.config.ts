@@ -6,6 +6,13 @@ export default defineConfig({
   },
   fmt: {},
   lint: {
+    // Don't lint test fixtures. They are test INPUTS, not shipped source, and some are
+    // deliberately broken: the overlay / full-reload dev-server tests transiently overwrite a
+    // fixture's app.vue with a syntax error (to exercise the error overlay / failed HMR), then
+    // restore it. Because `vp run ci` runs lint CONCURRENTLY with those tests, a linter that read
+    // a fixture inside that broken window failed with a spurious "Unexpected token" (a flaky race,
+    // surfaced by test timing). Excluding fixtures removes the race and the wasted lint work.
+    ignorePatterns: ["**/test/fixtures/**"],
     options: { typeAware: true, typeCheck: false },
     rules: {
       // This is a terminal UI library: parsing keyboard escape sequences and
