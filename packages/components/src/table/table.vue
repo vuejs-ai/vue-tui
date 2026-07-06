@@ -7,19 +7,19 @@ import { tableProps, type ColumnConfig, type Scalar, type ScalarDict } from "./t
 defineOptions({ name: "Table" });
 const props = defineProps(tableProps);
 
+// Validate padding: must be a non-negative integer.
+if (!Number.isInteger(props.padding) || props.padding < 0) {
+  throw new Error(`[Table] padding must be a non-negative integer, got ${props.padding}`);
+}
+
 defineSlots<{
-  skeleton?: (props: {
-    text: string;
-    kind: "top" | "header" | "separator" | "data" | "bottom";
-    part: "left" | "line" | "cross" | "right";
-  }) => unknown;
   header?: (props: {
     text: string;
     column: ColumnConfig;
     columnIndex: number;
     width: number;
   }) => unknown;
-  cell?: (props: {
+  default?: (props: {
     text: string;
     value: Scalar;
     column: ColumnConfig;
@@ -47,8 +47,8 @@ type RowCell =
   | {
       type: "header";
       text: string;
-      /** Whether the header text comes from a user-provided formatter. */
-      hasFormatter: boolean;
+      /** Whether the header text comes from a user-provided headerFormatter. */
+      hasHeaderFormatter: boolean;
       /** Column-level header color override (undefined = use default blue). */
       headerColor: string | undefined;
       column: Column;
@@ -113,7 +113,7 @@ const resolvedColumns = computed(() => props.columns ?? getDataKeys(props.data))
 
 const tableColumns = computed<Column[]>(() =>
   resolvedColumns.value.map((config) => {
-    const headerText = config.formatter ? config.formatter(config) : config.label;
+    const headerText = config.headerFormatter ? config.headerFormatter(config) : config.label;
     const headerWidth = stringWidth(headerText);
     const dataWidths = props.data.map((row) => {
       const value = row[config.key];
@@ -160,14 +160,16 @@ function padCell(text: string, width: number, align: string, padSize: number): s
 
 const headerCells = computed<RowCell[]>(() =>
   tableColumns.value.map((column, columnIndex) => {
-    const hasFormatter = column.config.formatter != null;
-    const rawText = hasFormatter ? column.config.formatter!(column.config) : column.config.label;
+    const hasHeaderFormatter = column.config.headerFormatter != null;
+    const rawText = hasHeaderFormatter
+      ? column.config.headerFormatter!(column.config)
+      : column.config.label;
     const text = padCell(rawText, column.width, column.align, props.padding);
 
     return {
       type: "header" as const,
       text,
-      hasFormatter,
+      hasHeaderFormatter,
       headerColor: column.config.headerColor,
       column,
       columnIndex,
@@ -192,7 +194,8 @@ const dataRows = computed<RowCell[][]>(() =>
         };
       }
 
-      const stringValue = String(value);
+      // Strip newlines so multi-line values don't break the single-line row layout.
+      const stringValue = String(value).replace(/\n/g, "");
       const text = padCell(stringValue, column.width, column.align, props.padding);
 
       return {
@@ -275,43 +278,22 @@ const allRows = computed<TableRow[]>(() => [
       <!-- ===== Border row (top / separator / bottom) ===== -->
       <Box v-if="row.type === 'border'" flexDirection="row">
         <!-- Left edge -->
-        <slot name="skeleton" :text="row.left" :kind="row.kind" :part="'left'">
-          <Text bold>{{ row.left }}</Text>
-        </slot>
+        <Text bold>{{ row.left }}</Text>
 
         <!-- Columns with interspersed crosses -->
         <template v-for="(column, idx) in tableColumns" :key="`${row.key}-line-${idx}`">
-          <slot
-            name="skeleton"
-            :text="row.line.repeat(column.width)"
-            :kind="row.kind"
-            :part="'line'"
-          >
-            <Text bold>{{ row.line.repeat(column.width) }}</Text>
-          </slot>
-          <slot
-            v-if="idx < tableColumns.length - 1"
-            name="skeleton"
-            :text="row.cross"
-            :kind="row.kind"
-            :part="'cross'"
-          >
-            <Text bold>{{ row.cross }}</Text>
-          </slot>
+          <Text bold>{{ row.line.repeat(column.width) }}</Text>
+          <Text v-if="idx < tableColumns.length - 1" bold>{{ row.cross }}</Text>
         </template>
 
         <!-- Right edge -->
-        <slot name="skeleton" :text="row.right" :kind="row.kind" :part="'right'">
-          <Text bold>{{ row.right }}</Text>
-        </slot>
+        <Text bold>{{ row.right }}</Text>
       </Box>
 
       <!-- ===== Content row (header / data) ===== -->
       <Box v-else flexDirection="row">
         <!-- Left border -->
-        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'left'">
-          <Text bold>│</Text>
-        </slot>
+        <Text bold>│</Text>
 
         <!-- Cells with interspersed separators -->
         <template v-for="(cell, idx) in row.cells" :key="`${row.key}-cell-${idx}`">
@@ -324,15 +306,14 @@ const allRows = computed<TableRow[]>(() => [
               :column-index="cell.columnIndex"
               :width="cell.column.width"
             >
-              <Text v-if="cell.hasFormatter" :color="cell.headerColor">{{ cell.text }}</Text>
+              <Text v-if="cell.hasHeaderFormatter" :color="cell.headerColor">{{ cell.text }}</Text>
               <Text v-else bold :color="cell.headerColor ?? 'blue'">{{ cell.text }}</Text>
             </slot>
           </Box>
 
-          <!-- Data cell -->
+          <!-- Data cell (default slot) -->
           <Box v-else :width="cell.column.width">
             <slot
-              name="cell"
               :text="cell.text"
               :value="cell.value"
               :column="cell.column.config"
@@ -346,21 +327,11 @@ const allRows = computed<TableRow[]>(() => [
           </Box>
 
           <!-- Separator between cells (skip after last) -->
-          <slot
-            v-if="idx < row.cells.length - 1"
-            name="skeleton"
-            :text="'│'"
-            :kind="row.kind"
-            :part="'cross'"
-          >
-            <Text bold>│</Text>
-          </slot>
+          <Text v-if="idx < row.cells.length - 1" bold>│</Text>
         </template>
 
         <!-- Right border -->
-        <slot name="skeleton" :text="'│'" :kind="row.kind" :part="'right'">
-          <Text bold>│</Text>
-        </slot>
+        <Text bold>│</Text>
       </Box>
     </template>
   </Box>

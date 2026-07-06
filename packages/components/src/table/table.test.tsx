@@ -94,37 +94,61 @@ describe("Table", () => {
   // -------------------------------------------------------------------------
   // 4. Column alignment
   // -------------------------------------------------------------------------
-  test("respects column align prop", async () => {
-    const columns = [
-      { label: "L", key: "key", align: "left" as const },
-      { label: "C", key: "key", align: "center" as const },
-      { label: "R", key: "key", align: "right" as const },
-    ];
-    const result = await render(Table, {
-      interactive: false,
-      props: { data: singleRow, columns },
-    });
+  test("left alignment places content at padding offset from left border", async () => {
+    // Label "HHHH" (4 chars), value "AB" (2 chars), padding=1
+    // column width = max(4, 2) + 2 = 6
+    // left-aligned cell: pad=1 space + "AB" + fill=3 spaces = " AB   "
+    const data = [{ a: "AB" }];
+    const columns = [{ label: "HHHH", key: "a", align: "left" as const }];
+    const result = await render(Table, { interactive: false, props: { data, columns } });
     try {
       const out = result.lastFrame() ?? "";
-      // Each cell contains the value "value", just verify all three render
-      // (exact alignment is hard to assert via string snapshot; the key check
-      //  is that the component doesn't crash with each align variant)
-      const occurrences = [...out.matchAll(/value/g)];
-      expect(occurrences.length).toBeGreaterThanOrEqual(3);
+      // Data row has no ANSI inside cell content; only borders are bold-wrapped.
+      // Strip ANSI and assert the exact spacing pattern.
+      const clean = out.replace(/\x1b\[[\d;]*m/g, "");
+      expect(clean).toContain("│ AB   │");
+    } finally {
+      result.unmount();
+    }
+  });
+
+  test("center alignment distributes space evenly around content", async () => {
+    // Same setup: width=6, centered: (6-2)/2 = 2 spaces each side → "  AB  "
+    const data = [{ a: "AB" }];
+    const columns = [{ label: "HHHH", key: "a", align: "center" as const }];
+    const result = await render(Table, { interactive: false, props: { data, columns } });
+    try {
+      const out = result.lastFrame() ?? "";
+      const clean = out.replace(/\x1b\[[\d;]*m/g, "");
+      expect(clean).toContain("│  AB  │");
+    } finally {
+      result.unmount();
+    }
+  });
+
+  test("right alignment places content at padding offset from right border", async () => {
+    // Same setup: width=6, right-aligned: fill=3 spaces + "AB" + pad=1 → "   AB "
+    const data = [{ a: "AB" }];
+    const columns = [{ label: "HHHH", key: "a", align: "right" as const }];
+    const result = await render(Table, { interactive: false, props: { data, columns } });
+    try {
+      const out = result.lastFrame() ?? "";
+      const clean = out.replace(/\x1b\[[\d;]*m/g, "");
+      expect(clean).toContain("│   AB │");
     } finally {
       result.unmount();
     }
   });
 
   // -------------------------------------------------------------------------
-  // 5. Formatter
+  // 5. Header formatter
   // -------------------------------------------------------------------------
-  test("applies formatter to header cells", async () => {
+  test("applies headerFormatter to header cells", async () => {
     const columns = [
       {
         label: "Name",
         key: "name",
-        formatter: (col: { label: string }) => `***${col.label}***`,
+        headerFormatter: (col: { label: string }) => `***${col.label}***`,
       },
     ];
     const result = await render(Table, {
@@ -143,36 +167,49 @@ describe("Table", () => {
   // -------------------------------------------------------------------------
   // 6. Custom padding
   // -------------------------------------------------------------------------
-  test("respects padding prop", async () => {
+  test("padding=0 renders cells with no space between border and content", async () => {
+    // Label "K" (1), value "value" (5), padding=0
+    // width = max(1, 5) + 0 = 5, cell = "value"
     const columns = [{ label: "K", key: "key" }];
-    const resultDefault = await render(Table, {
+    const result = await render(Table, {
       interactive: false,
-      props: { data: singleRow, columns },
-    });
-    const resultWide = await render(Table, {
-      interactive: false,
-      props: { data: singleRow, columns, padding: 5 },
+      props: { data: singleRow, columns, padding: 0 },
     });
     try {
-      const outDefault = resultDefault.lastFrame() ?? "";
-      const outWide = resultWide.lastFrame() ?? "";
-      // Wider padding produces more whitespace → longer total output
-      expect(outWide.length).toBeGreaterThan(outDefault.length);
+      const out = result.lastFrame() ?? "";
+      const clean = out.replace(/\x1b\[[\d;]*m/g, "");
+      expect(clean).toContain("│value│");
     } finally {
-      resultDefault.unmount();
-      resultWide.unmount();
+      result.unmount();
+    }
+  });
+
+  test("padding=2 adds two spaces on each side of cell content", async () => {
+    // Label "K" (1), value "value" (5), padding=2
+    // width = max(1, 5) + 4 = 9, cell (left-aligned) = "  value  "
+    const columns = [{ label: "K", key: "key" }];
+    const result = await render(Table, {
+      interactive: false,
+      props: { data: singleRow, columns, padding: 2 },
+    });
+    try {
+      const out = result.lastFrame() ?? "";
+      const clean = out.replace(/\x1b\[[\d;]*m/g, "");
+      expect(clean).toContain("│  value  │");
+    } finally {
+      result.unmount();
     }
   });
 
   // -------------------------------------------------------------------------
-  // 7. Custom cell slot
+  // 7. Custom default slot (was "cell")
   // -------------------------------------------------------------------------
-  test("custom cell slot overrides default rendering", async () => {
+  test("custom default slot overrides cell rendering", async () => {
     const App = defineComponent(() => {
       return () => (
         <Table data={simpleData}>
           {{
-            cell: ({ value }: { value: string }) => <Text>{`[${value}]`}</Text>,
+            default: ({ value }: { value: string }) => <Text>{`[${value}]`}</Text>,
           }}
         </Table>
       );
@@ -217,36 +254,7 @@ describe("Table", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 9. Custom skeleton slot
-  // -------------------------------------------------------------------------
-  test("custom skeleton slot overrides border characters", async () => {
-    const App = defineComponent(() => {
-      return () => (
-        <Table data={simpleData}>
-          {{
-            skeleton: ({ text, part }: { text: string; part: string }) => (
-              <Text>{part === "line" ? "=" : text ? "*" : ""}</Text>
-            ),
-          }}
-        </Table>
-      );
-    });
-    const result = await render(App, { interactive: false });
-    try {
-      const out = result.lastFrame() ?? "";
-      // Border chars are replaced but data values still render
-      expect(out).toContain("Alice");
-      expect(out).toContain("30");
-      // Original box-drawing chars should be gone
-      expect(out).not.toContain("─");
-      expect(out).not.toContain("┌");
-    } finally {
-      result.unmount();
-    }
-  });
-
-  // -------------------------------------------------------------------------
-  // 10. Null and undefined cell values
+  // 9. Null and undefined cell values
   // -------------------------------------------------------------------------
   test("handles null and undefined cell values without crashing", async () => {
     const data = [
@@ -305,7 +313,7 @@ describe("Table", () => {
       {
         label: "Name",
         key: "name",
-        formatter: (col: { label: string }) => `[${col.label}]`,
+        headerFormatter: (col: { label: string }) => `[${col.label}]`,
       },
     ];
     const colsColored = [
@@ -313,7 +321,7 @@ describe("Table", () => {
         label: "Name",
         key: "name",
         headerColor: "green",
-        formatter: (col: { label: string }) => `[${col.label}]`,
+        headerFormatter: (col: { label: string }) => `[${col.label}]`,
       },
     ];
     const r1 = await render(Table, {
@@ -358,6 +366,64 @@ describe("Table", () => {
       expect(out).toContain("NYC");
       // ANSI codes are present (FORCE_COLOR=3 in vitest config)
       expect(out).toContain("\x1b[");
+    } finally {
+      result.unmount();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 12. Padding validation
+  // -------------------------------------------------------------------------
+  test("throws for negative padding", async () => {
+    await expect(
+      render(Table, {
+        interactive: false,
+        props: { data: simpleData, padding: -1 },
+      }),
+    ).rejects.toThrow("[Table] padding must be a non-negative integer");
+  });
+
+  test("throws for fractional padding", async () => {
+    await expect(
+      render(Table, {
+        interactive: false,
+        props: { data: simpleData, padding: 1.5 },
+      }),
+    ).rejects.toThrow("[Table] padding must be a non-negative integer");
+  });
+
+  test("accepts zero padding", async () => {
+    const result = await render(Table, {
+      interactive: false,
+      props: { data: simpleData, padding: 0 },
+    });
+    try {
+      const out = result.lastFrame() ?? "";
+      expect(out).toContain("Alice");
+    } finally {
+      result.unmount();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 13. Multi-line text normalization
+  // -------------------------------------------------------------------------
+  test("strips newlines from cell values to preserve single-line rows", async () => {
+    const data = [{ a: "line1\nline2" }];
+    const result = await render(Table, {
+      interactive: false,
+      props: { data },
+    });
+    try {
+      const out = result.lastFrame() ?? "";
+      // The raw value "line1\nline2" is normalized to "line1line2"
+      expect(out).toContain("line1line2");
+      // The original newline should not split the value across multiple lines;
+      // "line1" and "line2" must appear together on the same line.
+      const lines = out.split("\n");
+      const dataLine = lines.find((l) => l.includes("line1"));
+      expect(dataLine).toBeDefined();
+      expect(dataLine).toContain("line1line2");
     } finally {
       result.unmount();
     }
