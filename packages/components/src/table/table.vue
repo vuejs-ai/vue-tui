@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, useSlots } from "vue";
 import { Box, Text } from "@vue-tui/runtime";
 import stringWidth from "string-width";
 import { tableProps, type ColumnConfig, type Scalar, type ScalarDict } from "./table-props.ts";
@@ -109,25 +109,107 @@ function getRowKey(row: ScalarDict, index: number): string {
 // Computed: column definitions
 // =========================================================================
 
+const slots = useSlots();
+
+/**
+ * Recursively extract plain text from a VNode tree returned by a slot function.
+ * Handles string children, arrays of VNodes, and nested component default slots
+ * so we can measure slot content width without a full rendering pipeline.
+ */
+function extractVNodeText(node: unknown): string {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return (node as unknown[]).map(extractVNodeText).join("");
+
+  const vnode = node as Record<string, unknown>;
+  const children = vnode.children;
+
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return (children as unknown[]).map(extractVNodeText).join("");
+  if (children && typeof children === "object" && "default" in (children as object)) {
+    const defaultFn = (children as Record<string, unknown>).default;
+    if (typeof defaultFn === "function") {
+      return extractVNodeText((defaultFn as () => unknown)());
+    }
+  }
+
+  return "";
+}
+
 const resolvedColumns = computed(() => props.columns ?? getDataKeys(props.data));
 
-const tableColumns = computed<Column[]>(() =>
-  resolvedColumns.value.map((config) => {
+const tableColumns = computed<Column[]>(() => {
+  const hasHeaderSlot = !!slots.header;
+  const hasDefaultSlot = !!slots.default;
+
+  return resolvedColumns.value.map((config, columnIndex) => {
+    // Explicit width from column config takes highest precedence.
+    if (config.width !== undefined) {
+      if (!Number.isInteger(config.width) || config.width <= 0) {
+        throw new Error(
+          `[Table] column "${config.key}" width must be a positive integer, got ${config.width}`,
+        );
+      }
+      return {
+        config,
+        key: config.key,
+        width: config.width,
+        align: config.align ?? "left",
+      };
+    }
+
+    // === Auto-calculated widths from raw header / data text ===
     const headerText = config.headerFormatter ? config.headerFormatter(config) : config.label;
-    const headerWidth = stringWidth(headerText);
-    const dataWidths = props.data.map((row) => {
+    const autoHeaderWidth = stringWidth(headerText);
+    const autoDataWidths = props.data.map((row) => {
       const value = row[config.key];
       return value === undefined || value === null ? 0 : stringWidth(String(value));
     });
 
+    // === Slot-based widths (measured from slot VNode output) ===
+    const slotWidths: number[] = [];
+
+    if (hasHeaderSlot) {
+      // Call the header slot with raw (unpadded) text so the measurement
+      // reflects what the slot actually renders. Passing width=0 is safe
+      // because the slot is measuring, not constraining.
+      const vnodes = slots.header!({
+        text: headerText,
+        column: config,
+        columnIndex,
+        width: 0,
+      });
+      slotWidths.push(stringWidth(extractVNodeText(vnodes)));
+    }
+
+    if (hasDefaultSlot) {
+      for (let rowIndex = 0; rowIndex < props.data.length; rowIndex++) {
+        const row = props.data[rowIndex];
+        const value = row[config.key];
+        const stringValue = value === undefined || value === null ? "" : String(value);
+        const vnodes = slots.default!({
+          text: stringValue,
+          value,
+          column: config,
+          columnIndex,
+          width: 0,
+          row,
+          rowIndex,
+        });
+        slotWidths.push(stringWidth(extractVNodeText(vnodes)));
+      }
+    }
+
+    const maxContentWidth = Math.max(autoHeaderWidth, ...autoDataWidths, ...slotWidths);
+
     return {
       config,
       key: config.key,
-      width: Math.max(headerWidth, ...dataWidths) + props.padding * 2,
+      width: maxContentWidth + props.padding * 2,
       align: config.align ?? "left",
     };
-  }),
-);
+  });
+});
 
 // =========================================================================
 // Helpers (continued)
