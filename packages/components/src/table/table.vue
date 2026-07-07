@@ -46,7 +46,10 @@ type SkeletonKind = "top" | "header" | "separator" | "data" | "bottom";
 type RowCell =
   | {
       type: "header";
+      /** Padded header text for the default fallback (fills the full column width). */
       text: string;
+      /** Raw (unpadded) header text passed to the slot — consistent with measurement. */
+      rawText: string;
       /** Whether the header text comes from a user-provided headerFormatter. */
       hasHeaderFormatter: boolean;
       /** Column-level header color override (undefined = use default blue). */
@@ -56,7 +59,10 @@ type RowCell =
     }
   | {
       type: "data";
+      /** Padded cell text for the default fallback (fills the full column width). */
       text: string;
+      /** Raw (unpadded) value string passed to the slot — consistent with measurement. */
+      rawText: string;
       value: Scalar;
       column: Column;
       columnIndex: number;
@@ -216,6 +222,17 @@ const tableColumns = computed<Column[]>(() => {
 // =========================================================================
 
 /**
+ * Map column alignment to Yoga justifyContent for the cell Box.
+ * When a slot renders content narrower than the column width, this
+ * positions it correctly (left / center / right) within the cell.
+ */
+function justifyFromAlign(align: string): "flex-start" | "center" | "flex-end" {
+  if (align === "center") return "center";
+  if (align === "right") return "flex-end";
+  return "flex-start";
+}
+
+/**
  * Pad `text` inside a cell of `width` according to `align`, with at least
  * `padSize` spaces on the outer edge(s).
  */
@@ -251,6 +268,7 @@ const headerCells = computed<RowCell[]>(() =>
     return {
       type: "header" as const,
       text,
+      rawText,
       hasHeaderFormatter,
       headerColor: column.config.headerColor,
       column,
@@ -268,6 +286,7 @@ const dataRows = computed<RowCell[][]>(() =>
         return {
           type: "data" as const,
           text: " ".repeat(column.width),
+          rawText: "",
           value,
           column,
           columnIndex,
@@ -283,6 +302,7 @@ const dataRows = computed<RowCell[][]>(() =>
       return {
         type: "data" as const,
         text,
+        rawText: stringValue,
         value,
         column,
         columnIndex,
@@ -380,23 +400,35 @@ const allRows = computed<TableRow[]>(() => [
         <!-- Cells with interspersed separators -->
         <template v-for="(cell, idx) in row.cells" :key="`${row.key}-cell-${idx}`">
           <!-- Header cell -->
-          <Box v-if="cell.type === 'header'" :width="cell.column.width">
+          <Box
+            v-if="cell.type === 'header'"
+            :width="cell.column.width"
+            :paddingX="props.padding"
+            :justifyContent="justifyFromAlign(cell.column.align)"
+          >
             <slot
               name="header"
-              :text="cell.text"
+              :text="cell.rawText"
               :column="cell.column.config"
               :column-index="cell.columnIndex"
               :width="cell.column.width"
             >
-              <Text v-if="cell.hasHeaderFormatter" :color="cell.headerColor">{{ cell.text }}</Text>
-              <Text v-else bold :color="cell.headerColor ?? 'blue'">{{ cell.text }}</Text>
+              <Text v-if="cell.hasHeaderFormatter" :color="cell.headerColor">{{
+                cell.rawText
+              }}</Text>
+              <Text v-else bold :color="cell.headerColor ?? 'blue'">{{ cell.rawText }}</Text>
             </slot>
           </Box>
 
           <!-- Data cell (default slot) -->
-          <Box v-else :width="cell.column.width">
+          <Box
+            v-else
+            :width="cell.column.width"
+            :paddingX="props.padding"
+            :justifyContent="justifyFromAlign(cell.column.align)"
+          >
             <slot
-              :text="cell.text"
+              :text="cell.rawText"
               :value="cell.value"
               :column="cell.column.config"
               :column-index="cell.columnIndex"
@@ -404,7 +436,7 @@ const allRows = computed<TableRow[]>(() => [
               :row="cell.row"
               :row-index="cell.rowIndex"
             >
-              <Text>{{ cell.text }}</Text>
+              <Text>{{ cell.rawText }}</Text>
             </slot>
           </Box>
 
