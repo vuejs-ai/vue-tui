@@ -37,14 +37,6 @@
     <!-- ================================================================= -->
     <Text bold>CellSlot Demo（自定义单元格插槽）:</Text>
     <CellSlot />
-
-    <Text> </Text>
-
-    <!-- ================================================================= -->
-    <!-- SkeletonSlot: custom border characters                             -->
-    <!-- ================================================================= -->
-    <Text bold>SkeletonSlot Demo（自定义边框字符）:</Text>
-    <SkeletonSlot />
   </Box>
 </template>
 
@@ -55,5 +47,4 @@ import ColumnsProp from "./components/ColumnsProp.vue";
 import DataProp from "./components/DataProp.vue";
 import HeaderSlot from "./components/HeaderSlot.vue";
 import PaddingProp from "./components/PaddingProp.vue";
-import SkeletonSlot from "./components/SkeletonSlot.vue";
 </script>

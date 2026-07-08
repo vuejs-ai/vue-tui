@@ -1,8 +1,8 @@
 <template>
   <Table :data="rows" :columns="columns">
-    <template #header="{ text }">
+    <template #header="{ text, columnIndex }">
       <!-- Custom header: left-align text, add column index badge -->
-      <Text color="magenta" bold>{{ text }}</Text>
+      <Text color="magenta" bold>{{ text }}-{{ columnIndex }}-{{ text }}</Text>
     </template>
   </Table>
 </template>
