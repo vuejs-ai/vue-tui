@@ -14,16 +14,16 @@ const rows = [
 ];
 
 const columns = defineTableColumns([
-  { label: "#", key: "id", align: "right" as const },
-  { label: "Product", key: "product", align: "left" as const },
-  { label: "Price", key: "price", align: "right" as const },
+  { label: "#", key: "id", align: "right" },
+  { label: "Product", key: "product", align: "left" },
+  { label: "Price", key: "price", align: "right" },
   {
     label: "Stock",
     key: "stock",
-    align: "right" as const,
+    align: "right",
     // formatter receives the ColumnConfig and returns the formatted header text;
     // it also applies to each cell value via padCell.
-    headerFormatter: (_col) => "Stock (units)",
+    headerFormatter: (_col) => "(units)" + _col.label,
   },
 ]);
 </script>

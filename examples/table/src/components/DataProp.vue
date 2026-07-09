@@ -11,6 +11,6 @@ const rows = [
   { name: "Alice", age: 28, active: true },
   { name: "Bob", age: 35, active: false },
   { name: "Charlie", age: 42, active: true },
-  { name: "Diana", age: null, active: undefined },
+  { name: "Diana Diana Diana vDiana Diana", age: null, active: undefined },
 ];
 </script>
