@@ -26,13 +26,6 @@ export interface ColumnConfigBase {
    * Has no effect when the `header` slot is used.
    */
   headerColor?: string;
-  /**
-   * Explicit column width in characters (including padding).
-   * When set, this overrides the auto-calculated width derived from
-   * header/data text lengths. Useful when using `header` or `default`
-   * slots that render custom content with different widths.
-   */
-  width?: number;
 }
 
 /**

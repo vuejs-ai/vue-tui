@@ -23,21 +23,6 @@ export function useTableColumns(props: UseTableColumnsProps, slots: Slots): UseT
     const hasDefaultSlot = !!slots.default;
 
     return resolvedColumns.value.map((config, columnIndex) => {
-      // Explicit width from column config takes highest precedence.
-      if (config.width !== undefined) {
-        if (!Number.isInteger(config.width) || config.width <= 0) {
-          throw new Error(
-            `[Table] column "${config.key}" width must be a positive integer, got ${config.width}`,
-          );
-        }
-        return {
-          config,
-          key: config.key,
-          width: config.width,
-          align: config.align ?? "left",
-        };
-      }
-
       // === Auto-calculated widths from raw header / data text ===
       const headerText = config.headerFormatter ? config.headerFormatter(config) : config.label;
       const autoHeaderWidth = stringWidth(headerText);
