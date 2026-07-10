@@ -23,6 +23,51 @@ export default defineConfig({
       // suggested form), not raw bytes.
       "no-control-regex": "off",
     },
+    overrides: [
+      {
+        // Wall-clock creep guard (see .agents/docs/clock.md): runtime timers
+        // must go through the injected Clock (appCtx.clock), or determinism
+        // silently leaks back in — the chaos watchdog would eventually catch
+        // it, but this catches it at lint time. The sanctioned direct-global
+        // fallbacks (the un-injected branches in scheduler.ts /
+        // animation-scheduler.ts) carry per-line disables with reasons.
+        files: ["packages/runtime/src/**"],
+        rules: {
+          "no-restricted-globals": [
+            "error",
+            {
+              name: "setTimeout",
+              message:
+                "Arm runtime timers through the injected Clock (appCtx.clock / io/clock.ts) — see .agents/docs/clock.md.",
+            },
+            {
+              name: "setInterval",
+              message:
+                "Arm runtime timers through the injected Clock (appCtx.clock / io/clock.ts) — see .agents/docs/clock.md.",
+            },
+            {
+              name: "clearTimeout",
+              message:
+                "Cancel runtime timers through the injected Clock (appCtx.clock / io/clock.ts) — see .agents/docs/clock.md.",
+            },
+            {
+              name: "clearInterval",
+              message:
+                "Cancel runtime timers through the injected Clock (appCtx.clock / io/clock.ts) — see .agents/docs/clock.md.",
+            },
+          ],
+        },
+      },
+      {
+        // The two sanctioned wall-clock modules: io/clock.ts IS the wrapper the
+        // rule points everyone at, and hmr.ts's reset timer is module-global
+        // dev-only state a per-app clock has no handle to (.agents/docs/clock.md).
+        files: ["packages/runtime/src/io/clock.ts", "packages/runtime/src/hmr.ts"],
+        rules: {
+          "no-restricted-globals": "off",
+        },
+      },
+    ],
   },
   run: {
     cache: false,

@@ -36,7 +36,7 @@ async function runJourney(chaos: boolean): Promise<string[]> {
   // allocation pressure between steps. None of it may reach the writes.
   const jitter = async () => {
     if (!chaos) return;
-    garbage.push(new Array(1024).fill(garbage.length));
+    garbage.push(Array.from({ length: 1024 }, () => garbage.length));
     if (garbage.length > 64) garbage = [];
     await realSleep(Math.random() * 5);
   };

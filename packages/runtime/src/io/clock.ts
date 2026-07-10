@@ -19,9 +19,10 @@
 /**
  * Opaque timer handle. The real clock returns Node's `Timeout`; a virtual
  * clock returns its own ledger entry. Consumers only ever hand it back to
- * `clearTimeout`, so the type is deliberately opaque.
+ * `clearTimeout`, so the type is deliberately opaque — `object` rather than
+ * `unknown` so it still unions cleanly with `null`/`undefined` sentinels.
  */
-export type ClockTimeout = unknown;
+export type ClockTimeout = object;
 
 export interface Clock {
   /** Monotonic milliseconds. Consumers use deltas only, never absolute values. */

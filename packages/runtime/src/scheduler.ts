@@ -40,14 +40,16 @@ export function createCommitScheduler(
   const immediate = options.immediate ?? false;
   const throttleMs = options.throttleMs;
   const clock = options.clock;
-  const now = options.now ?? (clock ? clock.now : Date.now);
+  const now = options.now ?? (clock ? () => clock.now() : Date.now);
   // `clock` members are read via property access at arm/cancel time — never
   // captured at construction — so a spy installed on the clock object after
   // creation still observes every arm.
   const armTimeout = (cb: () => void, ms: number): ClockTimeout =>
+    // eslint-disable-next-line no-restricted-globals -- the sanctioned un-injected fallback: fake-timer tests patch exactly this global
     clock ? clock.setTimeout(cb, ms) : setTimeout(cb, ms);
   const cancelTimeout = (handle: ClockTimeout): void => {
     if (clock) clock.clearTimeout(handle);
+    // eslint-disable-next-line no-restricted-globals -- the sanctioned un-injected fallback: fake-timer tests patch exactly this global
     else clearTimeout(handle as ReturnType<typeof setTimeout>);
   };
   let scheduled = false;

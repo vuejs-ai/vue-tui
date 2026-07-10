@@ -1,13 +1,15 @@
-// Sequential: uses vi.useFakeTimers (process-global setTimeout/performance
-// mocking) to lock EXACT frame offsets deterministically — the same offsets Ink
-// asserts (test/use-animation.tsx) but which real wall-clock timers can only
-// approximate. The composable's scheduler reads performance.now()/setTimeout, so
-// faking both makes frame = floor((now - startTime) / interval) fully reproducible.
+// Formerly a *.sequential.test file driven by vi.useFakeTimers. Now each app
+// mounts with its own VirtualClock via the INTERNAL_CLOCK mount option (see
+// .agents/docs/clock.md), which locks the same EXACT frame offsets Ink asserts
+// (test/use-animation.tsx) — frame = floor((now - startTime) / interval) over
+// virtual time — without process-global timer mocking, so this file runs in
+// the normal parallel pool.
 
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef, watchEffect } from "vue";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
-import { createApp, Text, useAnimation } from "@vue-tui/runtime";
+import { describe, expect, test } from "vite-plus/test";
+import { createApp, Text, useAnimation, type TuiApp } from "@vue-tui/runtime";
+import { createVirtualClock, INTERNAL_CLOCK, type VirtualClock } from "@vue-tui/runtime/internal";
 
 function makeStreams() {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -36,15 +38,7 @@ async function flush() {
   await nextTick();
 }
 
-describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
-
+describe("useAnimation exact frame offsets (deterministic)", () => {
   // Ink test/use-animation.tsx:1080-1135 ("newly mounted animations do not
   // inherit elapsed time"). A second animation appearing one interval after the
   // first starts from frame 0 and stays EXACTLY one frame behind.
@@ -78,13 +72,21 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
     });
 
     const { stdout, stderr, stdin } = makeStreams();
+    const clock: VirtualClock = createVirtualClock();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      debug: true,
+      exitOnCtrlC: false,
+      [INTERNAL_CLOCK]: clock,
+    } as Parameters<TuiApp["mount"]>[0]);
     await flush();
 
     // Advance just past one interval, then mount the second animation. The first
     // is now at frame 1; the second subscribes at this moment → frame 0.
-    await vi.advanceTimersByTimeAsync(25);
+    await clock.advance(25);
     showSecond.value = true;
     await flush();
 
@@ -92,7 +94,7 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
     expect(secondFrame).toBe(0);
 
     // Advance two more intervals: first → 3, second → 2. Exactly one apart.
-    await vi.advanceTimersByTimeAsync(40);
+    await clock.advance(40);
     await flush();
 
     expect(firstFrame).toBeGreaterThanOrEqual(2);
@@ -126,18 +128,26 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
     });
 
     const { stdout, stderr, stdin } = makeStreams();
+    const clock: VirtualClock = createVirtualClock();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      debug: true,
+      exitOnCtrlC: false,
+      [INTERNAL_CLOCK]: clock,
+    } as Parameters<TuiApp["mount"]>[0]);
     await flush();
 
-    await vi.advanceTimersByTimeAsync(25);
+    await clock.advance(25);
     secondActive.value = true;
     await flush();
 
     expect(firstFrame).toBe(1);
     expect(secondFrame).toBe(0);
 
-    await vi.advanceTimersByTimeAsync(40);
+    await clock.advance(40);
     await flush();
 
     expect(firstFrame).toBeGreaterThanOrEqual(2);
@@ -168,12 +178,20 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
     });
 
     const { stdout, stderr, stdin } = makeStreams();
+    const clock: VirtualClock = createVirtualClock();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      debug: true,
+      exitOnCtrlC: false,
+      [INTERNAL_CLOCK]: clock,
+    } as Parameters<TuiApp["mount"]>[0]);
     await flush();
 
     // Advance past frame 1.
-    await vi.advanceTimersByTimeAsync(120);
+    await clock.advance(120);
     await flush();
     const frameBefore = frameVal;
     expect(frameBefore).toBeGreaterThanOrEqual(1);
@@ -208,8 +226,16 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
     });
 
     const { stdout, stderr, stdin } = makeStreams();
+    const clock: VirtualClock = createVirtualClock();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      debug: true,
+      exitOnCtrlC: false,
+      [INTERNAL_CLOCK]: clock,
+    } as Parameters<TuiApp["mount"]>[0]);
     await flush();
 
     tick.value = 1;

@@ -51,6 +51,7 @@ export function createAnimationScheduler(renderThrottleMs = 0, clock?: Clock): A
   function clearTimer() {
     if (timer !== undefined) {
       if (clock) clock.clearTimeout(timer);
+      // eslint-disable-next-line no-restricted-globals -- the sanctioned un-injected fallback: fake-timer tests patch exactly this global
       else clearTimeout(timer as ReturnType<typeof setTimeout>);
       timer = undefined;
     }
@@ -70,6 +71,7 @@ export function createAnimationScheduler(renderThrottleMs = 0, clock?: Clock): A
     // skips, and reschedules — one wasted wakeup per frame. Ceiling makes it fire
     // at-or-after the due time, so the frame lands on the first wakeup.
     const delay = Math.ceil(Math.max(0, earliest - nowMs()));
+    // eslint-disable-next-line no-restricted-globals -- the sanctioned un-injected fallback: fake-timer tests patch exactly this global
     timer = clock ? clock.setTimeout(onTick, delay) : setTimeout(onTick, delay);
   }
 
