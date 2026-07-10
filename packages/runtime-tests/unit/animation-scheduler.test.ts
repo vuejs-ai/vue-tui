@@ -1,7 +1,9 @@
-// Sequential: uses vi.useFakeTimers (process-global timer mocking). See the
-// other *.sequential.test files. The describe blocks are describe.sequential.
+// Formerly a *.sequential.test file driven by vi.useFakeTimers (process-global
+// timer mocking). Now driven by an injected VirtualClock (see
+// .agents/docs/clock.md): per-scheduler, no global mutation, so this file runs
+// in the normal parallel pool.
 
-import { afterEach, beforeEach, describe, expect, test, vi } from "vite-plus/test";
+import { describe, expect, test, vi } from "vite-plus/test";
 // Internal module not in package exports — import via relative source path,
 // matching the convention in integration/lifecycle/write-synchronized.test.ts.
 import {
@@ -9,8 +11,9 @@ import {
   createNoOpAnimationScheduler,
   normalizeInterval,
 } from "../../runtime/src/animation-scheduler.ts";
+import { createVirtualClock } from "../../runtime/src/io/clock.ts";
 
-describe.sequential("normalizeInterval", () => {
+describe("normalizeInterval", () => {
   test("clamps and defaults", () => {
     expect(normalizeInterval(50)).toBe(50);
     expect(normalizeInterval(0)).toBe(1);
@@ -32,143 +35,146 @@ describe.sequential("normalizeInterval", () => {
   });
 });
 
-describe.sequential("createAnimationScheduler", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
-
-  test("same-interval subscribers share one timer", () => {
-    const s = createAnimationScheduler();
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+describe("createAnimationScheduler", () => {
+  test("same-interval subscribers share one timer", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
+    const setTimeoutSpy = vi.spyOn(clock, "setTimeout");
     const a = vi.fn();
     const b = vi.fn();
     s.subscribe(a, 50);
     s.subscribe(b, 50);
-    expect(vi.getTimerCount()).toBe(1);
-    vi.advanceTimersByTime(50);
+    expect(clock.pendingTimers()).toHaveLength(1);
+    await clock.advance(50);
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(1);
     expect(setTimeoutSpy.mock.calls.every((c) => c[1] === 50)).toBe(true);
     s.dispose();
   });
 
-  test("different intervals wake at earliest deadline", () => {
-    const s = createAnimationScheduler();
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+  test("different intervals wake at earliest deadline", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
+    const setTimeoutSpy = vi.spyOn(clock, "setTimeout");
     s.subscribe(vi.fn(), 50);
     s.subscribe(vi.fn(), 80);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(clock.pendingTimers()).toHaveLength(1);
     expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(50);
-    vi.advanceTimersByTime(50);
+    await clock.advance(50);
     expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(30);
     s.dispose();
   });
 
-  test("late subscriber with earlier deadline reschedules", () => {
-    const s = createAnimationScheduler();
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+  test("late subscriber with earlier deadline reschedules", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
+    const setTimeoutSpy = vi.spyOn(clock, "setTimeout");
     s.subscribe(vi.fn(), 100);
-    vi.advanceTimersByTime(20);
+    await clock.advance(20);
     const early = vi.fn();
     s.subscribe(early, 10);
     expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(10);
-    vi.advanceTimersByTime(10);
+    await clock.advance(10);
     expect(early).toHaveBeenCalledTimes(1);
     s.dispose();
   });
 
   test("last unsubscribe clears the timer", () => {
-    const s = createAnimationScheduler();
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     const { unsubscribe } = s.subscribe(vi.fn(), 50);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(clock.pendingTimers()).toHaveLength(1);
     unsubscribe();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clock.pendingTimers()).toHaveLength(0);
   });
 
   test("partial unsubscribe keeps timer alive", () => {
-    const s = createAnimationScheduler();
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     const first = s.subscribe(vi.fn(), 50);
     s.subscribe(vi.fn(), 50);
     first.unsubscribe();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(clock.pendingTimers()).toHaveLength(1);
     s.dispose();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clock.pendingTimers()).toHaveLength(0);
   });
 
-  test("elapsed-time frame catch-up", () => {
-    const s = createAnimationScheduler();
+  test("elapsed-time frame catch-up", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     let lastFrame = -1;
     let startTime = 0;
     const handle = s.subscribe((now) => {
       lastFrame = Math.floor((now - startTime) / 50);
     }, 50);
     startTime = handle.startTime;
-    vi.advanceTimersByTime(220);
+    await clock.advance(220);
     expect(lastFrame).toBe(4);
     s.dispose();
   });
 
-  test("reentrancy: callback A unsubscribes B before B's turn", () => {
-    const s = createAnimationScheduler();
+  test("reentrancy: callback A unsubscribes B before B's turn", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     const b = vi.fn();
     let bHandle: { unsubscribe: () => void };
     const a = vi.fn(() => bHandle.unsubscribe());
     s.subscribe(a, 50);
     bHandle = s.subscribe(b, 50);
-    vi.advanceTimersByTime(50);
+    await clock.advance(50);
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).not.toHaveBeenCalled();
     s.dispose();
   });
 
-  test("reentrancy: callback subscribes during dispatch", () => {
-    const s = createAnimationScheduler();
+  test("reentrancy: callback subscribes during dispatch", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     const c = vi.fn();
     const a = vi.fn(() => {
       s.subscribe(c, 50);
     });
     s.subscribe(a, 50);
-    vi.advanceTimersByTime(50);
+    await clock.advance(50);
     expect(c).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(50);
+    await clock.advance(50);
     expect(c).toHaveBeenCalledTimes(1);
     s.dispose();
   });
 
-  test("reentrancy: callback resets itself without crashing", () => {
-    const s = createAnimationScheduler();
+  test("reentrancy: callback resets itself without crashing", async () => {
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     let handle: { startTime: number; unsubscribe: () => void };
     const cb = vi.fn(() => {
       handle.unsubscribe();
       handle = s.subscribe(cb, 50);
     });
     handle = s.subscribe(cb, 50);
-    expect(() => vi.advanceTimersByTime(150)).not.toThrow();
+    await expect(clock.advance(150)).resolves.toBeUndefined();
     expect(cb).toHaveBeenCalled();
     s.dispose();
   });
 
-  test("a throwing subscriber callback does not wedge the shared scheduler", () => {
+  test("a throwing subscriber callback does not wedge the shared scheduler", async () => {
     // Regression: onTick set `isDispatching = true`, ran the subscriber
     // callbacks, then reset the flag / flushed `pending` / rescheduled with NO
     // try/finally. A throwing callback skipped all three, leaving isDispatching
     // stuck true forever — every later subscribe/unsubscribe queued into
     // `pending` and never ran, and no timer was ever rescheduled. One bad tick
     // permanently killed EVERY useAnimation instance sharing this scheduler.
-    const s = createAnimationScheduler();
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     const boom = vi.fn(() => {
       throw new Error("boom in tick");
     });
     const boomHandle = s.subscribe(boom, 50);
 
     // The throw propagates out of the timer callback (house idiom: restore the
-    // scheduler invariants, then rethrow — mirrors scheduler.ts doCommit). That
-    // is expected; what must NOT happen is the scheduler wedging.
-    expect(() => vi.advanceTimersByTime(50)).toThrow("boom in tick");
+    // scheduler invariants, then rethrow — mirrors scheduler.ts doCommit); the
+    // VirtualClock surfaces it by rejecting advance(). That is expected; what
+    // must NOT happen is the scheduler wedging.
+    await expect(clock.advance(50)).rejects.toThrow("boom in tick");
     expect(boom).toHaveBeenCalledTimes(1);
 
     // Remove the thrower (must run synchronously — proves isDispatching was
@@ -180,21 +186,22 @@ describe.sequential("createAnimationScheduler", () => {
     // was ever scheduled, so it never fired.
     const recovered = vi.fn();
     s.subscribe(recovered, 50);
-    vi.advanceTimersByTime(50);
+    await clock.advance(50);
     expect(recovered).toHaveBeenCalledTimes(1);
     s.dispose();
   });
 
   test("dispose clears everything", () => {
-    const s = createAnimationScheduler();
+    const clock = createVirtualClock();
+    const s = createAnimationScheduler(0, clock);
     s.subscribe(vi.fn(), 50);
     s.subscribe(vi.fn(), 80);
     s.dispose();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(clock.pendingTimers()).toHaveLength(0);
   });
 });
 
-describe.sequential("createNoOpAnimationScheduler", () => {
+describe("createNoOpAnimationScheduler", () => {
   test("subscribe returns inert handle, never ticks", () => {
     const s = createNoOpAnimationScheduler();
     const cb = vi.fn();
