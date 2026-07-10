@@ -4,7 +4,11 @@ export default defineConfig({
   staged: {
     "*": "vp check --fix",
   },
-  fmt: {},
+  fmt: {
+    // PCR owns its marked block byte-for-byte. Formatting AGENTS.md would rewrite the markers
+    // and make future methodology updates unsafe.
+    ignorePatterns: ["AGENTS.md"],
+  },
   lint: {
     // Don't lint test fixtures. They are test INPUTS, not shipped source, and some are
     // deliberately broken: the overlay / full-reload dev-server tests transiently overwrite a
