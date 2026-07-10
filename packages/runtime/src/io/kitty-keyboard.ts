@@ -1,6 +1,7 @@
 // packages/runtime/src/io/kitty-keyboard.ts
 
 import { writeSync as fsWriteSync } from "node:fs";
+import { realClock, type Clock } from "./clock.ts";
 
 const textEncoder = new TextEncoder();
 
@@ -125,6 +126,9 @@ export interface KittyKeyboardController {
 export function createKittyKeyboardController(
   stdin: NodeJS.ReadStream,
   stdout: NodeJS.WriteStream,
+  // Optional so the many existing two-arg call sites (tests) stay valid; the
+  // realClock default is behavior-identical to the direct global setTimeout.
+  clock: Clock = realClock,
 ): KittyKeyboardController {
   let enabled = false;
   let disposed = false;
@@ -140,7 +144,7 @@ export function createKittyKeyboardController(
 
     const cleanup = (): void => {
       cancelDetection = undefined;
-      clearTimeout(timer);
+      clock.clearTimeout(timer);
       stdin.removeListener("data", onData);
 
       const remaining = stripKittyQueryResponsesAndTrailingPartial(responseBuffer);
@@ -165,7 +169,7 @@ export function createKittyKeyboardController(
     };
 
     stdin.on("data", onData);
-    const timer = setTimeout(cleanup, 200);
+    const timer = clock.setTimeout(cleanup, 200);
     cancelDetection = cleanup;
 
     stdout.write("\x1b[?u");

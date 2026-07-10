@@ -32,7 +32,7 @@ import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
-import { INTERNAL_CLOCK, realClock, type Clock } from "./io/clock.ts";
+import { INTERNAL_CLOCK, realClock, type Clock, type ClockTimeout } from "./io/clock.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
@@ -912,7 +912,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdinController.holdRawModeForLifetime();
       }
 
-      kittyController = createKittyKeyboardController(stdin, stdout);
+      kittyController = createKittyKeyboardController(stdin, stdout, clock);
       // Register BEFORE init(): in auto mode, init() installs a stdin 'data'
       // listener + a 200ms detection timer and only THEN writes the support
       // query ("\x1b[?u") — which can throw on a broken stream. Assigning
@@ -1824,7 +1824,9 @@ function createStdinController(
   const emitter = new EventEmitter();
   emitter.setMaxListeners(Infinity);
   const inputParser = createInputParser();
-  let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  // Armed through the app's injected clock (appCtx.clock — realClock in
+  // production) so tests can advance the escape hold in virtual time.
+  let pendingFlushTimer: ClockTimeout | undefined;
   const FLUSH_DELAY = 20; // ms, matching Ink
   let bracketedPasteModeCount = 0;
   const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
@@ -1947,7 +1949,7 @@ function createStdinController(
 
   function clearPendingFlush() {
     if (pendingFlushTimer !== undefined) {
-      clearTimeout(pendingFlushTimer);
+      appCtx.clock.clearTimeout(pendingFlushTimer);
       pendingFlushTimer = undefined;
     }
   }
@@ -2001,7 +2003,7 @@ function createStdinController(
 
   function schedulePendingFlush() {
     clearPendingFlush();
-    pendingFlushTimer = setTimeout(() => {
+    pendingFlushTimer = appCtx.clock.setTimeout(() => {
       pendingFlushTimer = undefined;
       const pending = inputParser.flushPendingEscape();
       if (pending) emitInput(pending);
