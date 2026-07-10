@@ -1,7 +1,7 @@
 {
   "name": "@vue-tui/vite",
   "version": "0.2.0",
-  "description": "Vite plugin for vue-tui: in-process terminal dev server with HMR + production build.",
+  "description": "Vite plugin for vue-tui: in-process terminal dev server with HMR.",
   "license": "MIT",
   "files": [
     "dist",

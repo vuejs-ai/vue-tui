@@ -7,10 +7,11 @@
 > [api-contract.md](./api-contract.md); Ink-alignment is explicitly **not** a constraint here — the
 > deciding rules are **user-friendliness** and **following Vue/DOM conventions, not inventing names**.
 >
-> **Status:** v1 shipped in [#245](https://github.com/vuejs-ai/vue-tui/pull/245). The fixed fullscreen
-> output contract that keeps the visible surface and hit map at the same origin is recorded in
+> **Status:** v1 shipped in [#245](https://github.com/vuejs-ai/vue-tui/pull/245) at commit
+> `3e44c9a266e52ebeba2db669b4bb96521b9e2f3a`. The fixed fullscreen output contract that keeps the
+> visible surface and hit map at the same origin is recorded in
 > [fullscreen-output.md](./fullscreen-output.md). §5 remains the load-bearing forward-compatibility
-> contract.
+> contract; hover, selection/clipboard, side buttons, and pixel mode remain deferred.
 
 ## 1. What this is, and the scope of v1
 
@@ -248,10 +249,9 @@ catch-all), and `useMouse(ref, handlers)` just re-expressed `@click`. `useDragga
 survive because they add something element props can't (gesture state, capture, a reactive
 `hovered`) and match VueUse.
 
-**This is net-new renderer work:** `patchProp` currently _ignores_ `on*` props on host nodes. v1
-records mouse handlers on the node so the dispatch layer finds them (this is also the hook that fires
-the §3.2 inline warning), and `<Box>`/`<Text>` fall these props through to the host node, typed so
-`@click` type-checks in templates.
+The shipped renderer stores these mouse handler props on host nodes so the dispatch layer can find
+them (this is also the hook that fires the §3.2 inline warning), and `<Box>`/`<Text>` fall the props
+through to the host node, typed so `@click` type-checks in templates.
 
 ### 4.3 Low-level — `useMouseInput`, and `useDraggable`
 
@@ -314,12 +314,11 @@ The returned `x` / `y` are the draggable element's `left` / `top` cell position,
 
 ## 6. Dispatch infrastructure (the hit map)
 
-Each committed frame, build a map of every node's **absolute** cell rectangle in **paint order**
-(vue-tui has no z-index; later paint ops overwrite earlier, so paint order _is_ stacking order — a
-hit is the last-painted node covering the cell). The absolute rects come from the paint walk's
-existing origin accumulation, captured by a new recording pass (the paint op-list keeps no node
-identity today). The map **must honor** `overflow: "hidden"` clip rects and `position: "absolute"`
-placement, or it reports hits on clipped/mispositioned nodes.
+Each committed full-screen frame builds a map of every node's **absolute** cell rectangle in **paint
+order** (vue-tui has no z-index; later paint ops overwrite earlier, so paint order _is_ stacking
+order — a hit is the last-painted node covering the cell). The paint walk records node identity and
+the visible rectangle after clipping. The map **must honor** `overflow: "hidden"` clip rects and
+`position: "absolute"` placement, or it reports hits on clipped or misplaced nodes.
 
 Per raw event: `hitTest(screenX, screenY)` → topmost node → build the event with `offsetX/offsetY`
 re-based into that node's box → dispatch to its handlers, then **bubble up the parent chain until
@@ -340,20 +339,19 @@ full-screen hit map on frames without a current mouse registration is allowed as
 detail; gating that work on the controller's armed state is only a performance optimization, and it
 must not change the public event / `MouseTarget.rect` contract.
 
-**⚠️ Teardown must disable the actual mouse level (correctness bug if missed).** Today's disable
-string is `\x1b[?1000l\x1b[?1006l`, used by both the async and the synchronous signal-exit paths.
-`\x1b[?1000l` does **not** turn off `1002`/`1003`. Once v1 enables `1002`, exit / Ctrl-C / SIGINT
-would leave the terminal spewing `<35;..M` on every move — the exact corruption the sync-restore
-machinery exists to prevent. Simplest airtight fix: on teardown always emit
-`\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l` (disabling an un-set mode is a no-op). Degradation:
-non-TTY / `TERM=dumb` enables nothing; handlers never fire.
+**⚠️ Teardown disables every mouse level.** Both the async and synchronous signal-exit paths emit
+`\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l`; disabling an unset mode is a no-op. Omitting
+`1002` or `1003` would leave the terminal reporting pointer bytes after exit. Non-TTY and
+`TERM=dumb` paths enable nothing, so targeted handlers never fire there.
 
-## 7. What v1 level negotiation required
+## 7. Mouse-level negotiation
 
-- **Parser widening.** `parseMouseInput` was widened beyond wheel events to decode press, release,
-  and drag, with dispatch beyond the earlier wheel-only `"mouse"` emitter.
-- **Leveled enable.** The earlier `1000`-only 0→1 refcount switch became level negotiation with
-  upgrade/downgrade transitions (`button`=1000 / `drag`=1002 / `hover`=1003).
+- **Two parser surfaces.** The internal `parseSgrMouseInput` decodes press, release, drag, and four
+  wheel directions for targeted dispatch. The legacy public `useMouseInput` stream intentionally
+  keeps its vertical-wheel-only `parseMouseInput` shape until a breaking raw-mouse redesign is
+  decided (§8).
+- **Leveled enable.** Each consumer holds a mode token; the controller selects the highest request
+  (`button`=1000, `drag`=1002, `hover`=1003) and re-emits terminal modes on upgrades and downgrades.
 - Both the low-level `useMouseInput` and the high-level dispatch acquire the **same** underlying mode
   through the shared refcount (§2) — one switch, not two.
 
@@ -377,8 +375,10 @@ non-TTY / `TERM=dumb` enables nothing; handlers never fire.
   object if real examples need it. `handle` also remains additive.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
   by `useDraggable`, including when the capturing node unmounts; mouse composables use a local
-  `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the primary mount option and
-  `alternateScreen` remains only as a deprecated alias.
+  `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the supported mount-option name
+  and `alternateScreen` remains only as a deprecated alias. This naming decision does not settle
+  whether full-screen or inline should be the product's primary mode; see
+  [goal.md](./goal.md#rendering-modes).
 
 ## 9. Deliberately out of scope (v1)
 

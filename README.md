@@ -2,7 +2,7 @@
 
 > **Public beta** — the `@vue-tui/runtime` API is stabilizing toward 1.0; dev-mode HMR is still experimental. Bug reports welcome.
 
-The Vue framework for terminal UIs.
+vue-tui is a Vue-native application framework for interactive terminal UIs.
 Build with components, develop with HMR, test with confidence.
 
 <p align="center">
@@ -105,7 +105,7 @@ createApp(App).mount();
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._                                                                                                      |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                                                                                                                                   |
-| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<Spinner>` (animated loading), with more to come.                                                                                                                                                                                               |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
 
 ## Examples
 
@@ -115,6 +115,8 @@ createApp(App).mount();
 | [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                             |
 | [`coding-agent`](./examples/coding-agent)     | AI coding agent with LLM streaming and interactive UI       |
 | [`flappy-bird`](./examples/flappy-bird)       | Physics-based terminal game with reactive state and borders |
+| [`mouse`](./examples/mouse)                   | Full-screen targeted mouse events and dragging              |
+| [`scroll-box`](./examples/scroll-box)         | Bounded viewport with app-controlled scrolling              |
 
 ## Components
 
@@ -127,13 +129,15 @@ createApp(App).mount();
 | [`<Static>`](./packages/runtime)    | Renders inline items once above the redrawn region; fullscreen does not retain them            |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
 
+`<Box>` and `<Text>` also support targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers in full-screen mode.
+
 ## High-level Components
 
 The [`@vue-tui/components`](./packages/components) package adds higher-level components composed from the runtime primitives — published separately from the core.
 
 | Component                              | Description                                                                                |
 | -------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [`<ScrollBox>`](./packages/components) | Bounded scroll viewport with mouse-wheel scrolling and sticky-bottom behavior              |
+| [`<ScrollBox>`](./packages/components) | Bounded sticky-bottom viewport; the app controls scrolling through its imperative handle   |
 | [`<Spinner>`](./packages/components)   | Animated loading spinner — built-in `dots`/`line` presets or custom frames, optional label |
 
 ## Composables (Hooks)
@@ -142,6 +146,7 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `useInput(handler, opts?)`      | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection                                                                        |
 | `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                                               |
+| `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                                               |
 | `usePaste(handler, opts?)`      | Handle bracketed paste — receives the pasted `text` as a single event                                                                                        |
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                                                                                       |
 | `useFocusManager()`             | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                                                                                      |

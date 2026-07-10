@@ -12,7 +12,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Vue SFC & JSX** — `<template>`, TSX, or render functions — your choice
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
 - **Built-in input system** — keyboard handling, focus management, Tab navigation
-- **Terminal-native** — renders directly to stdout, purpose-built for CLI tools and AI agent interfaces
+- **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
 - **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
 `@vue-tui/runtime` is a terminal platform renderer parallel to `@vue/runtime-dom`, comparable to [React Ink](https://github.com/vadimdemedes/ink) but adapted for Vue's reactivity model.
@@ -87,6 +87,7 @@ useInput((input) => {
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `useInput(handler, opts?)`      | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
 | `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
+| `useDraggable(ref, opts?)`      | Full-screen element dragging — reactive position and drag state from a normal template ref   |
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
 | `useFocusManager()`             | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
@@ -117,6 +118,8 @@ await app.waitUntilExit();
 // Custom streams (for testing):
 createApp(App).mount({ stdout, stdin, stderr });
 ```
+
+Use `createApp(App).mount({ fullscreen: true })` to render in the terminal's alternate screen. Full-screen mode enables targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers on `<Box>` and `<Text>` when the app registers them; inline apps can still use the low-level `useMouseInput()` stream.
 
 > **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
 > server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the

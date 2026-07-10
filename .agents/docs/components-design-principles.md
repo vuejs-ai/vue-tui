@@ -23,15 +23,21 @@ authoritative list of what the runtime exposes is its public barrel — see
 [api-contract.md](./api-contract.md) (snapshotted by `public-api.test.ts`). This doc does not
 re-enumerate it: a second copy would drift.
 
-## Inclusion bar — demand-driven
+## Inclusion bar — product-driven and evidence-backed
 
-A component earns its place by **demonstrated community need** — a real use case people actually
-hit. "Ink (or Textual, or any framework) has it" is not a reason on its own.
+[VOUCHED @hyf0 2026-07-10]
+
+A component earns its place by closing a recurring need in an [active product scenario](./product-scenarios.md#active-application-scenarios) or a real consumer. A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
+
+"Ink (or Textual, OpenTUI, or any framework) has it" is not a reason on its own. Another project can show that a problem exists, but vue-tui still needs evidence that the problem belongs in its own scenario journeys or consumer workflows.
+
+The public piece must remain generic. Provider protocols, agent or tool-call models, Git and database schemas, monitor collectors, and purely application-specific visual treatment stay in applications or specialized libraries. Repeated behavior may become a component, an independent composable, or a missing runtime capability; the scenario does not predetermine the layer.
 
 This **extends** the [alignment-is-a-means principle](./ink-divergences.md) to a different axis.
 That principle governs _behavior_ (match Ink only where Ink is already correct); this one governs
 _set-membership_ (which components exist at all). "Ink has it" justifies neither — but for a
-component we _do_ ship, we still borrow its proven behavior (see _Vue-idiomatic, Ink-inspired_).
+component we _do_ ship, we still borrow proven behavior where it fits (see _Vue-idiomatic,
+Ink-inspired_).
 
 ## The runtime ↔ component boundary
 
@@ -45,9 +51,10 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
   expose.
 
 Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
-input decoding lives in the runtime (`useMouseInput`, added in #237; wider mouse support
-still tracked in #207) — whereas anything driven by existing keyboard input plus measured
-layout is a pure composition. (`overflow:"hidden"`
+input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime
+(`useMouseInput`, targeted handlers, and `useDraggable`; see [mouse-input.md](./mouse-input.md)) —
+whereas anything driven by existing keyboard input plus measured layout is a pure composition.
+(`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
 
@@ -132,6 +139,8 @@ Component boolean props follow Vue-ecosystem and terminal-UI convention — not 
 - **A prop with a global / terminal-wide side effect is opt-in (`false` by default), and the side effect is documented.** Example: enabling terminal mouse tracking suppresses the terminal's native text selection window-wide (users bypass with Shift) — so such a prop must be opt-in, not on by default.
 
 ## Deliberately omitted
+
+[VOUCHED @hyf0 2026-07-10]
 
 - **No accessibility requirement.** Components are not required to set `ariaRole` / `ariaState`.
   It isn't always cheap to get right, and mandating it would tax contribution; a component may opt
