@@ -10,6 +10,7 @@ import {
   attachYoga,
   renderScreenReaderOutput,
   renderToStringWithScreenReader as renderToString,
+  realClock,
   type AppContext,
 } from "@vue-tui/runtime/internal";
 import {
@@ -44,6 +45,7 @@ function createTestAppContext(): AppContext {
     writeToStderr: () => {},
     cursorPosition: undefined,
     setCursorPosition: () => {},
+    clock: realClock,
   };
 }
 

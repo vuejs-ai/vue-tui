@@ -1,6 +1,7 @@
 import type { InjectionKey, ShallowRef } from "vue";
 import type { EventEmitter } from "node:events";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
+import type { Clock } from "./io/clock.ts";
 import type { MouseController } from "./mouse/controller.ts";
 
 export interface CursorPosition {
@@ -23,6 +24,12 @@ export interface AppContext {
   writeToStderr: (data: string) => void;
   cursorPosition: CursorPosition | undefined;
   setCursorPosition: (pos: CursorPosition | undefined) => void;
+  /**
+   * The app's injected time source (internal — see .agents/docs/clock.md).
+   * `realClock` unless a test injects a clock via the INTERNAL_CLOCK mount
+   * option; timer-owning runtime code must arm timers through this.
+   */
+  clock: Clock;
   internal_mouse?: MouseController;
 }
 

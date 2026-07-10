@@ -4,6 +4,7 @@ import { createRenderer } from "@vue/runtime-core";
 import { EventEmitter } from "node:events";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
+import { realClock } from "./io/clock.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
@@ -264,6 +265,7 @@ function createNoOpAppContext(isScreenReaderEnabled = false): AppContext {
     writeToStderr: () => {},
     cursorPosition: undefined,
     setCursorPosition: () => {},
+    clock: realClock,
   };
 }
 

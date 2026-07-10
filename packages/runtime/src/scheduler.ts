@@ -1,4 +1,5 @@
 import { queuePostFlushCb } from "@vue/runtime-core";
+import type { Clock, ClockTimeout } from "./io/clock.ts";
 
 export interface CommitScheduler {
   schedule: () => void;
@@ -21,6 +22,15 @@ export interface CommitSchedulerOptions {
    */
   throttleMs: number;
   now?: () => number;
+  /**
+   * Injected time source (see .agents/docs/clock.md). When present it
+   * supplies BOTH `now` (unless `now` is explicitly given) and the trailing
+   * timer, so virtual timers never mix with a real time base. When absent,
+   * the historic globals (`Date.now`, global `setTimeout`) are read directly
+   * — kept as the default so fake-timer tests that patch exactly those
+   * globals see unchanged behavior.
+   */
+  clock?: Clock;
 }
 
 export function createCommitScheduler(
@@ -29,7 +39,17 @@ export function createCommitScheduler(
 ): CommitScheduler {
   const immediate = options.immediate ?? false;
   const throttleMs = options.throttleMs;
-  const now = options.now ?? Date.now;
+  const clock = options.clock;
+  const now = options.now ?? (clock ? clock.now : Date.now);
+  // `clock` members are read via property access at arm/cancel time — never
+  // captured at construction — so a spy installed on the clock object after
+  // creation still observes every arm.
+  const armTimeout = (cb: () => void, ms: number): ClockTimeout =>
+    clock ? clock.setTimeout(cb, ms) : setTimeout(cb, ms);
+  const cancelTimeout = (handle: ClockTimeout): void => {
+    if (clock) clock.clearTimeout(handle);
+    else clearTimeout(handle as ReturnType<typeof setTimeout>);
+  };
   let scheduled = false;
   // Multiple concurrent flush() callers can be waiting on the same pending
   // commit; settle all of them rather than overwriting a single resolver.
@@ -53,7 +73,7 @@ export function createCommitScheduler(
   //   - maxWait: when a call arrives a full window after the first deferral
   //     (`pendingAt`), it commits synchronously — sustained updates hold a
   //     ~wait cadence instead of debounce-starving forever.
-  let trailingTimer: ReturnType<typeof setTimeout> | null = null;
+  let trailingTimer: ClockTimeout | null = null;
   let hasPendingFlag = false;
   // Time of the first call since the last leading/trailing commit
   // (es-toolkit compat-debounce `pendingAt`); drives the maxWait edge.
@@ -75,8 +95,8 @@ export function createCommitScheduler(
   // a leading/maxWait commit): an "empty" expiry is a no-op, but while armed
   // it marks the window as active so calls inside it defer.
   function armTrailingWindow() {
-    if (trailingTimer) clearTimeout(trailingTimer);
-    trailingTimer = setTimeout(() => {
+    if (trailingTimer !== null) cancelTimeout(trailingTimer);
+    trailingTimer = armTimeout(() => {
       trailingTimer = null;
       if (hasPendingFlag) doCommit();
     }, throttleMs);
@@ -139,8 +159,8 @@ export function createCommitScheduler(
   }
 
   function cancel() {
-    if (trailingTimer) {
-      clearTimeout(trailingTimer);
+    if (trailingTimer !== null) {
+      cancelTimeout(trailingTimer);
       trailingTimer = null;
     }
     hasPendingFlag = false;

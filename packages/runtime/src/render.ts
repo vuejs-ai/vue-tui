@@ -32,6 +32,7 @@ import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
+import { INTERNAL_CLOCK, realClock, type Clock } from "./io/clock.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
@@ -645,6 +646,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // testing helper's frames[] are provably content-only.
     const frameSink = (options as { [INTERNAL_FRAME_SINK]?: FrameSink })[INTERNAL_FRAME_SINK];
 
+    // Internal, test-only per-app clock (see io/clock.ts and
+    // .agents/docs/clock.md), read off a Symbol-keyed mount option exactly
+    // like the frame sink. `injectedClock` (not the realClock fallback) is
+    // what the schedulers receive: when it is undefined they keep their
+    // historic direct global reads, so fake-timer tests that patch those
+    // globals see unchanged behavior; when present, it supplies the whole
+    // time base so virtual timers never mix with real clocks.
+    const injectedClock = (options as { [INTERNAL_CLOCK]?: Clock })[INTERNAL_CLOCK];
+    const clock: Clock = injectedClock ?? realClock;
+
     // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
     // already rendering to this stdout, warn on stderr and skip wiring a second
     // competing renderer. The second mount is a deliberate no-op: the caller
@@ -845,6 +856,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       writeToStdout,
       writeToStderr,
       cursorPosition: undefined,
+      clock,
       setCursorPosition(pos: CursorPosition | undefined) {
         cursorPosition = pos;
         appContext.cursorPosition = pos;
@@ -1283,6 +1295,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const scheduler = createCommitScheduler(commit, {
       immediate: unthrottled,
       throttleMs: renderThrottleMs,
+      clock: injectedClock,
     });
     const mouseController = createMouseController({
       stdin: stdinController,
@@ -1305,7 +1318,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // stdout), rather than a single scheduler interval. It shares the exact
     // renderThrottleMs the commit scheduler uses, so the animation cadence
     // tracks the actual commit cadence (Ink ink.tsx:650).
-    const animationScheduler = createAnimationScheduler(renderThrottleMs);
+    const animationScheduler = createAnimationScheduler(renderThrottleMs, injectedClock);
     mountedAnimationScheduler = animationScheduler;
     baseApp.provide(AnimationSchedulerKey, animationScheduler);
     if (isDevConnected()) {

@@ -1,3 +1,5 @@
+import type { Clock, ClockTimeout } from "./io/clock.ts";
+
 const DEFAULT_INTERVAL = 100;
 const MAX_TIMER_INTERVAL = 2_147_483_647;
 
@@ -32,16 +34,24 @@ export interface AnimationScheduler {
   dispose(): void;
 }
 
-export function createAnimationScheduler(renderThrottleMs = 0): AnimationScheduler {
+export function createAnimationScheduler(renderThrottleMs = 0, clock?: Clock): AnimationScheduler {
   const subscribers = new Set<AnimationSubscriber>();
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: ClockTimeout | undefined;
   let scheduledDueTime = Number.POSITIVE_INFINITY;
   let isDispatching = false;
   const pending: Array<() => void> = [];
 
+  // When no clock is injected, the historic globals (`performance.now`, global
+  // `setTimeout`) are read directly — kept as the default so fake-timer tests
+  // that patch exactly those globals see unchanged behavior. `clock` members
+  // are read via property access at call time (never captured) so a spy
+  // installed on the clock object after creation still observes every arm.
+  const nowMs = (): number => (clock ? clock.now() : performance.now());
+
   function clearTimer() {
     if (timer !== undefined) {
-      clearTimeout(timer);
+      if (clock) clock.clearTimeout(timer);
+      else clearTimeout(timer as ReturnType<typeof setTimeout>);
       timer = undefined;
     }
     scheduledDueTime = Number.POSITIVE_INFINITY;
@@ -59,14 +69,14 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
     // just before `earliest`; onTick then finds nothing due (now < nextDueTime),
     // skips, and reschedules — one wasted wakeup per frame. Ceiling makes it fire
     // at-or-after the due time, so the frame lands on the first wakeup.
-    const delay = Math.ceil(Math.max(0, earliest - performance.now()));
-    timer = setTimeout(onTick, delay);
+    const delay = Math.ceil(Math.max(0, earliest - nowMs()));
+    timer = clock ? clock.setTimeout(onTick, delay) : setTimeout(onTick, delay);
   }
 
   function onTick() {
     timer = undefined;
     scheduledDueTime = Number.POSITIVE_INFINITY;
-    const now = performance.now();
+    const now = nowMs();
     isDispatching = true;
     try {
       for (const s of subscribers) {
@@ -98,7 +108,7 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
 
   function subscribe(callback: (currentTime: number) => void, intervalRaw: number) {
     const interval = normalizeInterval(intervalRaw);
-    const startTime = performance.now();
+    const startTime = nowMs();
     const sub: AnimationSubscriber = {
       callback,
       interval,
