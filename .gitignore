@@ -30,3 +30,6 @@ dist-ssr
 docs/superpowers/
 tmp/
 docs/known-yoga-bugs.md
+
+# Repository-internal visual terminal development artifacts
+visual-terminal-results/

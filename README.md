@@ -198,7 +198,9 @@ test("counter responds to + and - keys", async () => {
 
 Component assertions are necessary, but they do not show the final screen after a terminal has executed the application's ANSI and VT control sequences. vue-tui therefore ships a versioned [visual development guide](./packages/runtime/docs/visual-development-feedback-loops.md) for terminal-visible work: run the built app in a real PTY, feed its output through a declared terminal emulator, inspect both the structured active screen and a rendered image, operate the app one step at a time, and use those observations to guide the next code pass.
 
-The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. vue-tui ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
+The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. The published runtime ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
+
+This repository includes its own private controller for vue-tui development. After `vp install`, run `vp run visual:basic-template` for an interactive JSONL session. The agent chooses states and actions from observed PNGs; this non-deterministic visual acceptance is not an image snapshot or prewritten UI test. `vp run visual:basic-template:smoke` only checks that the controller infrastructure, recorded emulator-mode cleanup, and available host restoration checks work on the current computer. See the [repository controller instructions](./packages/runtime-tests/visual/README.md).
 
 Every `@vue-tui/runtime` installation contains the version-matched guide. From the application directory, a coding agent can locate it with:
 

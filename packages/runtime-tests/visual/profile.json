@@ -1,0 +1,26 @@
+{
+  "id": "vue-tui-xterm-reference-v1",
+  "terminal": {
+    "term": "xterm-256color",
+    "colorterm": "truecolor",
+    "columns": 64,
+    "rows": 18,
+    "scrollback": 1000,
+    "unicodeVersion": "11"
+  },
+  "renderer": {
+    "format": "SVG rasterized to PNG",
+    "cellWidthPx": 10,
+    "cellHeightPx": 20,
+    "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, Liberation Mono, monospace",
+    "fontSizePx": 15,
+    "drawBoldTextInBrightColors": true,
+    "foreground": "#e5e5e5",
+    "background": "#000000",
+    "cursor": "#ffffff"
+  },
+  "limits": {
+    "pixelRendering": "This is a cell-grid reference renderer, not xterm's browser renderer. Font rasterization and glyph fallback can differ by host. Dynamic OSC palette changes, blink timing, underline variants, and selection pixels are not reproduced.",
+    "terminalCoverage": "This xterm-compatible reference profile does not represent every native terminal."
+  }
+}
