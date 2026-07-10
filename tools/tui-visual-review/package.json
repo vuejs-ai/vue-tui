@@ -10,7 +10,7 @@
     "check:type": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
+    "@types/node": "catalog:",
     "@xterm/addon-unicode11": "catalog:",
     "@xterm/headless": "catalog:",
     "node-pty": "catalog:",

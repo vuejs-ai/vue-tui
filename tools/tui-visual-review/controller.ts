@@ -53,8 +53,9 @@ function actionSource(request: Request): ActionSource {
   };
 }
 
-function requiredString(value: string | undefined, name: string): string {
+function requiredString(value: unknown, name: string): string {
   if (value === undefined) throw new Error(`${name} is required`);
+  if (typeof value !== "string") throw new Error(`${name} must be a string`);
   return value;
 }
 
