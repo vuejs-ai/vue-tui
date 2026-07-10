@@ -1,8 +1,9 @@
 # Public API contract & surface
 
 What is — and isn't — part of `@vue-tui/runtime`'s public contract, and how the contract is
-tested. (Behavioral _divergences_ from Ink live in [ink-divergences](./ink-divergences.md); this file is about the
-SHAPE of the public surface itself.)
+tested. The principles and capability work used to choose future APIs live in
+[api-design](./api-design.md). Behavioral _divergences_ from Ink live in
+[ink-divergences](./ink-divergences.md); this file is about the SHAPE of the public surface itself.
 
 ## The contract = public exports **and their user-consumable types**
 

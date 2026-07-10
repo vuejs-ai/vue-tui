@@ -314,11 +314,13 @@ The returned `x` / `y` are the draggable element's `left` / `top` cell position,
 
 ## 6. Dispatch infrastructure (the hit map)
 
-Each committed full-screen frame builds a map of every node's **absolute** cell rectangle in **paint
-order** (vue-tui has no z-index; later paint ops overwrite earlier, so paint order _is_ stacking
-order — a hit is the last-painted node covering the cell). The paint walk records node identity and
-the visible rectangle after clipping. The map **must honor** `overflow: "hidden"` clip rects and
-`position: "absolute"` placement, or it reports hits on clipped or misplaced nodes.
+Each committed frame where targeted mouse is effective builds a map of every node's **absolute**
+cell rectangle in **paint order**. That requires effective full-screen, a supported terminal, TTY
+stdin, and the normal paint path rather than screen-reader linearization. vue-tui has no z-index;
+later paint ops overwrite earlier, so paint order _is_ stacking order and a hit is the last-painted
+node covering the cell. The paint walk records node identity and the visible rectangle after
+clipping. The map **must honor** `overflow: "hidden"` clip rects and `position: "absolute"`
+placement, or it reports hits on clipped or misplaced nodes.
 
 Per raw event: `hitTest(screenX, screenY)` → topmost node → build the event with `offsetX/offsetY`
 re-based into that node's box → dispatch to its handlers, then **bubble up the parent chain until
