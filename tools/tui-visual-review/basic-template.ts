@@ -17,12 +17,31 @@ export interface BasicTemplateSession {
 export async function startBasicTemplateSession(
   artifactDir: string,
 ): Promise<BasicTemplateSession> {
+  return startCommandSession(artifactDir, {
+    file: process.execPath,
+    args: [basicTemplateBundle],
+    cwd: basicTemplateDir,
+    label: "basic-template",
+  });
+}
+
+export interface VisualReviewCommand {
+  file: string;
+  args?: string[];
+  cwd: string;
+  label: string;
+}
+
+export async function startCommandSession(
+  artifactDir: string,
+  target: VisualReviewCommand,
+): Promise<BasicTemplateSession> {
   if (process.platform === "win32") {
     return {
       session: await VisualTerminalSession.create({
-        file: process.execPath,
-        args: [basicTemplateBundle],
-        cwd: basicTemplateDir,
+        file: target.file,
+        args: target.args,
+        cwd: target.cwd,
         artifactDir,
       }),
       mode: "direct-process",
@@ -31,19 +50,20 @@ export async function startBasicTemplateSession(
 
   const session = await VisualTerminalSession.create({
     file: "/bin/sh",
-    cwd: basicTemplateDir,
+    cwd: target.cwd,
     artifactDir,
     env: { ENV: "" },
   });
+  const launch = [target.file, ...(target.args ?? [])].map(shellQuote).join(" ");
   const command = [
     "__vt_before=$(stty -g)",
     "printf '\\033[2J\\033[3J\\033[H'",
-    `node ${shellQuote(basicTemplateBundle)}`,
+    launch,
     "__vt_code=$?",
     "__vt_after=$(stty -g)",
     'printf \'\\n__VT_APP_EXIT__:%s\\n__VT_STTY_BEFORE__:%s\\n__VT_STTY_AFTER__:%s\\n\' "$__vt_code" "$__vt_before" "$__vt_after"',
   ].join("; ");
-  session.sendSystem(`${command}\r`, "launch-basic-template-with-restoration-markers");
+  session.sendSystem(`${command}\r`, `launch-${target.label}-with-restoration-markers`);
   return { session, mode: "persistent-posix-shell" };
 }
 

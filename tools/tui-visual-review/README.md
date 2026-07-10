@@ -1,6 +1,6 @@
 # TUI visual review tool
 
-This private workspace tool lets a coding agent run vue-tui's basic-template reference application through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that visual review. It lives under `tools/` because it is repository infrastructure, not a deterministic test, published package, or runtime API.
+This private workspace tool lets a coding agent run vue-tui's basic-template reference application or a focused review fixture through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that visual review. It lives under `tools/` because it is repository infrastructure, not a deterministic test, published package, or runtime API.
 
 ## Start an interactive session
 
@@ -10,7 +10,15 @@ From the repository root after `vp install`, run:
 vp run visual:basic-template
 ```
 
-The command builds `@vue-tui/runtime` and the reference application, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
+For the fullscreen fixed-origin regression fixture, use:
+
+```sh
+vp run visual:fullscreen-origin
+```
+
+Pass `--scenario <static|stdout|stderr|console|debug|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
+
+The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 
 When an agent's command tool distinguishes one-shot commands from interactive sessions, use a persistent session or allocate a parent TTY so stdin remains open for later commands.
 

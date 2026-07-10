@@ -78,7 +78,7 @@ useInput((input) => {
 | `<Text>`      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
 | `<Spacer>`    | Expands to fill available space (`flex-grow: 1`)                                               |
 | `<Newline>`   | Inserts line breaks (configurable `count`)                                                     |
-| `<Static>`    | Renders a list of items once, above the redrawn region                                         |
+| `<Static>`    | Renders inline items once above the redrawn region; fullscreen does not retain them            |
 | `<Transform>` | Applies a string transform function to each rendered line                                      |
 
 ## Composables

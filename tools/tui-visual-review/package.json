@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx controller.ts",
+    "fullscreen-origin": "tsx controller.ts --target fullscreen-origin",
     "smoke": "tsx smoke.ts",
     "check:type": "tsc --noEmit"
   },

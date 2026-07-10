@@ -16,6 +16,7 @@
     "@vitejs/plugin-vue-jsx": "catalog:",
     "@vue-tui/runtime": "workspace:*",
     "@vue-tui/testing": "workspace:*",
+    "@xterm/headless": "catalog:",
     "ansi-escapes": "catalog:",
     "chalk": "catalog:",
     "is-in-ci": "catalog:",

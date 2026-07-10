@@ -11,12 +11,15 @@ component itself listens to **no** mouse or keyboard input.
 ## What it's for — and what to use instead
 
 - Use it for a **fixed-height scroll region inside a persistent layout** — a pane in a full-screen
-  (`alternateScreen`) app (a dashboard, a multi-pane TUI) where content can't just flow into the
+  (`fullscreen`) app (a dashboard, a multi-pane TUI) where content can't just flow into the
   terminal's own scrollback.
 - For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static`: let
   the content flow into the terminal's scrollback, where the terminal owns scrolling and text
   selection natively. vue-tui's own `coding-agent` example does exactly this — it uses `Static`, not
   `ScrollBox`. Bounding streaming output in an inline `ScrollBox` fights the grain (see below).
+- Fullscreen does not retain `<Static>` output on its fixed surface: new Static bytes are emitted to
+  stream observers and then repainted away. Keep fullscreen history in reactive state inside a
+  `ScrollBox`; see [fullscreen-output.md](../fullscreen-output.md).
 
 ## No built-in input — imperative handle only
 

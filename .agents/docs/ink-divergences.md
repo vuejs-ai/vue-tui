@@ -670,6 +670,32 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   (issue #26). The separate narrowing-only `writer.clear()` frame reset is a distinct
   mechanism.
 
+### Fullscreen owns a fixed viewport instead of reusing the inline writer
+
+- **Ink:** `alternateScreen: true` switches buffers but keeps the relative inline output writer.
+  Run-verified against v7.0.4 (`40b3a757`, real PTY + xterm, 32×10): an initial `<Static>` leaves
+  `STATIC` on row 0 and moves `DYNAMIC` to row 1; successive `useStdout`, `useStderr`, patched
+  `console.log`, and patched `console.error` writes move the dynamic frame down one more row each.
+  With `debug: true`, rerenders append in place (`DYNAMICFRAME-1FRAME-2`) instead of replacing the
+  alternate-screen surface.
+- **vue-tui:** effective `fullscreen` visual rendering owns the current `columns × rows` viewport.
+  Yoga receives both dimensions; paint and hit testing clip to them; every commit clears, homes, and
+  repaints the complete frame from `(0,0)`, hiding the caret until a declared position is restored.
+  Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
+  repaint. `<Static>` bytes are emitted to stream observers but warned once and not retained
+  visually. Debug frames replace the surface too.
+- **Why:** targeted mouse events, `useCursor()`, and Yoga layout all use viewport coordinates. If
+  output outside the tree can move the visible frame while the hit map remains at row 0, clicking
+  the visible element misses and clicking the log line can trigger it. Treating fullscreen as an
+  owned fixed surface keeps all four coordinate systems identical and prevents tall content from
+  scrolling the alternate buffer. The first implementation favors correctness with a full repaint,
+  even when `incrementalRendering: true`; a later absolute-cell diff may optimize bytes without
+  changing this contract.
+- **Boundary:** direct `process.stdout.write()` / `process.stderr.write()` calls bypass the runtime
+  coordinator and cannot be repaired automatically. Screen-reader output stays on its linear
+  transcript path. Introduced 2026-07-11. Tests: `fullscreen-origin.test.ts`; full contract:
+  [fullscreen-output.md](./fullscreen-output.md).
+
 ### Degenerate boxes do not lay out or paint children when the content area is gone
 
 - **Ink:** its size model is border-box-like: `width`/`height` are handed to Yoga as the

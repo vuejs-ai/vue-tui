@@ -7,8 +7,10 @@
 > [api-contract.md](./api-contract.md); Ink-alignment is explicitly **not** a constraint here — the
 > deciding rules are **user-friendliness** and **following Vue/DOM conventions, not inventing names**.
 >
-> **Status:** design approved through the API shape and names; adversarially reviewed against source;
-> implementation not started. §5 (forward-compat contract) is the load-bearing part.
+> **Status:** v1 shipped in [#245](https://github.com/vuejs-ai/vue-tui/pull/245). The fixed fullscreen
+> output contract that keeps the visible surface and hit map at the same origin is recorded in
+> [fullscreen-output.md](./fullscreen-output.md). §5 remains the load-bearing forward-compatibility
+> contract.
 
 ## 1. What this is, and the scope of v1
 
@@ -79,10 +81,12 @@ top-left sits on the physical screen.
   cursor occasionally, but not frame-to-frame. Content flushed outside the tracked layout, à la
   `<Static>`, shifts rows too. So the conservative gate is a full-app full-screen declaration.)
 
-- **Full-screen (alternate buffer):** vue-tui enters the alt buffer _before the first render_ and
-  paints from its top, so the frame's top-left **is** screen origin `(0,0)` and the conversion is
-  exact. (Robustness: emit `\x1b[H` before the first alt frame so origin `(0,0)` is guaranteed, not
-  reliant on the terminal homing on alt-buffer entry.)
+- **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount.
+  Every commit clears and homes that viewport, then paints the complete frame from screen origin
+  `(0,0)`. Yoga receives the current terminal height, and paint plus hit testing are clipped to the
+  addressable rows. Coordinated Static/stdout/stderr/console writes are followed by the same repaint,
+  so they cannot move the visible frame away from the hit map. Direct `process.stdout.write()` calls
+  bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
 
 Second, independent reason: enabling mouse tracking suppresses the terminal's native click-drag text
 selection window-wide, including scrollback above an inline app. In full-screen the app owns the
@@ -325,9 +329,10 @@ dispatch state. `click` is synthesized when `up` lands on the same target as the
 `detail` increments on repeat clicks at the same cell within a short window — driven by the commit
 scheduler's timing hooks (not a bare timer), so tests stay deterministic. Capture bypasses `hitTest`.
 
-Invariants from Ink's failure (§3): the map is built **only** in full-screen (known origin), and
-content flushed outside the tracked layout (`<Static>`) is excluded so screen rows and layout rows
-can't disagree.
+Invariants from Ink's failure (§3): the map is built **only** in full-screen (known origin), is
+clipped to the same terminal viewport as paint, and excludes `<Static>`. Fullscreen Static output is
+not retained visually; the runtime repaints the live surface at `(0,0)` after emitting it, so screen
+rows and layout rows cannot disagree.
 
 The correctness gate is about dispatch and terminal mode: targeted handlers / `useDraggable` arm
 mouse tracking only when there is a mouse registration and the app is full-screen. Building a
@@ -343,14 +348,12 @@ machinery exists to prevent. Simplest airtight fix: on teardown always emit
 `\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l` (disabling an un-set mode is a no-op). Degradation:
 non-TTY / `TERM=dumb` enables nothing; handlers never fire.
 
-## 7. What "level negotiation" actually requires (net-new work, not a tweak)
+## 7. What v1 level negotiation required
 
-- **Parser widening.** `parseMouseInput` decodes wheel only and drops every non-wheel button; v1
-  decodes press / release / drag, and needs a dispatch channel beyond today's single wheel-only
-  `"mouse"` emitter.
-- **Leveled enable.** Today's enable (`1000`) fires only on the 0→1 refcount transition; v1 requests
-  `1002` and must emit escapes on upgrade/downgrade transitions (`off`=1000 / `drag`=1002 /
-  `hover`=1003).
+- **Parser widening.** `parseMouseInput` was widened beyond wheel events to decode press, release,
+  and drag, with dispatch beyond the earlier wheel-only `"mouse"` emitter.
+- **Leveled enable.** The earlier `1000`-only 0→1 refcount switch became level negotiation with
+  upgrade/downgrade transitions (`button`=1000 / `drag`=1002 / `hover`=1003).
 - Both the low-level `useMouseInput` and the high-level dispatch acquire the **same** underlying mode
   through the shared refcount (§2) — one switch, not two.
 
