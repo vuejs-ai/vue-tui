@@ -17,6 +17,7 @@ Build with components, develop with HMR, test with confidence.
 - **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`npm run dev`)
 - **Input & focus** — keyboard handling, focus management, Tab navigation, Kitty keyboard protocol
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
+- **Coding-agent visual development guide** — a version-matched method for running the real app, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees ([guide](./packages/runtime/docs/visual-development-feedback-loops.md))
 
 <p align="center">
   <a href="./examples/flappy-bird"><em>Flappy Bird</em></a> — one of the <a href="#examples">examples</a> included in the repo
@@ -91,6 +92,7 @@ createApp(App).mount();
 - [High-level Components](#high-level-components)
 - [Composables (Hooks)](#composables-hooks)
 - [Testing](#testing)
+- [Visual development with coding agents](#visual-development-with-coding-agents)
 - [Development](#development)
 - [Contributing](#contributing)
 - [Credits](#credits)
@@ -191,6 +193,20 @@ test("counter responds to + and - keys", async () => {
   expect(lastFrame()).toContain("Count: 0");
 });
 ```
+
+## Visual development with coding agents
+
+Component assertions are necessary, but they do not show the final screen after a terminal has executed the application's ANSI and VT control sequences. vue-tui therefore ships a versioned [visual development guide](./packages/runtime/docs/visual-development-feedback-loops.md) for terminal-visible work: run the built app in a real PTY, feed its output through a declared terminal emulator, inspect both the structured active screen and a rendered image, operate the app one step at a time, and use those observations to guide the next code pass.
+
+The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. vue-tui ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
+
+Every `@vue-tui/runtime` installation contains the version-matched guide. From the application directory, a coding agent can locate it with:
+
+```sh
+node -p "require('node:path').join(require.resolve('@vue-tui/runtime/package.json'), '../docs/visual-development-feedback-loops.md')"
+```
+
+To make this the default in an application, put the [guide's instruction](./packages/runtime/docs/visual-development-feedback-loops.md#tell-an-agent-to-use-this-guide) in the project's root `AGENTS.md`, `CLAUDE.md`, or equivalent agent-instruction file. npm dependencies cannot make an agent read their nested documentation automatically, so the root instruction is the dependable reminder.
 
 ## Development
 

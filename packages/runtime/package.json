@@ -27,6 +27,7 @@
   },
   "files": [
     "dist",
+    "docs/visual-development-feedback-loops.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
