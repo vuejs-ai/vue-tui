@@ -4,7 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { VisualTerminalSession } from "./session.ts";
 
-export const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
+export const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 export const basicTemplateDir = path.join(repoRoot, "examples", "basic-template");
 export const basicTemplateBundle = path.join(basicTemplateDir, "dist", "main.mjs");
 

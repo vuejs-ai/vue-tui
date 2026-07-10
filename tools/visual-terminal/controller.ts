@@ -1,3 +1,4 @@
+// Repository-internal JSONL entry point for agent-driven visual acceptance.
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";

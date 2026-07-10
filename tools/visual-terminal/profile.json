@@ -21,6 +21,6 @@
   },
   "limits": {
     "pixelRendering": "This is a cell-grid reference renderer, not xterm's browser renderer. Font rasterization and glyph fallback can differ by host. Dynamic OSC palette changes, blink timing, underline variants, and selection pixels are not reproduced.",
-    "terminalCoverage": "This xterm-compatible reference profile does not represent every native terminal."
+    "terminalCoverage": "This repository xterm-compatible reference profile does not represent every native terminal."
   }
 }

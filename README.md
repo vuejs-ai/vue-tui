@@ -200,7 +200,7 @@ Component assertions are necessary, but they do not show the final screen after 
 
 The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. The published runtime ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
 
-This repository includes its own private controller for vue-tui development. After `vp install`, run `vp run visual:basic-template` for an interactive JSONL session. The agent chooses states and actions from observed PNGs; this non-deterministic visual acceptance is not an image snapshot or prewritten UI test. `vp run visual:basic-template:smoke` only checks that the controller infrastructure, recorded emulator-mode cleanup, and available host restoration checks work on the current computer. See the [repository controller instructions](./packages/runtime-tests/visual/README.md).
+This repository includes its own private controller under [`tools/visual-terminal`](./tools/visual-terminal) for vue-tui development. After `vp install`, run `vp run visual:basic-template` for an interactive JSONL session. The agent chooses states and actions from observed PNGs; this non-deterministic visual acceptance is not an image snapshot or prewritten UI test. `vp run visual:basic-template:smoke` only checks that the controller infrastructure, recorded emulator-mode cleanup, and available host restoration checks work on the current computer. The tool is a private workspace with no runtime exports or publication path.
 
 Every `@vue-tui/runtime` installation contains the version-matched guide. From the application directory, a coding agent can locate it with:
 

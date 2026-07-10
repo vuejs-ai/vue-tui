@@ -35,7 +35,7 @@ The guide defines a browser-independent loop built around a real PTY, an emulate
 
 `@vue-tui/runtime` ships the guide, not a controller, PTY library, terminal emulator, or image renderer. The coding-agent environment or application project supplies those capabilities.
 
-For reliable discovery, copy the [provided instruction](https://github.com/vuejs-ai/vue-tui/blob/main/packages/runtime/docs/visual-development-feedback-loops.md#tell-an-agent-to-use-this-guide) into the application's root `AGENTS.md`, `CLAUDE.md`, or equivalent agent-instruction file.
+For reliable discovery, copy the [provided instruction](./docs/visual-development-feedback-loops.md#tell-an-agent-to-use-this-guide) into the application's root `AGENTS.md`, `CLAUDE.md`, or equivalent agent-instruction file.
 
 ## Quick Start
 

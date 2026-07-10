@@ -1,6 +1,6 @@
 # Repository visual terminal controller
 
-This private development tool lets a coding agent run vue-tui's basic-template reference application through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that run. It is repository infrastructure, not a published package or runtime API.
+This private workspace tool lets a coding agent run vue-tui's basic-template reference application through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that run. It lives under `tools/` because it is repository infrastructure, not a deterministic test, published package, or runtime API.
 
 ## Start an interactive session
 

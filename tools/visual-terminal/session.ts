@@ -1,3 +1,4 @@
+// Repository-internal PTY, terminal-emulation, observation, and artifact implementation.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";

@@ -1,3 +1,4 @@
+// Optional infrastructure health check; this is not visual acceptance.
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";

@@ -373,12 +373,6 @@ importers:
       '@vue-tui/testing':
         specifier: workspace:*
         version: link:../testing
-      '@xterm/addon-unicode11':
-        specifier: 'catalog:'
-        version: 0.9.0
-      '@xterm/headless':
-        specifier: 'catalog:'
-        version: 6.0.0
       ansi-escapes:
         specifier: 'catalog:'
         version: 7.3.0
@@ -391,9 +385,6 @@ importers:
       node-pty:
         specifier: 'catalog:'
         version: 1.2.0-beta.13
-      sharp:
-        specifier: 'catalog:'
-        version: 0.35.3(@types/node@24.12.4)
       string-width:
         specifier: 'catalog:'
         version: 8.2.1
@@ -461,6 +452,30 @@ importers:
       vue:
         specifier: ^3.4.0
         version: 3.5.34(typescript@6.0.3)
+
+  tools/visual-terminal:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.12.4
+        version: 24.12.4
+      '@xterm/addon-unicode11':
+        specifier: 'catalog:'
+        version: 0.9.0
+      '@xterm/headless':
+        specifier: 'catalog:'
+        version: 6.0.0
+      node-pty:
+        specifier: 'catalog:'
+        version: 1.2.0-beta.13
+      sharp:
+        specifier: 'catalog:'
+        version: 0.35.3(@types/node@24.12.4)
+      tsx:
+        specifier: 'catalog:'
+        version: 4.22.3
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
 packages:
 
