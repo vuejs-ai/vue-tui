@@ -1,8 +1,8 @@
 {
-  "name": "@vue-tui/internal-visual-terminal",
+  "name": "@vue-tui/tui-visual-review",
   "version": "0.0.0",
   "private": true,
-  "description": "Repository-internal visual terminal feedback-loop infrastructure.",
+  "description": "Repository-internal tooling for agent-driven TUI visual review.",
   "type": "module",
   "scripts": {
     "start": "tsx controller.ts",

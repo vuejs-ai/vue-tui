@@ -1,4 +1,4 @@
-// Optional infrastructure health check; this is not visual acceptance.
+// Optional infrastructure health check; this is not TUI visual review.
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -19,7 +19,7 @@ export interface SmokeResult {
 
 function defaultArtifactDir(): string {
   const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
-  return path.join(repoRoot, "visual-terminal-results", `basic-template-${stamp}`);
+  return path.join(repoRoot, "tui-visual-review-results", `basic-template-${stamp}`);
 }
 
 function source(observation: Observation, label: string): ActionSource {

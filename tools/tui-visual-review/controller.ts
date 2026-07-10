@@ -1,4 +1,4 @@
-// Repository-internal JSONL entry point for agent-driven visual acceptance.
+// Repository-internal JSONL entry point for agent-driven TUI visual review.
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
@@ -30,7 +30,7 @@ interface Request {
 
 function defaultArtifactDir(): string {
   const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
-  return path.join(repoRoot, "visual-terminal-results", `basic-template-session-${stamp}`);
+  return path.join(repoRoot, "tui-visual-review-results", `basic-template-session-${stamp}`);
 }
 
 function artifactDir(args: string[]): string {

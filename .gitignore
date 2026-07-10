@@ -31,5 +31,7 @@ docs/superpowers/
 tmp/
 docs/known-yoga-bugs.md
 
-# Repository-internal visual terminal development artifacts
+# Repository-internal TUI visual review artifacts
+tui-visual-review-results/
+# Legacy local runs from before the tool was named.
 visual-terminal-results/

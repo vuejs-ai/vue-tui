@@ -1,6 +1,6 @@
-# Repository visual terminal controller
+# TUI visual review tool
 
-This private workspace tool lets a coding agent run vue-tui's basic-template reference application through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that run. It lives under `tools/` because it is repository infrastructure, not a deterministic test, published package, or runtime API.
+This private workspace tool lets a coding agent run vue-tui's basic-template reference application through a real PTY, observe the active screen after terminal emulation, load a reference PNG, operate the application one step at a time, and keep the evidence for that visual review. It lives under `tools/` because it is repository infrastructure, not a deterministic test, published package, or runtime API.
 
 ## Start an interactive session
 
@@ -45,7 +45,7 @@ Visual acceptance is intentionally agent-driven rather than a fixed journey or i
 
 ## Artifacts
 
-Each run creates a unique ignored directory under `visual-terminal-results/` containing:
+Each run creates a unique ignored directory under `tui-visual-review-results/` containing:
 
 - `profile.json`: fixed reference settings plus actual package, host, Node, and PTY-backend versions;
 - `screens/*.json`: active buffer, cells, styles, cursor, modes, viewport, scrollback, process state, and visible revision;

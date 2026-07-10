@@ -453,7 +453,7 @@ importers:
         specifier: ^3.4.0
         version: 3.5.34(typescript@6.0.3)
 
-  tools/visual-terminal:
+  tools/tui-visual-review:
     devDependencies:
       '@types/node':
         specifier: ^24.12.4
