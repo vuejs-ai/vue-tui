@@ -1,0 +1,21 @@
+{
+  "name": "@vue-tui/tui-visual-review",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Repository-internal tooling for agent-driven TUI visual review.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx controller.ts",
+    "smoke": "tsx smoke.ts",
+    "check:type": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@xterm/addon-unicode11": "catalog:",
+    "@xterm/headless": "catalog:",
+    "node-pty": "catalog:",
+    "sharp": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "^6.0.3"
+  }
+}

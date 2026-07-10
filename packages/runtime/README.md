@@ -13,6 +13,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
 - **Built-in input system** — keyboard handling, focus management, Tab navigation
 - **Terminal-native** — renders directly to stdout, purpose-built for CLI tools and AI agent interfaces
+- **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
 `@vue-tui/runtime` is a terminal platform renderer parallel to `@vue/runtime-dom`, comparable to [React Ink](https://github.com/vadimdemedes/ink) but adapted for Vue's reactivity model.
 
@@ -21,6 +22,20 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 ```bash
 npm install @vue-tui/runtime vue
 ```
+
+## Develop with a coding agent
+
+If a coding agent changes visible terminal behavior, tell it to read the version-matched visual development guide shipped in this package before editing or accepting the result. Run this from the application directory:
+
+```sh
+node -p "require('node:path').join(require.resolve('@vue-tui/runtime/package.json'), '../docs/visual-development-feedback-loops.md')"
+```
+
+The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`lastFrame()` from `@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) remains the fast assertion layer, but it is not the terminal's final post-emulation screen.
+
+`@vue-tui/runtime` ships the guide, not a controller, PTY library, terminal emulator, or image renderer. The coding-agent environment or application project supplies those capabilities.
+
+For reliable discovery, copy the [provided instruction](./docs/visual-development-feedback-loops.md#tell-an-agent-to-use-this-guide) into the application's root `AGENTS.md`, `CLAUDE.md`, or equivalent agent-instruction file.
 
 ## Quick Start
 
