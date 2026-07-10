@@ -850,3 +850,13 @@ or internal mechanics so they are not mistaken for parity gaps.
   `screen-reader.ts`; `G52`). This is renderer mechanics, not a divergence entry by
   itself. The observable `<Transform>` literal-`false` edge is documented above as a
   **model-implied divergence**.
+- The runtime reads time through an injected `Clock` (`AppContext.clock`; internal
+  Symbol-keyed mount option, see [clock.md](./clock.md)) instead of calling
+  `Date.now`/`performance.now`/global `setTimeout` directly. This is **not** a behavioral
+  divergence: the throttle/animation timing _logic_ is unchanged (the leading/trailing/
+  maxWait pattern verified against Ink v7.0.4 in audit e29 still holds — see the
+  "Commit timing" alignment entry above); production injects a passthrough to the real
+  timers, so observable timing is byte-for-byte what it was. Only vue-tui's own tests
+  inject a virtual clock to make timing assertions deterministic. Recorded so a future
+  reader tracing timing code through `clock.now()` does not mistake the indirection for a
+  parity change.
