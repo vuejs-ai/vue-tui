@@ -34,7 +34,7 @@ A pure composition of `<Text>` + `useAnimation` — no new runtime export needed
 
 - `color` tints the **glyph only**; the `label` stays default-colored (matches ora / @inkjs/ui).
 - `label` is a **`string` prop** (type-friendly + the common Vue idiom for simple text). If rich
-  label content is ever needed, add a same-purpose **default slot** later — non-breaking.
+  label content is ever needed, reconsider a same-purpose **default slot** from consumer evidence.
 
 ## Non-goals
 

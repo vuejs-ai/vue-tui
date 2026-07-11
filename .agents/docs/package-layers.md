@@ -60,7 +60,4 @@ which is exactly why `components` needs no broader name.
 
 ## Status
 
-`runtime` and `components` exist today. `use` is a **reserved layer**: its dependency
-contract is fixed now, but the package is created only when its first real member (an
-independent, reusable hook) actually ships — additive, with no rename or migration of
-`components`.
+`runtime` and `components` exist today. `use` is a **reserved layer**: its dependency contract is fixed now, but the package is created only when its first real member—an independent, reusable hook—actually ships. Creating that layer does not by itself justify renaming or repurposing `components`; any package-boundary change requires its own accepted architectural reason.

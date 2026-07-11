@@ -35,18 +35,24 @@ Owning a renderer is an implementation responsibility, not the product value on 
 - **Stable generic contracts.** Public APIs and user-consumable types should mature toward a dependable 1.0 surface without freezing weak early designs.
 - **Clear package boundaries.** Terminal rendering and I/O, reusable interaction logic, and composed UI pieces stay in their recorded layers; application-specific data and business behavior stay in the application.
 
+## API stability during experimentation
+
+[VOUCHED @hyf0 2026-07-11]
+
+vue-tui is currently experimental. Until a future stability milestone is explicitly accepted, existing public APIs are not backward-compatibility constraints. Treat each shipped API as evidence about the current implementation, then decide from the target product and terminal model whether to retain it, redesign it, or delete it. Design work should prefer one coherent target contract over aliases, deprecation windows, precedence rules, or compatibility shims whose only purpose is to preserve current releases.
+
 ## Rendering modes
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyf0 2026-07-11]
 
-The `fullscreen` mount option selects the terminal screen model:
+Rendering mode selects one of two terminal screen models:
 
-- `fullscreen: false` is **inline mode**. The application renders in the terminal's main screen buffer, so completed output can remain in native terminal scrollback.
-- `fullscreen: true` is **full-screen mode**. The application uses the alternate screen and owns a persistent viewport until it exits and restores the prior screen.
+- **Inline mode.** The application renders in the terminal's main screen buffer, so completed output can remain in native terminal scrollback.
+- **Full-screen mode.** The application uses the alternate screen and owns a persistent viewport until it exits and restores the prior screen.
 
 The product supports both modes. No decision currently makes either one the primary product mode or treats the other as a degraded fallback. Work that affects only one mode must say so; shared APIs should support both when their terminal models honestly allow it, without hiding real differences behind a misleading common abstraction.
 
-A future hierarchy decision requires evidence from representative journeys in both modes and explicit maintainer review. The current `fullscreen: false` default does not settle that product decision by itself.
+A future hierarchy decision requires evidence from representative journeys in both modes and explicit maintainer review. No current or future mount default settles that product decision by itself; the exact clean-slate mount API is a separate design choice.
 
 ## Inline scrollback ownership
 

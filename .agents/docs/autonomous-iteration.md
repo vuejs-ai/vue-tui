@@ -10,20 +10,20 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.2, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define and obtain maintainer acceptance for the exact `mode` mount option and legacy compatibility contract.
+Close F1.2, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define and obtain maintainer acceptance for the exact clean-slate `mode` mount contract.
 
-1. audit current `fullscreen` and `alternateScreen` behavior, public docs, package versions, deprecation precedent, and recent real-consumer usage;
-2. produce one finite table for `mode`, `fullscreen`, and `alternateScreen` across omitted, valid, invalid-equivalence, and conflicting combinations;
-3. propose the smallest honest warning and compatibility window supported by that evidence;
-4. surface only compatibility, breaking-change, and release-policy choices for maintainer acceptance;
-5. update the roadmap and design records after acceptance without implementing the migration or selecting the readonly session API.
+1. compare a required `mode` with an explicit omission/default using the accepted two-surface product model rather than the old boolean default;
+2. produce one finite table for omission, `inline`, `fullscreen`, invalid JavaScript values, validation timing, and every live, non-TTY, screen-reader, deterministic-test, and string host;
+3. specify direct removal of `fullscreen` and `alternateScreen`, including whether recognizable obsolete keys fail immediately instead of silently selecting Inline;
+4. surface the one-application model, option term, required-or-default behavior, failure behavior, and two forced non-TTY output-policy choices for maintainer acceptance;
+5. update the roadmap and design records after acceptance without implementing the replacement or selecting the readonly session API.
 
-F1.2 does not reopen the accepted [rendering-mode and host behavior matrix](./rendering-mode-matrix.md), choose the public session composable, implement target lifecycle fixes, or activate a later foundation. Research may compare peer deprecation practice only when it directly resolves the active compatibility contract.
+F1.2 does not reopen the accepted two-screen surface model or lifecycle invariants in the [rendering-mode and host behavior matrix](./rendering-mode-matrix.md); it explicitly owns the two marked non-TTY output-policy cells whose prior rationale was backward compatibility. It does not choose the public session composable, implement target lifecycle fixes, or activate a later foundation. The experimental API-stability policy removes deprecation, version-window, and consumer-usage research from this checkpoint.
 
 ## Baseline for the current foundation
 
 - PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F1 must expose truthful session facts rather than redesign that backend.
-- Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose sound compatibility work from stale inputs.
+- Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose a sound target API from stale inputs.
 - Keep later foundations free of new public APIs while F1 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F2–F8 early.
 
 ## Where work comes from
@@ -61,13 +61,13 @@ The foundation roadmap is the single ordered backlog for this program. This live
 ## Verification rules
 
 - Behavior claims are demonstrated, not inferred from source.
-- Public API additions include SFC/template and TSX type checks, public-surface guards, user documentation, and a clean tarball consumer.
+- Public API additions, replacements, moves, and removals include the applicable SFC/template and TSX type checks, public-surface guards, user documentation, repository consumers, and a clean tarball consumer.
 - Input, paste, focus, layout, paint, streaming, scroll, cursor, resize, external output, and teardown changes include real-PTY evidence. Raw output bytes alone are insufficient when the claim concerns what is visible on screen.
 - The PTY path declares one terminal profile. Start with `xterm-256color`; do not generalize one Unicode-width, keyboard, or color result to every terminal.
 - The visual loop feeds terminal query replies back to the PTY and exposes the active viewport, style runs, cursor, named key/text/resize actions, an explicit wait condition, raw transcript, and exit status.
 - Silence is not a settled state. Success is an expected screen predicate, a process exit, or another explicit event before a deadline.
 - Preserve durable evidence as tests, fixtures, commands, committed artifacts, stable URLs, or commit hashes. Do not cite a temporary screenshot or `/tmp` result as final evidence.
-- A gate may be strengthened autonomously. Weakening or deleting a check, lowering a compatibility promise, or changing a test merely to accept new output requires explicit review.
+- A gate may be strengthened autonomously. Weakening or deleting a correctness, lifecycle, type-safety, or terminal-restoration check, or changing a test merely to accept new output, requires explicit review.
 
 ## Authority after this contract is approved
 
@@ -86,7 +86,7 @@ Stop before:
 
 - deciding whether inline or full-screen is primary, or making a change that intentionally reduces one mode to a fallback;
 - choosing a new public API when multiple honest shapes remain, including input ownership, focus routing, mode-capability APIs, or a generic styled-cell-grid view;
-- making a breaking change, moving a package boundary, changing the supported Node or terminal range, adding a native runtime requirement, or choosing release or version policy;
+- moving a package boundary, changing the supported Node or terminal range, adding a native runtime requirement, or choosing release or version policy;
 - conflicting with a vouched record;
 - duplicating or superseding an active external contribution without coordination;
 - weakening an objective gate or accepting a result that cannot be reproduced on the untouched base;
@@ -112,7 +112,7 @@ When F3–F8 need an end-to-end interaction journey, use a scripted model adapte
 
 Run the same state machine with two view adapters:
 
-- **Inline:** completed transcript through `Static`, current streaming output and composer in the managed region, native scrollback retained.
+- **Inline:** completed transcript through the current `Static` mechanism or its accepted replacement, current streaming output and composer in the managed region, native scrollback retained.
 - **Full-screen:** persistent layout in the alternate screen, transcript through `ScrollBox` or its successor, explicit internal navigation, and restoration on exit.
 
 The comparison should record where behavior can share one public abstraction and where the terminal model forces a mode-specific capability. It should not hide differences behind a lowest-common-denominator API or choose a product hierarchy.

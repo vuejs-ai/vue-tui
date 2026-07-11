@@ -1,6 +1,6 @@
 # Fullscreen output contract
 
-`fullscreen: true` is the application-facing mode; the alternate screen is the terminal mechanism used to implement it. The mode is effective only for an interactive app with a TTY `stdout`. `alternateScreen` remains a deprecated alias.
+The current runtime selects this behavior with `fullscreen: true`; the target clean-slate mount name and required/default behavior remain F1.2 work. The alternate screen is the terminal mechanism used to implement the full-screen model. The mode is effective only for an interactive app with a TTY `stdout`; `alternateScreen` remains a deprecated alias in the current implementation only.
 
 ## The surface vue-tui owns
 

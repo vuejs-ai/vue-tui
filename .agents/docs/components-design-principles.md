@@ -70,10 +70,10 @@ not a transliterated render prop.
 ## Pure composition
 
 Build only on the runtime's **public barrel**, never `@vue-tui/runtime/internal`. Two reasons:
-`/internal` carries no stability guarantee ([api-contract.md](./api-contract.md)), and staying on
-the public surface **dogfoods** it — a missing capability surfaces as a real gap to fix in the
-runtime (see _The runtime ↔ component boundary_) rather than something papered over from the
-inside.
+`/internal` is an unsupported implementation surface ([api-contract.md](./api-contract.md)), and
+staying on the public surface **dogfoods** it — a missing capability surfaces as a real gap to fix
+in the runtime (see _The runtime ↔ component boundary_) rather than something papered over from
+the inside.
 
 ## Type-friendliness — Volar / vue-tsc must catch misuse at compile time
 

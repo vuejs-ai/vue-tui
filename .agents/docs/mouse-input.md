@@ -3,27 +3,28 @@
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:
 > [#207](https://github.com/vuejs-ai/vue-tui/issues/207). Builds on the low-level stream
-> `useMouseInput`, added in #237. Shared surface/SemVer rules live in
+> `useMouseInput`, added in #237. Shared public-surface rules live in
 > [api-contract.md](./api-contract.md); Ink-alignment is explicitly **not** a constraint here — the
 > deciding rules are **user-friendliness** and **following Vue/DOM conventions, not inventing names**.
 >
 > **Status:** v1 shipped in [#245](https://github.com/vuejs-ai/vue-tui/pull/245) at commit
 > `3e44c9a266e52ebeba2db669b4bb96521b9e2f3a`. The fixed fullscreen output contract that keeps the
 > visible surface and hit map at the same origin is recorded in
-> [fullscreen-output.md](./fullscreen-output.md). §5 preserves the shipped v1 event contract until
-> an explicit breaking migration; target-ref, dispatch, and bubbling semantics are reopened by the
-> current API-design correction. Hover, selection/clipboard, side buttons, and pixel mode remain
-> deferred.
+> [fullscreen-output.md](./fullscreen-output.md). §5 records the shipped v1 event shape as historical
+> evidence; the experimental API-stability policy does not require the target API to preserve it.
+> Target-ref, dispatch, bubbling, low-level raw-mouse shape, hover, selection/clipboard, side
+> buttons, and pixel mode remain open or deferred as described below.
 >
 > **Current API-design correction (2026-07-11):** this file records the shipped v1 implementation
 > and its historical rationale; it no longer settles the future public placement or authoring shape
-> of targeted pointer APIs. The working direction removes targeted listeners from common `Box` and
+> of targeted pointer APIs. Under the [experimental API-stability policy](./goal.md#api-stability-during-experimentation), shipped v1 APIs may be replaced or removed directly once their target contracts are accepted. The working direction removes targeted listeners from common `Box` and
 > `Text`, does not add a `PointerBox`, and validates a ref-bound composable such as
 > `usePointerEvent(target, type, handler)` from `@vue-tui/runtime/fullscreen`. Under the proposed
 > contract, full-screen targeted composables acquire mouse reporting only while a rendered target
 > needs it, while interactive inline use is rejected because it has no reliable element hit-test
-> origin. The root `useMouseInput` remains a
-> separate terminal-wide vertical-wheel stream whose call is itself the explicit low-level choice.
+> origin. Terminal-wide raw mouse remains conceptually separate from targeted pointer delivery, but
+> the current root `useMouseInput` name, export path, coordinate base, and vertical-wheel-only shape
+> are reopened rather than preserved for compatibility.
 > Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 
@@ -45,7 +46,7 @@ The event **types** cover the full pointer space, but **v1 delivers a subset**:
   types; element handler props `@mousedown` / `@mouseup` / `@click` / `@wheel`; **drag** via
   `useDraggable` (which owns pointer **capture** internally); buttons **left / middle / right**. Wire
   mode: `1002` (button + drag).
-- **Deferred, additive later:** bare **hover** — `@mousemove` / `@mouseenter` / `@mouseleave` and
+- **Deferred in v1:** bare **hover** — `@mousemove` / `@mouseenter` / `@mouseleave` and
   `useElementHover` — which needs the heavier `1003` mode (§9); an in-app selection + clipboard
   layer; the side buttons and pixel mode.
 
@@ -216,8 +217,8 @@ Every author-facing name maps to a real precedent, none invented:
 | type names `TuiMouseEvent` / `TuiWheelEvent`                                                                       | DOM `MouseEvent`/`WheelEvent`, `Tui`-prefixed like PixiJS's `Federated…`; also matches vue-tui's own `TuiApp` |
 | `useDraggable`                                                                                                     | VueUse `useDraggable`, exact                                                                                  |
 | `useElementHover` (deferred)                                                                                       | VueUse `useElementHover`, exact                                                                               |
-| `useMouseInput`, `MouseInputEvent`                                                                                 | existing vue-tui exports (#237), unchanged                                                                    |
-| `fullscreen` mount option                                                                                          | intent-named; renames the mechanism-named `alternateScreen`                                                   |
+| `useMouseInput`, `MouseInputEvent`                                                                                 | existing vue-tui exports in v1 (#237); target names and shape reopened                                        |
+| `fullscreen` mount option                                                                                          | v1 intent-named replacement for the mechanism-named `alternateScreen`; target mount shape reopened            |
 
 Only the two names that collide with a DOM global are prefixed. `Tui` — not the brand `VueTui`, and
 not a namespace — is the deliberate call: it matches PixiJS (a non-DOM renderer with DOM-shaped
@@ -248,8 +249,8 @@ export interface MouseHandlerProps {
 ```
 
 `@mousemove` / `@mouseenter` / `@mouseleave` are **omitted** from the v1 interface (not shipped as
-dead no-ops) — binding one is a vue-tsc error today; they arrive with mode `1003` (§9), purely
-additively. Drag has **no** element prop: it is a gesture with capture, handled by `useDraggable`
+dead no-ops) — binding one is a vue-tsc error today; v1 expected them to arrive with mode `1003`
+(§9). Drag has **no** element prop: it is a gesture with capture, handled by `useDraggable`
 (§4.3) — mirroring the web, which has no mouse-drag DOM event either (drag is a library/composable
 there too).
 
@@ -312,21 +313,18 @@ The returned `x` / `y` are the draggable element's `left` / `top` cell position,
 `left` / `top` instead of binding a CSS `style` string. The event still exposes `screenX/Y` and
 `movementX/Y` for custom gesture math.
 
-## 5. Forward-compatibility contract — fix now vs add later
+## 5. Shipped v1 event-shape snapshot
 
-This table is the compatibility contract of shipped v1, not an endorsement of listener props as the
-future authoring surface. Moving targeted authoring to a ref-bound full-screen composable and
-removing the current props would be an explicit breaking migration; event fields that survive that
-migration still need the same semantic care.
+This table records which fields v1 treated as fixed and which it expected to add later. It is evidence about the current implementation, not a compatibility constraint on the replacement API. The target may change or remove these fields directly, but coordinates, target selection, propagation, and gesture semantics still require explicit design and tests rather than accidental inheritance.
 
-| Get right NOW (breaking to change later)                                                                           | Add LATER (purely additive)                                         |
+| V1 treated as fixed                                                                                                | V1 deferred                                                         |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
 | `offsetX/offsetY` (target rendered-box-relative) **and** `screenX/screenY` (absolute), all 0-based, always present | new `type` members (`move`, `enter`, `leave`)                       |
 | `movementX/movementY` on `TuiMouseEvent`, `deltaX/deltaY` on `TuiWheelEvent` (never mixed)                         | new handler props (`onMousemove`, `onMouseenter`, `onMouseleave`)   |
 | `button` an **open** string union; wheel is `TuiWheelEvent`, not a button                                          | populating `movementX/Y`, `buttons`, `detail` as gestures gain them |
 | flat DOM modifier names (`ctrlKey/shiftKey/altKey/metaKey`)                                                        | emitting side buttons (`back`/`forward`/8–11)                       |
 | `type` an **open** discriminator                                                                                   | `useElementHover` + hover via mode `1003`                           |
-| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event                                         | additive event methods                                              |
+| `target`/`currentTarget` + `stopPropagation`/`preventDefault` on the event                                         | additional event methods                                            |
 | `offsetX/offsetY` stay relative-to-`currentTarget`'s rendered box and re-base while bubbling                       | switching the default motion level (config)                         |
 | `MouseTarget` exposes an **absolute** rect and does **not** expose the internal `TuiNode`                          | an in-app selection + OSC 52 clipboard layer                        |
 | type names `TuiMouseEvent`/`TuiWheelEvent` (prefixed)                                                              | —                                                                   |
@@ -368,9 +366,8 @@ must not change the public event / `MouseTarget.rect` contract.
 ## 7. Mouse-level negotiation
 
 - **Two parser surfaces.** The internal `parseSgrMouseInput` decodes press, release, drag, and four
-  wheel directions for targeted dispatch. The legacy public `useMouseInput` stream intentionally
-  keeps its vertical-wheel-only `parseMouseInput` shape until a breaking raw-mouse redesign is
-  decided (§8).
+  wheel directions for targeted dispatch. The current public `useMouseInput` stream exposes the
+  vertical-wheel-only `parseMouseInput` shape; its target replacement or removal is open (§8).
 - **Leveled enable.** Each consumer holds a mode token; the controller selects the highest request
   (`button`=1000, `drag`=1002, `hover`=1003) and re-emits terminal modes on upgrades and downgrades.
 - Both the low-level `useMouseInput` and the high-level dispatch acquire the **same** underlying mode
@@ -382,10 +379,10 @@ must not change the public event / `MouseTarget.rect` contract.
   `currentTarget`: stable identity + an **absolute** rect accessor from the paint walk. It must not
   re-export `TuiNode`, must not be accepted as a way to recover a `TuiNode`, and must not be required
   for ordinary template-ref composables such as `useDraggable`.
-- **`useMouseInput` compatibility** — its coordinates are **1-based**, while shipped targeted
-  events are **0-based**. The current API direction keeps it as the root-exported narrow global
-  wheel stream. A future complete terminal-level stream needs a separately named API, or an explicit
-  breaking redesign of this one; it must not arrive as a drive-by widening. Its handler source
+- **Current `useMouseInput` shape** — its coordinates are **1-based**, while shipped targeted
+  events are **0-based**. A future complete terminal-level stream may retain, replace, or remove
+  this API, but must define its coordinate and event model deliberately rather than inherit either
+  current parser accidentally. Its handler source
   intentionally stays `MaybeRef`, not
   `MaybeRefOrGetter`, because function handlers and getter functions have the same runtime shape.
   Reactive handler replacement should pass a ref to the handler.
@@ -394,7 +391,7 @@ must not change the public event / `MouseTarget.rect` contract.
   callback return is `void` so normal expression callbacks like `onStart: () => calls.push(...)`
   remain valid; runtime still checks the actual return value. VueUse's CSS `style`
   helper does not map directly to terminal props; a future helper can return a vue-tui layout-prop
-  object if real examples need it. `handle` also remains additive.
+  object if real examples need it. A future `handle` option remains open.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
   by `useDraggable`, including when the capturing node unmounts; mouse composables use a local
   `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the supported mount-option name
@@ -406,7 +403,8 @@ must not change the public event / `MouseTarget.rect` contract.
 
 - **Bare hover** (`@mousemove` / `@mouseenter` / `@mouseleave`, `useElementHover`, mode `1003`): every
   cursor move floods stdin (heavy over SSH) and suppresses selection more aggressively than `1002`.
-  Declared in the types, emitted later.
+  V1 declared parts of this surface in types and planned later emission; the replacement hover API
+  remains open.
 - **Side buttons** (back / forward / 8–11) and **pixel mode (1016).** v1 emits left/middle/right only.
 - **In-app text selection + clipboard (OSC 52).** This requires a separate selection, copy, and
   terminal-capability subsystem. The full-screen gate does not remove the native-selection
