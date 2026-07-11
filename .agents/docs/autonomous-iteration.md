@@ -10,13 +10,12 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.1, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): produce and obtain maintainer acceptance of one finite rendering-mode and host behavior matrix.
+Close F1.1, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint), by obtaining maintainer acceptance of the completed [rendering-mode and host behavior matrix](./rendering-mode-matrix.md).
 
-1. inventory every supported combination of requested mode, live/static/test host, stdout and stdin TTY state, interactivity, and screen-reader path;
-2. record effective mode, fallback or failure, surface and history ownership, origin and hit-map reliability, `Static`, external output, resize, suspension, final output, and restoration for every combination;
-3. distinguish current implementation from target behavior and link implemented claims to tests or canonical records;
-4. surface only the remaining product choices for maintainer acceptance;
-5. update the matrix and roadmap checkpoint after that acceptance.
+1. review the six [maintainer decisions](./rendering-mode-matrix.md#maintainer-decisions), including their recommended target behavior and current implementation conflicts;
+2. update the matrix to record the accepted choices without changing the vouched product goal implicitly;
+3. reconcile the vouched rendering-mode record only after explicit acceptance;
+4. mark F1.1 complete and activate F1.2 for the exact mount-option and compatibility contract in the same change.
 
 F1.1 does not choose the exact public environment composable, compatibility window, or implementation patch. Research may compare honest shapes only when it directly completes a matrix cell; it does not activate F1.2 or a later foundation.
 

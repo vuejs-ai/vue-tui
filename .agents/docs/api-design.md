@@ -274,6 +274,8 @@ The remaining gaps are at the public contract and inline boundary:
 
 ### Questions this packet must settle
 
+The finite current-versus-target answers and the remaining maintainer choices are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The questions below define the packet's scope; they are not a second decision list.
+
 1. Which requested mode becomes effective in every supported execution environment, and is an unavailable request ignored, rejected, warned about, or exposed as a detectable fallback?
 2. What exact live region does inline own, how does completed output leave it, and what can still be redrawn after `Static`, external output, resize, suspension, and restoration?
 3. How do suspension, final output, and nested or busy output streams fit the implemented full-screen contract, and how can applications inspect its lifecycle and direct-write boundary without reading private state?
