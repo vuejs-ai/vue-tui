@@ -10,16 +10,21 @@
 > **Status:** v1 shipped in [#245](https://github.com/vuejs-ai/vue-tui/pull/245) at commit
 > `3e44c9a266e52ebeba2db669b4bb96521b9e2f3a`. The fixed fullscreen output contract that keeps the
 > visible surface and hit map at the same origin is recorded in
-> [fullscreen-output.md](./fullscreen-output.md). §5 remains the load-bearing forward-compatibility
-> contract; hover, selection/clipboard, side buttons, and pixel mode remain deferred.
+> [fullscreen-output.md](./fullscreen-output.md). §5 preserves the shipped v1 event contract until
+> an explicit breaking migration; target-ref, dispatch, and bubbling semantics are reopened by the
+> current API-design correction. Hover, selection/clipboard, side buttons, and pixel mode remain
+> deferred.
 >
 > **Current API-design correction (2026-07-11):** this file records the shipped v1 implementation
-> and its historical rationale; it no longer settles the future public placement of pointer APIs.
-> The source audit found that public `useMouseInput` emits only vertical wheel events rather than a
-> catch-all raw stream, ordinary `Box` and `Text` advertise handlers that cannot fire inline, and
-> mouse capture still displaces terminal-native selection on the alternate screen. Main-screen
-> targeted input is technically possible when an implementation tracks its physical origin, as fzf
-> demonstrates. Carry new design work through [api-design.md](./api-design.md) and the bounded
+> and its historical rationale; it no longer settles the future public placement or authoring shape
+> of targeted pointer APIs. The working direction removes targeted listeners from common `Box` and
+> `Text`, does not add a `PointerBox`, and validates a ref-bound composable such as
+> `usePointerEvent(target, type, handler)` from `@vue-tui/runtime/fullscreen`. Under the proposed
+> contract, full-screen targeted composables acquire mouse reporting only while a rendered target
+> needs it, while interactive inline use is rejected because it has no reliable element hit-test
+> origin. The root `useMouseInput` remains a
+> separate terminal-wide vertical-wheel stream whose call is itself the explicit low-level choice.
+> Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 
 ## 1. What this is, and the scope of v1
@@ -59,7 +64,7 @@ terminal bytes (SGR: absolute screen coordinates)
    └───────────► hit-test + dispatch → targeted element events + 0-based coordinates
 ```
 
-- SGR bytes and absolute coordinates do not depend on presentation, but receiving them still
+- SGR bytes and absolute coordinates do not depend on rendering mode, but receiving them still
   depends on raw-capable stdin, writable TTY stdout, terminal support, and explicit mouse capture.
 - Public `useMouseInput` is a terminal-wide vertical-wheel stream, not a catch-all raw stream and not
   an inline substitute for `@click`.
@@ -91,7 +96,7 @@ and invalidate mouse when that origin becomes unreliable; see
 across its own writers and target terminals.
 
 Mouse capture is a second, independent concern. Enabling tracking redirects terminal-native
-selection and wheel behavior to the application in either presentation. Alternate screen changes
+selection and wheel behavior to the application in either rendering mode. Alternate screen changes
 surface ownership; it does not remove the user's possible desire to select terminal text.
 
 ### 3.1 Shipped policy: full-screen gate and automatic acquisition
@@ -104,11 +109,11 @@ actually uses mouse** (any element handler / `useDraggable` mounts) **and** the 
 via the existing ref-counted SGR-mode ownership (`acquireSgrMouseMode`). This correctly avoids
 blanket enabling and restores the mode after the last consumer unmounts.
 
-The historical claim that full-screen removes the side effect is incorrect. Automatic
-when-used acquisition minimizes the duration of capture, but a nested or third-party component can
-still change terminal-wide mouse behavior without a separate application-level authorization. The
-future policy is open in [api-design.md](./api-design.md); presentation and mouse must remain
-separate facts.
+The historical claim that full-screen removes the side effect is incorrect. Automatic when-used
+acquisition minimizes the duration of capture, but applications still need a deliberate selection
+and copy story. The future direction in [api-design.md](./api-design.md) does not add a separate
+public authorization step: using an explicit full-screen target composable is the request, and the
+runtime owns minimum-level acquisition and restoration internally.
 
 The shipped runtime has no opt-out beyond removing all pointer handlers and `useDraggable`
 consumers.
@@ -128,8 +133,9 @@ warns once and the handler never fires:
 The warning's second suggestion is inaccurate for click: public `useMouseInput()` emits only wheel
 events and does not hit-test elements. The API-design audit also proved that Vue template misuse is
 not unavoidable: explicit `onClick?: never` listener props can make `<Box @click>` a `vue-tsc`
-error, while a separately named pointer-capable component can carry the capability request. That
-proposal remains unstamped until the presentation and input contract is accepted.
+error. The current replacement candidate is a ref-bound composable from the full-screen entry point,
+not a pointer-specific component. That proposal remains unstamped until the rendering-mode and
+input contract is accepted.
 
 ## 4. The public surface
 
@@ -253,6 +259,10 @@ the specific targeted handlers, while `useMouse(ref, handlers)` would re-express
 state, capture, a reactive `hovered`) and match VueUse. The public vertical-wheel
 `useMouseInput` hook is not a catch-all substitute.
 
+This is the shipped v1 choice, not the future authoring decision. The current API-design proposal
+reverses the preference between element listeners and a target-ref composable to avoid visual
+component variants and mode-dependent listener props.
+
 The shipped renderer stores these mouse handler props on host nodes so the dispatch layer can find
 them (this is also the hook that fires the §3.2 inline warning), and `<Box>`/`<Text>` fall the props
 through to the host node, typed so `@click` type-checks in templates.
@@ -303,6 +313,11 @@ The returned `x` / `y` are the draggable element's `left` / `top` cell position,
 `movementX/Y` for custom gesture math.
 
 ## 5. Forward-compatibility contract — fix now vs add later
+
+This table is the compatibility contract of shipped v1, not an endorsement of listener props as the
+future authoring surface. Moving targeted authoring to a ref-bound full-screen composable and
+removing the current props would be an explicit breaking migration; event fields that survive that
+migration still need the same semantic care.
 
 | Get right NOW (breaking to change later)                                                                           | Add LATER (purely additive)                                         |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
@@ -361,16 +376,17 @@ must not change the public event / `MouseTarget.rect` contract.
 - Both the low-level `useMouseInput` and the high-level dispatch acquire the **same** underlying mode
   through the shared refcount (§2) — one switch, not two.
 
-## 8. Settled implementation notes and follow-ups (no effect on §5)
+## 8. Shipped v1 implementation notes and follow-ups
 
 - **`MouseTarget` surface** — settled for v1: a thin public wrapper for event `target` /
   `currentTarget`: stable identity + an **absolute** rect accessor from the paint walk. It must not
   re-export `TuiNode`, must not be accepted as a way to recover a `TuiNode`, and must not be required
   for ordinary template-ref composables such as `useDraggable`.
-- **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
-  the narrow global wheel stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
-  latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
-  "compatible" widening. Its handler source intentionally stays `MaybeRef`, not
+- **`useMouseInput` compatibility** — its coordinates are **1-based**, while shipped targeted
+  events are **0-based**. The current API direction keeps it as the root-exported narrow global
+  wheel stream. A future complete terminal-level stream needs a separately named API, or an explicit
+  breaking redesign of this one; it must not arrive as a drive-by widening. Its handler source
+  intentionally stays `MaybeRef`, not
   `MaybeRefOrGetter`, because function handlers and getter functions have the same runtime shape.
   Reactive handler replacement should pass a ref to the handler.
 - **`useDraggable` follow-ups** — v1 carries over VueUse's element-position semantics,

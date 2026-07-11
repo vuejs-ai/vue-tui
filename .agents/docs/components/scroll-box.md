@@ -10,9 +10,9 @@ component itself listens to **no** mouse or keyboard input.
 
 ## What it's for — and what to use instead
 
-- Use it for an **app-owned bounded scroll region** in either presentation — for example a log pane
+- Use it for an **app-owned bounded scroll region** in either rendering mode — for example a log pane
   in a full-screen dashboard or a fixed-height preview inside an inline workflow. The parent must
-  allocate a height; presentation does not create that bound by itself.
+  allocate a height; mode does not create that bound by itself.
 - For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static`: let
   the content flow into the terminal's scrollback, where the terminal owns scrolling and text
   selection natively. vue-tui's own `coding-agent` example does exactly this — it uses `Static`, not
@@ -54,6 +54,23 @@ ownership, reliable geometry, and hit testing. Preserving application-controlled
 copy after mouse capture would additionally require a selection and clipboard model. Both concerns
 are out of scope for this input-free component; see
 [terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
+
+The current unstamped API direction composes full-screen wheel behavior through a ref-bound runtime
+composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
+
+```ts
+import { usePointerEvent } from "@vue-tui/runtime/fullscreen";
+
+usePointerEvent(wheelTarget, "wheel", (event) => {
+  const moved = scrollBox.value?.scrollByLines(event.deltaY);
+  if (moved) event.stopPropagation();
+});
+```
+
+That example requires the proposed scroll methods to report whether the position actually changed;
+the return-type change and exact pointer-composable signature are not yet accepted. The durable
+boundary is that pointer input composes outside this component and follows the rendered target's
+lifetime.
 
 ## Future direction (not in scope now)
 

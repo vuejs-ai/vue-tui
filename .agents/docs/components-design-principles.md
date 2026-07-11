@@ -52,8 +52,9 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 
 Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
 input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime
-(`useMouseInput`, targeted handlers, and `useDraggable`; see [mouse-input.md](./mouse-input.md)) —
-whereas anything driven by existing keyboard input plus measured layout is a pure composition.
+(`useMouseInput` and candidate full-screen target-ref composables such as `usePointerEvent` and
+`useDraggable`; see [mouse-input.md](./mouse-input.md)) — whereas anything driven by existing
+keyboard input plus measured layout is a pure composition.
 (`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)

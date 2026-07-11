@@ -71,7 +71,7 @@ The source establishes that line diff can reduce emitted output only after the f
 | Multi-region workbench                 | Vue and Yoga are a good fit for independently composed panes.                                                    | Several large or frequently changing panes compound full-tree paint and allocation. Long lists require virtualization.                                                             |
 | Terminal workspace pane                | vue-tui can own pane bounds, focus, input routing, and surrounding UI.                                           | An externally emulated terminal must enter as a coarse styled-cell surface with dirty rows; representing every terminal cell as a Vue/Yoga node would create the wrong cost model. |
 
-These implications do not choose inline or full-screen as the primary rendering mode. They expose different terminal constraints that should share a core renderer where honest and use different presentation behavior where necessary.
+These implications do not choose inline or full-screen as the primary rendering mode. They expose different terminal constraints that should share a core renderer where honest and use different rendering-mode behavior where necessary.
 
 ## Layout-engine assessment
 
@@ -143,7 +143,7 @@ The candidate mechanisms are:
 8. Virtualize long lists, tables, logs, and transcript views so layout and paint see the visible range plus a small bounded buffer of nearby items instead of every item.
 9. Add a coarse styled-cell surface only when a real consumer establishes the API. An external terminal emulator should submit changed rows or rectangles in batches; it should never cross the Vue or native boundary once per cell.
 
-### Inline and full-screen presentation
+### Inline and full-screen rendering modes
 
 Both modes can share host nodes, incremental layout, primitives, cell buffers, damage tracking, and ANSI encoding, but they cannot share every output assumption:
 
