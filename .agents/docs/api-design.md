@@ -12,6 +12,106 @@ The first concrete design topic is the **presentation contract**: which terminal
 
 Interaction ownership follows as the second topic. It must distinguish two independent questions: how one effective logical focus target is maintained, and how app, overlay, region, focused-control, and external-target handlers take priority or pass an event onward. These are cooperating parts of one input model, not three competing choices called targeted events, scoped commands, and a hybrid.
 
+## Current pointer and scrolling boundary proposal
+
+This section is an unstamped proposal derived from the source audit and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It does not accept the example names or signatures.
+
+Treat three choices separately:
+
+1. **Presentation** decides whether the session owns an inline main-screen region or the full alternate-screen viewport.
+2. **Mouse authorization** decides whether the application permits vue-tui to redirect terminal-native selection and wheel behavior into SGR mouse events. The proposed default is off; a live application must opt into an automatic-while-used policy explicitly.
+3. **Active consumers** decide whether the runtime currently needs button, drag, or future hover reporting. Reference-counted acquisition still enables only the highest requested level and restores it after the final consumer unmounts.
+
+Conceptually:
+
+```ts
+createApp(App).mount({
+  presentation: "fullscreen",
+  mouse: "when-used",
+});
+```
+
+The exact configuration shape remains open. The important constraint is that `fullscreen` alone must not authorize mouse capture, and a nested third-party component must not be able to take over terminal-wide selection without application-level consent.
+
+Keep one canonical `createApp`. Inline and full-screen select the mounted terminal session's presentation; they do not create different Vue application kinds. A separate `createFullscreenApp` would duplicate lifecycle, plugins, dependency injection, testing, and component authoring while still failing to express the capabilities that actually differ. Keep inline as the compatibility default because it composes with shell output and preserves current behavior, but treat both presentations as first-class. Put APIs that require stronger capabilities on capability-named entry points such as `/pointer`, and check their effective capabilities at runtime. Revisit a separate creator only if implementation proves that the two sessions need incompatible lifecycle types that one discriminated mount contract cannot express honestly.
+
+### Common primitives and targeted pointer primitives
+
+The common `Box` and `Text` should not advertise targeted pointer handlers. Their public template and TSX types should explicitly declare `onClick`, `onWheel`, `onMousedown`, and `onMouseup` as `never`; simply omitting the props does not defeat Vue listener fallthrough.
+
+An explicit pointer-capable primitive can reuse the same rendering implementation while adding targeted handler types, for example:
+
+```vue
+<script setup lang="ts">
+import { Box, Text } from "@vue-tui/runtime";
+import { PointerBox } from "@vue-tui/runtime/pointer";
+</script>
+
+<template>
+  <PointerBox @click="open">
+    <Text>Open</Text>
+  </PointerBox>
+</template>
+```
+
+`PointerBox` is a more accurate working name than `InteractableBox` or `ActionableBox`: the latter names imply keyboard activation, focus, disabled state, and a semantic action contract that targeted mouse handling alone does not provide. The pointer path should also become the canonical home of targeted event types and `useDraggable`; root re-exports can be deprecated for migration. The implementation may share layout and paint code with `Box`, but a pointer target needs a distinct runtime host marker. `PointerBox` supplies that marker directly. An explicitly element-bound composable such as the existing `useDraggable(boxRef)` may install it for the composable's lifetime, so that deliberate existing use remains valid. Arbitrary listener props, JavaScript, and `any` must not be able to install it by bypassing the public `Box` type.
+
+The primitive requires two independent effective capabilities:
+
+- terminal pointer input can be captured and decoded;
+- the current render surface has a reliable physical origin and hit map.
+
+Current normal full-screen rendering can provide both after the fixed-viewport work. Current inline rendering may provide terminal-level coordinates but does not maintain a reliable target origin. A targeted handler in an interactive session that lacks either authorization or hit testing should fail at registration with the exact missing capability; it must not warn and continue with a dead handler. A non-interactive or static render host should render the visual primitive passively and emit no terminal mode changes. Screen-reader behavior must be explicit and must never arm a hit map that its linearized render path does not build.
+
+This surface belongs to a pointer capability path, not `/fullscreen`. fzf demonstrates that a future bounded inline renderer can satisfy targeted coordinates; using a capability name lets the same component begin working there without another public migration.
+
+Only explicit pointer primitives and elements enrolled by an explicit pointer composable participate as public event targets. Ordinary `Box` and `Text` nodes between nested pointer targets are transparent to event routing. The deepest last-painted, unclipped pointer target receives the event; bubbling walks outward through pointer-target ancestors, rebases `currentTarget` and offsets at each handler, and respects `stopPropagation`. This prevents a passive inner `Text` from unexpectedly becoming the public `target` merely because it was painted inside a clickable area.
+
+### `ScrollBox` stays common and input-free
+
+The current `ScrollBox` correctly owns clipping, sticky-bottom state, and semantic scrolling operations without inspecting presentation or acquiring terminal input. It works whenever its parent gives it a bounded height, including a bounded region inside an inline application. A terminal-owned transcript is a different history model and normally uses `Static` rather than an unbounded `ScrollBox`.
+
+Its public type should also reject `@wheel`, `@click`, and the other targeted pointer listeners explicitly, and its SFC must not let those listeners fall through accidentally to the internal viewport `Box`. Pointer behavior belongs on the explicit wrapper below.
+
+Keyboard policy remains outside `ScrollBox` until focused input routing exists. Targeted wheel behavior composes explicitly:
+
+```vue
+<PointerBox @wheel="onWheel">
+  <ScrollBox ref="scrollBox">
+    <!-- content -->
+  </ScrollBox>
+</PointerBox>
+```
+
+A useful additive refinement is for `scrollByLines`, `scrollToLine`, `scrollToTop`, and `scrollToBottom` to report whether the position changed. A nested wheel handler can then stop propagation only when the inner viewport actually moved; at an edge, the event can continue to an outer scroll owner. Do not add a pointer-aware `ScrollBox` variant until repeated journeys show that the composition itself needs a first-party convenience component.
+
+### Legacy `useMouseInput` is global wheel input, not inline `@click`
+
+The current public `useMouseInput` name overstates its implementation. Its public handler receives only vertical wheel events with 1-based absolute coordinates. The shared internal parser decodes button down, button up, drag, and all four wheel directions, but the hook filters those other events out; targeted dispatch synthesizes `click` from a matching down/up pair. A lone legacy hook currently requests button reporting rather than drag motion, so it will not normally make the terminal send drag reports in the first place. The hook has no region, host node, hit test, bubbling, or relationship to `ScrollBox`.
+
+Immediate compatibility direction:
+
+- describe `useMouseInput` as a legacy terminal-wide vertical-wheel stream;
+- stop recommending it as an inline replacement for `@click`;
+- export the existing `useMouseInput` canonically from the pointer subpath while retaining a deprecated root re-export for a short migration window; the subpath groups the terminal pointer capability but must document and type its terminal-level and renderer-targeted layers separately;
+- preserve its event shape and coordinate base instead of silently widening a discriminated union or changing coordinate math.
+
+Application-level authorization would be a new contract, so accepting it also requires accepting a migration. The current proposal is: during a short compatibility window, calling the existing `useMouseInput` hook continues to count as legacy implicit authorization, regardless of which re-export supplied it, so existing applications do not become inert after upgrading; new targeted primitives and composables require explicit application authorization immediately. Deprecation guidance tells legacy callers to add that authorization. A later declared breaking release can remove the exception and apply the same gate to the hook. The exact removal release remains unaccepted; this paragraph describes the migration that must accompany the proposal, not an already approved break or a permanent way for third-party code to bypass application policy.
+
+If scenarios require a complete terminal-level stream, introduce a separately named API such as `useTerminalMouse` or make the redesign an explicit breaking change. It should expose all decoded events, use one documented coordinate base consistent with targeted events, state its tracking level, report unsupported capability consistently, and share parser, mode negotiation, reference counts, and teardown with targeted dispatch.
+
+### Mouse-mode rules
+
+The terminal controller already has the right ownership mechanism and should keep it with more precise requests:
+
+- click, down, up, and wheel require button reporting (`1000 + 1006`);
+- drag requires button-motion reporting (`1002 + 1006`);
+- future hover requires all-motion reporting (`1003 + 1006`);
+- simultaneous consumers select the highest active level and downgrade when the stronger consumer unmounts;
+- the final release and every normal, error, signal, suspend, and HMR teardown disable all enabled levels.
+
+The current targeted controller requests drag reporting for every handler. The proposal should reduce that to the minimum active level.
+
 ## What counts as application API
 
 The API is larger than the runtime export list. It includes:
@@ -159,22 +259,24 @@ The vouched product decision defines the two modes but does not yet define their
 
 The following table is the desired public contract to evaluate, not a claim that the current writer already satisfies every row. It derives the API constraints from the two vouched terminal models; implementation gaps are listed immediately afterward.
 
-| Assumption                   | Inline: `fullscreen: false`                                                                                                                                                                                                               | Full-screen: `fullscreen: true`                                                                                                                                                     | API consequence                                                                                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Terminal surface ownership   | The app shares the main screen with preceding shell output and owns only its current live render region.                                                                                                                                  | The app owns the alternate-screen viewport until teardown.                                                                                                                          | An API must not promise whole-screen effects in inline mode.                                                                                       |
-| Completed output and history | Completed `Static` output can become terminal-owned scrollback and is no longer an editable app surface.                                                                                                                                  | The alternate screen has no durable shell history; searchable or navigable history must remain in an app-owned model and be projected into the viewport.                            | Transcript history and viewport scrolling cannot be represented by one hidden offset with identical meaning.                                       |
-| Coordinates                  | The live frame is updated relative to its prior position; its absolute top row is not stably known, especially after `Static` output or external writes.                                                                                  | The target contract preserves a viewport origin at `(0, 0)` while the app is mounted.                                                                                               | Shared geometry should be element- or region-relative; absolute hit testing is a capability, not a universal primitive.                            |
-| Redraw and visual overlays   | The runtime can redraw its managed live region but cannot cover and later restore arbitrary rows already in scrollback. A visual overlay must fit inside that live region.                                                                | The runtime can repaint the current viewport, so a visual overlay can cover and restore app content.                                                                                | Modal input and focus behavior can be shared, while visual overlay placement and guarantees remain mode-specific.                                  |
-| Scrolling                    | Native terminal scrollback is the natural history surface; bounded app scrolling is possible only inside space the live region currently owns.                                                                                            | The application must provide scrolling for content larger than the viewport, for example through a bounded `ScrollBox`.                                                             | Components must state whether they operate on native history, an app-owned viewport, or either with different behavior.                            |
-| Resize                       | The current live region can relayout and repaint, but the app cannot retroactively rewrite completed terminal history.                                                                                                                    | The target contract relayouts and repaints the full current viewport.                                                                                                               | Resize contracts must say which state is recomputed and must not imply that inline history is still mounted or editable.                           |
-| Mouse and selection          | Raw SGR mouse input is an explicit low-level path when the terminal and stdin support it, but the runtime cannot reliably map absolute mouse coordinates to elements; tracking also suppresses native selection across the shared screen. | A stable-origin environment can provide targeted hit testing when stdin, the terminal, and the active render path support a hit map; tracking is enabled only when the app uses it. | Raw mouse input and semantic element events are distinct capabilities. Targeted mouse remains full-screen-only unless the origin model changes.    |
-| Cursor placement             | Cursor coordinates are relative to the current output origin, whose absolute screen row can move.                                                                                                                                         | The target contract lets a managed caret resolve through a stable viewport origin.                                                                                                  | A reusable editor should request a caret relative to a semantic element or managed region instead of computing physical screen cells itself.       |
-| Input and logical focus      | Presentation alone says nothing about stdin or raw-mode ownership. When live input is effective, inline uses the shared interaction model.                                                                                                | Presentation alone says nothing about stdin or raw-mode ownership. When live input is effective, full-screen uses the same interaction model.                                       | Logical focus, keyboard routing, paste, and focus scopes can share one semantic model; input availability remains a separately derived capability. |
-| Exit and restoration         | Current output remains on the main screen and can remain in shell history after terminal modes and cursor state are restored.                                                                                                             | Leaving the alternate screen restores the previous main-screen contents; the app viewport disappears.                                                                               | Completion, suspension, final output, and teardown behavior must have explicit mode-specific contracts.                                            |
+| Assumption                   | Inline: `fullscreen: false`                                                                                                                                                                                                               | Full-screen: `fullscreen: true`                                                                                                                                                                                              | API consequence                                                                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Terminal surface ownership   | The app shares the main screen with preceding shell output and owns only its current live render region.                                                                                                                                  | The app owns the alternate-screen viewport until teardown.                                                                                                                                                                   | An API must not promise whole-screen effects in inline mode.                                                                                       |
+| Completed output and history | Completed `Static` output can become terminal-owned scrollback and is no longer an editable app surface.                                                                                                                                  | The alternate screen has no durable shell history; searchable or navigable history must remain in an app-owned model and be projected into the viewport.                                                                     | Transcript history and viewport scrolling cannot be represented by one hidden offset with identical meaning.                                       |
+| Coordinates                  | The live frame is updated relative to its prior position; its absolute top row is not stably known, especially after `Static` output or external writes.                                                                                  | The target contract preserves a viewport origin at `(0, 0)` while the app is mounted.                                                                                                                                        | Shared geometry should be element- or region-relative; absolute hit testing is a capability, not a universal primitive.                            |
+| Redraw and visual overlays   | The runtime can redraw its managed live region but cannot cover and later restore arbitrary rows already in scrollback. A visual overlay must fit inside that live region.                                                                | The runtime can repaint the current viewport, so a visual overlay can cover and restore app content.                                                                                                                         | Modal input and focus behavior can be shared, while visual overlay placement and guarantees remain mode-specific.                                  |
+| Scrolling                    | Native terminal scrollback is the natural history surface; bounded app scrolling is possible only inside space the live region currently owns.                                                                                            | The application must provide scrolling for content larger than the viewport, for example through a bounded `ScrollBox`.                                                                                                      | Components must state whether they operate on native history, an app-owned viewport, or either with different behavior.                            |
+| Resize                       | The current live region can relayout and repaint, but the app cannot retroactively rewrite completed terminal history.                                                                                                                    | The target contract relayouts and repaints the full current viewport.                                                                                                                                                        | Resize contracts must say which state is recomputed and must not imply that inline history is still mounted or editable.                           |
+| Mouse and selection          | Raw SGR mouse input is an explicit low-level path when the terminal and stdin support it, but the runtime cannot reliably map absolute mouse coordinates to elements; tracking also suppresses native selection across the shared screen. | A stable-origin environment can provide targeted hit testing when stdin, the terminal, and the active render path support a hit map; tracking is enabled only when the app authorizes it and an active consumer requests it. | Raw mouse input and semantic element events are distinct capabilities. Targeted mouse remains full-screen-only unless the origin model changes.    |
+| Cursor placement             | Cursor coordinates are relative to the current output origin, whose absolute screen row can move.                                                                                                                                         | The target contract lets a managed caret resolve through a stable viewport origin.                                                                                                                                           | A reusable editor should request a caret relative to a semantic element or managed region instead of computing physical screen cells itself.       |
+| Input and logical focus      | Presentation alone says nothing about stdin or raw-mode ownership. When live input is effective, inline uses the shared interaction model.                                                                                                | Presentation alone says nothing about stdin or raw-mode ownership. When live input is effective, full-screen uses the same interaction model.                                                                                | Logical focus, keyboard routing, paste, and focus scopes can share one semantic model; input availability remains a separately derived capability. |
+| Exit and restoration         | Current output remains on the main screen and can remain in shell history after terminal modes and cursor state are restored.                                                                                                             | Leaving the alternate screen restores the previous main-screen contents; the app viewport disappears.                                                                                                                        | Completion, suspension, final output, and teardown behavior must have explicit mode-specific contracts.                                            |
 
 These are product constraints. `Static` and `ScrollBox` are evidence for different history owners, not a rule that either primitive must be rejected when used in the other mode.
 
 ### Current implementation gaps exposed by the target
+
+These observations describe this worktree's `origin/main` base. Draft PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) implements a fixed normal visual full-screen viewport, origin-preserving coordinated output, and clipping; reconcile the bullets below with its final merged behavior instead of re-solving that work.
 
 - Effective full-screen already enters the alternate screen before the first render, homes that first frame, and restores the previous main screen and terminal state on exit. This establishes the correct terminal mode but not yet a separate fixed-viewport layout and output backend.
 - Inline and full-screen currently share the same relative frame writer, and the Yoga root is constrained by terminal width rather than by a full rows-by-columns viewport. A short full-screen tree therefore does not automatically occupy or relayout the full terminal height.
@@ -258,6 +360,7 @@ Testing API design proceeds with every step rather than as a final phase.
 Every proposal should state:
 
 - the representative user journey and observable problem;
+- the relevant systems in [terminal UI prior art](./terminal-ui-prior-art.md), where their terminal ownership and runtime constraints match or differ, and which load-bearing behavior was reverified;
 - application-owned state, framework-owned mechanics, and controlled state;
 - events, semantic operations, cleanup and error behavior;
 - requested/effective/capability behavior across inline, full-screen, non-TTY, static render, screen-reader mode, testing and HMR;
@@ -268,8 +371,9 @@ Every proposal should state:
 
 ## Prior-art constraints
 
+- The cross-framework evidence ledger, comparison vocabulary, and required decision check live in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). A peer establishes a mechanism or tradeoff in its own constraints; it does not choose vue-tui's Vue API, package path, product default, or component catalog.
 - Vue's [custom renderer contract](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/renderer.ts#L96-L155) keeps host operations narrow, while [hierarchical provide/inject](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/apiInject.ts#L8-L74) is a natural mechanism for app and subtree services.
-- Ink's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/25766aec618bd62030069f57dd081e5ebdd46add/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/25766aec618bd62030069f57dd081e5ebdd46add/src/hooks/use-focus.ts#L5-L82) explain vue-tui's current baseline and also its limit for nested applications. Ink parity is not the API objective.
+- Ink v7.0.4's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) explain vue-tui's current baseline and also its limit for nested applications. This matches the repository's canonical Ink snapshot; Ink parity is not the API objective.
 - OpenTUI's [key event contract](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/lib/KeyHandler.ts#L5-L62) demonstrates handled and propagation semantics. Its framework-neutral core and broad exports are not a reason to migrate or copy its public structure.
 - Textual's [focused-widget and app binding route](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/guide/input.md#L118-L185) demonstrates why focus, app shortcuts and inspectable bindings belong in one model. Its Python inheritance, string actions and full message system are not proposed for vue-tui.
 
@@ -278,11 +382,11 @@ Every proposal should state:
 This record does not decide to:
 
 - publish a `useTerminal`, key event, command, focus-scope, editor, list, overlay or cell-surface API under any particular name;
-- remove or break `useInput`, current focus APIs, mount options, raw mouse, or direct stream access;
+- accept a breaking migration for `useInput`, current focus APIs, mount options, `useMouseInput`, or direct stream access; the pointer section identifies the migration required if its proposal is accepted;
 - build a Table, TextInput, Dialog, Tree, Command Palette, TaskList or other catalog item merely because another framework has one;
 - create `@vue-tui/use` before an accepted independent behavior requires it;
 - make all web Vue directives or DOM event semantics work unchanged in a terminal;
 - add a blanket component accessibility requirement or change the runtime's existing accessibility contract;
-- choose inline or full-screen as the primary product mode;
+- make either presentation the sole or feature-reduced product mode; the current proposal keeps inline as the compatibility default and both presentations first-class;
 - introduce a router, generic message bus, framework-neutral renderer API, or application-domain state machine;
 - reopen renderer optimization, virtualization or native-core work without the triggers in [performance.md](./performance.md#when-to-reopen-this-work).

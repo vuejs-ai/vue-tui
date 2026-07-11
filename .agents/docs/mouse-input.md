@@ -12,6 +12,15 @@
 > visible surface and hit map at the same origin is recorded in
 > [fullscreen-output.md](./fullscreen-output.md). §5 remains the load-bearing forward-compatibility
 > contract; hover, selection/clipboard, side buttons, and pixel mode remain deferred.
+>
+> **Current API-design correction (2026-07-11):** this file records the shipped v1 implementation
+> and its historical rationale; it no longer settles the future public placement of pointer APIs.
+> The source audit found that public `useMouseInput` emits only vertical wheel events rather than a
+> catch-all raw stream, ordinary `Box` and `Text` advertise handlers that cannot fire inline, and
+> mouse capture still displaces terminal-native selection on the alternate screen. Main-screen
+> targeted input is technically possible when an implementation tracks its physical origin, as fzf
+> demonstrates. Carry new design work through [api-design.md](./api-design.md) and the bounded
+> [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 
 ## 1. What this is, and the scope of v1
 
@@ -21,9 +30,9 @@ owns pointer input, because decoding mouse bytes and flipping terminal modes is 
 
 The model is **runtime-owned targeted dispatch**: the runtime hit-tests the pointer against its
 layout tree and delivers the event to the element under the pointer, which bubbles up its ancestors
-— exactly like the DOM (and Textual / OpenTUI / blessed). The raw-coordinate broadcast alternative
-(Bubble Tea / Ratatui, where the app hit-tests itself) is kept only as the low-level escape hatch
-(`useMouseInput`, §4.3).
+— a DOM-like model also used by Textual and OpenTUI. Bubble Tea and Ratatui demonstrate the
+alternative global-event model where the application routes input. vue-tui's legacy
+`useMouseInput` exposes only the vertical-wheel subset of that lower-level model (§4.3).
 
 The event **types** cover the full pointer space, but **v1 delivers a subset**:
 
@@ -35,52 +44,38 @@ The event **types** cover the full pointer space, but **v1 delivers a subset**:
   `useElementHover` — which needs the heavier `1003` mode (§9); an in-app selection + clipboard
   layer; the side buttons and pixel mode.
 
-## 2. The architecture in one picture (why `useMouseInput` works anywhere but `@click` needs full-screen)
+## 2. The shipped architecture: one parser, two unequal public paths
 
-There is **one** raw source; the high-level API is that same source **plus a hit-test step**. They
-are not two parallel systems.
+There is one SGR parser and one reference-counted terminal-mode owner. The two current public paths
+do not expose the same event set:
 
 ```
 terminal bytes (SGR: absolute screen coordinates)
    │
    ▼
- parser  →  raw mouse event stream (each event carries absolute screenX/screenY)   ← mode-independent
+ internal parser → down / up / drag / four wheel directions
    │
-   ├───────────►  useMouseInput: hands you the raw event as-is           (any mode)
-   │
-   └───────────►  hit-test + dispatch: map (screenX,screenY) → "which box"
-                   → deliver to that box's @click                         (full-screen only)
+   ├───────────► legacy useMouseInput filter → vertical wheel + 1-based absolute x/y
+   └───────────► hit-test + dispatch → targeted element events + 0-based coordinates
 ```
 
-- The vertical spine (terminal → parser → raw stream) is **identical inline and full-screen** — the
-  bytes are the same, the absolute coordinates are the same. `useMouseInput` just reads that stream,
-  so it works in **any** mode.
-- `@click` is **not** a separate system: it is that same stream **plus one extra step — hit-testing**
-  (turn the absolute coordinate into "which box"). That step, and only that step, needs the frame's
-  absolute screen origin, which is knowable only in full-screen (§3).
+- SGR bytes and absolute coordinates do not depend on presentation, but receiving them still
+  depends on raw-capable stdin, writable TTY stdout, terminal support, and explicit mouse capture.
+- Public `useMouseInput` is a terminal-wide vertical-wheel stream, not a catch-all raw stream and not
+  an inline substitute for `@click`.
+- Targeted events add renderer geometry, hit testing, target selection, and bubbling. The current
+  vue-tui implementation enables that path only for effective full-screen sessions.
 
-So: `useMouseInput` = raw stream; `@click` = raw stream + hit-test. Both consume the same internal
-stream and share the same ref-counted mouse-mode switch (§4.3). The **only** full-screen-restricted
-piece is the hit-test.
-
-## 3. Why hit-testing needs full-screen, and how the gate is enforced
+## 3. Why current hit testing is gated to full-screen
 
 To convert an absolute click coordinate into "which box," the runtime must know where the frame's
 top-left sits on the physical screen.
 
-- **Inline:** vue-tui writes each frame at the cursor's current position and updates it _relative to
+- **Current vue-tui inline writer:** vue-tui writes each frame at the cursor's current position and updates it _relative to
   the previous frame_ (log-update-style line diffing — verified: `eraseLines`, `cursorUp`,
   `cursorTo(0)`, never an absolute home in steady state). It never tracks the frame's absolute top
-  row, so an absolute click cannot be reliably mapped to a node. This is verbatim why Ink's
-  maintainer rejected `onClick`:
-
-  > "In the normal interactive path, Ink does not know or track the frame's absolute terminal origin
-  > … SGR mouse coordinates are absolute screen coordinates. So clicks will be offset or just hit the
-  > wrong element."
-
-  (Precise claim: the origin is _not stably knowable_ inline — a `clearTerminal` branch does home the
-  cursor occasionally, but not frame-to-frame. Content flushed outside the tracked layout, à la
-  `<Static>`, shifts rows too. So the conservative gate is a full-app full-screen declaration.)
+  row, so an absolute click cannot currently be mapped reliably to a node. Content flushed outside
+  the tracked layout, such as `<Static>`, can also shift the live region.
 
 - **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount.
   Every commit clears and homes that viewport, then paints the complete frame from screen origin
@@ -89,43 +84,52 @@ top-left sits on the physical screen.
   so they cannot move the visible frame away from the hit map. Direct `process.stdout.write()` calls
   bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
 
-Second, independent reason: enabling mouse tracking suppresses the terminal's native click-drag text
-selection window-wide, including scrollback above an inline app. In full-screen the app owns the
-whole viewport, so there is nothing shared to break.
+Full-screen is sufficient for the current implementation, not a universal requirement. fzf proves
+that a bounded main-screen application can query its physical origin, translate SGR coordinates,
+and invalidate mouse when that origin becomes unreliable; see
+[terminal UI prior art](./terminal-ui-prior-art.md#fzf). vue-tui has not yet validated that model
+across its own writers and target terminals.
 
-### 3.1 The mode is `fullscreen`; enabling is automatic
+Mouse capture is a second, independent concern. Enabling tracking redirects terminal-native
+selection and wheel behavior to the application in either presentation. Alternate screen changes
+surface ownership; it does not remove the user's possible desire to select terminal text.
+
+### 3.1 Shipped policy: full-screen gate and automatic acquisition
 
 **The mount option is renamed `alternateScreen` → `fullscreen`** (with `alternateScreen` kept as a
 deprecated alias). It names the user's intent, not the terminal mechanism.
 
-**There is no `mouse` option — enabling is fully automatic.** Mouse tracking turns on **when the app
+In v1 there is no `mouse` option: enabling is automatic. Mouse tracking turns on **when the app
 actually uses mouse** (any element handler / `useDraggable` mounts) **and** the app is `fullscreen`,
-via the existing ref-counted SGR-mode ownership (`acquireSgrMouseMode`). Rationale:
+via the existing ref-counted SGR-mode ownership (`acquireSgrMouseMode`). This correctly avoids
+blanket enabling and restores the mode after the last consumer unmounts.
 
-- **No explicit opt-in needed, because in full-screen there is no side effect to opt into.** The
-  reason mouse tracking is normally "opt-in with a warning" (it suppresses native selection) does not
-  apply once the app owns the whole screen. Declaring `fullscreen` _is_ the opt-in.
-- **On-when-used, not blanket-on.** A full-screen app that uses no mouse never enables tracking, so
-  its users keep native selection. Only apps that actually wire mouse pay the selection tradeoff.
+The historical claim that full-screen removes the side effect is incorrect. Automatic
+when-used acquisition minimizes the duration of capture, but a nested or third-party component can
+still change terminal-wide mouse behavior without a separate application-level authorization. The
+future policy is open in [api-design.md](./api-design.md); presentation and mouse must remain
+separate facts.
 
-There is deliberately **no opt-out flag** either; an app that wants native selection simply doesn't
-wire mouse.
+The shipped runtime has no opt-out beyond removing all pointer handlers and `useDraggable`
+consumers.
 
 ### 3.2 Telling an inline author that `@click` won't work
 
-`@click` type-checks everywhere (the mount-option↔template coupling isn't expressible in types), so
-in an inline app a bound handler **silently never fires**. This is the one unavoidable exception to
-"misuse is a compile error"; it is covered two ways so the author can't miss it:
+In v1, `@click` type-checks on the common `Box` and `Text` in every application. Inline registration
+warns once and the handler never fires:
 
 - **Write-time (passive):** JSDoc on the handler props — hovering `@click` in the editor shows
   "fires only in `fullscreen` mode; for raw mouse in inline mode use `useMouseInput()`."
-- **Run-time (active):** when `patchProp` registers a mouse handler while mouse isn't armed (inline,
-  or full-screen with no fullscreen), it warns **once** (dev **and** prod — a real dead-end, not a
+- **Run-time (active):** when `patchProp` registers a mouse handler while mouse isn't armed, it warns
+  **once** (dev **and** prod — a real dead-end, not a
   style nit), at **registration time**, not on first click, naming both fixes:
   `app.mount({ fullscreen: true })`, or `useMouseInput()` for raw inline mouse.
 
-Refusing to render the whole app is rejected as disproportionate; the correct "don't render" is the
-runtime simply not delivering events, plus the warning.
+The warning's second suggestion is inaccurate for click: public `useMouseInput()` emits only wheel
+events and does not hit-test elements. The API-design audit also proved that Vue template misuse is
+not unavoidable: explicit `onClick?: never` listener props can make `<Box @click>` a `vue-tsc`
+error, while a separately named pointer-capable component can carry the capability request. That
+proposal remains unstamped until the presentation and input contract is accepted.
 
 ## 4. The public surface
 
@@ -243,11 +247,11 @@ additively. Drag has **no** element prop: it is a gesture with capture, handled 
 (§4.3) — mirroring the web, which has no mouse-drag DOM event either (drag is a library/composable
 there too).
 
-There is **no** `@mouse` catch-all and **no** general `useMouse` composable — both were dropped as
-redundant: `@mouse` duplicates binding the specific events (and the raw stream already is a
-catch-all), and `useMouse(ref, handlers)` just re-expressed `@click`. `useDraggable`/`useElementHover`
-survive because they add something element props can't (gesture state, capture, a reactive
-`hovered`) and match VueUse.
+There is **no** `@mouse` catch-all and **no** general `useMouse` composable. `@mouse` would duplicate
+the specific targeted handlers, while `useMouse(ref, handlers)` would re-express `@click`.
+`useDraggable`/`useElementHover` survive because they add something element props cannot (gesture
+state, capture, a reactive `hovered`) and match VueUse. The public vertical-wheel
+`useMouseInput` hook is not a catch-all substitute.
 
 The shipped renderer stores these mouse handler props on host nodes so the dispatch layer can find
 them (this is also the hook that fires the §3.2 inline warning), and `<Box>`/`<Text>` fall the props
@@ -256,8 +260,8 @@ through to the host node, typed so `@click` type-checks in templates.
 ### 4.3 Low-level — `useMouseInput`, and `useDraggable`
 
 ```ts
-/** Existing (#237). The raw broadcast stream (§2): absolute coords, you hit-test yourself, any mode.
- *  The inline escape hatch. Its coords are 1-based (unchanged); see §8 for the base mismatch. */
+/** Existing (#237). A terminal-wide vertical-wheel stream with 1-based absolute coordinates.
+ *  It does not deliver click, down, up, drag, or targeted events. */
 export function useMouseInput(handler: MaybeRef<(e: MouseInputEvent) => void>, options?): void;
 
 /** VueUse `useDraggable`, adapted to the terminal: the element position tracks the pointer during
@@ -364,7 +368,7 @@ must not change the public event / `MouseTarget.rect` contract.
   re-export `TuiNode`, must not be accepted as a way to recover a `TuiNode`, and must not be required
   for ordinary template-ref composables such as `useDraggable`.
 - **`useMouseInput` future** — its coords are **1-based**; the new events are **0-based**. Keep it as
-  the narrow wheel/raw stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
+  the narrow global wheel stream, or replace with a `useRawMouse` delivering `TuiMouseEvent` — the
   latter is a **breaking change** (coord base + shape), so decide it deliberately, not as a
   "compatible" widening. Its handler source intentionally stays `MaybeRef`, not
   `MaybeRefOrGetter`, because function handlers and getter functions have the same runtime shape.
@@ -388,6 +392,6 @@ must not change the public event / `MouseTarget.rect` contract.
   cursor move floods stdin (heavy over SSH) and suppresses selection more aggressively than `1002`.
   Declared in the types, emitted later.
 - **Side buttons** (back / forward / 8–11) and **pixel mode (1016).** v1 emits left/middle/right only.
-- **In-app text selection + clipboard (OSC 52).** A whole subsystem (Textual/opencode ship their own);
-  the full-screen gate contains the tradeoff meanwhile, and Shift bypasses tracking for a native
-  selection in most terminals.
+- **In-app text selection + clipboard (OSC 52).** This requires a separate selection, copy, and
+  terminal-capability subsystem. The full-screen gate does not remove the native-selection
+  tradeoff, and modifier-key bypass behavior varies by terminal.

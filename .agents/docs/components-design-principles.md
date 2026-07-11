@@ -60,9 +60,9 @@ the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).
 
 ## Vue-idiomatic, Ink-inspired
 
-Look to prior art — Ink's ecosystem, and Textual / Bubble Tea / Ratatui — for behavior _ideas_,
-not for React's (or any framework's) signatures. Correctness and Vue philosophy **outrank
-parity**; see the governing principle in [ink-divergences.md](./ink-divergences.md) (not
+Look to the bounded observations in [terminal UI prior art](./terminal-ui-prior-art.md) for behavior
+ideas, not for another framework's signatures or component catalog. Correctness and Vue philosophy
+**outrank parity**; see the governing principle in [ink-divergences.md](./ink-divergences.md) (not
 re-derived here). A component should feel like Vue: props, `v-model`, events, slots, composables —
 not a transliterated render prop.
 
