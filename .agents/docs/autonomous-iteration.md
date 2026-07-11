@@ -10,14 +10,15 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.1, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint), by obtaining maintainer acceptance of the completed [rendering-mode and host behavior matrix](./rendering-mode-matrix.md).
+Close F1.2, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define and obtain maintainer acceptance for the exact `mode` mount option and legacy compatibility contract.
 
-1. review the six [maintainer decisions](./rendering-mode-matrix.md#maintainer-decisions), including their recommended target behavior and current implementation conflicts;
-2. update the matrix to record the accepted choices without changing the vouched product goal implicitly;
-3. reconcile the vouched rendering-mode record only after explicit acceptance;
-4. mark F1.1 complete and activate F1.2 for the exact mount-option and compatibility contract in the same change.
+1. audit current `fullscreen` and `alternateScreen` behavior, public docs, package versions, deprecation precedent, and recent real-consumer usage;
+2. produce one finite table for `mode`, `fullscreen`, and `alternateScreen` across omitted, valid, invalid-equivalence, and conflicting combinations;
+3. propose the smallest honest warning and compatibility window supported by that evidence;
+4. surface only compatibility, breaking-change, and release-policy choices for maintainer acceptance;
+5. update the roadmap and design records after acceptance without implementing the migration or selecting the readonly session API.
 
-F1.1 does not choose the exact public environment composable, compatibility window, or implementation patch. Research may compare honest shapes only when it directly completes a matrix cell; it does not activate F1.2 or a later foundation.
+F1.2 does not reopen the accepted [rendering-mode and host behavior matrix](./rendering-mode-matrix.md), choose the public session composable, implement target lifecycle fixes, or activate a later foundation. Research may compare peer deprecation practice only when it directly resolves the active compatibility contract.
 
 ## Baseline for the current foundation
 

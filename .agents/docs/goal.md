@@ -48,6 +48,12 @@ The product supports both modes. No decision currently makes either one the prim
 
 A future hierarchy decision requires evidence from representative journeys in both modes and explicit maintainer review. The current `fullscreen: false` default does not settle that product decision by itself.
 
+## Inline scrollback ownership
+
+[VOUCHED @hyf0 2026-07-11]
+
+The coordinated inline renderer must never erase terminal history or shell output that existed before the application started. Applications that need behavior outside that guarantee must retain an explicit application-side escape hatch. This vouch does not choose the exact overflow presentation, implementation mechanism, or escape-hatch API. Those details may be derived or proposed through real-terminal evidence, but they cannot weaken the scrollback invariant implicitly.
+
 ## Application scenarios and shared interaction flows
 
 [VOUCHED @hyf0 2026-07-10]

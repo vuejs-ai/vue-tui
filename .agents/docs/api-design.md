@@ -274,7 +274,7 @@ The remaining gaps are at the public contract and inline boundary:
 
 ### Questions this packet must settle
 
-The finite current-versus-target answers and the remaining maintainer choices are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The questions below define the packet's scope; they are not a second decision list.
+The accepted finite current-versus-target answers and inline-overflow PTY comparison are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The no-clear inline invariant and application-side escape-hatch requirement are vouched; the active F1.2 checkpoint now handles only the exact mount-option and compatibility contract. The questions below define the packet's full scope rather than a second active backlog.
 
 1. Which requested mode becomes effective in every supported execution environment, and is an unavailable request ignored, rejected, warned about, or exposed as a detectable fallback?
 2. What exact live region does inline own, how does completed output leave it, and what can still be redrawn after `Static`, external output, resize, suspension, and restoration?
