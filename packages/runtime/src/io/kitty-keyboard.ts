@@ -112,6 +112,10 @@ export function stripKittyQueryResponsesAndTrailingPartial(buffer: number[]): nu
 
 export interface KittyKeyboardController {
   init(options: KittyKeyboardOptions | undefined, allowAutoDetection: boolean): void;
+  /** Temporarily release the physical protocol while retaining its desired configuration. */
+  suspend(sync?: boolean): void;
+  /** Reacquire the protocol state that was active before suspend(). */
+  resume(): void;
   /**
    * @param sync When true, write the disable-kitty escape synchronously
    * (fs.writeSync) so it reaches the fd before an abrupt signal-driven exit
@@ -128,11 +132,50 @@ export function createKittyKeyboardController(
 ): KittyKeyboardController {
   let enabled = false;
   let disposed = false;
+  let suspended = false;
   let cancelDetection: (() => void) | undefined;
+  let configuredMode: "auto" | "enabled" | "disabled" = "disabled";
+  let configuredFlags: KittyFlagName[] = ["disambiguateEscapeCodes"];
+  let allowConfiguredAutoDetection = false;
+  let resumeEnabled = false;
+  let resumeDetection = false;
 
   function enableProtocol(flags: KittyFlagName[]): void {
     stdout.write(`\x1b[>${resolveFlags(flags)}u`);
     enabled = true;
+  }
+
+  function disableProtocol(sync = false): boolean {
+    try {
+      if (sync) {
+        const streamFd = (stdout as { fd?: number }).fd;
+        if (typeof streamFd === "number") {
+          fsWriteSync(streamFd, "\x1b[<u");
+        } else if (stdout === process.stdout) {
+          fsWriteSync(1, "\x1b[<u");
+        } else if (stdout === process.stderr) {
+          fsWriteSync(2, "\x1b[<u");
+        } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
+          // A custom stream without an fd may model a different terminal. Never
+          // guess process fd 1; write through the stream that was actually used.
+          stdout.write("\x1b[<u");
+        } else {
+          return false;
+        }
+      } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
+        stdout.write("\x1b[<u");
+      } else {
+        return false;
+      }
+      enabled = false;
+      return true;
+    } catch {
+      // Terminal restoration is best-effort; a failed Kitty write must not
+      // prevent the remaining cursor, screen, paste, mouse, or raw cleanup. Keep
+      // physical ownership so resume cannot push a duplicate protocol level and
+      // dispose can retry the pop.
+      return false;
+    }
   }
 
   function confirmKittySupport(flags: KittyFlagName[]): void {
@@ -158,7 +201,7 @@ export function createKittyKeyboardController(
 
       if (hasCompleteKittyQueryResponse(responseBuffer)) {
         cleanup();
-        if (!disposed) {
+        if (!disposed && !suspended) {
           enableProtocol(flags);
         }
       }
@@ -180,9 +223,12 @@ export function createKittyKeyboardController(
       if (!options) return;
 
       const mode = options.mode ?? "auto";
+      configuredMode = mode;
+      configuredFlags = options.flags ?? ["disambiguateEscapeCodes"];
+      allowConfiguredAutoDetection = allowAutoDetection;
       if (mode === "disabled") return;
 
-      const flags: KittyFlagName[] = options.flags ?? ["disambiguateEscapeCodes"];
+      const flags = configuredFlags;
 
       if (mode === "enabled") {
         if ((stdin as { isTTY?: boolean }).isTTY && (stdout as { isTTY?: boolean }).isTTY) {
@@ -203,34 +249,53 @@ export function createKittyKeyboardController(
       confirmKittySupport(flags);
     },
 
+    suspend(sync = false) {
+      if (disposed || suspended) return;
+      suspended = true;
+      resumeDetection = cancelDetection !== undefined;
+      if (cancelDetection) cancelDetection();
+      resumeEnabled = enabled;
+      if (enabled) disableProtocol(sync);
+    },
+
+    resume() {
+      if (disposed || !suspended) return;
+      const shouldEnable = resumeEnabled;
+      const shouldDetect = resumeDetection;
+      if (shouldEnable) {
+        // A failed suspend pop leaves the original protocol level active. In
+        // that case continuation must not push another level.
+        if (!enabled) enableProtocol(configuredFlags);
+        suspended = false;
+        resumeEnabled = false;
+        resumeDetection = false;
+        return;
+      }
+      if (
+        shouldDetect &&
+        configuredMode === "auto" &&
+        allowConfiguredAutoDetection &&
+        (stdin as { isTTY?: boolean }).isTTY &&
+        (stdout as { isTTY?: boolean }).isTTY
+      ) {
+        confirmKittySupport(configuredFlags);
+      }
+      suspended = false;
+      resumeEnabled = false;
+      resumeDetection = false;
+    },
+
     dispose(sync = false) {
       disposed = true;
       if (cancelDetection) {
         cancelDetection();
       }
       if (enabled) {
-        if (sync) {
-          // Signal-exit path (G18, Finding A): flush the disable-kitty escape
-          // synchronously so it reaches the fd before signal-exit re-raises.
-          // Fall back to fd 1 when the stream has no numeric fd.
-          try {
-            // The base WriteStream type doesn't declare `fd`; tty streams do.
-            const streamFd = (stdout as { fd?: number }).fd;
-            const fd = typeof streamFd === "number" ? streamFd : 1;
-            fsWriteSync(fd, "\x1b[<u");
-          } catch {
-            // Best-effort restore during abrupt shutdown.
-          }
-        } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
-          // Skip the disable-kitty write on a destroyed/ended stdout: `isTTY`
-          // stays cached-truthy after destroy()/end(), so an unguarded write on
-          // a teardown where stdout is already gone throws ERR_STREAM_DESTROYED.
-          // Mirror Ink's `if (canWriteToStdout) writeBestEffort(stdout,
-          // '[<u')` (ink.tsx:792-795).
-          stdout.write("\x1b[<u");
-        }
-        enabled = false;
+        disableProtocol(sync);
       }
+      suspended = false;
+      resumeEnabled = false;
+      resumeDetection = false;
     },
   };
 

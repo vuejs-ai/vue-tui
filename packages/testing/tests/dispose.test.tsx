@@ -23,6 +23,8 @@ test("host operations fail clearly after disposal without changing dimensions", 
   await expect(result.screen()).rejects.toThrow("Test host has been disposed.");
   await expect(result.stdin.write("x")).rejects.toThrow("Test host has been disposed.");
   await expect(result.terminal.resize(80, 24)).rejects.toThrow("Test host has been disposed.");
+  await expect(result.terminal.suspend()).rejects.toThrow("Test host has been disposed.");
+  await expect(result.terminal.resume()).rejects.toThrow("Test host has been disposed.");
   await expect(result.waitUntilRenderFlush()).rejects.toThrow("Test host has been disposed.");
   await expect(result.waitUntilExit()).rejects.toThrow("Test host has been disposed.");
   expect(result.terminal.columns).toBe(40);

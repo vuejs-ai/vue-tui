@@ -118,6 +118,8 @@ export interface LiveHostInput {
   readonly liveUpdatesOverride: boolean | undefined;
   readonly isCI: boolean;
   readonly presentation: RenderPresentation;
+  /** Whether this live host can coordinate restore-before-stop and resume. */
+  readonly suspensionSupported: boolean;
   readonly stdout: {
     readonly isTTY: boolean;
     readonly columns: unknown;
@@ -238,11 +240,13 @@ function sessionSnapshot(options: {
   };
 }
 
-const unavailableCapabilities: RenderCapabilities = {
-  stableOrigin: false,
-  elementHitTesting: false,
-  suspension: false,
-};
+function unavailableCapabilities(suspension: boolean): RenderCapabilities {
+  return {
+    stableOrigin: false,
+    elementHitTesting: false,
+    suspension,
+  };
+}
 
 export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   const dimensions = resolveLiveDimensions(input.stdout, input.terminalProbe);
@@ -263,7 +267,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           presentation: input.presentation,
         },
         dimensions,
-        capabilities: unavailableCapabilities,
+        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -283,7 +287,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           presentation: input.presentation,
         },
         dimensions,
-        capabilities: unavailableCapabilities,
+        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -307,7 +311,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           presentation: "screen-reader",
         },
         dimensions,
-        capabilities: unavailableCapabilities,
+        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -327,7 +331,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           presentation: "visual",
         },
         dimensions,
-        capabilities: unavailableCapabilities,
+        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -354,7 +358,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         capabilities: {
           stableOrigin: true,
           elementHitTesting: true,
-          suspension: false,
+          suspension: input.suspensionSupported,
         },
       }),
     };
@@ -373,7 +377,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         presentation: "visual",
       },
       dimensions: terminalBoundedDimensions,
-      capabilities: unavailableCapabilities,
+      capabilities: unavailableCapabilities(input.suspensionSupported),
     }),
   };
 }

@@ -302,11 +302,12 @@ test("unthrottled live output still paints the ErrorOverview frame", async () =>
   expect(frame).toContain("PAINTED_BOOM");
 });
 
-test("final-stream error paint matches main with no overview frame", async () => {
+test("final-stream errors are written durably to stderr without a stale stdout frame", async () => {
   const stdout = makeNonTtyWritable();
   const stderr = makeNonTtyWritable();
   const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
+  const stdoutWrites = captureWrites(stdout);
+  const stderrWrites = captureWrites(stderr);
 
   const Throws = defineComponent(() => {
     return () => {
@@ -322,11 +323,11 @@ test("final-stream error paint matches main with no overview frame", async () =>
   await new Promise<void>((r) => setImmediate(r));
   await new Promise<void>((r) => setImmediate(r));
 
-  // Main paints NO ErrorOverview here: the error message never reaches stdout.
-  const allContent = writes.join("");
-  expect(stripAnsi(allContent)).not.toContain("UNPAINTED_BOOM");
-  // The only content write is the trailing newline teardown owes (lastFrame is
-  // empty + "\n"), matching Ink's final-stream branch.
-  const content = getContentWrites(writes);
-  expect(content).toEqual(["\n"]);
+  // A failed final-output render must not emit the last successful dynamic
+  // frame (or the old bare trailing newline) as if it completed normally.
+  expect(getContentWrites(stdoutWrites)).toEqual([]);
+  // The failure remains observable even though no live ErrorOverview surface
+  // exists. Exact public formatting is future error-contract work; F1.7 requires
+  // at least the original Error and message on stderr before waitUntilExit rejects.
+  expect(stripAnsi(stderrWrites.join(""))).toContain("Error: UNPAINTED_BOOM");
 });

@@ -75,7 +75,17 @@ import {
   unregisterDevApp,
 } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
-import { ErrorOverview, isErrorInput, messageForNonError } from "./components/error-overview.ts";
+import {
+  ErrorOverview,
+  formatErrorForStderr,
+  isErrorInput,
+  messageForNonError,
+} from "./components/error-overview.ts";
+import {
+  INTERNAL_SUSPENSION_HOST,
+  processSuspensionHost,
+  type SuspensionHost,
+} from "./process-suspension.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
@@ -273,8 +283,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // to remove the handler so it can't leak or double-run.
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
+  let mountedUnsubscribeSuspension: (() => void) | null = null;
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
+  let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
   // re-imports the entry. Held per-app so teardown() can unregister exactly its
@@ -287,6 +299,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAnimationScheduler: ReturnType<typeof createAnimationScheduler> | null = null;
   let mountedCommit: (() => void) | null = null;
   let mountedAlternateScreen = false;
+  let mountedFullscreenCursorHidden = false;
   let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   // True once Vue's original mount has begun. Pre-Vue terminal setup failures
@@ -312,8 +325,25 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // settling the exit promise.
   let pendingExitError: unknown = undefined;
   let pendingExitResult: unknown = undefined;
+  let pendingExitErrorWasRendered = false;
+  let pendingBoundaryError: Error | undefined;
+  let pendingBoundaryFrameReady: Error | undefined;
+  let pendingBoundaryFrameWriteFailed = false;
+  let pendingFatalReport: string | null = null;
+  let settlementStarted = false;
 
   function resolveExit() {
+    if (settlementStarted) return;
+    // A custom stream or renderer callback may synchronously call unmount()
+    // from inside a terminal acquisition/repaint. Settling here would let the
+    // exit promise resolve before the surrounding write has finished and before
+    // the terminal has been restored. Record the request; the outermost
+    // lifecycle transaction flushes it after teardown completes.
+    if (lifecycleTransactionDepth > 0 || (teardownStarted && !teardownCompleted)) {
+      pendingSettlement = true;
+      return;
+    }
+    settlementStarted = true;
     // Nothing wired: this app never mounted a renderer (every mount() either
     // never happened or hit the instance-reuse guard, which wires nothing).
     // Settle the exit promise directly without any write-barrier so no stream
@@ -328,8 +358,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       return;
     }
-    const stdout = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
-    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stdout);
+    const appContext = mountedAppContext;
+    const stdout = (appContext?.stdout ?? process.stdout) as MaybeWritableStream;
 
     const finish = () => {
       if (isErrorInput(pendingExitError)) {
@@ -339,15 +369,55 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     };
 
-    if (canWriteToStdout && hasWritableState) {
-      stdout.write("", () => finish());
-    } else {
-      setImmediate(() => finish());
+    const afterBarrier = (stream: MaybeWritableStream, callback: () => void) => {
+      const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
+      if (!canWriteToStdout || !hasWritableState) {
+        setImmediate(callback);
+        return;
+      }
+      try {
+        stream.write("", callback);
+      } catch {
+        setImmediate(callback);
+      }
+    };
+
+    const report = pendingFatalReport;
+    pendingFatalReport = null;
+    if (!report || !appContext) {
+      afterBarrier(stdout, finish);
+      return;
     }
+
+    const stderr = appContext.stderr as MaybeWritableStream;
+    const writeReport = () => {
+      const { canWriteToStdout, hasWritableState } = getWritableStreamState(stderr);
+      if (!canWriteToStdout) {
+        setImmediate(finish);
+        return;
+      }
+      try {
+        if (hasWritableState) {
+          stderr.write(report, finish);
+        } else {
+          stderr.write(report);
+          setImmediate(finish);
+        }
+      } catch {
+        setImmediate(finish);
+      }
+    };
+
+    // When both channels share one stream, the report write itself is ordered
+    // after every queued restore and its callback is the single completion
+    // barrier. With distinct streams, first drain stdout restoration, then emit
+    // stderr so the durable error cannot race ahead of leaving Fullscreen.
+    if (stderr === stdout) writeReport();
+    else afterBarrier(stdout, writeReport);
   }
 
-  function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false) {
-    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) return;
+  function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false): boolean {
+    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) return false;
     try {
       if (sync) {
         // Signal-exit path (G18, Finding A): signal-exit re-raises the signal
@@ -375,18 +445,120 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       } else {
         stream.write(data);
       }
+      return true;
     } catch {
       // Stream may already be destroyed during shutdown, or the fd may be
       // unwritable; restore is best-effort.
+      return false;
     }
   }
 
   let teardownStarted = false;
+  let teardownCompleted = false;
+  let teardownExecutionStarted = false;
+  let lifecycleTransactionDepth = 0;
+  let pendingTeardown = false;
+  let pendingTeardownSync = false;
+  let pendingSettlement = false;
+  let flushingDeferredLifecycle = false;
+  let emergencyTerminalRestoreStarted = false;
+
+  function performEmergencyTerminalRestore(): void {
+    if (emergencyTerminalRestoreStarted) return;
+    emergencyTerminalRestoreStarted = true;
+    const runBestEffort = (operation: () => void): void => {
+      try {
+        operation();
+      } catch {
+        // A non-returning exit leaves no later retry opportunity. Continue with
+        // every independent terminal resource even when one release fails.
+      }
+    };
+    const appContext = mountedAppContext;
+
+    runBestEffort(() => mountedScheduler?.cancel());
+    if (mountedStdinController) {
+      const stdinController = mountedStdinController;
+      mountedStdinController = null;
+      runBestEffort(() => stdinController.dispose(true));
+    }
+    if (mountedKittyController) {
+      const kittyController = mountedKittyController;
+      mountedKittyController = null;
+      runBestEffort(() => kittyController.dispose(true));
+    }
+
+    if (mountedWriter && mountedDynamicUpdatesLive && appContext) {
+      const writer = mountedWriter;
+      const returnToBottom = writer.getCursorReturnToBottom();
+      if (returnToBottom !== "") writeBestEffort(appContext.stdout, returnToBottom, true);
+      if (mountedNeedsTerminalLineAdvance?.()) {
+        writeBestEffort(appContext.stdout, nextLineEscape, true);
+      }
+      if (writer.isCursorHidden()) writeBestEffort(appContext.stdout, "\x1b[?25h", true);
+      writer.reset({ cursorDirty: false, cursorHidden: false });
+    }
+    if (mountedAlternateScreen && appContext) {
+      writeBestEffort(appContext.stdout, ansiEscapes.exitAlternativeScreen, true);
+      mountedAlternateScreen = false;
+    }
+    if (mountedFullscreenCursorHidden && appContext) {
+      writeBestEffort(appContext.stdout, "\x1b[?25h", true);
+      mountedFullscreenCursorHidden = false;
+    }
+  }
+
+  function flushDeferredLifecycle(): void {
+    if (lifecycleTransactionDepth > 0 || flushingDeferredLifecycle) return;
+    flushingDeferredLifecycle = true;
+    try {
+      while (lifecycleTransactionDepth === 0) {
+        if (pendingTeardown && teardownStarted && !teardownCompleted) {
+          const sync = pendingTeardownSync;
+          pendingTeardown = false;
+          pendingTeardownSync = false;
+          performTeardown(sync, false);
+          continue;
+        }
+
+        if (pendingSettlement && (!teardownStarted || teardownCompleted)) {
+          pendingSettlement = false;
+          resolveExit();
+          continue;
+        }
+
+        break;
+      }
+    } finally {
+      flushingDeferredLifecycle = false;
+    }
+  }
+
+  function enterLifecycleTransaction(): () => void {
+    lifecycleTransactionDepth++;
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      lifecycleTransactionDepth--;
+      if (lifecycleTransactionDepth === 0) flushDeferredLifecycle();
+    };
+  }
+
+  function runLifecycleTransaction<T>(operation: () => T): T {
+    const leave = enterLifecycleTransaction();
+    try {
+      return operation();
+    } finally {
+      leave();
+    }
+  }
+
   // `sync` is set only when teardown is driven by the signal-exit callback
   // (G18, Finding A). On that path the restore escapes must be written
   // synchronously (fs.writeSync) so they reach the fd before signal-exit
   // re-raises the signal. The normal unmount()/exit() path keeps async writes.
-  function teardown(sync = false) {
+  function teardown(sync = false, immediateTermination = false) {
     // Nothing wired: this app never mounted a renderer (never mounted, or
     // every mount() hit the instance-reuse guard, which wires nothing), so
     // teardown is a complete no-op — do not touch any stream or another
@@ -396,162 +568,261 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // (double-fire on its own live stdout, a later mount on a free stdout,
     // or merely targeting another app's busy stream — audit e18).
     if (!mountedAppContext) return;
-    if (teardownStarted) return;
+    if (teardownStarted) {
+      // A later abrupt-exit request upgrades a deferred normal cleanup to the
+      // synchronous restore path. Cleanup itself still runs exactly once.
+      if (!teardownCompleted && sync) pendingTeardownSync = true;
+      if (immediateTermination && teardownExecutionStarted && !teardownCompleted) {
+        // process.exit() and terminating signals do not return to the active
+        // teardown stack. Release the terminal-owning subset right now; the
+        // interrupted normal cleanup cannot reach its later restore steps.
+        performEmergencyTerminalRestore();
+        return;
+      }
+      if (immediateTermination && !teardownCompleted && !teardownExecutionStarted) {
+        const effectiveSync = sync || pendingTeardownSync;
+        pendingTeardown = false;
+        pendingTeardownSync = false;
+        performTeardown(effectiveSync, true);
+      }
+      return;
+    }
     teardownStarted = true;
 
-    // Remove the signal-exit handler first (Ink parity G18, ink.tsx:765:
-    // `this.unsubscribeExit()`). When teardown is triggered BY a signal,
-    // signal-exit has already unloaded its own listeners, so this is a no-op;
-    // when triggered by unmount()/exit(), it stops the handler from firing
-    // later (no leak, no double-run — teardownStarted also guards re-entry).
-    if (mountedUnsubscribeExit) {
-      mountedUnsubscribeExit();
-      mountedUnsubscribeExit = null;
+    if (lifecycleTransactionDepth > 0 && !immediateTermination) {
+      pendingTeardown = true;
+      pendingTeardownSync ||= sync;
+      return;
     }
 
-    // Remove this app from the live-instances registry so a subsequent mount()
-    // on the same stdout works normally. Only the owning app removes its entry;
-    // a no-op second mount (mountedAsOwner=false) must NOT evict the first
-    // app's entry.
-    if (mountedAsOwner && mountedAppContext) {
-      liveInstances.delete(mountedAppContext.stdout);
-      mountedAsOwner = false;
-    }
+    performTeardown(sync, immediateTermination);
+  }
 
-    // Cancel any pending trailing-edge timer first, then do a final
-    // synchronous commit so the latest state is always flushed before
-    // unmount (matching Ink ink.tsx:755-761).
-    // teardownStarted=true lets the last Inline state render before its bounded
-    // region is left on the main screen. Fixed Fullscreen repaints once more
-    // before the alternate screen is restored instead.
-    scheduledCommit = () => {};
-    mountedScheduler?.cancel();
-    // Prevent post-unmount app.clear() from writing to a torn-down stream.
-    mountedClear = null;
-    const stdout = mountedAppContext?.stdout;
-    const stdoutWritable = stdout
-      ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
-      : false;
-    // Final commit at unmount, mirroring Ink's settleThrottle path
-    // (ink.tsx:749-762): unmount FLUSHES the throttled render so lastOutput
-    // reflects the CURRENT tree before any teardown write. We just cancel()ed
-    // the scheduler, which DISCARDS a pending trailing-edge commit — so a
-    // reactive change deferred to that trailing edge would be lost. Re-running
-    // commit() here recomputes the frame against the live tree and refreshes
-    // frameState.lastOutput. Live output repaints; final-stream output only
-    // refreshes frameState and writes write-once <Static>, deferring the dynamic
-    // frame to the trailing-write block below. So this
-    //     refresh feeds the correct, latest `lastFrame + "\n"` into that write
-    //     (matching Ink's `this.lastOutput + '\n'`, ink.tsx:817-818) WITHOUT
-    //     double-writing the dynamic frame. Before this, a deferred trailing
-    //     change unmounted within the throttle window emitted the STALE
-    //     last-committed frame instead of the latest tree.
-    // EXCEPTION — final-stream ERROR teardown: do NOT re-commit. A
-    // re-commit would refresh frameState.lastOutput to the ErrorOverview and the
-    // trailing-write block would then emit it, but the non-interactive error
-    // path paints NO overview (only the trailing newline), matching Ink/main
-    // (see error-capture-race.test.tsx). Live output still commits because the
-    // overview is shown there.
-    if (
-      mountedCommit &&
-      stdoutWritable &&
-      (mountedDynamicUpdatesLive || !isErrorInput(pendingExitError))
-    ) {
-      try {
-        mountedCommit();
-      } catch {
-        // Final render is best-effort; don't block teardown cleanup.
+  function performTeardown(sync = false, immediateTermination = false) {
+    if (teardownCompleted || teardownExecutionStarted) return;
+    if (!mountedAppContext) {
+      teardownCompleted = true;
+      return;
+    }
+    teardownExecutionStarted = true;
+
+    try {
+      // Terminal cleanup is a best-effort transaction. One failed release must
+      // never strand a later lease (for example a Kitty write must not prevent
+      // leaving the alternate screen or restoring raw mode), and cleanup failure
+      // must never replace the application's original fatal error.
+      const runBestEffort = (operation: () => void): void => {
+        try {
+          operation();
+        } catch {
+          // Continue through every remaining release.
+        }
+      };
+      const appContext = mountedAppContext;
+
+      if (mountedUnsubscribeSuspension) {
+        const unsubscribe = mountedUnsubscribeSuspension;
+        mountedUnsubscribeSuspension = null;
+        runBestEffort(unsubscribe);
       }
-    }
-    // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
-    if (mountedRestoreConsole) {
-      mountedRestoreConsole();
-      mountedRestoreConsole = null;
-    }
-    if (vueMountStarted) {
-      vueMountStarted = false;
-      try {
-        originalUnmount();
-      } catch {
-        // Vue's unmount may throw on a partially-started or duplicate unmount;
-        // cleanup remains best-effort and teardown stays idempotent.
+
+      // Remove the signal-exit handler first (Ink parity G18, ink.tsx:765:
+      // `this.unsubscribeExit()`). When teardown is triggered BY a signal,
+      // signal-exit has already unloaded its own listeners, so this is a no-op;
+      // when triggered by unmount()/exit(), it stops the handler from firing
+      // later (no leak, no double-run — teardownStarted also guards re-entry).
+      if (mountedUnsubscribeExit) {
+        const unsubscribe = mountedUnsubscribeExit;
+        mountedUnsubscribeExit = null;
+        runBestEffort(unsubscribe);
       }
-    }
-    // Dispose the animation scheduler after Vue unmount: each useAnimation's
-    // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
-    mountedAnimationScheduler?.dispose();
-    mountedAnimationScheduler = null;
-    if (mountedKittyController) {
-      // Disable-kitty is a restore escape: on the signal path it must flush
-      // synchronously too (Finding A).
-      mountedKittyController.dispose(sync);
-      mountedKittyController = null;
-    }
-    if (!mountedDynamicUpdatesLive && mountedAppContext) {
-      // The dynamic frame was deferred during rendering. The final commit()
-      // above refreshed lastOutput to the current tree, so write that latest
-      // frame now as `lastFrame + "\n"`.
-      const lastFrame = mountedGetLastOutput?.() ?? "";
-      writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
-    }
-    // A viewport-filling Inline frame intentionally has no trailing newline
-    // while it is live. Advance exactly once before restoring the cursor so a
-    // following shell prompt cannot append to the frame's final row. NEL moves
-    // to column zero even when the terminal does not translate LF to CRLF.
-    if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
-      // A declared application caret may leave the physical cursor above the
-      // bottom of either a short or full-height frame. Return to the writer's
-      // actual bottom before establishing the post-app line; otherwise the
-      // shell can overwrite retained application rows.
-      const returnToBottom = mountedWriter.getCursorReturnToBottom();
-      if (returnToBottom !== "") {
-        writeBestEffort(mountedAppContext.stdout, returnToBottom, sync);
+
+      // Remove this app from the live-instances registry so a subsequent mount()
+      // on the same stdout works normally. Only the owning app removes its entry;
+      // a no-op second mount (mountedAsOwner=false) must NOT evict the first
+      // app's entry.
+      if (mountedAsOwner && mountedAppContext) {
+        liveInstances.delete(mountedAppContext.stdout);
+        mountedAsOwner = false;
       }
-      if (mountedNeedsTerminalLineAdvance?.()) {
-        writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
+
+      // Cancel any pending trailing-edge timer first, then do a final
+      // synchronous commit so the latest state is always flushed before
+      // unmount (matching Ink ink.tsx:755-761).
+      // teardownStarted=true lets the last Inline state render before its bounded
+      // region is left on the main screen. Fixed Fullscreen repaints once more
+      // before the alternate screen is restored instead.
+      scheduledCommit = () => {};
+      if (mountedScheduler) runBestEffort(() => mountedScheduler?.cancel());
+      // Prevent post-unmount app.clear() from writing to a torn-down stream.
+      mountedClear = null;
+      const stdout = mountedAppContext?.stdout;
+      const stdoutWritable = stdout
+        ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
+        : false;
+      // Final commit at unmount, mirroring Ink's settleThrottle path
+      // (ink.tsx:749-762): unmount FLUSHES the throttled render so lastOutput
+      // reflects the CURRENT tree before any teardown write. We just cancel()ed
+      // the scheduler, which DISCARDS a pending trailing-edge commit — so a
+      // reactive change deferred to that trailing edge would be lost. Re-running
+      // commit() here recomputes the frame against the live tree and refreshes
+      // frameState.lastOutput. Live output repaints; final-stream output only
+      // refreshes frameState and writes write-once <Static>, deferring the dynamic
+      // frame to the trailing-write block below. So this
+      //     refresh feeds the correct, latest `lastFrame + "\n"` into that write
+      //     (matching Ink's `this.lastOutput + '\n'`, ink.tsx:817-818) WITHOUT
+      //     double-writing the dynamic frame. Before this, a deferred trailing
+      //     change unmounted within the throttle window emitted the STALE
+      //     last-committed frame instead of the latest tree.
+      // EXCEPTION — final-stream ERROR teardown: do NOT re-commit. A re-commit
+      // could replace the retained successful frame with an overview or replay
+      // stale output. Fatal final-stream completion skips the dynamic frame and
+      // emits the durable report to stderr below. Live output still commits so an
+      // Inline/transcript overview can remain when its stdout write succeeds.
+      if (
+        !immediateTermination &&
+        mountedCommit &&
+        stdoutWritable &&
+        (mountedDynamicUpdatesLive || !isErrorInput(pendingExitError))
+      ) {
+        try {
+          mountedCommit();
+        } catch {
+          // Final render is best-effort; don't block teardown cleanup.
+        }
       }
-      mountedWriter.done();
-    }
-    if (mountedAlternateScreen && mountedAppContext) {
-      writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
-      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
-      mountedAlternateScreen = false;
-    } else if (
-      mountedDynamicUpdatesLive &&
-      mountedAppContext &&
-      Boolean(mountedAppContext.stdout.isTTY)
-    ) {
-      // isTTY gate (cli-cursor short-circuit): Ink's non-alt-screen teardown
-      // show goes through log.done() -> cliCursor.show, which no-ops on a
-      // non-TTY stream. Forced-interactive on a piped stdout emits no show.
-      writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
-    }
-    if (mountedRoot) detachYoga(mountedRoot);
-    if (mountedResizeHandler && mountedAppContext) {
-      mountedAppContext.stdout.off("resize", mountedResizeHandler);
-    }
-    if (mountedExitListener) {
-      process.off("exit", mountedExitListener);
-    }
-    if (mountedBeforeExitHandler) {
-      process.off("beforeExit", mountedBeforeExitHandler);
-      mountedBeforeExitHandler = null;
-    }
-    if (mountedStdinController) {
-      // Pass sync through so the bracketed-paste-disable escape flushes
-      // synchronously on the signal-exit path (Finding A), mirroring the
-      // kitty/cursor/alt-screen restores above.
-      mountedStdinController.dispose(sync);
-    }
-    mountedRenderSession?.dispose();
-    mountedRenderSession = null;
-    mountedNeedsTerminalLineAdvance = null;
-    // Drop this app's full-reload registration so a stale teardown can't run on
-    // the next reload. Identity-guarded inside unregisterDevApp: during a reload
-    // the old app unregisters here before the new app registers.
-    if (mountedDevTeardown) {
-      unregisterDevApp(mountedDevTeardown);
-      mountedDevTeardown = null;
+      // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
+      if (mountedRestoreConsole) {
+        const restoreConsole = mountedRestoreConsole;
+        mountedRestoreConsole = null;
+        runBestEffort(restoreConsole);
+      }
+      if (vueMountStarted) {
+        vueMountStarted = false;
+        // A non-returning process/signal exit must not invoke application
+        // lifecycle hooks: mount may still be on the stack, and user cleanup can
+        // re-enter process.exit() before terminal restoration completes. Runtime
+        // resources below are released directly instead.
+        if (!immediateTermination) runBestEffort(originalUnmount);
+      }
+      // Dispose the animation scheduler after Vue unmount: each useAnimation's
+      // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
+      if (mountedAnimationScheduler) {
+        const animationScheduler = mountedAnimationScheduler;
+        runBestEffort(() => animationScheduler.dispose());
+      }
+      mountedAnimationScheduler = null;
+      if (mountedKittyController) {
+        // Disable-kitty is a restore escape: on the signal path it must flush
+        // synchronously too (Finding A).
+        const kittyController = mountedKittyController;
+        mountedKittyController = null;
+        runBestEffort(() => kittyController.dispose(sync));
+      }
+      if (!mountedDynamicUpdatesLive && mountedAppContext && !isErrorInput(pendingExitError)) {
+        // The dynamic frame was deferred during rendering. The final commit()
+        // above refreshed lastOutput to the current tree, so write that latest
+        // frame now as `lastFrame + "\n"`.
+        const lastFrame = mountedGetLastOutput?.() ?? "";
+        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n", sync);
+      }
+      // A viewport-filling Inline frame intentionally has no trailing newline
+      // while it is live. Advance exactly once before restoring the cursor so a
+      // following shell prompt cannot append to the frame's final row. NEL moves
+      // to column zero even when the terminal does not translate LF to CRLF.
+      if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
+        // A declared application caret may leave the physical cursor above the
+        // bottom of either a short or full-height frame. Return to the writer's
+        // actual bottom before establishing the post-app line; otherwise the
+        // shell can overwrite retained application rows.
+        const writer = mountedWriter;
+        const returnToBottom = writer.getCursorReturnToBottom();
+        if (returnToBottom !== "") {
+          writeBestEffort(mountedAppContext.stdout, returnToBottom, sync);
+        }
+        if (mountedNeedsTerminalLineAdvance?.()) {
+          writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
+        }
+        if (sync) {
+          if (writer.isCursorHidden()) {
+            writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", true);
+          }
+          writer.reset({ cursorDirty: false, cursorHidden: false });
+        } else {
+          runBestEffort(() => writer.done());
+        }
+      }
+      if (mountedAlternateScreen && mountedAppContext) {
+        writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
+        mountedAlternateScreen = false;
+      }
+      if (mountedFullscreenCursorHidden && mountedAppContext) {
+        writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
+        mountedFullscreenCursorHidden = false;
+      }
+      if (mountedRoot) runBestEffort(() => detachYoga(mountedRoot!));
+      mountedRoot = null;
+      if (mountedResizeHandler && mountedAppContext) {
+        const resizeHandler = mountedResizeHandler;
+        runBestEffort(() => mountedAppContext?.stdout.off("resize", resizeHandler));
+        mountedResizeHandler = null;
+      }
+      if (mountedExitListener) {
+        const exitListener = mountedExitListener;
+        runBestEffort(() => process.off("exit", exitListener));
+        mountedExitListener = null;
+      }
+      if (mountedBeforeExitHandler) {
+        const beforeExitHandler = mountedBeforeExitHandler;
+        runBestEffort(() => process.off("beforeExit", beforeExitHandler));
+        mountedBeforeExitHandler = null;
+      }
+      if (mountedStdinController) {
+        // Pass sync through so the bracketed-paste-disable escape flushes
+        // synchronously on the signal-exit path (Finding A), mirroring the
+        // kitty/cursor/alt-screen restores above.
+        const stdinController = mountedStdinController;
+        mountedStdinController = null;
+        runBestEffort(() => stdinController.dispose(sync));
+      }
+      if (mountedRenderSession) {
+        const renderSession = mountedRenderSession;
+        runBestEffort(() => renderSession.dispose());
+      }
+      mountedRenderSession = null;
+      mountedNeedsTerminalLineAdvance = null;
+      // Drop this app's full-reload registration so a stale teardown can't run on
+      // the next reload. Identity-guarded inside unregisterDevApp: during a reload
+      // the old app unregisters here before the new app registers.
+      if (mountedDevTeardown) {
+        const devTeardown = mountedDevTeardown;
+        mountedDevTeardown = null;
+        runBestEffort(() => unregisterDevApp(devTeardown));
+      }
+
+      if (
+        isErrorInput(pendingExitError) &&
+        (!pendingExitErrorWasRendered || !mountedBoundaryErrorsAreDurable)
+      ) {
+        const report = sanitizeAnsiMultiline(formatErrorForStderr(pendingExitError));
+        const output = `${appContext.stderr.isTTY ? nextLineEscape : ""}${report}`;
+        if (sync) {
+          writeBestEffort(appContext.stderr, output, true);
+        } else {
+          pendingFatalReport = output;
+        }
+      }
+
+      // Retain the context only until every cleanup operation above has had its
+      // chance. resolveExit() still needs the streams for its write barrier, so it
+      // deliberately observes this final readonly reference through the closure.
+      mountedAppContext = appContext;
+    } finally {
+      teardownCompleted = true;
+      // A write performed by cleanup itself can synchronously re-enter
+      // app.unmount() and request settlement. It is safe to honor that request
+      // only after every owned terminal resource above has had its release turn.
+      flushDeferredLifecycle();
     }
   }
 
@@ -635,6 +906,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       return () => {
         if (errored.value) {
+          // Rendering this vnode only means the error frame is ready to paint.
+          // Durability is recorded later, after the terminal write succeeds.
+          pendingBoundaryFrameReady = pendingBoundaryError;
           return h(ErrorOverview, { error: caught.value });
         }
         return h(userRoot, userRootProps ?? undefined);
@@ -668,6 +942,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const configuredTerminalSizeProbe = (
       options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
     )[INTERNAL_TERMINAL_SIZE_PROBE];
+    const suspensionHost =
+      (options as { [INTERNAL_SUSPENSION_HOST]?: SuspensionHost })[INTERNAL_SUSPENSION_HOST] ??
+      processSuspensionHost;
     // Process-global fallbacks describe the process's controlling terminal, not
     // an arbitrary custom WriteStream. A custom TTY must provide a complete
     // columns/rows pair; deterministic hosts can supply the internal modeled
@@ -676,6 +953,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       configuredTerminalSizeProbe ??
       (stdout === process.stdout || stdout === process.stderr
         ? probeControllingTerminalSize
+        : () => ({ kind: "unavailable" }));
+    const resumeTerminalSizeProbe: TerminalSizeProbe =
+      configuredTerminalSizeProbe ??
+      (stdout === process.stdout || stdout === process.stderr
+        ? () =>
+            probeControllingTerminalSize({
+              // process.stdout/process.stderr dimensions are refreshed by
+              // Node's pending SIGWINCH callback, which may run only after the
+              // SIGTSTP handler resumes. Query the controlling terminal first
+              // so continuation can repaint at the new size immediately.
+              stdout: undefined,
+              stderr: undefined,
+              env: {},
+            })
         : () => ({ kind: "unavailable" }));
 
     // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
@@ -713,6 +1004,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       liveUpdatesOverride,
       isCI: isInCi,
       presentation: requestedScreenReaderPresentation ? "screen-reader" : "visual",
+      suspensionSupported: suspensionHost.supported,
       stdout: stdoutFacts,
       terminalProbe,
     });
@@ -734,16 +1026,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       supportsTerminalMouse() &&
       Boolean((stdin as { isTTY?: boolean }).isTTY);
 
-    function readCurrentDimensions(): ResolvedLiveDimensions | null {
+    function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
       const currentStdout = {
         isTTY: Boolean(stdout.isTTY),
         columns: stdout.columns,
         rows: stdout.rows,
       } as const;
-      const currentProbe = needsTerminalSizeProbe(currentStdout)
-        ? terminalSizeProbe()
-        : ({ kind: "unavailable" } as const);
-      const next = resolveLiveDimensions(currentStdout, currentProbe);
+      const currentProbe = preferFreshProbe
+        ? resumeTerminalSizeProbe()
+        : needsTerminalSizeProbe(currentStdout)
+          ? terminalSizeProbe()
+          : ({ kind: "unavailable" } as const);
+      const dimensionsSource =
+        preferFreshProbe && currentProbe.kind === "detected"
+          ? {
+              isTTY: currentStdout.isTTY,
+              columns: currentProbe.size.columns,
+              rows: currentProbe.size.rows,
+            }
+          : currentStdout;
+      const next = resolveLiveDimensions(dimensionsSource, currentProbe);
 
       if (surface.kind === "fullscreen-terminal") {
         if (next.terminal === null) return null;
@@ -770,922 +1072,1176 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // coalescing (G02) never kicks in on an unthrottled path.
     const maxFps = options.maxFps ?? 30;
     mountedDynamicUpdatesLive = dynamicUpdatesLive;
+    mountedBoundaryErrorsAreDurable = dynamicUpdatesLive && !fixedFullscreenSurface;
 
-    // Frame coordination state — tracks the last rendered output so
-    // writeToStdout/writeToStderr can clear and restore the active frame.
-    // Frame state: lastOutput is the most recent rendered frame string and
-    // outputHeight is its line count (used by transcript erasure and lifecycle
-    // bookkeeping). Inline history is emitted once and is never accumulated for
-    // destructive whole-terminal replay.
-    const frameState = {
-      lastOutput: "",
-      lastOutputToRender: "" as string | undefined,
-      outputHeight: 0,
-    };
-    let inlineRegionStarted = false;
-    let warnedFullscreenStatic = false;
-    let cursorPosition: CursorPosition | undefined;
-    mountedGetLastOutput = () => frameState.lastOutput;
-    mountedNeedsTerminalLineAdvance = () =>
-      inlineTerminalSurface &&
-      frameState.lastOutputToRender !== undefined &&
-      frameState.lastOutputToRender !== "" &&
-      !frameState.lastOutputToRender.endsWith("\n");
-
-    function ensureInlineRegionStart() {
-      if (!inlineTerminalSurface || inlineRegionStarted) return;
-      // The runtime cannot know the caller's starting cursor column without an
-      // asynchronous terminal query. Start on a new physical row so later
-      // erase-line operations can never delete a pre-mount partial line. Delay
-      // this until the first visible write so an empty app emits no initial NEL.
-      stdout.write(nextLineEscape);
-      inlineRegionStarted = true;
-    }
-
-    function restoreLastOutput() {
-      if (!dynamicUpdatesLive) return;
-      // Clear() resets log-update's cursor state, so replay the latest cursor
-      // intent before restoring output after external stdout/stderr writes.
-      writer.setCursorPosition(cursorPosition);
-      // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
-      // the first content commit, the value the resize-boundary path assigns,
-      // and what an empty screen-reader frame leaves — must fall
-      // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
-      // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
-      // empty string would pass through and restore nothing after an external write.
-      writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
-    }
-
-    function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
-      if (data !== "") ensureInlineRegionStart();
-      stream.write(data);
-      // Coordinated output becomes terminal-owned history before the dynamic
-      // region is restored. If the payload did not finish its row, NEL creates
-      // the line boundary without relying on the terminal's LF/CRLF mode.
-      if (
-        inlineTerminalSurface &&
-        data !== "" &&
-        !data.endsWith("\n") &&
-        (stream === stdout || Boolean(stream.isTTY))
-      ) {
-        stream.write(nextLineEscape);
-      }
-    }
-
-    function writeToStdout(data: string) {
-      // Mirror Ink ink.tsx:673: return early after teardown so a late write
-      // (e.g. a stray useStdout().write after unmount) cannot run
-      // clear()/write/restore on an already-torn-down renderer.
-      if (teardownStarted) return;
-      const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
-      if (outputData === "") return;
-      if (fixedFullscreenSurface) {
-        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stdout.write(outputData) });
-        return;
-      }
-      if (isScreenReaderEnabled && dynamicUpdatesLive) {
-        repaintTranscript(() => writeCommittedInlineOutput(stdout, outputData));
-        return;
-      }
-      if (!dynamicUpdatesLive) {
-        stdout.write(outputData);
-        return;
-      }
-      // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
-      // terminal supports synchronized updates, so the three-step sequence is
-      // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
-      if (synchronize) stdout.write(bsu);
-      writer.clear();
-      writeCommittedInlineOutput(stdout, outputData);
-      restoreLastOutput();
-      if (synchronize) stdout.write(esu);
-    }
-
-    function writeToStderr(data: string) {
-      // Mirror Ink ink.tsx:702: return early after teardown so a late write
-      // cannot corrupt the restored terminal state.
-      if (teardownStarted) return;
-      const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
-      if (outputData === "") return;
-      if (fixedFullscreenSurface) {
-        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stderr.write(outputData) });
-        return;
-      }
-      if (isScreenReaderEnabled && dynamicUpdatesLive) {
-        repaintTranscript(() => writeCommittedInlineOutput(stderr, outputData));
-        return;
-      }
-      if (!dynamicUpdatesLive) {
-        stderr.write(outputData);
-        return;
-      }
-      // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
-      // because synchronized-update mode is a stdout capability, while the
-      // actual data goes to stderr. The sync gate also uses stdout's isTTY.
-      if (synchronize) stdout.write(bsu);
-      writer.clear();
-      writeCommittedInlineOutput(stderr, outputData);
-      restoreLastOutput();
-      if (synchronize) stdout.write(esu);
-    }
-
-    const appContext: AppContext = {
-      exit(errorOrResult?: unknown) {
-        // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
-        // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
-        // exit() captures its value/error and initiates teardown; any
-        // SUBSEQUENT exit() is a no-op so it can neither overwrite the recorded
-        // value nor re-resolve the exit promise with a later value.
-        //
-        // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
-        // app.unmount() runs teardown()+resolveExit() WITHOUT setting
-        // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
-        // unmount teardown (or any exit() after unmount) would otherwise pass
-        // the exitInitiated check, overwrite pendingExitResult/pendingExitError
-        // and queue a microtask — letting that late value win over the unmount.
-        // Gating on teardownStarted too makes exit() a no-op once unmount/
-        // teardown is in progress. At the FIRST exit() both flags are false, so
-        // a normal exit-from-Vue-cycle still proceeds.
-        if (exitInitiated || teardownStarted) return;
-        exitInitiated = true;
-        // Record the FIRST value/error synchronously (before the deferred
-        // teardown microtask) so a re-entrant exit() — which is blocked above
-        // anyway — and the eventual resolveExit() always settle on this value.
-        if (isErrorInput(errorOrResult)) {
-          // Don't clobber an error already recorded synchronously by
-          // recordExitError() (the boundary captured first): first-wins keeps the
-          // displayed and rejected error the SAME. pendingExitError is undefined on
-          // a normal first exit(), so `??=` is identical to `=` in every other case.
-          // (The race: a descendant throws Error1 → onErrorCaptured shows Error1 and
-          // recordExitError sets pendingExitError=Error1 WITHOUT setting exitInitiated,
-          // then app code calls exit(Error2) before the deferred exitWithError(Error1)
-          // microtask runs — exitInitiated is still false so we reach here. `=` would
-          // overwrite to Error2, making the overview show Error1 while waitUntilExit()
-          // rejects Error2.)
-          pendingExitError ??= errorOrResult;
-        } else {
-          pendingExitResult = errorOrResult;
-        }
-        // Defer teardown to a microtask: exit() is frequently called from
-        // inside the Vue update cycle (useInput handler, setup(), errorHandler)
-        // and unmounting synchronously would tear Vue down mid-flush.
-        queueMicrotask(() => {
-          teardown();
-          resolveExit();
-        });
-      },
-      waitUntilRenderFlush,
-      stdout,
-      stderr,
-      stdin,
-      isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
-      setRawMode(mode: boolean) {
-        if (
-          typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
-        ) {
-          (stdin as { setRawMode: (mode: boolean) => unknown }).setRawMode(mode);
-        }
-      },
-      writeToStdout,
-      writeToStderr,
-      cursorPosition: undefined,
-      setCursorPosition(pos: CursorPosition | undefined) {
-        cursorPosition = pos;
-        appContext.cursorPosition = pos;
-        // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
-        // BOTH the instance field AND this.log.setCursorPosition(position) on
-        // every render. Forwarding to the frame writer updates log-update's
-        // last-declared position (persistently re-emitted at every commit) and
-        // marks cursorDirty so the commit gate (output !== lastOutput ||
-        // isCursorDirty) fires even on a cursor-only move (same output, new pos).
-        // Without this the cursor is never shown/moved on the interactive path.
-        // `writer` is created below in mount() but is always initialized before
-        // any render/setup can call this (originalMount runs after writer creation),
-        // so the optional-chain guards only the pre-mount appContext shape.
-        mountedWriter?.setCursorPosition(pos);
-      },
-    };
-    mountedAppContext = appContext;
-    // Reserve the stream only after every mount option and session fact needed
-    // above has been read successfully. From this point teardown can always
-    // find mountedAppContext and release the reservation on a setup failure.
-    liveInstances.set(stdout, app);
-    mountedAsOwner = true;
-    mountedRenderSession = renderSession;
-
-    const focusContext: FocusContext = createFocusController();
-    const stdinController = createStdinController(stdin, {
-      exitOnCtrlC,
-      appCtx: appContext,
-      focusContext,
-    });
-    mountedStdinController = stdinController;
-
-    // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
-    // terminal: holdRawModeForLifetime() → stdin.setRawMode(true) raises
-    // ERR_TTY_INIT_FAILED when the ioctl fails (real on some SSH/container PTYs
-    // that still report isTTY=true); kittyController.init() may stdout.write()
-    // to enable the protocol (throws on a broken stream); attachYoga() allocates
-    // a WASM yoga node. liveInstances.set(stdout, app) already ran above, so a
-    // throw HERE — before the originalMount try/catch and before the process-
-    // exit / signal-exit handlers are wired — would leak the registry entry
-    // (poisoning the stdout: every later mount() hits the reuse guard and
-    // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
-    // the same teardown-then-rethrow guard as originalMount so teardown()
-    // (idempotent; safe at this early stage — it derives all cleanup from the
-    // wired state set so far) restores everything and frees the registry entry,
-    // while the caller still sees the original error.
-    let kittyController: ReturnType<typeof createKittyKeyboardController>;
-    let tuiRoot: ReturnType<typeof createRoot>;
+    let leaveMountLifecycleTransaction: (() => void) | null = null;
     try {
-      // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
-      // the refcount floor never drops to 0 while the app runs — raw mode is held
-      // continuously regardless of which input composables come and go, and there
-      // is no cooked-mode oscillation between input and no-input screens. Gated on
-      // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
-      // must not seize raw mode. The matching release happens in the controller's
-      // dispose() at teardown. (Diverges from Ink's lazy default — see
-      // .agents/docs/ink-divergences.md.)
-      if (rawMode === "always" && inputLifecycleActive && stdinController.isRawModeSupported) {
-        stdinController.holdRawModeForLifetime();
-      }
+      // Frame coordination state — tracks the last rendered output so
+      // writeToStdout/writeToStderr can clear and restore the active frame.
+      // Frame state: lastOutput is the most recent rendered frame string and
+      // outputHeight is its line count (used by transcript erasure and lifecycle
+      // bookkeeping). Inline history is emitted once and is never accumulated for
+      // destructive whole-terminal replay.
+      const frameState = {
+        lastOutput: "",
+        lastOutputToRender: "" as string | undefined,
+        outputHeight: 0,
+      };
+      let inlineRegionStarted = false;
+      let terminalSuspended = false;
+      let terminalResumeInProgress = false;
+      let resumeSurfaceCommit: (() => void) | null = null;
+      let suspendedFullscreenSurface = false;
+      let suspendedInlineSurface = false;
+      let warnedFullscreenStatic = false;
+      let cursorPosition: CursorPosition | undefined;
+      mountedGetLastOutput = () => frameState.lastOutput;
+      mountedNeedsTerminalLineAdvance = () =>
+        inlineTerminalSurface &&
+        frameState.lastOutputToRender !== undefined &&
+        frameState.lastOutputToRender !== "" &&
+        !frameState.lastOutputToRender.endsWith("\n");
 
-      kittyController = createKittyKeyboardController(stdin, stdout);
-      // Register BEFORE init(): in auto mode, init() installs a stdin 'data'
-      // listener + a 200ms detection timer and only THEN writes the support
-      // query ("\x1b[?u") — which can throw on a broken stream. Assigning
-      // mountedKittyController first lets teardown's dispose() (which calls
-      // cancelDetection: removes the listener, clears the timer) run on that
-      // throw, instead of leaking a dangling stdin listener until the timer fires.
-      mountedKittyController = kittyController;
-      kittyController.init(kittyKeyboard, inputLifecycleActive);
-
-      tuiRoot = createRoot(appContext);
-      attachYoga(tuiRoot);
-      // Record the root BEFORE setWidth so teardown's `if (mountedRoot)
-      // detachYoga(mountedRoot)` frees the just-allocated yoga node even if
-      // setWidth (or anything below) throws.
-      mountedRoot = tuiRoot;
-      tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
-    } catch (err) {
-      try {
-        teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
-      } catch {
-        // A failing best-effort restore must NOT replace `err` — the ORIGINAL
-        // pre-mount error must survive and be rethrown (mirrors the
-        // originalMount catch below).
-      }
-      throw err;
-    }
-
-    const writer = createFrameWriter(stdout, {
-      incremental: incrementalRendering,
-    });
-    mountedWriter = writer;
-    mountedClear = () => {
-      if (!dynamicUpdatesLive) return;
-      if (fixedFullscreenSurface) {
-        if (synchronize) stdout.write(bsu);
+      const runSuspensionStep = (operation: () => void): void => {
         try {
-          stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
-          writer.sync("", { cursor: false });
-        } finally {
-          if (synchronize) stdout.write(esu);
+          operation();
+        } catch {
+          // A failed resource must not prevent the remaining resources or other
+          // mounted sessions from reaching their suspend boundary.
         }
-        return;
-      }
-      if (isScreenReaderEnabled) {
-        if (synchronize) stdout.write(bsu);
-        try {
-          if (frameState.outputHeight > 0) {
-            stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
+      };
+
+      function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
+        const writer = mountedWriter;
+        if (fixedFullscreenSurface) {
+          if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
+          if (mountedAlternateScreen) {
+            if (writeBestEffort(stdout, ansiEscapes.exitAlternativeScreen, true)) {
+              mountedAlternateScreen = false;
+            }
+          }
+          if (mountedFullscreenCursorHidden) {
+            if (writeBestEffort(stdout, "\x1b[?25h", true)) {
+              mountedFullscreenCursorHidden = false;
+            }
+          }
+          if (writer) {
+            runSuspensionStep(() => writer.reset({ cursorDirty: false, cursorHidden: false }));
           }
           frameState.lastOutput = "";
           frameState.lastOutputToRender = "";
           frameState.outputHeight = 0;
-        } finally {
-          if (synchronize) stdout.write(esu);
-        }
-        return;
-      }
-      writer.clear();
-      // The physical frame is now blank. Forget its row bookkeeping without
-      // writing anything: recording the erased frame as a live baseline would
-      // make a second clear/update walk upward into pre-app history. The logical
-      // frameState remains available for a coordinated write to restore later,
-      // while a real commit can paint it again from this owned origin.
-      writer.reset({ cursorDirty: false });
-    };
-    const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
-
-    function repaintTranscript(writeBefore: () => void) {
-      if (synchronize) stdout.write(bsu);
-      try {
-        if (frameState.outputHeight > 0) {
-          stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
-        }
-        writeBefore();
-        // Preserve the existing transcript updater's empty-frame fallback:
-        // after a coordinated write an empty live region still restores one
-        // newline (`lastOutput + "\n"`), matching the pinned Ink behavior.
-        stdout.write(frameState.lastOutput || "\n");
-      } finally {
-        if (synchronize) stdout.write(esu);
-      }
-    }
-
-    function repaintFullscreen(output: string, options: { writeBefore?: () => void } = {}) {
-      // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
-      // clear that surface after every coordinated side-channel write instead
-      // of restoring relative to the cursor position that the write left
-      // behind. This keeps paint geometry, cursor coordinates, and the mouse
-      // hit map in the same viewport coordinate system.
-      if (synchronize) stdout.write(bsu);
-      try {
-        // Hide first even on terminals without synchronized updates. A declared
-        // caret may be visible after the previous sync; leaving it visible while
-        // a full repaint streams produces a corner-to-caret flash.
-        stdout.write(hideCursorEscape);
-        options.writeBefore?.();
-        writer.setCursorPosition(cursorPosition);
-        stdout.write(ansiEscapes.clearViewport + output);
-        writer.sync(output);
-      } finally {
-        if (synchronize) stdout.write(esu);
-      }
-
-      frameState.lastOutput = output;
-      frameState.lastOutputToRender = output;
-      frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
-    }
-
-    function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
-      const hasStaticOutput = staticOutput !== "";
-      const isTty = !!stdout.isTTY;
-      const viewportRows = renderSession.legacyWindowRows.value;
-
-      if (fixedFullscreenSurface) {
-        const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
-        if (shouldWarnStatic) {
-          warnedFullscreenStatic = true;
-        }
-        repaintFullscreen(output, {
-          // Keep the write-once stream observable to stream consumers, but do
-          // not let it become fullscreen layout/history or move the live
-          // surface. The repaint below immediately restores the fixed viewport.
-          writeBefore:
-            hasStaticOutput || shouldWarnStatic
-              ? () => {
-                  if (shouldWarnStatic) stderr.write(FULLSCREEN_STATIC_WARNING);
-                  if (hasStaticOutput) stdout.write(staticOutput);
-                }
-              : undefined,
-        });
-        return;
-      }
-
-      if (output !== "" || hasStaticOutput || writer.isCursorDirty()) {
-        ensureInlineRegionStart();
-      }
-
-      // A frame that fills or exceeds the viewport gets no trailing newline.
-      // Only apply when writing to a real TTY — piped output always gets trailing newlines.
-      const fillsViewport = isTty && outputHeight >= viewportRows;
-      // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
-      // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
-      // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
-      // and `lastOutputHeight = wrappedOutput === "" ? 0 : split("\n").length`.
-      // So EVERY SR frame, empty or not, must skip the trailing newline: an empty
-      // frame emits zero lines instead of a spurious blank line (G17), and a
-      // non-empty multi-line frame keeps its true line count so the next-frame
-      // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
-      // interactive frames are untouched — they still append "\n" as before.
-      const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
-
-      if (hasStaticOutput) {
-        // Clear frame -> write static -> re-render frame via log-update
-        if (synchronize) stdout.write(bsu);
-        writer.clear();
-        stdout.write(staticOutput);
-        writer.write(outputToRender);
-        if (synchronize) stdout.write(esu);
-      } else {
-        // Mirror Ink's TWO-LEVEL commit gate, which keeps the synchronized-update
-        // wrapper and the "should we touch log-update at all" decision separate:
-        //
-        //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
-        //    decides whether to call the (throttled) log at all. It compares the RAW
-        //    frame (`output`, no trailing "\n") against the PREVIOUS frame
-        //    (frameState.lastOutput, set at the end of this fn) — NOT log-update's
-        //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
-        //    case: on the first commit of an app that renders nothing, both are ""
-        //    so the gate is false and log-update — including its LAZY cursor hide —
-        //    is never reached, so the initial empty commit emits no log-update
-        //    cursor escapes (the cursor stays visible), matching Ink. Using
-        //    willRender(outputToRender) here
-        //    instead would compare "\n" against "" and wrongly fire the hide. A
-        //    cursor-only move whose position is unchanged is still dirty, so the
-        //    `|| isCursorDirty` disjunct keeps it reaching log-update.
-        //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
-        //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
-        //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
-        //    flag is reset and the write no-ops cleanly — Ink emits ZERO bytes there,
-        //    not an empty `BSU`+`ESU` pair.
-        //
-        // willRender()/isCursorDirty() must be read BEFORE writer.write():
-        // log-update's render consumes/resets isCursorDirty, so reading them
-        // afterwards would be stale. Both reads are pure (no mutation), and the
-        // bsu/esu wrapper is gated on this single pre-write snapshot.
-        const willRender = writer.willRender(outputToRender);
-        if (output !== frameState.lastOutput || writer.isCursorDirty()) {
-          const shouldWrap = synchronize && willRender;
-          if (shouldWrap) stdout.write(bsu);
-          writer.write(outputToRender);
-          if (shouldWrap) stdout.write(esu);
-        }
-      }
-
-      frameState.lastOutput = output;
-      frameState.lastOutputToRender = outputToRender;
-      frameState.outputHeight = outputHeight;
-    }
-
-    // Produce the dynamic frame for a given terminal width. In screen-reader
-    // mode the tree is linearized to flat plain text (no borders / 2D grid)
-    // via renderScreenReaderOutput, then wrapped with wrapAnsi(trim:false,
-    // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
-    // <Static> channel is excluded here (skipStaticElements) just like
-    // render-to-string.ts; static output is handled separately by commit().
-    function renderFrame(
-      width: number,
-      hitMap?: MouseHitMapEntry[],
-      viewportRows?: number,
-    ): string {
-      if (!isScreenReaderEnabled) {
-        const output = paint(tuiRoot, {
-          hitMap,
-          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
-        });
-        // The hard paint viewport is the primary guard. Keep a final physical
-        // row bound as defense-in-depth for future paint extensions: Inline
-        // must never let an application frame exceed terminal-addressable rows.
-        return boundedInlineSurface && viewportRows !== undefined
-          ? output.split("\n").slice(0, viewportRows).join("\n")
-          : output;
-      }
-      const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
-      return wrapAnsi(linear, width, { trim: false, hard: true });
-    }
-
-    function commit() {
-      const start = onRender ? performance.now() : 0;
-
-      // Capture static output as a string (for both interactive and non-interactive paths)
-      const w = renderSession.session.dimensions.layout.columns;
-      let staticOutput = "";
-      for (const stat of findStatics(tuiRoot)) {
-        const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
-        if (staticFrame.length > 0) {
-          staticOutput += staticFrame + "\n";
-        }
-      }
-      const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-      if (!dynamicUpdatesLive) {
-        // Non-interactive: compute the dynamic frame now, write static output
-        // after onRender, and defer dynamic frame output until unmount.
-        tuiRoot.yoga.setWidth(w);
-        const restoreLayoutGuards = calculateLayoutWithContentGuards(
-          tuiRoot,
-          w,
-          undefined,
-          Yoga.DIRECTION_LTR,
-        );
-        try {
-          emitLayoutListeners(tuiRoot);
-          const frame = renderFrame(w);
-          renderObserver?.onCommit?.({
-            dynamic: frame,
-            staticOutput: hasStaticOutput ? staticOutput : "",
-            phase: teardownStarted ? "teardown" : "update",
-          });
-          frameState.lastOutput = frame;
-          frameState.lastOutputToRender = frame + "\n";
-          frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-          if (onRender) onRender({ renderTime: performance.now() - start });
-          if (hasStaticOutput) {
-            stdout.write(staticOutput);
-          }
-        } finally {
-          restoreLayoutGuards();
-        }
-        return;
-      }
-
-      const exactViewportRows = fixedFullscreenSurface
-        ? (renderSession.session.dimensions.layout.rows ?? undefined)
-        : undefined;
-      tuiRoot.yoga.setWidth(w);
-      let restoreLayoutGuards = calculateLayoutWithContentGuards(
-        tuiRoot,
-        w,
-        exactViewportRows,
-        Yoga.DIRECTION_LTR,
-      );
-      try {
-        const inlineMaximumRows = boundedInlineSurface
-          ? (renderSession.session.dimensions.layout.rows ?? undefined)
-          : undefined;
-        if (
-          inlineMaximumRows !== undefined &&
-          tuiRoot.yoga.getComputedLayout().height > inlineMaximumRows
-        ) {
-          // A permanent Yoga max-height changes how nested percentage heights
-          // resolve even when the natural tree is short (for example, 50% of a
-          // six-row Box incorrectly becomes 50% of the terminal). Compute the
-          // natural tree first, and only rerun with an exact available height
-          // when it actually exceeds Inline's maximum. This gives overflowing
-          // flex layouts a real rows-sized allocation without padding or
-          // perturbing short layouts.
-          restoreLayoutGuards();
-          restoreLayoutGuards = calculateLayoutWithContentGuards(
-            tuiRoot,
-            w,
-            inlineMaximumRows,
-            Yoga.DIRECTION_LTR,
-          );
-        }
-        emitLayoutListeners(tuiRoot);
-        const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
-        const computedRootHeight = Math.max(0, Math.floor(tuiRoot.yoga.getComputedLayout().height));
-        const inlineViewportRows = boundedInlineSurface
-          ? Math.min(
-              renderSession.session.dimensions.layout.rows ?? computedRootHeight,
-              computedRootHeight,
-            )
-          : undefined;
-        const paintViewportRows = exactViewportRows ?? inlineViewportRows;
-        const frame = renderFrame(w, hitMap, paintViewportRows);
-        renderObserver?.onCommit?.({
-          dynamic: frame,
-          staticOutput: hasStaticOutput ? staticOutput : "",
-          phase: teardownStarted ? "teardown" : "update",
-        });
-        mouseController.updateHitMap(hitMap ?? []);
-        const outputHeight = frame === "" ? 0 : frame.split("\n").length;
-
-        if (fixedFullscreenSurface) {
-          if (onRender) onRender({ renderTime: performance.now() - start });
-          renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
           return;
         }
 
-        if (isScreenReaderEnabled) {
-          // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
-          // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
-          // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
-          // (inline static, if any) + the wrapped output, then RETURNS — before the
-          // normal interactive frame path. Crucially it:
-          //   - never emits a whole-terminal reset, so a tall transcript cannot
-          //     delete terminal-owned scrollback;
-          //   - emits new Static content once instead of retaining/replaying it;
-          //   - never routes through the log-update writer (raw writes only);
-          //   - leaves the cursor visible (the mount-time hide is skipped for SR).
-          // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
-          // it plays the role of Ink's `wrappedOutput`.
-          const sync = synchronize;
-          if (onRender) onRender({ renderTime: performance.now() - start });
-          if (frame !== "" || hasStaticOutput) ensureInlineRegionStart();
-          if (sync) stdout.write(bsu);
+        if (!inlineTerminalSurface || !dynamicUpdatesLive || !writer) return;
+        if (rememberSurface) suspendedInlineSurface = true;
+        const returnToBottom = writer.getCursorReturnToBottom();
+        if (returnToBottom !== "") writeBestEffort(stdout, returnToBottom, true);
+        if (mountedNeedsTerminalLineAdvance?.()) {
+          writeBestEffort(stdout, nextLineEscape, true);
+        }
+        const cursorWasHidden = writer.isCursorHidden();
+        const cursorShown = !cursorWasHidden || writeBestEffort(stdout, "\x1b[?25h", true);
+        runSuspensionStep(() =>
+          writer.reset({
+            cursorDirty: false,
+            cursorHidden: cursorWasHidden && !cursorShown,
+          }),
+        );
+        frameState.lastOutput = "";
+        frameState.lastOutputToRender = "";
+        frameState.outputHeight = 0;
+        inlineRegionStarted = false;
+      }
 
-          if (hasStaticOutput) {
-            // Erase the previous main output before writing new static output
-            // (ink.tsx:579-588), then reset the tracked height to 0.
-            const erase =
-              frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
-            stdout.write(erase + staticOutput);
-            frameState.outputHeight = 0;
+      function suspendSession(): void {
+        if (teardownStarted || terminalSuspended) return;
+        runLifecycleTransaction(() => {
+          terminalSuspended = true;
+          terminalResumeInProgress = false;
+          runSuspensionStep(() => mountedScheduler?.cancel());
+          runSuspensionStep(() => mountedStdinController?.suspend(true));
+          runSuspensionStep(() => mountedKittyController?.suspend(true));
+          releaseOutputSurfaceForSuspension(true);
+        });
+      }
+
+      function resumeSession(): void {
+        if (teardownStarted || !terminalSuspended || terminalResumeInProgress) return;
+        runLifecycleTransaction(() => {
+          terminalResumeInProgress = true;
+          try {
+            if (fixedFullscreenSurface && suspendedFullscreenSurface) {
+              if (
+                !mountedAlternateScreen &&
+                !writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H")
+              ) {
+                throw new Error("failed to re-enter the Fullscreen surface");
+              }
+              mountedAlternateScreen = true;
+              if (!mountedFullscreenCursorHidden && !writeBestEffort(stdout, "\x1b[?25l")) {
+                throw new Error("failed to hide the Fullscreen cursor");
+              }
+              mountedFullscreenCursorHidden = true;
+              const repaint = resumeSurfaceCommit ?? mountedCommit;
+              if (!repaint) throw new Error("Fullscreen repaint is not ready");
+              repaint();
+            } else if (inlineTerminalSurface && suspendedInlineSurface) {
+              const repaint = resumeSurfaceCommit ?? mountedCommit;
+              if (!repaint) throw new Error("Inline repaint is not ready");
+              repaint();
+            }
+
+            // Input is reacquired only after the output surface is complete. If an
+            // input mode fails, return the visible surface to its suspended state
+            // instead of accepting input against a partial viewport.
+            mountedKittyController?.resume();
+            mountedStdinController?.resume();
+            terminalSuspended = false;
+            suspendedFullscreenSurface = false;
+            suspendedInlineSurface = false;
+          } catch {
+            runSuspensionStep(() => mountedStdinController?.suspend(true));
+            runSuspensionStep(() => mountedKittyController?.suspend(true));
+            releaseOutputSurfaceForSuspension(false);
+          } finally {
+            terminalResumeInProgress = false;
           }
+        });
+      }
 
-          if (frame === frameState.lastOutput && !hasStaticOutput) {
-            // Unchanged frame and no new static: nothing to write (ink.tsx:590-596).
-            if (sync) stdout.write(esu);
+      function ensureInlineRegionStart() {
+        if (!inlineTerminalSurface || inlineRegionStarted) return;
+        // The runtime cannot know the caller's starting cursor column without an
+        // asynchronous terminal query. Start on a new physical row so later
+        // erase-line operations can never delete a pre-mount partial line. Delay
+        // this until the first visible write so an empty app emits no initial NEL.
+        stdout.write(nextLineEscape);
+        inlineRegionStarted = true;
+      }
+
+      function restoreLastOutput() {
+        if (!dynamicUpdatesLive) return;
+        // Clear() resets log-update's cursor state, so replay the latest cursor
+        // intent before restoring output after external stdout/stderr writes.
+        writer.setCursorPosition(cursorPosition);
+        // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
+        // the first content commit, the value the resize-boundary path assigns,
+        // and what an empty screen-reader frame leaves — must fall
+        // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
+        // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
+        // empty string would pass through and restore nothing after an external write.
+        writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+      }
+
+      function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
+        if (data !== "") ensureInlineRegionStart();
+        stream.write(data);
+        // Coordinated output becomes terminal-owned history before the dynamic
+        // region is restored. If the payload did not finish its row, NEL creates
+        // the line boundary without relying on the terminal's LF/CRLF mode.
+        if (
+          inlineTerminalSurface &&
+          data !== "" &&
+          !data.endsWith("\n") &&
+          (stream === stdout || Boolean(stream.isTTY))
+        ) {
+          stream.write(nextLineEscape);
+        }
+      }
+
+      function writeToStdout(data: string) {
+        runLifecycleTransaction(() => {
+          // Mirror Ink ink.tsx:673: return early after teardown so a late write
+          // (e.g. a stray useStdout().write after unmount) cannot run
+          // clear()/write/restore on an already-torn-down renderer.
+          if (teardownStarted || terminalSuspended) return;
+          const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
+          if (outputData === "") return;
+          if (fixedFullscreenSurface) {
+            repaintFullscreen(frameState.lastOutput, {
+              writeBefore: () => stdout.write(outputData),
+            });
+            return;
+          }
+          if (isScreenReaderEnabled && dynamicUpdatesLive) {
+            repaintTranscript(() => writeCommittedInlineOutput(stdout, outputData));
+            return;
+          }
+          if (!dynamicUpdatesLive) {
+            stdout.write(outputData);
+            return;
+          }
+          // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
+          // terminal supports synchronized updates, so the three-step sequence is
+          // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
+          runCoordinatedWrite(() => {
+            writer.clear();
+            writeCommittedInlineOutput(stdout, outputData);
+          }, restoreLastOutput);
+        });
+      }
+
+      function writeToStderr(data: string) {
+        runLifecycleTransaction(() => {
+          // Mirror Ink ink.tsx:702: return early after teardown so a late write
+          // cannot corrupt the restored terminal state.
+          if (teardownStarted || terminalSuspended) return;
+          const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
+          if (outputData === "") return;
+          if (fixedFullscreenSurface) {
+            repaintFullscreen(frameState.lastOutput, {
+              writeBefore: () => stderr.write(outputData),
+            });
+            return;
+          }
+          if (isScreenReaderEnabled && dynamicUpdatesLive) {
+            repaintTranscript(() => writeCommittedInlineOutput(stderr, outputData));
+            return;
+          }
+          if (!dynamicUpdatesLive) {
+            stderr.write(outputData);
+            return;
+          }
+          // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
+          // because synchronized-update mode is a stdout capability, while the
+          // actual data goes to stderr. The sync gate also uses stdout's isTTY.
+          runCoordinatedWrite(() => {
+            writer.clear();
+            writeCommittedInlineOutput(stderr, outputData);
+          }, restoreLastOutput);
+        });
+      }
+
+      const appContext: AppContext = {
+        exit(errorOrResult?: unknown) {
+          // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
+          // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
+          // exit() captures its value/error and initiates teardown; any
+          // SUBSEQUENT exit() is a no-op so it can neither overwrite the recorded
+          // value nor re-resolve the exit promise with a later value.
+          //
+          // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
+          // app.unmount() runs teardown()+resolveExit() WITHOUT setting
+          // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
+          // unmount teardown (or any exit() after unmount) would otherwise pass
+          // the exitInitiated check, overwrite pendingExitResult/pendingExitError
+          // and queue a microtask — letting that late value win over the unmount.
+          // Gating on teardownStarted too makes exit() a no-op once unmount/
+          // teardown is in progress. At the FIRST exit() both flags are false, so
+          // a normal exit-from-Vue-cycle still proceeds.
+          if (exitInitiated || teardownStarted) return;
+          exitInitiated = true;
+          // Record the FIRST value/error synchronously (before the deferred
+          // teardown microtask) so a re-entrant exit() — which is blocked above
+          // anyway — and the eventual resolveExit() always settle on this value.
+          if (isErrorInput(errorOrResult)) {
+            // Don't clobber an error already recorded synchronously by
+            // recordExitError() (the boundary captured first): first-wins keeps the
+            // displayed and rejected error the SAME. pendingExitError is undefined on
+            // a normal first exit(), so `??=` is identical to `=` in every other case.
+            // (The race: a descendant throws Error1 → onErrorCaptured shows Error1 and
+            // recordExitError sets pendingExitError=Error1 WITHOUT setting exitInitiated,
+            // then app code calls exit(Error2) before the deferred exitWithError(Error1)
+            // microtask runs — exitInitiated is still false so we reach here. `=` would
+            // overwrite to Error2, making the overview show Error1 while waitUntilExit()
+            // rejects Error2.)
+            pendingExitError ??= errorOrResult;
+          } else {
+            pendingExitResult = errorOrResult;
+          }
+          // Defer teardown to a microtask: exit() is frequently called from
+          // inside the Vue update cycle (useInput handler, setup(), errorHandler)
+          // and unmounting synchronously would tear Vue down mid-flush.
+          queueMicrotask(() => {
+            try {
+              teardown();
+            } finally {
+              resolveExit();
+            }
+          });
+        },
+        waitUntilRenderFlush,
+        stdout,
+        stderr,
+        stdin,
+        isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
+        setRawMode(mode: boolean) {
+          if (
+            typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
+          ) {
+            (stdin as { setRawMode: (mode: boolean) => unknown }).setRawMode(mode);
+          }
+        },
+        writeToStdout,
+        writeToStderr,
+        cursorPosition: undefined,
+        setCursorPosition(pos: CursorPosition | undefined) {
+          cursorPosition = pos;
+          appContext.cursorPosition = pos;
+          // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
+          // BOTH the instance field AND this.log.setCursorPosition(position) on
+          // every render. Forwarding to the frame writer updates log-update's
+          // last-declared position (persistently re-emitted at every commit) and
+          // marks cursorDirty so the commit gate (output !== lastOutput ||
+          // isCursorDirty) fires even on a cursor-only move (same output, new pos).
+          // Without this the cursor is never shown/moved on the interactive path.
+          // `writer` is created below in mount() but is always initialized before
+          // any render/setup can call this (originalMount runs after writer creation),
+          // so the optional-chain guards only the pre-mount appContext shape.
+          mountedWriter?.setCursorPosition(pos);
+        },
+      };
+      mountedAppContext = appContext;
+      // Reserve the stream only after every mount option and session fact needed
+      // above has been read successfully. From this point teardown can always
+      // find mountedAppContext and release the reservation on a setup failure.
+      liveInstances.set(stdout, app);
+      mountedAsOwner = true;
+      mountedRenderSession = renderSession;
+      // From stream reservation through Vue's first render and final listener
+      // wiring, a synchronous host callback may request teardown but may not run
+      // it in the middle of terminal acquisition or before Vue finishes mount.
+      leaveMountLifecycleTransaction = enterLifecycleTransaction();
+
+      // Everything after stdout reservation is one mount transaction. Listener
+      // registration happens before the first terminal acquisition, and any later
+      // failure rolls back through the same complete teardown path.
+      // process.exit() never returns after the synchronous `exit` event. It
+      // therefore cannot wait for an enclosing render transaction to unwind;
+      // restore immediately and skip user-facing final rendering callbacks.
+      const exitListener = () => teardown(true, true);
+      process.on("exit", exitListener);
+      mountedExitListener = exitListener;
+
+      // Termination cleanup is independent from output cadence. A final-output
+      // app can still acquire raw, paste, mouse, or explicit Kitty state through
+      // input composables, so every real mount gets the same idempotent handler.
+      // signal-exit re-raises the terminating signal as soon as this callback
+      // returns, so this path has the same non-returning cleanup requirement as
+      // process.exit().
+      mountedUnsubscribeExit = onExit(() => teardown(true, true), { alwaysLast: false });
+
+      // Install job-control interception before raw mode, Kitty, cursor, or the
+      // alternate screen can be acquired. The stable delegates above inspect
+      // only resources that have become available so far, so even a signal in a
+      // partially initialized mount restores what that mount already owns.
+      if (suspensionHost.supported) {
+        mountedUnsubscribeSuspension = suspensionHost.register({
+          suspend: suspendSession,
+          resume: resumeSession,
+        });
+      }
+
+      // Register beforeExit on successful reservation rather than waiting for a
+      // caller to request the promise. This lets natural event-loop drain flush a
+      // deferred final frame and its stream barrier before Node exits.
+      mountedBeforeExitHandler = () => app.unmount();
+      process.once("beforeExit", mountedBeforeExitHandler);
+
+      const focusContext: FocusContext = createFocusController();
+      const stdinController = createStdinController(stdin, {
+        exitOnCtrlC,
+        appCtx: appContext,
+        focusContext,
+      });
+      mountedStdinController = stdinController;
+
+      // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
+      // terminal: holdRawModeForLifetime() → stdin.setRawMode(true) raises
+      // ERR_TTY_INIT_FAILED when the ioctl fails (real on some SSH/container PTYs
+      // that still report isTTY=true); kittyController.init() may stdout.write()
+      // to enable the protocol (throws on a broken stream); attachYoga() allocates
+      // a WASM yoga node. liveInstances.set(stdout, app) already ran above, so a
+      // throw HERE — before the originalMount try/catch — would leak the registry entry
+      // (poisoning the stdout: every later mount() hits the reuse guard and
+      // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
+      // the same teardown-then-rethrow guard as originalMount so teardown()
+      // (idempotent; safe at this early stage — it derives all cleanup from the
+      // wired state set so far) restores everything and frees the registry entry,
+      // while the caller still sees the original error.
+      let kittyController: ReturnType<typeof createKittyKeyboardController>;
+      let tuiRoot: ReturnType<typeof createRoot>;
+      try {
+        // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
+        // the refcount floor never drops to 0 while the app runs — raw mode is held
+        // continuously regardless of which input composables come and go, and there
+        // is no cooked-mode oscillation between input and no-input screens. Gated on
+        // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
+        // must not seize raw mode. The matching release happens in the controller's
+        // dispose() at teardown. (Diverges from Ink's lazy default — see
+        // .agents/docs/ink-divergences.md.)
+        if (rawMode === "always" && inputLifecycleActive && stdinController.isRawModeSupported) {
+          stdinController.holdRawModeForLifetime();
+        }
+
+        kittyController = createKittyKeyboardController(stdin, stdout);
+        // Register BEFORE init(): in auto mode, init() installs a stdin 'data'
+        // listener + a 200ms detection timer and only THEN writes the support
+        // query ("\x1b[?u") — which can throw on a broken stream. Assigning
+        // mountedKittyController first lets teardown's dispose() (which calls
+        // cancelDetection: removes the listener, clears the timer) run on that
+        // throw, instead of leaking a dangling stdin listener until the timer fires.
+        mountedKittyController = kittyController;
+        kittyController.init(kittyKeyboard, inputLifecycleActive);
+
+        tuiRoot = createRoot(appContext);
+        attachYoga(tuiRoot);
+        // Record the root BEFORE setWidth so teardown's `if (mountedRoot)
+        // detachYoga(mountedRoot)` frees the just-allocated yoga node even if
+        // setWidth (or anything below) throws.
+        mountedRoot = tuiRoot;
+        tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
+      } catch (err) {
+        try {
+          teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
+        } catch {
+          // A failing best-effort restore must NOT replace `err` — the ORIGINAL
+          // pre-mount error must survive and be rethrown (mirrors the
+          // originalMount catch below).
+        }
+        throw err;
+      }
+
+      const writer = createFrameWriter(stdout, {
+        incremental: incrementalRendering,
+      });
+      mountedWriter = writer;
+      mountedClear = () => {
+        runLifecycleTransaction(() => {
+          if (!dynamicUpdatesLive || terminalSuspended) return;
+          if (fixedFullscreenSurface) {
+            runSynchronizedOutput(() => {
+              stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
+              writer.sync("", { cursor: false });
+            });
+            return;
+          }
+          if (isScreenReaderEnabled) {
+            runSynchronizedOutput(() => {
+              if (frameState.outputHeight > 0) {
+                stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
+              }
+              frameState.lastOutput = "";
+              frameState.lastOutputToRender = "";
+              frameState.outputHeight = 0;
+            });
+            return;
+          }
+          writer.clear();
+          // The physical frame is now blank. Forget its row bookkeeping without
+          // writing anything: recording the erased frame as a live baseline would
+          // make a second clear/update walk upward into pre-app history. The logical
+          // frameState remains available for a coordinated write to restore later,
+          // while a real commit can paint it again from this owned origin.
+          writer.reset({ cursorDirty: false });
+        });
+      };
+      const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
+
+      function runSynchronizedOutput(body: () => void): void {
+        if (!synchronize) {
+          body();
+          return;
+        }
+
+        let error: unknown;
+        try {
+          stdout.write(bsu);
+          body();
+        } catch (caught) {
+          error = caught;
+        } finally {
+          try {
+            stdout.write(esu);
+          } catch (caught) {
+            error ??= caught;
+          }
+        }
+        if (error !== undefined) throw error;
+      }
+
+      function runCoordinatedWrite(body: () => void, finalize: () => void): void {
+        let error: unknown;
+        let bodyStarted = false;
+        let syncStarted = false;
+        try {
+          if (synchronize) {
+            stdout.write(bsu);
+            syncStarted = true;
+          }
+          bodyStarted = true;
+          body();
+        } catch (caught) {
+          error = caught;
+        } finally {
+          if (bodyStarted) {
+            try {
+              finalize();
+            } catch (caught) {
+              error ??= caught;
+            }
+          }
+          if (syncStarted) {
+            try {
+              stdout.write(esu);
+            } catch (caught) {
+              error ??= caught;
+            }
+          }
+        }
+        if (error !== undefined) throw error;
+      }
+
+      function repaintTranscript(writeBefore: () => void) {
+        runCoordinatedWrite(
+          () => {
+            if (frameState.outputHeight > 0) {
+              stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
+            }
+            writeBefore();
+          },
+          () => {
+            // Preserve the existing transcript updater's empty-frame fallback:
+            // after a coordinated write an empty live region still restores one
+            // newline (`lastOutput + "\n"`), matching the pinned Ink behavior.
+            stdout.write(frameState.lastOutput || "\n");
+          },
+        );
+      }
+
+      function repaintFullscreen(output: string, options: { writeBefore?: () => void } = {}) {
+        runLifecycleTransaction(() => {
+          // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
+          // clear that surface after every coordinated side-channel write instead
+          // of restoring relative to the cursor position that the write left
+          // behind. This keeps paint geometry, cursor coordinates, and the mouse
+          // hit map in the same viewport coordinate system.
+          runCoordinatedWrite(
+            () => {
+              // Hide first even on terminals without synchronized updates. A declared
+              // caret may be visible after the previous sync; leaving it visible while
+              // a full repaint streams produces a corner-to-caret flash.
+              stdout.write(hideCursorEscape);
+              options.writeBefore?.();
+            },
+            () => {
+              writer.setCursorPosition(cursorPosition);
+              stdout.write(ansiEscapes.clearViewport + output);
+              writer.sync(output);
+            },
+          );
+
+          frameState.lastOutput = output;
+          frameState.lastOutputToRender = output;
+          frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+        });
+      }
+
+      function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
+        const hasStaticOutput = staticOutput !== "";
+        const isTty = !!stdout.isTTY;
+        const viewportRows = renderSession.legacyWindowRows.value;
+
+        if (fixedFullscreenSurface) {
+          const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
+          if (shouldWarnStatic) {
+            warnedFullscreenStatic = true;
+          }
+          repaintFullscreen(output, {
+            // Keep the write-once stream observable to stream consumers, but do
+            // not let it become fullscreen layout/history or move the live
+            // surface. The repaint below immediately restores the fixed viewport.
+            writeBefore:
+              hasStaticOutput || shouldWarnStatic
+                ? () => {
+                    if (shouldWarnStatic) stderr.write(FULLSCREEN_STATIC_WARNING);
+                    if (hasStaticOutput) stdout.write(staticOutput);
+                  }
+                : undefined,
+          });
+          return;
+        }
+
+        if (output !== "" || hasStaticOutput || writer.isCursorDirty()) {
+          ensureInlineRegionStart();
+        }
+
+        // A frame that fills or exceeds the viewport gets no trailing newline.
+        // Only apply when writing to a real TTY — piped output always gets trailing newlines.
+        const fillsViewport = isTty && outputHeight >= viewportRows;
+        // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
+        // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
+        // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
+        // and `lastOutputHeight = wrappedOutput === "" ? 0 : split("\n").length`.
+        // So EVERY SR frame, empty or not, must skip the trailing newline: an empty
+        // frame emits zero lines instead of a spurious blank line (G17), and a
+        // non-empty multi-line frame keeps its true line count so the next-frame
+        // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
+        // interactive frames are untouched — they still append "\n" as before.
+        const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
+
+        if (hasStaticOutput) {
+          // Clear frame -> write static -> re-render frame via log-update
+          runSynchronizedOutput(() => {
+            writer.clear();
+            stdout.write(staticOutput);
+            writer.write(outputToRender);
+          });
+        } else {
+          // Mirror Ink's TWO-LEVEL commit gate, which keeps the synchronized-update
+          // wrapper and the "should we touch log-update at all" decision separate:
+          //
+          //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
+          //    decides whether to call the (throttled) log at all. It compares the RAW
+          //    frame (`output`, no trailing "\n") against the PREVIOUS frame
+          //    (frameState.lastOutput, set at the end of this fn) — NOT log-update's
+          //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
+          //    case: on the first commit of an app that renders nothing, both are ""
+          //    so the gate is false and log-update — including its LAZY cursor hide —
+          //    is never reached, so the initial empty commit emits no log-update
+          //    cursor escapes (the cursor stays visible), matching Ink. Using
+          //    willRender(outputToRender) here
+          //    instead would compare "\n" against "" and wrongly fire the hide. A
+          //    cursor-only move whose position is unchanged is still dirty, so the
+          //    `|| isCursorDirty` disjunct keeps it reaching log-update.
+          //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
+          //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
+          //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
+          //    flag is reset and the write no-ops cleanly — Ink emits ZERO bytes there,
+          //    not an empty `BSU`+`ESU` pair.
+          //
+          // willRender()/isCursorDirty() must be read BEFORE writer.write():
+          // log-update's render consumes/resets isCursorDirty, so reading them
+          // afterwards would be stale. Both reads are pure (no mutation), and the
+          // bsu/esu wrapper is gated on this single pre-write snapshot.
+          const willRender = writer.willRender(outputToRender);
+          if (output !== frameState.lastOutput || writer.isCursorDirty()) {
+            const shouldWrap = synchronize && willRender;
+            if (shouldWrap) runSynchronizedOutput(() => writer.write(outputToRender));
+            else writer.write(outputToRender);
+          }
+        }
+
+        frameState.lastOutput = output;
+        frameState.lastOutputToRender = outputToRender;
+        frameState.outputHeight = outputHeight;
+      }
+
+      function markBoundaryErrorFrameRendered(frame: string): void {
+        const errorMessage =
+          pendingBoundaryError === undefined ? "" : messageForNonError(pendingBoundaryError);
+        // A successful write is not enough when the bounded viewport clipped the
+        // entire error message. In that case the rich overview is not durable and
+        // teardown must still emit the complete plain-text report to stderr.
+        const messageIsVisible =
+          errorMessage === "" ? frame.trim().length > 0 : frame.includes(errorMessage);
+        if (
+          messageIsVisible &&
+          !pendingBoundaryFrameWriteFailed &&
+          mountedBoundaryErrorsAreDurable &&
+          pendingBoundaryError !== undefined &&
+          pendingBoundaryFrameReady === pendingBoundaryError &&
+          pendingExitError === pendingBoundaryError
+        ) {
+          pendingExitErrorWasRendered = true;
+        }
+      }
+
+      // Produce the dynamic frame for a given terminal width. In screen-reader
+      // mode the tree is linearized to flat plain text (no borders / 2D grid)
+      // via renderScreenReaderOutput, then wrapped with wrapAnsi(trim:false,
+      // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
+      // <Static> channel is excluded here (skipStaticElements) just like
+      // render-to-string.ts; static output is handled separately by commit().
+      function renderFrame(
+        width: number,
+        hitMap?: MouseHitMapEntry[],
+        viewportRows?: number,
+      ): string {
+        if (!isScreenReaderEnabled) {
+          const output = paint(tuiRoot, {
+            hitMap,
+            viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+          });
+          // The hard paint viewport is the primary guard. Keep a final physical
+          // row bound as defense-in-depth for future paint extensions: Inline
+          // must never let an application frame exceed terminal-addressable rows.
+          return boundedInlineSurface && viewportRows !== undefined
+            ? output.split("\n").slice(0, viewportRows).join("\n")
+            : output;
+        }
+        const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
+        return wrapAnsi(linear, width, { trim: false, hard: true });
+      }
+
+      function commit() {
+        if (terminalSuspended && !terminalResumeInProgress) return;
+        const leaveLifecycleTransaction = enterLifecycleTransaction();
+        try {
+          const start = onRender ? performance.now() : 0;
+
+          // Capture static output as a string (for both interactive and non-interactive paths)
+          const w = renderSession.session.dimensions.layout.columns;
+          let staticOutput = "";
+          for (const stat of findStatics(tuiRoot)) {
+            const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
+            if (staticFrame.length > 0) {
+              staticOutput += staticFrame + "\n";
+            }
+          }
+          const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
+          if (!dynamicUpdatesLive) {
+            // Non-interactive: compute the dynamic frame now, write static output
+            // after onRender, and defer dynamic frame output until unmount.
+            tuiRoot.yoga.setWidth(w);
+            const restoreLayoutGuards = calculateLayoutWithContentGuards(
+              tuiRoot,
+              w,
+              undefined,
+              Yoga.DIRECTION_LTR,
+            );
+            try {
+              emitLayoutListeners(tuiRoot);
+              const frame = renderFrame(w);
+              renderObserver?.onCommit?.({
+                dynamic: frame,
+                staticOutput: hasStaticOutput ? staticOutput : "",
+                phase: teardownStarted ? "teardown" : "update",
+              });
+              frameState.lastOutput = frame;
+              frameState.lastOutputToRender = frame + "\n";
+              frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+              if (onRender) onRender({ renderTime: performance.now() - start });
+              if (hasStaticOutput) {
+                stdout.write(staticOutput);
+              }
+            } finally {
+              restoreLayoutGuards();
+            }
             return;
           }
 
-          if (hasStaticOutput) {
-            // Already erased above; write the wrapped output directly.
-            stdout.write(frame);
-          } else {
-            const erase =
-              frameState.outputHeight > 0 ? ansiEscapes.eraseLines(frameState.outputHeight) : "";
-            stdout.write(erase + frame);
-          }
-
-          // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
-          // case — empty frame => 0 lines, multi-line frame keeps its true count so
-          // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
-          frameState.lastOutput = frame;
-          frameState.lastOutputToRender = frame;
-          frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-
-          if (sync) stdout.write(esu);
-          return;
-        }
-
-        // Interactive path
-        if (onRender) onRender({ renderTime: performance.now() - start });
-        renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
-      } finally {
-        restoreLayoutGuards();
-      }
-    }
-
-    // A single render-throttle window derived from maxFps drives BOTH the
-    // commit scheduler and the animation scheduler, mirroring Ink where one
-    // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
-    // to useAnimation (ink.tsx:337-344, 650). Screen-reader paths and
-    // non-positive maxFps are unthrottled (0 = commit every tick), matching
-    // Ink's `unthrottled` gate.
-    const unthrottled = isScreenReaderEnabled || maxFps <= 0;
-    const renderThrottleMs = !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
-
-    // Unthrottled screen-reader or maxFps<=0 commits fire every tick, so the
-    // throttle window is unused there — renderThrottleMs is already 0. Otherwise
-    // it's the maxFps-derived window (34ms at the default maxFps=30).
-    const scheduler = createCommitScheduler(commit, {
-      immediate: unthrottled,
-      throttleMs: renderThrottleMs,
-    });
-    const mouseController = createMouseController({
-      stdin: stdinController,
-      fullscreen: targetedMouseInputAvailable,
-      now: scheduler.now,
-    });
-    appContext.internal_mouse = mouseController;
-    mountedScheduler = scheduler;
-    mountedCommit = commit;
-    scheduledCommit = scheduler.schedule;
-
-    // Internal provides — set before the actual mount so components can inject
-    // them. User .use/.provide calls made earlier on the chain stay intact;
-    // our keys are Symbols so there's no collision risk.
-    baseApp.provide(InternalRenderSessionKey, renderSession);
-    baseApp.provide(AppContextKey, appContext);
-    baseApp.provide(FocusContextKey, focusContext);
-    baseApp.provide(StdinContextKey, stdinController);
-    // useAnimation coalesces ticks within this same window so committed deltas
-    // accumulate to the real wall-clock elapsed time (the value committed to
-    // stdout), rather than a single scheduler interval. It shares the exact
-    // renderThrottleMs the commit scheduler uses, so the animation cadence
-    // tracks the actual commit cadence (Ink ink.tsx:650).
-    const animationScheduler = createAnimationScheduler(renderThrottleMs);
-    mountedAnimationScheduler = animationScheduler;
-    baseApp.provide(AnimationSchedulerKey, animationScheduler);
-    if (isDevConnected()) {
-      baseApp.provide(DevStateKey, devState);
-      // Register this app's INTERNAL teardown (not unmount()) with the HMR
-      // bridge: on a full reload the bridge runs it to unmount this app before
-      // the runner re-imports the entry. Using teardown() — not unmount() —
-      // deliberately does NOT settle the exit promise, so a reload is not seen
-      // as an app exit and the dev-server-close hook below stays untriggered.
-      mountedDevTeardown = () => teardown();
-      registerDevApp(mountedDevTeardown);
-      // App-exit → dev-server teardown. In dev the app runs in-process under the
-      // Vite dev server, which holds the event loop open (ports, watchers, the
-      // module runner). When the app genuinely exits (useApp().exit(),
-      // waitUntilExit() drain, error exit) the exit promise settles; signal the
-      // dev plugin over the in-process hot channel (notifyDevExit → the plugin's
-      // ssr.hot listener closes the server) so the process exits cleanly. A full
-      // reload tears down via teardown() above and never settles this promise, so
-      // it cannot reach here. The hot channel routes to THIS app's connected server
-      // (bridgedHot), so there's no cross-server ambiguity — no process-global.
-      // .finally derives a NEW promise that re-rejects on an error-exit; .catch it
-      // so that chain can't surface as an unhandled rejection (the original
-      // exitPromise is already .catch()-guarded above).
-      void exitPromise.finally(() => notifyDevExit()).catch(() => {});
-    }
-
-    // Wire exit-with-error for the error boundary (must be set before mount).
-    exitWithError = (e: Error) => appContext.exit(e);
-    recordExitError = (e: Error) => {
-      // First-wins: don't overwrite an exit already decided (a clean exit() or a
-      // prior error). Records the error so a racing unmount()'s resolveExit()
-      // rejects with it instead of resolving clean (BUG #2). Mirrors the
-      // synchronous record in appContext.exit() — pendingExitError is set here,
-      // then the deferred exitWithError() drives teardown/resolveExit().
-      if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
-        pendingExitError = e;
-      }
-    };
-
-    // Enter the alternate screen before rendering starts when the resolved
-    // surface is an effective fullscreen terminal. Emit home explicitly so
-    // targeted mouse hit-testing can treat the frame origin as screen (0,0).
-    if (fixedFullscreenSurface) {
-      writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H");
-      writeBestEffort(stdout, "\x1b[?25l");
-    }
-    mountedAlternateScreen = fixedFullscreenSurface;
-
-    // Patch console.log/warn/error etc. to route through writeToStdout /
-    // writeToStderr so console output doesn't corrupt the rendered frame.
-    // Installed BEFORE originalMount (matching Ink, which patches in its
-    // constructor before the first render — ink.tsx:435-436): a dev-only
-    // [Vue warn] emitted DURING the initial mount (e.g. the missing-render-
-    // function warn when the root's setup() throws) must hit the filter too.
-    // The mount-throw catch below runs teardown(), which restores the console,
-    // so a synchronous mount failure cannot leak a patched console.
-    if (patchConsole !== false) {
-      try {
-        mountedRestoreConsole = patchConsoleFn((stream, data) => {
-          if (stream === "stdout") {
-            appContext.writeToStdout(data);
-          }
-          if (stream === "stderr") {
-            // Filter Vue internal warnings
-            if (!data.startsWith("[Vue warn]")) {
-              appContext.writeToStderr(data);
+          const exactViewportRows = fixedFullscreenSurface
+            ? (renderSession.session.dimensions.layout.rows ?? undefined)
+            : undefined;
+          tuiRoot.yoga.setWidth(w);
+          let restoreLayoutGuards = calculateLayoutWithContentGuards(
+            tuiRoot,
+            w,
+            exactViewportRows,
+            Yoga.DIRECTION_LTR,
+          );
+          try {
+            const inlineMaximumRows = boundedInlineSurface
+              ? (renderSession.session.dimensions.layout.rows ?? undefined)
+              : undefined;
+            if (
+              inlineMaximumRows !== undefined &&
+              tuiRoot.yoga.getComputedLayout().height > inlineMaximumRows
+            ) {
+              // A permanent Yoga max-height changes how nested percentage heights
+              // resolve even when the natural tree is short (for example, 50% of a
+              // six-row Box incorrectly becomes 50% of the terminal). Compute the
+              // natural tree first, and only rerun with an exact available height
+              // when it actually exceeds Inline's maximum. This gives overflowing
+              // flex layouts a real rows-sized allocation without padding or
+              // perturbing short layouts.
+              restoreLayoutGuards();
+              restoreLayoutGuards = calculateLayoutWithContentGuards(
+                tuiRoot,
+                w,
+                inlineMaximumRows,
+                Yoga.DIRECTION_LTR,
+              );
             }
+            emitLayoutListeners(tuiRoot);
+            const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
+            const computedRootHeight = Math.max(
+              0,
+              Math.floor(tuiRoot.yoga.getComputedLayout().height),
+            );
+            const inlineViewportRows = boundedInlineSurface
+              ? Math.min(
+                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
+                  computedRootHeight,
+                )
+              : undefined;
+            const paintViewportRows = exactViewportRows ?? inlineViewportRows;
+            const frame = renderFrame(w, hitMap, paintViewportRows);
+            renderObserver?.onCommit?.({
+              dynamic: frame,
+              staticOutput: hasStaticOutput ? staticOutput : "",
+              phase: teardownStarted ? "teardown" : "update",
+            });
+            mouseController.updateHitMap(hitMap ?? []);
+            const outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
+            if (fixedFullscreenSurface) {
+              if (onRender) onRender({ renderTime: performance.now() - start });
+              renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+              return;
+            }
+
+            if (isScreenReaderEnabled) {
+              // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
+              // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
+              // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
+              // (inline static, if any) + the wrapped output, then RETURNS — before the
+              // normal interactive frame path. Crucially it:
+              //   - never emits a whole-terminal reset, so a tall transcript cannot
+              //     delete terminal-owned scrollback;
+              //   - emits new Static content once instead of retaining/replaying it;
+              //   - never routes through the log-update writer (raw writes only);
+              //   - leaves the cursor visible (the mount-time hide is skipped for SR).
+              // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
+              // it plays the role of Ink's `wrappedOutput`.
+              if (onRender) onRender({ renderTime: performance.now() - start });
+              if (frame !== "" || hasStaticOutput) ensureInlineRegionStart();
+              runSynchronizedOutput(() => {
+                if (hasStaticOutput) {
+                  // Erase the previous main output before writing new static output
+                  // (ink.tsx:579-588), then reset the tracked height to 0.
+                  const erase =
+                    frameState.outputHeight > 0
+                      ? ansiEscapes.eraseLines(frameState.outputHeight)
+                      : "";
+                  stdout.write(erase + staticOutput);
+                  frameState.outputHeight = 0;
+                }
+
+                if (frame === frameState.lastOutput && !hasStaticOutput) return;
+
+                if (hasStaticOutput) {
+                  // Already erased above; write the wrapped output directly.
+                  stdout.write(frame);
+                } else {
+                  const erase =
+                    frameState.outputHeight > 0
+                      ? ansiEscapes.eraseLines(frameState.outputHeight)
+                      : "";
+                  stdout.write(erase + frame);
+                }
+
+                // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
+                // case — empty frame => 0 lines, multi-line frame keeps its true count so
+                // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
+                frameState.lastOutput = frame;
+                frameState.lastOutputToRender = frame;
+                frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
+              });
+              markBoundaryErrorFrameRendered(frame);
+              return;
+            }
+
+            // Interactive path
+            if (onRender) onRender({ renderTime: performance.now() - start });
+            renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+            markBoundaryErrorFrameRendered(frame);
+          } finally {
+            restoreLayoutGuards();
           }
-        });
-      } catch {
-        // patch-console uses console.Console which may not be available in
-        // some environments (e.g., vitest workers). Degrade gracefully.
-      }
-    }
-
-    // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
-    // LAZILY: the non-alt-screen hide comes from log-update's isTTY-gated
-    // cliCursor.hide on the first render that actually writes (log-update.ts:
-    // 55-59), and the onRender outer gate skips log-update entirely for an empty
-    // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
-    // commit). So an interactive app whose root renders nothing emits ZERO
-    // cursor escapes — the cursor stays visible — while a non-empty / useCursor
-    // app hides on its first render via the same lazy path. The renderInteractive
-    // commit gate below mirrors that `output !== frameState.lastOutput` outer
-    // condition so the empty-frame skip (and thus the no-hide behavior) holds.
-    //
-    // Ordering for a useCursor app is preserved without an eager hide: log-update
-    // hides-then-shows WITHIN a single render() (it hides at the top, then emits
-    // the showCursor + cursorTo suffix for the active position), so the last
-    // visibility change on the first frame is the SHOW — exactly Ink's ordering.
-    //
-    // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
-    // dedicated write branch never routes through log-update, so no hide. The
-    // only mount-time hide that remains is the alt-screen one above
-    // (setAlternateScreen, alt-screen + isTTY gated), mirroring Ink.
-
-    // The cursor (and alternate screen) have already been hidden/entered above,
-    // but the process-exit and signal-exit teardown handlers are not wired until
-    // after originalMount returns (the resize handler below needs `writer`). If
-    // originalMount throws SYNCHRONOUSLY in a way the onErrorCaptured boundary
-    // can't catch — a renderer/patch-level vnode error (e.g. a vnode whose
-    // `type` getter throws) — nothing would ever restore the cursor and the
-    // terminal would be left permanently invisible. Ink avoids this by wiring
-    // signalExit(this.unmount) in its CONSTRUCTOR (ink.tsx:426), before any
-    // hide/render. We get the same "teardown wired before hide" guarantee by
-    // running teardown() (which shows the cursor, leaves the alt screen and
-    // cleans up — idempotent) before rethrowing. The success path is unchanged:
-    // teardown only runs on a throw, so the last visibility change on a normal
-    // mount is still the SHOW emitted by the first commit.
-    let proxy: ComponentPublicInstance;
-    vueMountStarted = true;
-    try {
-      proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
-    } catch (err) {
-      try {
-        teardown(); // best-effort cursor/alt-screen restore
-      } catch {
-        // teardown's restore write (mountedWriter.done() -> log-update
-        // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
-        // stdout.write fails. A failing best-effort restore must NOT replace
-        // `err` — the ORIGINAL mount error must always survive and be rethrown.
-      }
-      throw err;
-    }
-
-    // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
-    // async errors in Vue's internal scheduler). The error boundary returns
-    // false to stop propagation, so caught errors won't reach here.
-    baseApp.config.errorHandler = (err) => {
-      // Preserve a genuine (incl. cross-realm) Error so the original survives to
-      // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
-      // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
-      appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
-    };
-
-    // Only listen for resize when dynamic output is live (matching Ink).
-    // Render synchronously on resize rather than through the commit throttle:
-    // a resize is a discrete event that changes the viewport. Deferring it
-    // through the ~32ms throttle can leave stale geometry on screen and race a
-    // second commit against the freshly established Inline region.
-    if (dynamicUpdatesLive) {
-      // Track the physical geometry that the current relative-writer baseline
-      // was painted against. A real dimension change can invalidate that
-      // baseline even when the logical component output is unchanged.
-      let lastTerminalWidth = renderSession.session.dimensions.layout.columns;
-      let lastTerminalRows =
-        renderSession.session.dimensions.terminal?.rows ?? renderSession.legacyWindowRows.value;
-
-      const onResize = () => {
-        const nextDimensions = readCurrentDimensions();
-        // Once a visual terminal mode is acquired its immutable mode does not
-        // flip to unavailable because of a transient invalid resize report.
-        // Keep the last coherent pair and wait for the next valid event.
-        if (nextDimensions === null) return;
-
-        // Cancel any pending trailing commit before painting synchronously. The
-        // synchronous commit below already reflects the current tree, so a
-        // second scheduled paint would be redundant and can race frame state.
-        scheduler.cancel();
-
-        renderSession.updateDimensions(nextDimensions);
-        const currentWidth = nextDimensions.layout.columns;
-        const currentRows = nextDimensions.terminal?.rows ?? nextDimensions.legacyWindowRows;
-        const dimensionsChanged =
-          currentWidth !== lastTerminalWidth || currentRows !== lastTerminalRows;
-        // A screen-reader transcript intentionally works even when rows are
-        // unknown. Treat every resize event as invalidating its old physical
-        // row mapping; a synthetic legacy row count cannot prove otherwise.
-        const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
-
-        if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
-          // Terminal reflow makes the old logical-line baseline untrustworthy:
-          // erasing it could touch terminal-owned rows. Leave that snapshot
-          // immutable, move to the bottom of the resized viewport, establish a
-          // fresh row, forget writer bookkeeping without emitting erase bytes,
-          // and paint the new bounded region from scratch.
-          if (synchronize) stdout.write(bsu);
-          if (!isScreenReaderEnabled) stdout.write(hideCursorEscape);
-          const bottomClampRows = isScreenReaderEnabled ? TERMINAL_BOTTOM_CLAMP_ROWS : currentRows;
-          stdout.write(ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape);
-          writer.reset();
-          frameState.lastOutput = "";
-          frameState.lastOutputToRender = "";
-          frameState.outputHeight = 0;
-          if (synchronize) stdout.write(esu);
-        } else if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
-          // Live non-terminal streams retain the existing relative-writer
-          // narrowing behavior; they do not claim terminal history ownership.
-          writer.clear();
-          frameState.lastOutput = "";
-          frameState.lastOutputToRender = "";
+        } catch (error) {
+          if (
+            pendingBoundaryError !== undefined &&
+            pendingBoundaryFrameReady === pendingBoundaryError &&
+            pendingExitError === pendingBoundaryError
+          ) {
+            // Writer implementations update their dedup baseline before calling
+            // the host stream. If that stream throws, teardown's final commit may
+            // be deduplicated even though no durable frame reached the terminal.
+            // Preserve the failed attempt so a later no-op commit cannot suppress
+            // the plain-text stderr fallback.
+            pendingBoundaryFrameWriteFailed = true;
+          }
+          throw error;
+        } finally {
+          leaveLifecycleTransaction();
         }
-        lastTerminalWidth = currentWidth;
-        lastTerminalRows = currentRows;
+      }
 
-        commit();
+      // A single render-throttle window derived from maxFps drives BOTH the
+      // commit scheduler and the animation scheduler, mirroring Ink where one
+      // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
+      // to useAnimation (ink.tsx:337-344, 650). Screen-reader paths and
+      // non-positive maxFps are unthrottled (0 = commit every tick), matching
+      // Ink's `unthrottled` gate.
+      const unthrottled = isScreenReaderEnabled || maxFps <= 0;
+      const renderThrottleMs =
+        !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
+
+      // Unthrottled screen-reader or maxFps<=0 commits fire every tick, so the
+      // throttle window is unused there — renderThrottleMs is already 0. Otherwise
+      // it's the maxFps-derived window (34ms at the default maxFps=30).
+      const scheduler = createCommitScheduler(commit, {
+        immediate: unthrottled,
+        throttleMs: renderThrottleMs,
+      });
+      const mouseController = createMouseController({
+        stdin: stdinController,
+        fullscreen: targetedMouseInputAvailable,
+        now: scheduler.now,
+      });
+      appContext.internal_mouse = mouseController;
+      mountedScheduler = scheduler;
+      mountedCommit = commit;
+      resumeSurfaceCommit = commit;
+      scheduledCommit = () => {
+        if (!terminalSuspended) scheduler.schedule();
       };
-      stdout.on("resize", onResize);
-      mountedResizeHandler = onResize;
+
+      // Internal provides — set before the actual mount so components can inject
+      // them. User .use/.provide calls made earlier on the chain stay intact;
+      // our keys are Symbols so there's no collision risk.
+      baseApp.provide(InternalRenderSessionKey, renderSession);
+      baseApp.provide(AppContextKey, appContext);
+      baseApp.provide(FocusContextKey, focusContext);
+      baseApp.provide(StdinContextKey, stdinController);
+      // useAnimation coalesces ticks within this same window so committed deltas
+      // accumulate to the real wall-clock elapsed time (the value committed to
+      // stdout), rather than a single scheduler interval. It shares the exact
+      // renderThrottleMs the commit scheduler uses, so the animation cadence
+      // tracks the actual commit cadence (Ink ink.tsx:650).
+      const animationScheduler = createAnimationScheduler(renderThrottleMs);
+      mountedAnimationScheduler = animationScheduler;
+      baseApp.provide(AnimationSchedulerKey, animationScheduler);
+      if (isDevConnected()) {
+        baseApp.provide(DevStateKey, devState);
+        // Register this app's INTERNAL teardown (not unmount()) with the HMR
+        // bridge: on a full reload the bridge runs it to unmount this app before
+        // the runner re-imports the entry. Using teardown() — not unmount() —
+        // deliberately does NOT settle the exit promise, so a reload is not seen
+        // as an app exit and the dev-server-close hook below stays untriggered.
+        mountedDevTeardown = () => teardown();
+        registerDevApp(mountedDevTeardown);
+        // App-exit → dev-server teardown. In dev the app runs in-process under the
+        // Vite dev server, which holds the event loop open (ports, watchers, the
+        // module runner). When the app genuinely exits (useApp().exit(),
+        // waitUntilExit() drain, error exit) the exit promise settles; signal the
+        // dev plugin over the in-process hot channel (notifyDevExit → the plugin's
+        // ssr.hot listener closes the server) so the process exits cleanly. A full
+        // reload tears down via teardown() above and never settles this promise, so
+        // it cannot reach here. The hot channel routes to THIS app's connected server
+        // (bridgedHot), so there's no cross-server ambiguity — no process-global.
+        // .finally derives a NEW promise that re-rejects on an error-exit; .catch it
+        // so that chain can't surface as an unhandled rejection (the original
+        // exitPromise is already .catch()-guarded above).
+        void exitPromise.finally(() => notifyDevExit()).catch(() => {});
+      }
+
+      // Wire exit-with-error for the error boundary (must be set before mount).
+      exitWithError = (e: Error) => appContext.exit(e);
+      recordExitError = (e: Error) => {
+        // First-wins: don't overwrite an exit already decided (a clean exit() or a
+        // prior error). Records the error so a racing unmount()'s resolveExit()
+        // rejects with it instead of resolving clean (BUG #2). Mirrors the
+        // synchronous record in appContext.exit() — pendingExitError is set here,
+        // then the deferred exitWithError() drives teardown/resolveExit().
+        if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
+          pendingExitError = e;
+          pendingBoundaryError = e;
+          pendingExitErrorWasRendered = false;
+          pendingBoundaryFrameWriteFailed = false;
+        }
+      };
+
+      // Enter the alternate screen before rendering starts when the resolved
+      // surface is an effective fullscreen terminal. Emit home explicitly so
+      // targeted mouse hit-testing can treat the frame origin as screen (0,0).
+      if (fixedFullscreenSurface) {
+        // These are acquisitions, not best-effort restores. A thrown write aborts
+        // the mount transaction; each lease is recorded only after its enable
+        // bytes were accepted, so rollback never disables an unacquired mode.
+        stdout.write(ansiEscapes.enterAlternativeScreen + "\x1b[H");
+        mountedAlternateScreen = true;
+        stdout.write("\x1b[?25l");
+        mountedFullscreenCursorHidden = true;
+      }
+
+      // Patch console.log/warn/error etc. to route through writeToStdout /
+      // writeToStderr so console output doesn't corrupt the rendered frame.
+      // Installed BEFORE originalMount (matching Ink, which patches in its
+      // constructor before the first render — ink.tsx:435-436): a dev-only
+      // [Vue warn] emitted DURING the initial mount (e.g. the missing-render-
+      // function warn when the root's setup() throws) must hit the filter too.
+      // The mount-throw catch below runs teardown(), which restores the console,
+      // so a synchronous mount failure cannot leak a patched console.
+      if (patchConsole !== false) {
+        try {
+          mountedRestoreConsole = patchConsoleFn((stream, data) => {
+            if (stream === "stdout") {
+              appContext.writeToStdout(data);
+            }
+            if (stream === "stderr") {
+              // Filter Vue internal warnings
+              if (!data.startsWith("[Vue warn]")) {
+                appContext.writeToStderr(data);
+              }
+            }
+          });
+        } catch {
+          // patch-console uses console.Console which may not be available in
+          // some environments (e.g., vitest workers). Degrade gracefully.
+        }
+      }
+
+      // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
+      // LAZILY: the non-alt-screen hide comes from log-update's isTTY-gated
+      // cliCursor.hide on the first render that actually writes (log-update.ts:
+      // 55-59), and the onRender outer gate skips log-update entirely for an empty
+      // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
+      // commit). So an interactive app whose root renders nothing emits ZERO
+      // cursor escapes — the cursor stays visible — while a non-empty / useCursor
+      // app hides on its first render via the same lazy path. The renderInteractive
+      // commit gate below mirrors that `output !== frameState.lastOutput` outer
+      // condition so the empty-frame skip (and thus the no-hide behavior) holds.
+      //
+      // Ordering for a useCursor app is preserved without an eager hide: log-update
+      // hides-then-shows WITHIN a single render() (it hides at the top, then emits
+      // the showCursor + cursorTo suffix for the active position), so the last
+      // visibility change on the first frame is the SHOW — exactly Ink's ordering.
+      //
+      // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
+      // dedicated write branch never routes through log-update, so no hide. The
+      // only mount-time hide that remains is the alt-screen one above
+      // (setAlternateScreen, alt-screen + isTTY gated), mirroring Ink.
+
+      // Process-exit, termination, and suspension handlers are already wired
+      // before terminal acquisition. This catch still routes renderer/patch-level
+      // vnode failures that bypass onErrorCaptured through the same idempotent
+      // rollback before preserving the original mount error.
+      let proxy: ComponentPublicInstance;
+      vueMountStarted = true;
+      try {
+        proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+      } catch (err) {
+        try {
+          teardown(); // best-effort cursor/alt-screen restore
+        } catch {
+          // teardown's restore write (mountedWriter.done() -> log-update
+          // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
+          // stdout.write fails. A failing best-effort restore must NOT replace
+          // `err` — the ORIGINAL mount error must always survive and be rethrown.
+        }
+        throw err;
+      }
+
+      // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
+      // async errors in Vue's internal scheduler). The error boundary returns
+      // false to stop propagation, so caught errors won't reach here.
+      baseApp.config.errorHandler = (err) => {
+        // Preserve a genuine (incl. cross-realm) Error so the original survives to
+        // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
+        // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
+        appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
+      };
+
+      // Only listen for resize when dynamic output is live (matching Ink).
+      // Render synchronously on resize rather than through the commit throttle:
+      // a resize is a discrete event that changes the viewport. Deferring it
+      // through the ~32ms throttle can leave stale geometry on screen and race a
+      // second commit against the freshly established Inline region.
+      resumeSurfaceCommit = commit;
+      if (dynamicUpdatesLive) {
+        // Track the physical geometry that the current relative-writer baseline
+        // was painted against. A real dimension change can invalidate that
+        // baseline even when the logical component output is unchanged.
+        let lastTerminalWidth = renderSession.session.dimensions.layout.columns;
+        let lastTerminalRows =
+          renderSession.session.dimensions.terminal?.rows ?? renderSession.legacyWindowRows.value;
+
+        const updateDimensionsAndCommit = (preferFreshProbe: boolean) => {
+          runLifecycleTransaction(() => {
+            if (terminalSuspended && !terminalResumeInProgress) return;
+            const nextDimensions = readCurrentDimensions(preferFreshProbe);
+            // Once a visual terminal mode is acquired its immutable mode does not
+            // flip to unavailable because of a transient invalid resize report.
+            // Keep the last coherent pair and wait for the next valid event.
+            if (nextDimensions === null) {
+              // A live surface already has one last coherent size. Continuation
+              // must still repaint it when a fresh query is temporarily
+              // unavailable; only a normal resize event may wait for a valid pair.
+              if (preferFreshProbe) {
+                scheduler.cancel();
+                commit();
+              }
+              return;
+            }
+
+            // Cancel any pending trailing commit before painting synchronously. The
+            // synchronous commit below already reflects the current tree, so a
+            // second scheduled paint would be redundant and can race frame state.
+            scheduler.cancel();
+
+            renderSession.updateDimensions(nextDimensions);
+            const currentWidth = nextDimensions.layout.columns;
+            const currentRows = nextDimensions.terminal?.rows ?? nextDimensions.legacyWindowRows;
+            const dimensionsChanged =
+              currentWidth !== lastTerminalWidth || currentRows !== lastTerminalRows;
+            // A screen-reader transcript intentionally works even when rows are
+            // unknown. Treat every resize event as invalidating its old physical
+            // row mapping; a synthetic legacy row count cannot prove otherwise.
+            const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
+
+            if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
+              // Terminal reflow makes the old logical-line baseline untrustworthy:
+              // erasing it could touch terminal-owned rows. Leave that snapshot
+              // immutable, move to the bottom of the resized viewport, establish a
+              // fresh row, forget writer bookkeeping without emitting erase bytes,
+              // and paint the new bounded region from scratch.
+              runSynchronizedOutput(() => {
+                if (!isScreenReaderEnabled) stdout.write(hideCursorEscape);
+                const bottomClampRows = isScreenReaderEnabled
+                  ? TERMINAL_BOTTOM_CLAMP_ROWS
+                  : currentRows;
+                stdout.write(ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape);
+                writer.reset();
+                frameState.lastOutput = "";
+                frameState.lastOutputToRender = "";
+                frameState.outputHeight = 0;
+              });
+            } else if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
+              // Live non-terminal streams retain the existing relative-writer
+              // narrowing behavior; they do not claim terminal history ownership.
+              writer.clear();
+              frameState.lastOutput = "";
+              frameState.lastOutputToRender = "";
+            }
+            lastTerminalWidth = currentWidth;
+            lastTerminalRows = currentRows;
+
+            commit();
+          });
+        };
+        const onResize = () => updateDimensionsAndCommit(false);
+        resumeSurfaceCommit = () => updateDimensionsAndCommit(true);
+        stdout.on("resize", onResize);
+        mountedResizeHandler = onResize;
+      }
+
+      const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
+      leaveMountLifecycleTransaction = null;
+      leaveLifecycleTransaction();
+      return proxy;
+    } catch (error) {
+      const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
+      leaveMountLifecycleTransaction = null;
+      leaveLifecycleTransaction?.();
+      teardown();
+      throw error;
     }
-
-    // Auto-cleanup on process exit (process.exit, event-loop drain, uncaught
-    // exception — anything that fires Node's 'exit' event). teardown() is
-    // sync and idempotent, safe to call from this hook. If the user already
-    // called unmount() / exit() (via useApp()), this is a no-op.
-    const exitListener = () => teardown();
-    process.on("exit", exitListener);
-    mountedExitListener = exitListener;
-
-    // Signal-based teardown (Ink parity G18, ink.tsx:426). On SIGINT/SIGTERM/
-    // SIGHUP signal-exit runs this callback BEFORE the process dies, so
-    // teardown() restores the cursor, leaves the alternate screen, disables
-    // kitty keyboard, flushes the final frame and restores raw mode — the
-    // terminal isn't left corrupted. We do NOT return true / prevent exit
-    // (mirroring Ink's {alwaysLast:false}): signal-exit lets the signal
-    // proceed after the callback. teardown() is idempotent (teardownStarted
-    // guard), so a signal-triggered teardown plus a later unmount() won't
-    // double-run. Registration follows the temporary input-lifecycle policy,
-    // independently of whether output resolved to a terminal or stream: raw
-    // input modes still need restoration even when dynamic output is deferred.
-    // `!mountedUnsubscribeExit` guards against double-register
-    // on a no-op second mount; `!teardownStarted` keeps a spent (already
-    // torn-down) app instance from re-registering on a same-instance remount,
-    // which would otherwise leak — the next unmount() returns early at the
-    // teardownStarted guard before it could unsubscribe.
-    if (inputLifecycleActive && !mountedUnsubscribeExit && !teardownStarted) {
-      // sync=true: signal-exit re-raises the signal right after this callback
-      // returns, so the restore escapes must be flushed to the fd
-      // synchronously (Finding A) — a buffered async write can be lost.
-      mountedUnsubscribeExit = onExit(() => teardown(true), { alwaysLast: false });
-    }
-
-    return proxy;
   };
 
   app.unmount = function unmount(): void {
-    teardown();
-    resolveExit();
+    try {
+      teardown();
+    } finally {
+      resolveExit();
+    }
   };
 
   app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
-    if (!mountedBeforeExitHandler) {
-      mountedBeforeExitHandler = () => {
-        app.unmount();
-      };
-      process.once("beforeExit", mountedBeforeExitHandler);
-    }
     return exitPromise;
   };
 
@@ -1922,6 +2478,10 @@ interface StdinController extends StdinContext {
   // (fs.writeSync) so they reach the fd before signal-exit re-raises the signal.
   // Defaults to the async stdout.write path for normal unmount/exit.
   dispose: (sync?: boolean) => void;
+  /** Temporarily release physical input modes without dropping logical consumers. */
+  suspend: (sync?: boolean) => void;
+  /** Reacquire the physical input modes still requested by logical consumers. */
+  resume: () => void;
   // rawMode 'always': take a lifetime raw-mode hold (raw on + keep-alive + input
   // listener) that input composables stack on top of, with the per-consumer
   // input-state cleanup re-based to this floor.
@@ -1935,13 +2495,24 @@ interface RawModeState {
   // physically on, so it can skip re-issuing ref()/setRawMode(true) and cancel the
   // queued disable — Ink's pendingDisableRawModeRef (App.tsx:335-336,361-368).
   pendingDisable: boolean;
+  baselineRaw: boolean;
+  changedRawMode: boolean;
+  suspended: boolean;
+  physicalRefHeld: boolean;
 }
 const rawModeRegistry = new WeakMap<NodeJS.ReadStream, RawModeState>();
 
 function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
   let state = rawModeRegistry.get(stdin);
   if (!state) {
-    state = { refs: 0, pendingDisable: false };
+    state = {
+      refs: 0,
+      pendingDisable: false,
+      baselineRaw: false,
+      changedRawMode: false,
+      suspended: false,
+      physicalRefHeld: false,
+    };
     rawModeRegistry.set(stdin, state);
   }
   return state;
@@ -1966,6 +2537,9 @@ function createStdinController(
   let bracketedPasteModeCount = 0;
   const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
   let activeSgrMouseMode: SgrMouseMode | undefined;
+  const ownedSgrMouseModes = new Set<SgrMouseMode>();
+  let suspended = false;
+  let bracketedPastePhysicallyEnabled = false;
 
   // True once bracketed paste has been enabled at least once on this controller
   // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
@@ -1973,8 +2547,6 @@ function createStdinController(
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
   let everEnabledSgrMouse = false;
-
-  const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
 
   // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
@@ -1988,11 +2560,11 @@ function createStdinController(
   }
 
   function canUseSgrMouseMode(): boolean {
-    return canWriteTerminalMode() && supportsTerminalMouse();
+    return !suspended && canWriteTerminalMode() && supportsTerminalMouse();
   }
 
-  function writeTerminalMode(data: string, sync = false): void {
-    if (!canWriteTerminalMode()) return;
+  function writeTerminalMode(data: string, sync = false): boolean {
+    if (!canWriteTerminalMode()) return false;
     const stdout = appCtx.stdout;
     if (sync) {
       try {
@@ -2007,12 +2579,24 @@ function createStdinController(
         } else {
           stdout.write(data);
         }
+        return true;
       } catch {
         // Best-effort restore during abrupt shutdown.
+        return false;
       }
-      return;
     }
     stdout.write(data);
+    return true;
+  }
+
+  function runTerminalCleanup(operation: () => void): void {
+    try {
+      operation();
+    } catch {
+      // Terminal restoration is a best-effort transaction. A failed write for
+      // one mode must not prevent the remaining modes or raw stdin from being
+      // restored.
+    }
   }
 
   // sync (Finding A): on the signal-exit path signal-exit re-raises the signal
@@ -2023,25 +2607,44 @@ function createStdinController(
   // bytes reach the fd first — same rationale (and mechanism) as the show-cursor
   // / leave-alt-screen / disable-kitty restores. An arbitrary custom stream is
   // written through its own API rather than being misdirected to process fd 1.
-  function disableBracketedPaste(sync = false) {
-    writeTerminalMode("\x1b[?2004l", sync);
+  function disableBracketedPaste(sync = false, force = false): boolean {
+    if (!bracketedPastePhysicallyEnabled && !force) return true;
+    const disabled = writeTerminalMode("\x1b[?2004l", sync);
+    if (disabled) bracketedPastePhysicallyEnabled = false;
+    return disabled;
   }
 
-  function disableSgrMouse(sync = false) {
-    writeTerminalMode(DISABLE_SGR_MOUSE, sync);
+  function mouseDisableSequence(levels: Iterable<SgrMouseMode>): string {
+    const controls: string[] = [];
+    const unique = new Set(levels);
+    if (unique.has("hover")) controls.push("\x1b[?1003l");
+    if (unique.has("drag")) controls.push("\x1b[?1002l");
+    if (unique.has("button")) controls.push("\x1b[?1000l");
+    if (unique.size > 0) controls.push("\x1b[?1006l");
+    return controls.join("");
   }
 
-  function enableSgrMouse(level: SgrMouseMode) {
+  function disableSgrMouse(levels: Iterable<SgrMouseMode>, sync = false): boolean {
+    const sequence = mouseDisableSequence(levels);
+    return sequence === "" || writeTerminalMode(sequence, sync);
+  }
+
+  function enableSgrMouse(level: SgrMouseMode): boolean {
+    let sequence: string;
     switch (level) {
       case "button":
-        writeTerminalMode("\x1b[?1000h\x1b[?1006h");
-        return;
+        sequence = "\x1b[?1000h\x1b[?1006h";
+        break;
       case "drag":
-        writeTerminalMode("\x1b[?1002h\x1b[?1006h");
-        return;
+        sequence = "\x1b[?1002h\x1b[?1006h";
+        break;
       case "hover":
-        writeTerminalMode("\x1b[?1003h\x1b[?1006h");
+        sequence = "\x1b[?1003h\x1b[?1006h";
     }
+    if (!writeTerminalMode(sequence)) return false;
+    ownedSgrMouseModes.add(level);
+    everEnabledSgrMouse = true;
+    return true;
   }
 
   function sgrMouseModeRank(level: SgrMouseMode): number {
@@ -2068,25 +2671,24 @@ function createStdinController(
   function reconcileSgrMouseMode() {
     const next = highestRequestedSgrMouseMode();
     if (!canUseSgrMouseMode()) {
-      if (activeSgrMouseMode) {
-        disableSgrMouse();
+      if (activeSgrMouseMode && disableSgrMouse([activeSgrMouseMode])) {
+        activeSgrMouseMode = undefined;
       }
-      activeSgrMouseMode = undefined;
       return;
     }
     if (next === activeSgrMouseMode) return;
     if (!next) {
-      disableSgrMouse();
-      activeSgrMouseMode = undefined;
+      if (activeSgrMouseMode && disableSgrMouse([activeSgrMouseMode])) {
+        activeSgrMouseMode = undefined;
+      }
       return;
     }
 
     if (activeSgrMouseMode) {
-      disableSgrMouse();
+      if (!disableSgrMouse([activeSgrMouseMode])) return;
+      activeSgrMouseMode = undefined;
     }
-    enableSgrMouse(next);
-    everEnabledSgrMouse = true;
-    activeSgrMouseMode = next;
+    activeSgrMouseMode = enableSgrMouse(next) ? next : undefined;
   }
 
   function clearPendingFlush() {
@@ -2235,6 +2837,46 @@ function createStdinController(
     );
   };
 
+  function releasePhysicalRawMode(state: RawModeState): void {
+    let firstError: unknown;
+    if (state.changedRawMode) {
+      try {
+        appCtx.setRawMode(state.baselineRaw);
+      } catch (error) {
+        firstError = error;
+      }
+    }
+    if (state.physicalRefHeld && typeof stdin.unref === "function") {
+      try {
+        stdin.unref();
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    state.physicalRefHeld = false;
+    if (firstError !== undefined) throw firstError;
+  }
+
+  function acquirePhysicalRawMode(state: RawModeState): void {
+    // The caller owns rollback so an acquisition failure is released exactly
+    // once together with any later listener/mode acquisition in its transaction.
+    if (state.changedRawMode) appCtx.setRawMode(true);
+    if (typeof stdin.ref === "function") {
+      // Mark before calling: a custom ref() may throw after taking the keepalive
+      // lease, and unref() is idempotent for Node streams.
+      state.physicalRefHeld = true;
+      stdin.ref();
+    }
+  }
+
+  function resetRawModeState(state: RawModeState): void {
+    state.pendingDisable = false;
+    state.suspended = false;
+    state.physicalRefHeld = false;
+    state.baselineRaw = false;
+    state.changedRawMode = false;
+  }
+
   const controller: StdinController = {
     stdin,
     setRawMode(mode: boolean) {
@@ -2266,57 +2908,47 @@ function createStdinController(
         throwRawModeUnsupported();
       }
       const state = getRawModeState(stdin);
-      if (state.refs === 0) {
-        // SHARED (per-stdin) terminal raw-mode enable. If a same-tick swap left
-        // raw mode physically enabled (its disable is still queued), don't re-ref
-        // or re-toggle — just cancel the pending disable. Ink (App.tsx:331-344)
-        // skips stdin.ref()/setRawMode(true) when isRawModeAlreadyEnabled;
-        // re-issuing them is a redundant ioctl AND an unbalanced ref() (the
-        // deferred disable would bail on refs>0 and never unref). setEncoding is
-        // idempotent so it stays here.
-        const alreadyEnabled = state.pendingDisable;
-        state.pendingDisable = false;
-        if (!alreadyEnabled) {
-          // setRawMode(true) BEFORE stdin.ref(). setRawMode can throw
-          // ERR_TTY_INIT_FAILED on a hostile SSH/container PTY (reports isTTY=true
-          // but the ioctl fails); a throw must leave NOTHING ref'd. If ref() ran
-          // first, the throw would abort before `state.refs++/localRefs++`, so
-          // dispose's unref (gated on those counts) would never fire — a ref'd
-          // stdin keeps the event loop alive and a caller that catches the mount
-          // error hangs at exit. With setRawMode first, a throw leaves ref()
-          // un-called and the counts untouched, so there is nothing to unbalance.
-          // On the success path both still run; order is irrelevant when both
-          // succeed.
-          appCtx.setRawMode(true);
-          if (typeof stdin.ref === "function") stdin.ref();
+      const firstSharedRef = state.refs === 0;
+      let listenerAttached = false;
+      try {
+        if (firstSharedRef) {
+          // SHARED (per-stdin) terminal raw-mode enable. If a same-tick swap left
+          // raw mode physically enabled, cancel its deferred release without
+          // acquiring a second raw/ref lease.
+          const alreadyEnabled = state.pendingDisable;
+          state.pendingDisable = false;
+          if (!alreadyEnabled) {
+            state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
+            state.changedRawMode = !state.baselineRaw;
+            if (!state.suspended) acquirePhysicalRawMode(state);
+          }
+          if (
+            typeof (stdin as { setEncoding?: (encoding: string) => void }).setEncoding ===
+            "function"
+          ) {
+            (stdin as { setEncoding: (encoding: string) => void }).setEncoding("utf8");
+          }
         }
-        if (typeof (stdin as any).setEncoding === "function") (stdin as any).setEncoding("utf8");
+        if (localRefs === 0 && !suspended) {
+          // PER-CONTROLLER input listener. Each render tree owns its listener;
+          // the raw terminal lease above remains shared by stdin identity.
+          stdin.on("data", handleData);
+          listenerAttached = true;
+        }
+        if (localRefs === lifetimeFloor) {
+          inputParser.reset();
+          clearPendingFlush();
+        }
+        state.refs++;
+        localRefs++;
+      } catch (error) {
+        if (listenerAttached) runTerminalCleanup(() => stdin.off("data", handleData));
+        if (firstSharedRef && state.refs === 0) {
+          runTerminalCleanup(() => releasePhysicalRawMode(state));
+          resetRawModeState(state);
+        }
+        throw error;
       }
-      if (localRefs === 0) {
-        // PER-CONTROLLER input listener. Each controller (one per render tree)
-        // attaches its OWN handleData → its OWN parser → its OWN event emitter,
-        // gated on THIS controller's ref count, NOT the shared one. So two apps
-        // sharing one stdin both receive every keystroke: vue's 'data' (push)
-        // event broadcasts to every listener — unlike Ink's 'readable' (pull)
-        // model where the first-registered listener drains the buffer and a
-        // second same-stdin app stays deaf until the first unmounts
-        // (App.tsx:278-313). The terminal raw-mode toggle above stays shared so
-        // one app's unmount can't drop raw mode while another still needs it.
-        stdin.on("data", handleData);
-      }
-      if (localRefs === lifetimeFloor) {
-        // The FIRST input consumer joining above the App's lifetime floor (and
-        // the very first acquire in 'auto', where the floor is 0). Under rawMode
-        // 'always' the lifetime listener keeps parsing on no-input screens, so an
-        // escape typed while idle leaves a buffered partial + pending-flush timer;
-        // discard it here so it can't bleed into this consumer ~20ms later. (The
-        // mirror clear on the last consumer's release handles a same-tick swap;
-        // this handles a delayed idle→input transition.)
-        inputParser.reset();
-        clearPendingFlush();
-      }
-      state.refs++;
-      localRefs++;
     },
     holdRawModeForLifetime() {
       // Same as acquireRawMode (raw on + ref + data listener), but marks the
@@ -2330,15 +2962,17 @@ function createStdinController(
     },
     setBracketedPasteMode(enabled: boolean) {
       if (enabled) {
-        if (bracketedPasteModeCount === 0 && appCtx.stdout.isTTY) {
-          appCtx.stdout.write("\x1b[?2004h");
-          everEnabledBracketedPaste = true;
+        if (bracketedPasteModeCount === 0 && !suspended && appCtx.stdout.isTTY) {
+          if (writeTerminalMode("\x1b[?2004h")) {
+            everEnabledBracketedPaste = true;
+            bracketedPastePhysicallyEnabled = true;
+          }
         }
         bracketedPasteModeCount++;
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
-        if (bracketedPasteModeCount === 0) {
+        if (bracketedPasteModeCount === 0 && !suspended) {
           disableBracketedPaste();
         }
       }
@@ -2378,6 +3012,11 @@ function createStdinController(
         stdin.off("data", handleData);
       }
       if (state.refs === 0) {
+        if (state.suspended) {
+          runTerminalCleanup(() => releasePhysicalRawMode(state));
+          resetRawModeState(state);
+          return;
+        }
         // Defer ONLY the SHARED terminal raw-mode toggle (Ink defers just disableRawMode,
         // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
         // the old before mounting the new, so refs briefly hits 0. Disabling
@@ -2388,14 +3027,102 @@ function createStdinController(
         queueMicrotask(() => {
           if (!state.pendingDisable) return;
           state.pendingDisable = false;
-          // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
-          // never restores a captured prior raw state. Restoring a captured prevRaw was a
-          // vue-only invention that corrupts on a sync re-acquire swap: it gets
-          // re-snapshotted as true (raw still active via the deferred toggle), leaving
-          // the terminal in raw mode after exit.
-          appCtx.setRawMode(false);
-          if (typeof stdin.unref === "function") stdin.unref();
+          runTerminalCleanup(() => releasePhysicalRawMode(state));
+          resetRawModeState(state);
         });
+      }
+    },
+    suspend(sync = false) {
+      if (suspended) return;
+      suspended = true;
+      clearPendingFlush();
+      inputParser.reset();
+      stdin.off("readable", handleReadable);
+      stdin.off("data", handleData);
+
+      if (bracketedPastePhysicallyEnabled) {
+        runTerminalCleanup(() => disableBracketedPaste(sync));
+      }
+      if (activeSgrMouseMode) {
+        const activeMode = activeSgrMouseMode;
+        runTerminalCleanup(() => {
+          if (disableSgrMouse([activeMode], sync)) activeSgrMouseMode = undefined;
+        });
+      }
+
+      if (appCtx.isRawModeSupported) {
+        const state = getRawModeState(stdin);
+        if (!state.suspended && (state.refs > 0 || state.pendingDisable)) {
+          state.pendingDisable = false;
+          let released = true;
+          try {
+            releasePhysicalRawMode(state);
+          } catch {
+            released = false;
+          }
+          if (state.refs > 0 || !released) state.suspended = true;
+          else resetRawModeState(state);
+        }
+      }
+    },
+    resume() {
+      if (!suspended) return;
+      const state = appCtx.isRawModeSupported ? getRawModeState(stdin) : undefined;
+      const rawNeedsResume = Boolean(state?.suspended);
+      let acquiredSharedRaw = false;
+      let listenerAttached = false;
+      let acquiredPaste = false;
+      const mouseBefore = activeSgrMouseMode;
+
+      // Let the mode reconciler acquire the requested mouse level, but only
+      // commit the controller's resumed state after every acquisition succeeds.
+      suspended = false;
+      try {
+        if (
+          bracketedPasteModeCount > 0 &&
+          !bracketedPastePhysicallyEnabled &&
+          appCtx.stdout.isTTY
+        ) {
+          if (writeTerminalMode("\x1b[?2004h")) {
+            everEnabledBracketedPaste = true;
+            bracketedPastePhysicallyEnabled = true;
+            acquiredPaste = true;
+          }
+        }
+        reconcileSgrMouseMode();
+
+        if (state?.suspended) {
+          if (state.refs > 0) {
+            acquiredSharedRaw = true;
+            acquirePhysicalRawMode(state);
+            state.suspended = false;
+          } else {
+            // A failed release from the suspend boundary has no remaining
+            // logical consumer. Retry that release instead of reacquiring raw.
+            releasePhysicalRawMode(state);
+            resetRawModeState(state);
+          }
+        }
+
+        if (localRefs > 0) {
+          stdin.on("data", handleData);
+          listenerAttached = true;
+        }
+      } catch (error) {
+        if (listenerAttached) runTerminalCleanup(() => stdin.off("data", handleData));
+        if (acquiredSharedRaw && state) {
+          runTerminalCleanup(() => releasePhysicalRawMode(state));
+          state.suspended = rawNeedsResume;
+        }
+        if (mouseBefore === undefined && activeSgrMouseMode !== undefined) {
+          const acquiredMouse = activeSgrMouseMode;
+          runTerminalCleanup(() => {
+            if (disableSgrMouse([acquiredMouse])) activeSgrMouseMode = undefined;
+          });
+        }
+        if (acquiredPaste) runTerminalCleanup(() => disableBracketedPaste());
+        suspended = true;
+        throw error;
       }
     },
     dispose(sync = false) {
@@ -2415,23 +3142,27 @@ function createStdinController(
         // sync write after a surviving async one is harmless. If detach hasn't run
         // yet (count still > 0), this single sync write still covers it.
         if (everEnabledBracketedPaste) {
-          disableBracketedPaste(true);
+          runTerminalCleanup(() => disableBracketedPaste(true, true));
         }
         if (everEnabledSgrMouse) {
-          disableSgrMouse(true);
-          activeSgrMouseMode = undefined;
+          runTerminalCleanup(() => {
+            if (disableSgrMouse(ownedSgrMouseModes, true)) activeSgrMouseMode = undefined;
+          });
         }
       } else {
-        if (bracketedPasteModeCount > 0) {
-          disableBracketedPaste();
+        if (bracketedPastePhysicallyEnabled) {
+          runTerminalCleanup(() => disableBracketedPaste());
         }
-        if (sgrMouseModeTokens.size > 0) {
-          disableSgrMouse();
-          activeSgrMouseMode = undefined;
+        if (activeSgrMouseMode) {
+          const activeMode = activeSgrMouseMode;
+          runTerminalCleanup(() => {
+            if (disableSgrMouse([activeMode])) activeSgrMouseMode = undefined;
+          });
         }
       }
       bracketedPasteModeCount = 0;
       sgrMouseModeTokens.clear();
+      ownedSgrMouseModes.clear();
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already
@@ -2453,17 +3184,26 @@ function createStdinController(
         // Mirrors Ink's unmount cleanup guard `rawModeEnabledCount > 0 ||
         // pendingDisableRawModeRef.current` (App.tsx:626-631). Clearing
         // pendingDisable also cancels the queued microtask so it can't double-unref.
-        if (state.refs === 0 && (releasedLastRef || state.pendingDisable)) {
+        if (
+          state.refs === 0 &&
+          (releasedLastRef ||
+            state.pendingDisable ||
+            state.suspended ||
+            state.changedRawMode ||
+            state.physicalRefHeld)
+        ) {
           // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
           // never restores a captured prior raw state. (A restored prevRaw could be
           // the framework's own raw=true snapshotted during a sync swap, which would
           // leave the terminal raw on exit.)
           state.pendingDisable = false;
-          appCtx.setRawMode(false);
-          if (typeof stdin.unref === "function") stdin.unref();
-          inputParser.reset();
+          state.suspended = false;
+          runTerminalCleanup(() => releasePhysicalRawMode(state));
+          resetRawModeState(state);
+          runTerminalCleanup(() => inputParser.reset());
         }
       }
+      suspended = false;
     },
   };
 

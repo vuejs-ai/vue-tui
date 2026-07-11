@@ -12,7 +12,9 @@ import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/tes
 
 const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
 const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
+const DISABLE_SGR_DRAG_MOUSE = "\x1b[?1002l\x1b[?1006l";
+const DISABLE_SGR_HOVER_TRACKING = "\x1b[?1003l";
 let previousTerm: string | undefined;
 
 beforeEach(() => {
@@ -67,6 +69,8 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   await settle();
 
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 });
 
 test("useMouseInput accepts a handler ref", async () => {
@@ -146,6 +150,8 @@ test("useMouseInput keeps SGR mouse mode enabled until the last consumer release
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 
   app.unmount();
 });
@@ -186,6 +192,8 @@ test("useMouseInput respects isActive", async () => {
   active.value = false;
   await settle();
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 
   app.unmount();
 });
@@ -214,6 +222,8 @@ test("useMouseInput disables SGR mouse when support disappears before release", 
   await settle();
 
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
   app.unmount();
 });
 
@@ -250,6 +260,7 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(0);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(0);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
 
   showTarget.value = true;
   await settle();
@@ -257,18 +268,22 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
 
   showTarget.value = false;
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(2);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
-  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(2);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(1);
 
   app.unmount();
   await settle();
 
-  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(3);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(2);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(1);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 });
 
 test("useMouseInput consumes unsupported SGR mouse events before keyboard input", async () => {

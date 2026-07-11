@@ -97,8 +97,8 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    // liveUpdates: true forces the signal-exit handler to register regardless of
-    // ambient CI/TTY detection (the resolved `interactive` flag gates it).
+    // Keep the live TTY path explicit; lifecycle cleanup now registers for every
+    // real mount regardless of output cadence.
     app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     // Let usePaste's attach enable bracketed paste (writes \x1b[?2004h, async).

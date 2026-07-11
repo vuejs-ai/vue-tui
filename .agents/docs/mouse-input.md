@@ -361,10 +361,7 @@ full-screen hit map on frames without a current mouse registration is allowed as
 detail; gating that work on the controller's armed state is only a performance optimization, and it
 must not change the public event / `MouseTarget.rect` contract.
 
-**⚠️ Teardown disables every mouse level.** Both the async and synchronous signal-exit paths emit
-`\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l`; disabling an unset mode is a no-op. Omitting
-`1002` or `1003` would leave the terminal reporting pointer bytes after exit. Non-TTY and
-`TERM=dumb` paths enable nothing, so targeted handlers never fire there.
+**⚠️ Teardown releases exact ownership.** Normal teardown disables only the active level this controller successfully acquired plus SGR coordinates. Synchronous signal teardown retries every level this controller previously acquired, without disabling unrelated levels it never owned. Suspension temporarily releases the exact active level and continuation reacquires the strongest still-live request. Non-TTY and `TERM=dumb` paths acquire nothing, so targeted handlers never fire there and cleanup emits no mouse controls.
 
 ## 7. Mouse-level negotiation
 

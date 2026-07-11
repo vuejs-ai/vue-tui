@@ -1,6 +1,6 @@
-import { defineComponent, nextTick, onScopeDispose } from "vue";
+import { defineComponent, nextTick, onMounted, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { PassThrough } from "node:stream";
@@ -272,8 +272,8 @@ test("alternate screen - cursor restored after exit", async () => {
   expect(showCursorIndex).toBeGreaterThan(exitIndex);
 });
 
-test("alternate screen - does not replay exit(Error) output on primary screen", async () => {
-  const stdout = makeTtyStream();
+test("alternate screen - restores the primary screen before writing a thrown error to stderr", async () => {
+  const terminal = makeTtyStream();
   const stdin = makeFakeStdin();
 
   const ErrorApp = defineComponent(() => {
@@ -282,9 +282,9 @@ test("alternate screen - does not replay exit(Error) output on primary screen", 
 
   const app = createApp(ErrorApp);
   app.mount({
-    stdout,
+    stdout: terminal,
     stdin,
-    stderr: makeTtyStream(),
+    stderr: terminal,
     mode: "fullscreen",
     liveUpdates: true,
     exitOnCtrlC: false,
@@ -297,15 +297,42 @@ test("alternate screen - does not replay exit(Error) output on primary screen", 
 
   await expect(exited).rejects.toThrow("Done");
 
-  const chunks = stdout.chunks;
+  const chunks = terminal.chunks;
   const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
   expect(exitIndex).not.toBe(-1);
 
-  // After exiting the alternate screen, no error content should leak
-  // to the primary screen (no stack trace, no "Error: Done" text).
+  // The error is intentionally not a replay of the last fullscreen frame. It is
+  // a durable stderr report emitted only after the alternate screen is gone.
   const afterExit = stripAnsi(chunks.slice(exitIndex + 1).join(""));
-  expect(afterExit).not.toContain("Error: Done");
-  expect(afterExit).not.toContain("Done\n    at");
+  expect(afterExit).toContain("Error: Done");
+});
+
+test("alternate screen - restores before reporting useApp().exit(error)", async () => {
+  const terminal = makeTtyStream();
+  const stdin = makeFakeStdin();
+
+  const ErrorExitApp = defineComponent(() => {
+    const { exit } = useApp();
+    onMounted(() => exit(new Error("PROGRAMMATIC_DONE")));
+    return () => <Text>fullscreen content</Text>;
+  });
+
+  const app = createApp(ErrorExitApp);
+  app.mount({
+    stdout: terminal,
+    stdin,
+    stderr: terminal,
+    mode: "fullscreen",
+    liveUpdates: true,
+    exitOnCtrlC: false,
+  });
+
+  await expect(app.waitUntilExit()).rejects.toThrow("PROGRAMMATIC_DONE");
+
+  const chunks = terminal.chunks;
+  const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
+  expect(exitIndex).not.toBe(-1);
+  expect(stripAnsi(chunks.slice(exitIndex + 1).join(""))).toContain("Error: PROGRAMMATIC_DONE");
 });
 
 test("alternate screen - does not replay teardown output on primary screen", async () => {

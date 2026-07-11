@@ -127,6 +127,12 @@ Before its first visible managed output, Inline advances to a fresh terminal row
 
 If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
+On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that the session acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes dimensions when available, otherwise keeps the last coherent size, starts a fresh Inline or transcript region or transactionally re-enters and repaints Fullscreen, then restores still-requested input modes. This does not reserve the Ctrl+Z input byte.
+
+Normal Inline output remains on the main screen. Normal Fullscreen exit restores the previous main screen and does not replay the last viewport. Fatal exit is different: a durably painted Inline or transcript error remains visible, with a sanitized stderr report when that rich error was clipped, stdout was lost, or its first physical write failed; Fullscreen restores first and then writes the report to stderr. Final-stream fatal exit never prints a stale successful dynamic frame and writes the error to stderr.
+
+Mount, repaint, and teardown are exception-safe transactions. A partially initialized mount rolls back every resource it acquired, cleanup continues if one release throws, and an ordinary teardown or exit re-entered synchronously from a stream callback waits until the current acquisition or repaint is complete. A non-returning `process.exit()` or signal-exit callback instead restores owned terminal state immediately with synchronous writes and skips final user rendering and Vue lifecycle hooks. This protects the application's original error and prevents one failed cleanup from stranding another terminal mode.
+
 > **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
 > server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the
 > entry module's evaluation — which wedges Vite's HMR full-reload queue after the first reload.

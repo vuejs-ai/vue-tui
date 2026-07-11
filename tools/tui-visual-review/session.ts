@@ -1,5 +1,6 @@
 // Repository-internal PTY, terminal-emulation, observation, and visual-review artifacts.
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -292,6 +293,7 @@ export class VisualTerminalSession {
   private pendingAction: PendingAction | null = null;
   private lastObservationRevision: number | null = null;
   private exitInfo: { exitCode: number; signal?: number } | null = null;
+  private suspendedForegroundProcessGroup: number | null = null;
   private exitResolve!: (value: { exitCode: number; signal?: number }) => void;
   private readonly exitPromise: Promise<{ exitCode: number; signal?: number }>;
   private closed = false;
@@ -441,6 +443,7 @@ export class VisualTerminalSession {
       });
     });
     this.child.onExit(({ exitCode, signal }) => {
+      this.suspendedForegroundProcessGroup = null;
       const exitInfo = { exitCode, signal };
       this.exitInfo = exitInfo;
       this.processRecord.state = "exited";
@@ -990,7 +993,33 @@ export class VisualTerminalSession {
     source: ActionSource,
   ): Promise<{ actionId: number; executedRevision: number; signal: string }> {
     const action = await this.prepareAction("signal", source);
-    this.child.kill(signal);
+    if (process.platform === "win32") {
+      this.child.kill(signal);
+    } else {
+      // The POSIX visual controller keeps a wrapper shell alive so it can verify
+      // termios restoration after the application exits. node-pty.kill() targets
+      // that shell PID, while terminal job-control signals belong to the PTY's
+      // current foreground process group. Resolve tpgid from the wrapper and
+      // signal the negative group id so SIGTSTP/SIGCONT reach the actual app.
+      const foregroundGroup =
+        signal === "SIGCONT" && this.suspendedForegroundProcessGroup !== null
+          ? this.suspendedForegroundProcessGroup
+          : Number.parseInt(
+              execFileSync("ps", ["-o", "tpgid=", "-p", String(this.child.pid)], {
+                encoding: "utf8",
+              }).trim(),
+              10,
+            );
+      if (!Number.isSafeInteger(foregroundGroup) || foregroundGroup <= 0) {
+        throw new Error(`could not resolve foreground process group for PTY ${this.child.pid}`);
+      }
+      process.kill(-foregroundGroup, signal as NodeJS.Signals);
+      if (signal === "SIGTSTP" || signal === "SIGSTOP") {
+        this.suspendedForegroundProcessGroup = foregroundGroup;
+      } else if (signal === "SIGCONT" || signal === "SIGKILL") {
+        this.suspendedForegroundProcessGroup = null;
+      }
+    }
     this.appendAction({ event: "action-payload", actionId: action.id, signal });
     return { actionId: action.id, executedRevision: action.executedRevision, signal };
   }
@@ -1045,6 +1074,7 @@ export class VisualTerminalSession {
   async close(options: { gracefulInput?: string; timeoutMs?: number } = {}): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.suspendedForegroundProcessGroup = null;
     if (!this.exitInfo && options.gracefulInput)
       this.sendSystem(options.gracefulInput, "controller-close");
     if (!this.exitInfo) {

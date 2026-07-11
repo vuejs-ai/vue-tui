@@ -22,6 +22,7 @@ function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
     liveUpdatesOverride: undefined,
     isCI: false,
     presentation: "visual",
+    suspensionSupported: false,
     stdout: { isTTY: true, columns: 100, rows: 30 },
     terminalProbe: unavailable,
     ...overrides,
@@ -33,6 +34,28 @@ test("normalizes the finite mount mode input", () => {
   expect(normalizeRequestedMode({ mode: undefined })).toBe("inline");
   expect(normalizeRequestedMode({ mode: "inline" })).toBe("inline");
   expect(normalizeRequestedMode({ mode: "fullscreen" })).toBe("fullscreen");
+});
+
+test("reports host suspension independently from output cadence and effective mode", () => {
+  const surfaces = [
+    resolveLiveSurface(liveInput({ suspensionSupported: true })),
+    resolveLiveSurface(liveInput({ suspensionSupported: true, liveUpdatesOverride: false })),
+    resolveLiveSurface(
+      liveInput({
+        suspensionSupported: true,
+        stdout: { isTTY: false, columns: undefined, rows: undefined },
+        liveUpdatesOverride: true,
+      }),
+    ),
+    resolveLiveSurface(liveInput({ suspensionSupported: true, requestedMode: "fullscreen" })),
+  ];
+
+  expect(surfaces.map((surface) => surface.session.capabilities.suspension)).toEqual([
+    true,
+    true,
+    true,
+    true,
+  ]);
 });
 
 test.each(["fullscreen", "alternateScreen"] as const)(

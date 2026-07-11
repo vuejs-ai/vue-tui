@@ -3,7 +3,9 @@ import { nextTick, readonly, type Component, type DeepReadonly } from "vue";
 import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_RENDER_OBSERVER,
+  INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
+  createManualSuspensionHost,
   type InternalLiveRenderSessionSnapshot,
   type InternalRenderObserver,
 } from "@vue-tui/runtime/internal";
@@ -53,6 +55,10 @@ export interface Terminal {
   readonly columns: number;
   readonly rows: number;
   resize(columns: number, rows: number): Promise<void>;
+  /** Temporarily release the modeled terminal without unmounting the app. */
+  suspend(): Promise<void>;
+  /** Reacquire the modeled terminal, refresh dimensions, and repaint. */
+  resume(): Promise<void>;
   readonly rawMode: RawModeState;
 }
 
@@ -226,6 +232,7 @@ export async function render(
   const emulator = createTerminalEmulator(host.stdout.columns, host.emulatorRows, {
     convertEol: host.stdout.kind === "tty",
   });
+  const suspensionHost = createManualSuspensionHost();
   const forwardOutput = (chunk: Buffer | string) => emulator.write(chunk);
   stdout.on("data", forwardOutput);
   stderr.on("data", forwardOutput);
@@ -320,6 +327,7 @@ export async function render(
       patchConsole: false,
       maxFps: 0,
       [INTERNAL_RENDER_OBSERVER]: observer,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
     } as Parameters<TuiApp["mount"]>[0]);
   } catch (error) {
@@ -376,6 +384,18 @@ export async function render(
       stderr.columns = nextColumns;
       if (host.stdout.kind === "tty") stderr.rows = nextRows;
       (stdout as unknown as PassThrough).emit("resize");
+      await nextTick();
+      await app.waitUntilRenderFlush();
+      await emulator.flush();
+    },
+    async suspend() {
+      assertActive();
+      suspensionHost.suspend();
+      await emulator.flush();
+    },
+    async resume() {
+      assertActive();
+      suspensionHost.resume();
       await nextTick();
       await app.waitUntilRenderFlush();
       await emulator.flush();

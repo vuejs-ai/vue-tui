@@ -1,6 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, useStdout } from "@vue-tui/runtime";
+import { Box, Text, useInput, useStdout, useWindowSize } from "@vue-tui/runtime";
 import {
   useInternalRenderSession,
   type InternalLiveRenderSessionSnapshot,
@@ -27,7 +27,7 @@ test("default host models a visual Inline TTY", async () => {
     capabilities: {
       stableOrigin: false,
       elementHitTesting: false,
-      suspension: false,
+      suspension: true,
     },
   });
 });
@@ -86,8 +86,59 @@ test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
   expect(result.session.capabilities).toEqual({
     stableOrigin: true,
     elementHitTesting: true,
-    suspension: false,
+    suspension: true,
   });
+});
+
+test("modeled Inline suspension releases input and repaints at the continued size", async () => {
+  const App = defineComponent(() => {
+    const { columns, rows } = useWindowSize();
+    return () => <Text>{`inline:${columns.value}x${rows.value}`}</Text>;
+  });
+  const result = await render(App, { columns: 30, rows: 8 });
+
+  expect(result.terminal.rawMode.current).toBe(true);
+  await result.terminal.suspend();
+  expect(result.terminal.rawMode.current).toBe(false);
+  const suspendedHistory = [
+    ...(await result.screen()).scrollback,
+    ...(await result.screen()).lines,
+  ].join("\n");
+  expect(suspendedHistory).toContain("inline:30x8");
+
+  await result.terminal.resize(24, 6);
+  await result.terminal.resume();
+
+  expect(result.terminal.rawMode.current).toBe(true);
+  expect(result.lastFrame()).toContain("inline:24x6");
+  const resumedScreen = await result.screen();
+  expect(resumedScreen.activeBuffer).toBe("normal");
+  expect([...resumedScreen.scrollback, ...resumedScreen.lines].join("\n")).toContain("inline:30x8");
+  result.dispose();
+});
+
+test("modeled Fullscreen suspension restores and reacquires the alternate screen", async () => {
+  const App = defineComponent(() => {
+    const { columns, rows } = useWindowSize();
+    return () => <Text>{`fullscreen:${columns.value}x${rows.value}`}</Text>;
+  });
+  const result = await render(App, {
+    columns: 30,
+    rows: 8,
+    host: { mode: "fullscreen" },
+  });
+
+  expect((await result.screen()).activeBuffer).toBe("alternate");
+  await result.terminal.suspend();
+  expect((await result.screen()).activeBuffer).toBe("normal");
+
+  await result.terminal.resize(24, 6);
+  await result.terminal.resume();
+
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("alternate");
+  expect(result.lastFrame()).toContain("fullscreen:24x6");
+  result.dispose();
 });
 
 test("Fullscreen screen-reader request resolves to an Inline transcript", async () => {
@@ -104,6 +155,53 @@ test("Fullscreen screen-reader request resolves to an Inline transcript", async 
   expect(result.session.dimensions.layout).toEqual({ columns: 100, rows: null });
   expect((await result.screen()).activeBuffer).toBe("normal");
 });
+
+test("modeled screen-reader transcript suspends and resumes without acquiring Fullscreen", async () => {
+  const App = defineComponent(() => {
+    const { columns, rows } = useWindowSize();
+    useInput(() => {});
+    return () => <Text>{`transcript:${columns.value}x${rows.value}`}</Text>;
+  });
+  const result = await render(App, {
+    columns: 30,
+    rows: 8,
+    host: { mode: "fullscreen", presentation: "screen-reader" },
+  });
+
+  await result.terminal.suspend();
+  expect(result.terminal.rawMode.current).toBe(false);
+  expect((await result.screen()).activeBuffer).toBe("normal");
+  await result.terminal.resize(24, 6);
+  await result.terminal.resume();
+
+  expect(result.terminal.rawMode.current).toBe(true);
+  expect(result.lastFrame()).toContain("transcript:24x6");
+  expect((await result.screen()).activeBuffer).toBe("normal");
+  result.dispose();
+});
+
+test.each(["at-teardown", "live"] as const)(
+  "modeled %s stream restores input modes without manufacturing a terminal surface",
+  async (updates) => {
+    const App = defineComponent(() => {
+      useInput(() => {});
+      return () => <Text>{`stream:${updates}`}</Text>;
+    });
+    const result = await render(App, {
+      host: { stdout: "stream", updates, mode: "fullscreen" },
+    });
+
+    expect(result.session.mode.effective).toBeNull();
+    expect(result.session.capabilities.suspension).toBe(true);
+    expect(result.terminal.rawMode.current).toBe(true);
+    await result.terminal.suspend();
+    expect(result.terminal.rawMode.current).toBe(false);
+    await result.terminal.resume();
+    expect(result.terminal.rawMode.current).toBe(true);
+    expect((await result.screen()).activeBuffer).toBe("normal");
+    result.dispose();
+  },
+);
 
 test("Inline clamps tall dynamic output without padding short output", async () => {
   const short = await render(() => <Text>short</Text>, { columns: 20, rows: 3 });

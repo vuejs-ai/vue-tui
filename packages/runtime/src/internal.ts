@@ -38,6 +38,12 @@ export {
   type InternalLiveRenderSessionSnapshot,
   type InternalStringRenderSessionSnapshot,
 } from "./render-session.ts";
+export {
+  INTERNAL_SUSPENSION_HOST,
+  createManualSuspensionHost,
+  type ManualSuspensionHost,
+  type SuspensionHost,
+} from "./process-suspension.ts";
 // Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.

@@ -77,6 +77,8 @@ expectTypeOf(result.frames).toEqualTypeOf<readonly ContentFrame[]>();
 expectTypeOf(result.session).toEqualTypeOf<TestRenderSession>();
 expectTypeOf(result.lastFrame()).toEqualTypeOf<string>();
 expectTypeOf(result.screen()).toEqualTypeOf<Promise<ScreenSnapshot>>();
+expectTypeOf(result.terminal.suspend()).toEqualTypeOf<Promise<void>>();
+expectTypeOf(result.terminal.resume()).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.dispose()).toEqualTypeOf<void>();
 
 // @ts-expect-error Captured frame collections are readonly observations.

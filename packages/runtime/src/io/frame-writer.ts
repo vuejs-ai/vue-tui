@@ -11,6 +11,7 @@ export interface FrameWriter {
   getCursorReturnToBottom: () => string;
   sync: (frame: string, options?: SyncOptions) => void;
   setCursorPosition: (pos: CursorPosition | undefined) => void;
+  isCursorHidden: () => boolean;
   isCursorDirty: () => boolean;
   willRender: (frame: string) => boolean;
 }
@@ -64,6 +65,9 @@ export function createFrameWriter(
     },
     setCursorPosition(pos) {
       log.setCursorPosition(pos);
+    },
+    isCursorHidden() {
+      return log.isCursorHidden();
     },
     isCursorDirty() {
       return log.isCursorDirty();

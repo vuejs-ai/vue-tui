@@ -18,8 +18,8 @@ The controller may be a project script, an existing agent tool, or a disposable 
 - a declared terminal-emulator profile that consumes ANSI/VT output and returns terminal replies to the PTY;
 - a structured observation of the active screen, including cells, styles, cursor, active buffer, dimensions, terminal modes, and a monotonic visible revision;
 - an image of that same post-emulation screen that the agent can load into visual input;
-- incremental keyboard, text, paste, mouse, resize, scroll, selection, copy, interrupt, and exit actions as the workflow requires;
-- process exit, timeout, unexpected output, and terminal-restoration diagnostics.
+- incremental keyboard, text, paste, mouse, resize, scroll, selection, copy, job-control suspend/continue, interrupt, and exit actions as the workflow requires;
+- process running/stopped/exited state, timeout, unexpected output, and terminal-restoration diagnostics.
 
 A practical local implementation is a PTY library plus an xterm-compatible headless emulator and a direct cell-grid-to-SVG-or-PNG renderer. This is an example, not a required vue-tui dependency or public API.
 
@@ -54,9 +54,9 @@ Wait for an explicit screen predicate, named application state, process event, o
 
 Capture the structured active screen and render its image. The coding agent must load and inspect the image; creating a PNG that nobody observes is not visual verification.
 
-Inspect hierarchy, clipping, alignment, wrapping, focus, cursor, selection, color and non-color cues, busy and error states, resize behavior, scroll behavior, and state continuity. Use the structured screen for exact text, cell, style, cursor, mode, and buffer facts rather than guessing them from pixels.
+Inspect hierarchy, clipping, alignment, wrapping, focus, cursor, selection, color and non-color cues, busy and error states, resize behavior, scroll behavior, suspension, continuation, and state continuity. Use the structured screen for exact text, cell, style, cursor, mode, buffer, and process-state facts rather than guessing them from pixels.
 
-For a full-screen application, observe the alternate buffer before exit and then verify restoration separately. For an inline application, include the relevant normal-buffer viewport and scrollback rather than treating the latest redrawn region as the whole user experience.
+For a full-screen application, observe the alternate buffer, the restored main buffer while suspended, the reacquired alternate buffer after continuation, and final restoration separately. For an inline application, include the relevant normal-buffer viewport and scrollback before suspension and after a fresh resumed region rather than treating the latest redrawn region as the whole user experience.
 
 ### 5. Operate from what was observed
 
@@ -72,7 +72,7 @@ Stop subjective polishing when requirements pass and only low-impact cosmetic di
 
 ### 7. Run final acceptance
 
-Run the project's full programmatic gate, applicable deterministic PTY scenarios, and the final interactive observation on the same revision. Report the exact command, profile, dimensions, mode, actions, observed named states, diagnostics, restoration evidence, and remaining gaps.
+Run the project's full programmatic gate, applicable deterministic PTY scenarios, and the final interactive observation on the same revision. Report the exact command, profile, dimensions, mode, actions, observed named running/stopped/continued/exited states, diagnostics, restoration evidence, and remaining gaps.
 
 ## Intermediate artifacts
 

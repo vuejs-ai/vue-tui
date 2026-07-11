@@ -130,6 +130,8 @@ immediately, dynamic commits only replace the retained latest frame, and teardow
 latest dynamic frame plus a newline. This keeps ordinary redirected output useful and avoids
 emitting cursor-relative update bytes by default.
 
+That alignment describes clean completion. Fatal completion is a deliberate durability exception: vue-tui does not replay a retained successful frame after a later render error, writes a sanitized stack or message to stderr, and settles only after the error write completes.
+
 The override remains real rather than advisory: explicitly enabling live updates on a non-TTY
 stream runs the relative or screen-reader writer and may emit live frames plus ANSI erase or cursor
 movement bytes. Commit throttling can coalesce intermediate states, so the contract is not that
@@ -141,7 +143,7 @@ stdin can still acquire raw mode through an input consumer while stdout uses fin
 Ink's `debug: true` remains a separate append-oriented diagnostic branch, but vue-tui deliberately does not carry that branch as part of this output-policy alignment: deterministic observation is orthogonal and the public `debug` option is removed, as recorded below. Finally, Ink's screen-reader flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen screen-reader request to a main-screen transcript is a separate product decision from the non-TTY alignment.
 
 The pinned upstream behavior was run-verified through Ink's [non-TTY and explicit-override tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1152-L1247), CI tests, [alternate-screen tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1712-L1757), and Static tests. vue-tui's current behavior is covered by
-[`non-interactive-final-frame.test.tsx`](../../packages/runtime-tests/integration/lifecycle/non-interactive-final-frame.test.tsx), [`unmount-stream.test.tsx`](../../packages/runtime-tests/integration/lifecycle/unmount-stream.test.tsx), [`cursor-non-tty.test.tsx`](../../packages/runtime-tests/integration/lifecycle/cursor-non-tty.test.tsx), and [`alternate-screen.test.tsx`](../../packages/runtime-tests/integration/lifecycle/alternate-screen.test.tsx).
+[`non-interactive-final-frame.test.tsx`](../../packages/runtime-tests/integration/lifecycle/non-interactive-final-frame.test.tsx), [`unmount-stream.test.tsx`](../../packages/runtime-tests/integration/lifecycle/unmount-stream.test.tsx), [`cursor-non-tty.test.tsx`](../../packages/runtime-tests/integration/lifecycle/cursor-non-tty.test.tsx), [`alternate-screen.test.tsx`](../../packages/runtime-tests/integration/lifecycle/alternate-screen.test.tsx), and [`fatal-output-durability.test.tsx`](../../packages/runtime-tests/integration/lifecycle/fatal-output-durability.test.tsx).
 
 ### Literal tabs in `<Text>` are not normalized (measure vs paint width)
 

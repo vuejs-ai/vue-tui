@@ -106,6 +106,33 @@ describe("kitty lifecycle - init/cleanup", () => {
     expect(ctrl.isEnabled).toBe(false);
   });
 
+  test("a failed suspend pop remains owned, avoids a duplicate push, and is retried", () => {
+    const { stdout } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const writes: string[] = [];
+    let failFirstPop = true;
+    stdout.write = ((data: string) => {
+      writes.push(data);
+      if (failFirstPop && data === "\x1b[<u") {
+        failFirstPop = false;
+        throw new Error("kitty pop failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    const ctrl = createKittyKeyboardController(stdin, stdout);
+
+    ctrl.init({ mode: "enabled" }, true);
+    ctrl.suspend();
+    expect(ctrl.isEnabled).toBe(true);
+
+    ctrl.resume();
+    expect(writes.filter((data) => data === "\x1b[>1u")).toHaveLength(1);
+
+    ctrl.dispose();
+    expect(writes.filter((data) => data === "\x1b[<u")).toHaveLength(2);
+    expect(ctrl.isEnabled).toBe(false);
+  });
+
   test("not enabled when stdin is not TTY", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();

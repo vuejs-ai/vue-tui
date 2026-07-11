@@ -13,7 +13,9 @@ import {
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+const DISABLE_SGR_DRAG_MOUSE = "\x1b[?1002l\x1b[?1006l";
+const DISABLE_SGR_BUTTON_TRACKING = "\x1b[?1000l";
+const DISABLE_SGR_HOVER_TRACKING = "\x1b[?1003l";
 type BoxInstance = InstanceType<typeof Box>;
 let previousTerm: string | undefined;
 
@@ -88,7 +90,9 @@ test("fullscreen element handlers enable 1002 mode and receive hit-tested click 
 
   app.unmount();
   await settle();
-  expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+  expect(writes.join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_BUTTON_TRACKING);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 });
 
 test("mouse events bubble and stopPropagation stops ancestor handlers", async () => {

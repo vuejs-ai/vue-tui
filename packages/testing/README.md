@@ -171,6 +171,8 @@ try {
 
 Test-only observation remains on `RenderResult`; it does not change the component's `session.host`.
 
+The deterministic host reports `session.capabilities.suspension: true` for every modeled live surface. This is a host-lifecycle capability, not a claim that the selected output owns a terminal screen.
+
 ### `frames`
 
 `frames` is a readonly live array of rendering-phase content commits. The public view and every frame reject runtime mutation while the host retains a private writable collection for later commits:
@@ -217,12 +219,16 @@ interface ScreenSnapshot {
 
 ### Input and terminal controls
 
-| Property or method                   | Behavior                                                                                                              |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `stdin.write(data)`                  | Emits input, waits for the input parser, and waits for the resulting render and emulator writes                       |
-| `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                           |
-| `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering |
-| `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                       |
+| Property or method                   | Behavior                                                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stdin.write(data)`                  | Emits input, waits for the input parser, and waits for the resulting render and emulator writes                                                                     |
+| `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
+| `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering                                               |
+| `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
+| `terminal.resume()`                  | Establishes a fresh Inline or transcript region or re-enters and repaints Fullscreen at the current dimensions, then reacquires requested input modes               |
+| `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                     |
+
+The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; the session dimensions and terminal surface are refreshed by `terminal.resume()`.
 
 ### Lifecycle methods
 
@@ -233,7 +239,7 @@ interface ScreenSnapshot {
 | `waitUntilExit()`        | Settles with the application exit result and rejects for `exit(error)`                                |
 | `waitUntilRenderFlush()` | Waits for the runtime render queue and pending emulator writes                                        |
 
-After `dispose()`, retained content facts such as `session`, `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
+After `dispose()`, retained content facts such as `session`, `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, `suspend()`, `resume()`, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
 
 ## Cleanup
 

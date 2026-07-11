@@ -26,6 +26,8 @@ export type SyncOptions = {
 export type ResetOptions = {
   /** Override whether an active cursor declaration should force the next write. */
   cursorDirty?: boolean;
+  /** Override whether the writer believes it currently owns a hidden cursor. */
+  cursorHidden?: boolean;
 };
 
 export type LogUpdate = {
@@ -36,6 +38,7 @@ export type LogUpdate = {
   getCursorReturnToBottom: () => string;
   sync: (str: string, options?: SyncOptions) => void;
   setCursorPosition: (position: CursorPosition | undefined) => void;
+  isCursorHidden: () => boolean;
   isCursorDirty: () => boolean;
   willRender: (str: string) => boolean;
   (str: string): boolean;
@@ -183,7 +186,7 @@ const createStandard = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
 
-    if (!showCursorOption) {
+    if (!showCursorOption && hasHiddenCursor) {
       showCursor(stream);
       hasHiddenCursor = false;
     }
@@ -195,6 +198,7 @@ const createStandard = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
     cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
+    hasHiddenCursor = options?.cursorHidden ?? hasHiddenCursor;
   };
 
   render.getCursorReturnToBottom = () =>
@@ -249,6 +253,7 @@ const createStandard = (
     cursorDirty = true;
   };
 
+  render.isCursorHidden = () => hasHiddenCursor;
   render.isCursorDirty = () => cursorDirty;
   render.willRender = (str: string) => hasChanges(str, getActiveCursor());
 
@@ -415,7 +420,7 @@ const createIncremental = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
 
-    if (!showCursorOption) {
+    if (!showCursorOption && hasHiddenCursor) {
       showCursor(stream);
       hasHiddenCursor = false;
     }
@@ -427,6 +432,7 @@ const createIncremental = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
     cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
+    hasHiddenCursor = options?.cursorHidden ?? hasHiddenCursor;
   };
 
   render.getCursorReturnToBottom = () =>
@@ -481,6 +487,7 @@ const createIncremental = (
     cursorDirty = true;
   };
 
+  render.isCursorHidden = () => hasHiddenCursor;
   render.isCursorDirty = () => cursorDirty;
   render.willRender = (str: string) => hasChanges(str, getActiveCursor());
 
