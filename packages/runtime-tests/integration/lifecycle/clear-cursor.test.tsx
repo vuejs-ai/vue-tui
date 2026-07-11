@@ -362,6 +362,29 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     app.unmount();
   });
 
+  test("S8c: clear() in fullscreen debug mode remains a no-op (no bytes)", async () => {
+    const { stream: stdout, writes } = makeTtyStdout();
+    const App = defineComponent(() => () => h(Text, null, () => "Hello"));
+
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin: makeTtyStdin(),
+      stderr: makeTtyStderr(),
+      debug: true,
+      fullscreen: true,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    });
+    await app.waitUntilRenderFlush();
+
+    const before = writes.length;
+    app.clear();
+    expect(writes.slice(before).join("")).toBe("");
+
+    app.unmount();
+  });
+
   test("S9: the external-write restore path still SHOWS the caret (the fix must not touch it)", async () => {
     // Ink v7.0.4 WRITE_BYTES (external useStdout().write): the restore re-shows
     // the cursor (hasShow=true). restoreLastOutput() explicitly re-seats the

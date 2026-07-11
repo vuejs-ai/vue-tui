@@ -43,6 +43,16 @@ interface ClipRect {
   y2: number | undefined;
 }
 
+function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
+  if (!a) return b;
+  return {
+    x1: a.x1 === undefined ? b.x1 : b.x1 === undefined ? a.x1 : Math.max(a.x1, b.x1),
+    x2: a.x2 === undefined ? b.x2 : b.x2 === undefined ? a.x2 : Math.min(a.x2, b.x2),
+    y1: a.y1 === undefined ? b.y1 : b.y1 === undefined ? a.y1 : Math.max(a.y1, b.y1),
+    y2: a.y2 === undefined ? b.y2 : b.y2 === undefined ? a.y2 : Math.min(a.y2, b.y2),
+  };
+}
+
 interface WriteOp {
   type: "write";
   x: number;
@@ -104,10 +114,12 @@ class Output {
   readonly height: number;
   private ops: Op[] = [];
   private readonly caches: OutputCaches = new OutputCaches();
+  private readonly hardClip: ClipRect | undefined;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, clipToBounds = false) {
     this.width = width;
     this.height = height;
+    this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
   }
 
   write(x: number, y: number, lines: string[], transformers: Transformer[]): void {
@@ -150,8 +162,11 @@ class Output {
       let { x, y } = op;
       let lines = op.lines;
 
-      // Only the most recent clip applies (top-only, matching Ink behavior)
-      const clip = clips.at(-1);
+      // Only the most recent component clip applies (top-only, matching Ink
+      // behavior). A fullscreen viewport is a separate hard boundary and must
+      // intersect even that top clip so nested overflow cannot escape it.
+      const stackedClip = clips.at(-1);
+      const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
 
       if (clip) {
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
@@ -263,7 +278,7 @@ class Output {
           currentLine[offsetX - 1] = spaceCell;
         }
 
-        // NO x-bounds check here — matches Ink's Output write loop
+        // Normal relative output has NO x-bounds check here — matching Ink's Output write loop
         // (output.ts:272-294), which writes `currentLine[offsetX] = character`
         // and the trailing placeholder cells regardless of `this.width`. A wide
         // char whose LEADING cell is in-bounds but whose TRAILING cell exceeds
@@ -275,8 +290,19 @@ class Output {
         // edge, so an edge-aligned `aa你` rendered as `aa`. Box-level
         // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
         // path); this loop must not re-implement a second, glyph-truncating clip.
+        // The one exception is the explicit fullscreen hard boundary below: a
+        // glyph beyond the addressable viewport would make the terminal wrap.
         for (const character of characters) {
           const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
+
+          // A transformer runs after the line-level clip and may expand the
+          // text again. A wide glyph may also straddle the final cell. Keep the
+          // viewport as a hard cell boundary in both cases so the terminal
+          // cannot auto-wrap an extra glyph and scroll the fullscreen surface.
+          if (this.hardClip && (offsetX < 0 || offsetX + characterWidth > this.width)) {
+            offsetX += characterWidth;
+            continue;
+          }
 
           currentLine[offsetX] = character;
 
@@ -614,6 +640,12 @@ interface HitRect {
 
 export interface PaintOptions {
   readonly hitMap?: MouseHitMapEntry[];
+  /**
+   * Clip paint and hit testing to an app-owned viewport. Fullscreen rendering
+   * uses this to keep off-screen layout from wrapping or scrolling the
+   * alternate screen, and to exclude mouse targets outside addressable cells.
+   */
+  readonly viewport?: { readonly width: number; readonly height: number };
 }
 
 function intersectHitRect(rect: HitRect, clip: HitRect | undefined): HitRect | undefined {
@@ -740,10 +772,11 @@ function recordVirtualTextHits(
 export function paint(root: TuiNode, options: PaintOptions = {}): string {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
   const layout = root.yoga.getComputedLayout();
-  const width = Math.max(1, Math.floor(layout.width));
-  const height = Math.max(1, Math.floor(layout.height));
-  const out = new Output(width, height);
-  paintNode(root, out, 0, 0, [], undefined, options.hitMap);
+  const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
+  const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
+  const out = new Output(width, height, options.viewport !== undefined);
+  const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
+  paintNode(root, out, 0, 0, [], undefined, options.hitMap, viewportClip);
   return out.get().output;
 }
 

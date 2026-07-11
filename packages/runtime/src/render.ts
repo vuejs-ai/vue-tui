@@ -31,6 +31,7 @@ import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
+import { hideCursorEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
@@ -130,13 +131,26 @@ export interface MountOptions {
    * line-diffing to minimize terminal writes — only changed lines are
    * rewritten instead of erasing and repainting the entire frame.
    *
+   * Fixed fullscreen rendering currently favors coordinate correctness and
+   * always repaints the complete viewport, so this option has no effect there.
+   *
    * @default false
    */
   incrementalRendering?: boolean;
   /**
-   * Render as a fullscreen terminal app in the alternate screen buffer. When
-   * enabled, the terminal switches to a clean buffer on mount and restores the
-   * original content on unmount — no rendering artifacts are left behind.
+   * Render as a fullscreen terminal app in the alternate screen buffer. For
+   * normal visual rendering, the runtime owns a fixed terminal-sized viewport,
+   * lays out and paints from `(0, 0)`, clips content outside it, and restores
+   * the original screen on unmount. Screen-reader mode remains a linear
+   * transcript and does not use this fixed visual-surface path.
+   *
+   * Writes made through `useStdout()`, `useStderr()`, or the default patched
+   * `console.*` are coordinated with a viewport repaint. Direct writes to
+   * `process.stdout` or `process.stderr` bypass that coordination.
+   *
+   * `<Static>` is an inline-scrollback primitive: its bytes are emitted but are
+   * not retained on the fullscreen surface. Keep persistent fullscreen history
+   * in ordinary app state, typically inside a bounded `ScrollBox`.
    *
    * Element mouse handlers (`@click`, `@wheel`, etc.) only fire in fullscreen
    * mode because terminal mouse coordinates are absolute screen cells.
@@ -180,6 +194,9 @@ export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
 }
 
 type RootProps = Record<string, unknown>;
+
+const FULLSCREEN_STATIC_WARNING =
+  "[vue-tui] <Static> output is not retained in fullscreen mode because fullscreen owns a fixed viewport. Render persistent history inside the app (for example with ScrollBox), or use inline mode.\n";
 
 function shouldClearTerminalForFrame(opts: {
   isTty: boolean;
@@ -412,8 +429,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Cancel any pending trailing-edge timer first, then do a final
     // synchronous commit so the latest state is always flushed before
     // unmount (matching Ink ink.tsx:755-761).
-    // teardownStarted=true makes shouldClearTerminalForFrame see isUnmounting,
-    // so fullscreen apps get clearTerminal on exit.
+    // teardownStarted=true lets inline frames that fill the terminal run their
+    // existing clear-on-exit path. Fixed fullscreen repaints once more before
+    // the alternate screen is restored instead.
     scheduledCommit = () => {};
     mountedScheduler?.cancel();
     // Prevent post-unmount app.clear() from writing to a torn-down stream.
@@ -692,6 +710,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       Boolean(options.fullscreen ?? options.alternateScreen) &&
       interactive &&
       Boolean(stdout.isTTY);
+    // Screen-reader rendering is a linear transcript, not a fixed cell surface.
+    // Keep its existing path separate; the fullscreen/SR interaction is a
+    // pre-existing contract question and must not be changed incidentally by
+    // the fixed-viewport correctness work here.
+    const fixedFullscreenSurface = fullscreen && !isScreenReaderEnabled;
     const mouseFullscreen =
       fullscreen && supportsTerminalMouse() && Boolean((stdin as { isTTY?: boolean }).isTTY);
 
@@ -707,6 +730,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       outputHeight: 0,
       fullStaticOutput: "",
     };
+    let warnedFullscreenStatic = false;
     let cursorPosition: CursorPosition | undefined;
     mountedGetLastOutput = () => frameState.lastOutput;
 
@@ -729,6 +753,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // (e.g. a stray useStdout().write after unmount) cannot run
       // clear()/write/restore on an already-torn-down renderer.
       if (teardownStarted) return;
+      if (fixedFullscreenSurface) {
+        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stdout.write(data) });
+        return;
+      }
       if (debug) {
         const out = data + frameState.fullStaticOutput + frameState.lastOutput;
         stdout.write(out);
@@ -757,6 +785,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Mirror Ink ink.tsx:702: return early after teardown so a late write
       // cannot corrupt the restored terminal state.
       if (teardownStarted) return;
+      if (fixedFullscreenSurface) {
+        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stderr.write(data) });
+        return;
+      }
       if (debug) {
         stderr.write(data);
         const replay = frameState.fullStaticOutput + frameState.lastOutput;
@@ -941,6 +973,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedWriter = writer;
     mountedClear = () => {
       if (!interactive || debug) return;
+      if (fixedFullscreenSurface) {
+        if (synchronize) stdout.write(bsu);
+        try {
+          stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
+          writer.sync("", { cursor: false });
+        } finally {
+          if (synchronize) stdout.write(esu);
+        }
+        return;
+      }
       writer.clear();
       // cursor:false — leave the caret HIDDEN after clear() (Ink parity:
       // ink.js clear() -> log.clear() then log.sync(...) where cursorDirty is
@@ -957,6 +999,35 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     };
     const synchronize = shouldSynchronize(stdout, interactive);
 
+    function repaintFullscreen(
+      output: string,
+      options: { writeBefore?: () => void; forwardFrame?: boolean } = {},
+    ) {
+      // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
+      // clear that surface after every coordinated side-channel write instead
+      // of restoring relative to the cursor position that the write left
+      // behind. This keeps paint geometry, cursor coordinates, and the mouse
+      // hit map in the same viewport coordinate system.
+      if (synchronize) stdout.write(bsu);
+      try {
+        // Hide first even on terminals without synchronized updates. A declared
+        // caret may be visible after the previous sync; leaving it visible while
+        // a full repaint streams produces a corner-to-caret flash.
+        stdout.write(hideCursorEscape);
+        options.writeBefore?.();
+        writer.setCursorPosition(cursorPosition);
+        stdout.write(ansiEscapes.clearViewport + output);
+        writer.sync(output);
+      } finally {
+        if (synchronize) stdout.write(esu);
+      }
+
+      frameState.lastOutput = output;
+      frameState.lastOutputToRender = output;
+      frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+      if (options.forwardFrame && !teardownStarted) frameSink?.(output);
+    }
+
     function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
       const hasStaticOutput = staticOutput !== "";
       const isTty = !!stdout.isTTY;
@@ -964,9 +1035,30 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Use resolveSize for TTY to handle the 0-columns/rows case (Ink parity G12).
       const viewportRows = isTty ? resolveSize(stdout).rows : 24;
 
-      // Fullscreen: output fills or exceeds terminal height — no trailing newline.
+      if (fixedFullscreenSurface) {
+        const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
+        if (shouldWarnStatic) {
+          warnedFullscreenStatic = true;
+        }
+        repaintFullscreen(output, {
+          // Keep the write-once stream observable to stream consumers, but do
+          // not let it become fullscreen layout/history or move the live
+          // surface. The repaint below immediately restores the fixed viewport.
+          writeBefore:
+            hasStaticOutput || shouldWarnStatic
+              ? () => {
+                  if (shouldWarnStatic) stderr.write(FULLSCREEN_STATIC_WARNING);
+                  if (hasStaticOutput) stdout.write(staticOutput);
+                }
+              : undefined,
+          forwardFrame: debug,
+        });
+        return;
+      }
+
+      // A frame that fills or exceeds the viewport gets no trailing newline.
       // Only apply when writing to a real TTY — piped output always gets trailing newlines.
-      const isFullscreen = isTty && outputHeight >= viewportRows;
+      const fillsViewport = isTty && outputHeight >= viewportRows;
       // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
       // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
       // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
@@ -976,7 +1068,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // non-empty multi-line frame keeps its true line count so the next-frame
       // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
       // interactive frames are untouched — they still append "\n" as before.
-      const outputToRender = isFullscreen || isScreenReaderEnabled ? output : output + "\n";
+      const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
 
       const shouldClear = shouldClearTerminalForFrame({
         isTty,
@@ -1064,9 +1156,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
     // <Static> channel is excluded here (skipStaticElements) just like
     // render-to-string.ts; static output is handled separately by commit().
-    function renderFrame(width: number, hitMap?: MouseHitMapEntry[]): string {
+    function renderFrame(
+      width: number,
+      hitMap?: MouseHitMapEntry[],
+      viewportRows?: number,
+    ): string {
       if (!isScreenReaderEnabled) {
-        return paint(tuiRoot, { hitMap });
+        return paint(tuiRoot, {
+          hitMap,
+          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+        });
       }
       const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
       return wrapAnsi(linear, width, { trim: false, hard: true });
@@ -1107,7 +1206,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // path. The SR exclusion is non-debug only: accumulating for interactive SR
       // would also make a later non-SR remount on the same stream replay stale
       // history (the original G59 motivation).
-      if (hasStaticOutput && (debug || !isScreenReaderEnabled)) {
+      if (hasStaticOutput && !fixedFullscreenSurface && (debug || !isScreenReaderEnabled)) {
         frameState.fullStaticOutput += staticOutput;
       }
 
@@ -1137,19 +1236,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return;
       }
 
+      const viewportRows = fixedFullscreenSurface ? resolveSize(stdout).rows : undefined;
       tuiRoot.yoga.setWidth(w);
       const restoreLayoutGuards = calculateLayoutWithContentGuards(
         tuiRoot,
         w,
-        undefined,
+        viewportRows,
         Yoga.DIRECTION_LTR,
       );
       try {
         emitLayoutListeners(tuiRoot);
         const hitMap = mouseFullscreen ? [] : undefined;
-        const frame = renderFrame(w, hitMap);
+        const frame = renderFrame(w, hitMap, viewportRows);
         mouseController.updateHitMap(hitMap ?? []);
         const outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
+        if (fixedFullscreenSurface) {
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+          return;
+        }
 
         if (debug) {
           // Debug mode mirrors Ink's onRender debug branch (ink.tsx:550-558): its
@@ -1469,7 +1575,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // produce duplicate/corrupted output. Width increase and pure height
         // changes do not trigger this path — only genuine narrowing does.
         const currentWidth = resolveSize(stdout).columns;
-        if (currentWidth < lastTerminalWidth) {
+        if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
           writer.clear();
           // Reset last-output strings so commit() repaints from scratch
           // (no stale diff), but preserve outputHeight — Ink ink.tsx:462-466

@@ -362,7 +362,7 @@ const createIncremental = (
           nextLines[i]! +
           ansiEscapes.eraseEndLine +
           // Don't append newline after the last line when the input
-          // has no trailing newline (fullscreen mode).
+          // has no trailing newline (for example, a viewport-filling frame).
           (isLastLine && !hasTrailingNewline ? "" : "\n"),
       );
     }

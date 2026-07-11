@@ -3,7 +3,13 @@ import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
 import { readPosixRestoration, repoRoot, startBasicTemplateSession } from "./basic-template.ts";
+import {
+  parseFullscreenOriginScenario,
+  startFullscreenOriginSession,
+} from "./fullscreen-origin.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
+
+type ReviewTarget = "basic-template" | "fullscreen-origin";
 
 interface Request {
   id?: string | number | null;
@@ -28,14 +34,30 @@ interface Request {
   signal?: string;
 }
 
-function defaultArtifactDir(): string {
-  const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
-  return path.join(repoRoot, "tui-visual-review-results", `basic-template-session-${stamp}`);
+function reviewTarget(args: string[]): ReviewTarget {
+  const index = args.indexOf("--target");
+  if (index === -1) return "basic-template";
+  const value = args[index + 1];
+  if (value === "basic-template" || value === "fullscreen-origin") return value;
+  throw new Error(`--target must be basic-template or fullscreen-origin, received ${value}`);
 }
 
-function artifactDir(args: string[]): string {
+function option(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value) throw new Error(`${name} requires a value`);
+  return value;
+}
+
+function defaultArtifactDir(target: ReviewTarget): string {
+  const stamp = new Date().toISOString().replaceAll(/[:.]/g, "-");
+  return path.join(repoRoot, "tui-visual-review-results", `${target}-session-${stamp}`);
+}
+
+function artifactDir(args: string[], target: ReviewTarget): string {
   const index = args.indexOf("--artifacts");
-  if (index === -1) return defaultArtifactDir();
+  if (index === -1) return defaultArtifactDir(target);
   const value = args[index + 1];
   if (!value) throw new Error("--artifacts requires a directory");
   return path.resolve(value);
@@ -119,11 +141,22 @@ async function execute(session: VisualTerminalSession, request: Request): Promis
 }
 
 async function main(): Promise<void> {
-  const outputDir = artifactDir(process.argv.slice(2));
-  const { session, mode } = await startBasicTemplateSession(outputDir);
+  const args = process.argv.slice(2);
+  const target = reviewTarget(args);
+  const outputDir = artifactDir(args, target);
+  const scenario =
+    target === "fullscreen-origin"
+      ? parseFullscreenOriginScenario(option(args, "--scenario"))
+      : undefined;
+  const { session, mode } =
+    target === "fullscreen-origin"
+      ? await startFullscreenOriginSession(outputDir, scenario!)
+      : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",
+      target,
+      scenario,
       artifactDir: session.artifactDir,
       profilePath: session.profilePath,
       processPath: session.processPath,

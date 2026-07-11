@@ -124,7 +124,7 @@ createApp(App).mount();
 | [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
 | [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
-| [`<Static>`](./packages/runtime)    | Renders a list of items once, above the redrawn region                                         |
+| [`<Static>`](./packages/runtime)    | Renders inline items once above the redrawn region; fullscreen does not retain them            |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
 
 ## High-level Components
@@ -200,7 +200,7 @@ Component assertions are necessary, but they do not show the final screen after 
 
 The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. The published runtime ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
 
-This repository includes a private TUI visual review tool under [`tools/tui-visual-review`](./tools/tui-visual-review). After `vp install`, run `vp run visual:basic-template` for an interactive JSONL session. The agent chooses states and actions from observed PNGs; this non-deterministic visual acceptance is not an image snapshot or prewritten UI test. `vp run visual:basic-template:smoke` only checks that the controller infrastructure, recorded emulator-mode cleanup, and available host restoration checks work on the current computer. The tool is a private workspace with no runtime exports or publication path.
+This repository includes a private TUI visual review tool under [`tools/tui-visual-review`](./tools/tui-visual-review). After `vp install`, run `vp run visual:basic-template` for the reference application or `vp run visual:fullscreen-origin` for the fixed-origin regression fixture. Both start an interactive JSONL session. The agent chooses states and actions from observed PNGs; this non-deterministic visual acceptance is not an image snapshot or prewritten UI test. `vp run visual:basic-template:smoke` only checks that the controller infrastructure, recorded emulator-mode cleanup, and available host restoration checks work on the current computer. The tool is a private workspace with no runtime exports or publication path.
 
 Every `@vue-tui/runtime` installation contains the version-matched guide. From the application directory, a coding agent can locate it with:
 
