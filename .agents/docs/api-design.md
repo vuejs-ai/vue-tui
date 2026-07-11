@@ -1,6 +1,6 @@
 # Application API design
 
-> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model and the component/composable boundary; it does not yet accept the readonly session-fact API, candidate pointer name or signature, target-ref and event details, the target disposition of current pointer and input APIs, a component catalog, or a 1.0 surface.
+> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, and the selected unstamped readonly render-session proposal; it does not claim that proposal is implemented or vouched and does not select the candidate pointer name or signature, target-ref and event details, target disposition of current pointer and input APIs, a component catalog, or a 1.0 surface.
 
 ## Current conclusion
 
@@ -9,6 +9,8 @@ API design is the next product-design phase for vue-tui. Positioning explains wh
 Do not begin by listing components or specifying every future prop. Start with capability boundaries and state ownership, validate them through representative journeys, and only then stabilize composables and components. API design and journey implementation should alternate: abstract design supplies a coherent model, while real applications prevent the model from becoming speculative.
 
 The first concrete design topic is the **rendering-mode contract**: which terminal surface the application owns in inline and full-screen modes, which regions remain addressable, where completed output lives, and which capabilities each mode can honestly provide. Input, focus, geometry, scrolling, overlays, and components must be designed inside that contract rather than assuming a permanently addressable screen.
+
+F1.3 selects [`useRenderSession()`](./render-session.md) as the readonly reactive projection of that contract and `useLayoutSize()` as its focused responsive-layout projection. The session preserves requested and effective mode in one finite resolution value, describes output destination, dynamic updates, and presentation separately, distinguishes terminal size from the effective layout bound, and exposes semantic availability without leaking a mutable renderer. F1.4 is the active implementation checkpoint.
 
 Interaction ownership follows as the second topic. It must distinguish two independent questions: how one effective logical focus target is maintained, and how app, overlay, region, focused-control, and external-target handlers take priority or pass an event onward. These are cooperating parts of one input model, not three competing choices called targeted events, scoped commands, and a hybrid.
 
@@ -27,12 +29,12 @@ Vue application + createApp
        redirected I/O  -> final stream by default OR an explicitly forced stream updater
        test harness    -> deterministic test observation or emulated terminal
        renderToString  -> static document
-  -> readonly session facts describe what actually became effective
+  -> useRenderSession() exposes readonly facts about what actually became effective
 ```
 
 Inline and full-screen are peers, not a complete mode and a degraded subset. Inline contributes main-screen composition and native terminal scrollback but can replace only rows the terminal can still address. Full-screen contributes a fixed viewport, stable screen coordinates, clipping, and arbitrary repaint but its visible state disappears when the alternate screen is restored. Neither has every property of the other.
 
-Requested mode and effective surface must remain separate. A request can run under a non-TTY, screen-reader, test, or string host where no live terminal mode becomes effective. Later capability APIs must derive from the effective surface and input environment rather than from the requested string alone.
+Requested mode and effective surface must remain separate. A non-TTY or string render may acquire no live terminal mode. A TTY Fullscreen request under screen-reader presentation falls back to effective Inline, while deterministic tests expose the same resolution as the production preset they model. Later capability APIs must derive from the effective surface and independent input environment rather than from the requested string or test harness alone.
 
 For normal `debug: false` output, the accepted non-TTY default follows pinned Ink v7.0.4: newly committed `Static` output is written immediately, the current dynamic frame is retained, and teardown writes only the latest dynamic frame plus a newline. An explicit live-update override may instead run the relative or linear stream updater and emit ANSI update bytes, but a non-TTY stream never acquires an alternate screen, stable viewport, or hit map. Debug output remains a separate append-oriented observation path, and stdin/raw-input availability remains independent from this stdout policy.
 
@@ -263,11 +265,12 @@ The vouched product decision defines the two modes but does not yet define their
 ### Keep rendering mode and independent runtime facts separate
 
 - **Rendering mode** is the requested and effective surface model: inline on the main screen or full-screen on the alternate screen.
-- **Render host** says whether Vue is mounted to a live terminal session, rendered to a static string, or driven by a deterministic test host.
-- **Runtime facts** are independent and can combine: stdin and stdout TTY state, effective interactivity, screen-reader output, debug behavior, dimensions, and protocol results. Screen-reader output can, for example, coexist with an interactive full-screen request; it is not a third rendering mode.
-- **Capability** is the semantic fact an API can rely on after those inputs combine, such as live key input, a stable viewport origin, targeted mouse hit testing, resize events, or terminal protocol support.
+- **Render host** says whether the component has a live-session contract or is rendered to a static string. A deterministic harness presents modeled live facts to the component and keeps its test-only identity on `RenderResult`, so application behavior cannot diverge merely because it is under test.
+- **Resolver inputs** are independent and can combine: stdin and stdout TTY state, requested live-update policy, selected screen-reader presentation, diagnostic observation, dimensions, and protocol results. They remain separate inside the runtime so one coarse boolean cannot silently decide unrelated behavior.
+- **Public runtime facts** describe the semantic result application code can adapt to: mode resolution, output destination/dynamic-update/presentation, terminal and layout dimensions, and selected structural capabilities. Raw TTY, debug, and protocol inputs are not automatically public merely because the resolver needs them.
+- **Capability** is a semantic guarantee an API can rely on after those inputs combine, such as a stable viewport origin, renderer-owned element hit testing, or coordinated suspension support. F3 owns the first public input-availability contract.
 
-`fullscreen: true` is currently effective for a mounted app only with interactive rendering and a TTY stdout. A requested mode, the effective mode, independent runtime facts, and derived capabilities must therefore remain separately observable. A component must not infer capabilities from the requested mount boolean or from one coarse environment enum.
+`fullscreen: true` is currently effective for a mounted app only with live output updates and a usable TTY surface. The runtime must preserve requested mode, effective mode, each resolver input, and derived capabilities separately; the selected public projection exposes only the semantic results that application code needs. A component must not infer capabilities from the requested mount value, raw streams, or one coarse environment enum.
 
 ### Proposed mode invariants
 
@@ -292,9 +295,9 @@ These are product constraints. `Static` and `ScrollBox` are evidence for differe
 
 Merged PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) establishes the normal visual full-screen backend described in [fullscreen-output.md](./fullscreen-output.md): Yoga, paint, cursor placement, and hit testing use the current terminal rows and columns with viewport origin `(0, 0)`; each commit clears, homes, clips, and repaints that viewport; coordinated `Static`, stdout, stderr, and patched-console output is followed by an origin-preserving repaint. Direct process-stream writes still bypass the coordinator, and screen-reader output retains its separate linear transcript path. `incrementalRendering` is deliberately ignored on this correctness-first full-screen path for now.
 
-The remaining gaps are at the public contract and inline boundary:
+The remaining gaps are at the implementation and Inline boundary:
 
-- The shipped mount surface still uses `fullscreen` and deprecated `alternateScreen` booleans. The accepted clean-slate optional `mode` option with an Inline default, direct removal of the old booleans, fail-fast runtime validation, requested-versus-effective state, and public capability view are not implemented.
+- The shipped mount surface still uses `fullscreen` and deprecated `alternateScreen` booleans. The accepted clean-slate optional `mode` option with an Inline default, direct removal of the old booleans, fail-fast runtime validation, and selected [`useRenderSession()` projection](./render-session.md) are not implemented.
 - Inline still uses the relative live-region writer. Its absolute top row is not stable, and the overflow-clear fallback can affect earlier main-screen content or scrollback, so its exact ownership and external-output contract remains narrower than the desired model.
 - Full-screen restoration on unmount, exit, and signals, plus the direct-write bypass, are recorded current behavior. Target suspension and final-output semantics are specified in the matrix but not implemented or exposed through public session facts.
 - `@vue-tui/testing` captures content frames in debug mode without selecting full-screen or emulating the final terminal screen. `renderToString` has columns but no rows, rendering mode, or terminal-I/O lifecycle. The matrix specifies the target distinction between test observations and production surfaces, but the exact deterministic controls and observations remain F1 work.
@@ -302,10 +305,10 @@ The remaining gaps are at the public contract and inline boundary:
 
 ### Remaining work in this packet
 
-The accepted finite current-versus-target answers, F1.2 mount contract, and inline-overflow PTY comparison are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The no-clear inline invariant, application-side escape-hatch requirement, and experimental API-stability policy are vouched. F1.2 is complete; the active F1.3 checkpoint now defines the readonly session facts that expose the accepted matrix. The questions below define the packet's full scope rather than a second active backlog.
+The accepted finite current-versus-target answers, F1.2 mount contract, and Inline-overflow PTY comparison are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The no-clear Inline invariant, application-side escape-hatch requirement, and experimental API-stability policy are vouched. F1.3 selects the unstamped readonly [`useRenderSession()` contract](./render-session.md); F1.4 now owns its first implementation slice. The questions below define the packet's full scope rather than a second active backlog.
 
 1. What exact live region does Inline own, how does completed output leave it, and what can still be redrawn after `Static`, external output, resize, suspension, and restoration?
-2. Which accepted facts belong in the F1.3 readonly reactive session API, and how are requested mode, effective mode, live-update policy, dimensions, stable-origin availability, hit testing, input support, protocol support, and screen-reader behavior represented without conflation?
+2. How is the selected readonly session contract implemented from one resolver so requested mode, effective mode, output facts, dimensions, and structural capabilities cannot diverge?
 3. How are the accepted suspension, final-output, fatal-error, and direct-write contracts implemented and exposed without application code reading private state?
 4. How do deterministic tests select requested mode and execution environment, inspect effective capabilities, and distinguish content frames from the final emulated terminal screen?
 5. Which primitives and components have genuinely shared semantics, which expose capability-dependent behavior, and which should clearly support only one rendering mode?
@@ -391,7 +394,7 @@ Every proposal should state:
 
 This record does not decide to:
 
-- publish a `useTerminal`, key event, command, focus-scope, editor, list, overlay or cell-surface API under any particular name;
+- publish a `useTerminal`, key event, command, focus-scope, editor, list, overlay or cell-surface API under any particular name; F1.3's selected `useRenderSession()` is the explicit exception recorded in [render-session.md](./render-session.md);
 - implement the direct replacement of current mount, targeted-listener, drag, input, focus, raw-mouse, or direct-stream APIs before each target contract and its evidence are accepted; the experimental policy removes the backward-compatibility gate but does not choose the new API shape;
 - build a Table, TextInput, Dialog, Tree, Command Palette, TaskList or other catalog item merely because another framework has one;
 - create `@vue-tui/use` before an accepted independent behavior requires it;

@@ -10,15 +10,16 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.3, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define the minimal readonly session-fact API over the accepted mount and host matrix.
+Close F1.4, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): implement the accepted clean-slate live mount surface and the authoritative internal resolver that will later back the selected readonly [`useRenderSession()` contract](./render-session.md).
 
-1. map every accepted live, non-TTY, screen-reader, deterministic-test, and string-host row to finite observable facts;
-2. preserve requested mode, effective mode or no acquired mode, render host, effective surface, live-update policy, fallback reason, screen-reader path, dimensions, stable-origin availability, and hit-map availability as distinct facts;
-3. choose a Vue-native readonly and reactive shape with an explicit app/session lifetime and clear behavior inside and outside component setup;
-4. state the retain, replace, or remove disposition of overlapping facts currently exposed by `useApp`, `useWindowSize`, and `useIsScreenReaderEnabled`;
-5. provide template and TSX examples plus a deterministic-test control picture without implementing the mount replacement or predesigning pointer, focus, or input routing.
+1. add optional `mode`, remove the old Fullscreen booleans directly, and reject every invalid/removed-key case before any terminal mutation;
+2. derive live-host mode resolution, output destination/dynamic updates/presentation, terminal/layout dimensions, and semantic capabilities from one pure resolver used by behavior and internal session state;
+3. provide the internal session before setup with stable identity and reactive dimensions/capabilities, but do not export a public hook while test/string hosts and Inline bounds are incomplete;
+4. make Fullscreen plus screen-reader rendering use the accepted main-screen Inline transcript fallback and map default/forced non-TTY output without acquiring false terminal capabilities;
+5. retain current public fact hooks temporarily while making them derive from the one live resolution source, and record the next disposition of `interactive`/`debug` wherever they would contradict the selected output contract;
+6. prove the mount slice through type/runtime guards, focused lifecycle/integration tests, real PTY behavior, a clean packed consumer, `vp run ready`, and fresh `CI=true vp run ci`.
 
-F1.2 is complete: one `createApp`, optional `mode` with an Inline default, fail-fast invalid and removed keys, and pinned Ink v7.0.4 non-TTY output behavior are accepted unstamped target decisions. F1.3 consumes those decisions; it does not reopen the two screen models, treat the Inline default as product hierarchy, implement target lifecycle fixes, or activate F2. The experimental API-stability policy removes deprecation, version-window, and consumer-usage research from this checkpoint.
+F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, source audit, peer comparison, host mapping, lifetime, test-host picture, and current-API dispositions. F1.4 implements the live behavior source without publishing a partial facts API; F1.5 owns deterministic testing and string rendering, F1.6 owns Inline history/overflow, F1.7 owns remaining lifecycle behavior, and F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, or activate F2 early.
 
 ## Baseline for the current foundation
 
