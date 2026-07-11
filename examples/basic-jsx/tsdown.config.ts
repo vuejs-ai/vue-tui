@@ -1,5 +1,5 @@
 import { defineConfig } from "tsdown";
-import VueJsx from "unplugin-vue-jsx/rolldown";
+import vueJsx from "unplugin-vue-jsx/rolldown";
 
 // This example authors in JSX (.tsx), so the build uses unplugin-vue-jsx (Vue's JSX transform)
 // instead of unplugin-vue. Self-contained Node build → dist/main.mjs. See
@@ -9,5 +9,5 @@ export default defineConfig({
   platform: "node",
   format: "esm",
   deps: { alwaysBundle: [/./], onlyBundle: false },
-  plugins: [VueJsx()],
+  plugins: [vueJsx()],
 });
