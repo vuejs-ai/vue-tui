@@ -53,6 +53,47 @@ test.sequential("live commit path emits linear screen-reader text (no border gly
   app.unmount();
 });
 
+test.sequential("forced live screen-reader output updates a non-TTY without alternate screen", async () => {
+  const label = shallowRef("first-linear-frame");
+  const App = defineComponent(() => () => <Text>{label.value}</Text>);
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 80, rows: 24 });
+  const stderr = makeFakeWritable({ columns: 80, rows: 24 });
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    interactive: true,
+    fullscreen: true,
+    isScreenReaderEnabled: true,
+  });
+
+  await nextTick();
+  await app.waitUntilRenderFlush();
+  expect(getContentWrites(writes).join("")).toContain("first-linear-frame");
+  expect(writes.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
+
+  writes.length = 0;
+  label.value = "second-linear-frame";
+  await nextTick();
+  await app.waitUntilRenderFlush();
+
+  const liveUpdate = writes.join("");
+  expect(liveUpdate).toContain(ansiEscapes.eraseLines(1));
+  expect(getContentWrites(writes).join("")).toContain("second-linear-frame");
+  expect(liveUpdate).not.toContain(ansiEscapes.enterAlternativeScreen);
+
+  app.unmount();
+  await app.waitUntilExit();
+  expect(writes.join("")).not.toContain(ansiEscapes.exitAlternativeScreen);
+});
+
 test.sequential("live commit path WITHOUT SR still emits 2D grid with border glyphs (contrast)", async () => {
   const App = defineComponent(() => {
     return () => (

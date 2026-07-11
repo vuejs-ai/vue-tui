@@ -122,6 +122,32 @@ re-render. Matching Ink's well-tuned cadence buys the same perceived responsiven
 guarantees without re-deriving them. One deliberate exception: resize cancels the pending trailing
 commit — see the divergence "Resize unconditionally cancels the pending trailing commit".
 
+### Non-TTY output defaults to a final stream while explicit live updates remain possible
+
+The stdout policy deliberately matches Ink v7.0.4. Both runtimes [resolve live updates](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L979-L981) as the explicit override when present, otherwise as
+`!isInCi && Boolean(stdout.isTTY)`. With normal
+`debug: false` output and live updates disabled, newly committed `Static` bytes are written
+immediately, dynamic commits only replace the retained latest frame, and teardown writes that
+latest dynamic frame plus a newline. This keeps ordinary redirected output useful and avoids
+emitting cursor-relative update bytes by default.
+
+The override remains real rather than advisory: explicitly enabling live updates on a non-TTY
+stream runs the relative or screen-reader writer and may emit live frames plus ANSI erase or cursor
+movement bytes. Commit throttling can coalesce intermediate states, so the contract is not that
+every reactive state is observable. Alternate-screen entry still independently requires a TTY
+stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a hit map on a pipe.
+
+This alignment is about output policy, not a broad claim that the application has no input. A TTY
+stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
+`debug: true` is also a separate append-oriented diagnostic branch that writes complete current
+content on commits and only adds a newline at non-interactive teardown. Finally, Ink's screen-reader
+flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen
+screen-reader request to a main-screen transcript is a separate product decision from the
+non-TTY alignment.
+
+The pinned upstream behavior was run-verified through Ink's [non-TTY and explicit-override tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1152-L1247), CI tests, [alternate-screen tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1712-L1757), and Static tests. vue-tui's current behavior is covered by
+[`non-interactive-final-frame.test.tsx`](../../packages/runtime-tests/integration/lifecycle/non-interactive-final-frame.test.tsx), [`unmount-stream.test.tsx`](../../packages/runtime-tests/integration/lifecycle/unmount-stream.test.tsx), [`cursor-non-tty.test.tsx`](../../packages/runtime-tests/integration/lifecycle/cursor-non-tty.test.tsx), and [`alternate-screen.test.tsx`](../../packages/runtime-tests/integration/lifecycle/alternate-screen.test.tsx).
+
 ### Literal tabs in `<Text>` are not normalized (measure vs paint width)
 
 Tabs in `<Text>` aren't normalized — measured width can disagree with painted width (shared with

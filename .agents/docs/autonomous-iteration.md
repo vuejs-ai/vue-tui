@@ -10,15 +10,15 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.2, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define and obtain maintainer acceptance for the exact clean-slate `mode` mount contract.
+Close F1.3, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): define the minimal readonly session-fact API over the accepted mount and host matrix.
 
-1. compare a required `mode` with an explicit omission/default using the accepted two-surface product model rather than the old boolean default;
-2. produce one finite table for omission, `inline`, `fullscreen`, invalid JavaScript values, validation timing, and every live, non-TTY, screen-reader, deterministic-test, and string host;
-3. specify direct removal of `fullscreen` and `alternateScreen`, including whether recognizable obsolete keys fail immediately instead of silently selecting Inline;
-4. surface the one-application model, option term, required-or-default behavior, failure behavior, and two forced non-TTY output-policy choices for maintainer acceptance;
-5. update the roadmap and design records after acceptance without implementing the replacement or selecting the readonly session API.
+1. map every accepted live, non-TTY, screen-reader, deterministic-test, and string-host row to finite observable facts;
+2. preserve requested mode, effective mode or no acquired mode, render host, effective surface, live-update policy, fallback reason, screen-reader path, dimensions, stable-origin availability, and hit-map availability as distinct facts;
+3. choose a Vue-native readonly and reactive shape with an explicit app/session lifetime and clear behavior inside and outside component setup;
+4. state the retain, replace, or remove disposition of overlapping facts currently exposed by `useApp`, `useWindowSize`, and `useIsScreenReaderEnabled`;
+5. provide template and TSX examples plus a deterministic-test control picture without implementing the mount replacement or predesigning pointer, focus, or input routing.
 
-F1.2 does not reopen the accepted two-screen surface model or lifecycle invariants in the [rendering-mode and host behavior matrix](./rendering-mode-matrix.md); it explicitly owns the two marked non-TTY output-policy cells whose prior rationale was backward compatibility. It does not choose the public session composable, implement target lifecycle fixes, or activate a later foundation. The experimental API-stability policy removes deprecation, version-window, and consumer-usage research from this checkpoint.
+F1.2 is complete: one `createApp`, optional `mode` with an Inline default, fail-fast invalid and removed keys, and pinned Ink v7.0.4 non-TTY output behavior are accepted unstamped target decisions. F1.3 consumes those decisions; it does not reopen the two screen models, treat the Inline default as product hierarchy, implement target lifecycle fixes, or activate F2. The experimental API-stability policy removes deprecation, version-window, and consumer-usage research from this checkpoint.
 
 ## Baseline for the current foundation
 

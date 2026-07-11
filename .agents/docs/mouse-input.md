@@ -24,7 +24,9 @@
 > needs it, while interactive inline use is rejected because it has no reliable element hit-test
 > origin. Terminal-wide raw mouse remains conceptually separate from targeted pointer delivery, but
 > the current root `useMouseInput` name, export path, coordinate base, and vertical-wheel-only shape
-> are reopened rather than preserved for compatibility.
+> are reopened rather than preserved for compatibility. The accepted mount target is one
+> `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default; shipped
+> v1 still uses `fullscreen` and `alternateScreen` until later F1 implementation replaces them.
 > Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 
@@ -218,7 +220,7 @@ Every author-facing name maps to a real precedent, none invented:
 | `useDraggable`                                                                                                     | VueUse `useDraggable`, exact                                                                                  |
 | `useElementHover` (deferred)                                                                                       | VueUse `useElementHover`, exact                                                                               |
 | `useMouseInput`, `MouseInputEvent`                                                                                 | existing vue-tui exports in v1 (#237); target names and shape reopened                                        |
-| `fullscreen` mount option                                                                                          | v1 intent-named replacement for the mechanism-named `alternateScreen`; target mount shape reopened            |
+| `fullscreen` mount option                                                                                          | historical v1 replacement for `alternateScreen`; accepted target is the optional `mode` field                 |
 
 Only the two names that collide with a DOM global are prefixed. `Tui` — not the brand `VueTui`, and
 not a namespace — is the deliberate call: it matches PixiJS (a non-DOM renderer with DOM-shaped
@@ -395,7 +397,8 @@ must not change the public event / `MouseTarget.rect` contract.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
   by `useDraggable`, including when the capturing node unmounts; mouse composables use a local
   `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the supported mount-option name
-  and `alternateScreen` remains only as a deprecated alias. This naming decision does not settle
+  and `alternateScreen` remains only as a deprecated alias in shipped v1. The accepted target
+  replaces both with `mode`, without a compatibility alias. This naming decision does not settle
   whether full-screen or inline should be the product's primary mode; see
   [goal.md](./goal.md#rendering-modes).
 

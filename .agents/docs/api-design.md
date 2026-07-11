@@ -1,6 +1,6 @@
 # Application API design
 
-> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records one `createApp`, the public `mode` term, and the component/composable boundary; it does not yet accept whether `mode` is required or has a default, the candidate pointer name or signature, target-ref and event details, the target disposition of current pointer and input APIs, a component catalog, or a 1.0 surface.
+> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model and the component/composable boundary; it does not yet accept the readonly session-fact API, candidate pointer name or signature, target-ref and event details, the target disposition of current pointer and input APIs, a component catalog, or a 1.0 surface.
 
 ## Current conclusion
 
@@ -24,7 +24,7 @@ Vue application + createApp
   -> runtime resolves the actual output host and surface
        live visual TTY -> inline main-screen live region OR full-screen alternate-screen viewport
        screen reader   -> main-screen linear transcript
-       redirected I/O  -> no live terminal surface; final stream is the current recommendation
+       redirected I/O  -> final stream by default OR an explicitly forced stream updater
        test harness    -> deterministic test observation or emulated terminal
        renderToString  -> static document
   -> readonly session facts describe what actually became effective
@@ -34,13 +34,15 @@ Inline and full-screen are peers, not a complete mode and a degraded subset. Inl
 
 Requested mode and effective surface must remain separate. A request can run under a non-TTY, screen-reader, test, or string host where no live terminal mode becomes effective. Later capability APIs must derive from the effective surface and input environment rather than from the requested string alone.
 
+For normal `debug: false` output, the accepted non-TTY default follows pinned Ink v7.0.4: newly committed `Static` output is written immediately, the current dynamic frame is retained, and teardown writes only the latest dynamic frame plus a newline. An explicit live-update override may instead run the relative or linear stream updater and emit ANSI update bytes, but a non-TTY stream never acquires an alternate screen, stable viewport, or hit map. Debug output remains a separate append-oriented observation path, and stdin/raw-input availability remains independent from this stdout policy.
+
 The common authoring surface contains Vue components and composables whose semantics do not depend on whole-screen ownership: passive layout and text primitives, shared logical input and focus foundations, and a bounded, input-free `ScrollBox`. A component should not inspect global mode and quietly change meaning. An operation that requires stable physical coordinates, a hit map, alternate-screen ownership, or terminal-wide capture belongs behind an explicit terminal-integration boundary and may reject an unavailable surface immediately. The current candidate is a ref-bound full-screen composable, not a parallel catalog of `PointerBox`, `PointerScrollBox`, and other visual variants. An inline-specific subpath remains possible if a future capability genuinely depends on main-screen history.
 
 Two current APIs are deliberately not promoted into the final picture merely because they shipped. `<Static>` has honest terminal-history semantics inline but cannot provide the same persistence full-screen, so its eventual common or inline-specific placement remains open. Terminal-wide raw mouse input remains conceptually different from element-targeted pointer delivery, but the current `useMouseInput` name, event subset, and root export have no backward-compatibility protection during experimentation.
 
 ## Current mode, pointer, and scrolling boundary
 
-This section records the design boundaries that are stable enough to carry forward after the source audit, concrete examples, and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It remains unstamped: the exact mount shape, example names, signatures, target-ref type, event map, and target disposition of current APIs are not yet accepted.
+This section records the design boundaries that are stable enough to carry forward after the source audit, concrete examples, and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It remains unstamped: the mount shape is accepted, while example pointer names, signatures, target-ref type, event map, and target disposition of current pointer APIs are not yet accepted.
 
 ### One app, two rendering modes
 
@@ -54,9 +56,9 @@ createApp(App).mount({
 
 Inline and full-screen select different terminal-surface contracts within the same `createApp` and mount lifecycle; they are not different Vue application kinds. A separate `createFullscreenApp` would duplicate lifecycle, plugins, dependency injection, testing, and component authoring while still failing to express effective TTY and capability state. Revisit a separate creator only if implementation proves that the modes require incompatible Vue app construction or lifecycle types.
 
-Whether `mode` is required or omission defaults to a mode remains the active F1.2 choice. The old `fullscreen: false` behavior supplies no backward-compatibility constraint and cannot decide the new default by itself. Requested mode, effective mode, render host, interactivity, and derived capabilities remain separate facts. Both modes are first-class; choosing a conservative default later would not make the other mode degraded.
+`mode` is optional and omission, including `mode: undefined`, requests Inline. This default reduces ceremony for main-screen composition but does not make Inline the primary product mode or Fullscreen a fallback. `mode: "inline"` and `mode: "fullscreen"` are the only other accepted values. Every other runtime value fails synchronously, as does the presence of an own `fullscreen` or `alternateScreen` property, before the runtime reserves a stream or mutates terminal or Vue state. Removed-option errors take precedence when old and new keys appear together.
 
-The current clean-slate recommendation is to require `mode`. It changes terminal ownership, history, coordinate guarantees, exit behavior, and which integrations can work, so making the application choose is clearer than hiding those assumptions behind omission. Recognizable `fullscreen` or `alternateScreen` keys and invalid `mode` values should fail immediately instead of silently launching the wrong surface. These are F1.2 proposals, not conclusions derived from the old API; an Inline default can still be added later if representative journeys show that explicit selection is needless friction.
+After validation and defaulting, every live mount records one normalized requested mode even when the host cannot make it effective. The accepted finite input and host tables are in [rendering-mode-matrix.md](./rendering-mode-matrix.md#f12-accepted-mount-contract). The current `fullscreen` and `alternateScreen` implementation remains only until a later F1 implementation checkpoint replaces it directly; no compatibility alias or warning period belongs in the target.
 
 ### Common components stay passive
 
@@ -292,22 +294,21 @@ Merged PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) establishes the n
 
 The remaining gaps are at the public contract and inline boundary:
 
-- The shipped mount surface still uses `fullscreen` and deprecated `alternateScreen` booleans. The target clean-slate `mode` option, direct removal of the old booleans, requested-versus-effective state, and public capability view are not implemented.
+- The shipped mount surface still uses `fullscreen` and deprecated `alternateScreen` booleans. The accepted clean-slate optional `mode` option with an Inline default, direct removal of the old booleans, fail-fast runtime validation, requested-versus-effective state, and public capability view are not implemented.
 - Inline still uses the relative live-region writer. Its absolute top row is not stable, and the overflow-clear fallback can affect earlier main-screen content or scrollback, so its exact ownership and external-output contract remains narrower than the desired model.
-- Full-screen restoration on unmount, exit, and signals, plus the direct-write bypass, are recorded current behavior. Suspension and final-output semantics remain unspecified, and applications still lack a public way to inspect output ownership and lifecycle capabilities.
-- `@vue-tui/testing` captures content frames in debug mode without selecting full-screen or emulating the final terminal screen. `renderToString` has columns but no rows, rendering mode, or terminal-I/O lifecycle. The proposed mode matrix therefore needs new testing semantics before it can become contract.
+- Full-screen restoration on unmount, exit, and signals, plus the direct-write bypass, are recorded current behavior. Target suspension and final-output semantics are specified in the matrix but not implemented or exposed through public session facts.
+- `@vue-tui/testing` captures content frames in debug mode without selecting full-screen or emulating the final terminal screen. `renderToString` has columns but no rows, rendering mode, or terminal-I/O lifecycle. The matrix specifies the target distinction between test observations and production surfaces, but the exact deterministic controls and observations remain F1 work.
 - Full-screen targeted mouse can take terminal-native selection away from the user, but vue-tui has no application-owned selection and copy model yet.
 
-### Questions this packet must settle
+### Remaining work in this packet
 
-The accepted finite current-versus-target answers and inline-overflow PTY comparison are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The no-clear inline invariant, application-side escape-hatch requirement, and experimental API-stability policy are vouched; the active F1.2 checkpoint now handles the exact clean-slate mount contract. The questions below define the packet's full scope rather than a second active backlog.
+The accepted finite current-versus-target answers, F1.2 mount contract, and inline-overflow PTY comparison are tracked in [rendering-mode-matrix.md](./rendering-mode-matrix.md). The no-clear inline invariant, application-side escape-hatch requirement, and experimental API-stability policy are vouched. F1.2 is complete; the active F1.3 checkpoint now defines the readonly session facts that expose the accepted matrix. The questions below define the packet's full scope rather than a second active backlog.
 
-1. Which requested mode becomes effective in every supported execution environment, and is an unavailable request ignored, rejected, warned about, or exposed as a detectable fallback?
-2. What exact live region does inline own, how does completed output leave it, and what can still be redrawn after `Static`, external output, resize, suspension, and restoration?
-3. How do suspension, final output, and nested or busy output streams fit the implemented full-screen contract, and how can applications inspect its lifecycle and direct-write boundary without reading private state?
-4. Which facts belong in a readonly reactive environment API, including requested mode, effective mode, interactivity, size, stable-origin availability, mouse hit testing, paste, keyboard protocol, color, and screen-reader behavior?
+1. What exact live region does Inline own, how does completed output leave it, and what can still be redrawn after `Static`, external output, resize, suspension, and restoration?
+2. Which accepted facts belong in the F1.3 readonly reactive session API, and how are requested mode, effective mode, live-update policy, dimensions, stable-origin availability, hit testing, input support, protocol support, and screen-reader behavior represented without conflation?
+3. How are the accepted suspension, final-output, fatal-error, and direct-write contracts implemented and exposed without application code reading private state?
+4. How do deterministic tests select requested mode and execution environment, inspect effective capabilities, and distinguish content frames from the final emulated terminal screen?
 5. Which primitives and components have genuinely shared semantics, which expose capability-dependent behavior, and which should clearly support only one rendering mode?
-6. How do deterministic tests select requested mode and execution environment, inspect effective capabilities, and distinguish content frames from the final emulated terminal screen?
 
 Do not publish a mode-dependent editor, overlay, viewport, pointer, geometry, or high-level component API until this matrix is explicit enough that the same application cannot accidentally depend on a full-screen assumption while running inline.
 
@@ -382,7 +383,7 @@ Every proposal should state:
 
 - The cross-framework evidence ledger, comparison vocabulary, and required decision check live in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). A peer establishes a mechanism or tradeoff in its own constraints; it does not choose vue-tui's Vue API, package path, product default, or component catalog.
 - Vue's [custom renderer contract](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/renderer.ts#L96-L155) keeps host operations narrow, while [hierarchical provide/inject](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/apiInject.ts#L8-L74) is a natural mechanism for app and subtree services.
-- Ink v7.0.4's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) explain vue-tui's current baseline and also its limit for nested applications. This matches the repository's canonical Ink snapshot; Ink parity is not the API objective.
+- Ink v7.0.4's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) explain vue-tui's current baseline and also its limit for nested applications. Its run-verified non-TTY default and explicit live-update override are recorded as a deliberate alignment in [ink-divergences.md](./ink-divergences.md#non-tty-output-defaults-to-a-final-stream-while-explicit-live-updates-remain-possible). This matches the repository's canonical Ink snapshot; Ink parity is not the API objective.
 - OpenTUI's [key event contract](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/lib/KeyHandler.ts#L5-L62) demonstrates handled and propagation semantics. Its framework-neutral core and broad exports are not a reason to migrate or copy its public structure.
 - Textual's [focused-widget and app binding route](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/guide/input.md#L118-L185) demonstrates why focus, app shortcuts and inspectable bindings belong in one model. Its Python inheritance, string actions and full message system are not proposed for vue-tui.
 
@@ -396,6 +397,6 @@ This record does not decide to:
 - create `@vue-tui/use` before an accepted independent behavior requires it;
 - make all web Vue directives or DOM event semantics work unchanged in a terminal;
 - add a blanket component accessibility requirement or change the runtime's existing accessibility contract;
-- make either rendering mode the sole or feature-reduced product mode; both remain first-class, while the mount option's required or default behavior remains F1.2 work;
+- make either rendering mode the sole or feature-reduced product mode; both remain first-class, and the accepted Inline omission default does not establish a product hierarchy;
 - introduce a router, generic message bus, framework-neutral renderer API, or application-domain state machine;
 - reopen renderer optimization, virtualization or native-core work without the triggers in [performance.md](./performance.md#when-to-reopen-this-work).

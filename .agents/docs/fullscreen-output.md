@@ -1,6 +1,6 @@
 # Fullscreen output contract
 
-The current runtime selects this behavior with `fullscreen: true`; the target clean-slate mount name and required/default behavior remain F1.2 work. The alternate screen is the terminal mechanism used to implement the full-screen model. The mode is effective only for an interactive app with a TTY `stdout`; `alternateScreen` remains a deprecated alias in the current implementation only.
+The current runtime selects this behavior with `fullscreen: true`, with `alternateScreen` as a deprecated implementation alias. The accepted clean-slate target instead uses optional `mode: "inline" | "fullscreen"` with Inline as the omission default and removes both booleans directly; that replacement remains later F1 implementation work. The alternate screen is the terminal mechanism used to implement the full-screen model, and Fullscreen becomes effective only when live updates are enabled and `stdout` is a TTY. An explicit live-update override on a non-TTY stream cannot bypass that gate.
 
 ## The surface vue-tui owns
 
