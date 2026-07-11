@@ -50,7 +50,7 @@ function mountMouseApp(
     stdout,
     stderr,
     stdin,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
     rawMode: "auto",
     mode: fullscreen ? "fullscreen" : "inline",

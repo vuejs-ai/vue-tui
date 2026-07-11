@@ -70,6 +70,12 @@ export type LiveRenderOutput =
       readonly presentation: RenderPresentation;
     };
 
+export interface StringRenderOutput {
+  readonly destination: "document";
+  readonly dynamicUpdates: "none";
+  readonly presentation: RenderPresentation;
+}
+
 export interface RenderCapabilities {
   readonly stableOrigin: boolean;
   readonly elementHitTesting: boolean;
@@ -83,6 +89,28 @@ export interface InternalLiveRenderSessionSnapshot {
   readonly dimensions: RenderDimensions;
   readonly capabilities: RenderCapabilities;
 }
+
+export interface InternalStringRenderSessionSnapshot {
+  readonly host: "string";
+  readonly mode: null;
+  readonly output: StringRenderOutput;
+  readonly dimensions: {
+    readonly terminal: null;
+    readonly layout: {
+      readonly columns: number;
+      readonly rows: null;
+    };
+  };
+  readonly capabilities: {
+    readonly stableOrigin: false;
+    readonly elementHitTesting: false;
+    readonly suspension: false;
+  };
+}
+
+export type InternalRenderSessionSnapshot =
+  | InternalLiveRenderSessionSnapshot
+  | InternalStringRenderSessionSnapshot;
 
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
@@ -135,6 +163,11 @@ export function normalizeRequestedMode(options: object): RenderMode {
   if (hasOwn(options, "interactive")) {
     throw new TypeError(
       'Mount option "interactive" was removed; use "liveUpdates" only to override output cadence.',
+    );
+  }
+  if (hasOwn(options, "debug")) {
+    throw new TypeError(
+      'Mount option "debug" was removed; use "liveUpdates" for output cadence and @vue-tui/testing for deterministic content frames.',
     );
   }
 
@@ -351,13 +384,25 @@ type MutableLiveRenderSession = Omit<
   capabilities: RenderCapabilities;
 };
 
-export interface InternalRenderSessionService {
-  readonly session: DeepReadonly<InternalLiveRenderSessionSnapshot>;
+interface InternalRenderSessionServiceBase {
+  readonly session: DeepReadonly<InternalRenderSessionSnapshot>;
   readonly legacyWindowRows: Readonly<ShallowRef<number>>;
-  updateDimensions(next: ResolvedLiveDimensions): void;
-  updateElementHitTesting(value: boolean): void;
   dispose(): void;
 }
+
+export interface InternalLiveRenderSessionService extends InternalRenderSessionServiceBase {
+  readonly session: DeepReadonly<InternalLiveRenderSessionSnapshot>;
+  updateDimensions(next: ResolvedLiveDimensions): void;
+  updateElementHitTesting(value: boolean): void;
+}
+
+export interface InternalStringRenderSessionService extends InternalRenderSessionServiceBase {
+  readonly session: DeepReadonly<InternalStringRenderSessionSnapshot>;
+}
+
+export type InternalRenderSessionService =
+  | InternalLiveRenderSessionService
+  | InternalStringRenderSessionService;
 
 function frozenDimensions(dimensions: RenderDimensions): RenderDimensions {
   return Object.freeze({
@@ -368,7 +413,7 @@ function frozenDimensions(dimensions: RenderDimensions): RenderDimensions {
 
 export function createLiveRenderSessionService(
   surface: ResolvedLiveSurface,
-): InternalRenderSessionService {
+): InternalLiveRenderSessionService {
   const initial = surface.session;
   const state = shallowReactive<MutableLiveRenderSession>({
     host: "live",
@@ -395,6 +440,41 @@ export function createLiveRenderSessionService(
     },
     dispose() {
       disposed = true;
+    },
+  };
+}
+
+export function createStringRenderSessionService(options: {
+  readonly columns: number;
+  readonly presentation: RenderPresentation;
+}): InternalStringRenderSessionService {
+  const state = shallowReactive<InternalStringRenderSessionSnapshot>({
+    host: "string",
+    mode: null,
+    output: Object.freeze({
+      destination: "document",
+      dynamicUpdates: "none",
+      presentation: options.presentation,
+    }),
+    dimensions: Object.freeze({
+      terminal: null,
+      layout: Object.freeze({ columns: options.columns, rows: null }),
+    }),
+    capabilities: Object.freeze({
+      stableOrigin: false,
+      elementHitTesting: false,
+      suspension: false,
+    }),
+  });
+  // useWindowSize() remains public until F1.8 and still requires a numeric row
+  // value. A document has no bounded rows, so keep the deliberate 24-row value
+  // as a temporary projection without placing it in the truthful session.
+  const legacyWindowRows = readonly(shallowRef(24));
+  return {
+    session: readonly(state) as DeepReadonly<InternalStringRenderSessionSnapshot>,
+    legacyWindowRows,
+    dispose() {
+      // The readonly snapshot remains valid after the synchronous tree is gone.
     },
   };
 }

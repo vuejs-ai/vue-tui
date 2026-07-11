@@ -11,7 +11,7 @@ export interface CommitScheduler {
 }
 
 export interface CommitSchedulerOptions {
-  /** Disable time-based throttle (used in tests / debug mode). */
+  /** Disable time-based throttling, for example when maxFps is non-positive. */
   immediate?: boolean;
   /**
    * Throttle window in ms — the leading+trailing commit interval. The caller

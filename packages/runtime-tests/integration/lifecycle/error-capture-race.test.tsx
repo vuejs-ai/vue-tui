@@ -11,7 +11,7 @@ import {
 } from "./test-streams.ts";
 
 // A NON-TTY writable (isTTY=false). makeFakeWritable() forces isTTY=true, which
-// makes the app interactive; for the non-interactive non-debug race below we need
+// selects live output; for the final-stream race below we need
 // a piped stream so `interactive` derives false (render.ts:
 // `options.liveUpdates ?? (!isInCi && Boolean(stdout.isTTY))`). We also pass
 // `liveUpdates: false` explicitly so the case is deterministic regardless of CI.
@@ -51,7 +51,7 @@ test("update-flush throw then synchronous unmount(): waitUntilExit REJECTS with 
   });
 
   const app = createApp(ThrowsOnUpdate);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -104,7 +104,7 @@ test("two sibling throws in one flush: displayed overview and rejected error AGR
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   type Reject = { kind: "rejected"; message: unknown } | { kind: "resolved" };
   const settled: Promise<Reject> = app.waitUntilExit().then(
@@ -174,7 +174,7 @@ test("captured throw then racing exit(err): displayed overview and rejected erro
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -214,15 +214,15 @@ test("captured throw then racing exit(err): displayed overview and rejected erro
   expect(frame).not.toContain("EXIT_ERROR_2");
 });
 
-// --- BUG #2, the NON-INTERACTIVE NON-DEBUG case ---
+// --- BUG #2, the final-stream case ---
 // This is the exact case the discarded synchronous-exit approach broke and the
-// case Option B must handle: a piped (non-TTY) stdout with no debug flag. The
+// case Option B must handle: a piped (non-TTY) stdout with live updates disabled. The
 // racing app.unmount() runs teardown() + resolveExit() SYNCHRONOUSLY (only the
 // boundary's deferred exitWithError teardown is microtask-driven), so resolveExit
 // reads pendingExitError in the same task. The synchronous record
 // (recordExitError) is what makes the race reject; remove it and this test goes
 // RED (resolves clean — the original swallow).
-test("non-interactive non-debug: update-flush throw + synchronous unmount() still REJECTS", async () => {
+test("final stream: update-flush throw + synchronous unmount() still REJECTS", async () => {
   const stdout = makeNonTtyWritable();
   const stderr = makeNonTtyWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -238,7 +238,7 @@ test("non-interactive non-debug: update-flush throw + synchronous unmount() stil
   });
 
   const app = createApp(ThrowsOnUpdate);
-  // Non-interactive (piped stdout), non-debug, liveUpdates:false pinned.
+  // A piped stdout with liveUpdates:false selects final-stream output.
   app.mount({ stdout, stdin, stderr, liveUpdates: false, exitOnCtrlC: false });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
@@ -262,21 +262,21 @@ test("non-interactive non-debug: update-flush throw + synchronous unmount() stil
 });
 
 // --- FRAME-PAINTING regression guard (the synchronous approach would have
-// broken the interactive/debug paint by letting teardown run before the
+// broken the unthrottled live paint by letting teardown run before the
 // errored→true re-render committed) ---
 //
 // Two mode-specific assertions, both pinned to MAIN's empirically-measured
 // behavior (Option B keeps teardown timing byte-identical to main):
-//   - interactive/debug: main DOES paint the ErrorOverview frame (the last
+//   - unthrottled live output: main DOES paint the ErrorOverview frame (the last
 //     content write contains the error message). Option B must preserve that.
-//   - non-interactive non-debug: main does NOT paint ErrorOverview — its only
+//   - final stream: main does NOT paint ErrorOverview — its only
 //     content write is a bare trailing "\n" (Ink's `this.lastOutput + '\n'`
 //     branch, and lastOutput is empty because the dynamic frame was deferred and
 //     the boundary's error frame is never committed on this path). We assert the
 //     fix MATCHES main: no error message reaches stdout, just the trailing
 //     newline. (Verified by probe: main writes ["\n",""]; Option B writes the
 //     same.)
-test("interactive/debug: an error STILL paints the ErrorOverview frame", async () => {
+test("unthrottled live output still paints the ErrorOverview frame", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -289,7 +289,7 @@ test("interactive/debug: an error STILL paints the ErrorOverview frame", async (
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));
@@ -302,7 +302,7 @@ test("interactive/debug: an error STILL paints the ErrorOverview frame", async (
   expect(frame).toContain("PAINTED_BOOM");
 });
 
-test("non-interactive non-debug: error paint MATCHES main (no overview frame, just trailing newline)", async () => {
+test("final-stream error paint matches main with no overview frame", async () => {
   const stdout = makeNonTtyWritable();
   const stderr = makeNonTtyWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -326,7 +326,7 @@ test("non-interactive non-debug: error paint MATCHES main (no overview frame, ju
   const allContent = writes.join("");
   expect(stripAnsi(allContent)).not.toContain("UNPAINTED_BOOM");
   // The only content write is the trailing newline teardown owes (lastFrame is
-  // empty + "\n"), matching Ink's non-interactive non-debug branch.
+  // empty + "\n"), matching Ink's final-stream branch.
   const content = getContentWrites(writes);
   expect(content).toEqual(["\n"]);
 });

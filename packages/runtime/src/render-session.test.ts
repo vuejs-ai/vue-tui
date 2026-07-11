@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import {
   createLiveRenderSessionService,
+  createStringRenderSessionService,
   normalizeRequestedMode,
   resolveLiveDimensions,
   resolveLiveSurface,
@@ -228,3 +229,29 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
   expect(session.dimensions.layout).toEqual({ columns: 70, rows: 20 });
   expect(session.capabilities.elementHitTesting).toBe(false);
 });
+
+test.each(["visual", "screen-reader"] as const)(
+  "string service exposes one fixed %s document snapshot",
+  (presentation) => {
+    const service = createStringRenderSessionService({ columns: 37, presentation });
+    const session = service.session;
+
+    expect(session).toEqual({
+      host: "string",
+      mode: null,
+      output: { destination: "document", dynamicUpdates: "none", presentation },
+      dimensions: { terminal: null, layout: { columns: 37, rows: null } },
+      capabilities: {
+        stableOrigin: false,
+        elementHitTesting: false,
+        suspension: false,
+      },
+    });
+    expect(service.legacyWindowRows.value).toBe(24);
+
+    service.dispose();
+    expect(service.session).toBe(session);
+    expect(session.dimensions.layout).toEqual({ columns: 37, rows: null });
+    expect(session.capabilities.elementHitTesting).toBe(false);
+  },
+);

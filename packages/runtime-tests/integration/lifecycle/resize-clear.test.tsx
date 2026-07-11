@@ -1,5 +1,5 @@
 // G11 parity: clear+reset on terminal-width DECREASE during resize.
-// These tests use interactive mode (not debug) so that writer.clear() emits
+// These tests use the live writer so that writer.clear() emits
 // real ANSI erase sequences to stdout. They do NOT use fake timers and are
 // safe to run concurrently with other test files.
 

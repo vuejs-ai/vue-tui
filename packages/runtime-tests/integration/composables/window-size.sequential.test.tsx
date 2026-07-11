@@ -58,7 +58,7 @@ test.sequential("useWindowSize derives rows from an explicitly modeled terminal 
       stdout,
       stdin,
       stderr,
-      debug: true,
+      maxFps: 0,
       exitOnCtrlC: false,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
         kind: "detected",

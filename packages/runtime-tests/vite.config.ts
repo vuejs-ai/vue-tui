@@ -4,6 +4,9 @@ import vueJsx from "@vitejs/plugin-vue-jsx";
 export default defineConfig({
   plugins: [vueJsx()],
   test: {
+    // @vue-tui/testing registers its cleanup hook through the test runner's
+    // global afterEach when available.
+    globals: true,
     // chalk disables color in non-TTY envs; force it on so ANSI style bugs don't hide from tests.
     // CI:"false" because the runner sets CI=true, which flips vue-tui's default live-update
     // detection (`!isInCi && isTTY`) off — disabling the resize listener,

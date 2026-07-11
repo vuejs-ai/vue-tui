@@ -145,8 +145,8 @@ test("unmounting first app allows a subsequent mount on the same stdout (no warn
 
 // The three tests below pin the guard's CALL-SCOPED semantics (audit e18): a
 // guarded mount() is inert for THAT call only — it must never poison the app's
-// ability to tear down the mount it ACTUALLY wired. Each uses debug mode (every
-// commit writes the full frame to stdout immediately) so "a frame painted after
+// ability to tear down the mount it ACTUALLY wired. Each uses unthrottled commits
+// so "a frame painted after
 // unmount()" is directly observable on the fake stream, mirroring the run-based
 // probes (/tmp/ink-audit/e18x-*.mjs) that established the bug.
 
@@ -165,13 +165,13 @@ test("owner double-firing mount() on its own live stdout keeps a working unmount
   const { warnings, restore } = spyOnGuardWarnings();
 
   const app1 = createApp(App);
-  app1.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app1.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
   expect(writes.join("")).toContain("OWNER-A");
 
   // Double-fire: warns, wires nothing.
-  app1.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app1.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).toContain(GUARD_WARNING);
 
   // The recovery path: unmount() must tear down the real first mount.
@@ -189,7 +189,7 @@ test("owner double-firing mount() on its own live stdout keeps a working unmount
   // (2) Registry entry freed: a fresh mount on the same stdout must NOT warn.
   warnings.length = 0;
   const app2 = createApp(defineComponent(() => () => <Text>FRESH</Text>));
-  app2.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();
@@ -207,7 +207,7 @@ test("an app that once hit the guard can later mount AND unmount on a free stdou
   const { warnings, restore } = spyOnGuardWarnings();
 
   const owner = createApp(defineComponent(() => () => <Text>OWNER-ON-A</Text>));
-  owner.mount({ stdout: stdoutA, stdin: stdinA, stderr, debug: true, exitOnCtrlC: false });
+  owner.mount({ stdout: stdoutA, stdin: stdinA, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
 
@@ -215,12 +215,12 @@ test("an app that once hit the guard can later mount AND unmount on a free stdou
   const appY = createApp(defineComponent(() => () => <Text>{msg.value}</Text>));
 
   // Guarded call on busy A: warns, inert.
-  appY.mount({ stdout: stdoutA, stdin: stdinB, stderr, debug: true, exitOnCtrlC: false });
+  appY.mount({ stdout: stdoutA, stdin: stdinB, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).toContain(GUARD_WARNING);
 
   // Legitimate mount on free B: renders normally.
   const writesB = captureWrites(stdoutB);
-  appY.mount({ stdout: stdoutB, stdin: stdinB, stderr, debug: true, exitOnCtrlC: false });
+  appY.mount({ stdout: stdoutB, stdin: stdinB, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
   expect(writesB.join("")).toContain("Y-ON-B-FIRST");
@@ -236,7 +236,7 @@ test("an app that once hit the guard can later mount AND unmount on a free stdou
   // ...and free B's registry entry: a fresh mount on B must NOT warn.
   warnings.length = 0;
   const appZ = createApp(defineComponent(() => () => <Text>FRESH-ON-B</Text>));
-  appZ.mount({ stdout: stdoutB, stdin: stdinB, stderr, debug: true, exitOnCtrlC: false });
+  appZ.mount({ stdout: stdoutB, stdin: stdinB, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   appZ.unmount();
@@ -257,18 +257,18 @@ test("targeting another app's busy stdout never poisons the caller's own live mo
 
   const msgA = shallowRef("APP1-ON-A-FIRST");
   const app1 = createApp(defineComponent(() => () => <Text>{msgA.value}</Text>));
-  app1.mount({ stdout: stdoutA, stdin: stdinA, stderr, debug: true, exitOnCtrlC: false });
+  app1.mount({ stdout: stdoutA, stdin: stdinA, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
   expect(writesA.join("")).toContain("APP1-ON-A-FIRST");
 
   const app2 = createApp(defineComponent(() => () => <Text>APP2-OWNS-B</Text>));
-  app2.mount({ stdout: stdoutB, stdin: stdinB, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout: stdoutB, stdin: stdinB, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
 
   // app1 (live on A) targets busy B: warns, inert for that call only.
-  app1.mount({ stdout: stdoutB, stdin: stdinA, stderr, debug: true, exitOnCtrlC: false });
+  app1.mount({ stdout: stdoutB, stdin: stdinA, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).toContain(GUARD_WARNING);
 
   // app1's REAL mount on A must still be killable.
@@ -284,13 +284,13 @@ test("targeting another app's busy stdout never poisons the caller's own live mo
   // A's registry entry freed: a fresh mount on A must NOT warn.
   warnings.length = 0;
   const app3 = createApp(defineComponent(() => () => <Text>FRESH-ON-A</Text>));
-  app3.mount({ stdout: stdoutA, stdin: stdinA, stderr, debug: true, exitOnCtrlC: false });
+  app3.mount({ stdout: stdoutA, stdin: stdinA, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
 
   // Control: app2 still owns B (a mount attempt on B still warns)...
   warnings.length = 0;
   const probe = createApp(defineComponent(() => () => <Text>PROBE</Text>));
-  probe.mount({ stdout: stdoutB, stdin: stdinB, stderr, debug: true, exitOnCtrlC: false });
+  probe.mount({ stdout: stdoutB, stdin: stdinB, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).toContain(GUARD_WARNING);
   restore();
 

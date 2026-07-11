@@ -8,7 +8,7 @@
 //
 // These run under a real PTY (run() spawns a TTY child with FORCE_COLOR=3 +
 // CI=false) so the genuine interactive log-update path is exercised, not the
-// debug helper.
+// deterministic content-frame observer.
 import { test as it, expect } from "vite-plus/test";
 import { run } from "./helpers/run.ts";
 

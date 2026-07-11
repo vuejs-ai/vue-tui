@@ -1,6 +1,5 @@
-import { computed, inject, shallowRef, type Ref } from "vue";
-import { AppContextKey } from "../context.ts";
-import { useOptionalInternalRenderSession } from "../render-session.ts";
+import { computed, type Ref } from "vue";
+import { useInternalRenderSession } from "../render-session.ts";
 
 /** A terminal's character-cell dimensions. */
 export interface WindowSize {
@@ -20,17 +19,7 @@ export function useWindowSize(): {
   columns: Readonly<Ref<number>>;
   rows: Readonly<Ref<number>>;
 } {
-  const service = useOptionalInternalRenderSession();
-  if (!service) {
-    // Temporary string-renderer compatibility until F1.5 supplies the same
-    // render-session service to document hosts.
-    const ctx = inject(AppContextKey);
-    if (!ctx) throw new Error("useWindowSize() must be called inside a vue-tui render tree");
-    return {
-      columns: shallowRef(ctx.stdout.columns || 80),
-      rows: shallowRef(ctx.stdout.rows || 24),
-    };
-  }
+  const service = useInternalRenderSession();
   return {
     columns: computed(() => service.session.dimensions.layout.columns),
     rows: service.legacyWindowRows,

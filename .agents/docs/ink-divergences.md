@@ -125,8 +125,7 @@ commit — see the divergence "Resize unconditionally cancels the pending traili
 ### Non-TTY output defaults to a final stream while explicit live updates remain possible
 
 The stdout policy deliberately matches Ink v7.0.4. Both runtimes [resolve live updates](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L979-L981) as the explicit override when present, otherwise as
-`!isInCi && Boolean(stdout.isTTY)`. Ink names the override `interactive`; vue-tui's public name is the narrower `liveUpdates`, recorded as an API divergence below. With normal
-`debug: false` output and live updates disabled, newly committed `Static` bytes are written
+`!isInCi && Boolean(stdout.isTTY)`. Ink names the override `interactive`; vue-tui's public name is the narrower `liveUpdates`, recorded as an API divergence below. With live updates disabled, newly committed `Static` bytes are written
 immediately, dynamic commits only replace the retained latest frame, and teardown writes that
 latest dynamic frame plus a newline. This keeps ordinary redirected output useful and avoids
 emitting cursor-relative update bytes by default.
@@ -139,11 +138,7 @@ stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a 
 
 This alignment is about output policy, not a broad claim that the application has no input. A TTY
 stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
-`debug: true` is also a separate append-oriented diagnostic branch that writes complete current
-content on commits and only adds a newline at final-stream teardown. Finally, Ink's screen-reader
-flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen
-screen-reader request to a main-screen transcript is a separate product decision from the
-non-TTY alignment.
+Ink's `debug: true` remains a separate append-oriented diagnostic branch, but vue-tui deliberately does not carry that branch as part of this output-policy alignment: deterministic observation is orthogonal and the public `debug` option is removed, as recorded below. Finally, Ink's screen-reader flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen screen-reader request to a main-screen transcript is a separate product decision from the non-TTY alignment.
 
 The pinned upstream behavior was run-verified through Ink's [non-TTY and explicit-override tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1152-L1247), CI tests, [alternate-screen tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1712-L1757), and Static tests. vue-tui's current behavior is covered by
 [`non-interactive-final-frame.test.tsx`](../../packages/runtime-tests/integration/lifecycle/non-interactive-final-frame.test.tsx), [`unmount-stream.test.tsx`](../../packages/runtime-tests/integration/lifecycle/unmount-stream.test.tsx), [`cursor-non-tty.test.tsx`](../../packages/runtime-tests/integration/lifecycle/cursor-non-tty.test.tsx), and [`alternate-screen.test.tsx`](../../packages/runtime-tests/integration/lifecycle/alternate-screen.test.tsx).
@@ -291,7 +286,7 @@ current-props model, or API conventions.
 - **vue-tui:** in a **development** build, a component whose `setup()` throws additionally
   produces Vue's own `[Vue warn]` lines on stderr (for example, the missing-render-function
   warning) that Ink has no analog for. While console patching is active (the default;
-  disabled by `patchConsole: false` or `debug`, independent of interactive mode), vue-tui
+  disabled by `patchConsole: false`, independent of live-update mode), vue-tui
   treats the `[Vue warn]` prefix as Vue's framework-diagnostics channel and drops those
   stderr lines. The patch is installed before the first mount (matching Ink, which patches
   before the first render), so a `setup()` throw during the **initial** mount is filtered
@@ -554,7 +549,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   calls `yogaNode.markDirty()`. Only `setTextNodeValue` (a text-CONTENT change) dirties the
   measure func. So when ONLY `wrap` toggles, yoga keeps the previously-measured height while
   paint renders with the new wrap mode → layout and paint disagree. Run-verified vs v7.0.4
-  (`/tmp/ink-verify`, debug-mode frame capture): a width-6 column `<Box>` with
+  (`/tmp/ink-verify`, append-oriented diagnostic capture): a width-6 column `<Box>` with
   `<Text wrap>` over `"aaaa bbbb cccc"` and a `ZZZZ` sentinel below, toggled wrap→truncate,
   yields `"aaaa …\n\n\nZZZZ"` — the truncated text paints on row 1 but yoga still reserves 3
   rows, stranding `ZZZZ` on row 4 with blank rows. Toggling text content alongside `wrap`
@@ -609,6 +604,12 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** `alternateScreen?: boolean` requests the alternate buffer and `interactive?: boolean` controls its broad live-output policy. The resolved state is not available as one public fact, and the word “interactive” can be mistaken for stdin or logical-input availability.
 - **vue-tui:** `mode?: "inline" | "fullscreen"` requests one of the two terminal screen models, while `liveUpdates?: boolean` only overrides output cadence. Omission requests Inline and otherwise follows Ink's `!isInCi && Boolean(stdout.isTTY)` default. Own `fullscreen`, `alternateScreen`, and `interactive` keys fail synchronously before terminal mutation; there are no compatibility aliases. The internal render session keeps the request, effective mode, fallback, output, dimensions, and capabilities distinct.
 - **Why:** the screen model and whether dynamic bytes update live are different decisions. A non-TTY stream may update live without acquiring either terminal mode; a TTY may use final-stream output; stdin can have its own availability. Separate, accurately named fields prevent application code from treating one boolean as all three facts. The direct replacement is appropriate while vue-tui is experimental, and one `createApp` still owns the shared Vue lifecycle. Introduced in F1.4; no VOUCHED stamp has been added.
+
+### Deterministic observation is separate from output; `debug` is removed
+
+- **Ink:** public `debug: true` changes stdout behavior: every commit writes complete current content, Static history can be replayed, clear and console-patching behavior changes, and final-stream teardown follows a distinct diagnostic path.
+- **vue-tui:** own `debug` keys on live mounts and `@vue-tui/testing` render options are removed programming errors and fail before terminal or component mutation. The testing package installs a symbol-keyed internal render observer that receives structured `{ dynamic, staticOutput }` commits without selecting a host, changing stdout, disabling console handling, or changing scheduling. Terminal-visible assertions use an independent xterm emulator; `maxFps: 0` remains an unthrottled scheduler choice rather than an output mode.
+- **Why:** output policy and observation have different consumers. Making tests alter application bytes produced sessions that claimed production cadence while stdout followed an append-only diagnostic branch, and content frames had to be inferred from a stream containing terminal controls. Orthogonal observation lets the deterministic host exercise the real Inline, Fullscreen, screen-reader, live-stream, and final-stream paths while exposing both semantic commits and the resulting terminal screen. Direct removal is appropriate while vue-tui is experimental. Implemented and verified in F1.5.
 
 ### Raw mode is owned for the live-update-request lifetime by default (`rawMode` option)
 
@@ -715,7 +716,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   repaints the complete frame from `(0,0)`, hiding the caret until a declared position is restored.
   Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
   repaint. `<Static>` bytes are emitted to stream observers but warned once and not retained
-  visually. Debug frames replace the surface too.
+  visually. Ordinary reactive rerenders replace the same surface, and deterministic observation does not change those bytes.
 - **Why:** targeted mouse events, `useCursor()`, and Yoga layout all use viewport coordinates. If
   output outside the tree can move the visible frame while the hit map remains at row 0, clicking
   the visible element misses and clicking the log line can trigger it. Treating fullscreen as an

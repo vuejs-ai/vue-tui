@@ -51,24 +51,6 @@ function createStdout(): FakeStdout {
   return stdout;
 }
 
-// ---------------------------------------------------------------------------
-// Debug mode (existing test)
-// ---------------------------------------------------------------------------
-
-test("debug mode writes complete frames terminated by newline", () => {
-  const writes: string[] = [];
-  const stream = new PassThrough() as unknown as NodeJS.WriteStream;
-  Object.assign(stream, { columns: 80, rows: 24, isTTY: true });
-  stream.on("data", (chunk) => writes.push(chunk.toString()));
-
-  const writer = createFrameWriter(stream, { debug: true });
-  writer.write("hello");
-  writer.write("hello"); // identical frame skipped
-  writer.write("world");
-
-  expect(writes).toEqual(["hello\n", "world\n"]);
-});
-
 test("sync() updates the dedup baseline so a later changed frame is not dropped", () => {
   // Regression: sync() previously updated log-update's previousOutput but not
   // the frame-writer's own lastFrame. After a sync() (e.g. the clearTerminal

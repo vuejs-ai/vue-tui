@@ -109,7 +109,7 @@ describe("SGR mouse disable on signal exit", () => {
     const app = createApp(MouseApp);
     // liveUpdates: true forces the signal-exit handler to register regardless of
     // ambient CI/TTY detection (the resolved `interactive` flag gates it).
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     // Let useMouseInput's attach enable SGR mouse tracking (writes
     // \x1b[?1000h\x1b[?1006h, async).
@@ -144,7 +144,7 @@ describe("SGR mouse disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(MouseApp);
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(MOUSE_ON);

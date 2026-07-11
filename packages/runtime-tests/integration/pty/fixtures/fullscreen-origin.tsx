@@ -17,7 +17,7 @@ type Scenario =
   | "stdout"
   | "stderr"
   | "console"
-  | "debug"
+  | "rerender"
   | "overflow"
   | "horizontal-overflow"
   | "horizontal-wide"
@@ -43,7 +43,7 @@ const App = defineComponent(() => {
   const { write } = useStdout();
   const { write: writeError } = useStderr();
 
-  if (scenario !== "debug" && scenario !== "screen-reader") {
+  if (scenario !== "screen-reader") {
     setCursorPosition({ x: 3, y: 0 });
   }
 
@@ -73,7 +73,7 @@ const App = defineComponent(() => {
         return;
       }
 
-      if (scenario === "debug") {
+      if (scenario === "rerender") {
         label.value = "UPDATED";
         void nextTick().then(markSettled);
         return;
@@ -156,7 +156,6 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   mode: "fullscreen",
-  debug: scenario === "debug",
   isScreenReaderEnabled: scenario === "screen-reader",
   incrementalRendering: scenario === "stdout",
   exitOnCtrlC: false,

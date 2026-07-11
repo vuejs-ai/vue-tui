@@ -3,7 +3,7 @@
  * synchronized-update markers (BSU/ESU) when the stream is a TTY and the
  * runtime is in interactive mode — Ink parity G09.
  *
- * We use createApp with debug:false and a fake TTY stream so the interactive
+ * We use createApp with a fake TTY stream so the live
  * path is exercised.  The test config forces CI:"false" so isInCi() returns
  * false and shouldSynchronize() returns true.
  */
@@ -52,7 +52,7 @@ test("writeToStdout wraps external write in BSU/ESU on TTY interactive stream", 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -103,7 +103,7 @@ test("writeToStderr wraps external write in BSU/ESU on stdout (Ink parity: stder
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));

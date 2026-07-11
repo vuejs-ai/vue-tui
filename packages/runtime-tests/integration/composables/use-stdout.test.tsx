@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useStdout } from "@vue-tui/runtime";
 
-test("useStdout.write does not corrupt active frame in debug mode", async () => {
+test("useStdout.write does not corrupt the active deterministic frame", async () => {
   const App = defineComponent(() => {
     const { write } = useStdout();
     onMounted(() => write("log line\n"));
@@ -30,9 +30,9 @@ test("useStdout.write routes through writeToStdout", async () => {
     const { write, stdout } = useStdout();
     // Capture all writes to the stdout stream
     const origWrite = stdout.write.bind(stdout);
-    stdout.write = ((data: string) => {
-      writes.push(data);
-      return origWrite(data);
+    stdout.write = ((...args: Parameters<typeof stdout.write>) => {
+      writes.push(String(args[0]));
+      return origWrite(...args);
     }) as typeof stdout.write;
     onMounted(() => write("test-data"));
     return () => <Text>frame</Text>;

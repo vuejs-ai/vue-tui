@@ -190,9 +190,9 @@ test.sequential("sustained deferred calls hold a ~wait cadence (maxWait edge)", 
   }
 });
 
-test.sequential("immediate scheduler in debug mode commits every mutation", async () => {
-  // Counterpart to the throttle test: in debug mode (used by the testing
-  // helper), the scheduler bypasses throttling and commits synchronously.
+test.sequential("unthrottled scheduler commits every mutation", async () => {
+  // Counterpart to the throttle test: maxFps: 0 bypasses throttling and
+  // commits synchronously.
   // This verifies the immediate path in createCommitScheduler.
   const msg = shallowRef("A");
 
@@ -210,7 +210,7 @@ test.sequential("immediate scheduler in debug mode commits every mutation", asyn
     stdout,
     stdin,
     stderr,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
   });
 

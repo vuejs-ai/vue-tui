@@ -99,7 +99,7 @@ describe("bracketed-paste disable on signal exit", () => {
     const app = createApp(PasteApp);
     // liveUpdates: true forces the signal-exit handler to register regardless of
     // ambient CI/TTY detection (the resolved `interactive` flag gates it).
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     // Let usePaste's attach enable bracketed paste (writes \x1b[?2004h, async).
     await new Promise<void>((r) => setTimeout(r, 60));
@@ -133,7 +133,7 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(PASTE_ON);

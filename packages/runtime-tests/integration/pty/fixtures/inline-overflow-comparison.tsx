@@ -8,7 +8,6 @@ type Scenario =
   | "current-shrink"
   | "bounded"
   | "bounded-tail"
-  | "append"
   | "static-tail"
   | "fullscreen"
   | "explicit-preclear";
@@ -99,7 +98,6 @@ const App = defineComponent(() => {
 
 const app = createApp(App);
 app.mount({
-  debug: scenario === "append",
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
   exitOnCtrlC: false,
   maxFps: 0,

@@ -9,7 +9,7 @@ type SurfaceScenario =
   | "stdout"
   | "stderr"
   | "console"
-  | "debug"
+  | "rerender"
   | "overflow"
   | "horizontal-overflow"
   | "horizontal-wide"
@@ -45,7 +45,7 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
     const terminal = await emulate(ps.output);
     const lines = visibleLines(terminal);
     const expected =
-      scenario === "debug"
+      scenario === "rerender"
         ? "UPDATED"
         : scenario === "overflow"
           ? "LINE0"
@@ -72,10 +72,8 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
       expect(lines.slice(1)).not.toContain("BUTTON");
       expect(lines.slice(1)).not.toContain("UPDATED");
     }
-    if (scenario !== "debug") {
-      expect(terminal.buffer.active.cursorX).toBe(3);
-      expect(terminal.buffer.active.cursorY).toBe(0);
-    }
+    expect(terminal.buffer.active.cursorX).toBe(3);
+    expect(terminal.buffer.active.cursorY).toBe(0);
     expect(ps.output).toContain("\x1b[?25l\x1b[2J\x1b[H");
 
     const sideChannels: Partial<Record<SurfaceScenario, string>> = {
@@ -119,8 +117,8 @@ test("fullscreen patched console output does not move the live surface away from
   await assertStableFullscreenSurface("console");
 });
 
-test("fullscreen debug rerenders replace the live surface instead of appending", async () => {
-  await assertStableFullscreenSurface("debug");
+test("fullscreen rerenders replace the live surface instead of appending", async () => {
+  await assertStableFullscreenSurface("rerender");
 });
 
 test("fullscreen clips an overflowing tree to the addressable viewport", async () => {

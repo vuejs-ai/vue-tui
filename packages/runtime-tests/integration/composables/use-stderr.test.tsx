@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useStderr } from "@vue-tui/runtime";
 
-test("useStderr.write does not corrupt active frame in debug mode", async () => {
+test("useStderr.write does not corrupt the deterministic host's active frame", async () => {
   const App = defineComponent(() => {
     const { write } = useStderr();
     onMounted(() => write("err line\n"));

@@ -1,48 +1,200 @@
 import { PassThrough } from "node:stream";
-import { nextTick, type Component } from "vue";
-import { createApp, type TuiApp } from "@vue-tui/runtime";
-import { INTERNAL_FRAME_SINK, type FrameSink } from "@vue-tui/runtime/internal";
+import { nextTick, readonly, type Component, type DeepReadonly } from "vue";
+import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
+import {
+  INTERNAL_RENDER_OBSERVER,
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  type InternalLiveRenderSessionSnapshot,
+  type InternalRenderObserver,
+} from "@vue-tui/runtime/internal";
+import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
-import { trackApp } from "./cleanup.ts";
+import { trackHost } from "./cleanup.ts";
+
+export type TestRenderSession = DeepReadonly<InternalLiveRenderSessionSnapshot>;
+
+export interface TestHost {
+  /** Requested production screen model. @default "inline" */
+  readonly mode?: NonNullable<MountOptions["mode"]>;
+  /** Renderer presentation. @default "visual" */
+  readonly presentation?: "visual" | "screen-reader";
+  /** Dynamic output cadence. Defaults to live for a TTY and at-teardown for a stream. */
+  readonly updates?: "live" | "at-teardown";
+  /** Input stream class. @default "tty" */
+  readonly stdin?: "tty" | "non-tty";
+  /** Output stream class. @default "tty" */
+  readonly stdout?: "tty" | "stream";
+}
 
 export interface RenderOptions {
-  columns?: number;
-  rows?: number;
-  props?: Record<string, unknown>;
-  exitOnCtrlC?: boolean;
+  readonly host?: TestHost;
+  /** Deliberate layout and emulator width. @default 100 */
+  readonly columns?: number;
+  /** Deliberate emulator height and TTY height. @default 100 */
+  readonly rows?: number;
+  readonly props?: Record<string, unknown>;
+  readonly exitOnCtrlC?: boolean;
+}
+
+export interface ContentFrame {
   /**
-   * Whether the rendered app emits live updates. Defaults to `true` so the
-   * harness is deterministic: `terminal.resize()` triggers a re-layout and the
-   * current lifetime input hold engages regardless of the host environment. Set
-   * to `false` to disable those runtime paths. The current debug-backed frame
-   * observer still captures each commit; it does not model production final-stream
-   * cadence until F1.5 replaces this host.
+   * Current dynamic region as emitted by the renderer. This may contain SGR
+   * styling, but excludes output-writer lifecycle and screen-update controls.
    */
-  liveUpdates?: boolean;
+  readonly dynamic: string;
+  /**
+   * New `<Static>` content produced by this commit. This may contain SGR
+   * styling, but excludes accumulated replay and output-writer controls.
+   */
+  readonly staticOutput: string;
 }
 
 export interface Terminal {
   readonly columns: number;
   readonly rows: number;
   resize(columns: number, rows: number): Promise<void>;
-  rawMode: RawModeState;
+  readonly rawMode: RawModeState;
 }
 
 export interface LastFrameOptions {
-  raw?: boolean;
-  trimLines?: boolean;
+  readonly raw?: boolean;
+  readonly trimLines?: boolean;
 }
 
 export interface RenderResult {
-  lastFrame(this: void, opts?: LastFrameOptions): string | undefined;
-  frames: string[];
-  stdin: {
+  /** Deeply readonly production-like facts visible to the component. */
+  readonly session: TestRenderSession;
+  /** Runtime-readonly rendering-phase content observations. */
+  readonly frames: readonly ContentFrame[];
+  lastFrame(this: void, options?: LastFrameOptions): string;
+  /** Snapshot terminal state after all currently queued host output. */
+  screen(this: void): Promise<ScreenSnapshot>;
+  readonly stdin: {
     write(data: string): Promise<void>;
   };
-  terminal: Terminal;
+  readonly terminal: Terminal;
+  /** Tear down the app while retaining the emulator for restoration assertions. */
   unmount(this: void): void;
+  /** Idempotently tear down the app and release every test-host resource. */
+  dispose(this: void): void;
   waitUntilExit(this: void): Promise<unknown>;
   waitUntilRenderFlush(this: void): Promise<void>;
+}
+
+interface NormalizedTestHost {
+  readonly mode: NonNullable<MountOptions["mode"]>;
+  readonly presentation: "visual" | "screen-reader";
+  readonly updates: "live" | "at-teardown";
+  readonly stdin: "tty" | "non-tty";
+  readonly stdout: {
+    readonly kind: "tty" | "stream";
+    readonly columns: number;
+    readonly rows: number | undefined;
+  };
+  readonly emulatorRows: number;
+}
+
+const hasOwn = (value: object, key: PropertyKey): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+function assertObject(value: unknown, name: string): Record<PropertyKey, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(`${name} must be an object.`);
+  }
+  return value as Record<PropertyKey, unknown>;
+}
+
+function rejectUnknownKeys(
+  value: Record<PropertyKey, unknown>,
+  allowed: readonly string[],
+  name: string,
+): void {
+  const allowedKeys = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) throw new TypeError(`Unknown ${name} option "${key}".`);
+  }
+}
+
+function positiveDimension(value: unknown, name: string): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  throw new TypeError(`${name} must be a positive safe integer.`);
+}
+
+function dimension(value: unknown, fallback: number, name: string): number {
+  return value === undefined ? fallback : positiveDimension(value, name);
+}
+
+function normalizeOptions(options: RenderOptions): {
+  readonly props: Record<string, unknown> | undefined;
+  readonly exitOnCtrlC: boolean;
+  readonly host: NormalizedTestHost;
+} {
+  const root = assertObject(options, "render options");
+  for (const removed of ["liveUpdates", "debug"] as const) {
+    if (hasOwn(root, removed)) {
+      throw new TypeError(`render option "${removed}" was removed; configure the modeled host.`);
+    }
+  }
+  rejectUnknownKeys(root, ["host", "columns", "rows", "props", "exitOnCtrlC"], "render");
+
+  // Snapshot each accessor once. Validation and construction must use the same
+  // value so a stateful getter cannot pass one check and mount with another.
+  const hostOption = root.host;
+  const columnsOption = root.columns;
+  const rowsOption = root.rows;
+  const propsOption = root.props;
+  const exitOnCtrlCOption = root.exitOnCtrlC;
+
+  const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
+  rejectUnknownKeys(host, ["mode", "presentation", "updates", "stdin", "stdout"], "render host");
+  const modeOption = host.mode;
+  const presentationOption = host.presentation;
+  const updatesOption = host.updates;
+  const stdinOption = host.stdin;
+  const stdoutOption = host.stdout;
+
+  const mode = modeOption === undefined ? "inline" : modeOption;
+  if (mode !== "inline" && mode !== "fullscreen") {
+    throw new TypeError('render host mode must be "inline" or "fullscreen".');
+  }
+  const presentation = presentationOption === undefined ? "visual" : presentationOption;
+  if (presentation !== "visual" && presentation !== "screen-reader") {
+    throw new TypeError('render host presentation must be "visual" or "screen-reader".');
+  }
+  const stdin = stdinOption === undefined ? "tty" : stdinOption;
+  if (stdin !== "tty" && stdin !== "non-tty") {
+    throw new TypeError('render host stdin must be "tty" or "non-tty".');
+  }
+
+  const kind = stdoutOption === undefined ? "tty" : stdoutOption;
+  if (kind !== "tty" && kind !== "stream") {
+    throw new TypeError('render host stdout must be "tty" or "stream".');
+  }
+  const columns = dimension(columnsOption, 100, "render columns");
+  const emulatorRows = dimension(rowsOption, 100, "render rows");
+  const rows = kind === "tty" ? emulatorRows : undefined;
+  const updates =
+    updatesOption === undefined ? (kind === "tty" ? "live" : "at-teardown") : updatesOption;
+  if (updates !== "live" && updates !== "at-teardown") {
+    throw new TypeError('render host updates must be "live" or "at-teardown".');
+  }
+  if (exitOnCtrlCOption !== undefined && typeof exitOnCtrlCOption !== "boolean") {
+    throw new TypeError("render option exitOnCtrlC must be a boolean or undefined.");
+  }
+  if (propsOption !== undefined) assertObject(propsOption, "render props");
+
+  return {
+    props: propsOption as Record<string, unknown> | undefined,
+    exitOnCtrlC: (exitOnCtrlCOption as boolean | undefined) ?? false,
+    host: {
+      mode,
+      presentation,
+      updates,
+      stdin,
+      stdout: { kind, columns, rows },
+      emulatorRows,
+    },
+  };
 }
 
 function trimFrame(raw: string): string {
@@ -57,141 +209,225 @@ export async function render(
   component: Component,
   options: RenderOptions = {},
 ): Promise<RenderResult> {
+  const normalized = normalizeOptions(options);
+  const { host } = normalized;
   const stdout = makeFakeWritable({
-    columns: options.columns ?? 100,
-    rows: options.rows ?? 100,
+    isTTY: host.stdout.kind === "tty",
+    columns: host.stdout.columns,
+    rows: host.stdout.rows,
   });
   const stderr = makeFakeWritable({
-    columns: options.columns ?? 100,
-    rows: options.rows ?? 100,
+    isTTY: host.stdout.kind === "tty",
+    columns: host.stdout.columns,
+    rows: host.stdout.rows,
   });
-  const { stream: stdin, rawMode } = makeFakeStdin();
+  const { stream: stdin, rawMode } = makeFakeStdin({ isTTY: host.stdin === "tty" });
+  const publicRawMode = readonly(rawMode) as RawModeState;
+  const emulator = createTerminalEmulator(host.stdout.columns, host.emulatorRows, {
+    convertEol: host.stdout.kind === "tty",
+  });
+  const forwardOutput = (chunk: Buffer | string) => emulator.write(chunk);
+  stdout.on("data", forwardOutput);
+  stderr.on("data", forwardOutput);
 
-  // Capture committed frames via the runtime's internal per-app frame SINK
-  // (@vue-tui/runtime/internal: INTERNAL_FRAME_SINK), NOT by reverse-engineering
-  // them out of stdout. The runtime's debug commit branch invokes this callback
-  // with the EXACT content chunks it writes to stdout — the accumulated <Static>
-  // history chunk (when non-empty), then the dynamic frame — in write order, and
-  // the debug writeToStdout/writeToStderr branches forward their replayed-frame
-  // bytes too. Terminal-control escapes the runtime writes to stay byte-faithful
-  // to Ink (bracketed-paste `\x1b[?2004h/l`, cursor hide/show, BSU/ESU) are NOT
-  // forwarded, so `frames[]` are provably content-only.
-  //
-  // Properties this preserves vs the old stdout-sniffing capture:
-  //   - EMPTY render is forwarded as "" (Ink-faithful: `fullStaticOutput +
-  //     output`, both "" — ink.tsx:558), so `frames.at(-1)` reads back "" after
-  //     rendering null and `lastFrame()` correctly returns "".
-  //   - VERBATIM content — NO trailing-newline stripping. The static-history
-  //     chunk stays "\n"-terminated; the dynamic-frame chunk has NO trailing
-  //     newline (output.ts:305-312), so a real blank trailing row (e.g. a height
-  //     4 box "AB\n\n\n") survives. `trimFrame` / `trimLines` handle display
-  //     trimming in `lastFrame()` instead.
-  //   - The flush WRITE BARRIER (`stdout.write("", () => ...)`) never reaches the
-  //     sink — barriers are pure stdout drain awaits, not commits — so they can't
-  //     clobber `lastFrame()`.
-  const frames: string[] = [];
-  const frameSink: FrameSink = (chunk) => {
-    frames.push(chunk);
+  const frames: ContentFrame[] = [];
+  const publicFrames = readonly(frames) as readonly ContentFrame[];
+  let session: TestRenderSession | undefined;
+  const observer: InternalRenderObserver = {
+    onSession(value) {
+      session = value;
+    },
+    onCommit(commit) {
+      if (commit.phase === "teardown") return;
+      frames.push(Object.freeze({ dynamic: commit.dynamic, staticOutput: commit.staticOutput }));
+    },
   };
 
-  const app: TuiApp = createApp(component, options.props ?? undefined);
-  // The frame sink is passed via a Symbol-keyed INTERNAL option, kept off the
-  // public MountOptions type (Ink-faithful). Cast through `Parameters` to attach
-  // it without widening the public type.
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    debug: true,
-    // Pin live updates ON by default so the harness is deterministic and
-    // independent of ambient CI/TTY detection. The runtime otherwise derives
-    // the default as `!isInCi && Boolean(stdout.isTTY)`, and `isInCi` is
-    // evaluated ONCE at import time — so a consumer running tests in CI would
-    // silently get final-stream output: `terminal.resize()` would not re-lay-out
-    // and the current lifetime input hold would never engage, breaking both APIs
-    // this helper advertises. `options.liveUpdates` keeps that host behavior
-    // directly testable until F1.5 replaces this debug-backed host.
-    liveUpdates: options.liveUpdates ?? true,
-    exitOnCtrlC: options.exitOnCtrlC ?? false,
-    [INTERNAL_FRAME_SINK]: frameSink,
-  } as Parameters<TuiApp["mount"]>[0]);
+  const app: TuiApp = createApp(component, normalized.props);
+  let resourcesDisposed = false;
+  const disposeResources = () => {
+    if (resourcesDisposed) return;
+    resourcesDisposed = true;
+    const errors: unknown[] = [];
+    const release = (operation: () => void) => {
+      try {
+        operation();
+      } catch (error) {
+        errors.push(error);
+      }
+    };
+    release(() => stdout.off("data", forwardOutput));
+    release(() => stderr.off("data", forwardOutput));
+    release(() => stdout.destroy());
+    release(() => stderr.destroy());
+    release(() => stdin.destroy());
+    release(() => emulator.dispose());
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) {
+      throw new AggregateError(errors, "Failed to release test-host resources.");
+    }
+  };
+  let unmounted = false;
+  const unmount = () => {
+    if (unmounted) return;
+    unmounted = true;
+    app.unmount();
+  };
+  let disposed = false;
+  let untrack: () => void = () => undefined;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    const errors: unknown[] = [];
+    try {
+      unmount();
+    } catch (error) {
+      errors.push(error);
+    }
+    untrack();
+    try {
+      disposeResources();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose the test host.");
+  };
+  const assertActive = () => {
+    if (disposed) throw new Error("Test host has been disposed.");
+  };
+  const failAfterDispose = (error: unknown): never => {
+    try {
+      dispose();
+    } catch (disposeError) {
+      throw new AggregateError(
+        [error, disposeError],
+        "Failed to initialize and dispose the test host.",
+      );
+    }
+    throw error;
+  };
 
-  trackApp(app);
-
-  // Attach early-error detector BEFORE flushing, so the rejection handler is
-  // in place when the error boundary's nextTick → exit() → microtask fires.
-  let earlyError: Error | undefined;
-  app.waitUntilExit().catch((e) => {
-    earlyError = e as Error;
-  });
-
-  // Flush the Vue queue. Chain: onErrorCaptured (records pendingExitError
-  // synchronously) → nextTick → exit → queueMicrotask → teardown → resolveExit()
-  // → stdout.write("", callback) → reject. The error is recorded up front so a
-  // racing unmount() still rejects; teardown stays deferred so the overview paints.
-  // The stdout write barrier fires via process.nextTick (inside stream internals),
-  // so we need setImmediate (runs after all process.nextTick callbacks), then one
-  // more microtask yield so the .catch() handler on exitPromise can set earlyError.
-  await nextTick();
-  await nextTick();
-  await Promise.resolve();
-  await Promise.resolve();
-  await new Promise<void>((r) => setImmediate(r));
-  await Promise.resolve();
-
-  if (earlyError) {
-    throw earlyError;
+  try {
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      mode: host.mode,
+      liveUpdates: host.updates === "live",
+      isScreenReaderEnabled: host.presentation === "screen-reader",
+      exitOnCtrlC: normalized.exitOnCtrlC,
+      patchConsole: false,
+      maxFps: 0,
+      [INTERNAL_RENDER_OBSERVER]: observer,
+      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+    } as Parameters<TuiApp["mount"]>[0]);
+  } catch (error) {
+    failAfterDispose(error);
   }
 
+  untrack = trackHost(dispose);
+
+  let earlyError: Error | undefined;
+  try {
+    app.waitUntilExit().catch((error) => {
+      earlyError = error as Error;
+    });
+
+    await nextTick();
+    await nextTick();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await Promise.resolve();
+    await app.waitUntilRenderFlush();
+    await emulator.flush();
+
+    if (earlyError) throw earlyError;
+    if (!session) {
+      throw new Error("The deterministic render host did not receive a render session.");
+    }
+  } catch (error) {
+    failAfterDispose(error);
+  }
+  const resolvedSession: TestRenderSession =
+    session ??
+    failAfterDispose(new Error("The deterministic render host did not receive a render session."));
+
+  let emulatorColumns = host.stdout.columns;
+  let emulatorRows = host.emulatorRows;
   const terminal: Terminal = {
     get columns() {
-      return stdout.columns;
+      return emulatorColumns;
     },
     get rows() {
-      return stdout.rows;
+      return emulatorRows;
     },
     async resize(columns: number, rows: number) {
-      stdout.columns = columns;
-      stdout.rows = rows;
-      (stderr as NodeJS.WriteStream).columns = columns;
-      (stderr as NodeJS.WriteStream).rows = rows;
+      assertActive();
+      const nextColumns = positiveDimension(columns, "terminal columns");
+      const nextRows = positiveDimension(rows, "terminal rows");
+      await emulator.resize(nextColumns, nextRows);
+      assertActive();
+      emulatorColumns = nextColumns;
+      emulatorRows = nextRows;
+      stdout.columns = nextColumns;
+      if (host.stdout.kind === "tty") stdout.rows = nextRows;
+      stderr.columns = nextColumns;
+      if (host.stdout.kind === "tty") stderr.rows = nextRows;
       (stdout as unknown as PassThrough).emit("resize");
       await nextTick();
+      await app.waitUntilRenderFlush();
+      await emulator.flush();
     },
-    rawMode,
+    rawMode: publicRawMode,
+  };
+
+  const waitUntilRenderFlush = async (): Promise<void> => {
+    assertActive();
+    await app.waitUntilRenderFlush();
+    assertActive();
+    await emulator.flush();
   };
 
   return {
-    lastFrame: (opts?: LastFrameOptions) => {
-      // An empty render is written (and so captured) as "", so `frames.at(-1)`
-      // reads back "" after rendering null — matching Ink. `?? ""` is a defensive
-      // floor for the (unreachable in practice) pre-first-render read; `render()`
-      // always flushes at least one render before returning.
-      const f = frames.at(-1) ?? "";
-      if (opts?.raw) return f;
-      if (opts?.trimLines)
-        return f
+    session: resolvedSession,
+    frames: publicFrames,
+    lastFrame: (frameOptions?: LastFrameOptions) => {
+      const frame = frames.at(-1)?.dynamic ?? "";
+      if (frameOptions?.raw) return frame;
+      if (frameOptions?.trimLines) {
+        return frame
           .split("\n")
-          .map((l) => l.trimEnd())
+          .map((line) => line.trimEnd())
           .join("\n");
-      return trimFrame(f);
+      }
+      return trimFrame(frame);
     },
-    frames,
+    screen: async () => {
+      assertActive();
+      return await emulator.snapshot();
+    },
     stdin: {
       async write(data: string): Promise<void> {
+        assertActive();
         stdin.emit("data", data);
         await nextTick();
-        // The input parser may hold a bare escape (\x1b) as "pending" for
-        // up to 20ms, waiting to see if it's the start of an escape sequence.
-        // Wait long enough for the pending-flush timer to fire so tests that
-        // send a bare escape don't silently lose the event.
-        await new Promise((r) => setTimeout(r, 30));
+        await new Promise((resolve) => setTimeout(resolve, 30));
         await nextTick();
+        await waitUntilRenderFlush();
       },
     },
     terminal,
-    unmount: app.unmount.bind(app),
-    waitUntilExit: app.waitUntilExit.bind(app),
-    waitUntilRenderFlush: app.waitUntilRenderFlush.bind(app),
+    unmount,
+    dispose,
+    async waitUntilExit() {
+      try {
+        return await app.waitUntilExit();
+      } finally {
+        await emulator.flush();
+      }
+    },
+    waitUntilRenderFlush,
   };
 }

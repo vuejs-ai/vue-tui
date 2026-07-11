@@ -22,7 +22,7 @@ export interface AnimationScheduler {
    * Render-throttle window in ms, derived from `maxFps`. useAnimation coalesces
    * ticks while inside the current window so committed deltas accumulate across
    * skipped ticks (Ink parity — see AnimationContext.renderThrottleMs). `0`
-   * disables throttling (debug / screen-reader / standalone fallback).
+   * disables throttling (screen-reader, non-positive maxFps, or standalone fallback).
    */
   readonly renderThrottleMs: number;
   subscribe(

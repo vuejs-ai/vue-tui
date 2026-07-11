@@ -14,8 +14,9 @@
 //
 // This is the fullscreen→non-fullscreen sibling of #198 (which fixed the
 // steady-state fullscreen caret row). Observable only at the interactive stream
-// level — @vue-tui/testing lastFrame() is content-only and never sees the cursor
-// escapes — so we mount a REAL interactive TTY and assert the raw bytes.
+// level — @vue-tui/testing lastFrame() observes renderer output and never sees
+// output-writer cursor escapes — so we mount a REAL interactive TTY and assert
+// the raw bytes.
 import { PassThrough } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";

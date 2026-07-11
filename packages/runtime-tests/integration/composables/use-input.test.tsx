@@ -252,15 +252,18 @@ test("useInput - ignore input if not active (isActive ref toggled)", async () =>
 // --- useStdout (from hooks.tsx) ---
 
 test("useStdout - write to stdout", async () => {
+  let writeOutput: ((data: string) => void) | undefined;
   const App = defineComponent(() => {
     const { write } = useStdout();
-    write("Hello from vue-tui to stdout");
+    writeOutput = write;
     return () => <Text>Hello World</Text>;
   });
 
-  const { frames } = await render(App);
-  // The direct write appears as a raw data chunk in the frames list
-  const allOutput = frames.join("");
+  const result = await render(App);
+  writeOutput?.("Hello from vue-tui to stdout\n");
+  // Direct output changes the emulated terminal, not renderer content frames.
+  const screen = await result.screen();
+  const allOutput = [...screen.scrollback, ...screen.lines].join("\n");
   expect(allOutput).toContain("Hello from vue-tui to stdout");
 });
 

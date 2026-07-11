@@ -10,16 +10,15 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.5, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): replace implicit testing and string-render environments with finite hosts backed by the authoritative session service, without publishing the still incomplete readonly [`useRenderSession()` contract](./render-session.md).
+Advance F1.6, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint), without publishing the still incomplete readonly [`useRenderSession()` contract](./render-session.md) or implementing later lifecycle, input, focus, geometry, pointer, scroll-composition, or selection foundations early. The user-visible failure is that a long Inline dynamic layout can enter the current whole-terminal clear path and erase scrollback from before the application. The target result is a bounded replaceable region that never deletes earlier terminal history, makes committed history immutable, survives resize and coordinated output honestly, and leaves deliberate destructive main-screen behavior behind an explicit application escape hatch.
 
-1. replace `@vue-tui/testing`'s arbitrary `debug`, fake-TTY, and `liveUpdates` combination with a finite production-like host model whose impossible combinations fail immediately;
-2. keep committed content-frame observations separate from the final emulated terminal screen, and make a final-stream preset reproduce production cadence instead of debug cadence;
-3. provide the same session service and deliberate dimensions to deterministic test components, public visual string rendering, and the internal screen-reader string helper without reading process streams;
-4. make public `renderToString()` reject recognizable hidden screen-reader or mode passthrough before rendering, while the internal helper selects screen-reader presentation deliberately;
-5. define unavailable string-host operations honestly, including `useApp()` exit/flush behavior and inert terminal I/O, without silently pretending a live app exists;
-6. prove the host matrix through testing-package API/type/runtime guards, string-render lifecycle tests, clean tarball consumers, `vp run ready`, and fresh `CI=true vp run ci`.
+1. reproduce and reduce every current Inline overflow clear trigger through deterministic screen state and a real PTY, identifying which writer state remains addressable after initial mount, rerender, `Static`, coordinated stdout/stderr, resize, and direct output;
+2. use the existing head-versus-tail comparison plus coding-agent and finder/monitor journeys to select the exact bounded overflow projection and history-commit behavior; do not copy Fullscreen clipping merely because it already exists;
+3. establish failing tests that preserve pre-app scrollback and bound the dynamic region, then implement the smallest writer/layout change without claiming a fixed Inline origin;
+4. update the internal session's Inline layout rows only when the renderer actually enforces that bound, and define the supported application escape hatch separately from coordinated output;
+5. verify Inline and Fullscreen through focused tests, real PTYs, the visual controller, clean packages, `vp run ready`, fresh CI when environment-sensitive, and proportional independent review before activating F1.7.
 
-F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, and F1.4 is complete with the verified private live behavior source. F1.5 now owns deterministic testing and string rendering; F1.6 owns Inline history/overflow, F1.7 owns remaining lifecycle behavior, and F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, or activate F2 early.
+F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, F1.4 is complete with the verified private live behavior source, and F1.5 is complete with verified deterministic-test and string-host authority. F1.6 owns Inline history/overflow, F1.7 owns remaining lifecycle behavior, and F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, or activate F2 early.
 
 ## Baseline for the current foundation
 

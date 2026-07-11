@@ -3,15 +3,16 @@ import { PassThrough } from "node:stream";
 export interface FakeWritableOptions {
   columns?: number;
   rows?: number;
+  isTTY?: boolean;
 }
 
 export function makeFakeWritable(options: FakeWritableOptions = {}): NodeJS.WriteStream {
   const s = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(s, {
     columns: options.columns ?? 100,
-    rows: options.rows ?? 100,
-    isTTY: true,
+    isTTY: options.isTTY ?? true,
   });
+  if (options.rows !== undefined) Object.assign(s, { rows: options.rows });
   return s;
 }
 
@@ -20,11 +21,14 @@ export interface RawModeState {
   readonly history: readonly boolean[];
 }
 
-export function makeFakeStdin(): { stream: NodeJS.ReadStream; rawMode: RawModeState } {
+export function makeFakeStdin(options: { isTTY?: boolean } = {}): {
+  stream: NodeJS.ReadStream;
+  rawMode: RawModeState;
+} {
   const rawMode = { current: false, history: [] as boolean[] };
   const s = new PassThrough() as unknown as NodeJS.ReadStream;
   Object.assign(s, {
-    isTTY: true,
+    isTTY: options.isTTY ?? true,
     setRawMode(this: NodeJS.ReadStream, mode: boolean) {
       rawMode.current = mode;
       (rawMode.history as boolean[]).push(mode);

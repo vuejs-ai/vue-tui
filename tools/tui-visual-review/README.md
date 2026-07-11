@@ -16,7 +16,7 @@ For the fullscreen fixed-origin regression fixture, use:
 vp run visual:fullscreen-origin
 ```
 
-Pass `--scenario <static|stdout|stderr|console|debug|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
+Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
 
 The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 

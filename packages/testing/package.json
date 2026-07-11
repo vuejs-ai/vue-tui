@@ -1,10 +1,12 @@
 {
   "name": "@vue-tui/testing",
   "version": "0.0.3",
-  "description": "Test utilities for Vue terminal components. Render and assert vue-tui output.",
+  "description": "Deterministic test host for Vue terminal applications.",
   "license": "MIT",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
   "exports": {
@@ -22,7 +24,9 @@
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
-    "@vue-tui/runtime": "workspace:*"
+    "@vue-tui/runtime": "workspace:*",
+    "@xterm/addon-unicode11": "catalog:",
+    "@xterm/headless": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^25.6.2",

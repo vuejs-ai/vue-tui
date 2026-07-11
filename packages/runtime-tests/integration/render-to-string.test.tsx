@@ -22,6 +22,11 @@ import {
   useAnimation,
   useBoxMetrics,
 } from "@vue-tui/runtime";
+import {
+  renderToStringWithScreenReader,
+  useInternalRenderSession,
+  type InternalRenderSessionSnapshot,
+} from "@vue-tui/runtime/internal";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -42,16 +47,71 @@ describe("renderToString", () => {
     expect(output).toBe("test");
   });
 
-  // Contract guard: `isScreenReaderEnabled` is INTERNAL-only — the public `renderToString` must
-  // reject it at the type level (SR rendering goes through `renderToStringWithScreenReader` in
-  // `@vue-tui/runtime/internal`). If the option is ever re-added to the public `RenderToStringOptions`,
-  // the `@ts-expect-error` below goes unused and `tsc --noEmit` fails. (At runtime the unknown option
-  // is harmlessly ignored — only `columns` is read — so the frame still renders.)
-  test("public renderToString rejects the internal isScreenReaderEnabled option (type-level)", () => {
+  test("public renderToString rejects hidden screen-reader passthrough before rendering", () => {
+    let setupRan = false;
     const App = defineComponent(() => () => <Text>x</Text>);
-    // @ts-expect-error - isScreenReaderEnabled is internal-only (use renderToStringWithScreenReader from /internal)
-    const output = renderToString(App, { isScreenReaderEnabled: true });
-    expect(output).toBe("x");
+    const guarded = Object.defineProperty({ isScreenReaderEnabled: undefined }, "columns", {
+      enumerable: true,
+      get() {
+        setupRan = true;
+        throw new Error("columns getter must not run");
+      },
+    });
+
+    expect(() => {
+      // @ts-expect-error - screen-reader presentation is selected only by the internal helper
+      renderToString(App, guarded);
+    }).toThrow('renderToString option "isScreenReaderEnabled" is unavailable');
+    expect(setupRan).toBe(false);
+  });
+
+  test("public renderToString rejects terminal-surface passthrough", () => {
+    const App = defineComponent(() => () => <Text>x</Text>);
+    expect(() => {
+      // @ts-expect-error - a synchronous document has no requested terminal mode
+      renderToString(App, { mode: "fullscreen" });
+    }).toThrow('renderToString option "mode" is unavailable');
+    expect(() => {
+      // @ts-expect-error - a synchronous document has unbounded rows
+      renderToString(App, { rows: 24 });
+    }).toThrow('renderToString option "rows" is unavailable');
+  });
+
+  test("public and internal helpers select fixed visual and screen-reader documents", () => {
+    const App = defineComponent(() => () => (
+      <Box ariaLabel="accessible label">
+        <Text>visual child</Text>
+      </Box>
+    ));
+
+    expect(renderToString(App)).toContain("visual child");
+    expect(renderToString(App)).not.toContain("accessible label");
+    expect(renderToStringWithScreenReader(App)).toContain("accessible label");
+    expect(renderToStringWithScreenReader(App)).not.toContain("visual child");
+  });
+
+  test.each([
+    ["visual", renderToString],
+    ["screen-reader", renderToStringWithScreenReader],
+  ] as const)("provides one truthful %s string session", (presentation, renderDocument) => {
+    let captured: InternalRenderSessionSnapshot | undefined;
+    const App = defineComponent(() => {
+      captured = useInternalRenderSession().session as InternalRenderSessionSnapshot;
+      return () => <Text>session</Text>;
+    });
+
+    expect(renderDocument(App, { columns: 37 })).toContain("session");
+    expect(captured).toEqual({
+      host: "string",
+      mode: null,
+      output: { destination: "document", dynamicUpdates: "none", presentation },
+      dimensions: { terminal: null, layout: { columns: 37, rows: null } },
+      capabilities: {
+        stableOrigin: false,
+        elementHitTesting: false,
+        suspension: false,
+      },
+    });
   });
 
   test("rethrows component errors after cleanup", () => {
@@ -91,6 +151,30 @@ describe("renderToString", () => {
     });
     const output = renderToString(App);
     expect(output).toContain("with exit");
+  });
+
+  test("useApp exit is explicitly unavailable in a string render", () => {
+    const App = defineComponent(() => {
+      useApp().exit();
+      return () => <Text>unreachable</Text>;
+    });
+
+    expect(() => renderToString(App)).toThrow(
+      "useApp().exit() is unavailable during renderToString()",
+    );
+  });
+
+  test("useApp render flush is explicitly unavailable in a string render", async () => {
+    let waitUntilRenderFlush: (() => Promise<void>) | undefined;
+    const App = defineComponent(() => {
+      waitUntilRenderFlush = useApp().waitUntilRenderFlush;
+      return () => <Text>document</Text>;
+    });
+
+    expect(renderToString(App)).toBe("document");
+    await expect(waitUntilRenderFlush?.()).rejects.toThrow(
+      "useApp().waitUntilRenderFlush() is unavailable during renderToString()",
+    );
   });
 
   test("useFocus does not throw in renderToString", () => {
@@ -140,6 +224,28 @@ describe("renderToString", () => {
     });
     const output = renderToString(App);
     expect(output).toContain("with stderr");
+  });
+
+  test("string terminal streams are isolated and direct writes remain inert", () => {
+    let capturedStdin: NodeJS.ReadStream | undefined;
+    let capturedStdout: NodeJS.WriteStream | undefined;
+    let capturedStderr: NodeJS.WriteStream | undefined;
+    const App = defineComponent(() => {
+      capturedStdin = useStdin().stdin;
+      capturedStdout = useStdout().stdout;
+      capturedStderr = useStderr().stderr;
+      capturedStdout.write("discard stdout");
+      capturedStderr.write("discard stderr");
+      return () => <Text>isolated</Text>;
+    });
+
+    expect(renderToString(App, { columns: 29 })).toBe("isolated");
+    expect(capturedStdin).not.toBe(process.stdin);
+    expect(capturedStdout).not.toBe(process.stdout);
+    expect(capturedStderr).not.toBe(process.stderr);
+    expect(capturedStdin?.isTTY).toBe(false);
+    expect(capturedStdout?.isTTY).toBe(false);
+    expect(capturedStdout?.columns).toBe(29);
   });
 
   test("respects custom columns width", () => {
@@ -727,17 +833,19 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useWindowSize does not throw in renderToString", () => {
+    test("useWindowSize reads the document width from the shared session", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const App = defineComponent(() => {
-        // Resolves dimensions from ctx.stdout (process.stdout in the no-op
-        // context) with the terminal-size fallback; never throws.
         const { columns, rows } = useWindowSize();
-        return () => <Text>size {columns.value > 0 && rows.value > 0 ? "ok" : "fallback"}</Text>;
+        return () => (
+          <Text>
+            {columns.value}x{rows.value}
+          </Text>
+        );
       });
       try {
-        const output = renderToString(App);
-        expect(output).toContain("size");
+        const output = renderToString(App, { columns: 13 });
+        expect(output).toBe("13x24");
         expect(warn).not.toHaveBeenCalled();
       } finally {
         warn.mockRestore();

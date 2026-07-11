@@ -375,7 +375,7 @@ test("alternate screen - cleanup console output does not leak into managed strea
   expect(output).not.toContain("cleanup log");
 });
 
-test("alternate screen - still activates in debug mode", async () => {
+test("alternate screen - still activates with unthrottled commits", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();
 
@@ -386,7 +386,7 @@ test("alternate screen - still activates in debug mode", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
   });
   await nextTick();

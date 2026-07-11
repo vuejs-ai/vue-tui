@@ -1,6 +1,6 @@
 # Fullscreen output contract
 
-The runtime selects this behavior with optional `mode: "inline" | "fullscreen"`; omission requests Inline. Own `fullscreen`, `alternateScreen`, and `interactive` mount fields are removed programming errors and fail before terminal inspection or mutation. `liveUpdates` separately controls output cadence and does not grant a screen model. Fullscreen becomes effective only on a visual TTY with usable terminal dimensions; an explicit live-update override on a non-TTY stream cannot acquire the alternate screen, fixed viewport, or hit map. A screen-reader request for Fullscreen instead resolves to an Inline linear transcript on the main screen.
+The runtime selects this behavior with optional `mode: "inline" | "fullscreen"`; omission requests Inline. Own `fullscreen`, `alternateScreen`, `interactive`, and `debug` mount fields are removed programming errors and fail before terminal inspection or mutation. `liveUpdates` separately controls output cadence and does not grant a screen model. Fullscreen becomes effective only on a visual TTY with usable terminal dimensions; an explicit live-update override on a non-TTY stream cannot acquire the alternate screen, fixed viewport, or hit map. A screen-reader request for Fullscreen instead resolves to an Inline linear transcript on the main screen.
 
 ## The surface vue-tui owns
 
@@ -26,8 +26,8 @@ Persistent fullscreen history belongs in ordinary reactive application state ren
 
 - Inline rendering keeps the relative writer and terminal-owned scrollback semantics while F1.6 defines the exact ownership and overflow contract.
 - Screen-reader rendering remains a linear transcript on the main screen and resolves a Fullscreen request to effective Inline.
-- `debug: true` still exposes committed frames to the test frame sink, but an effective fullscreen app replaces the viewport instead of appending each debug frame on screen. `app.clear()` remains a no-op in debug mode, including fullscreen debug.
+- Deterministic tests observe structured content commits through an internal render observer and inspect terminal-visible state through a separate xterm screen. Observation does not alter Fullscreen repaint behavior; `maxFps: 0` changes scheduling only.
 - Resize recomputes the terminal-sized Yoga layout and repaints the fixed viewport synchronously.
 - Unmount, exit, and signals restore cursor, input modes, raw mode, and the original screen through the existing teardown path.
 
-The real-PTY regression fixture is `packages/runtime-tests/integration/pty/fullscreen-origin.test.ts`. It feeds the byte stream through a terminal emulator and checks Static, stdout, stderr, patched console, debug rerenders, vertical and horizontal overflow clipping, cursor placement, and physical-row mouse targeting.
+The real-PTY regression fixture is `packages/runtime-tests/integration/pty/fullscreen-origin.test.ts`. It feeds the byte stream through a terminal emulator and checks Static, stdout, stderr, patched console, ordinary reactive rerenders, vertical and horizontal overflow clipping, cursor placement, and physical-row mouse targeting.

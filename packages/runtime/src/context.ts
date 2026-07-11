@@ -14,8 +14,6 @@ export interface AppContext {
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   stdin: NodeJS.ReadStream;
-  debug: boolean;
-  isScreenReaderEnabled: boolean;
   isRawModeSupported: boolean;
   setRawMode: (mode: boolean) => void;
   writeToStdout: (data: string) => void;

@@ -18,17 +18,15 @@ test("useIsScreenReaderEnabled returns false by default", async () => {
   expect(result).toBe(false);
 });
 
-// B28: the existing test only covers the `false` default. When SR IS enabled,
-// useIsScreenReaderEnabled() must return `true`. It reads ctx.isScreenReaderEnabled
-// (useIsScreenReaderEnabled.ts:8), which renderToString seeds from the
-// isScreenReaderEnabled option (render-to-string.ts:61-64,179).
-test("useIsScreenReaderEnabled returns true when SR is enabled (renderToString option)", () => {
+// The internal helper selects the fixed screen-reader string host. The
+// composable reads that presentation from the shared render session.
+test("useIsScreenReaderEnabled returns true in the screen-reader string host", () => {
   let result: boolean | undefined;
   const App = defineComponent(() => {
     result = useIsScreenReaderEnabled();
     return () => <Text>sr enabled</Text>;
   });
-  const output = renderToString(App, { isScreenReaderEnabled: true });
+  const output = renderToString(App);
   // Composable observed the enabled flag, and the SR text still rendered.
   expect(result).toBe(true);
   expect(output).toBe("sr enabled");

@@ -16,7 +16,7 @@ function chunksFrom(stream: NodeJS.WriteStream): string[] {
   return chunks;
 }
 
-test.each(["fullscreen", "alternateScreen", "interactive"] as const)(
+test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
   "removed %s option fails before another mount option is read",
   (removedKey) => {
     const options = Object.defineProperty({ [removedKey]: undefined }, "stdout", {

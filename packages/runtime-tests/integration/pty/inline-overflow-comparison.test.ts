@@ -54,16 +54,6 @@ test("an application-bounded live region preserves history and replaces its visi
   expect(lines).not.toContain("BOTTOM 2");
 });
 
-test("append-only frames preserve history but retain duplicate snapshots", async () => {
-  const { lines, output } = await runScenario("append");
-
-  expect(output).not.toContain(ansiEscapes.clearTerminal);
-  expect(lines).toContain("PRE_APP_HISTORY");
-  expect(lines).toContain("TOP 0");
-  expect(lines).toContain("TOP 1");
-  expect(lines).toContain("TOP 2");
-});
-
 test("an application-selected bounded tail preserves history and keeps the latest state visible", async () => {
   const { lines, output } = await runScenario("bounded-tail");
 

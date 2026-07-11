@@ -31,7 +31,7 @@ If a coding agent changes visible terminal behavior, tell it to read the version
 node -p "require('node:path').join(require.resolve('@vue-tui/runtime/package.json'), '../docs/visual-development-feedback-loops.md')"
 ```
 
-The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`lastFrame()` from `@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) remains the fast assertion layer, but it is not the terminal's final post-emulation screen.
+The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) provides fast content-frame and modeled-screen assertions, while the visual loop exercises the built application through the real PTY path.
 
 `@vue-tui/runtime` ships the guide, not a controller, PTY library, terminal emulator, or image renderer. The coding-agent environment or application project supplies those capabilities.
 
@@ -126,15 +126,17 @@ Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's a
 > entry module's evaluation — which wedges Vite's HMR full-reload queue after the first reload.
 > Reserve `await app.waitUntilExit()` for standalone/production entries (`node dist/main.js`).
 
-## Render to String
+## Render to string
 
-Render a component to a single output frame without driving a live terminal — useful for snapshots, logging, or non-interactive output:
+Render a component as a synchronous, width-constrained visual document without acquiring a terminal. The document has no terminal mode, bounded row count, input, resize lifecycle, or live updates:
 
 ```ts
 import { renderToString } from "@vue-tui/runtime";
 
-const frame = renderToString(App); // synchronous, returns a string
+const document = renderToString(App, { columns: 80 });
 ```
+
+The default width is 80 columns. Terminal mode and screen-reader presentation are deliberately not options on this public string API. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` or `useApp().waitUntilRenderFlush()` reports that the operation is unavailable.
 
 ## Links
 

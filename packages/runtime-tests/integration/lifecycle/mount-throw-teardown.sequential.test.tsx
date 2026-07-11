@@ -65,7 +65,7 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
   const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -114,7 +114,7 @@ test.sequential("a synchronous stdout.write throw during kitty enable runs teard
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
   const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();

@@ -25,13 +25,11 @@ const App = defineComponent(() => {
   return () => <Text>signal teardown fixture</Text>;
 });
 
-// `--debug` mounts in debug mode (still interactive). Debug mode enters the
-// alternate screen and hides the cursor just like a normal interactive mount,
-// so signal-driven teardown must still restore the terminal — this exercises
-// Finding 1 (the registration must not be gated on `!debug`).
-const debug = process.argv.includes("--debug");
+// The unthrottled variant proves signal restoration is independent of commit
+// scheduling while exercising the same full-screen terminal ownership.
+const unthrottled = process.argv.includes("--unthrottled");
 
 const app = createApp(App);
-app.mount({ mode: "fullscreen", debug });
+app.mount({ mode: "fullscreen", maxFps: unthrottled ? 0 : undefined });
 
 await app.waitUntilExit();

@@ -8,7 +8,7 @@ const dots = PRESETS.dots.frames;
 
 describe("Spinner", () => {
   test("renders a dots glyph by default", async () => {
-    const r = await render(Spinner, { liveUpdates: false });
+    const r = await render(Spinner, { host: { updates: "at-teardown" } });
     await delay(50);
     const out = r.lastFrame() ?? "";
     expect(out.length).toBeGreaterThan(0);
@@ -19,20 +19,23 @@ describe("Spinner", () => {
   test("animates through more than two distinct glyphs over time", async () => {
     const r = await render(Spinner);
     await delay(250);
-    const distinct = new Set(r.frames.map((f) => f.trim()).filter(Boolean));
+    const distinct = new Set(r.frames.map((frame) => frame.dynamic.trim()).filter(Boolean));
     expect(distinct.size).toBeGreaterThan(2);
     r.unmount();
   });
 
-  test("renders a visible (non-blank) glyph when non-interactive", async () => {
-    const r = await render(Spinner, { liveUpdates: false });
+  test("renders a visible glyph when dynamic output is deferred", async () => {
+    const r = await render(Spinner, { host: { updates: "at-teardown" } });
     await delay(50);
     expect((r.lastFrame() ?? "").trim().length).toBeGreaterThan(0);
     r.unmount();
   });
 
   test("type='line' renders a line glyph", async () => {
-    const r = await render(Spinner, { liveUpdates: false, props: { type: "line" } });
+    const r = await render(Spinner, {
+      host: { updates: "at-teardown" },
+      props: { type: "line" },
+    });
     await delay(50);
     const out = r.lastFrame() ?? "";
     expect(PRESETS.line.frames.some((g) => out.includes(g))).toBe(true);
@@ -40,7 +43,10 @@ describe("Spinner", () => {
   });
 
   test("custom frames override the preset", async () => {
-    const r = await render(Spinner, { liveUpdates: false, props: { frames: ["@"] } });
+    const r = await render(Spinner, {
+      host: { updates: "at-teardown" },
+      props: { frames: ["@"] },
+    });
     await delay(50);
     expect((r.lastFrame() ?? "").includes("@")).toBe(true);
     r.unmount();
@@ -49,7 +55,7 @@ describe("Spinner", () => {
   test("color tints the glyph but not the label", async () => {
     const chalk = (await import("chalk")).default;
     const r = await render(Spinner, {
-      liveUpdates: false,
+      host: { updates: "at-teardown" },
       props: { frames: ["⠋"], color: "green", label: "Loading" },
     });
     await delay(20);
@@ -62,7 +68,7 @@ describe("Spinner", () => {
 
   test("label renders after the glyph with a separating space", async () => {
     const r = await render(Spinner, {
-      liveUpdates: false,
+      host: { updates: "at-teardown" },
       props: { frames: ["⠋"], label: "Done" },
     });
     await delay(20);
@@ -71,7 +77,10 @@ describe("Spinner", () => {
   });
 
   test("no label renders the glyph only", async () => {
-    const r = await render(Spinner, { liveUpdates: false, props: { frames: ["⠋"] } });
+    const r = await render(Spinner, {
+      host: { updates: "at-teardown" },
+      props: { frames: ["⠋"] },
+    });
     await delay(20);
     expect((r.lastFrame() ?? "").trim()).toBe("⠋");
     r.unmount();

@@ -1,7 +1,7 @@
-import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
-import { Box, createApp, Static, Text, useStdout } from "@vue-tui/runtime";
+import { Box, createApp, Static, Text } from "@vue-tui/runtime";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -364,70 +364,6 @@ test.sequential("tall/overflowing SR transcript never clears terminal, replays s
   // (5) Subsequent SR frames erase via eraseLines (raw stdout.write), not via a
   // clearTerminal/log-update repaint.
   expect(raw).toContain(ansiEscapes.eraseLines(4));
-
-  app.unmount();
-});
-
-// G59 follow-up (Ink parity): the G59 gate that stops fullStaticOutput
-// accumulation for the INTERACTIVE screen-reader branch must NOT also disable it
-// in DEBUG mode. Ink accumulates fullStaticOutput in the debug branch regardless
-// of SR (ink.tsx:550-553), and its debug writeToStdout replays
-// `data + fullStaticOutput + lastOutput` (ink.tsx:677). vue-tui mirrors this:
-// the debug writeToStdout (render.ts) writes `data + frameState.fullStaticOutput
-// + frameState.lastOutput`. So in debug + SR, an external useStdout().write()
-// after a <Static> render MUST replay the accumulated static history. The
-// over-broad G59 gate (`!isScreenReaderEnabled`) skipped accumulation here too,
-// dropping the static history from the debug replay — an Ink-parity regression.
-test.sequential("debug + SR accumulates static history so external writes replay it (Ink parity)", async () => {
-  const doWrite = shallowRef(false);
-  const App = defineComponent(() => {
-    const { write } = useStdout();
-    onMounted(() => {
-      // Defer the external write until after the first static commit so
-      // fullStaticOutput has had a chance to accumulate.
-      queueMicrotask(() => {
-        doWrite.value = true;
-        write("EXTERNAL-WRITE\n");
-      });
-    });
-    return () => (
-      <Box flexDirection="column">
-        <Static items={["History line"]}>
-          {{
-            default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-          }}
-        </Static>
-        <Text>Live frame</Text>
-      </Box>
-    );
-  });
-
-  const app = createApp(App);
-  const stdout = makeFakeWritable({ columns: 80 });
-  const stderr = makeFakeWritable({ columns: 80 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    exitOnCtrlC: false,
-    debug: true,
-    isScreenReaderEnabled: true,
-  });
-
-  await nextTick();
-  await nextTick();
-  await nextTick();
-
-  // The external write replays `data + fullStaticOutput + lastOutput`. Find the
-  // chunk that carries the external write and assert it ALSO carries the
-  // accumulated static history (which the over-broad G59 gate dropped).
-  const externalChunk = writes.find((w) => w.includes("EXTERNAL-WRITE"));
-  expect(externalChunk).toBeDefined();
-  // Ink replays the accumulated static history in the debug external write.
-  expect(externalChunk).toContain("History line");
 
   app.unmount();
 });

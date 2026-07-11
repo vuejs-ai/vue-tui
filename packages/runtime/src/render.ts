@@ -32,7 +32,7 @@ import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { hideCursorEscape } from "./io/cursor-helpers.ts";
-import { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
+import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
@@ -80,7 +80,6 @@ export interface MountOptions {
   stdout?: NodeJS.WriteStream;
   stdin?: NodeJS.ReadStream;
   stderr?: NodeJS.WriteStream;
-  debug?: boolean;
   /**
    * Select the terminal screen model requested by this application.
    * Omission requests Inline. A host that cannot acquire a live terminal
@@ -125,8 +124,6 @@ export interface MountOptions {
    * coordinator (writeToStdout / writeToStderr) so that console.log
    * calls don't corrupt the rendered UI.
    *
-   * Automatically disabled in debug mode.
-   *
    * @default true
    */
   patchConsole?: boolean;
@@ -139,7 +136,7 @@ export interface MountOptions {
    * (`ceil(1000 / maxFps)` ms) that throttles both the commit scheduler and
    * the useAnimation tick coalescing. Defaults to 30 (≈34ms), matching Ink.
    *
-   * Ignored in debug / screen-reader mode (commits are immediate).
+   * Ignored in screen-reader mode and when non-positive (commits are immediate).
    * @default 30
    */
   maxFps?: number;
@@ -293,7 +290,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // to remove the handler so it can't leak or double-run.
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
-  let mountedDebug = false;
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
@@ -379,9 +375,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // tiny and this only runs on the rare abrupt-exit path. Fall back to fd
         // 1 (stdout) when the stream has no numeric fd (e.g. some wrapped TTYs).
         // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
+        // Never guess fd 1 for an arbitrary custom stream: deterministic hosts
+        // and embedders may deliberately model a TTY without targeting the
+        // process terminal.
         const streamFd = (stream as { fd?: number }).fd;
-        const fd = typeof streamFd === "number" ? streamFd : 1;
-        fsWriteSync(fd, data);
+        if (typeof streamFd === "number") {
+          fsWriteSync(streamFd, data);
+        } else if (stream === process.stdout) {
+          fsWriteSync(1, data);
+        } else if (stream === process.stderr) {
+          fsWriteSync(2, data);
+        } else {
+          stream.write(data);
+        }
       } else {
         stream.write(data);
       }
@@ -448,29 +454,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // the scheduler, which DISCARDS a pending trailing-edge commit — so a
     // reactive change deferred to that trailing edge would be lost. Re-running
     // commit() here recomputes the frame against the live tree and refreshes
-    // frameState.lastOutput, in EVERY mode:
-    //   - interactive: re-emits the last frame via the writer (Ink ink.tsx:756);
-    //   - debug: unthrottled, so a re-commit re-writes `fullStaticOutput + frame`
-    //     (the debug branch's stdout.write — gated !teardownStarted so it doesn't
-    //     push a spurious live frames[] entry);
-    //   - non-interactive non-debug: the commit only refreshes frameState
-    //     (lastOutput/lastOutputToRender) and writes write-once <Static>; it
-    //     DEFERS the dynamic frame to the trailing-write block below. So this
+    // frameState.lastOutput. Live output repaints; final-stream output only
+    // refreshes frameState and writes write-once <Static>, deferring the dynamic
+    // frame to the trailing-write block below. So this
     //     refresh feeds the correct, latest `lastFrame + "\n"` into that write
     //     (matching Ink's `this.lastOutput + '\n'`, ink.tsx:817-818) WITHOUT
     //     double-writing the dynamic frame. Before this, a deferred trailing
     //     change unmounted within the throttle window emitted the STALE
     //     last-committed frame instead of the latest tree.
-    // EXCEPTION — non-interactive non-debug ERROR teardown: do NOT re-commit. A
+    // EXCEPTION — final-stream ERROR teardown: do NOT re-commit. A
     // re-commit would refresh frameState.lastOutput to the ErrorOverview and the
     // trailing-write block would then emit it, but the non-interactive error
     // path paints NO overview (only the trailing newline), matching Ink/main
-    // (see error-capture-race.test.tsx). Interactive/debug still commit on error
-    // (the overview IS shown on screen there), so they keep the unconditional path.
+    // (see error-capture-race.test.tsx). Live output still commits because the
+    // overview is shown there.
     if (
       mountedCommit &&
       stdoutWritable &&
-      (mountedDynamicUpdatesLive || mountedDebug || !isErrorInput(pendingExitError))
+      (mountedDynamicUpdatesLive || !isErrorInput(pendingExitError))
     ) {
       try {
         mountedCommit();
@@ -503,29 +504,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedKittyController = null;
     }
     if (!mountedDynamicUpdatesLive && mountedAppContext) {
-      // Non-interactive teardown write, mirroring Ink's finishUnmount branch
-      // (ink.tsx:812-819: `stdout.write(this.options.debug ? '\n' : this.lastOutput + '\n')`).
-      // In DEBUG each render already wrote its full frame to stdout (and the
-      // final-frame re-emit above re-wrote the last one), so only a trailing
-      // newline is owed — Ink writes a bare "\n" here unconditionally. In
-      // non-debug non-interactive mode the dynamic frame was deferred during
-      // rendering; the final commit() above refreshed lastOutput to the current
-      // tree, so write that latest frame now as `lastFrame + "\n"`.
-      if (mountedDebug) {
-        writeBestEffort(mountedAppContext.stdout, "\n");
-      } else {
-        const lastFrame = mountedGetLastOutput?.() ?? "";
-        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
-      }
+      // The dynamic frame was deferred during rendering. The final commit()
+      // above refreshed lastOutput to the current tree, so write that latest
+      // frame now as `lastFrame + "\n"`.
+      const lastFrame = mountedGetLastOutput?.() ?? "";
+      writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
     }
-    if (mountedWriter && !mountedDebug && mountedDynamicUpdatesLive && stdoutWritable)
-      mountedWriter.done();
+    if (mountedWriter && mountedDynamicUpdatesLive && stdoutWritable) mountedWriter.done();
     if (mountedAlternateScreen && mountedAppContext) {
       writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
       mountedAlternateScreen = false;
     } else if (
-      !mountedDebug &&
       mountedDynamicUpdatesLive &&
       mountedAppContext &&
       Boolean(mountedAppContext.stdout.isTTY)
@@ -625,7 +615,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           //      with the thrown error.
           //   2. exitWithError(e) stays on nextTick so teardown is DEFERRED until
           //      AFTER the current flush. teardown() runs the final mountedCommit()
-          //      that paints the ErrorOverview frame (on interactive/debug mounts),
+          //      that paints the ErrorOverview frame on live-output mounts,
           //      and the boundary's errored→true re-render must commit BEFORE that
           //      final commit. A synchronous exit here would let teardown's
           //      microtask run before the re-render, dropping the overview frame.
@@ -667,16 +657,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stdout = options.stdout ?? process.stdout;
     const stdin = options.stdin ?? process.stdin;
     const stderr = options.stderr ?? process.stderr;
-    const debug = options.debug ?? false;
 
-    // Internal, test-only per-app frame sink (see io/frame-sink.ts). Read off a
-    // Symbol-keyed mount option so it never appears on the public MountOptions
-    // type (which stays Ink-faithful). Closure-captured here — no module-global
-    // state — so concurrent test files / multiple apps stay isolated. When set,
-    // the debug commit branch forwards the EXACT content chunks it writes to
-    // stdout (static-history chunk, then dynamic frame), MINUS escapes, so the
-    // testing helper's frames[] are provably content-only.
-    const frameSink = (options as { [INTERNAL_FRAME_SINK]?: FrameSink })[INTERNAL_FRAME_SINK];
+    // Internal deterministic-test observer. It observes the resolved session
+    // and renderer content commits without selecting another output path.
+    const renderObserver = (options as { [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver })[
+      INTERNAL_RENDER_OBSERVER
+    ];
     const configuredTerminalSizeProbe = (
       options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
     )[INTERNAL_TERMINAL_SIZE_PROBE];
@@ -729,6 +715,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       terminalProbe,
     });
     const renderSession = createLiveRenderSessionService(surface);
+    renderObserver?.onSession?.(renderSession.session);
     const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
     const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
     // F3 will replace this temporary input-lifecycle policy. It intentionally
@@ -778,9 +765,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const kittyKeyboard = options.kittyKeyboard;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
     // the render throttle engages by default — without this the animation
-    // coalescing (G02) never kicks in on the normal non-debug path.
+    // coalescing (G02) never kicks in on an unthrottled path.
     const maxFps = options.maxFps ?? 30;
-    mountedDebug = debug;
     mountedDynamicUpdatesLive = dynamicUpdatesLive;
 
     // Frame coordination state — tracks the last rendered output so
@@ -822,16 +808,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         repaintFullscreen(frameState.lastOutput, { writeBefore: () => stdout.write(data) });
         return;
       }
-      if (debug) {
-        const out = data + frameState.fullStaticOutput + frameState.lastOutput;
-        stdout.write(out);
-        // Forward the EXACT stdout bytes to the test-only sink. This is content
-        // (app data + replayed frame), not a terminal-control escape, so the
-        // testing helper's frames[] reproduce today's verbatim capture — only
-        // escapes are excluded under B′.
-        frameSink?.(out);
-        return;
-      }
       if (isScreenReaderEnabled && dynamicUpdatesLive) {
         repaintTranscript(() => stdout.write(data));
         return;
@@ -856,17 +832,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (teardownStarted) return;
       if (fixedFullscreenSurface) {
         repaintFullscreen(frameState.lastOutput, { writeBefore: () => stderr.write(data) });
-        return;
-      }
-      if (debug) {
-        stderr.write(data);
-        const replay = frameState.fullStaticOutput + frameState.lastOutput;
-        stdout.write(replay);
-        // Forward the replayed-frame stdout bytes to the test-only sink (content,
-        // not an escape). The stderr `data` is intentionally NOT forwarded: the
-        // old verbatim capture wrapped STDOUT only, so stderr never appeared in
-        // frames[]. Faithful B′ keeps frames[] = the stdout content stream.
-        frameSink?.(replay);
         return;
       }
       if (isScreenReaderEnabled && dynamicUpdatesLive) {
@@ -936,8 +901,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stdout,
       stderr,
       stdin,
-      debug,
-      isScreenReaderEnabled,
       isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
       setRawMode(mode: boolean) {
         if (
@@ -1045,12 +1008,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     };
 
     const writer = createFrameWriter(stdout, {
-      debug,
       incremental: incrementalRendering,
     });
     mountedWriter = writer;
     mountedClear = () => {
-      if (!dynamicUpdatesLive || debug) return;
+      if (!dynamicUpdatesLive) return;
       if (fixedFullscreenSurface) {
         if (synchronize) stdout.write(bsu);
         try {
@@ -1107,10 +1069,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     }
 
-    function repaintFullscreen(
-      output: string,
-      options: { writeBefore?: () => void; forwardFrame?: boolean } = {},
-    ) {
+    function repaintFullscreen(output: string, options: { writeBefore?: () => void } = {}) {
       // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
       // clear that surface after every coordinated side-channel write instead
       // of restoring relative to the cursor position that the write left
@@ -1133,7 +1092,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       frameState.lastOutput = output;
       frameState.lastOutputToRender = output;
       frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
-      if (options.forwardFrame && !teardownStarted) frameSink?.(output);
     }
 
     function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
@@ -1157,7 +1115,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                   if (hasStaticOutput) stdout.write(staticOutput);
                 }
               : undefined,
-          forwardFrame: debug,
         });
         return;
       }
@@ -1300,22 +1257,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
       const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-      // fullStaticOutput is the accumulated <Static> history. Mirror Ink's three
-      // onRender branches: it accumulates in the DEBUG branch (ink.tsx:550-553)
-      // and the normal-interactive branch (ink.tsx:626-628), but NOT in the
-      // dedicated interactive screen-reader branch (ink.tsx:573-625), which
-      // writes static inline + never clears + never replays history. So we must
-      // accumulate ALWAYS in debug (so the debug writeToStdout/writeToStderr
-      // replay of `fullStaticOutput + lastOutput` still includes static history,
-      // regardless of SR), and otherwise only when NOT in the interactive SR
-      // path. The SR exclusion is non-debug only: accumulating for interactive SR
-      // would also make a later non-SR remount on the same stream replay stale
-      // history (the original G59 motivation).
-      if (hasStaticOutput && !fixedFullscreenSurface && (debug || !isScreenReaderEnabled)) {
+      // fullStaticOutput is accumulated only for the visual path. The
+      // screen-reader transcript writes new static content inline and never
+      // replays accumulated history.
+      if (hasStaticOutput && !fixedFullscreenSurface && !isScreenReaderEnabled) {
         frameState.fullStaticOutput += staticOutput;
       }
 
-      if (!dynamicUpdatesLive && !debug) {
+      if (!dynamicUpdatesLive) {
         // Non-interactive: compute the dynamic frame now, write static output
         // after onRender, and defer dynamic frame output until unmount.
         tuiRoot.yoga.setWidth(w);
@@ -1328,6 +1277,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         try {
           emitLayoutListeners(tuiRoot);
           const frame = renderFrame(w);
+          renderObserver?.onCommit?.({
+            dynamic: frame,
+            staticOutput: hasStaticOutput ? staticOutput : "",
+            phase: teardownStarted ? "teardown" : "update",
+          });
           frameState.lastOutput = frame;
           frameState.lastOutputToRender = frame + "\n";
           frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
@@ -1355,69 +1309,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         emitLayoutListeners(tuiRoot);
         const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
         const frame = renderFrame(w, hitMap, viewportRows);
+        renderObserver?.onCommit?.({
+          dynamic: frame,
+          staticOutput: hasStaticOutput ? staticOutput : "",
+          phase: teardownStarted ? "teardown" : "update",
+        });
         mouseController.updateHitMap(hitMap ?? []);
         const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
         if (fixedFullscreenSurface) {
           if (onRender) onRender({ renderTime: performance.now() - start });
           renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
-          return;
-        }
-
-        if (debug) {
-          // Debug mode mirrors Ink's onRender debug branch (ink.tsx:550-558): its
-          // contract is "every update rendered as a separate, FULL output". Ink
-          // writes `this.fullStaticOutput + output` UNCONDITIONALLY on every render
-          // — the ENTIRE accumulated <Static> history (not just this commit's delta)
-          // prepended to the current dynamic frame, with NO equality short-circuit.
-          // Two fixes vs the old behavior, BOTH scoped to this debug branch only:
-          //   (a) re-emit the FULL accumulated history (frameState.fullStaticOutput,
-          //       accumulated at line 847-849) on every render, not just this
-          //       commit's static delta — Ink re-prints all static every render; and
-          //   (b) write straight to stdout, bypassing the FrameWriter, whose
-          //       `frame === lastFrame` dedup would swallow a byte-identical debug
-          //       rerender that Ink still emits.
-          // The static history and dynamic frame are written as two consecutive
-          // stdout.write calls: the byte stream reaching the terminal is identical
-          // to Ink's single `fullStaticOutput + output` write (stdout.write inserts
-          // no separator), while keeping the dynamic frame its own chunk so the
-          // @vue-tui/testing render() helper can still split frames (its `lastFrame`
-          // is the dynamic frame, `frames` distinguishes static from dynamic).
-          // The non-debug interactive path below is untouched — it keeps the
-          // per-commit static delta and the FrameWriter dedup (the correct,
-          // efficient live-render behavior).
-          if (frameState.fullStaticOutput !== "") {
-            stdout.write(frameState.fullStaticOutput);
-            // Forward the static-history chunk to the test-only frame sink in the
-            // SAME order it reaches stdout (static first, dynamic next), with the
-            // EXACT value written — so the testing helper's frames[] reproduce
-            // today's content faithfully, minus the escapes (which only go to
-            // stdout). No-op when no sink is registered (normal runs).
-            //
-            // Gate on !teardownStarted: the final mountedCommit() in teardown()
-            // (every teardown route — unmount/cleanup/exit/Ctrl+C/signal/
-            // process.exit — sets teardownStarted=true before re-emitting) is a
-            // stdout byte-parity FLUSH, not a render, so it must keep writing to
-            // stdout but must NOT push a spurious entry into the live frames[].
-            if (!teardownStarted) frameSink?.(frameState.fullStaticOutput);
-          }
-          frameState.lastOutput = frame;
-          frameState.lastOutputToRender = frame;
-          frameState.outputHeight = outputHeight;
-          if (onRender) onRender({ renderTime: performance.now() - start });
-          // Ink writes `fullStaticOutput + output` with NO trailing newline
-          // (ink.tsx:558; `output` is \n-joined and returned WITHOUT a trailing
-          // \n — output.ts:305-312). Writing `frame` (not `frame + "\n"`) makes
-          // the concatenation of these two stdout.write calls byte-identical to
-          // Ink's single write.
-          stdout.write(frame);
-          // Forward the dynamic frame to the sink (mirrors the always-run
-          // stdout.write above). lastFrame() is the most recent dynamic frame; an
-          // empty render forwards "" so lastFrame() reads back "" (Ink-faithful).
-          // Same teardown gate as the static chunk above: the teardown re-emit
-          // flushes to stdout for byte parity but is not a render, so it must not
-          // append a duplicate of the final frame to the live frames[].
-          if (!teardownStarted) frameSink?.(frame);
           return;
         }
 
@@ -1484,13 +1386,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // A single render-throttle window derived from maxFps drives BOTH the
     // commit scheduler and the animation scheduler, mirroring Ink where one
     // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
-    // to useAnimation (ink.tsx:337-344, 650). Debug / screen-reader paths and
+    // to useAnimation (ink.tsx:337-344, 650). Screen-reader paths and
     // non-positive maxFps are unthrottled (0 = commit every tick), matching
     // Ink's `unthrottled` gate.
-    const unthrottled = debug || isScreenReaderEnabled;
+    const unthrottled = isScreenReaderEnabled || maxFps <= 0;
     const renderThrottleMs = !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
 
-    // Unthrottled (debug / screen-reader) commits fire every tick, so the
+    // Unthrottled screen-reader or maxFps<=0 commits fire every tick, so the
     // throttle window is unused there — renderThrottleMs is already 0. Otherwise
     // it's the maxFps-derived window (34ms at the default maxFps=30).
     const scheduler = createCommitScheduler(commit, {
@@ -1559,8 +1461,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     };
 
-    // Fullscreen: enter the alternate screen BEFORE rendering starts (matching Ink ink.tsx:428).
-    // Requires fullscreen option + interactive + isTTY. Emit home explicitly so
+    // Enter the alternate screen before rendering starts when the resolved
+    // surface is an effective fullscreen terminal. Emit home explicitly so
     // targeted mouse hit-testing can treat the frame origin as screen (0,0).
     if (fixedFullscreenSurface) {
       writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H");
@@ -1576,8 +1478,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // function warn when the root's setup() throws) must hit the filter too.
     // The mount-throw catch below runs teardown(), which restores the console,
     // so a synchronous mount failure cannot leak a patched console.
-    // Disabled in debug mode (matching Ink).
-    if (patchConsole !== false && !debug) {
+    if (patchConsole !== false) {
       try {
         mountedRestoreConsole = patchConsoleFn((stream, data) => {
           if (stream === "stdout") {
@@ -1656,7 +1557,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
     };
 
-    // Only listen for resize in interactive mode (matching Ink).
+    // Only listen for resize when dynamic output is live (matching Ink).
     // Render synchronously on resize rather than through the commit throttle:
     // a resize is a discrete event that changes the viewport, and Ink's
     // resized() handler calls onRender() directly. Deferring it through the
@@ -1725,13 +1626,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // (mirroring Ink's {alwaysLast:false}): signal-exit lets the signal
     // proceed after the callback. teardown() is idempotent (teardownStarted
     // guard), so a signal-triggered teardown plus a later unmount() won't
-    // double-run. Every interactive mount registers — including debug mode,
-    // which still enters the alternate screen and hides the cursor (above), so
-    // a debug-but-interactive app must restore on signal too (Ink registers
-    // signal-exit unconditionally, ink.tsx:426, and allows alt-screen in
-    // debug). Only render-to-string / non-interactive paths stay out, since
-    // they have no cursor/alt-screen to restore and must not touch process
-    // signal handlers. `!mountedUnsubscribeExit` guards against double-register
+    // double-run. Registration follows the temporary input-lifecycle policy,
+    // independently of whether output resolved to a terminal or stream: raw
+    // input modes still need restoration even when dynamic output is deferred.
+    // `!mountedUnsubscribeExit` guards against double-register
     // on a no-op second mount; `!teardownStarted` keeps a spent (already
     // torn-down) app instance from re-registering on a same-instance remount,
     // which would otherwise leak — the next unmount() returns early at the
@@ -2070,8 +1968,15 @@ function createStdinController(
       try {
         // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
         const streamFd = (stdout as { fd?: number }).fd;
-        const fd = typeof streamFd === "number" ? streamFd : 1;
-        fsWriteSync(fd, data);
+        if (typeof streamFd === "number") {
+          fsWriteSync(streamFd, data);
+        } else if (stdout === process.stdout) {
+          fsWriteSync(1, data);
+        } else if (stdout === process.stderr) {
+          fsWriteSync(2, data);
+        } else {
+          stdout.write(data);
+        }
       } catch {
         // Best-effort restore during abrupt shutdown.
       }
@@ -2086,8 +1991,8 @@ function createStdinController(
   // paste OFF) can be lost before the process dies, leaving the shell wrapping
   // later pastes in \x1b[200~…\x1b[201~. A synchronous fd write guarantees the
   // bytes reach the fd first — same rationale (and mechanism) as the show-cursor
-  // / leave-alt-screen / disable-kitty restores. Falls back to fd 1 when the
-  // stream has no numeric fd.
+  // / leave-alt-screen / disable-kitty restores. An arbitrary custom stream is
+  // written through its own API rather than being misdirected to process fd 1.
   function disableBracketedPaste(sync = false) {
     writeTerminalMode("\x1b[?2004l", sync);
   }

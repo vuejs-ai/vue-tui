@@ -6,7 +6,7 @@
 
 A terminal is a state machine. A vue-tui application writes text and ANSI/VT control sequences, then the terminal applies those sequences to its current buffers, cursor, styles, modes, viewport, and scrollback. The final visible screen is that post-emulation state, not the application's latest output chunk or vue-tui's latest content frame.
 
-`@vue-tui/testing` remains the fast way to test components, input handlers, layout behavior, and known frame invariants. The visual loop adds the missing development feedback: a coding agent can run the real program, see the screen a user would see, operate it one step at a time, and use those observations to decide what to change next.
+`@vue-tui/testing` remains the fast way to test components, input handlers, layout behavior, content-frame invariants, and deterministic terminal-emulated screens. The visual loop adds a real PTY, the built application, rendered images, and observation-driven interaction: a coding agent can run the user path, see the screen, operate it one step at a time, and use those observations to decide what to change next.
 
 A browser is not required. A local headless terminal emulator can produce the structured cell grid for its declared profile, and a separate renderer can turn that grid into a reference PNG. Use a browser-hosted terminal or a real-terminal screenshot only when the behavior being checked depends on that terminal surface.
 

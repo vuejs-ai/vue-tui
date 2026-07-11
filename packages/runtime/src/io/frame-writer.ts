@@ -13,15 +13,12 @@ export interface FrameWriter {
 
 export function createFrameWriter(
   stream: NodeJS.WriteStream,
-  options: { debug?: boolean; incremental?: boolean },
+  options: { incremental?: boolean },
 ): FrameWriter {
   // Sentinel: use a value that can never equal a real frame so the very first
   // write (even an empty string) is always emitted.
   let lastFrame: string | null = null;
-  const debug = options.debug ?? false;
-  const log: LogUpdate | null = debug
-    ? null
-    : logUpdate.create(stream, { incremental: options.incremental });
+  const log: LogUpdate = logUpdate.create(stream, { incremental: options.incremental });
 
   return {
     write(frame: string) {
@@ -31,20 +28,16 @@ export function createFrameWriter(
       // log-update so it emits buildCursorOnlySequence. log-update's own
       // hasChanges() then decides whether to actually write. Mirrors Ink,
       // which has no FrameWriter dedup layer and lets log-update own this.
-      if (frame === lastFrame && !(log && log.isCursorDirty())) return;
+      if (frame === lastFrame && !log.isCursorDirty()) return;
       lastFrame = frame;
-      if (debug) {
-        stream.write(frame + "\n");
-      } else {
-        log!(frame);
-      }
+      log(frame);
     },
     done() {
-      if (log) log.done();
+      log.done();
     },
     clear() {
       lastFrame = null;
-      if (log) log.clear();
+      log.clear();
     },
     sync(frame: string, options?: SyncOptions) {
       // Keep this writer's dedup baseline aligned with log-update's internal
@@ -55,16 +48,16 @@ export function createFrameWriter(
       // `options` (e.g. { cursor: false } from app.clear()) is forwarded so the
       // caller can suppress the cursor emit on this sync — see log-update.sync.
       lastFrame = frame;
-      if (log) log.sync(frame, options);
+      log.sync(frame, options);
     },
     setCursorPosition(pos) {
-      if (log) log.setCursorPosition(pos);
+      log.setCursorPosition(pos);
     },
     isCursorDirty() {
-      return log ? log.isCursorDirty() : false;
+      return log.isCursorDirty();
     },
     willRender(frame: string) {
-      return log ? log.willRender(frame) : true;
+      return log.willRender(frame);
     },
   };
 }

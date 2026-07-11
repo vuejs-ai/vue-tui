@@ -1,8 +1,8 @@
 import { defineComponent, shallowRef, nextTick, h } from "vue";
 import { test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader as renderToString } from "@vue-tui/runtime/internal";
+import { Box, Text, renderToString } from "@vue-tui/runtime";
+import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
 
 const BG_BLUE = "\x1b[44m";
 const BG_CYAN = "\x1b[46m";
@@ -33,7 +33,7 @@ test("Box backgroundColor produces ANSI background codes", async ({ expect }) =>
   const { frames } = await render(() => <Box backgroundColor="blue" width={5} height={1} />, {
     columns: 10,
   });
-  expect(frames.at(-1)).toContain(BG_BLUE);
+  expect(frames.at(-1)?.dynamic).toContain(BG_BLUE);
 });
 
 test("Box backgroundColor survives border rendering", async ({ expect }) => {
@@ -41,7 +41,7 @@ test("Box backgroundColor survives border rendering", async ({ expect }) => {
     () => <Box backgroundColor="blue" borderStyle="single" width={6} height={3} />,
     { columns: 10 },
   );
-  const raw = frames.at(-1)!;
+  const raw = frames.at(-1)!.dynamic;
   expect(raw).toContain(BG_BLUE);
   expect(raw).toContain("┌");
 });
@@ -55,7 +55,7 @@ test("child Text inherits backgroundColor from parent Box", async ({ expect }) =
     ),
     { columns: 20 },
   );
-  const raw = frames.at(-1)!;
+  const raw = frames.at(-1)!.dynamic;
   expect(raw).toContain("hello");
   expect(raw).toContain(BG_BLUE);
 });
@@ -69,7 +69,7 @@ test("wrapped text preserves backgroundColor on every content line", async ({ ex
     ),
     { columns: 20 },
   );
-  const raw = frames.at(-1)!;
+  const raw = frames.at(-1)!.dynamic;
   const lines = raw.split("\n").filter(Boolean);
   // Ink parity: the inner content rows carry the background on every line; the
   // first/last rows are pure border glyphs and carry no background.
@@ -1081,7 +1081,7 @@ test("screen-reader-hidden Box with modifier-name backgroundColor does NOT throw
   ));
   let out = "<unset>";
   expect(() => {
-    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+    out = renderToStringWithScreenReader(App, { columns: 100 });
   }).not.toThrow();
   // Hidden from the screen reader → not rendered → bg never colorized → no throw.
   expect(out).not.toContain("secret");
@@ -1099,7 +1099,7 @@ test("screen-reader-hidden Text with modifier-name backgroundColor does NOT thro
       </Text>
     </Box>
   ));
-  expect(() => renderToString(App, { columns: 100, isScreenReaderEnabled: true })).not.toThrow();
+  expect(() => renderToStringWithScreenReader(App, { columns: 100 })).not.toThrow();
 });
 
 // GLOBAL screen-reader mode (Ink parity): even a NON-aria-hidden <Box>/<Text> with
@@ -1120,7 +1120,7 @@ test("GLOBAL SR: non-hidden Box with modifier-name backgroundColor renders text,
   ));
   let out = "<unset>";
   expect(() => {
-    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+    out = renderToStringWithScreenReader(App, { columns: 100 });
   }).not.toThrow();
   // The accessible plain-text content is rendered (not crashed away).
   expect(out).toContain("accessible content");
@@ -1136,7 +1136,7 @@ test("GLOBAL SR: non-hidden Text with modifier-name backgroundColor renders text
   ));
   let out = "<unset>";
   expect(() => {
-    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+    out = renderToStringWithScreenReader(App, { columns: 100 });
   }).not.toThrow();
   expect(out).toContain("accessible text");
 });
@@ -1154,7 +1154,7 @@ test("GLOBAL SR: non-hidden Box with invalid borderStyle renders text, does NOT 
   ));
   let out = "<unset>";
   expect(() => {
-    out = renderToString(App, { columns: 100, isScreenReaderEnabled: true });
+    out = renderToStringWithScreenReader(App, { columns: 100 });
   }).not.toThrow();
   expect(out).toContain("bordered content");
 });

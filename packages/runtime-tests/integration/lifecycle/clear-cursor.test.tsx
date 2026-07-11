@@ -6,9 +6,9 @@
 // commits/restores (which DO redraw the content).
 //
 // This is observable only at the interactive stream level: the @vue-tui/testing
-// lastFrame() is content-only and never sees the cursor escapes (\x1b[?25h /
-// \x1b[?25l / reposition). So we mount a REAL interactive TTY (isTTY:true,
-// debug:false), capture the raw stdout write chunks (Ink's getWriteCalls
+// lastFrame() observes renderer output and never sees output-writer cursor
+// escapes (\x1b[?25h / \x1b[?25l / reposition). So we mount a REAL interactive TTY (isTTY:true,
+// liveUpdates:true), capture the raw stdout write chunks (Ink's getWriteCalls
 // pattern), and assert the byte-level cursor sequences.
 //
 // Every expectation below was cross-checked against real Ink v7.0.4 (the
@@ -321,58 +321,6 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
       stdin: makeTtyStdin(),
       stderr: makeTtyStderr(),
       liveUpdates: false,
-      exitOnCtrlC: false,
-      patchConsole: false,
-    });
-    await app.waitUntilRenderFlush();
-
-    const before = writes.length;
-    app.clear();
-    expect(writes.slice(before).join("")).toBe("");
-
-    app.unmount();
-  });
-
-  test("S8b: clear() in debug mode is a no-op (no bytes)", async () => {
-    // Ink no-ops a debug clear() (ink.js:619 `&& !this.options.debug`).
-    const { stream: stdout, writes } = makeTtyStdout();
-    const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 5, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
-    });
-
-    const app = createApp(App);
-    app.mount({
-      stdout,
-      stdin: makeTtyStdin(),
-      stderr: makeTtyStderr(),
-      debug: true,
-      exitOnCtrlC: false,
-      patchConsole: false,
-    });
-    await app.waitUntilRenderFlush();
-
-    const before = writes.length;
-    app.clear();
-    expect(writes.slice(before).join("")).toBe("");
-
-    app.unmount();
-  });
-
-  test("S8c: clear() in fullscreen debug mode remains a no-op (no bytes)", async () => {
-    const { stream: stdout, writes } = makeTtyStdout();
-    const App = defineComponent(() => () => h(Text, null, () => "Hello"));
-
-    const app = createApp(App);
-    app.mount({
-      stdout,
-      stdin: makeTtyStdin(),
-      stderr: makeTtyStderr(),
-      debug: true,
-      mode: "fullscreen",
       exitOnCtrlC: false,
       patchConsole: false,
     });

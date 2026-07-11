@@ -1,95 +1,268 @@
 # @vue-tui/testing
 
-> **Early stage** — under active development. Bug reports welcome, but not recommended for production use yet.
+> **Early stage** — under active development. Bug reports are welcome, but the API may still change.
 
-Test harness for vue-tui — render Vue 3 terminal components, simulate input, assert frames. Like `@testing-library`, but for the terminal.
-
-[![npm version](https://img.shields.io/npm/v/@vue-tui/testing?color=%2342b883)](https://www.npmjs.com/package/@vue-tui/testing)
-[![npm downloads](https://img.shields.io/npm/dm/@vue-tui/testing)](https://www.npmjs.com/package/@vue-tui/testing)
-
-## Why
-
-- **Isolated terminal** — renders into a fake TTY, no real terminal needed
-- **Input simulation** — inject keystrokes that reach `useInput` handlers
-- **Frame snapshots** — assert exact visual output with `lastFrame()` and `frames[]`
-- **Auto-cleanup** — unmounts all rendered apps after each test (requires Vitest `globals: true`)
+Deterministic test host for Vue terminal applications. It mounts an application against modeled terminal or stream inputs, records renderer content, and applies the emitted bytes to an in-memory terminal emulator. The host never patches the process-global `console`.
 
 ## Install
 
-Assumes `@vue-tui/runtime` and `vue` are already installed in your project.
+`vue` and `@vue-tui/runtime` should already be dependencies of the application under test.
 
 ```bash
 npm install -D @vue-tui/testing
 ```
 
-## Quick Start
+## Quick start
 
 ```tsx
 import { defineComponent, shallowRef } from "vue";
 import { expect, test } from "vitest";
-import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
+import { render } from "@vue-tui/testing";
 
-test("counter responds to + and - keys", async () => {
-  const Counter = defineComponent(() => {
-    const count = shallowRef(0);
-    useInput((input) => {
-      if (input === "+") count.value++;
-      if (input === "-") count.value--;
-    });
-    return () => (
-      <Box>
-        <Text>Count: {count.value}</Text>
-      </Box>
-    );
+const Counter = defineComponent(() => {
+  const count = shallowRef(0);
+
+  useInput((input) => {
+    if (input === "+") count.value++;
+    if (input === "-") count.value--;
   });
 
-  const { lastFrame, stdin } = await render(Counter);
-  expect(lastFrame()).toContain("Count: 0");
+  return () => (
+    <Box>
+      <Text>Count: {count.value}</Text>
+    </Box>
+  );
+});
 
-  await stdin.write("+");
-  expect(lastFrame()).toContain("Count: 1");
+test("the counter responds to input", async () => {
+  const result = await render(Counter);
+  try {
+    expect(result.lastFrame()).toBe("Count: 0");
 
-  await stdin.write("-");
-  expect(lastFrame()).toContain("Count: 0");
+    await result.stdin.write("+");
+    expect(result.lastFrame()).toBe("Count: 1");
+  } finally {
+    result.dispose();
+  }
 });
 ```
 
-## API
+## Three observations
 
-### `render(component, options?)`
+The test host exposes three intentionally different views of one run:
 
-Mounts a component in a fake terminal environment. Returns a `RenderResult`.
+| Observation              | Meaning                                                                      | Use it for                                                                                        |
+| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `session`                | Readonly production-like facts visible to the component                      | Requested and effective mode, fallback, output policy, dimensions, and capabilities               |
+| `frames` / `lastFrame()` | Renderer commits before the output writer adds screen and lifecycle controls | Exact component output, renderer styling, and `<Static>` deltas                                   |
+| `screen()`               | Cell surface after stdout and stderr bytes pass through a terminal emulator  | Alternate-screen behavior, cursor position, scrollback, external writes, and teardown restoration |
 
-| Option        | Type      | Default | Description                                                                                                                                                                                         |
-| ------------- | --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `columns`     | `number`  | `100`   | Terminal width in columns                                                                                                                                                                           |
-| `rows`        | `number`  | `100`   | Terminal height in rows                                                                                                                                                                             |
-| `props`       | `object`  | —       | Props passed to the root component                                                                                                                                                                  |
-| `exitOnCtrlC` | `boolean` | `false` | Enable Ctrl+C exit handling                                                                                                                                                                         |
-| `liveUpdates` | `boolean` | `true`  | Keep the runtime live updater and resize path active. `false` disables them, but the current debug-backed observer still captures each commit; F1.5 will add a production-like final-stream preset. |
+Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, direct `useStdout()` writes, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
 
-### `RenderResult`
+## `render(component, options?)`
 
-| Property / Method        | Description                                              |
-| ------------------------ | -------------------------------------------------------- |
-| `lastFrame(opts?)`       | Latest rendered frame as a string                        |
-| `frames`                 | Array of all captured frame snapshots                    |
-| `stdin.write(data)`      | Inject input (reaches `useInput` handlers)               |
-| `terminal`               | Fake terminal — `columns`, `rows`, `resize()`, `rawMode` |
-| `unmount()`              | Tear down the app                                        |
-| `waitUntilExit()`        | Settles when the app exits (rejects if `exit(error)`)    |
-| `waitUntilRenderFlush()` | Resolves after the next render cycle completes           |
+`render()` mounts the root component and waits for its initial render. Omission models a visual Inline application with TTY stdin, TTY stdout, live updates, and a `100 × 100` terminal.
 
-### `cleanup()`
+```ts
+interface RenderOptions {
+  readonly host?: TestHost;
+  readonly columns?: number;
+  readonly rows?: number;
+  readonly props?: Record<string, unknown>;
+  readonly exitOnCtrlC?: boolean;
+}
+```
 
-Unmounts all rendered apps. Auto-registered as a Vitest `afterEach` hook when `globals: true` is set. Call manually if your test runner doesn't expose a global `afterEach`.
+| Render field  | Default   | Meaning                                         |
+| ------------- | --------- | ----------------------------------------------- |
+| `host`        | See below | Production-like environment modeled by the test |
+| `columns`     | `100`     | Layout and emulator width                       |
+| `rows`        | `100`     | Emulator height and TTY height                  |
+| `props`       | —         | Props passed to the root component              |
+| `exitOnCtrlC` | `false`   | Whether Ctrl+C exits the mounted application    |
+
+`columns` and `rows` must be positive safe integers. They set both the modeled output dimensions and the emulator dimensions. `rows` still controls the emulator when `host.stdout` is `"stream"`, but a stream does not claim physical terminal rows in `session`.
+
+### Host options
+
+```ts
+interface TestHost {
+  readonly mode?: "inline" | "fullscreen";
+  readonly presentation?: "visual" | "screen-reader";
+  readonly updates?: "live" | "at-teardown";
+  readonly stdin?: "tty" | "non-tty";
+  readonly stdout?: "tty" | "stream";
+}
+```
+
+| Host field     | Default                                      | Meaning                                                      |
+| -------------- | -------------------------------------------- | ------------------------------------------------------------ |
+| `mode`         | `"inline"`                                   | Requested production screen model                            |
+| `presentation` | `"visual"`                                   | Visual renderer or linear screen-reader transcript           |
+| `updates`      | `"live"` for TTY; `"at-teardown"` for stream | Dynamic-output cadence                                       |
+| `stdin`        | `"tty"`                                      | Whether input supports TTY behavior such as raw mode         |
+| `stdout`       | `"tty"`                                      | Whether output can acquire a terminal surface and dimensions |
+
+These controls model production facts rather than setting unrelated internal booleans. In particular:
+
+- a Fullscreen request on stream stdout has no effective terminal mode;
+- `updates: "live"` on a stream enables the live stream updater but does not create a stable viewport or terminal hit testing;
+- a Fullscreen screen-reader request resolves to an Inline transcript on the normal screen;
+- `updates: "at-teardown"` uses the final-stream policy even when the underlying output is a TTY.
+
+The removed `liveUpdates` and `debug` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available.
+
+### Examples
+
+Model a Fullscreen TTY and assert its terminal surface:
+
+```tsx
+const Dashboard = defineComponent(() => () => <Text>Dashboard</Text>);
+const result = await render(Dashboard, {
+  columns: 80,
+  rows: 24,
+  host: { mode: "fullscreen" },
+});
+try {
+  expect(result.session.mode.effective).toBe("fullscreen");
+  expect((await result.screen()).activeBuffer).toBe("alternate");
+
+  result.unmount();
+  expect((await result.screen()).activeBuffer).toBe("normal");
+} finally {
+  result.dispose();
+}
+```
+
+Model final stream output:
+
+```tsx
+const FinalResult = defineComponent(() => () => <Text>Final result</Text>);
+const result = await render(FinalResult, {
+  host: { stdout: "stream" },
+});
+try {
+  expect(result.session.output.dynamicUpdates).toBe("at-teardown");
+  expect((await result.screen()).lines.join("\n")).not.toContain("Final result");
+
+  result.unmount();
+  expect((await result.screen()).lines.join("\n")).toContain("Final result");
+} finally {
+  result.dispose();
+}
+```
+
+## `RenderResult`
+
+### `session`
+
+`session` is the deeply readonly live-session snapshot exposed to the component tree. Its identity remains stable while reactive facts such as dimensions update. Runtime mutation is rejected; readonly is not only a TypeScript annotation.
+
+| Field          | Meaning                                                                                                   |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| `host`         | Always `"live"`; tests model a live production host rather than exposing a test-only branch to components |
+| `mode`         | Requested mode, effective mode, and a detectable fallback reason                                          |
+| `output`       | Destination (`"terminal"` or `"stream"`), update cadence, and presentation                                |
+| `dimensions`   | Physical terminal dimensions when acquired, plus effective layout dimensions                              |
+| `capabilities` | Availability of stable origin, renderer-owned element hit testing, and suspension                         |
+
+Test-only observation remains on `RenderResult`; it does not change the component's `session.host`.
+
+### `frames`
+
+`frames` is a readonly live array of rendering-phase content commits. The public view and every frame reject runtime mutation while the host retains a private writable collection for later commits:
+
+```ts
+interface ContentFrame {
+  readonly dynamic: string;
+  readonly staticOutput: string;
+}
+```
+
+`dynamic` is the complete current dynamic region. `staticOutput` is only the new `<Static>` content produced by that commit. Both strings retain SGR styling emitted by the renderer, while output-writer controls and direct side-channel writes remain outside the frame. Teardown commits are excluded, so unmounting or exiting does not append cleanup frames.
+
+### `lastFrame(options?)`
+
+Returns the `dynamic` string from the latest content frame. It always returns a string after `render()` resolves.
+
+```ts
+interface LastFrameOptions {
+  readonly raw?: boolean;
+  readonly trimLines?: boolean;
+}
+```
+
+- The default removes trailing spaces from each line and trailing blank output.
+- `trimLines: true` removes trailing spaces from each line while retaining the frame's final line structure.
+- `raw: true` returns the exact dynamic string and takes precedence over trimming.
+
+### `screen()`
+
+Waits for pending emulator writes and returns a readonly snapshot:
+
+```ts
+interface ScreenSnapshot {
+  readonly activeBuffer: "normal" | "alternate";
+  readonly dimensions: { readonly columns: number; readonly rows: number };
+  readonly lines: readonly string[];
+  readonly scrollback: readonly string[];
+  readonly cursor: { readonly column: number; readonly row: number };
+}
+```
+
+`lines` contains every visible row, including trailing cell spaces. `scrollback` contains rows above the normal buffer viewport. Trim lines in the assertion when padding is irrelevant. A TTY host models the output line discipline that moves a line feed to column zero; a stream host preserves raw line-feed cursor movement because no TTY performs that conversion.
+
+### Input and terminal controls
+
+| Property or method                   | Behavior                                                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `stdin.write(data)`                  | Emits input, waits for the input parser, and waits for the resulting render and emulator writes                       |
+| `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                           |
+| `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering |
+| `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                       |
+
+### Lifecycle methods
+
+| Method                   | Behavior                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `unmount()`              | Tears down the application; the emulator remains available for immediate restoration assertions       |
+| `dispose()`              | Idempotently unmounts, removes the host from automatic cleanup, and releases streams and the emulator |
+| `waitUntilExit()`        | Settles with the application exit result and rejects for `exit(error)`                                |
+| `waitUntilRenderFlush()` | Waits for the runtime render queue and pending emulator writes                                        |
+
+After `dispose()`, retained content facts such as `session`, `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
+
+## Cleanup
+
+Every successful `render()` is tracked. When the test runner exposes a global `afterEach`, importing this package registers automatic cleanup. Otherwise call `cleanup()` from the runner's teardown hook:
+
+```ts
+import { afterEach } from "vitest";
+import { cleanup } from "@vue-tui/testing";
+
+afterEach(cleanup);
+```
+
+When managing one result manually, preserve the emulator until terminal-restoration assertions are complete, then dispose it:
+
+```ts
+const result = await render(App, { host: { mode: "fullscreen" } });
+try {
+  result.unmount();
+  expect((await result.screen()).activeBuffer).toBe("normal");
+} finally {
+  result.dispose();
+}
+```
+
+Cleanup calls the same idempotent disposal path, attempts to release every tracked host even if one disposal fails, and rethrows collected errors only after the other hosts have been released.
 
 ## Links
 
-- [vue-tui](https://github.com/vuejs-ai/vue-tui) — monorepo root
-- [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime) — the core framework
-- [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite) — Vite plugin with terminal HMR
+- [vue-tui](https://github.com/vuejs-ai/vue-tui)
+- [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)
+- [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)
 
 ## License
 

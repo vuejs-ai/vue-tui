@@ -206,7 +206,7 @@ test("useWindowSize falls back to a positive column count when stdout.columns is
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await new Promise<void>((r) => setTimeout(r, 60));
 
   try {
@@ -237,7 +237,7 @@ test("multiple useWindowSize consumers share one app resize listener", async () 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await new Promise<void>((r) => setTimeout(r, 60));
 
   expect(stdout.listenerCount("resize")).toBe(baseline + 1);

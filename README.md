@@ -104,7 +104,7 @@ createApp(App).mount();
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._                                                                                                      |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Test harness — render in an isolated fake terminal, simulate input, assert output frame by frame                                                                                                                                                                                                                   |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect resolved session facts and content commits, and assert the terminal-emulated screen                                                                                                                                                         |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
 
 ## Examples
@@ -162,7 +162,7 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 ## Testing
 
-The `@vue-tui/testing` package renders components in an isolated environment and lets you simulate input and assert visual output:
+The `@vue-tui/testing` package renders components against a finite modeled host. It keeps renderer content commits (`frames` and `lastFrame()`) separate from the terminal-emulated result (`screen()`), so tests can assert the level they actually mean:
 
 ```bash
 npm install -D @vue-tui/testing
@@ -188,20 +188,24 @@ test("counter responds to + and - keys", async () => {
     );
   });
 
-  const { lastFrame, stdin } = await render(Counter);
-  expect(lastFrame()).toContain("Count: 0");
+  const result = await render(Counter);
+  expect(result.lastFrame()).toContain("Count: 0");
 
-  await stdin.write("+");
-  expect(lastFrame()).toContain("Count: 1");
+  await result.stdin.write("+");
+  expect(result.lastFrame()).toContain("Count: 1");
 
-  await stdin.write("-");
-  expect(lastFrame()).toContain("Count: 0");
+  await result.stdin.write("-");
+  expect(result.lastFrame()).toContain("Count: 0");
+
+  result.dispose();
 });
 ```
 
+The default host is a visual Inline TTY. Pass `host` options to model Fullscreen, a screen-reader transcript, final-stream output, live stream updates, or non-TTY input. `unmount()` preserves the emulated screen for restoration assertions; `dispose()` performs final resource cleanup. See the [`@vue-tui/testing` package guide](./packages/testing) for the complete matrix.
+
 ## Visual development with coding agents
 
-Component assertions are necessary, but they do not show the final screen after a terminal has executed the application's ANSI and VT control sequences. vue-tui therefore ships a versioned [visual development guide](./packages/runtime/docs/visual-development-feedback-loops.md) for terminal-visible work: run the built app in a real PTY, feed its output through a declared terminal emulator, inspect both the structured active screen and a rendered image, operate the app one step at a time, and use those observations to guide the next code pass.
+Content-frame assertions do not show the screen after terminal control sequences are applied, and an in-memory test host does not exercise the built application through a real PTY. vue-tui therefore ships a versioned [visual development guide](./packages/runtime/docs/visual-development-feedback-loops.md) for terminal-visible work: run the built app in a real PTY, feed its output through a declared terminal emulator, inspect both the structured active screen and a rendered image, operate the app one step at a time, and use those observations to guide the next code pass.
 
 The method does not require a browser. It complements `@vue-tui/testing`; it does not replace deterministic component and PTY tests. The published runtime ships the guide, not a controller, PTY library, terminal emulator, or image renderer; the coding-agent environment or application project supplies those capabilities.
 

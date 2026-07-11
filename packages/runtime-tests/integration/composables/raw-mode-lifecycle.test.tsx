@@ -71,7 +71,7 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   // Baseline: mounting the first useInput enables raw mode exactly once.
@@ -120,7 +120,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const { stream: stdin } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   which.value = "b";
@@ -158,7 +158,7 @@ test("teardown disables raw mode synchronously so a signal exit can't leave the 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   expect(setRawModeCalls).toEqual([true]);
@@ -209,8 +209,8 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
 
   const appA = createApp(AppA);
   const appB = createApp(AppB);
-  appA.mount({ stdout: stdout1, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
-  appB.mount({ stdout: stdout2, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  appA.mount({ stdout: stdout1, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  appB.mount({ stdout: stdout2, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   // Raw mode enabled exactly once (shared refcount); both apps hold the one ref.
@@ -256,7 +256,7 @@ test("rawMode 'always' (default): a no-input app holds raw mode for its whole li
 
   const app = createApp(App);
   // No rawMode option → default 'always'.
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   // Raw mode is on at mount despite no useInput/useFocus/usePaste.
@@ -279,7 +279,7 @@ test("rawMode 'auto': a no-input app never enables raw mode (Ink lazy behavior)"
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   // Cooked: raw mode never acquired without an input composable.
@@ -311,7 +311,7 @@ test("rawMode 'auto': useInput acquires raw on mount and releases it on unmount 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   // Mounting the useInput consumer enables raw mode exactly once (0→1).
@@ -347,7 +347,7 @@ test("rawMode 'auto': useInput isActive=false releases raw mode, true re-acquire
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   // Active on mount → raw acquired once.
@@ -388,7 +388,7 @@ test("rawMode 'always': raw mode stays on when the only input component unmounts
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   // App ref + the child's useInput ref; raw enabled once (one 0→1 transition).
@@ -433,7 +433,7 @@ test("rawMode 'always': a pending partial escape does not bleed across a useInpu
   const stdout = makeFakeWritable();
   const { stream: stdin } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false }); // default 'always'
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false }); // default 'always'
   await settle();
 
   // Buffer a partial CSI escape, then swap A → B in the same tick.
@@ -471,7 +471,7 @@ test("rawMode 'always': an escape buffered on a no-input screen does not bleed i
   const stdout = makeFakeWritable();
   const { stream: stdin } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false }); // default 'always'
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false }); // default 'always'
   await settle();
 
   // Navigate to the idle (no-input) screen; A's useInput unmounts.

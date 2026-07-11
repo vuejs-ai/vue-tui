@@ -1,7 +1,7 @@
 // Persistent cursor re-assertion across an UNRELATED repaint (real-TTY PTY).
 //
 // The caret-restore bytes only reach a live TTY (frame-writer's `log` is null in
-// debug/test mode), so this divergence is invisible to byte-exact non-TTY tests
+// content-frame tests), so this divergence is invisible to byte-exact non-TTY tests
 // — per CLAUDE.md that is a testing gap, not a non-issue, hence a PTY repro.
 //
 // Storyboard (sibling topology): an input declares its caret via useCursor after

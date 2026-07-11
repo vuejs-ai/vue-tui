@@ -1,8 +1,12 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, onUnmounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { render } from "@vue-tui/testing";
+import { render, type ContentFrame } from "@vue-tui/testing";
 import { Box, Text, Static, Spacer, createApp } from "@vue-tui/runtime";
+
+function joinedOutput(frames: readonly ContentFrame[]): string {
+  return frames.map((frame) => frame.staticOutput + frame.dynamic).join("");
+}
 
 test("Static appends new items above the dynamic frame", async () => {
   const items = shallowRef<string[]>([]);
@@ -28,7 +32,7 @@ test("Static appends new items above the dynamic frame", async () => {
   items.value = ["log-1"];
   await nextTick();
 
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("log-1");
   expect(lastFrame()).toContain("[dynamic]");
 });
@@ -62,7 +66,7 @@ test("Static preserves prior items when new ones are added", async () => {
   status.value = "running";
   await nextTick();
 
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("log A");
   expect(allOutput).toContain("log B");
   expect(lastFrame()).toContain("status: running");
@@ -75,7 +79,7 @@ function makeTtyStream(cols = 80): NodeJS.WriteStream & { chunks: string[] } {
   return s;
 }
 
-test("Static flush clears the dynamic frame first (non-debug mode)", async () => {
+test("Static flush clears the dynamic frame first on the live writer", async () => {
   const stdout = makeTtyStream();
   const stderr = makeTtyStream();
   const stdinStream = new PassThrough() as unknown as NodeJS.ReadStream;
@@ -100,7 +104,7 @@ test("Static flush clears the dynamic frame first (non-debug mode)", async () =>
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin: stdinStream, stderr, debug: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin: stdinStream, stderr, exitOnCtrlC: false });
   await nextTick();
 
   // After initial render, dynamic frame should contain LIVE_FRAME
@@ -168,7 +172,7 @@ test("skip previous output when rendering new static output", async () => {
   const { frames } = await render(App);
 
   // First render should emit "A" in static output
-  const afterFirst = frames.join("");
+  const afterFirst = joinedOutput(frames);
   expect(afterFirst).toContain("A");
 
   items.value = ["A", "B"];
@@ -176,7 +180,7 @@ test("skip previous output when rendering new static output", async () => {
 
   // After adding "B", the static channel only emits the fresh item "B"
   // (not "A" again). We verify by checking that the new frames contain "B".
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("B");
 });
 
@@ -200,7 +204,7 @@ test("static output stops accumulating after Static unmounts", async () => {
   const { frames } = await render(App);
 
   // Static items should be emitted on first mount
-  const afterMount = frames.join("");
+  const afterMount = joinedOutput(frames);
   expect(afterMount).toContain("A");
   expect(afterMount).toContain("B");
 
@@ -215,7 +219,7 @@ test("static output stops accumulating after Static unmounts", async () => {
   await nextTick();
 
   // After unmount, the dynamic frame should still render but no new static content
-  expect(frames.at(-1)).toContain("Dynamic");
+  expect(frames.at(-1)?.dynamic).toContain("Dynamic");
   // No new frames should have been added with static content after unmount
   // (i.e., the count shouldn't grow from static writes)
   expect(frames.length).toBeLessThanOrEqual(framesAfterUnmount + 1);
@@ -241,7 +245,7 @@ test("fullStaticOutput is reset when <Static> unmounts", async () => {
   const { frames } = await render(App);
 
   // Static items must be emitted on first mount
-  const afterMount = frames.join("");
+  const afterMount = joinedOutput(frames);
   expect(afterMount).toContain("HISTORY-A");
   expect(afterMount).toContain("HISTORY-B");
 
@@ -252,7 +256,7 @@ test("fullStaticOutput is reset when <Static> unmounts", async () => {
 
   // After unmount, the last frame should contain the new dynamic label
   // but NOT the old static items
-  const lastFrameAfterUnmount = frames.at(-1)!;
+  const lastFrameAfterUnmount = frames.at(-1)!.dynamic;
   expect(lastFrameAfterUnmount).toContain("d2");
   // The static content is no longer in the live DOM, so it shouldn't appear
   // in any NEW frames written after the unmount
@@ -280,7 +284,7 @@ test("remounting <Static> via key change emits the new items (nested under <Box>
   const { frames } = await render(App);
 
   // First mount must emit its Static items
-  const afterFirstMount = frames.join("");
+  const afterFirstMount = joinedOutput(frames);
   expect(afterFirstMount).toContain("old-A");
   expect(afterFirstMount).toContain("old-B");
 
@@ -289,7 +293,7 @@ test("remounting <Static> via key change emits the new items (nested under <Box>
   await nextTick();
 
   // Remounted Static must emit its new items
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("new-C");
   expect(allOutput).toContain("new-D");
 });
@@ -311,7 +315,7 @@ test("remounting <Static> via key change emits the new items (root-level)", asyn
   const { frames } = await render(App);
 
   // First mount must emit its Static items
-  const afterFirstMount = frames.join("");
+  const afterFirstMount = joinedOutput(frames);
   expect(afterFirstMount).toContain("old-A");
   expect(afterFirstMount).toContain("old-B");
 
@@ -320,7 +324,7 @@ test("remounting <Static> via key change emits the new items (root-level)", asyn
   await nextTick();
 
   // Remounted Static must emit its new items
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("new-C");
   expect(allOutput).toContain("new-D");
 });
@@ -340,14 +344,14 @@ test("render only new items in static output on final render", async () => {
 
   // Initial render — no items: Ink writes `fullStaticOutput + output`, both ""
   // here (ink.tsx:558), so the captured initial frame is the empty string.
-  const initialFrame = frames.at(-1);
+  const initialFrame = frames.at(-1)?.dynamic;
   expect(initialFrame).toBe("");
 
   items.value = ["A"];
   await nextTick();
 
   // After adding "A", the static output should contain "A"
-  const allAfterA = frames.join("");
+  const allAfterA = joinedOutput(frames);
   expect(allAfterA).toContain("A");
 
   items.value = ["A", "B"];
@@ -357,7 +361,7 @@ test("render only new items in static output on final render", async () => {
   // The static channel should have only emitted "B" (new item), not "A" again.
   // Since both A and B appear in accumulated frames, we verify that the last
   // static write contained "B".
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   expect(allOutput).toContain("A");
   expect(allOutput).toContain("B");
 });
@@ -441,8 +445,8 @@ test("Static resets cursor on shrink so later items still paint (Ink parity)", a
   await nextTick();
   await new Promise((r) => setTimeout(r, 50));
   await nextTick();
-  expect(frames.join("")).toContain("A");
-  expect(frames.join("")).toContain("B");
+  expect(joinedOutput(frames)).toContain("A");
+  expect(joinedOutput(frames)).toContain("B");
 
   // Shrink to [A]. Ink resets the cursor to items.length (1); no re-paint of A.
   items.value = ["A"];
@@ -457,7 +461,7 @@ test("Static resets cursor on shrink so later items still paint (Ink parity)", a
   await new Promise((r) => setTimeout(r, 50));
   await nextTick();
 
-  expect(frames.join("")).toContain("C");
+  expect(joinedOutput(frames)).toContain("C");
 });
 
 // Ink reference: src/components/Static.tsx merges
@@ -488,7 +492,9 @@ test("Static honors flexDirection:row in the isolated paint (Ink parity, G44)", 
   // The static frame must lay AA and BB out on ONE row ("AABB"), not stacked
   // on two lines ("AA\nBB"). The buggy path hard-defaults FLEX_DIRECTION_COLUMN
   // on the iso root and drops the row style, painting "AA\nBB".
-  const staticFrame = frames.find((f) => f.includes("AA") && f.includes("BB"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("AA") && f.includes("BB"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toContain("AABB");
   expect(staticFrame).not.toContain("AA\nBB");
@@ -515,7 +521,9 @@ test("Static honors paddingLeft in the isolated paint (Ink parity, G44)", async 
 
   // paddingLeft:4 must shift the static item right by 4 cells ("    X"). The
   // buggy path never reaches the static node's resolved padding, painting "X".
-  const staticFrame = frames.find((f) => f.includes("X") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("X") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toContain("    X");
 });
@@ -561,7 +569,9 @@ test("Static content-sizes an auto-width item: Spacer collapses (Ink parity, G64
   // The static frame must content-size to "LEFTRIGHT" (Spacer collapses to 0),
   // matching Ink. The buggy path forces the iso root to terminal width (80), so
   // the Spacer expands and the line becomes "LEFT" + 71 spaces + "RIGHT".
-  const staticFrame = frames.find((f) => f.includes("LEFT") && f.includes("RIGHT"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("LEFT") && f.includes("RIGHT"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toContain("LEFTRIGHT");
   expect(staticFrame).not.toMatch(/LEFT {2,}RIGHT/);
@@ -595,9 +605,9 @@ test("Static content-sizes an auto-width item: flexGrow collapses (Ink parity, G
   items.value = ["one"];
   await nextTick();
 
-  const staticFrame = frames.find(
-    (f) => f.includes("A") && f.includes("B") && !f.includes("[live]"),
-  );
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("A") && f.includes("B") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toContain("AB");
   expect(staticFrame).not.toMatch(/A {2,}B/);
@@ -641,7 +651,9 @@ test("Static overflows an explicit-width child wider than the terminal (Ink pari
   items.value = ["one"];
   await nextTick();
 
-  const staticFrame = frames.find((f) => f.includes("ABCDE") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("ABCDE") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   // Must overflow to the full content width, NOT clamp to the terminal width.
   expect(staticFrame).toContain("ABCDEFGHIJ");
@@ -677,7 +689,9 @@ test("Static overflows a non-wrapping two-Text row wider than the terminal (Ink 
   items.value = ["one"];
   await nextTick();
 
-  const staticFrame = frames.find((f) => f.includes("ABC") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("ABC") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   // Ink content-width output is exactly "ABCDEF" (Texts do not shrink/wrap here).
   // The captured static chunk is the "\n"-terminated `fullStaticOutput` (each
@@ -707,7 +721,9 @@ test("Static wraps a plain wide text to the terminal width (Ink parity, G64)", a
   items.value = ["one"];
   await nextTick();
 
-  const staticFrame = frames.find((f) => f.includes("ABCDE") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("ABCDE") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   // "\n"-terminated static chunk (`fullStaticOutput`), Ink-faithful.
   expect(staticFrame).toBe("ABCDE\nFGHIJ\n");
@@ -744,7 +760,9 @@ test("Static lays out percent-width children against the terminal width (Ink par
   items.value = ["one"];
   await nextTick();
 
-  const staticFrame = frames.find((f) => f.includes("HAL") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("HAL") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   // "\n"-terminated static chunk (`fullStaticOutput`), Ink-faithful.
   expect(staticFrame).toBe("HALEND\nF\n");
@@ -807,7 +825,7 @@ test("two separate <Static> regions both render their items (additive divergence
   await new Promise((r) => setTimeout(r, 50));
   await nextTick();
 
-  const allOutput = frames.join("");
+  const allOutput = joinedOutput(frames);
   // BOTH regions render (Ink would drop the second).
   expect(allOutput).toContain("HEADER-1");
   expect(allOutput).toContain("HEADER-2");
@@ -896,7 +914,9 @@ test("Static container vertical padding adds blank rows to the painted static fr
 
   // The captured static chunk is the "\n"-terminated fullStaticOutput. With
   // paddingTop:2 / paddingBottom:1 the painted region is "\n\nX\n\n" (Ink parity).
-  const staticFrame = frames.find((f) => f.includes("X") && !f.includes("[live]"));
+  const staticFrame = frames
+    .map((frame) => frame.staticOutput)
+    .find((f) => f.includes("X") && !f.includes("[live]"));
   expect(staticFrame).toBeDefined();
   expect(staticFrame).toBe("\n\nX\n\n");
 });
@@ -922,6 +942,8 @@ test("empty Static with padding emits no stray blank-line frame (template anchor
   // child set. A stray padding frame is NON-empty (e.g. "\n\n\n") yet blank once
   // trimmed; the empty "" frames are fine. So assert no frame is blank-but-
   // non-empty — that is exactly the stray blank-line frame the bug produces.
-  const strayBlank = frames.filter((f) => f !== "" && f.trim() === "");
+  const strayBlank = frames
+    .map((frame) => frame.staticOutput)
+    .filter((frame) => frame !== "" && frame.trim() === "");
   expect(strayBlank).toEqual([]);
 });

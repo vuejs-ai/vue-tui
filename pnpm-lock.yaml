@@ -406,6 +406,12 @@ importers:
       '@vue-tui/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@xterm/addon-unicode11':
+        specifier: 'catalog:'
+        version: 0.9.0
+      '@xterm/headless':
+        specifier: 'catalog:'
+        version: 6.0.0
     devDependencies:
       '@types/node':
         specifier: ^24.12.4

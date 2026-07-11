@@ -76,10 +76,7 @@ sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` h
 
 - **Live path:** `app.mount({ isScreenReaderEnabled })` (or `INK_SCREEN_READER=true`) makes each
   commit emit the linearized SR text instead of the ANSI frame.
-- **`renderToString`:** public, **layout-only** (matches Ink). Its SR-capable variant is
-  `renderToStringWithScreenReader` in `@vue-tui/runtime/internal`, used by the accessibility test
-  suite — the public string API does not surface SR (Ink also keeps its SR-string rendering
-  test-internal).
+- **`renderToString`:** public, **layout-only** (matches Ink). Its SR-capable variant is `renderToStringWithScreenReader` in `@vue-tui/runtime/internal`, used by the accessibility test suite — the public string API does not surface SR (Ink also keeps its SR-string rendering test-internal). F1.5 fixes these as separate visual and screen-reader document hosts: the public function rejects recognizable hidden presentation passthrough, the internal helper name selects SR without another flag, both provide truthful string-session facts, and both use isolated inert streams rather than process terminal state.
 - **`renderScreenReaderOutput(node)`:** the linearizer that walks the host tree's
   `internal_accessibility`. **`/internal`-only** [VOUCHED @hyf0]. Ink keeps its
   counterpart (`renderNodeToScreenReaderOutput`) module-internal and never exports it; we match

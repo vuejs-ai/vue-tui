@@ -78,6 +78,8 @@ const removedFullscreenOption: MountOptions = { fullscreen: true };
 const removedAlternateScreenOption: MountOptions = { alternateScreen: true };
 // @ts-expect-error Output policy is named liveUpdates, not broad interactivity.
 const removedInteractiveOption: MountOptions = { interactive: true };
+// @ts-expect-error Deterministic observation belongs to @vue-tui/testing, not live mounts.
+const removedDebugOption: MountOptions = { debug: true };
 // @ts-expect-error Only the two finite render-mode values are accepted.
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error liveUpdates is a boolean override.
@@ -85,6 +87,7 @@ const invalidLiveUpdatesOption: MountOptions = { liveUpdates: "yes" };
 void removedFullscreenOption;
 void removedAlternateScreenOption;
 void removedInteractiveOption;
+void removedDebugOption;
 void invalidModeOption;
 void invalidLiveUpdatesOption;
 

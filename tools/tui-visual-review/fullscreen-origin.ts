@@ -7,7 +7,7 @@ export const fullscreenOriginScenarios = [
   "stdout",
   "stderr",
   "console",
-  "debug",
+  "rerender",
   "overflow",
   "horizontal-overflow",
   "horizontal-wide",

@@ -2,6 +2,7 @@ import type { Component } from "vue";
 import { shallowRef } from "vue";
 import { createRenderer } from "vue";
 import { EventEmitter } from "node:events";
+import { Readable, Writable } from "node:stream";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
@@ -21,6 +22,12 @@ import {
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
+import {
+  InternalRenderSessionKey,
+  createStringRenderSessionService,
+  type InternalStringRenderSessionService,
+  type RenderPresentation,
+} from "./render-session.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -32,23 +39,6 @@ export interface RenderToStringOptions {
 }
 
 /**
- * Options for the internal, screen-reader-capable render-to-string used by the
- * accessibility test suite. NOT part of the public API: Ink likewise keeps
- * screen-reader string rendering out of its public `renderToString` (layout
- * only) and reaches it through a private test helper. Exposed via
- * `@vue-tui/runtime/internal` as `renderToStringWithScreenReader`.
- */
-interface RenderToStringInternalOptions extends RenderToStringOptions {
-  /**
-   * Enable screen reader mode. When enabled, the output is plain text
-   * suitable for screen readers (no ANSI styling, with role/state annotations).
-   *
-   * @default false
-   */
-  isScreenReaderEnabled?: boolean;
-}
-
-/**
  * Render a Vue component to a string synchronously. Unlike `createApp()`,
  * this function does not write to stdout, does not set up any terminal event
  * listeners, and returns the rendered output as a string.
@@ -57,10 +47,10 @@ interface RenderToStringInternalOptions extends RenderToStringOptions {
  * any scenario where you need the rendered output as a string without
  * starting a persistent terminal application.
  *
- * Terminal-specific composables (`useInput`, `useMouseInput`, `useStdin`, `useStdout`,
- * `useStderr`, `useApp`, `useFocus`, `useFocusManager`) return default
- * no-op values since there is no terminal session. They will not throw, but
- * they will not function as in a live terminal.
+ * Terminal-specific input, focus, and stream composables receive isolated inert
+ * services because there is no terminal session. `useApp()` can be called while
+ * sharing a component with a live tree, but invoking either lifecycle operation
+ * reports that the operation is unavailable for synchronous string rendering.
  *
  * The `<Static>` component is supported --- its output is prepended to the
  * dynamic output.
@@ -69,7 +59,7 @@ interface RenderToStringInternalOptions extends RenderToStringOptions {
  * caller after cleanup.
  */
 export function renderToString(component: Component, options?: RenderToStringOptions): string {
-  return renderToStringInternal(component, options);
+  return renderToStringInternal(component, normalizePublicOptions(options), "visual");
 }
 
 /**
@@ -80,85 +70,111 @@ export function renderToString(component: Component, options?: RenderToStringOpt
  */
 export function renderToStringWithScreenReader(
   component: Component,
-  options?: RenderToStringInternalOptions,
+  options?: RenderToStringOptions,
 ): string {
-  return renderToStringInternal(component, options);
+  return renderToStringInternal(component, normalizeInternalOptions(options), "screen-reader");
 }
 
 function renderToStringInternal(
   component: Component,
-  options?: RenderToStringInternalOptions,
+  options: { readonly columns: number },
+  presentation: RenderPresentation,
 ): string {
-  const columns = options?.columns ?? 80;
-  const isScreenReaderEnabled = options?.isScreenReaderEnabled ?? false;
+  const renderSession = createStringRenderSessionService({
+    columns: options.columns,
+    presentation,
+  });
+  const contexts = createStringContexts(options.columns);
+  try {
+    return renderStringDocument(component, options.columns, presentation, renderSession, contexts);
+  } finally {
+    renderSession.dispose();
+    contexts.dispose();
+  }
+}
 
+function renderStringDocument(
+  component: Component,
+  columns: number,
+  presentation: RenderPresentation,
+  renderSession: InternalStringRenderSessionService,
+  contexts: ReturnType<typeof createStringContexts>,
+): string {
+  const isScreenReaderEnabled = presentation === "screen-reader";
   // Create a standalone root node --- no stdout, stdin, or terminal bindings.
-  const appContext = createNoOpAppContext(isScreenReaderEnabled);
+  const { appContext, stdinContext } = contexts;
   const root = createRoot(appContext);
-  attachYoga(root);
-  root.yoga.setWidth(columns);
-
-  // Capture static output from intermediate renders.
-  // The <Static> component uses watchEffect / onMounted to clear its children
-  // after the first commit. The onCommit callback fires on each DOM mutation,
-  // giving us a chance to capture static content before it is cleared.
-  let capturedStaticOutput = "";
-
-  const renderer = createRenderer<TuiNode, TuiNode>(
-    buildNodeOps({
-      onCommit: () => {
-        const restoreLayoutGuards = calculateLayoutWithContentGuards(
-          root,
-          columns,
-          undefined,
-          Yoga.DIRECTION_LTR,
-        );
-        try {
-          // Flush static output from intermediate renders
-          for (const stat of findStatics(root)) {
-            const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
-            if (staticFrame && staticFrame !== "\n") {
-              capturedStaticOutput += staticFrame + "\n";
-            }
-          }
-        } finally {
-          restoreLayoutGuards();
-        }
-      },
-    }),
-  );
-
-  const app = renderer.createApp(component);
-
-  // Provide no-op contexts so composables don't throw when injecting.
-  app.provide(AppContextKey, appContext);
-  app.provide(FocusContextKey, createNoOpFocusContext());
-  app.provide(StdinContextKey, createNoOpStdinContext());
-  app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
-
-  // Capture the first uncaught error so we can re-throw after cleanup.
-  // Vue's error handling catches component errors internally; for a
-  // synchronous utility like renderToString, callers expect errors to throw.
-  //
-  // Track occurrence with a SEPARATE boolean — NOT a `uncaughtError !== undefined`
-  // sentinel. A component can throw literal `undefined` (e.g.
-  // `onMounted(() => { throw undefined })`); a sentinel can't tell that apart from
-  // "no error", so it would SWALLOW the error and return the normal frame,
-  // violating the documented "errors propagate to the caller" contract. First-wins
-  // (guarded by `errored`) matches the live renderer's onErrorCaptured.
-  let errored = false;
-  let caught: unknown;
-  app.config.errorHandler = (err) => {
-    if (!errored) {
-      errored = true;
-      caught = err;
-    }
-  };
-
-  let teardownSucceeded = false;
+  let yogaAttached = false;
+  let rootDetached = false;
+  let appUnmounted = false;
   let mounted = false;
+  let unmountApp: (() => void) | undefined;
 
   try {
+    attachYoga(root);
+    yogaAttached = true;
+    root.yoga.setWidth(columns);
+
+    // Capture static output from intermediate renders.
+    // The <Static> component uses watchEffect / onMounted to clear its children
+    // after the first commit. The onCommit callback fires on each DOM mutation,
+    // giving us a chance to capture static content before it is cleared.
+    let capturedStaticOutput = "";
+
+    const renderer = createRenderer<TuiNode, TuiNode>(
+      buildNodeOps({
+        onCommit: () => {
+          const restoreLayoutGuards = calculateLayoutWithContentGuards(
+            root,
+            columns,
+            undefined,
+            Yoga.DIRECTION_LTR,
+          );
+          try {
+            // Flush static output from intermediate renders
+            for (const stat of findStatics(root)) {
+              const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
+              if (staticFrame && staticFrame !== "\n") {
+                capturedStaticOutput += staticFrame + "\n";
+              }
+            }
+          } finally {
+            restoreLayoutGuards();
+          }
+        },
+      }),
+    );
+
+    const app = renderer.createApp(component);
+    unmountApp = () => app.unmount();
+
+    // Provide isolated string-host contexts so shared components can inject
+    // their normal services without acquiring a terminal.
+    app.provide(InternalRenderSessionKey, renderSession);
+    app.provide(AppContextKey, appContext);
+    app.provide(FocusContextKey, createNoOpFocusContext());
+    app.provide(StdinContextKey, stdinContext);
+    app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
+
+    // Capture the first uncaught error so we can re-throw after cleanup.
+    // Vue's error handling catches component errors internally; for a
+    // synchronous utility like renderToString, callers expect errors to throw.
+    //
+    // Track occurrence with a SEPARATE boolean — NOT a `uncaughtError !== undefined`
+    // sentinel. A component can throw literal `undefined` (e.g.
+    // `onMounted(() => { throw undefined })`); a sentinel can't tell that apart from
+    // "no error", so it would SWALLOW the error and return the normal frame,
+    // violating the documented "errors propagate to the caller" contract. First-wins
+    // (guarded by `errored`) matches the live renderer's onErrorCaptured.
+    let errored = false;
+    let caught: unknown;
+    app.config.errorHandler = (err) => {
+      if (!errored) {
+        errored = true;
+        caught = err;
+      }
+    };
+
     // Synchronously render the Vue tree into the root.
     app.mount(root);
     mounted = true;
@@ -183,10 +199,11 @@ function renderToStringInternal(
     // effect cleanup functions. Child yoga nodes are freed by the node-ops
     // remove handler.
     app.unmount();
-    teardownSucceeded = true;
+    appUnmounted = true;
 
     // Free the root yoga node itself (children already freed by unmount).
     detachYoga(root);
+    rootDetached = true;
 
     // Re-throw after full cleanup so callers see the original error. Mirrors the
     // live renderer's exit-error path: a genuine Error — including a cross-realm
@@ -218,15 +235,15 @@ function renderToStringInternal(
   } finally {
     // If layout/paint threw, the happy-path app.unmount() above was skipped. Unmount
     // here so the tree's onScopeDispose cleanups ALWAYS run — otherwise a composable
-    // that registered an external listener (e.g. useWindowSize's `resize` listener on
-    // the shared process.stdout) leaks one per failed call, accumulating toward Node's
-    // MaxListenersExceededWarning. Guard with `mounted` (never unmount a tree that
-    // never mounted) and `teardownSucceeded` (the happy path already unmounted — no
-    // double-unmount). app.unmount() also frees the CHILD yoga nodes via the node-ops
-    // remove handler, leaving only the root for freeRecursive below.
-    if (mounted && !teardownSucceeded) {
+    // that registered an external listener leaks one per failed call. Guard with
+    // `mounted` (never unmount a tree that never mounted) and `appUnmounted`
+    // (the happy path already unmounted, so avoid a second unmount).
+    // app.unmount() also frees the CHILD yoga nodes via the node-ops remove
+    // handler, leaving only the root for freeRecursive below.
+    if (mounted && !appUnmounted) {
       try {
-        app.unmount();
+        unmountApp?.();
+        appUnmounted = true;
       } catch {
         // Best-effort teardown: a throw here must not mask the original error.
       }
@@ -236,7 +253,7 @@ function renderToStringInternal(
     // Yoga nodes are WASM-backed and not garbage collected. In the happy path
     // detachYoga(root) already freed the root; here (error path) freeRecursive
     // cleans up the root and any child nodes the unmount above couldn't free.
-    if (!teardownSucceeded) {
+    if (yogaAttached && !rootDetached) {
       try {
         root.yoga.freeRecursive();
       } catch {
@@ -246,23 +263,125 @@ function renderToStringInternal(
   }
 }
 
-function createNoOpAppContext(isScreenReaderEnabled = false): AppContext {
-  return {
-    exit: () => {},
-    // No terminal session: nothing to flush, resolve immediately (mirrors Ink's
-    // default AppContext `async waitUntilRenderFlush() {}`).
-    waitUntilRenderFlush: async () => {},
-    stdout: process.stdout,
-    stderr: process.stderr,
-    stdin: process.stdin,
-    debug: false,
-    isScreenReaderEnabled,
+const hasOwn = (value: object, key: PropertyKey): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
+function normalizeColumns(value: unknown): number {
+  if (value === undefined) return 80;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  throw new TypeError('renderToString option "columns" must be a positive safe integer.');
+}
+
+function normalizeOptionsObject(options: unknown): Record<PropertyKey, unknown> {
+  if (options === undefined) return {};
+  if (typeof options !== "object" || options === null) {
+    throw new TypeError("renderToString options must be an object or undefined.");
+  }
+  return options as Record<PropertyKey, unknown>;
+}
+
+function rejectModePassthrough(options: Record<PropertyKey, unknown>): void {
+  for (const key of [
+    "mode",
+    "fullscreen",
+    "alternateScreen",
+    "rows",
+    "presentation",
+    "isScreenReaderEnabled",
+  ] as const) {
+    if (hasOwn(options, key)) {
+      throw new TypeError(
+        `renderToString option "${key}" is unavailable; public string rendering is a visual document with unbounded rows and no terminal mode.`,
+      );
+    }
+  }
+}
+
+function normalizePublicOptions(options: unknown): { readonly columns: number } {
+  const object = normalizeOptionsObject(options);
+  // Recognizable attempts to select a terminal mode or the private transcript
+  // renderer fail before any option getter can trigger rendering side effects.
+  rejectModePassthrough(object);
+  return { columns: normalizeColumns(object.columns) };
+}
+
+function normalizeInternalOptions(options: unknown): { readonly columns: number } {
+  const object = normalizeOptionsObject(options);
+  for (const key of ["mode", "fullscreen", "alternateScreen", "rows", "presentation"] as const) {
+    if (hasOwn(object, key)) {
+      throw new TypeError(
+        `renderToStringWithScreenReader option "${key}" is unavailable; the helper renders a screen-reader document with unbounded rows and no terminal mode.`,
+      );
+    }
+  }
+  if (hasOwn(object, "isScreenReaderEnabled")) {
+    throw new TypeError(
+      'renderToStringWithScreenReader no longer accepts "isScreenReaderEnabled"; the helper name selects that presentation.',
+    );
+  }
+  return { columns: normalizeColumns(object.columns) };
+}
+
+function createDiscardWritable(columns: number): NodeJS.WriteStream {
+  const stream = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
+  }) as unknown as NodeJS.WriteStream;
+  Object.assign(stream, { isTTY: false, columns });
+  return stream;
+}
+
+function createInertReadable(): NodeJS.ReadStream {
+  const stream = new Readable({ read() {} }) as unknown as NodeJS.ReadStream;
+  Object.assign(stream, {
+    isTTY: false,
+    setRawMode() {
+      return stream;
+    },
+  });
+  return stream;
+}
+
+function unavailableOperation(name: string): Error {
+  return new Error(`${name} is unavailable during renderToString().`);
+}
+
+function createStringContexts(columns: number): {
+  readonly appContext: AppContext;
+  readonly stdinContext: StdinContext;
+  dispose(): void;
+} {
+  const stdout = createDiscardWritable(columns);
+  const stderr = createDiscardWritable(columns);
+  const stdin = createInertReadable();
+  const appContext: AppContext = {
+    exit: () => {
+      throw unavailableOperation("useApp().exit()");
+    },
+    waitUntilRenderFlush: () =>
+      Promise.reject(unavailableOperation("useApp().waitUntilRenderFlush()")),
+    stdout,
+    stderr,
+    stdin,
     isRawModeSupported: false,
     setRawMode: () => {},
     writeToStdout: () => {},
     writeToStderr: () => {},
     cursorPosition: undefined,
     setCursorPosition: () => {},
+  };
+
+  const stdinContext = createNoOpStdinContext(stdin);
+  return {
+    appContext,
+    stdinContext,
+    dispose() {
+      stdinContext.internal_eventEmitter.removeAllListeners();
+      stdin.destroy();
+      stdout.destroy();
+      stderr.destroy();
+    },
   };
 }
 
@@ -285,9 +404,9 @@ function createNoOpFocusContext(): FocusContext {
   };
 }
 
-function createNoOpStdinContext(): StdinContext {
+function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
   return {
-    stdin: process.stdin,
+    stdin,
     setRawMode: () => {},
     isRawModeSupported: false,
     internal_eventEmitter: new EventEmitter(),
