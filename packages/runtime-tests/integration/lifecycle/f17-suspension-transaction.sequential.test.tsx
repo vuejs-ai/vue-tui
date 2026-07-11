@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, type TuiApp } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useLayoutSize, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
@@ -128,11 +128,11 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
       } as Parameters<TuiApp["mount"]>[0]);
       expect(stdin.isRaw).toBe(true);
 
-      suspensionHost.suspend();
+      await suspensionHost.suspend();
       expect(stdin.isRaw).toBe(false);
       const resumeOffset = forwardedWrites.length;
       armedFailure = failureStage;
-      suspensionHost.resume();
+      await suspensionHost.resume();
 
       content.value = "after-failed-resume";
       await nextTick();
@@ -166,6 +166,120 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     }
   },
 );
+
+test.sequential("unmount during the continuation gap cancels repaint and input reacquisition", async () => {
+  const stdout = makeWritable();
+  const stderr = makeWritable();
+  const stdin = makeRawTrackingStdin();
+  const suspensionHost = createManualSuspensionHost();
+  const writes: string[] = [];
+  const originalWrite = stdout.write.bind(stdout);
+  stdout.write = ((...args: unknown[]) => {
+    writes.push(String(args[0]));
+    return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+  }) as NodeJS.WriteStream["write"];
+  const app = createApp(defineComponent(() => () => <Text>frame</Text>));
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "fullscreen",
+      liveUpdates: true,
+      rawMode: "always",
+      maxFps: 0,
+      patchConsole: false,
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    await suspensionHost.suspend();
+    expect(stdin.isRaw).toBe(false);
+
+    const resumeOffset = writes.length;
+    const continuation = suspensionHost.resume();
+    expect(stdin.isRaw).toBe(false);
+    app.unmount();
+    await continuation;
+    await app.waitUntilExit();
+
+    const outputAfterResumeRequest = writes.slice(resumeOffset).join("");
+    expect(stdin.isRaw).toBe(false);
+    expect(outputAfterResumeRequest).not.toContain(ansiEscapes.enterAlternativeScreen);
+    expect(outputAfterResumeRequest).not.toContain(ansiEscapes.clearViewport);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test.sequential("a resize reported by the continued frame is repainted before input resumes", async () => {
+  const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
+  const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stdout, { isTTY: false, columns: 30 });
+  Object.assign(stderr, { isTTY: false, columns: 30 });
+  const stdin = makeRawTrackingStdin();
+  const suspensionHost = createManualSuspensionHost();
+  const renderedFacts: string[] = [];
+  const App = defineComponent(() => {
+    const { columns } = useLayoutSize();
+    useInput(() => {});
+    const frame = () => {
+      const facts = `${columns.value}:raw=${String(stdin.isRaw)}`;
+      renderedFacts.push(facts);
+      return facts;
+    };
+    return () => <Text>{frame()}</Text>;
+  });
+  const app = createApp(App);
+  let resizeReported = false;
+  const outputChunks: string[] = [];
+  const originalWrite = stdout.write.bind(stdout);
+  stdout.write = ((...args: unknown[]) => {
+    const output = String(args[0]);
+    outputChunks.push(output);
+    if (!resizeReported && output.includes("24:raw=false")) {
+      resizeReported = true;
+      stdout.columns = 18;
+      stdout.emit("resize");
+    }
+    return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+  }) as NodeJS.WriteStream["write"];
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      rawMode: "always",
+      maxFps: 0,
+      patchConsole: false,
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    await app.waitUntilRenderFlush();
+    await suspensionHost.suspend();
+    expect(stdin.isRaw).toBe(false);
+
+    stdout.columns = 24;
+    await suspensionHost.resume();
+
+    expect(resizeReported).toBe(true);
+    expect(outputChunks.join("")).toContain("18:raw=false");
+    expect(renderedFacts).toContain("24:raw=false");
+    expect(renderedFacts).toContain("18:raw=false");
+    expect(renderedFacts).not.toContain("18:raw=true");
+    expect(stdin.isRaw).toBe(true);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
 
 test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after restoring the main screen", async () => {
   const stdout = makeWritable();
@@ -202,11 +316,11 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
-    suspensionHost.suspend();
+    await suspensionHost.suspend();
 
     const resumeOffset = events.length;
     reenterOnRepaint = true;
-    suspensionHost.resume();
+    await suspensionHost.resume();
     await app.waitUntilExit();
 
     const resumedEvents = events.slice(resumeOffset);
@@ -316,11 +430,11 @@ test.sequential.each(["inline", "fullscreen"] as const)(
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
       } as Parameters<TuiApp["mount"]>[0]);
 
-      suspensionHost.suspend();
+      await suspensionHost.suspend();
       (stdout as { columns?: number }).columns = undefined;
       (stdout as { rows?: number }).rows = undefined;
       const resumeOffset = writes.length;
-      suspensionHost.resume();
+      await suspensionHost.resume();
 
       const resumedOutput = writes.slice(resumeOffset).join("");
       expect(resumedOutput).toContain(`${mode}-frame`);

@@ -1,14 +1,7 @@
 import { defineComponent, nextTick, ref, shallowRef, watchEffect, watchPostEffect } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import {
-  Box,
-  Text,
-  useBoxMetrics,
-  measureElement,
-  useWindowSize,
-  createApp,
-} from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, measureElement, createApp } from "@vue-tui/runtime";
 // Internal host primitives — build a node + attach yoga WITHOUT a layout pass so
 // the pre-layout read below is deterministic (no render/commit timing involved).
 import { createBox, attachYoga } from "@vue-tui/runtime/internal";
@@ -411,7 +404,6 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     const App = defineComponent(() => {
       const boxRef = ref(null);
       const { width } = useBoxMetrics(boxRef);
-      useWindowSize();
       return () => (
         <Box ref={boxRef}>
           <Text>Width: {width.value}</Text>
@@ -439,7 +431,6 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
       });
 
       const { height } = useBoxMetrics(trackedRef);
-      useWindowSize();
 
       return () => (
         <Box flexDirection="column">
@@ -668,7 +659,6 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     const App = defineComponent(() => {
       const boxRef = ref(null);
       useBoxMetrics(boxRef);
-      useWindowSize();
       return () => (
         <Box ref={boxRef}>
           <Text>Hello</Text>

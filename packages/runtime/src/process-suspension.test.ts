@@ -6,10 +6,11 @@ import {
 } from "./process-suspension.ts";
 
 type SuspensionSignal = "SIGTSTP" | "SIGCONT";
+type SuspensionListener = () => void | Promise<void>;
 
 function createAdapter(platform: NodeJS.Platform = "linux") {
-  const listeners = new Map<SuspensionSignal, Set<() => void>>();
-  const addSignalListener = vi.fn((signal: SuspensionSignal, listener: () => void) => {
+  const listeners = new Map<SuspensionSignal, Set<SuspensionListener>>();
+  const addSignalListener = vi.fn((signal: SuspensionSignal, listener: SuspensionListener) => {
     let signalListeners = listeners.get(signal);
     if (!signalListeners) {
       signalListeners = new Set();
@@ -17,7 +18,7 @@ function createAdapter(platform: NodeJS.Platform = "linux") {
     }
     signalListeners.add(listener);
   });
-  const removeSignalListener = vi.fn((signal: SuspensionSignal, listener: () => void) => {
+  const removeSignalListener = vi.fn((signal: SuspensionSignal, listener: SuspensionListener) => {
     listeners.get(signal)?.delete(listener);
   });
   const stopCurrentProcess = vi.fn();
@@ -33,8 +34,13 @@ function createAdapter(platform: NodeJS.Platform = "linux") {
     addSignalListener,
     removeSignalListener,
     stopCurrentProcess,
-    emit(signal: SuspensionSignal) {
-      for (const listener of listeners.get(signal) ?? []) listener();
+    async emit(signal: SuspensionSignal) {
+      const pending: Promise<void>[] = [];
+      for (const listener of listeners.get(signal) ?? []) {
+        const result = listener();
+        if (result) pending.push(Promise.resolve(result));
+      }
+      await Promise.allSettled(pending);
     },
     listenerCount(signal: SuspensionSignal) {
       return listeners.get(signal)?.size ?? 0;
@@ -43,15 +49,15 @@ function createAdapter(platform: NodeJS.Platform = "linux") {
 }
 
 describe("createProcessSuspensionHost", () => {
-  test("is unsupported on Windows and never installs signal listeners", () => {
+  test("is unsupported on Windows and never installs signal listeners", async () => {
     const processAdapter = createAdapter("win32");
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     const suspend = vi.fn();
     const resume = vi.fn();
 
     const unregister = manager.register({ suspend, resume });
-    processAdapter.emit("SIGTSTP");
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGCONT");
     unregister();
     unregister();
 
@@ -85,30 +91,34 @@ describe("createProcessSuspensionHost", () => {
     expect(processAdapter.listenerCount("SIGCONT")).toBe(0);
   });
 
-  test("suspends and resumes every session in registration order once per cycle", () => {
+  test("suspends and resumes every session in registration order once per cycle", async () => {
     const processAdapter = createAdapter();
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     const calls: string[] = [];
     const unregisterFirst = manager.register({
       suspend: () => calls.push("suspend:first"),
-      resume: () => calls.push("resume:first"),
+      resume: () => {
+        calls.push("resume:first");
+      },
     });
     const unregisterSecond = manager.register({
       suspend: () => calls.push("suspend:second"),
-      resume: () => calls.push("resume:second"),
+      resume: () => {
+        calls.push("resume:second");
+      },
     });
 
-    processAdapter.emit("SIGTSTP");
-    processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
     expect(calls).toEqual(["suspend:first", "suspend:second"]);
     expect(processAdapter.stopCurrentProcess).toHaveBeenCalledTimes(1);
 
-    processAdapter.emit("SIGCONT");
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGCONT");
     expect(calls).toEqual(["suspend:first", "suspend:second", "resume:first", "resume:second"]);
 
-    processAdapter.emit("SIGTSTP");
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGCONT");
     expect(processAdapter.stopCurrentProcess).toHaveBeenCalledTimes(2);
     expect(calls.slice(-4)).toEqual([
       "suspend:first",
@@ -121,37 +131,39 @@ describe("createProcessSuspensionHost", () => {
     unregisterSecond();
   });
 
-  test("continues after hook failures and ignores reentrant stop signals", () => {
+  test("continues after hook failures and ignores reentrant stop signals", async () => {
     const processAdapter = createAdapter();
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     const calls: string[] = [];
     const unregisterFirst = manager.register({
       suspend() {
         calls.push("suspend:first");
-        processAdapter.emit("SIGTSTP");
+        void processAdapter.emit("SIGTSTP");
         throw new Error("first suspend failed");
       },
       resume() {
         calls.push("resume:first");
-        processAdapter.emit("SIGTSTP");
+        void processAdapter.emit("SIGTSTP");
         throw new Error("first resume failed");
       },
     });
     const unregisterSecond = manager.register({
       suspend: () => calls.push("suspend:second"),
-      resume: () => calls.push("resume:second"),
+      resume: () => {
+        calls.push("resume:second");
+      },
     });
 
-    expect(() => processAdapter.emit("SIGTSTP")).not.toThrow();
+    await expect(processAdapter.emit("SIGTSTP")).resolves.toBeUndefined();
     expect(processAdapter.stopCurrentProcess).toHaveBeenCalledTimes(1);
-    expect(() => processAdapter.emit("SIGCONT")).not.toThrow();
+    await expect(processAdapter.emit("SIGCONT")).resolves.toBeUndefined();
     expect(calls).toEqual(["suspend:first", "suspend:second", "resume:first", "resume:second"]);
 
     unregisterFirst();
     unregisterSecond();
   });
 
-  test("does not resume a session unregistered while the process is suspended", () => {
+  test("does not resume a session unregistered while the process is suspended", async () => {
     const processAdapter = createAdapter();
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     const firstResume = vi.fn();
@@ -159,16 +171,16 @@ describe("createProcessSuspensionHost", () => {
     const unregisterFirst = manager.register({ suspend() {}, resume: firstResume });
     const unregisterSecond = manager.register({ suspend() {}, resume: secondResume });
 
-    processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
     unregisterFirst();
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGCONT");
 
     expect(firstResume).not.toHaveBeenCalled();
     expect(secondResume).toHaveBeenCalledOnce();
     unregisterSecond();
   });
 
-  test("still stops once when every session unregisters during suspension", () => {
+  test("still stops once when every session unregisters during suspension", async () => {
     const processAdapter = createAdapter();
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     let unregister = () => {};
@@ -177,18 +189,18 @@ describe("createProcessSuspensionHost", () => {
       resume() {},
     });
 
-    processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
 
     expect(processAdapter.stopCurrentProcess).toHaveBeenCalledOnce();
     expect(processAdapter.listenerCount("SIGTSTP")).toBe(1);
     expect(processAdapter.listenerCount("SIGCONT")).toBe(1);
 
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGCONT");
     expect(processAdapter.listenerCount("SIGTSTP")).toBe(0);
     expect(processAdapter.listenerCount("SIGCONT")).toBe(0);
   });
 
-  test("restores sessions immediately when stopping the process fails", () => {
+  test("restores sessions immediately when stopping the process fails", async () => {
     const processAdapter = createAdapter();
     processAdapter.stopCurrentProcess.mockImplementation(() => {
       throw new Error("SIGSTOP failed");
@@ -197,59 +209,98 @@ describe("createProcessSuspensionHost", () => {
     const calls: string[] = [];
     const unregister = manager.register({
       suspend: () => calls.push("suspend"),
-      resume: () => calls.push("resume"),
+      resume: () => {
+        calls.push("resume");
+      },
     });
 
-    expect(() => processAdapter.emit("SIGTSTP")).not.toThrow();
+    await expect(processAdapter.emit("SIGTSTP")).resolves.toBeUndefined();
     expect(calls).toEqual(["suspend", "resume"]);
 
-    processAdapter.emit("SIGCONT");
+    await processAdapter.emit("SIGCONT");
     expect(calls).toEqual(["suspend", "resume"]);
 
-    processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
     expect(calls).toEqual(["suspend", "resume", "suspend", "resume"]);
     unregister();
   });
 
-  test("handles a deterministic adapter that continues during the stop call", () => {
+  test("handles a deterministic adapter that continues during the stop call", async () => {
     const processAdapter = createAdapter();
     const manager = createProcessSuspensionHost(processAdapter.adapter);
     const calls: string[] = [];
     processAdapter.stopCurrentProcess.mockImplementation((afterContinue: () => void) => {
       calls.push("stop");
       afterContinue();
-      processAdapter.emit("SIGCONT");
+      void processAdapter.emit("SIGCONT");
     });
     const unregister = manager.register({
       suspend: () => calls.push("suspend"),
-      resume: () => calls.push("resume"),
+      resume: () => {
+        calls.push("resume");
+      },
     });
 
-    processAdapter.emit("SIGTSTP");
+    await processAdapter.emit("SIGTSTP");
 
     expect(calls).toEqual(["suspend", "stop", "resume"]);
     expect(processAdapter.stopCurrentProcess).toHaveBeenCalledOnce();
     unregister();
   });
+
+  test("keeps a continuation cycle closed until every asynchronous resume settles", async () => {
+    const processAdapter = createAdapter();
+    const manager = createProcessSuspensionHost(processAdapter.adapter);
+    let settleResume!: () => void;
+    const resume = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          settleResume = resolve;
+        }),
+    );
+    const unregister = manager.register({ suspend() {}, resume });
+
+    await processAdapter.emit("SIGTSTP");
+    const continuation = processAdapter.emit("SIGCONT");
+    await Promise.resolve();
+    expect(resume).toHaveBeenCalledOnce();
+
+    await processAdapter.emit("SIGTSTP");
+    expect(processAdapter.stopCurrentProcess).toHaveBeenCalledOnce();
+
+    settleResume();
+    await continuation;
+    await processAdapter.emit("SIGTSTP");
+    expect(processAdapter.stopCurrentProcess).toHaveBeenCalledTimes(2);
+    const secondContinuation = processAdapter.emit("SIGCONT");
+    await Promise.resolve();
+    settleResume();
+    await secondContinuation;
+    unregister();
+  });
 });
 
 describe("createManualSuspensionHost", () => {
-  test("drives the same registration boundary without process signals", () => {
+  test("drives the same registration boundary without process signals", async () => {
     const host = createManualSuspensionHost();
     const calls: string[] = [];
     const unregisterFirst = host.register({
       suspend: () => calls.push("suspend:first"),
-      resume: () => calls.push("resume:first"),
+      resume: () => {
+        calls.push("resume:first");
+      },
     });
     const unregisterSecond = host.register({
       suspend: () => calls.push("suspend:second"),
-      resume: () => calls.push("resume:second"),
+      resume: () => {
+        calls.push("resume:second");
+      },
     });
 
-    host.suspend();
-    host.suspend();
-    host.resume();
-    host.resume();
+    await host.suspend();
+    await host.suspend();
+    await host.resume();
+    await host.resume();
 
     expect(host.supported).toBe(true);
     expect(calls).toEqual(["suspend:first", "suspend:second", "resume:first", "resume:second"]);
@@ -257,14 +308,14 @@ describe("createManualSuspensionHost", () => {
     unregisterSecond();
   });
 
-  test("can model an unsupported host", () => {
+  test("can model an unsupported host", async () => {
     const host = createManualSuspensionHost({ supported: false });
     const suspend = vi.fn();
     const resume = vi.fn();
     host.register({ suspend, resume });
 
-    host.suspend();
-    host.resume();
+    await host.suspend();
+    await host.resume();
 
     expect(host.supported).toBe(false);
     expect(suspend).not.toHaveBeenCalled();

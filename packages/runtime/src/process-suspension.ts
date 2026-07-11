@@ -6,14 +6,22 @@ export interface SuspensionHooks {
   /** Temporarily release every terminal resource owned by this session. */
   readonly suspend: () => void;
   /** Reacquire the same effective surface and repaint it after continuation. */
-  readonly resume: () => void;
+  readonly resume: () => void | Promise<void>;
 }
+
+type SuspensionSignalListener = () => void | Promise<void>;
 
 /** Injectable process boundary. Tests use this without stopping the test runner. */
 export interface ProcessSuspensionAdapter {
   readonly platform: NodeJS.Platform;
-  readonly addSignalListener: (signal: ProcessSuspensionSignal, listener: () => void) => void;
-  readonly removeSignalListener: (signal: ProcessSuspensionSignal, listener: () => void) => void;
+  readonly addSignalListener: (
+    signal: ProcessSuspensionSignal,
+    listener: SuspensionSignalListener,
+  ) => void;
+  readonly removeSignalListener: (
+    signal: ProcessSuspensionSignal,
+    listener: SuspensionSignalListener,
+  ) => void;
   /**
    * Stop the current process with SIGSTOP. `afterContinue` must run only after the process has
    * continued. A real self-directed SIGSTOP blocks this call until an external SIGCONT arrives.
@@ -29,8 +37,8 @@ export interface SuspensionHost {
 
 /** Deterministic test host: callers choose exactly when suspension and continuation occur. */
 export interface ManualSuspensionHost extends SuspensionHost {
-  readonly suspend: () => void;
-  readonly resume: () => void;
+  readonly suspend: () => Promise<void>;
+  readonly resume: () => Promise<void>;
 }
 
 /** Internal mount-option key used by deterministic hosts to replace OS signals. */
@@ -87,7 +95,12 @@ export function createProcessSuspensionHost(
   let phase: "idle" | "suspending" | "suspended" | "resuming" = "idle";
   let activeCycle: SuspensionCycle | undefined;
 
-  const resumeCycle = (expectedCycle?: SuspensionCycle): void => {
+  const finishResumeCycle = (): void => {
+    if (phase === "resuming") phase = "idle";
+    if (detachWhenIdle && registrations.size === 0) detachListeners();
+  };
+
+  const resumeCycle = (expectedCycle?: SuspensionCycle): void | Promise<void> => {
     const cycle = activeCycle;
     if (
       phase !== "suspended" ||
@@ -101,16 +114,25 @@ export function createProcessSuspensionHost(
     // a hook from starting a nested stop cycle before later sessions have reacquired their state.
     phase = "resuming";
     activeCycle = undefined;
+    const pending: Promise<void>[] = [];
     for (const registration of cycle.registrations) {
-      if (registration.active) runBestEffort(registration.hooks.resume);
+      if (!registration.active) continue;
+      try {
+        const result = registration.hooks.resume();
+        if (result) pending.push(Promise.resolve(result));
+      } catch {
+        // A failed session resume must not prevent later sessions from
+        // reacquiring their terminal state.
+      }
     }
-    if (phase === "resuming") phase = "idle";
-    if (detachWhenIdle && registrations.size === 0) detachListeners();
+    if (pending.length === 0) {
+      finishResumeCycle();
+      return;
+    }
+    return Promise.allSettled(pending).then(() => finishResumeCycle());
   };
 
-  const handleContinue = (): void => {
-    resumeCycle();
-  };
+  const handleContinue = (): void | Promise<void> => resumeCycle();
 
   const handleSuspend = (): void => {
     if (phase !== "idle" || registrations.size === 0) return;
@@ -128,7 +150,7 @@ export function createProcessSuspensionHost(
     } catch {
       // If SIGSTOP could not be delivered, put successful suspension hooks back into a usable
       // state immediately instead of waiting forever for a SIGCONT that will never arrive.
-      resumeCycle(cycle);
+      void resumeCycle(cycle);
     }
   };
 
@@ -198,9 +220,18 @@ export function createProcessSuspensionHost(
 export function createManualSuspensionHost(
   options: { readonly supported?: boolean } = {},
 ): ManualSuspensionHost {
-  const listeners = new Map<ProcessSuspensionSignal, Set<() => void>>();
-  const emit = (signal: ProcessSuspensionSignal): void => {
-    for (const listener of listeners.get(signal) ?? []) listener();
+  const listeners = new Map<ProcessSuspensionSignal, Set<SuspensionSignalListener>>();
+  const emit = async (signal: ProcessSuspensionSignal): Promise<void> => {
+    const pending: Promise<void>[] = [];
+    for (const listener of listeners.get(signal) ?? []) {
+      try {
+        const result = listener();
+        if (result) pending.push(Promise.resolve(result));
+      } catch {
+        // Match process signal delivery: one listener cannot prevent the rest.
+      }
+    }
+    await Promise.allSettled(pending);
   };
   const host = createProcessSuspensionHost({
     platform: options.supported === false ? "win32" : "linux",

@@ -356,12 +356,9 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   const writesBeforeFailure = writes.length;
   stdout.columns = 60;
   failNextResizeBoundary = true;
-  let resizeError: unknown;
-  try {
-    stdout.emit("resize");
-  } catch (error) {
-    resizeError = error;
-  }
+  const exited = app.waitUntilExit();
+  stdout.emit("resize");
+  await expect(exited).rejects.toThrow("resize boundary failed");
 
   const failureWrites = writes.slice(writesBeforeFailure);
   const payloadIndex = failureWrites.findIndex((chunk) => chunk === "\x1b[?25l");
@@ -369,11 +366,9 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   app.unmount();
 
   expect({
-    error: resizeError instanceof Error ? resizeError.message : undefined,
     beganSynchronizedOutput: failureWrites.includes(bsu),
     closedAfterFailure: esuIndex > payloadIndex,
   }).toEqual({
-    error: "resize boundary failed",
     beganSynchronizedOutput: true,
     closedAfterFailure: true,
   });

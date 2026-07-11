@@ -11,11 +11,13 @@ Here, “public contract” means the authoring surface intentionally supported,
 
 The public-surface guards remain important. They make every change deliberate, prevent accidental exports or type drift, and prove that the resulting current API is internally coherent. A clean-slate change updates the implementation, value and type guards, documentation, examples, tests, and first-party consumers together.
 
+F1.8 applied that process to the public render-session surface: `useRenderSession()` and `useLayoutSize()` are verified exports, while `useWindowSize()` and `useIsScreenReaderEnabled()` were removed rather than retained as aliases. The named `RenderMode`, `RenderModeResolution`, `RenderOutput`, `RenderSession`, `RenderSize`, `RenderLayoutSize`, and `UseLayoutSizeReturn` types are part of the guarded public type contract. Repository, packed-consumer, PTY, visual, restoration, CI, and independent-review gates all agree with those exports, so F1 is complete.
+
 ## The contract = public exports **and their user-consumable types**
 
 The public API is everything exported from the main barrel (`@vue-tui/runtime`): components,
 composables, entry points — **and their TYPES** (component prop types, composable return/options
-types, and named types such as `AriaRole`, `WindowSize`, `BoxProps`, `UseXReturn` / `UseXOptions`).
+types, and named types such as `AriaRole`, `RenderSession`, `BoxProps`, `UseXReturn` / `UseXOptions`).
 
 A type is **as much a part of the current contract as runtime behavior**. If user code can name a type and annotate with it, changing or removing it changes the supported authoring surface at compile time. That is allowed during experimentation when deliberate, but the type surface must be designed, updated, and tested with the same care as runtime behavior.
 

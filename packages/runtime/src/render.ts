@@ -277,6 +277,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedStdinController: StdinController | null = null;
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
+  let mountedResizeRefresh: Promise<void> | null = null;
   let mountedExitListener: (() => void) | null = null;
   // signal-exit unsubscribe fn (Ink parity G18). Registered at interactive
   // mount so SIGINT/SIGTERM/SIGHUP route to teardown(); called in teardown()
@@ -1090,7 +1091,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let inlineRegionStarted = false;
       let terminalSuspended = false;
       let terminalResumeInProgress = false;
-      let resumeSurfaceCommit: (() => void) | null = null;
+      let terminalResumePainting = false;
+      let resizeEventGeneration = 0;
+      let resizeHandledGeneration = 0;
+      let resizePaintPending = false;
+      let requestPendingResizeRefresh: () => void = () => {};
+      let prepareResumeSurface: (() => (() => void) | null) | null = null;
       let suspendedFullscreenSurface = false;
       let suspendedInlineSurface = false;
       let warnedFullscreenStatic = false;
@@ -1167,48 +1173,148 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         });
       }
 
-      function resumeSession(): void {
+      async function resumeSession(): Promise<void> {
         if (teardownStarted || !terminalSuspended || terminalResumeInProgress) return;
-        runLifecycleTransaction(() => {
-          terminalResumeInProgress = true;
-          try {
-            if (fixedFullscreenSurface && suspendedFullscreenSurface) {
-              if (
-                !mountedAlternateScreen &&
-                !writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H")
-              ) {
-                throw new Error("failed to re-enter the Fullscreen surface");
-              }
-              mountedAlternateScreen = true;
-              if (!mountedFullscreenCursorHidden && !writeBestEffort(stdout, "\x1b[?25l")) {
-                throw new Error("failed to hide the Fullscreen cursor");
-              }
-              mountedFullscreenCursorHidden = true;
-              const repaint = resumeSurfaceCommit ?? mountedCommit;
-              if (!repaint) throw new Error("Fullscreen repaint is not ready");
-              repaint();
-            } else if (inlineTerminalSurface && suspendedInlineSurface) {
-              const repaint = resumeSurfaceCommit ?? mountedCommit;
-              if (!repaint) throw new Error("Inline repaint is not ready");
-              repaint();
-            }
-
-            // Input is reacquired only after the output surface is complete. If an
-            // input mode fails, return the visible surface to its suspended state
-            // instead of accepting input against a partial viewport.
-            mountedKittyController?.resume();
-            mountedStdinController?.resume();
-            terminalSuspended = false;
-            suspendedFullscreenSurface = false;
-            suspendedInlineSurface = false;
-          } catch {
-            runSuspensionStep(() => mountedStdinController?.suspend(true));
-            runSuspensionStep(() => mountedKittyController?.suspend(true));
-            releaseOutputSurfaceForSuspension(false);
-          } finally {
-            terminalResumeInProgress = false;
+        let applyPreparedSurface: (() => void) | null = null;
+        let resumeCoveredResizeGeneration = resizeHandledGeneration;
+        let resumed = false;
+        const prepareContinuedSurface = (): void => {
+          resumeCoveredResizeGeneration = resizeEventGeneration;
+          applyPreparedSurface = prepareResumeSurface?.() ?? null;
+          if (!applyPreparedSurface) {
+            const repaint = mountedCommit;
+            if (!repaint) throw new Error("continued surface repaint is not ready");
+            applyPreparedSurface = repaint;
           }
-        });
+        };
+        try {
+          runLifecycleTransaction(() => {
+            terminalResumeInProgress = true;
+            const needsLiveRepaint =
+              (fixedFullscreenSurface && suspendedFullscreenSurface) ||
+              (inlineTerminalSurface && suspendedInlineSurface) ||
+              dynamicUpdatesLive;
+            if (needsLiveRepaint) {
+              prepareContinuedSurface();
+            }
+          });
+
+          // Session dimensions are reactive facts. Vue must first update every
+          // component that consumed them before the host tree can be repainted
+          // accurately. Keep input and terminal ownership suspended across this
+          // microtask boundary.
+          if (applyPreparedSurface) await nextTick();
+          while (
+            applyPreparedSurface &&
+            !teardownStarted &&
+            terminalSuspended &&
+            resumeCoveredResizeGeneration !== resizeEventGeneration
+          ) {
+            runLifecycleTransaction(prepareContinuedSurface);
+            await nextTick();
+          }
+
+          let retryForNewerResize = false;
+          do {
+            retryForNewerResize = false;
+            runLifecycleTransaction(() => {
+              if (teardownStarted || !terminalSuspended || !terminalResumeInProgress) return;
+              if (fixedFullscreenSurface && suspendedFullscreenSurface) {
+                if (
+                  !mountedAlternateScreen &&
+                  !writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H")
+                ) {
+                  throw new Error("failed to re-enter the Fullscreen surface");
+                }
+                mountedAlternateScreen = true;
+                if (teardownStarted) return;
+                if (!mountedFullscreenCursorHidden && !writeBestEffort(stdout, "\x1b[?25l")) {
+                  throw new Error("failed to hide the Fullscreen cursor");
+                }
+                mountedFullscreenCursorHidden = true;
+                if (teardownStarted) return;
+              }
+              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+                retryForNewerResize = true;
+                return;
+              }
+              terminalResumePainting = true;
+              try {
+                applyPreparedSurface?.();
+              } finally {
+                terminalResumePainting = false;
+              }
+              if (teardownStarted) return;
+              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+                retryForNewerResize = true;
+                return;
+              }
+
+              // Input is reacquired only after the output surface is complete. A
+              // re-entrant stream can report another resize while the repaint or
+              // input-mode escapes are being written; release any partial input
+              // acquisition and repaint that newer geometry before returning.
+              mountedKittyController?.resume();
+              if (teardownStarted) return;
+              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+                runSuspensionStep(() => mountedKittyController?.suspend(true));
+                retryForNewerResize = true;
+                return;
+              }
+              mountedStdinController?.resume();
+              if (teardownStarted) return;
+              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+                runSuspensionStep(() => mountedStdinController?.suspend(true));
+                runSuspensionStep(() => mountedKittyController?.suspend(true));
+                retryForNewerResize = true;
+                return;
+              }
+              terminalSuspended = false;
+              suspendedFullscreenSurface = false;
+              suspendedInlineSurface = false;
+              resizeHandledGeneration = Math.max(
+                resizeHandledGeneration,
+                resumeCoveredResizeGeneration,
+              );
+              resumed = true;
+            });
+
+            if (
+              retryForNewerResize &&
+              !teardownStarted &&
+              terminalSuspended &&
+              terminalResumeInProgress
+            ) {
+              runLifecycleTransaction(prepareContinuedSurface);
+              await nextTick();
+              while (
+                !teardownStarted &&
+                terminalSuspended &&
+                resumeCoveredResizeGeneration !== resizeEventGeneration
+              ) {
+                runLifecycleTransaction(prepareContinuedSurface);
+                await nextTick();
+              }
+            }
+          } while (
+            retryForNewerResize &&
+            !teardownStarted &&
+            terminalSuspended &&
+            terminalResumeInProgress
+          );
+          if (resumed) requestPendingResizeRefresh();
+        } catch {
+          if (!teardownStarted) {
+            runLifecycleTransaction(() => {
+              runSuspensionStep(() => mountedStdinController?.suspend(true));
+              runSuspensionStep(() => mountedKittyController?.suspend(true));
+              releaseOutputSurfaceForSuspension(false);
+            });
+          }
+        } finally {
+          terminalResumePainting = false;
+          terminalResumeInProgress = false;
+        }
       }
 
       function ensureInlineRegionStart() {
@@ -1642,7 +1748,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
         const hasStaticOutput = staticOutput !== "";
         const isTty = !!stdout.isTTY;
-        const viewportRows = renderSession.legacyWindowRows.value;
+        const viewportRows = renderSession.session.dimensions.layout.rows;
 
         if (fixedFullscreenSurface) {
           const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
@@ -1670,7 +1776,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
         // A frame that fills or exceeds the viewport gets no trailing newline.
         // Only apply when writing to a real TTY — piped output always gets trailing newlines.
-        const fillsViewport = isTty && outputHeight >= viewportRows;
+        const fillsViewport = isTty && viewportRows !== null && outputHeight >= viewportRows;
         // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
         // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
         // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
@@ -1777,7 +1883,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function commit() {
-        if (terminalSuspended && !terminalResumeInProgress) return;
+        if (terminalSuspended && !terminalResumePainting) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         try {
           const start = onRender ? performance.now() : 0;
@@ -1857,7 +1963,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               );
             }
             emitLayoutListeners(tuiRoot);
-            const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
+            const hitMap = renderSession.session.capabilities.elementHitTesting ? [] : undefined;
             const computedRootHeight = Math.max(
               0,
               Math.floor(tuiRoot.yoga.getComputedLayout().height),
@@ -1986,9 +2092,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       appContext.internal_mouse = mouseController;
       mountedScheduler = scheduler;
       mountedCommit = commit;
-      resumeSurfaceCommit = commit;
+      prepareResumeSurface = () => commit;
       scheduledCommit = () => {
-        if (!terminalSuspended) scheduler.schedule();
+        if (!terminalSuspended && !resizePaintPending) scheduler.schedule();
       };
 
       // Internal provides — set before the actual mount so components can inject
@@ -2138,52 +2244,61 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       };
 
       // Only listen for resize when dynamic output is live (matching Ink).
-      // Render synchronously on resize rather than through the commit throttle:
-      // a resize is a discrete event that changes the viewport. Deferring it
-      // through the ~32ms throttle can leave stale geometry on screen and race a
-      // second commit against the freshly established Inline region.
-      resumeSurfaceCommit = commit;
+      // A resize is a discrete event that changes the viewport, so it bypasses
+      // the normal ~32ms commit throttle. Dimension facts update immediately,
+      // then the newest resize waits for Vue consumers before one authoritative
+      // paint. Rapid events are coalesced without exposing an intermediate frame.
       if (dynamicUpdatesLive) {
         // Track the physical geometry that the current relative-writer baseline
         // was painted against. A real dimension change can invalidate that
         // baseline even when the logical component output is unchanged.
-        let lastTerminalWidth = renderSession.session.dimensions.layout.columns;
-        let lastTerminalRows =
-          renderSession.session.dimensions.terminal?.rows ?? renderSession.legacyWindowRows.value;
+        let lastPaintedTerminalWidth = renderSession.session.dimensions.layout.columns;
+        let lastPaintedTerminalRows = renderSession.session.dimensions.terminal?.rows ?? null;
 
-        const updateDimensionsAndCommit = (preferFreshProbe: boolean) => {
-          runLifecycleTransaction(() => {
-            if (terminalSuspended && !terminalResumeInProgress) return;
-            const nextDimensions = readCurrentDimensions(preferFreshProbe);
-            // Once a visual terminal mode is acquired its immutable mode does not
-            // flip to unavailable because of a transient invalid resize report.
-            // Keep the last coherent pair and wait for the next valid event.
-            if (nextDimensions === null) {
-              // A live surface already has one last coherent size. Continuation
-              // must still repaint it when a fresh query is temporarily
-              // unavailable; only a normal resize event may wait for a valid pair.
-              if (preferFreshProbe) {
+        const prepareDimensionUpdate = (
+          preferFreshProbe: boolean,
+          allowWhileResuming: boolean,
+        ): (() => void) | null => {
+          if (terminalSuspended && !allowWhileResuming) return null;
+          const nextDimensions = readCurrentDimensions(preferFreshProbe);
+          // Once a visual terminal mode is acquired its immutable mode does not
+          // flip to unavailable because of a transient invalid resize report.
+          // Keep the last coherent pair and wait for the next valid event.
+          if (nextDimensions === null) {
+            // A live surface already has one last coherent size. Continuation
+            // must still repaint it when a fresh query is temporarily
+            // unavailable; only a normal resize event may wait for a valid pair.
+            if (preferFreshProbe) {
+              scheduler.cancel();
+              return () => {
                 scheduler.cancel();
                 commit();
-              }
-              return;
+              };
             }
+            return null;
+          }
 
-            // Cancel any pending trailing commit before painting synchronously. The
-            // synchronous commit below already reflects the current tree, so a
-            // second scheduled paint would be redundant and can race frame state.
+          // Cancel any pending trailing commit before replacing the dimensions.
+          // The prepared paint runs only after Vue has refreshed the host tree;
+          // a second scheduled paint would be redundant and can race frame state.
+          scheduler.cancel();
+
+          const previousTerminalWidth = lastPaintedTerminalWidth;
+          renderSession.updateDimensions(nextDimensions);
+          const currentWidth = nextDimensions.layout.columns;
+          const currentRows = nextDimensions.terminal?.rows ?? null;
+          const dimensionsChanged =
+            currentWidth !== previousTerminalWidth || currentRows !== lastPaintedTerminalRows;
+          // A screen-reader transcript intentionally works even when rows are
+          // unknown. Treat every resize event as invalidating its old physical
+          // row mapping; an unbounded layout cannot prove otherwise.
+          const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
+
+          return () => {
+            // Vue may have scheduled a host commit while reacting to the new
+            // dimensions. This explicit commit is the authoritative paint for
+            // the resize/continue boundary.
             scheduler.cancel();
-
-            renderSession.updateDimensions(nextDimensions);
-            const currentWidth = nextDimensions.layout.columns;
-            const currentRows = nextDimensions.terminal?.rows ?? nextDimensions.legacyWindowRows;
-            const dimensionsChanged =
-              currentWidth !== lastTerminalWidth || currentRows !== lastTerminalRows;
-            // A screen-reader transcript intentionally works even when rows are
-            // unknown. Treat every resize event as invalidating its old physical
-            // row mapping; a synthetic legacy row count cannot prove otherwise.
-            const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
-
             if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
               // Terminal reflow makes the old logical-line baseline untrustworthy:
               // erasing it could touch terminal-owned rows. Leave that snapshot
@@ -2192,30 +2307,92 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               // and paint the new bounded region from scratch.
               runSynchronizedOutput(() => {
                 if (!isScreenReaderEnabled) stdout.write(hideCursorEscape);
-                const bottomClampRows = isScreenReaderEnabled
-                  ? TERMINAL_BOTTOM_CLAMP_ROWS
-                  : currentRows;
+                let bottomClampRows: number;
+                if (isScreenReaderEnabled) bottomClampRows = TERMINAL_BOTTOM_CLAMP_ROWS;
+                else if (currentRows !== null) bottomClampRows = currentRows;
+                else return;
                 stdout.write(ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape);
                 writer.reset();
                 frameState.lastOutput = "";
                 frameState.lastOutputToRender = "";
                 frameState.outputHeight = 0;
               });
-            } else if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
+            } else if (currentWidth < previousTerminalWidth && !fixedFullscreenSurface) {
               // Live non-terminal streams retain the existing relative-writer
               // narrowing behavior; they do not claim terminal history ownership.
               writer.clear();
               frameState.lastOutput = "";
               frameState.lastOutputToRender = "";
             }
-            lastTerminalWidth = currentWidth;
-            lastTerminalRows = currentRows;
-
             commit();
+            lastPaintedTerminalWidth = currentWidth;
+            lastPaintedTerminalRows = currentRows;
+          };
+        };
+
+        let resizeRefreshRunning = false;
+        const refreshPendingResize = async (): Promise<void> => {
+          if (resizeRefreshRunning) return;
+          resizeRefreshRunning = true;
+          let preparedPaint: (() => void) | null = null;
+          try {
+            while (
+              !teardownStarted &&
+              !terminalSuspended &&
+              resizeHandledGeneration < resizeEventGeneration
+            ) {
+              const observedGeneration = resizeEventGeneration;
+              resizePaintPending = true;
+              const nextPaint = runLifecycleTransaction(() => prepareDimensionUpdate(false, false));
+              if (nextPaint) {
+                preparedPaint = nextPaint;
+                await nextTick();
+              }
+
+              if (teardownStarted || terminalSuspended) break;
+              if (observedGeneration !== resizeEventGeneration) continue;
+
+              if (preparedPaint) {
+                runLifecycleTransaction(preparedPaint);
+                preparedPaint = null;
+              }
+              resizeHandledGeneration = observedGeneration;
+            }
+          } catch (error) {
+            resizeHandledGeneration = resizeEventGeneration;
+            if (!teardownStarted) {
+              appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
+            }
+          } finally {
+            resizePaintPending = false;
+            resizeRefreshRunning = false;
+            if (
+              !teardownStarted &&
+              !terminalSuspended &&
+              resizeHandledGeneration < resizeEventGeneration
+            ) {
+              requestPendingResizeRefresh();
+            }
+          }
+        };
+        requestPendingResizeRefresh = () => {
+          if (
+            resizeHandledGeneration >= resizeEventGeneration ||
+            resizeRefreshRunning ||
+            teardownStarted
+          )
+            return;
+          const refresh = refreshPendingResize();
+          mountedResizeRefresh = refresh;
+          void refresh.then(() => {
+            if (mountedResizeRefresh === refresh) mountedResizeRefresh = null;
           });
         };
-        const onResize = () => updateDimensionsAndCommit(false);
-        resumeSurfaceCommit = () => updateDimensionsAndCommit(true);
+        const onResize = () => {
+          resizeEventGeneration++;
+          requestPendingResizeRefresh();
+        };
+        prepareResumeSurface = () => prepareDimensionUpdate(true, true);
         stdout.on("resize", onResize);
         mountedResizeHandler = onResize;
       }
@@ -2251,6 +2428,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   async function waitUntilRenderFlush(): Promise<void> {
     const stream = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
     const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
+
+    // A resize updates the public dimensions first, waits for Vue consumers,
+    // then performs one authoritative paint outside the normal throttle. Wait
+    // through the latest coalesced resize before inspecting the scheduler.
+    while (mountedResizeRefresh) await mountedResizeRefresh;
 
     // Flush any pending OR scheduled render. Gating on hasPending() alone
     // misses the window after schedule() queues a commit but before the

@@ -86,7 +86,6 @@ test("resolves one dimensions snapshot with source provenance", () => {
   expect(resolveLiveDimensions({ isTTY: true, columns: 120, rows: 40 }, detected80x24)).toEqual({
     terminal: { columns: 120, rows: 40 },
     layout: { columns: 120, rows: null },
-    legacyWindowRows: 40,
   });
 
   expect(
@@ -94,21 +93,18 @@ test("resolves one dimensions snapshot with source provenance", () => {
   ).toEqual({
     terminal: { columns: 80, rows: 24 },
     layout: { columns: 80, rows: null },
-    legacyWindowRows: 24,
   });
 
   expect(resolveLiveDimensions({ isTTY: true, columns: 0, rows: Number.NaN }, unavailable)).toEqual(
     {
       terminal: null,
       layout: { columns: 80, rows: null },
-      legacyWindowRows: 24,
     },
   );
 
   expect(resolveLiveDimensions({ isTTY: false, columns: 120, rows: 40 }, detected80x24)).toEqual({
     terminal: null,
     layout: { columns: 120, rows: null },
-    legacyWindowRows: 40,
   });
 });
 
@@ -240,7 +236,6 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
   service.updateDimensions({
     terminal: { columns: 70, rows: 20 },
     layout: { columns: 70, rows: 20 },
-    legacyWindowRows: 20,
   });
 
   expect(service.session).toBe(session);
@@ -248,20 +243,15 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
     terminal: { columns: 70, rows: 20 },
     layout: { columns: 70, rows: 20 },
   });
-  expect(service.legacyWindowRows.value).toBe(20);
-
-  service.updateElementHitTesting(false);
-  expect(session.capabilities.elementHitTesting).toBe(false);
+  expect(session.capabilities.elementHitTesting).toBe(true);
 
   service.dispose();
   service.updateDimensions({
     terminal: { columns: 60, rows: 10 },
     layout: { columns: 60, rows: 10 },
-    legacyWindowRows: 10,
   });
-  service.updateElementHitTesting(true);
   expect(session.dimensions.layout).toEqual({ columns: 70, rows: 20 });
-  expect(session.capabilities.elementHitTesting).toBe(false);
+  expect(session.capabilities.elementHitTesting).toBe(true);
 });
 
 test.each(["visual", "screen-reader"] as const)(
@@ -281,8 +271,6 @@ test.each(["visual", "screen-reader"] as const)(
         suspension: false,
       },
     });
-    expect(service.legacyWindowRows.value).toBe(24);
-
     service.dispose();
     expect(service.session).toBe(session);
     expect(session.dimensions.layout).toEqual({ columns: 37, rows: null });

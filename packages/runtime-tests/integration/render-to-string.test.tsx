@@ -1,6 +1,6 @@
 import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
 import chalk from "chalk";
-import { describe, test, expect, vi } from "vite-plus/test";
+import { describe, test, expect } from "vite-plus/test";
 import {
   renderToString,
   Box,
@@ -17,16 +17,14 @@ import {
   useStdout,
   useStderr,
   useCursor,
+  useLayoutSize,
   usePaste,
-  useWindowSize,
+  useRenderSession,
   useAnimation,
   useBoxMetrics,
+  type RenderSession,
 } from "@vue-tui/runtime";
-import {
-  renderToStringWithScreenReader,
-  useInternalRenderSession,
-  type InternalRenderSessionSnapshot,
-} from "@vue-tui/runtime/internal";
+import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -94,9 +92,9 @@ describe("renderToString", () => {
     ["visual", renderToString],
     ["screen-reader", renderToStringWithScreenReader],
   ] as const)("provides one truthful %s string session", (presentation, renderDocument) => {
-    let captured: InternalRenderSessionSnapshot | undefined;
+    let captured: RenderSession | undefined;
     const App = defineComponent(() => {
-      captured = useInternalRenderSession().session as InternalRenderSessionSnapshot;
+      captured = useRenderSession();
       return () => <Text>session</Text>;
     });
 
@@ -802,7 +800,7 @@ describe("renderToString", () => {
   // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, usePaste, useWindowSize, useAnimation, useBoxMetrics — so that
+  // useCursor, usePaste, useAnimation, useBoxMetrics — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -833,23 +831,16 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useWindowSize reads the document width from the shared session", () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    test("useLayoutSize reads the unbounded document layout from the shared session", () => {
       const App = defineComponent(() => {
-        const { columns, rows } = useWindowSize();
+        const { columns, rows } = useLayoutSize();
         return () => (
           <Text>
-            {columns.value}x{rows.value}
+            {columns.value}x{rows.value ?? "unbounded"}
           </Text>
         );
       });
-      try {
-        const output = renderToString(App, { columns: 13 });
-        expect(output).toBe("13x24");
-        expect(warn).not.toHaveBeenCalled();
-      } finally {
-        warn.mockRestore();
-      }
+      expect(renderToString(App, { columns: 13 })).toBe("13xunbounded");
     });
 
     test("useAnimation does not throw in renderToString (frame frozen at 0)", () => {
@@ -881,12 +872,11 @@ describe("renderToString", () => {
       expect(output).toContain("metrics");
     });
 
-    test("all five terminal composables together render to a string without throwing", () => {
+    test("all four terminal composables together render to a string without throwing", () => {
       const App = defineComponent(() => {
         const { setCursorPosition } = useCursor();
         setCursorPosition({ x: 1, y: 0 });
         usePaste(() => {});
-        useWindowSize();
         const { frame } = useAnimation({ interval: 30 });
         const boxRef = shallowRef(null);
         useBoxMetrics(boxRef);

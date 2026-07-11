@@ -29,7 +29,9 @@ export function makeFakeStdin(options: { isTTY?: boolean } = {}): {
   const s = new PassThrough() as unknown as NodeJS.ReadStream;
   Object.assign(s, {
     isTTY: options.isTTY ?? true,
-    setRawMode(this: NodeJS.ReadStream, mode: boolean) {
+    isRaw: false,
+    setRawMode(this: NodeJS.ReadStream & { isRaw: boolean }, mode: boolean) {
+      this.isRaw = mode;
       rawMode.current = mode;
       (rawMode.history as boolean[]).push(mode);
       return this;

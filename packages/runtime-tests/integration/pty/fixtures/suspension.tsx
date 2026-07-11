@@ -5,9 +5,9 @@ import {
   Text,
   useApp,
   useInput,
+  useLayoutSize,
   usePaste,
   useStderr,
-  useWindowSize,
 } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
@@ -17,7 +17,7 @@ const marker = mode === "fullscreen" ? "FULLSCREEN_SNAPSHOT" : "INLINE_SNAPSHOT"
 const App = defineComponent(() => {
   const { exit } = useApp();
   const { write } = useStderr();
-  const { columns, rows } = useWindowSize();
+  const { columns, rows } = useLayoutSize();
 
   useInput((input) => {
     if (input === "q") exit();
@@ -32,8 +32,8 @@ const App = defineComponent(() => {
 
   return () => (
     <Box flexDirection="column" width="100%" onClick={mode === "fullscreen" ? () => {} : undefined}>
-      <Text>{`${marker}:${columns.value}x${rows.value}`}</Text>
-      {Array.from({ length: Math.max(0, rows.value - 1) }, (_, index) => (
+      <Text>{`${marker}:${columns.value}x${rows.value ?? "unbounded"}`}</Text>
+      {Array.from({ length: Math.max(0, (rows.value ?? 1) - 1) }, (_, index) => (
         <Text key={index}>{`row-${String(index + 2).padStart(2, "0")}`}</Text>
       ))}
     </Box>

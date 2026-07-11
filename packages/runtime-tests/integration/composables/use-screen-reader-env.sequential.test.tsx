@@ -10,7 +10,7 @@
 
 import { defineComponent, nextTick } from "vue";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useIsScreenReaderEnabled } from "@vue-tui/runtime";
+import { Box, Text, createApp, useRenderSession } from "@vue-tui/runtime";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -73,12 +73,12 @@ test.sequential("INK_SCREEN_READER=true auto-detects SR mode at mount (no explic
   app.unmount();
 });
 
-test.sequential("useIsScreenReaderEnabled() returns true under INK_SCREEN_READER=true auto-detection", async () => {
+test.sequential("the render session reports screen-reader presentation under INK_SCREEN_READER=true auto-detection", async () => {
   process.env["INK_SCREEN_READER"] = "true";
 
-  let observed: boolean | undefined;
+  let observed: "visual" | "screen-reader" | undefined;
   const App = defineComponent(() => {
-    observed = useIsScreenReaderEnabled();
+    observed = useRenderSession().output.presentation;
     return () => <Text>flag</Text>;
   });
 
@@ -92,8 +92,7 @@ test.sequential("useIsScreenReaderEnabled() returns true under INK_SCREEN_READER
   await nextTick();
   await nextTick();
 
-  // The composable observed the env-var-derived SR flag as enabled.
-  expect(observed).toBe(true);
+  expect(observed).toBe("screen-reader");
 
   app.unmount();
 });
@@ -104,9 +103,9 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   // even when INK_SCREEN_READER=true.
   process.env["INK_SCREEN_READER"] = "true";
 
-  let observed: boolean | undefined;
+  let observed: "visual" | "screen-reader" | undefined;
   const App = defineComponent(() => {
-    observed = useIsScreenReaderEnabled();
+    observed = useRenderSession().output.presentation;
     return () => (
       <Box borderStyle="round">
         <Text>Visible</Text>
@@ -126,7 +125,7 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   await nextTick();
   await nextTick();
 
-  expect(observed).toBe(false);
+  expect(observed).toBe("visual");
   const content = getContentWrites(writes).join("");
   expect(content).toContain("Visible");
   // The visual (non-SR) path DOES emit border glyphs.

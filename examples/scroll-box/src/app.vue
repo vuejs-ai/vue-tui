@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { shallowRef, onMounted, onUnmounted } from "vue";
-import { Box, Text, useApp, useInput, useWindowSize } from "@vue-tui/runtime";
+import { Box, Text, useApp, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 
 const { exit } = useApp();
-const { rows } = useWindowSize();
+const { rows } = useLayoutSize();
 
 const box = shallowRef<ScrollBoxExpose>();
 
@@ -38,7 +38,7 @@ useInput((input, key) => {
 </script>
 
 <template>
-  <Box flexDirection="column" :height="rows">
+  <Box flexDirection="column" :height="rows ?? undefined">
     <Box borderStyle="round" :paddingX="1">
       <Text bold color="cyan">ScrollBox demo</Text>
       <Text dimColor> — ↑/↓ · Home/End · q to quit</Text>

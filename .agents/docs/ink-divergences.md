@@ -270,8 +270,9 @@ current-props model, or API conventions.
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
   follows this — `useFocusManager().activeId` is a single ref read as `.value`, while a
-  composable may instead return an **object of refs** (`useWindowSize()` returns
-  `{ columns, rows }`, read as `.columns.value` / `.rows.value`). An empty single-ref state
+  composable may instead return an **object of refs** (`useLayoutSize()` returns
+  `{ columns, rows }`, read as `.columns.value` / `.rows.value`, with `rows.value === null`
+  for an unbounded layout). An empty single-ref state
   holds `null` (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`),
   where Ink's plain value is `undefined`.
 - **Why:** the two frameworks track a changing value differently. React reads the newest
@@ -447,9 +448,10 @@ current-props model, or API conventions.
 - **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...). Where a
   composable's return type is exported under a name, the name always follows VueUse's
   `UseXReturn` convention (`UseAppReturn`, `UseStdinReturn`, `UseStdoutReturn`,
-  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`); the remaining composables
-  return `void`, plain `boolean`, or small unexported inline shapes — never an `XProps`
-  type. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
+  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`, `UseLayoutSizeReturn`); the remaining composables
+  return `void` or small unexported inline shapes — never an `XProps` type. `useRenderSession()`
+  returns the exported domain model `RenderSession` rather than adding a duplicate hook-specific
+  alias. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
   `ExtractPublicPropTypes`).
 - **Options types follow the same principle:** Ink names a composable's options type locally
   `Options` / `Props` and usually does **not** export it (e.g. `useAnimation`'s `Options` is
@@ -867,10 +869,9 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
-- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useWindowSize`,
-  `useFocus`, `useFocusManager`, `useInput`, `useMouseInput`, `usePaste`, `useCursor`, and
-  `useIsScreenReaderEnabled` **throw** when their context is absent ("... must be called
-  inside a vue-tui render tree"). `useBoxMetrics` and `useAnimation` do **not** throw:
+- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
+  `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useMouseInput`, `usePaste`, and
+  `useCursor` **throw** when their required context is absent. `useBoxMetrics` and `useAnimation` do **not** throw:
   they fall back. `useBoxMetrics` reports zero metrics, and `useAnimation` drives a
   standalone scheduler. See the additive entry.
 - **Why:** a composable used in the wrong place is a bug, and a thrown error names it at

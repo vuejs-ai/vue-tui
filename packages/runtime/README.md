@@ -91,7 +91,8 @@ useInput((input) => {
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
 | `useFocusManager()`             | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
-| `useWindowSize()`               | Reactive terminal dimensions — `{ columns, rows }`                                           |
+| `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities         |
+| `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |
 | `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
 | `useBoxMetrics(ref)`            | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
 | `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
@@ -100,7 +101,30 @@ useInput((input) => {
 | `useStdin()`                    | Access stdin stream and raw mode control                                                     |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
 | `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
-| `useIsScreenReaderEnabled()`    | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
+
+### Render-session facts
+
+`useRenderSession()` returns the authoritative readonly facts for the current render tree. The object identity stays stable for that tree. Its `host`, requested/effective `mode`, `output`, and `capabilities` are immutable session facts; `dimensions` is replaced atomically when the live host accepts a resize or refreshes dimensions after continuation. Use `session.output.presentation === "screen-reader"` when a component needs to adapt to the active linear presentation.
+
+| Session field         | Meaning                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `host`                | `"live"` for a mounted or modeled live app; `"string"` for synchronous document rendering               |
+| `mode`                | Requested mode, effective mode, and fallback for a live host; `null` for a string document              |
+| `output`              | Destination, dynamic-update cadence, and visual or screen-reader presentation                           |
+| `dimensions.terminal` | One coherent physical or modeled terminal size, or `null` when the host owns no terminal viewport       |
+| `dimensions.layout`   | Root layout columns and the numeric enforced row bound or `null` for unbounded height                   |
+| `capabilities`        | Immutable availability of stable origin, renderer-owned element hit testing, and coordinated suspension |
+
+`useLayoutSize()` derives readonly `columns` and `rows` refs from the same session, so destructuring preserves Vue reactivity. `rows.value` is `number | null`: a number is the enforced root layout bound, while `null` means the stream, transcript, or string document has no row bound. These composables must be called inside a vue-tui render tree.
+
+```ts
+import { useLayoutSize, useRenderSession } from "@vue-tui/runtime";
+
+const session = useRenderSession();
+const { columns, rows } = useLayoutSize();
+
+const isScreenReaderPresentation = session.output.presentation === "screen-reader";
+```
 
 ## App Lifecycle
 
@@ -127,7 +151,7 @@ Before its first visible managed output, Inline advances to a fresh terminal row
 
 If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
-On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that the session acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes dimensions when available, otherwise keeps the last coherent size, starts a fresh Inline or transcript region or transactionally re-enters and repaints Fullscreen, then restores still-requested input modes. This does not reserve the Ctrl+Z input byte.
+On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that the session acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes the public session dimensions when available, otherwise keeps the last coherent size, starts a fresh Inline or transcript region, transactionally re-enters and repaints Fullscreen, or repaints a live stream using its refreshed unbounded layout, then restores still-requested input modes. This does not reserve the Ctrl+Z input byte.
 
 Normal Inline output remains on the main screen. Normal Fullscreen exit restores the previous main screen and does not replay the last viewport. Fatal exit is different: a durably painted Inline or transcript error remains visible, with a sanitized stderr report when that rich error was clipped, stdout was lost, or its first physical write failed; Fullscreen restores first and then writes the report to stderr. Final-stream fatal exit never prints a stale successful dynamic frame and writes the error to stderr.
 

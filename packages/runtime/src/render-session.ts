@@ -1,22 +1,17 @@
-import {
-  inject,
-  readonly,
-  shallowReactive,
-  shallowRef,
-  type DeepReadonly,
-  type InjectionKey,
-  type ShallowRef,
-} from "vue";
+import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
 import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
 
+/** The terminal screen model requested when an application mounts. */
 export type RenderMode = "inline" | "fullscreen";
 export type RenderPresentation = "visual" | "screen-reader";
 
+/** A terminal or deliberately modeled terminal's character-cell dimensions. */
 export interface RenderSize {
   readonly columns: number;
   readonly rows: number;
 }
 
+/** The root area the renderer promises to lay out. `rows: null` is unbounded. */
 export interface RenderLayoutSize {
   readonly columns: number;
   readonly rows: number | null;
@@ -27,16 +22,9 @@ export interface RenderDimensions {
   readonly layout: RenderLayoutSize;
 }
 
-export interface ResolvedLiveDimensions extends RenderDimensions {
-  /**
-   * Temporary numeric row projection for the current useWindowSize() API.
-   * It is deliberately not part of the future public render-session facts:
-   * Visual Inline layout rows are the terminal's enforced maximum; transcript
-   * and stream surfaces remain unbounded.
-   */
-  readonly legacyWindowRows: number;
-}
+export type ResolvedLiveDimensions = RenderDimensions;
 
+/** The requested mode, the mode actually acquired, and any fallback reason. */
 export type RenderModeResolution =
   | {
       readonly requested: "inline";
@@ -77,13 +65,16 @@ export interface StringRenderOutput {
   readonly presentation: RenderPresentation;
 }
 
+/** Where output goes, when dynamic frames are emitted, and how they are presented. */
+export type RenderOutput = LiveRenderOutput | StringRenderOutput;
+
 export interface RenderCapabilities {
   readonly stableOrigin: boolean;
   readonly elementHitTesting: boolean;
   readonly suspension: boolean;
 }
 
-export interface InternalLiveRenderSessionSnapshot {
+export interface LiveRenderSession {
   readonly host: "live";
   readonly mode: RenderModeResolution;
   readonly output: LiveRenderOutput;
@@ -91,7 +82,7 @@ export interface InternalLiveRenderSessionSnapshot {
   readonly capabilities: RenderCapabilities;
 }
 
-export interface InternalStringRenderSessionSnapshot {
+export interface StringRenderSession {
   readonly host: "string";
   readonly mode: null;
   readonly output: StringRenderOutput;
@@ -109,9 +100,12 @@ export interface InternalStringRenderSessionSnapshot {
   };
 }
 
-export type InternalRenderSessionSnapshot =
-  | InternalLiveRenderSessionSnapshot
-  | InternalStringRenderSessionSnapshot;
+/** Readonly reactive facts for one live or synchronous string render tree. */
+export type RenderSession = LiveRenderSession | StringRenderSession;
+
+export type InternalLiveRenderSessionSnapshot = LiveRenderSession;
+export type InternalStringRenderSessionSnapshot = StringRenderSession;
+export type InternalRenderSessionSnapshot = RenderSession;
 
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
@@ -213,12 +207,10 @@ export function resolveLiveDimensions(
   // claim the result as an addressable viewport.
   const terminal = stdout.isTTY ? (stdoutSize ?? probeSize) : null;
   const layoutColumns = terminal?.columns ?? stdoutColumns ?? probeColumns ?? 80;
-  const legacyWindowRows = terminal?.rows ?? stdoutRows ?? probeRows ?? 24;
 
   return {
     terminal,
     layout: { columns: layoutColumns, rows: null },
-    legacyWindowRows,
   };
 }
 
@@ -339,7 +331,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   const terminalBoundedDimensions: ResolvedLiveDimensions = {
     terminal: dimensions.terminal,
     layout: dimensions.terminal,
-    legacyWindowRows: dimensions.legacyWindowRows,
   };
 
   if (input.requestedMode === "fullscreen") {
@@ -382,24 +373,18 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   };
 }
 
-type MutableLiveRenderSession = Omit<
-  InternalLiveRenderSessionSnapshot,
-  "dimensions" | "capabilities"
-> & {
+type MutableLiveRenderSession = Omit<InternalLiveRenderSessionSnapshot, "dimensions"> & {
   dimensions: RenderDimensions;
-  capabilities: RenderCapabilities;
 };
 
 interface InternalRenderSessionServiceBase {
   readonly session: DeepReadonly<InternalRenderSessionSnapshot>;
-  readonly legacyWindowRows: Readonly<ShallowRef<number>>;
   dispose(): void;
 }
 
 export interface InternalLiveRenderSessionService extends InternalRenderSessionServiceBase {
   readonly session: DeepReadonly<InternalLiveRenderSessionSnapshot>;
   updateDimensions(next: ResolvedLiveDimensions): void;
-  updateElementHitTesting(value: boolean): void;
 }
 
 export interface InternalStringRenderSessionService extends InternalRenderSessionServiceBase {
@@ -428,21 +413,13 @@ export function createLiveRenderSessionService(
     dimensions: frozenDimensions(initial.dimensions),
     capabilities: Object.freeze({ ...initial.capabilities }),
   });
-  const legacyWindowRows = shallowRef(surface.dimensions.legacyWindowRows);
-  const publicLegacyWindowRows = readonly(legacyWindowRows);
   let disposed = false;
 
   return {
     session: readonly(state) as DeepReadonly<InternalLiveRenderSessionSnapshot>,
-    legacyWindowRows: publicLegacyWindowRows,
     updateDimensions(next) {
       if (disposed) return;
       state.dimensions = frozenDimensions(next);
-      legacyWindowRows.value = next.legacyWindowRows;
-    },
-    updateElementHitTesting(value) {
-      if (disposed || state.capabilities.elementHitTesting === value) return;
-      state.capabilities = Object.freeze({ ...state.capabilities, elementHitTesting: value });
     },
     dispose() {
       disposed = true;
@@ -472,13 +449,8 @@ export function createStringRenderSessionService(options: {
       suspension: false,
     }),
   });
-  // useWindowSize() remains public until F1.8 and still requires a numeric row
-  // value. A document has no bounded rows, so keep the deliberate 24-row value
-  // as a temporary projection without placing it in the truthful session.
-  const legacyWindowRows = readonly(shallowRef(24));
   return {
     session: readonly(state) as DeepReadonly<InternalStringRenderSessionSnapshot>,
-    legacyWindowRows,
     dispose() {
       // The readonly snapshot remains valid after the synchronous tree is gone.
     },

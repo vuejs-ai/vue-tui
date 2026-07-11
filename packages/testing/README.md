@@ -171,7 +171,9 @@ try {
 
 Test-only observation remains on `RenderResult`; it does not change the component's `session.host`.
 
-The deterministic host reports `session.capabilities.suspension: true` for every modeled live surface. This is a host-lifecycle capability, not a claim that the selected output owns a terminal screen.
+Components read this same object through the public `useRenderSession()` composable and can use `useLayoutSize()` for destructurable readonly `columns` and `rows` refs. `rows` is `null` for an unbounded stream or screen-reader transcript and numeric for a bounded visual TTY layout. The modeled `mode`, `output`, and `capabilities` are immutable for one render session; resize and continuation update only its dimensions.
+
+The deterministic host reports `session.capabilities.suspension: true` for every modeled live surface. This is an immutable host-lifecycle capability, not a claim that the selected output owns a terminal screen.
 
 ### `frames`
 
@@ -225,10 +227,10 @@ interface ScreenSnapshot {
 | `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
 | `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering                                               |
 | `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
-| `terminal.resume()`                  | Establishes a fresh Inline or transcript region or re-enters and repaints Fullscreen at the current dimensions, then reacquires requested input modes               |
+| `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline/transcript region, Fullscreen viewport, or live stream before reacquiring requested input modes  |
 | `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                     |
 
-The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; the session dimensions and terminal surface are refreshed by `terminal.resume()`.
+The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes the public session dimensions before repainting every live-update surface, including row-unbounded live streams, and then reacquires requested input modes. Final-output streams have no live frame to repaint.
 
 ### Lifecycle methods
 

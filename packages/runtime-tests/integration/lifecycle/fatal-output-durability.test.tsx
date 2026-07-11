@@ -231,8 +231,8 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     liveUpdates: true,
     rawMode: "auto",
     patchConsole: false,
-    // Keep the error repaint pending so the resize event below can drive it
-    // synchronously and the injected stream failure is observable by the test.
+    // Keep the normal error repaint pending so the resize render barrier below
+    // owns the first physical attempt after Vue produces the overview.
     maxFps: 1,
     exitOnCtrlC: false,
   });
@@ -240,18 +240,17 @@ test("an Inline boundary error falls back to stderr when its first frame write t
   try {
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
-    trigger.value = true;
-    await nextTick();
 
     failErrorFrame = true;
-    expect(() => stdout.emit("resize")).toThrow("injected error-frame write failure");
-    app.unmount();
+    trigger.value = true;
+    stdout.emit("resize");
 
     await expect(exited).rejects.toBe(fatal);
     const durableError = stripAnsi(stderrCapture.chunks.join(""));
     expect(durableError).toContain(marker);
     expect(durableError.split(marker)).toHaveLength(2);
   } finally {
+    app.unmount();
     stdin.destroy();
     stdout.destroy();
     stderr.destroy();

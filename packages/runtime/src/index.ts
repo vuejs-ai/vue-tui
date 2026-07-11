@@ -91,9 +91,17 @@ export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
-export { useWindowSize, type WindowSize } from "./composables/useWindowSize.ts";
+export { useLayoutSize, type UseLayoutSizeReturn } from "./composables/useLayoutSize.ts";
+export { useRenderSession } from "./composables/useRenderSession.ts";
+export type {
+  RenderLayoutSize,
+  RenderMode,
+  RenderModeResolution,
+  RenderOutput,
+  RenderSession,
+  RenderSize,
+} from "./render-session.ts";
 export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
-export { useIsScreenReaderEnabled } from "./composables/useIsScreenReaderEnabled.ts";
 export {
   useAnimation,
   type UseAnimationOptions,

@@ -1,12 +1,9 @@
 // Type-level guarantees for the public *named* type surface.
 //
-// vue-tui tracks Ink, and Ink re-exports its component prop types and a couple of
-// framework-neutral data shapes under stable names. These names (BoxProps, TextProps,
-// …, WindowSize, CursorPosition) have nothing to do with React vs Vue — a <Box> has
-// props in Vue exactly as in React — so vue-tui re-exports them too, letting consumers
-// name a component's props the same way they would in Ink. This is parity, not a
-// divergence, so it is deliberately absent from `.agents/docs/ink-divergences.md` (which
-// records only divergences); this test is the guard that the names stay aligned.
+// Component props and framework-neutral cursor data retain the stable names that
+// vue-tui shares with Ink. The render-session types below are vue-tui's own truthful
+// host/surface contract. This test guards both groups without treating the session
+// design as Ink parity.
 //
 // These assertions are erased at runtime; the real gate is `tsc --noEmit` (the package's
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
@@ -24,8 +21,10 @@ import {
   useApp,
   useDraggable,
   useInput,
+  useLayoutSize,
   useMouseInput,
   usePaste,
+  useRenderSession,
   useStdin,
   useStdout,
   useStderr,
@@ -57,7 +56,13 @@ import type {
   UseDraggablePosition,
   UseDraggableReturn,
   UseDraggableTarget,
-  WindowSize,
+  RenderLayoutSize,
+  RenderMode,
+  RenderModeResolution,
+  RenderOutput,
+  RenderSession,
+  RenderSize,
+  UseLayoutSizeReturn,
   CursorPosition,
   UseAppReturn,
   UseStdinReturn,
@@ -129,8 +134,109 @@ expectTypeOf<TransformProps["transform"]>().toEqualTypeOf<
 expectTypeOf<NewlineProps["count"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<keyof SpacerProps>().toEqualTypeOf<never>();
 
-// Framework-neutral data shapes, mirrored from Ink exactly.
-expectTypeOf<WindowSize>().toEqualTypeOf<{ readonly columns: number; readonly rows: number }>();
+// Public render-session facts and projections.
+expectTypeOf<RenderMode>().toEqualTypeOf<"inline" | "fullscreen">();
+expectTypeOf<RenderSize>().toEqualTypeOf<{
+  readonly columns: number;
+  readonly rows: number;
+}>();
+expectTypeOf<RenderLayoutSize>().toEqualTypeOf<{
+  readonly columns: number;
+  readonly rows: number | null;
+}>();
+expectTypeOf<RenderModeResolution>().toEqualTypeOf<
+  | { readonly requested: "inline"; readonly effective: "inline"; readonly fallback: null }
+  | { readonly requested: "fullscreen"; readonly effective: "fullscreen"; readonly fallback: null }
+  | {
+      readonly requested: "fullscreen";
+      readonly effective: "inline";
+      readonly fallback: "screen-reader-transcript";
+    }
+  | {
+      readonly requested: RenderMode;
+      readonly effective: null;
+      readonly fallback: "live-updates-disabled" | "stdout-not-tty" | "terminal-size-unavailable";
+    }
+>();
+expectTypeOf<RenderOutput>().toEqualTypeOf<
+  | {
+      readonly destination: "terminal";
+      readonly dynamicUpdates: "live";
+      readonly presentation: "visual" | "screen-reader";
+    }
+  | {
+      readonly destination: "stream";
+      readonly dynamicUpdates: "live" | "at-teardown";
+      readonly presentation: "visual" | "screen-reader";
+    }
+  | {
+      readonly destination: "document";
+      readonly dynamicUpdates: "none";
+      readonly presentation: "visual" | "screen-reader";
+    }
+>();
+expectTypeOf<ReturnType<typeof useRenderSession>>().toEqualTypeOf<RenderSession>();
+expectTypeOf<UseLayoutSizeReturn>().toEqualTypeOf<{
+  readonly columns: Readonly<Ref<number>>;
+  readonly rows: Readonly<Ref<number | null>>;
+}>();
+expectTypeOf<ReturnType<typeof useLayoutSize>>().toEqualTypeOf<UseLayoutSizeReturn>();
+
+declare const session: RenderSession;
+if (session.host === "string") {
+  expectTypeOf(session.mode).toEqualTypeOf<null>();
+  expectTypeOf(session.output.destination).toEqualTypeOf<"document">();
+  expectTypeOf(session.output.dynamicUpdates).toEqualTypeOf<"none">();
+  expectTypeOf(session.dimensions.terminal).toEqualTypeOf<null>();
+  expectTypeOf(session.dimensions.layout.rows).toEqualTypeOf<null>();
+  expectTypeOf(session.capabilities.stableOrigin).toEqualTypeOf<false>();
+} else {
+  expectTypeOf(session.mode).toEqualTypeOf<RenderModeResolution>();
+  expectTypeOf(session.output.destination).toEqualTypeOf<"terminal" | "stream">();
+  expectTypeOf(session.dimensions.terminal).toEqualTypeOf<RenderSize | null>();
+  expectTypeOf(session.dimensions.layout).toEqualTypeOf<RenderLayoutSize>();
+}
+
+declare const resolution: RenderModeResolution;
+if (resolution.effective === "fullscreen") {
+  expectTypeOf(resolution.requested).toEqualTypeOf<"fullscreen">();
+  expectTypeOf(resolution.fallback).toEqualTypeOf<null>();
+} else if (resolution.fallback === "screen-reader-transcript") {
+  expectTypeOf(resolution.requested).toEqualTypeOf<"fullscreen">();
+  expectTypeOf(resolution.effective).toEqualTypeOf<"inline">();
+}
+
+const impossibleInlineFallback: RenderModeResolution = {
+  requested: "inline",
+  effective: "inline",
+  // @ts-expect-error Inline requests cannot carry a Fullscreen-only transcript fallback.
+  fallback: "screen-reader-transcript",
+};
+const impossibleStreamMode: RenderModeResolution = {
+  requested: "fullscreen",
+  effective: "fullscreen",
+  // @ts-expect-error A stream fallback cannot claim an effective terminal mode.
+  fallback: "stdout-not-tty",
+};
+void impossibleInlineFallback;
+void impossibleStreamMode;
+
+declare const size: RenderSize;
+declare const layoutSize: RenderLayoutSize;
+declare const layoutProjection: UseLayoutSizeReturn;
+// @ts-expect-error Render-session facts are readonly.
+size.columns = 40;
+// @ts-expect-error Render-session facts are readonly.
+layoutSize.rows = 24;
+// @ts-expect-error Session facts cannot be mutated through the public union.
+session.dimensions.layout.columns = 40;
+// @ts-expect-error The derived layout refs are readonly.
+layoutProjection.rows.value = 24;
+
+// @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
+export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
+
+// Framework-neutral cursor data shape, mirrored from Ink exactly.
 expectTypeOf<CursorPosition>().toEqualTypeOf<{ x: number; y: number }>();
 
 // Composable return types: named per VueUse's `UseXReturn` convention, and shape-locked to

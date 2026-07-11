@@ -1,19 +1,18 @@
 import { PassThrough } from "node:stream";
-import { nextTick, readonly, type Component, type DeepReadonly } from "vue";
-import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
+import { nextTick, readonly, type Component } from "vue";
+import { createApp, type MountOptions, type RenderSession, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_RENDER_OBSERVER,
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
   createManualSuspensionHost,
-  type InternalLiveRenderSessionSnapshot,
   type InternalRenderObserver,
 } from "@vue-tui/runtime/internal";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";
 
-export type TestRenderSession = DeepReadonly<InternalLiveRenderSessionSnapshot>;
+export type TestRenderSession = Extract<RenderSession, { readonly host: "live" }>;
 
 export interface TestHost {
   /** Requested production screen model. @default "inline" */
@@ -390,12 +389,12 @@ export async function render(
     },
     async suspend() {
       assertActive();
-      suspensionHost.suspend();
+      await suspensionHost.suspend();
       await emulator.flush();
     },
     async resume() {
       assertActive();
-      suspensionHost.resume();
+      await suspensionHost.resume();
       await nextTick();
       await app.waitUntilRenderFlush();
       await emulator.flush();

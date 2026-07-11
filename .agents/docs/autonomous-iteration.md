@@ -10,22 +10,23 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Implement and close F1.8, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint), by publishing the completed readonly [`useRenderSession()` contract](./render-session.md) and its `useLayoutSize()` projection without implementing input, focus, geometry, pointer, scroll-composition, or selection foundations early. F1.7 has closed the lifecycle behavior behind the internal service; this checkpoint makes the same facts a deliberate supported API across live, deterministic-test, and string hosts and removes the superseded fact hooks completely.
+Advance F2, rendered-target lifetime, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint). A behavior attached to a Vue ref must become live only while the referenced renderer element exists, follow a replacement target exactly once, and release on removal or disposal. Establish this as one internal lifecycle contract before focus, geometry, caret, or pointer define their own incompatible answers. Do not publish a generic target composable during the evidence phase.
 
-1. audit the selected declaration against the internal resolver, every exhaustive host row, current root exports, public type guards, repository consumers, examples, and packed declarations before changing the public surface;
-2. export `useRenderSession()`, `useLayoutSize()`, and their named public types through the supported runtime entry point while keeping the mutable provider, host adapters, terminal controllers, and internal injection keys private;
-3. replace `useWindowSize()` with `useLayoutSize()` and remove `useIsScreenReaderEnabled()` from code, exports, docs, examples, tests, and packed types; do not add aliases or compatibility shims while the project is experimental;
-4. prove readonly behavior, stable identity, reactive resize, every mode/output/presentation/capability branch, setup misuse, teardown snapshots, template inference, TSX narrowing, deterministic testing, and string rendering through focused public and type tests;
-5. close focused, full-repository, real-PTY, visual-controller, terminal-restoration, package-content, clean-consumer, fresh-CI, and independent-review gates; then commit and open one draft review boundary without adding a VOUCHED stamp;
-6. mark F1 Done and F2 Active only after the implementation, supported exports, shipped documentation, packed consumer, and every closure gate agree.
+1. audit every current behavior that registers against a renderer element or component ref, including `useDraggable`, focus registration, measurement, cursor placement, mouse hit targets, and issue #250; record the actual registration and cleanup owners rather than assuming setup-scope lifetime is sufficient;
+2. state one representative coding-agent journey and one finder, monitor, or workbench journey whose conditional or retargeted element exposes the same lifetime failure;
+3. reproduce null-to-element insertion, `v-if` removal, element-to-element retargeting, component unmount, scope disposal, and HMR with focused red tests before selecting the seam;
+4. implement the smallest internal registration contract that observes the current rendered target, serializes detach-before-attach, is idempotent, and exposes no `TuiNode`, Yoga node, terminal controller, focus semantics, geometry semantics, or pointer event API publicly;
+5. migrate two real internal registration adapters to the same seam and prove that neither leaves a stale registration nor attaches twice across every lifecycle transition;
+6. run focused lifecycle and type tests, then full `vp run ready`; add real-PTY or visual-controller evidence only when the chosen adapters make a terminal-visible claim; run a fresh `CI=true vp run ci` when behavior depends on task ordering or HMR;
+7. update the F2 contract and dispositions from evidence, commit one coherent review boundary, and open a draft stacked PR without adding a VOUCHED stamp.
 
-F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, F1.4 is complete with the verified private live behavior source, F1.5 is complete with verified deterministic-test and string-host authority, F1.6 is complete with verified Inline history/overflow ownership, and F1.7 is complete with exact lifecycle ownership, coordinated suspension/continuation, and clean/fatal output behavior. F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, change the selected session shape without new contradictory evidence, or activate F2 early.
+F1 is Done. Its public readonly render session, host matrix, Inline ownership, terminal lifecycle, package surface, and acceptance gates now agree across live, deterministic-test, and string hosts. F2 may consume those facts but must not reopen the two screen models, treat the Inline default as product hierarchy, or publish later input, focus, geometry, pointer, scroll-composition, or selection contracts early.
 
 ## Baseline for the current foundation
 
-- PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F1 must expose truthful session facts rather than redesign that backend.
+- PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F2 must treat that renderer behavior and F1's public session facts as established inputs.
 - Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose a sound target API from stale inputs.
-- Keep later foundations free of new public APIs while F1 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F2–F8 early.
+- Keep later foundations free of new public APIs while F2 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F3–F8 early or publishing a generic F2 target API before two real adapters establish the shared contract.
 
 ## Where work comes from
 
@@ -120,7 +121,7 @@ The comparison should record where behavior can share one public abstraction and
 
 ## Work after the current foundation
 
-The [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is the only ordered continuation. When F1 satisfies its definition of done, mark it Done and F2 Active in the same change; do not copy the remaining queue into this file. Independent bugs and external contributions continue to use the evidence rules above without changing foundation order.
+The [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is the only ordered continuation. When F2 satisfies its definition of done, mark it Done and F3 Active in the same change; do not copy the remaining queue into this file. Independent bugs and external contributions continue to use the evidence rules above without changing foundation order.
 
 ## Distillation returned after each run
 

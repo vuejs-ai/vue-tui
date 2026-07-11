@@ -2,6 +2,7 @@
 // `*.test-d.ts` name keeps the file out of the runtime Vitest suite.
 import { expectTypeOf } from "vite-plus/test";
 import { defineComponent } from "vue";
+import type { RenderSession } from "@vue-tui/runtime";
 import {
   render,
   type ContentFrame,
@@ -75,6 +76,9 @@ declare const screen: ScreenSnapshot;
 
 expectTypeOf(result.frames).toEqualTypeOf<readonly ContentFrame[]>();
 expectTypeOf(result.session).toEqualTypeOf<TestRenderSession>();
+expectTypeOf<TestRenderSession>().toEqualTypeOf<
+  Extract<RenderSession, { readonly host: "live" }>
+>();
 expectTypeOf(result.lastFrame()).toEqualTypeOf<string>();
 expectTypeOf(result.screen()).toEqualTypeOf<Promise<ScreenSnapshot>>();
 expectTypeOf(result.terminal.suspend()).toEqualTypeOf<Promise<void>>();

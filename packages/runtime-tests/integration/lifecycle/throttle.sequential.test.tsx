@@ -415,9 +415,9 @@ test.sequential("unmount cancels pending throttled render when stdout is ended",
 });
 
 test.sequential("resize consumes a pending throttled commit without a second paint", async () => {
-  // Regression for issue #26: resize paints synchronously. Any trailing timer
-  // that represented the same pending tree must be cancelled, or it repaints a
-  // second time immediately afterwards.
+  // Regression for issue #26: resize bypasses the throttle after Vue has
+  // refreshed the host tree. Any trailing timer that represented the same
+  // pending tree must be cancelled, or it repaints a second time afterwards.
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const msg = shallowRef("A");
@@ -444,8 +444,9 @@ test.sequential("resize consumes a pending throttled commit without a second pai
 
     const beforeResize = writes.length;
     // A same-size resize event keeps the current physical baseline addressable,
-    // but still consumes the pending tree synchronously.
+    // but still consumes the pending tree at the resize render barrier.
     stdout.emit("resize");
+    await app.waitUntilRenderFlush();
     const afterResize = writes.length;
     expect(stripAnsi(writes.slice(beforeResize).join(""))).toContain("B");
 

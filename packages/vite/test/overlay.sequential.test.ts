@@ -30,6 +30,29 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
+  delete (globalThis as Record<string, unknown>).__VT_RENDER_SESSION__;
+});
+
+test("a script hot update preserves the render-session object", async () => {
+  const read = capture();
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: [vue(), vueTui()],
+  });
+  await server.listen();
+  await waitFor(read, "session=stable");
+
+  writeFileSync(
+    appVue,
+    origAppVue.replace('const label = "LABEL-A";', 'const label = "LABEL-B-HOT";'),
+  );
+  await waitFor(read, "LABEL-B-HOT");
+
+  const updatedOutput = read().slice(read().lastIndexOf("LABEL-B-HOT"));
+  expect(updatedOutput).toContain("session=stable");
+  expect(updatedOutput).not.toContain("session=changed");
 });
 
 test("a build error renders the in-process dev overlay", async () => {

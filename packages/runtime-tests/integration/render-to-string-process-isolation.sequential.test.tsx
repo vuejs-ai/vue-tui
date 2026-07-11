@@ -6,7 +6,7 @@ import {
   useStderr,
   useStdin,
   useStdout,
-  useWindowSize,
+  useLayoutSize,
 } from "@vue-tui/runtime";
 import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
 
@@ -38,7 +38,7 @@ test.sequential("both string hosts avoid process terminal streams", () => {
     useStdin();
     useStdout();
     useStderr();
-    const { columns } = useWindowSize();
+    const { columns } = useLayoutSize();
     return () => <Text>{columns.value}</Text>;
   });
 

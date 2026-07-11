@@ -104,7 +104,11 @@ describePosix("external suspension", () => {
       child.killNow("SIGCONT");
       await child.waitForOutput((output) => {
         const resumed = output.slice(continueOffset);
-        return resumed.includes("INLINE_SNAPSHOT:72x12");
+        return (
+          resumed.includes("INLINE_SNAPSHOT:72x12") &&
+          resumed.includes(ENABLE_PASTE) &&
+          resumed.includes(ENABLE_KITTY)
+        );
       });
 
       const resumedOutput = child.output.slice(continueOffset);
@@ -113,6 +117,10 @@ describePosix("external suspension", () => {
       expect(resumedOutput).toContain(ENABLE_KITTY);
       expectNoDestructiveInlineControl(resumedOutput);
 
+      // The final escape is written immediately before raw mode and the stdin
+      // listener are reacquired in the same synchronous continuation tail.
+      // Let that tail finish before using input as the end-to-end readiness check.
+      await delay(20);
       child.write("q");
       await child.waitForExit();
     } finally {
@@ -149,7 +157,14 @@ describePosix("external suspension", () => {
       child.killNow("SIGCONT");
       await child.waitForOutput((output) => {
         const resumed = output.slice(continueOffset);
-        return resumed.includes(ENTER_ALT_SCREEN) && resumed.includes("FULLSCREEN_SNAPSHOT:72x12");
+        return (
+          resumed.includes(ENTER_ALT_SCREEN) &&
+          resumed.includes("FULLSCREEN_SNAPSHOT:72x12") &&
+          resumed.includes(ENABLE_PASTE) &&
+          resumed.includes(ENABLE_KITTY) &&
+          resumed.includes(ENABLE_DRAG_MOUSE) &&
+          resumed.includes(ENABLE_SGR_MOUSE)
+        );
       });
 
       const resumedOutput = child.output.slice(continueOffset);
@@ -160,6 +175,7 @@ describePosix("external suspension", () => {
       expect(resumedOutput).toContain(ENABLE_DRAG_MOUSE);
       expect(resumedOutput).toContain(ENABLE_SGR_MOUSE);
 
+      await delay(20);
       child.write("q");
       await child.waitForExit();
       expect(child.output.slice(continueOffset)).toContain(EXIT_ALT_SCREEN);
