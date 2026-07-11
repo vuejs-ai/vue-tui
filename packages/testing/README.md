@@ -84,6 +84,8 @@ interface RenderOptions {
 
 `columns` and `rows` must be positive safe integers. They set both the modeled output dimensions and the emulator dimensions. `rows` still controls the emulator when `host.stdout` is `"stream"`, but a stream does not claim physical terminal rows in `session`.
 
+For a visual Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. Screen-reader and stream presentations remain row-unbounded. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
+
 ### Host options
 
 ```ts

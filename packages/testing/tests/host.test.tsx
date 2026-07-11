@@ -1,6 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Text, useStdout } from "@vue-tui/runtime";
+import { Box, Text, useStdout } from "@vue-tui/runtime";
 import {
   useInternalRenderSession,
   type InternalLiveRenderSessionSnapshot,
@@ -22,7 +22,7 @@ test("default host models a visual Inline TTY", async () => {
     output: { destination: "terminal", dynamicUpdates: "live", presentation: "visual" },
     dimensions: {
       terminal: { columns: 100, rows: 100 },
-      layout: { columns: 100, rows: null },
+      layout: { columns: 100, rows: 100 },
     },
     capabilities: {
       stableOrigin: false,
@@ -101,13 +101,61 @@ test("Fullscreen screen-reader request resolves to an Inline transcript", async 
     fallback: "screen-reader-transcript",
   });
   expect(result.session.output.presentation).toBe("screen-reader");
+  expect(result.session.dimensions.layout).toEqual({ columns: 100, rows: null });
   expect((await result.screen()).activeBuffer).toBe("normal");
+});
+
+test("Inline clamps tall dynamic output without padding short output", async () => {
+  const short = await render(() => <Text>short</Text>, { columns: 20, rows: 3 });
+  try {
+    expect(short.lastFrame({ raw: true })).toBe("short");
+  } finally {
+    short.dispose();
+  }
+
+  const tall = await render(
+    () => (
+      <Box height={5} flexShrink={0} flexDirection="column">
+        {Array.from({ length: 5 }, (_, index) => (
+          <Text key={index}>line {index + 1}</Text>
+        ))}
+      </Box>
+    ),
+    { columns: 20, rows: 3 },
+  );
+  try {
+    expect(tall.lastFrame()).toBe("line 1\nline 2\nline 3");
+  } finally {
+    tall.dispose();
+  }
+});
+
+test("Inline hard-clips a non-shrinking wide child before terminal wrapping", async () => {
+  const result = await render(
+    () => (
+      <Box width={10} flexShrink={0}>
+        <Text>abcdefghij</Text>
+      </Box>
+    ),
+    { columns: 5, rows: 2 },
+  );
+
+  try {
+    expect(result.lastFrame({ raw: true })).toBe("abcde");
+    expect((await result.screen()).lines.map((line) => line.trimEnd())).toEqual(["abcde", ""]);
+  } finally {
+    result.dispose();
+  }
 });
 
 test("resize updates the same session before the resulting frame is observed", async () => {
   const result = await render(() => {
     const session = useInternalRenderSession().session;
-    return <Text>{session.dimensions.layout.columns}</Text>;
+    return (
+      <Text>
+        {session.dimensions.layout.columns}x{session.dimensions.layout.rows}
+      </Text>
+    );
   });
   const session = result.session;
 
@@ -115,8 +163,8 @@ test("resize updates the same session before the resulting frame is observed", a
 
   expect(result.session).toBe(session);
   expect(session.dimensions.terminal).toEqual({ columns: 64, rows: 12 });
-  expect(session.dimensions.layout).toEqual({ columns: 64, rows: null });
-  expect(result.lastFrame()).toBe("64");
+  expect(session.dimensions.layout).toEqual({ columns: 64, rows: 12 });
+  expect(result.lastFrame()).toBe("64x12");
 });
 
 test("resize rejects invalid dimensions without partially changing the host", async () => {

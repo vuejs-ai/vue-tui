@@ -12,9 +12,9 @@ This fixed origin is what makes targeted mouse events reliable: Yoga layout coor
 
 ## Output outside the component tree
 
-`useStdout().write()`, `useStderr().write()`, and the default patched `console.*` remain observable on their configured streams. After such a write, vue-tui immediately clears and repaints the owned viewport, so the write cannot move the live surface away from its layout, cursor, or hit map.
+`useStdout().write()`, `useStderr().write()`, and the default patched `console.*` remain observable on their configured streams. On TTY destinations these coordinated helpers accept geometry-safe styled lines; redirected/non-TTY output remains byte-exact. After such a write, vue-tui immediately clears and repaints the owned viewport, so the write cannot move the live surface away from its layout, cursor, or hit map.
 
-Direct calls to `process.stdout.write()` or `process.stderr.write()` bypass vue-tui's output coordinator. The runtime cannot guarantee a fixed surface after bytes it does not receive; applications that need coordinated output must use the composables or leave console patching enabled.
+Direct calls to `process.stdout.write()` or `process.stderr.write()`, including writes through the raw streams returned by the composables, bypass vue-tui's output coordinator. The runtime cannot guarantee a fixed surface after bytes it does not receive; applications that need coordinated output must use the composable `write()` functions or leave console patching enabled.
 
 ## `<Static>` is an inline history primitive
 
@@ -24,7 +24,7 @@ Persistent fullscreen history belongs in ordinary reactive application state ren
 
 ## Boundaries
 
-- Inline rendering keeps the relative writer and terminal-owned scrollback semantics while F1.6 defines the exact ownership and overflow contract.
+- Inline rendering uses the F1.6 bounded relative-writer contract: terminal-owned history remains immutable, while only the current managed region is replaceable.
 - Screen-reader rendering remains a linear transcript on the main screen and resolves a Fullscreen request to effective Inline.
 - Deterministic tests observe structured content commits through an internal render observer and inspect terminal-visible state through a separate xterm screen. Observation does not alter Fullscreen repaint behavior; `maxFps: 0` changes scheduling only.
 - Resize recomputes the terminal-sized Yoga layout and repaints the fixed viewport synchronously.

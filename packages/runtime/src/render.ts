@@ -29,9 +29,10 @@ import { createCommitScheduler } from "./scheduler.ts";
 import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
+import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
-import { hideCursorEscape } from "./io/cursor-helpers.ts";
+import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
@@ -191,28 +192,10 @@ type RootProps = Record<string, unknown>;
 
 const FULLSCREEN_STATIC_WARNING =
   "[vue-tui] <Static> output is not retained in fullscreen mode because fullscreen owns a fixed viewport. Render persistent history inside the app (for example with ScrollBox), or use inline mode.\n";
-
-function shouldClearTerminalForFrame(opts: {
-  isTty: boolean;
-  viewportRows: number;
-  previousOutputHeight: number;
-  nextOutputHeight: number;
-  isUnmounting: boolean;
-}): boolean {
-  if (!opts.isTty) return false;
-  const hadPreviousFrame = opts.previousOutputHeight > 0;
-  const wasFullscreen = opts.previousOutputHeight >= opts.viewportRows;
-  const wasOverflowing = opts.previousOutputHeight > opts.viewportRows;
-  const isOverflowing = opts.nextOutputHeight > opts.viewportRows;
-  const isLeavingFullscreen = wasFullscreen && opts.nextOutputHeight < opts.viewportRows;
-  const shouldClearOnUnmount = opts.isUnmounting && wasFullscreen;
-  return (
-    wasOverflowing ||
-    (isOverflowing && hadPreviousFrame) ||
-    isLeavingFullscreen ||
-    shouldClearOnUnmount
-  );
-}
+// Screen-reader Inline can remain live without a coherent terminal row count.
+// A large relative move is clamped by terminal emulators at the bottom margin,
+// giving resize recovery a truthful bottom boundary without inventing 24 rows.
+const TERMINAL_BOTTOM_CLAMP_ROWS = 9999;
 
 function supportsTerminalMouse(): boolean {
   return process.env["TERM"] !== "dumb";
@@ -298,6 +281,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // own registration. null in production / when the dev integration is off.
   let mountedDevTeardown: (() => void) | null = null;
   let mountedGetLastOutput: (() => string) | null = null;
+  let mountedNeedsTerminalLineAdvance: (() => boolean) | null = null;
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedAnimationScheduler: ReturnType<typeof createAnimationScheduler> | null = null;
@@ -437,9 +421,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Cancel any pending trailing-edge timer first, then do a final
     // synchronous commit so the latest state is always flushed before
     // unmount (matching Ink ink.tsx:755-761).
-    // teardownStarted=true lets inline frames that fill the terminal run their
-    // existing clear-on-exit path. Fixed fullscreen repaints once more before
-    // the alternate screen is restored instead.
+    // teardownStarted=true lets the last Inline state render before its bounded
+    // region is left on the main screen. Fixed Fullscreen repaints once more
+    // before the alternate screen is restored instead.
     scheduledCommit = () => {};
     mountedScheduler?.cancel();
     // Prevent post-unmount app.clear() from writing to a torn-down stream.
@@ -510,7 +494,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const lastFrame = mountedGetLastOutput?.() ?? "";
       writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
     }
-    if (mountedWriter && mountedDynamicUpdatesLive && stdoutWritable) mountedWriter.done();
+    // A viewport-filling Inline frame intentionally has no trailing newline
+    // while it is live. Advance exactly once before restoring the cursor so a
+    // following shell prompt cannot append to the frame's final row. NEL moves
+    // to column zero even when the terminal does not translate LF to CRLF.
+    if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
+      // A declared application caret may leave the physical cursor above the
+      // bottom of either a short or full-height frame. Return to the writer's
+      // actual bottom before establishing the post-app line; otherwise the
+      // shell can overwrite retained application rows.
+      const returnToBottom = mountedWriter.getCursorReturnToBottom();
+      if (returnToBottom !== "") {
+        writeBestEffort(mountedAppContext.stdout, returnToBottom, sync);
+      }
+      if (mountedNeedsTerminalLineAdvance?.()) {
+        writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
+      }
+      mountedWriter.done();
+    }
     if (mountedAlternateScreen && mountedAppContext) {
       writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
       writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
@@ -544,6 +545,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     mountedRenderSession?.dispose();
     mountedRenderSession = null;
+    mountedNeedsTerminalLineAdvance = null;
     // Drop this app's full-reload registration so a stale teardown can't run on
     // the next reload. Identity-guarded inside unregisterDevApp: during a reload
     // the old app unregisters here before the new app registers.
@@ -724,6 +726,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // what the caller requested for input acquisition.
     const inputLifecycleActive = surface.liveUpdatesRequested;
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
+    const boundedInlineSurface =
+      surface.kind === "inline-terminal" && surface.session.output.presentation === "visual";
+    const inlineTerminalSurface = surface.kind === "inline-terminal";
     const targetedMouseInputAvailable =
       fixedFullscreenSurface &&
       supportsTerminalMouse() &&
@@ -744,12 +749,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (next.terminal === null) return null;
         return { ...next, layout: next.terminal };
       }
-      if (
-        surface.kind === "inline-terminal" &&
-        surface.session.output.presentation === "visual" &&
-        next.terminal === null
-      ) {
-        return null;
+      if (boundedInlineSurface) {
+        if (next.terminal === null) return null;
+        return { ...next, layout: next.terminal };
       }
       return next;
     }
@@ -771,19 +773,34 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Frame coordination state — tracks the last rendered output so
     // writeToStdout/writeToStderr can clear and restore the active frame.
-    // Frame state: lastOutput is the most recent rendered frame string,
-    // outputHeight is its line count (used for erase-lines on resize and
-    // screen-reader mode in future tasks), fullStaticOutput is the
-    // accumulated <Static> content.
+    // Frame state: lastOutput is the most recent rendered frame string and
+    // outputHeight is its line count (used by transcript erasure and lifecycle
+    // bookkeeping). Inline history is emitted once and is never accumulated for
+    // destructive whole-terminal replay.
     const frameState = {
       lastOutput: "",
       lastOutputToRender: "" as string | undefined,
       outputHeight: 0,
-      fullStaticOutput: "",
     };
+    let inlineRegionStarted = false;
     let warnedFullscreenStatic = false;
     let cursorPosition: CursorPosition | undefined;
     mountedGetLastOutput = () => frameState.lastOutput;
+    mountedNeedsTerminalLineAdvance = () =>
+      inlineTerminalSurface &&
+      frameState.lastOutputToRender !== undefined &&
+      frameState.lastOutputToRender !== "" &&
+      !frameState.lastOutputToRender.endsWith("\n");
+
+    function ensureInlineRegionStart() {
+      if (!inlineTerminalSurface || inlineRegionStarted) return;
+      // The runtime cannot know the caller's starting cursor column without an
+      // asynchronous terminal query. Start on a new physical row so later
+      // erase-line operations can never delete a pre-mount partial line. Delay
+      // this until the first visible write so an empty app emits no initial NEL.
+      stdout.write(nextLineEscape);
+      inlineRegionStarted = true;
+    }
 
     function restoreLastOutput() {
       if (!dynamicUpdatesLive) return;
@@ -791,12 +808,28 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // intent before restoring output after external stdout/stderr writes.
       writer.setCursorPosition(cursorPosition);
       // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
-      // the first content commit, the value the narrowing-resize path assigns
-      // (render.ts:1043), and what an empty screen-reader frame leaves — must fall
+      // the first content commit, the value the resize-boundary path assigns,
+      // and what an empty screen-reader frame leaves — must fall
       // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
       // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
       // empty string would pass through and restore nothing after an external write.
       writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+    }
+
+    function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
+      if (data !== "") ensureInlineRegionStart();
+      stream.write(data);
+      // Coordinated output becomes terminal-owned history before the dynamic
+      // region is restored. If the payload did not finish its row, NEL creates
+      // the line boundary without relying on the terminal's LF/CRLF mode.
+      if (
+        inlineTerminalSurface &&
+        data !== "" &&
+        !data.endsWith("\n") &&
+        (stream === stdout || Boolean(stream.isTTY))
+      ) {
+        stream.write(nextLineEscape);
+      }
     }
 
     function writeToStdout(data: string) {
@@ -804,16 +837,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // (e.g. a stray useStdout().write after unmount) cannot run
       // clear()/write/restore on an already-torn-down renderer.
       if (teardownStarted) return;
+      const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
+      if (outputData === "") return;
       if (fixedFullscreenSurface) {
-        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stdout.write(data) });
+        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stdout.write(outputData) });
         return;
       }
       if (isScreenReaderEnabled && dynamicUpdatesLive) {
-        repaintTranscript(() => stdout.write(data));
+        repaintTranscript(() => writeCommittedInlineOutput(stdout, outputData));
         return;
       }
       if (!dynamicUpdatesLive) {
-        stdout.write(data);
+        stdout.write(outputData);
         return;
       }
       // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
@@ -821,7 +856,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
       if (synchronize) stdout.write(bsu);
       writer.clear();
-      stdout.write(data);
+      writeCommittedInlineOutput(stdout, outputData);
       restoreLastOutput();
       if (synchronize) stdout.write(esu);
     }
@@ -830,16 +865,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Mirror Ink ink.tsx:702: return early after teardown so a late write
       // cannot corrupt the restored terminal state.
       if (teardownStarted) return;
+      const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
+      if (outputData === "") return;
       if (fixedFullscreenSurface) {
-        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stderr.write(data) });
+        repaintFullscreen(frameState.lastOutput, { writeBefore: () => stderr.write(outputData) });
         return;
       }
       if (isScreenReaderEnabled && dynamicUpdatesLive) {
-        repaintTranscript(() => stderr.write(data));
+        repaintTranscript(() => writeCommittedInlineOutput(stderr, outputData));
         return;
       }
       if (!dynamicUpdatesLive) {
-        stderr.write(data);
+        stderr.write(outputData);
         return;
       }
       // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
@@ -847,7 +884,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // actual data goes to stderr. The sync gate also uses stdout's isTTY.
       if (synchronize) stdout.write(bsu);
       writer.clear();
-      stderr.write(data);
+      writeCommittedInlineOutput(stderr, outputData);
       restoreLastOutput();
       if (synchronize) stdout.write(esu);
     }
@@ -1001,12 +1038,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       throw err;
     }
 
-    // Reset accumulated static output when the <Static> identity changes
-    // (unmount, remount via key change) so stale items are not replayed.
-    tuiRoot.onStaticChange = () => {
-      frameState.fullStaticOutput = "";
-    };
-
     const writer = createFrameWriter(stdout, {
       incremental: incrementalRendering,
     });
@@ -1038,18 +1069,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return;
       }
       writer.clear();
-      // cursor:false — leave the caret HIDDEN after clear() (Ink parity:
-      // ink.js clear() -> log.clear() then log.sync(...) where cursorDirty is
-      // already false, so its sync emits no caret). clear() erased the lines
-      // WITHOUT redrawing them, so re-asserting the persistent caret would float
-      // it on a now-blank screen. The declared position is NOT discarded (sync
-      // doesn't touch it), so the next real commit re-shows the caret normally.
-      // This is scoped to clear() ONLY: restoreLastOutput()'s writer.write()
-      // (the external-write path) still REDRAWS the content and re-shows the
-      // caret, so it must keep the default cursor:true behavior.
-      writer.sync(frameState.lastOutputToRender || frameState.lastOutput + "\n", {
-        cursor: false,
-      });
+      // The physical frame is now blank. Forget its row bookkeeping without
+      // writing anything: recording the erased frame as a live baseline would
+      // make a second clear/update walk upward into pre-app history. The logical
+      // frameState remains available for a coordinated write to restore later,
+      // while a real commit can paint it again from this owned origin.
+      writer.reset({ cursorDirty: false });
     };
     const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
 
@@ -1119,6 +1144,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return;
       }
 
+      if (output !== "" || hasStaticOutput || writer.isCursorDirty()) {
+        ensureInlineRegionStart();
+      }
+
       // A frame that fills or exceeds the viewport gets no trailing newline.
       // Only apply when writing to a real TTY — piped output always gets trailing newlines.
       const fillsViewport = isTty && outputHeight >= viewportRows;
@@ -1133,40 +1162,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // interactive frames are untouched — they still append "\n" as before.
       const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
 
-      const shouldClear = shouldClearTerminalForFrame({
-        isTty,
-        viewportRows,
-        previousOutputHeight: frameState.outputHeight,
-        nextOutputHeight: outputHeight,
-        isUnmounting: teardownStarted,
-      });
-
-      if (shouldClear) {
-        // Direct write: clearTerminal + accumulated static + raw output.
-        // BSU/ESU wrap the actual stream writes (not embedded in the frame
-        // string) so synchronization survives log-update's line diffing.
-        if (synchronize) stdout.write(bsu);
-        stdout.write(ansiEscapes.clearTerminal + frameState.fullStaticOutput + output);
-        // Sync log-update with the SAME bytes we just wrote (raw `output`), NOT
-        // `outputToRender`. The direct write above emits raw `output` (no
-        // appended "\n"), so sync()'s recorded state — line count AND the
-        // hasTrailingNewline basis it feeds buildCursorSuffix — must reflect
-        // `output`, not the "\n"-suffixed `outputToRender`. They DIVERGE only
-        // when leaving fullscreen (a fullscreen frame shrinking below the
-        // viewport): there `outputToRender = output + "\n"` while the screen has
-        // raw `output`. Syncing `outputToRender` would (a) place the persistent
-        // caret one row too HIGH (sync emits buildCursorSuffix with
-        // hasTrailingNewline=true, basing the caret on row `visibleLineCount`
-        // instead of the real `visibleLineCount - 1`), and (b) record
-        // previousLineCount off by one so the next frame's return-to-bottom /
-        // erase is eraseLines(N+1) (G46 residue). This is the
-        // fullscreen→non-fullscreen sibling of #198. For the steady-state
-        // fullscreen and screen-reader sub-cases `outputToRender === output`, so
-        // this is byte-for-byte unchanged (G17: an empty SR frame still syncs ""
-        // → zero lines, no spurious blank line).
-        writer.sync(output);
-        if (synchronize) stdout.write(esu);
-      } else if (hasStaticOutput) {
+      if (hasStaticOutput) {
         // Clear frame -> write static -> re-render frame via log-update
         if (synchronize) stdout.write(bsu);
         writer.clear();
@@ -1184,8 +1180,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
         //    case: on the first commit of an app that renders nothing, both are ""
         //    so the gate is false and log-update — including its LAZY cursor hide —
-        //    is never reached, so an empty app emits zero cursor escapes (cursor
-        //    stays visible), matching Ink. Using willRender(outputToRender) here
+        //    is never reached, so the initial empty commit emits no log-update
+        //    cursor escapes (the cursor stays visible), matching Ink. Using
+        //    willRender(outputToRender) here
         //    instead would compare "\n" against "" and wrongly fire the hide. A
         //    cursor-only move whose position is unchanged is still dirty, so the
         //    `|| isCursorDirty` disjunct keeps it reaching log-update.
@@ -1225,10 +1222,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       viewportRows?: number,
     ): string {
       if (!isScreenReaderEnabled) {
-        return paint(tuiRoot, {
+        const output = paint(tuiRoot, {
           hitMap,
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
         });
+        // The hard paint viewport is the primary guard. Keep a final physical
+        // row bound as defense-in-depth for future paint extensions: Inline
+        // must never let an application frame exceed terminal-addressable rows.
+        return boundedInlineSurface && viewportRows !== undefined
+          ? output.split("\n").slice(0, viewportRows).join("\n")
+          : output;
       }
       const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
       return wrapAnsi(linear, width, { trim: false, hard: true });
@@ -1236,16 +1239,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     function commit() {
       const start = onRender ? performance.now() : 0;
-
-      // Detect <Static> identity changes (mount, unmount, key-driven remount).
-      // Fire onStaticChange BEFORE flushing static output so accumulated
-      // fullStaticOutput from a previous instance is cleared first.
-      if (tuiRoot.staticNode !== tuiRoot.previousStaticNode) {
-        tuiRoot.previousStaticNode = tuiRoot.staticNode;
-        if (typeof tuiRoot.onStaticChange === "function") {
-          tuiRoot.onStaticChange();
-        }
-      }
 
       // Capture static output as a string (for both interactive and non-interactive paths)
       const w = renderSession.session.dimensions.layout.columns;
@@ -1257,13 +1250,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
       const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-      // fullStaticOutput is accumulated only for the visual path. The
-      // screen-reader transcript writes new static content inline and never
-      // replays accumulated history.
-      if (hasStaticOutput && !fixedFullscreenSurface && !isScreenReaderEnabled) {
-        frameState.fullStaticOutput += staticOutput;
-      }
-
       if (!dynamicUpdatesLive) {
         // Non-interactive: compute the dynamic frame now, write static output
         // after onRender, and defer dynamic frame output until unmount.
@@ -1295,20 +1281,50 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return;
       }
 
-      const viewportRows = fixedFullscreenSurface
+      const exactViewportRows = fixedFullscreenSurface
         ? (renderSession.session.dimensions.layout.rows ?? undefined)
         : undefined;
       tuiRoot.yoga.setWidth(w);
-      const restoreLayoutGuards = calculateLayoutWithContentGuards(
+      let restoreLayoutGuards = calculateLayoutWithContentGuards(
         tuiRoot,
         w,
-        viewportRows,
+        exactViewportRows,
         Yoga.DIRECTION_LTR,
       );
       try {
+        const inlineMaximumRows = boundedInlineSurface
+          ? (renderSession.session.dimensions.layout.rows ?? undefined)
+          : undefined;
+        if (
+          inlineMaximumRows !== undefined &&
+          tuiRoot.yoga.getComputedLayout().height > inlineMaximumRows
+        ) {
+          // A permanent Yoga max-height changes how nested percentage heights
+          // resolve even when the natural tree is short (for example, 50% of a
+          // six-row Box incorrectly becomes 50% of the terminal). Compute the
+          // natural tree first, and only rerun with an exact available height
+          // when it actually exceeds Inline's maximum. This gives overflowing
+          // flex layouts a real rows-sized allocation without padding or
+          // perturbing short layouts.
+          restoreLayoutGuards();
+          restoreLayoutGuards = calculateLayoutWithContentGuards(
+            tuiRoot,
+            w,
+            inlineMaximumRows,
+            Yoga.DIRECTION_LTR,
+          );
+        }
         emitLayoutListeners(tuiRoot);
         const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
-        const frame = renderFrame(w, hitMap, viewportRows);
+        const computedRootHeight = Math.max(0, Math.floor(tuiRoot.yoga.getComputedLayout().height));
+        const inlineViewportRows = boundedInlineSurface
+          ? Math.min(
+              renderSession.session.dimensions.layout.rows ?? computedRootHeight,
+              computedRootHeight,
+            )
+          : undefined;
+        const paintViewportRows = exactViewportRows ?? inlineViewportRows;
+        const frame = renderFrame(w, hitMap, paintViewportRows);
         renderObserver?.onCommit?.({
           dynamic: frame,
           staticOutput: hasStaticOutput ? staticOutput : "",
@@ -1329,15 +1345,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
           // (inline static, if any) + the wrapped output, then RETURNS — before the
           // normal interactive frame path. Crucially it:
-          //   - NEVER calls shouldClearTerminalForFrame / emits clearTerminal, so a
-          //     tall/overflowing SR transcript does not wipe the user's scrollback;
-          //   - NEVER accumulates or replays fullStaticOutput (gated above);
-          //   - NEVER routes through the log-update writer (raw writes only);
+          //   - never emits a whole-terminal reset, so a tall transcript cannot
+          //     delete terminal-owned scrollback;
+          //   - emits new Static content once instead of retaining/replaying it;
+          //   - never routes through the log-update writer (raw writes only);
           //   - leaves the cursor visible (the mount-time hide is skipped for SR).
           // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
           // it plays the role of Ink's `wrappedOutput`.
           const sync = synchronize;
           if (onRender) onRender({ renderTime: performance.now() - start });
+          if (frame !== "" || hasStaticOutput) ensureInlineRegionStart();
           if (sync) stdout.write(bsu);
 
           if (hasStaticOutput) {
@@ -1559,16 +1576,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Only listen for resize when dynamic output is live (matching Ink).
     // Render synchronously on resize rather than through the commit throttle:
-    // a resize is a discrete event that changes the viewport, and Ink's
-    // resized() handler calls onRender() directly. Deferring it through the
-    // ~32ms throttle can leave stale/overlapping content on screen for a frame
-    // and makes the clearTerminal-on-overflow behavior depend on wall-clock
-    // timing rather than the resize itself.
+    // a resize is a discrete event that changes the viewport. Deferring it
+    // through the ~32ms throttle can leave stale geometry on screen and race a
+    // second commit against the freshly established Inline region.
     if (dynamicUpdatesLive) {
-      // Track last known terminal width so we can detect narrowing on resize
-      // (Ink parity G11: ink.tsx:302 declares lastTerminalWidth, ink.tsx:402
-      // initializes it in the constructor).
+      // Track the physical geometry that the current relative-writer baseline
+      // was painted against. A real dimension change can invalidate that
+      // baseline even when the logical component output is unchanged.
       let lastTerminalWidth = renderSession.session.dimensions.layout.columns;
+      let lastTerminalRows =
+        renderSession.session.dimensions.terminal?.rows ?? renderSession.legacyWindowRows.value;
 
       const onResize = () => {
         const nextDimensions = readCurrentDimensions();
@@ -1577,32 +1594,45 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // Keep the last coherent pair and wait for the next valid event.
         if (nextDimensions === null) return;
 
-        // Cancel any pending trailing commit before painting synchronously.
-        // Otherwise the throttle timer fires a second doCommit() right after
-        // this paint, and because shouldClearTerminalForFrame clears whenever
-        // the previous frame overflowed, that second commit emits a duplicate
-        // clearTerminal (issue #26). The synchronous commit below already
-        // reflects the current tree, so the pending commit is redundant.
+        // Cancel any pending trailing commit before painting synchronously. The
+        // synchronous commit below already reflects the current tree, so a
+        // second scheduled paint would be redundant and can race frame state.
         scheduler.cancel();
 
-        // Ink parity G11 (ink.tsx:459-474): when the terminal NARROWS, clear
-        // the screen and reset frame state before repainting. Without this,
-        // the previous wider frame and the new narrower frame can overlap and
-        // produce duplicate/corrupted output. Width increase and pure height
-        // changes do not trigger this path — only genuine narrowing does.
         renderSession.updateDimensions(nextDimensions);
         const currentWidth = nextDimensions.layout.columns;
-        if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
+        const currentRows = nextDimensions.terminal?.rows ?? nextDimensions.legacyWindowRows;
+        const dimensionsChanged =
+          currentWidth !== lastTerminalWidth || currentRows !== lastTerminalRows;
+        // A screen-reader transcript intentionally works even when rows are
+        // unknown. Treat every resize event as invalidating its old physical
+        // row mapping; a synthetic legacy row count cannot prove otherwise.
+        const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
+
+        if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
+          // Terminal reflow makes the old logical-line baseline untrustworthy:
+          // erasing it could touch terminal-owned rows. Leave that snapshot
+          // immutable, move to the bottom of the resized viewport, establish a
+          // fresh row, forget writer bookkeeping without emitting erase bytes,
+          // and paint the new bounded region from scratch.
+          if (synchronize) stdout.write(bsu);
+          if (!isScreenReaderEnabled) stdout.write(hideCursorEscape);
+          const bottomClampRows = isScreenReaderEnabled ? TERMINAL_BOTTOM_CLAMP_ROWS : currentRows;
+          stdout.write(ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape);
+          writer.reset();
+          frameState.lastOutput = "";
+          frameState.lastOutputToRender = "";
+          frameState.outputHeight = 0;
+          if (synchronize) stdout.write(esu);
+        } else if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
+          // Live non-terminal streams retain the existing relative-writer
+          // narrowing behavior; they do not claim terminal history ownership.
           writer.clear();
-          // Reset last-output strings so commit() repaints from scratch
-          // (no stale diff), but preserve outputHeight — Ink ink.tsx:462-466
-          // also leaves lastOutputHeight intact so shouldClearTerminalForFrame
-          // still sees a non-zero previousOutputHeight and can fire the
-          // clearTerminal path for overflowing frames on the resize commit.
           frameState.lastOutput = "";
           frameState.lastOutputToRender = "";
         }
         lastTerminalWidth = currentWidth;
+        lastTerminalRows = currentRows;
 
         commit();
       };

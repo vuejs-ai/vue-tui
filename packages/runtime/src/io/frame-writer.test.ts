@@ -53,7 +53,7 @@ function createStdout(): FakeStdout {
 
 test("sync() updates the dedup baseline so a later changed frame is not dropped", () => {
   // Regression: sync() previously updated log-update's previousOutput but not
-  // the frame-writer's own lastFrame. After a sync() (e.g. the clearTerminal
+  // the frame-writer's own lastFrame. After a sync() (e.g. a direct-output
   // path), re-rendering the pre-sync frame was silently dropped by the stale
   // lastFrame dedup even though the terminal showed different content.
   const writes: string[] = [];
@@ -808,6 +808,21 @@ describe("createFrameWriter - standard mode", () => {
     expect(stdout.get().includes("Hello")).toBe(true);
   });
 
+  test("reset() forgets the frame without erasing terminal content", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, {});
+
+    writer.write("Hello\n");
+    const countAfterFirst = stdout.write.callCount;
+
+    writer.reset();
+    expect(stdout.write.callCount).toBe(countAfterFirst);
+
+    writer.write("Hello\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterFirst);
+    expect(stdout.get().includes("Hello")).toBe(true);
+  });
+
   test("done() persists output and resets for next render", () => {
     const stdout = createStdout();
     const writer = createFrameWriter(stdout, {});
@@ -851,6 +866,19 @@ describe("createFrameWriter - incremental mode", () => {
     writer.write("Hello\n");
     // Dedup at the wrapper level prevents even reaching logUpdate
     expect(stdout.write.callCount).toBe(countAfterFirst);
+  });
+
+  test("reset() forgets incremental state without writing erase bytes", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental: true });
+
+    writer.write("Hello\n");
+    const countAfterFirst = stdout.write.callCount;
+    writer.reset();
+    expect(stdout.write.callCount).toBe(countAfterFirst);
+
+    writer.write("Hello\n");
+    expect(stdout.write.callCount).toBeGreaterThan(countAfterFirst);
   });
 });
 

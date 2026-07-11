@@ -1,9 +1,11 @@
 import { inject } from "vue";
 import { AppContextKey } from "../context.ts";
 
-/** The public stdout surface returned by {@link useStdout}. Mirrors Ink's `useStdout()`. */
+/** Coordinated styled-line output plus the deliberately raw stdout escape hatch. */
 export interface UseStdoutReturn {
+  /** Raw stream; writes through it bypass frame coordination and output sanitization. */
   readonly stdout: NodeJS.WriteStream;
+  /** Commit geometry-safe styled lines without corrupting the active live region. */
   readonly write: (data: string) => void;
 }
 

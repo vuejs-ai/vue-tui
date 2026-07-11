@@ -71,6 +71,10 @@ const term = (fixture: string, args: string[] = []) => {
         ps.kill(signal);
       });
     },
+    async resize(columns: number, rows: number) {
+      await readyPromise;
+      ps.resize(columns, rows);
+    },
     output: "",
     waitForExit: async () => exitPromise,
     waitForExitInfo: async () => exitInfoPromise,

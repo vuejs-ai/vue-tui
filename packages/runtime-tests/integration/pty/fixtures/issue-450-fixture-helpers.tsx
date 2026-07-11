@@ -121,7 +121,7 @@ const Issue450InitialFixtureComponent = defineComponent(
         lines.push(h(Text, { key: lineNumber }, () => `${props.linePrefix} line ${lineNumber}`));
       }
 
-      return h(Box, { flexDirection: "column" }, () => lines);
+      return h(Box, { flexDirection: "column", flexShrink: 0 }, () => lines);
     };
   },
   { props: ["renderedMarker", "lineCount", "linePrefix"] },

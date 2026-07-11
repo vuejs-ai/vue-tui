@@ -1,7 +1,23 @@
 import { test as it, expect } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
+import headless from "@xterm/headless";
 import stripAnsi from "strip-ansi";
 import term from "./helpers/term.ts";
+const { Terminal } = headless;
+const forbiddenMainScreenResets = ["\x1b[2J", "\x1b[3J", "\x1b[H"] as const;
+
+const expectNoMainScreenReset = (output: string) => {
+  for (const reset of forbiddenMainScreenResets) expect(output).not.toContain(reset);
+};
+
+const emulateNormalLines = async (output: string, rows: number): Promise<string[]> => {
+  const terminal = new Terminal({ cols: 100, rows, scrollback: 1000, allowProposedApi: true });
+  await new Promise<void>((resolve) => terminal.write(output, resolve));
+  const buffer = terminal.buffer.normal;
+  return Array.from({ length: buffer.length }, (_, row) =>
+    (buffer.getLine(row)?.translateToString(true) ?? "").trimEnd(),
+  );
+};
 const countOccurrences = (text: string, searchValue: string): number => {
   if (searchValue === "") return 0;
   return text.split(searchValue).length - 1;
@@ -34,7 +50,7 @@ const runIssue450FixtureBeforeMarker = async (fixture: string, marker: string, r
 it("do not erase screen (content fits viewport)", async () => {
   const ps = term("erase", ["4"]);
   await ps.waitForExit();
-  expect(ps.output).not.toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(ps.output);
 
   for (const letter of ["A", "B", "C"]) {
     expect(ps.output).toContain(letter);
@@ -44,27 +60,27 @@ it("do not erase screen (content fits viewport)", async () => {
 it("do not erase screen where <Static> is taller than viewport", async () => {
   const ps = term("erase-with-static", ["4"]);
   await ps.waitForExit();
-  expect(ps.output).not.toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(ps.output);
 
   for (const letter of ["A", "B", "C", "D", "E", "F"]) {
     expect(ps.output).toContain(letter);
   }
 });
 
-it("erase screen (content overflows viewport)", async () => {
+it("full-height Inline teardown does not reset terminal history", async () => {
   const ps = term("erase", ["3"]);
   await ps.waitForExit();
-  expect(ps.output).toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(ps.output);
 
   for (const letter of ["A", "B", "C"]) {
     expect(ps.output).toContain(letter);
   }
 });
 
-it("erase screen where <Static> exists but interactive part is taller than viewport", async () => {
+it("Static history and a full-height Inline region do not reset terminal history", async () => {
   const ps = term("erase-with-static", ["3"]);
   await ps.waitForExit();
-  expect(ps.output).toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(ps.output);
 
   for (const letter of ["A", "B", "C", "D", "E", "F"]) {
     expect(ps.output).toContain(letter);
@@ -74,51 +90,36 @@ it("erase screen where <Static> exists but interactive part is taller than viewp
 it("erase screen where state changes", async () => {
   const ps = term("erase-with-state-change", ["4"]);
   await ps.waitForExit();
-
-  // The final frame is between the last eraseLines sequence and cursorShow
-  // Split on cursorShow to isolate the final rendered content before the cursor is shown
-  const beforeCursorShow = ps.output.split(ansiEscapes.cursorShow)[0];
-  expect(beforeCursorShow).toBeDefined();
-
-  // Find the last occurrence of an eraseLines sequence
-  // eraseLines(1) is the minimal erase pattern
-  const eraseLinesPattern = ansiEscapes.eraseLines(1);
-  const lastEraseIndex = beforeCursorShow!.lastIndexOf(eraseLinesPattern);
-
-  const lastFrame =
-    lastEraseIndex === -1
-      ? beforeCursorShow!
-      : beforeCursorShow!.slice(lastEraseIndex + eraseLinesPattern.length);
-
-  const lastFrameContent = stripAnsi(lastFrame);
+  expectNoMainScreenReset(ps.output);
+  const finalScreen = (await emulateNormalLines(ps.output, 4)).join("\n");
 
   for (const letter of ["A", "B", "C"]) {
-    expect(lastFrameContent).not.toContain(letter);
+    expect(finalScreen).not.toContain(letter);
   }
 });
 
 it("erase screen where state changes in small viewport", async () => {
   const ps = term("erase-with-state-change", ["3"]);
   await ps.waitForExit();
-
-  const frames = ps.output.split(ansiEscapes.clearTerminal);
-  const lastFrame = frames.at(-1);
+  expectNoMainScreenReset(ps.output);
+  const finalScreen = (await emulateNormalLines(ps.output, 3)).join("\n");
 
   for (const letter of ["A", "B", "C"]) {
-    expect(lastFrame).not.toContain(letter);
+    expect(finalScreen).not.toContain(letter);
   }
 });
 
-it("fullscreen mode should not add extra newline at the bottom", async () => {
+it("full-height Inline paints content into every live-region row", async () => {
   const ps = term("fullscreen-no-extra-newline", ["5"]);
   await ps.waitForExit();
 
   expect(ps.output).toContain("Bottom line");
 
-  const lastFrame = ps.output.split(ansiEscapes.clearTerminal).at(-1) ?? "";
+  expectNoMainScreenReset(ps.output);
+  const lastFrame = stripAnsi(ps.output);
 
-  // Check that the bottom line is at the end without extra newlines
-  // In a 5-line terminal:
+  // Check the frame itself uses all five rows. Post-frame teardown placement is
+  // covered by inline-overflow-comparison's real xterm replay.
   // Line 1: Full-screen: top
   // Lines 2-4: empty (from flexGrow)
   // Line 5: Bottom line (should be usable)
@@ -128,13 +129,13 @@ it("fullscreen mode should not add extra newline at the bottom", async () => {
   expect(lines[4]).toContain("Bottom line");
 });
 
-it("#442: full terminal-size box should not add an extra scroll line", async () => {
+it("#442: a terminal-size Box paints exactly the live-region row count", async () => {
   const rows = 5;
   const ps = term("issue-442-full-height", [String(rows)]);
   await ps.waitForExit();
 
-  const lastFrame = ps.output.split(ansiEscapes.clearTerminal).at(-1) ?? "";
-  const lastFrameContent = stripAnsi(lastFrame);
+  expectNoMainScreenReset(ps.output);
+  const lastFrameContent = stripAnsi(ps.output);
   const lines = lastFrameContent.split("\n");
 
   expect(lastFrameContent).not.toMatch(/\n$/);
@@ -150,11 +151,12 @@ it("#450: full-height rerenders should not repeatedly clear terminal", async () 
   );
 
   expect(output).toContain("frame 8");
-  expect(clearTerminalCount).toBeLessThanOrEqual(1);
+  expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
   expect(eraseLineCount).toBeGreaterThan(0);
 });
 
-it("#450: initial overflowing frame should not clear terminal", async () => {
+it("#450: initial over-height tree is top-clipped without a terminal reset", async () => {
   const renderedMarker = "__INITIAL_OVERFLOW_FRAME_RENDERED__";
   const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
     "issue-450-initial-overflow",
@@ -162,7 +164,10 @@ it("#450: initial overflowing frame should not clear terminal", async () => {
     3,
   );
 
-  expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(outputBeforeMarker);
+  expect(outputBeforeMarker).toContain("#450 initial overflow line 1");
+  expect(outputBeforeMarker).toContain("#450 initial overflow line 3");
+  expect(outputBeforeMarker).not.toContain("#450 initial overflow line 4");
 });
 
 it("#450: initial full-height frame should not clear terminal", async () => {
@@ -173,7 +178,7 @@ it("#450: initial full-height frame should not clear terminal", async () => {
     3,
   );
 
-  expect(outputBeforeMarker).not.toContain(ansiEscapes.clearTerminal);
+  expectNoMainScreenReset(outputBeforeMarker);
 });
 
 it("#450: grow from rows - 1 to full-height should not clear before unmount", async () => {
@@ -186,22 +191,25 @@ it("#450: grow from rows - 1 to full-height should not clear before unmount", as
 
   expect(outputBeforeMarker).toContain("frame 8");
   expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(outputBeforeMarker);
 });
 
-it("#450: shrink from full-height to rows - 1 should clear exactly once", async () => {
+it("#450: shrink from full-height to rows - 1 never resets the terminal", async () => {
   const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
     "issue-450-shrink-from-fullscreen-rerender",
   );
 
   expect(output).toContain("frame 8");
-  expect(clearTerminalCount).toBe(1);
+  expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
 });
 
 it("#450 control: rows - 1 rerenders should avoid clearTerminal", async () => {
-  const { clearTerminalCount, eraseLineCount } = await runIssue450FixtureWithCounts(
+  const { output, clearTerminalCount, eraseLineCount } = await runIssue450FixtureWithCounts(
     "issue-450-height-minus-one-rerender",
   );
   expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
   expect(eraseLineCount).toBeGreaterThan(0);
 });
 
@@ -212,21 +220,24 @@ it("#450: full-height rerenders should not clear before unmount", async () => {
   );
   const { clearTerminalCount } = getIssue450ControlSequenceCounts(outputBeforeMarker);
   expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(outputBeforeMarker);
 });
 
-it("#450: shrink from overflow to rows - 1 should clear exactly once", async () => {
-  const { clearTerminalCount } = await runIssue450FixtureWithCounts(
+it("#450: shrink from overflow to rows - 1 never resets the terminal", async () => {
+  const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
     "issue-450-shrink-from-overflow-rerender",
   );
-  expect(clearTerminalCount).toBe(1);
+  expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
 });
 
-it("#450: <Static> with shrink from full-height should clear exactly once", async () => {
+it("#450: <Static> with shrink from full-height never resets the terminal", async () => {
   const { output, clearTerminalCount } = await runIssue450FixtureWithCounts(
     "issue-450-static-shrink-from-fullscreen-rerender",
   );
   expect(output).toContain("#450 static line");
-  expect(clearTerminalCount).toBe(1);
+  expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
 });
 
 it("#450: full-height rerenders with <Static> should not repeatedly clear terminal", async () => {
@@ -234,7 +245,8 @@ it("#450: full-height rerenders with <Static> should not repeatedly clear termin
     "issue-450-full-height-with-static-rerender",
   );
   expect(output).toContain("#450 static line");
-  expect(clearTerminalCount).toBeLessThanOrEqual(1);
+  expect(clearTerminalCount).toBe(0);
+  expectNoMainScreenReset(output);
   expect(eraseLineCount).toBeGreaterThan(0);
 });
 

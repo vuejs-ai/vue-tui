@@ -1,6 +1,6 @@
 # Readonly render session
 
-> **Status:** completed F1.3 public-API proposal, F1.4 private live-source implementation, and F1.5 deterministic-test/string-host authority, unstamped. F1.6 Inline bounds are Active. This record selects one target readonly session shape and maps it to every accepted host class. The public projection remains intentionally unexported until Inline bounds, lifecycle, and publication gates are complete.
+> **Status:** completed F1.3 public-API proposal, F1.4 private live-source implementation, F1.5 deterministic-test/string-host authority, and F1.6 Inline ownership, unstamped. F1.7 lifecycle completion is Active. This record selects one target readonly session shape and maps it to every accepted host class. The public projection remains intentionally unexported until lifecycle and publication gates are complete.
 
 ## Outcome and scope
 
@@ -214,7 +214,7 @@ The following table maps the accepted host matrix to the public facts. `elementH
 | Explicit live visual updates, non-TTY stdout        | Requested mode → `null`, `stdout-not-tty`              | stream / live / visual                              | Terminal `null`; resolved layout columns, rows `null`                                   | false / false                       |
 | Explicit live screen-reader updates, non-TTY stdout | Requested mode → `null`, `stdout-not-tty`              | stream / live / screen reader                       | Terminal `null`; resolved layout columns, rows `null`                                   | false / false                       |
 | Live visual TTY without usable terminal dimensions  | Requested mode → `null`, `terminal-size-unavailable`   | stream / at-teardown / visual                       | Terminal `null`; resolved/default layout columns, rows `null`                           | false / false                       |
-| Live visual TTY, Inline requested                   | Inline → Inline, no fallback                           | terminal / live / visual                            | Current terminal size; layout rows `null` until F1.6, then bounded                      | false / renderer-derived            |
+| Live visual TTY, Inline requested                   | Inline → Inline, no fallback                           | terminal / live / visual                            | Current terminal size; identical numeric layout rows enforced as a maximum              | false / false                       |
 | Live visual TTY, Fullscreen requested               | Fullscreen → Fullscreen, no fallback                   | terminal / live / visual                            | Current terminal size; identical fixed layout size                                      | true / renderer-derived             |
 | Live screen-reader TTY, Inline requested            | Inline → Inline, no fallback                           | terminal / live / screen reader                     | Terminal pair when known; resolved layout columns, rows `null`                          | false / false                       |
 | Live screen-reader TTY, Fullscreen requested        | Fullscreen → Inline, `screen-reader-transcript`        | terminal / live / screen reader                     | Terminal pair when known; resolved layout columns, rows `null`                          | false / false                       |
@@ -242,14 +242,14 @@ The first public runtime surface deliberately does not add `app.session`. Curren
 
 vue-tui is experimental, so these are direct target dispositions rather than compatibility plans:
 
-| Current API                       | Target disposition | Reason                                                                                                                                                      |
-| --------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `useApp()`                        | Retain             | It exposes lifecycle operations (`exit`, render flush), not environment facts. String-host invocation is explicitly unavailable rather than silently no-op. |
-| `useWindowSize()`                 | Replace            | `useLayoutSize()` derives readonly refs from session layout dimensions, keeps convenient destructuring reactive, and never independently detects globals.   |
-| `useIsScreenReaderEnabled()`      | Remove             | `session.output.presentation` states the active rendering path without presenting screen reader as a third mode or claiming hardware/user detection.        |
-| Internal `AppContext` fact fields | Replace internally | Streams and operations may remain internal services, but all public session facts must come from one resolver and one reactive state object.                |
-| `useStdin()`                      | Unchanged in F1.3  | F1 does not publish a competing raw-input fact. F3 decides one acquisition/availability contract and this hook's direct target disposition together.        |
-| `useStdout()` / `useStderr()`     | Unchanged in F1.3  | Low-level stream operations are not copied into the facts object. Their final escape-hatch disposition is separate from session resolution.                 |
+| Current API                       | Target disposition               | Reason                                                                                                                                                                                                        |
+| --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `useApp()`                        | Retain                           | It exposes lifecycle operations (`exit`, render flush), not environment facts. String-host invocation is explicitly unavailable rather than silently no-op.                                                   |
+| `useWindowSize()`                 | Replace                          | `useLayoutSize()` derives readonly refs from session layout dimensions, keeps convenient destructuring reactive, and never independently detects globals.                                                     |
+| `useIsScreenReaderEnabled()`      | Remove                           | `session.output.presentation` states the active rendering path without presenting screen reader as a third mode or claiming hardware/user detection.                                                          |
+| Internal `AppContext` fact fields | Replace internally               | Streams and operations may remain internal services, but all public session facts must come from one resolver and one reactive state object.                                                                  |
+| `useStdin()`                      | Unchanged in F1.3                | F1 does not publish a competing raw-input fact. F3 decides one acquisition/availability contract and this hook's direct target disposition together.                                                          |
+| `useStdout()` / `useStderr()`     | Retained; F1.6 refined `write()` | Coordinated TTY writes accept geometry-safe styled lines, redirected/non-TTY output stays byte-exact, and the returned streams remain raw escape hatches. These operations are not copied into session facts. |
 
 `useLayoutSize()` is the one selected convenience projection because responsive layout is already used by first-party code and peers, while scalar destructuring from a reactive session object would lose Vue dependency tracking. Template access auto-unwraps its readonly refs; TSX and setup code use `.value`. Any later projection must likewise derive from the same service and state exactly which semantic facts it returns.
 
@@ -289,9 +289,9 @@ Rejected for the public surface. A complete cross-product union can make every i
 
 The selected public shape is implemented behind the runtime boundary before it is exported:
 
-1. F1.4 creates the clean-slate live mount resolver and internal session service. Current Inline honestly reports unbounded layout rows until its renderer contract changes.
+1. F1.4 creates the clean-slate live mount resolver and internal session service; it initially reports visual Inline rows as unbounded until F1.6 changes the renderer contract.
 2. F1.5 gives deterministic tests, public `renderToString()`, and the internal screen-reader string helper the same service; it rejects hidden public-option passthrough, replaces implicit test-host construction with finite modeled axes, separates render observation from terminal emulation, and removes `debug`. The implementation and closure gates are complete.
-3. F1.6 makes the accepted Inline row bound and history ownership true, after which `dimensions.layout.rows` changes from `null` to the enforced maximum.
+3. F1.6 makes the accepted Inline row bound and history ownership true: `dimensions.layout.rows` is now the enforced maximum for visual Inline, while screen-reader and stream surfaces remain unbounded.
 4. F1.7 completes suspension, fatal-error, exit, and restoration behavior represented by the session.
 5. F1.8 exports `useRenderSession()` and `useLayoutSize()`, replaces or removes superseded public hooks, and runs the exhaustive public/type/package/PTY/CI closure gates.
 
@@ -304,6 +304,8 @@ The live adapter uses a provenance-aware terminal-size probe because `terminal-s
 F1.5 removes the public `debug` mount option directly. Recognizable own keys fail before terminal inspection, and `@vue-tui/testing` rejects the former render option before setup. Deterministic content observation now uses a symbol-keyed internal observer whose presence does not affect surface resolution, output cadence, scheduling, console ownership, or application-visible session facts. This is a clean-slate removal rather than a compatibility alias; the project remains experimental.
 
 Durable F1.5 evidence lives in the testing package's host, observation, emulator, cleanup, disposal, console-isolation, presentation-environment, and public-type tests; the runtime mount-mode and public-type removed-option guards; and the string renderer's host-session, process-isolation, unavailable-operation, error-cleanup, and accessibility integration tests. Focused and full integration, PTY, type, fixture, clean tarball consumer, Inline and Fullscreen visual-controller, terminal-restoration, fresh CI, and independent-review gates passed before F1.6 became Active.
+
+Durable F1.6 evidence lives in runtime writer, cursor, sanitization, layout, transform, screen-reader, resize, clear, coordinated-output, teardown, and deterministic-host tests; real PTY fixtures cover partial rows, bounded overflow, Static and coordinated first writes, resize-abandoned history, repeated clear, and cursor-aware teardown. Full repository, fresh CI, package-content, clean-consumer, Inline and Fullscreen visual-controller, terminal-restoration, and independent-review gates passed before F1.7 became Active.
 
 ## Implementation constraints and evidence
 

@@ -7,8 +7,13 @@ export type CursorPosition = {
 
 const showCursorEscape = "[?25h";
 const hideCursorEscape = "[?25l";
+// ECMA-48 NEL (Next Line): move to column zero of the following row and scroll
+// when already at the bottom margin. ansi-escapes.cursorNextLine is CSI E
+// (CNL), which xterm clamps at the bottom and can let later output overwrite
+// the final row instead of committing it to scrollback.
+const nextLineEscape = "\x1bE";
 
-export { showCursorEscape, hideCursorEscape };
+export { showCursorEscape, hideCursorEscape, nextLineEscape };
 
 /**
  * Compare two cursor positions. Returns true if they differ.

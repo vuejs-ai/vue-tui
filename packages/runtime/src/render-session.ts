@@ -31,7 +31,8 @@ export interface ResolvedLiveDimensions extends RenderDimensions {
   /**
    * Temporary numeric row projection for the current useWindowSize() API.
    * It is deliberately not part of the future public render-session facts:
-   * Inline layout rows remain unbounded until F1.6.
+   * Visual Inline layout rows are the terminal's enforced maximum; transcript
+   * and stream surfaces remain unbounded.
    */
   readonly legacyWindowRows: number;
 }
@@ -331,16 +332,17 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
     };
   }
 
+  const terminalBoundedDimensions: ResolvedLiveDimensions = {
+    terminal: dimensions.terminal,
+    layout: dimensions.terminal,
+    legacyWindowRows: dimensions.legacyWindowRows,
+  };
+
   if (input.requestedMode === "fullscreen") {
-    const fullscreenDimensions: ResolvedLiveDimensions = {
-      terminal: dimensions.terminal,
-      layout: dimensions.terminal,
-      legacyWindowRows: dimensions.legacyWindowRows,
-    };
     return {
       kind: "fullscreen-terminal",
       liveUpdatesRequested: liveUpdates,
-      dimensions: fullscreenDimensions,
+      dimensions: terminalBoundedDimensions,
       session: sessionSnapshot({
         mode: { requested: "fullscreen", effective: "fullscreen", fallback: null },
         output: {
@@ -348,7 +350,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           dynamicUpdates: "live",
           presentation: "visual",
         },
-        dimensions: fullscreenDimensions,
+        dimensions: terminalBoundedDimensions,
         capabilities: {
           stableOrigin: true,
           elementHitTesting: true,
@@ -362,7 +364,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
     kind: "inline-terminal",
     fallback: null,
     liveUpdatesRequested: liveUpdates,
-    dimensions,
+    dimensions: terminalBoundedDimensions,
     session: sessionSnapshot({
       mode: { requested: "inline", effective: "inline", fallback: null },
       output: {
@@ -370,7 +372,7 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         dynamicUpdates: "live",
         presentation: "visual",
       },
-      dimensions,
+      dimensions: terminalBoundedDimensions,
       capabilities: unavailableCapabilities,
     }),
   };

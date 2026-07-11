@@ -98,8 +98,8 @@ useInput((input) => {
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
 | `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
 | `useStdin()`                    | Access stdin stream and raw mode control                                                     |
-| `useStdout()`                   | Write directly to stdout                                                                     |
-| `useStderr()`                   | Write directly to stderr                                                                     |
+| `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
+| `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
 | `useIsScreenReaderEnabled()`    | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
 
 ## App Lifecycle
@@ -120,6 +120,12 @@ createApp(App).mount({ stdout, stdin, stderr });
 ```
 
 Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. Full-screen mode enables targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers on `<Box>` and `<Text>` when the app registers them; inline apps can still use the low-level `useMouseInput()` stream.
+
+Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use `<Static>` for completed history, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
+
+Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>`, `useStdout().write()`, `useStderr().write()`, and patched console calls coordinate with the live region and commit their output once. On a TTY, the coordinated `write()` functions accept styled multiline text: they retain SGR, OSC 8 hyperlinks, and line feeds while removing cursor/erase sequences, other OSC commands, and geometry-changing control bytes. Redirected stderr and non-TTY streams remain byte-exact. The `stdout`/`stderr` streams returned by those composables, direct `process.stdout.write()`, and other raw stream writes deliberately bypass sanitization and ownership coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
+
+If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
 > **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
 > server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the

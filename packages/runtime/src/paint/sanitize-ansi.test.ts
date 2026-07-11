@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vite-plus/test";
-import { sanitizeAnsi } from "./sanitize-ansi.ts";
+import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {
@@ -43,6 +43,30 @@ describe("sanitize-ansi", () => {
 
   test("passes through plain text unchanged", () => {
     expect(sanitizeAnsi("hello world")).toBe("hello world");
+  });
+
+  test("single-line mode strips geometry controls without corrupting SGR or OSC", () => {
+    const input =
+      "A\tB\nC\u001b[3JD\u001b[31mred\u001b[0m\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007";
+
+    expect(sanitizeAnsi(input, { singleLine: true })).toBe(
+      "ABCD\u001b[31mred\u001b[0m\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007",
+    );
+  });
+
+  test("multiline mode preserves line feeds and strips every other plain control", () => {
+    expect(sanitizeAnsiMultiline("A\tB\nC\rD\bE\vF\fG\u007fH")).toBe("AB\nCDEFGH");
+  });
+
+  test("geometry-safe modes drop OSC tokens with embedded controls", () => {
+    const unsafe = "A\x1b]8;;https://example.com\tbad\x07B";
+    expect(sanitizeAnsiMultiline(unsafe)).toBe("AB");
+    expect(sanitizeAnsi(unsafe, { singleLine: true })).toBe("AB");
+    expect(sanitizeAnsi(unsafe)).toBe(unsafe);
+  });
+
+  test("multiline mode drops non-hyperlink OSC before wrapping", () => {
+    expect(sanitizeAnsiMultiline("\x1b]0;My Title\x07abcdefghij")).toBe("abcdefghij");
   });
 
   // --- Ink parity tests below ---

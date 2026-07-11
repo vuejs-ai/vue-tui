@@ -694,14 +694,56 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `shouldClearTerminalForFrame` clears (because the previous frame overflowed), Ink emits a
   **second** `clearTerminal`.
 - **vue-tui:** `onResize` calls `scheduler.cancel()` as its **first, unconditional** step on
-  **every** resize (not only narrowing ones), dropping any pending throttled commit before
-  its synchronous commit, so the redundant trailing clear never fires.
-- **Why:** the synchronous resize commit already reflects the current tree, so the pending
-  commit would repeat the same clear. The dedup is triggered by an overflowing frame plus a
-  pending commit — not by narrowing specifically; a widening resize cancels the pending
-  commit too. Emitting one clear instead of two has no visible behavior difference
-  (issue #26). The separate narrowing-only `writer.clear()` frame reset is a distinct
-  mechanism.
+  **every** resize, dropping any pending throttled commit before its synchronous commit. A
+  same-size event consumes the pending tree once; a real Inline geometry change establishes
+  a fresh region once and cannot be followed by a stale timer repaint.
+- **Why:** the synchronous resize commit already reflects the current host tree. A pending
+  timer represents the same tree and would only repeat terminal writes after the resize
+  boundary (issue #26). Cancellation is independent of whether the terminal narrowed,
+  widened, or only changed height.
+
+### Inline bounds its live region instead of deleting terminal history
+
+- **Ink:** Inline Yoga receives only terminal width. A frame that fills the terminal omits its
+  trailing newline, but layout itself remains vertically unbounded. After an earlier overflow,
+  on a fit-to-overflow transition, on a full-height/overflow-to-shorter transition, or while
+  tearing down a full-height frame, Ink writes `ansiEscapes.clearTerminal`, retained Static
+  output, and the current frame. With ansi-escapes 7.3.0 that reset is `ED2 + ED3 + Home`; ED3
+  deletes scrollback, including output from before the application.
+- **vue-tui:** a visual Inline terminal session exposes terminal rows as a **maximum** layout
+  height. The runtime first computes natural Yoga layout; only a tree that exceeds the maximum
+  is recalculated against the available rows, which avoids making percentages inside a short
+  tree resolve against terminal height. Paint then hard-clips both columns and the final root
+  height, so a non-shrinking child or transform cannot create extra physical wraps or rows.
+  Overflow keeps the layout's row-zero projection; a coding-agent tail, finder selection, or
+  monitor follow state is expressed by Static, ScrollBox, or application state rather than a
+  renderer-wide tail slice.
+- **Ownership:** before the first visible managed output, vue-tui emits one NEL on the main
+  screen. This leaves a pre-existing partial row untouched and gives the relative writer a row
+  boundary it can own; an empty app emits no initial NEL. Static and coordinated stdout/stderr
+  output clear only the known live region, append bytes once, finish an unterminated TTY payload
+  with NEL, and redraw below it. On TTY destinations the coordinated helpers retain styled lines
+  while stripping cursor/erase and other geometry-changing control bytes. Redirected stderr and
+  non-TTY streams remain byte-exact; returned raw streams and direct process writes stay outside
+  the guarantee. After `app.clear()` erases the live region, vue-tui forgets that physical
+  baseline so a repeated clear cannot walk upward into pre-app history.
+- **Resize and teardown:** after a real Inline dimension change, terminal reflow makes the old
+  logical-line count untrustworthy. vue-tui moves to the resized viewport bottom, creates a new
+  row, resets writer bookkeeping **without erasing**, and paints a fresh bounded region; the old
+  frame is immutable history. Screen-reader transcript resize uses the same snapshot boundary
+  while keeping layout rows unbounded and clamps to the physical terminal bottom even when the
+  row count is unavailable. Teardown first returns a declared application caret to the region
+  bottom; a full-height final frame then advances once so subsequent shell output begins below
+  it. Framework-generated Inline controls emit no ED2, ED3, or Home.
+- **Escape hatch:** destructive main-screen control remains session-external: an application may
+  clear before mount or after teardown, or choose Fullscreen for arbitrary viewport repaint.
+  There is no ordinary `preserveHistory: false` policy or mounted destructive reset.
+- **Evidence:** `inline-overflow-comparison.test.ts`, `inline-resize-history.test.ts`,
+  `inline-clear-history.test.ts`, `resize-clear.test.tsx`, deterministic host screen tests,
+  geometry-safe text/coordinator tests, and frame-writer reset tests cover pre-app scrollback,
+  partial rows, repeated clear, overflow, width/height resize, Static, coordinated output,
+  screen-reader fallback, declared-caret teardown, and the post-app line. This deliberately
+  replaces Ink's overflow behavior rather than treating its ED3 fallback as compatibility.
 
 ### Fullscreen owns a fixed viewport instead of reusing the inline writer
 

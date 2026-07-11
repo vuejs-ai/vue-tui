@@ -18,14 +18,22 @@ export type SyncOptions = {
   // cursorWasShown=false — no hide either). Used by app.clear(): clear() erases
   // the lines WITHOUT redrawing them, so re-asserting the persistent caret would
   // float it on a blank screen. Defaults to true (the restoreLastOutput path,
-  // which DOES redraw, still re-shows the caret). See render.ts mountedClear.
+  // which DOES redraw, still re-shows the caret). Used by the fixed-viewport
+  // app.clear() path after clearViewport.
   cursor?: boolean;
+};
+
+export type ResetOptions = {
+  /** Override whether an active cursor declaration should force the next write. */
+  cursorDirty?: boolean;
 };
 
 export type LogUpdate = {
   clear: () => void;
   done: () => void;
-  reset: () => void;
+  reset: (options?: ResetOptions) => void;
+  /** Return the bytes needed to leave a declared caret at the frame bottom. */
+  getCursorReturnToBottom: () => string;
   sync: (str: string, options?: SyncOptions) => void;
   setCursorPosition: (position: CursorPosition | undefined) => void;
   isCursorDirty: () => boolean;
@@ -181,20 +189,24 @@ const createStandard = (
     }
   };
 
-  render.reset = () => {
+  render.reset = (options?: ResetOptions) => {
     previousOutput = "";
     previousLineCount = 0;
     previousCursorPosition = undefined;
     cursorWasShown = false;
+    cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
   };
+
+  render.getCursorReturnToBottom = () =>
+    buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition);
 
   render.sync = (str: string, options?: SyncOptions) => {
     // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
-    // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
+    // gated), so a direct-output / restoreLastOutput sync re-seats the caret
     // at the declared point too.
     //
     // options.cursor === false suppresses the cursor emit for THIS sync (the
-    // app.clear() path). clear() erased the lines WITHOUT redrawing them, so
+    // fixed-viewport app.clear() path). That operation erased WITHOUT redrawing, so
     // re-asserting the persistent caret would float it on a blank screen — Ink
     // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
     // emits no caret either). We do NOT touch cursorPosition (the declaration
@@ -211,7 +223,7 @@ const createStandard = (
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
     // unlike render()/done()'s hide/show which DO route through cli-cursor.
-    // After clear() cursorWasShown is already false, so the clear() path (which
+    // After clear() cursorWasShown is already false, so that path (which
     // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);
@@ -409,20 +421,24 @@ const createIncremental = (
     }
   };
 
-  render.reset = () => {
+  render.reset = (options?: ResetOptions) => {
     previousOutput = "";
     previousLines = [];
     previousCursorPosition = undefined;
     cursorWasShown = false;
+    cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
   };
+
+  render.getCursorReturnToBottom = () =>
+    buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition);
 
   render.sync = (str: string, options?: SyncOptions) => {
     // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
-    // gated), so the clearTerminal / restoreLastOutput sync re-seats the caret
+    // gated), so a direct-output / restoreLastOutput sync re-seats the caret
     // at the declared point too.
     //
     // options.cursor === false suppresses the cursor emit for THIS sync (the
-    // app.clear() path). clear() erased the lines WITHOUT redrawing them, so
+    // fixed-viewport app.clear() path). That operation erased WITHOUT redrawing, so
     // re-asserting the persistent caret would float it on a blank screen — Ink
     // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
     // emits no caret either). We do NOT touch cursorPosition (the declaration
@@ -439,7 +455,7 @@ const createIncremental = (
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
     // unlike render()/done()'s hide/show which DO route through cli-cursor.
-    // After clear() cursorWasShown is already false, so the clear() path (which
+    // After clear() cursorWasShown is already false, so that path (which
     // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
       stream.write(hideCursorEscape);

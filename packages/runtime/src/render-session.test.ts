@@ -171,6 +171,17 @@ test("visual TTY without detected dimensions falls back to final stream", () => 
   });
 });
 
+test("visual Inline exposes terminal rows as a maximum layout bound", () => {
+  const surface = resolveLiveSurface(liveInput());
+
+  expect(surface.kind).toBe("inline-terminal");
+  expect(surface.session.dimensions).toEqual({
+    terminal: { columns: 100, rows: 30 },
+    layout: { columns: 100, rows: 30 },
+  });
+  expect(surface.session.capabilities.stableOrigin).toBe(false);
+});
+
 test("visual Fullscreen owns an exact detected viewport and hit map", () => {
   const surface = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
 

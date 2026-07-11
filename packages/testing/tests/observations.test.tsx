@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Static, Text, useStdout } from "@vue-tui/runtime";
+import { Box, Static, Text, useStderr, useStdout } from "@vue-tui/runtime";
 import { render, type ScreenSnapshot } from "../src/index.ts";
 
 function screenText(screen: ScreenSnapshot): string {
@@ -23,6 +23,35 @@ test("content frames and terminal screen are separate observations", async () =>
   expect(result.lastFrame()).toBe("content");
   expect(screenText(screen)).toContain("side channel");
 });
+
+test.each([["stdout", useStdout] as const, ["stderr", useStderr] as const])(
+  "unterminated coordinated %s output becomes immutable history",
+  async (_name, useStream) => {
+    const dynamic = shallowRef("LIVE");
+    let write: ((data: string) => void) | undefined;
+    const App = defineComponent(() => {
+      write = useStream().write;
+      return () => <Text>{dynamic.value}</Text>;
+    });
+    const result = await render(App, { columns: 12, rows: 4 });
+
+    try {
+      write?.("COMMITTED");
+      dynamic.value = "LATEST";
+      await nextTick();
+      await result.waitUntilRenderFlush();
+
+      const lines = [...(await result.screen()).scrollback, ...(await result.screen()).lines].map(
+        (line) => line.trimEnd(),
+      );
+      expect(lines.filter((line) => line === "COMMITTED")).toHaveLength(1);
+      expect(lines).toContain("LATEST");
+      expect(lines).not.toContain("LIVE");
+    } finally {
+      result.dispose();
+    }
+  },
+);
 
 test("final-stream host writes Static immediately and only the latest dynamic frame at teardown", async () => {
   const items = shallowRef<string[]>([]);

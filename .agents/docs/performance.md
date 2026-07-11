@@ -147,7 +147,7 @@ The candidate mechanisms are:
 
 Both modes can share host nodes, incremental layout, primitives, cell buffers, damage tracking, and ANSI encoding, but they cannot share every output assumption:
 
-- **Inline:** treat completed transcript output as append-only main-screen content and manage only the live region that remains addressable. When origin or prior scrollback cannot be known after resize or external output, use a safe clear-and-repaint fallback for the managed region.
+- **Inline:** treat completed transcript output as append-only main-screen content and manage only the live region that remains addressable. When resize makes the old physical row mapping untrustworthy, leave that snapshot untouched, establish a fresh bounded region at the terminal bottom, and only erase rows owned by the new region.
 - **Full-screen:** treat the alternate screen as a fixed addressable viewport. Damage can use absolute rows, and a later implementation may use terminal scrolling regions for large vertical shifts when capability detection and correctness evidence justify it.
 
 The mode-specific writer is an internal architecture boundary, not evidence that either mode should become the product default.

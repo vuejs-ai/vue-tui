@@ -3,7 +3,7 @@ import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import { tokenizeAnsi } from "../paint/ansi-tokenizer.ts";
-import { sanitizeAnsi } from "../paint/sanitize-ansi.ts";
+import { sanitizeAnsiMultiline } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
 import { advancesLineIndex } from "./nodes.ts";
 
@@ -50,10 +50,9 @@ export function flattenLeaves(node: TuiText | TuiVirtualText): string {
   // at EVERY nesting level, exactly like Ink's recursive squashTextNodes, and
   // sanitizeAnsi is idempotent so the nested re-sanitization is harmless. This
   // single output feeds measureTextNatural, bindTextMeasure, and wrapText.
-  // (Note: sanitizeAnsi PRESERVES OSC sequences, so this does NOT fix the
-  // non-hyperlink-OSC overflow-wrap case — that is a separate Output-grid-clip
-  // gap; see the skipped test in text.test.tsx.)
-  return sanitizeAnsi(out);
+  // Geometry-safe sanitization preserves OSC 8 hyperlinks, which wrap-ansi
+  // understands, and drops other OSC commands before measurement and wrapping.
+  return sanitizeAnsiMultiline(out);
 }
 
 // Squash a single child into measured text, recursing GENERICALLY into
@@ -85,7 +84,9 @@ function squashTransformChild(child: TuiNode, index: number): string {
       innerText += squashTransformChild(grandchild, grandIndex);
       if (advancesLineIndex(grandchild)) grandIndex++;
     }
-    if (innerText.length > 0 && child.transform) innerText = child.transform(innerText, index);
+    if (innerText.length > 0 && child.transform) {
+      innerText = sanitizeAnsiMultiline(child.transform(innerText, index));
+    }
     return innerText;
   }
   // Comments, boxes, etc. contribute nothing to measured text.
@@ -111,7 +112,7 @@ export function flattenTransformLeaves(node: TuiTransform): string {
   // func feeds this into measureTextNatural/wrapText, and the paint twin
   // renderTransformAsText also ends in sanitizeAnsi — so measure+wrap must see the
   // same sanitized string paint produces.
-  return sanitizeAnsi(out);
+  return sanitizeAnsiMultiline(out);
 }
 
 export type WrapMode = NonNullable<TextProps["wrap"]>;
