@@ -10,24 +10,25 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Complete one bounded coding-agent pilot using the repository's existing visual terminal feedback loop:
+Close F1.1, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): produce and obtain maintainer acceptance of one finite rendering-mode and host behavior matrix.
 
-1. make the first-party coding-agent UI deterministic without a live model key;
-2. drive the same input → streaming → approval → tool result → resize → exit journey in inline and full-screen modes;
-3. observe and operate both through the repository-private real-PTY and emulated-active-screen controller;
-4. prove that a fresh agent can discover a hidden interaction or layout defect from the visible screen, add a failing test, fix it, and pass the full repository gate without receiving the seed patch or location;
-5. return a distillation of mode evidence, missing framework capabilities, discarded ideas, affected product scenarios, and the next three candidates.
+1. inventory every supported combination of requested mode, live/static/test host, stdout and stdin TTY state, interactivity, and screen-reader path;
+2. record effective mode, fallback or failure, surface and history ownership, origin and hit-map reliability, `Static`, external output, resize, suspension, final output, and restoration for every combination;
+3. distinguish current implementation from target behavior and link implemented claims to tests or canonical records;
+4. surface only the remaining product choices for maintainer acceptance;
+5. update the matrix and roadmap checkpoint after that acceptance.
 
-The repository controller is development infrastructure. The public product currently ships the version-matched [visual development guide](../../packages/runtime/docs/visual-development-feedback-loops.md), not a promised controller API. A future public tool requires repeated consumer evidence and an independently reviewed API decision.
+F1.1 does not choose the exact public environment composable, compatibility window, or implementation patch. Research may compare honest shapes only when it directly completes a matrix cell; it does not activate F1.2 or a later foundation.
 
-## Baseline before the pilot
+## Baseline for the current foundation
 
-- Reconcile records, README claims, package descriptions, and open trackers with the latest default branch; an agent cannot choose sound work from stale inputs.
-- Draft PR [#252](https://github.com/vuejs-ai/vue-tui/pull/252) is closed. Its local `feat/internal-virtual-clock` branch and `vue-tui-virtual-clock` worktree still need cleanup before the pilot; no present product failure justifies reviving the virtual-clock project.
-- Account for existing work before starting: [#249](https://github.com/vuejs-ai/vue-tui/issues/249) has external PR [#251](https://github.com/vuejs-ai/vue-tui/pull/251), Table issue [#224](https://github.com/vuejs-ai/vue-tui/issues/224) has draft PR [#244](https://github.com/vuejs-ai/vue-tui/pull/244), and older issues may be partly or wholly superseded by merged changes.
-- Keep the pilot free of new public APIs unless the shape is already accepted in an issue or vouched record. A useful internal prototype may supply evidence for a later API decision.
+- PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F1 must expose truthful session facts rather than redesign that backend.
+- Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose sound compatibility work from stale inputs.
+- Keep later foundations free of new public APIs while F1 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F2–F8 early.
 
 ## Where work comes from
+
+For planned API work, the one **Active** item in [api-foundation-roadmap.md](./api-foundation-roadmap.md) is the only selectable foundation. The general evidence order below still governs bugs, external contributions, packaging failures, and work inside that active foundation; it does not promote a queued foundation merely because it looks smaller.
 
 Choose one independently shippable unit, in this order:
 
@@ -42,7 +43,7 @@ Searching for TODOs, mining another framework for differences, speculative perfo
 
 When several units qualify, prefer the one with clearer user harm, stronger evidence, broader reuse across the active scenarios, and a smaller verifiable change. Coding-agent work has no automatic priority merely because it is the current pilot.
 
-The live record should contain at most three next candidates. GitHub issues and PRs remain the public tracker; do not duplicate their full backlog here.
+The foundation roadmap is the single ordered backlog for this program. This live plan names only its current Active item; GitHub issues and PRs remain the public tracker and should not be duplicated here.
 
 ## Operating loop
 
@@ -95,9 +96,9 @@ Stop before:
 
 Ordinary implementation choices inside an accepted API and objective do not require a stop. Choose the smallest reversible option, record durable rationale where it will matter again, and keep moving.
 
-## Pilot implementation shape
+## Representative journey for later interaction foundations
 
-Use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover at least:
+When F3–F8 need an end-to-end interaction journey, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover at least:
 
 - entering and editing a prompt;
 - bracketed paste or an explicit current limitation;
@@ -116,15 +117,9 @@ Run the same state machine with two view adapters:
 
 The comparison should record where behavior can share one public abstraction and where the terminal model forces a mode-specific capability. It should not hide differences behind a lowest-common-denominator API or choose a product hierarchy.
 
-## Candidates after the pilot
+## Work after the current foundation
 
-These are evidence-backed candidates, not an authorized backlog:
-
-1. Fix [`v-show` #246](https://github.com/vuejs-ai/vue-tui/issues/246). The failure is a reproducible Vue-contract gap. Stop if the minimal bridge would imply general DOM-style support or alter the public host shape.
-2. Test tarballs of `runtime`, `testing`, and `components` in a clean consumer using only the shipped visual guide and a controller supplied by the project or evaluation environment. Record which missing capabilities belong in documentation, repository tooling, or a later public API proposal; do not publish the repository controller by convenience.
-3. Produce an input-editor, input-ownership, and focus-routing API proposal from the hand-written coding-agent code, [`useInput` ownership #250](https://github.com/vuejs-ai/vue-tui/issues/250), and finder or workflow consumers. Do not publish the component or semantics until the maintainer reviews the competing shapes.
-
-Review [Table PR #244](https://github.com/vuejs-ai/vue-tui/pull/244) and [color reset PR #251](https://github.com/vuejs-ai/vue-tui/pull/251) against the general inclusion and correctness bars. Neither an external contribution nor the coding-agent pilot replaces evidence-based product prioritization.
+The [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is the only ordered continuation. When F1 satisfies its definition of done, mark it Done and F2 Active in the same change; do not copy the remaining queue into this file. Independent bugs and external contributions continue to use the evidence rules above without changing foundation order.
 
 ## Distillation returned after each run
 
@@ -135,7 +130,7 @@ Return a concise review that contains:
 - what was attempted and discarded;
 - any record or vouch whose scope may be affected;
 - inline and full-screen findings without choosing the hierarchy;
-- the remaining blocker or next three candidates;
+- the remaining blocker, current foundation state, and next queued foundation;
 - the exact commits and draft PRs produced.
 
 No amount of passing autonomous work vouches this plan, the product goal, or any new direction. The maintainer reviews the distillation, decides what to keep, and explicitly vouches only the direction that should continue to hold.

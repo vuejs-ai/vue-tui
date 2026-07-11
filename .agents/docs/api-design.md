@@ -12,6 +12,8 @@ The first concrete design topic is the **rendering-mode contract**: which termin
 
 Interaction ownership follows as the second topic. It must distinguish two independent questions: how one effective logical focus target is maintained, and how app, overlay, region, focused-control, and external-target handlers take priority or pass an event onward. These are cooperating parts of one input model, not three competing choices called targeted events, scoped commands, and a hybrid.
 
+The ordered implementation status and definition of done for these foundations live in [api-foundation-roadmap.md](./api-foundation-roadmap.md). That ledger is the canonical answer to what is active, queued, parked, or already shipped; this record remains the canonical design rationale.
+
 ## Current mode, pointer, and scrolling boundary
 
 This section records the design boundaries that are stable enough to carry forward after the source audit, concrete examples, and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It remains unstamped: the example names, signatures, target-ref type, event map, and compatibility release are not yet accepted.
@@ -330,16 +332,9 @@ The first implementation prototype should combine the workflow composer and find
 
 ## Work order
 
-1. Inventory the complete public surface across runtime, components, testing and vite; classify each item as stable application API, advanced/embedding API, deprecated compatibility, or internal mechanism.
-2. Settle the inline and full-screen rendering-mode contract above, including requested versus effective mode, environment combinations, addressable-region semantics, capability behavior, lifecycle, and testing controls.
-3. Write the focus-ownership and input-priority proposal inside that contract, with competing handler-attachment shapes and explicit compatibility for current `useInput` and focus APIs.
-4. Prototype both packets through the workflow and finder journeys in inline and full-screen modes, including semantic testing controls and real-PTY acceptance where terminal behavior is claimed.
-5. Distill shared controlled-state conventions and decide whether the first independent headless behavior justifies creating `@vue-tui/use`.
-6. Design component APIs only after the headless/runtime contracts are exercised; start with the smallest composer/editor and collection primitives the journeys require.
-7. Extend the same foundation to viewer scrolling, search, selection and copy. Implement virtualization only when a measured representative journey triggers the parked performance work.
-8. Before 1.0, reconcile naming, return types, capability-specific failure behavior, advanced exports and package-wide API/type tests.
+The live dependency order, one-active-item rule, and completion evidence are maintained in [the API foundation roadmap](./api-foundation-roadmap.md#priority-order). Do not run a second numbered backlog here: it will drift from implementation state.
 
-Testing API design proceeds with every step rather than as a final phase.
+The durable program order remains rendering-mode session facts → rendered-target lifetime → normalized input and routing → logical focus and focus scopes → semantic geometry and caret → full-screen targeted pointer → evidence-driven scroll composition → full-screen selection and copy. Representative workflow, finder, monitor, and workbench journeys validate each foundation as it lands. Component APIs follow the foundations they consume; testing, compatibility, and real-terminal evidence ship with each item rather than as a final phase.
 
 ## Review template for each proposed API
 
