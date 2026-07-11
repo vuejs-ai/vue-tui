@@ -1121,7 +1121,7 @@ describe("useAnimation", () => {
     mountOpts: {
       debug?: boolean;
       maxFps?: number;
-      interactive?: boolean;
+      liveUpdates?: boolean;
     } = {},
   ) {
     const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -1156,7 +1156,7 @@ describe("useAnimation", () => {
       debug: mountOpts.debug ?? false,
       exitOnCtrlC: false,
       maxFps: mountOpts.maxFps,
-      interactive: mountOpts.interactive,
+      liveUpdates: mountOpts.liveUpdates,
     });
 
     return {
@@ -1308,12 +1308,12 @@ describe("useAnimation", () => {
       return () => <Text>{String(frame.value)}</Text>;
     });
 
-    // Mount with debug: true + interactive: false. Animations should still
+    // Mount with debug: true + liveUpdates: false. Animations should still
     // advance because the animation timer (setInterval) is independent of
     // the interactive/non-interactive rendering mode.
     const { unmount } = mountWithOptions(App, {
       debug: true,
-      interactive: false,
+      liveUpdates: false,
     });
     await nextTick();
 

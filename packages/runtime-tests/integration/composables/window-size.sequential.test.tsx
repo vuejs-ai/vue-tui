@@ -1,7 +1,4 @@
 // Sequential: mutates / asserts on process-global state —
-//   • process.env.COLUMNS/LINES and process.stdout/process.stderr columns+rows
-//     (the terminal-size package, used by resolveSize's fallback, reads these
-//     globals directly, so a concurrent sibling would perturb the result), and
 //   • process.stdout.listenerCount("resize") — the renderToString teardown-leak
 //     test below mounts useWindowSize against the SHARED process.stdout (the
 //     no-op AppContext's stdout) and asserts the "resize" listener count returns
@@ -14,6 +11,7 @@ import process from "node:process";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, renderToString, Text, Transform, useWindowSize } from "@vue-tui/runtime";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "@vue-tui/runtime/internal";
 
 function makeTtyStream(columns: number): NodeJS.WriteStream {
   const s = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -38,21 +36,14 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-// Mirrors Ink terminal-resize.tsx:110-152 ("falls back to terminal-size rows
-// when stdout.rows is missing"). With the mount stdout reporting columns 0 and
-// no rows, resolveSize() calls terminal-size, which — after we zero out the real
-// process.stdout/stderr dimensions — resolves rows from process.env.LINES.
-test.sequential("useWindowSize falls back to terminal-size rows from env.LINES when stdout.rows is missing", async () => {
+// A deterministic host can model one coherent detected terminal pair when its
+// stream object does not expose dimensions directly. Process-global probing is
+// intentionally reserved for process.stdout/process.stderr; arbitrary custom
+// streams never borrow a different terminal's fields.
+test.sequential("useWindowSize derives rows from an explicitly modeled terminal pair", async () => {
   const stdout = makeTtyStream(0);
   const stderr = makeTtyStream(0);
   const stdin = makeFakeStdin();
-
-  const originalColumns = process.env.COLUMNS;
-  const originalLines = process.env.LINES;
-  const originalStdoutColumns = process.stdout.columns;
-  const originalStdoutRows = process.stdout.rows;
-  const originalStderrColumns = process.stderr.columns;
-  const originalStderrRows = process.stderr.rows;
 
   let capturedRows = -1;
   const App = defineComponent(() => {
@@ -63,31 +54,23 @@ test.sequential("useWindowSize falls back to terminal-size rows from env.LINES w
 
   const app = createApp(App);
   try {
-    // terminal-size prefers process.stdout/stderr dimensions, then env.
-    // Zero the real streams so env.COLUMNS/LINES is the winning source.
-    process.env.COLUMNS = "123";
-    process.env.LINES = "45";
-    process.stdout.columns = 0;
-    process.stdout.rows = 0;
-    process.stderr.columns = 0;
-    process.stderr.rows = 0;
-
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      debug: true,
+      exitOnCtrlC: false,
+      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
+        kind: "detected",
+        source: "environment",
+        size: { columns: 123, rows: 45 },
+      }),
+    } as Parameters<typeof app.mount>[0]);
     await new Promise<void>((r) => setTimeout(r, 60));
 
     expect(capturedRows).toBe(45);
   } finally {
     app.unmount();
-    // Restore env precisely: a var that was ABSENT must be DELETED, not set to
-    // the string "undefined" (which would pollute later tests' CI/size detection).
-    if (originalColumns === undefined) delete process.env.COLUMNS;
-    else process.env.COLUMNS = originalColumns;
-    if (originalLines === undefined) delete process.env.LINES;
-    else process.env.LINES = originalLines;
-    process.stdout.columns = originalStdoutColumns;
-    process.stdout.rows = originalStdoutRows;
-    process.stderr.columns = originalStderrColumns;
-    process.stderr.rows = originalStderrRows;
   }
 });
 

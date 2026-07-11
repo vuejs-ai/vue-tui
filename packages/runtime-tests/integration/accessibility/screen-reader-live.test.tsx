@@ -69,8 +69,8 @@ test.sequential("forced live screen-reader output updates a non-TTY without alte
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: true,
-    fullscreen: true,
+    liveUpdates: true,
+    mode: "fullscreen",
     isScreenReaderEnabled: true,
   });
 

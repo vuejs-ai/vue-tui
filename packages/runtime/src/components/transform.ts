@@ -5,12 +5,11 @@ import {
   inject,
   isVNode,
   provide,
-  type ExtractPublicPropTypes,
   type PropType,
   type VNode,
 } from "vue";
 import { AppContextKey, TextContextKey } from "../context.ts";
-import type { WithChildren } from "./with-children.ts";
+import type { PublicComponent } from "./with-children.ts";
 
 type TransformFn = (line: string, lineIndex: number) => string;
 
@@ -79,7 +78,7 @@ const TransformImpl = defineComponent({
   },
 });
 
-export const Transform = TransformImpl as WithChildren<typeof TransformImpl>;
+export const Transform = TransformImpl as unknown as PublicComponent<TransformProps>;
 
 /**
  * The Vue analogue of Ink's `children === undefined || children === null` guard
@@ -96,4 +95,7 @@ function isNoRenderableChildren(children: VNode[] | undefined): boolean {
 }
 
 /** Props accepted by `<Transform>` — the vue-tui analogue of Ink's `TransformProps`. */
-export type TransformProps = ExtractPublicPropTypes<typeof transformProps>;
+export interface TransformProps {
+  transform: TransformFn;
+  accessibilityLabel?: string;
+}

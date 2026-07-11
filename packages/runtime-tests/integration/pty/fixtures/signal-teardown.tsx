@@ -32,6 +32,6 @@ const App = defineComponent(() => {
 const debug = process.argv.includes("--debug");
 
 const app = createApp(App);
-app.mount({ alternateScreen: true, debug });
+app.mount({ mode: "fullscreen", debug });
 
 await app.waitUntilExit();

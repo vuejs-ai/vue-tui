@@ -31,9 +31,9 @@ async function mountInteractive(columns: number, rows: number) {
   });
 
   const app = createApp(App);
-  // interactive: true forces the resize handler even in CI where isTTY alone
+  // liveUpdates: true forces the resize handler even in CI where isTTY alone
   // would disable it. exitOnCtrlC: false so the app stays alive.
-  app.mount({ stdout, stdin, stderr, interactive: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
 
   // Flush initial render.
   await nextTick();
@@ -134,7 +134,7 @@ test("narrowing when previous frame overflows terminal fires clearTerminal (not 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, interactive: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
 
   // Flush initial render — this sets outputHeight = 5.
   await nextTick();
@@ -179,7 +179,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, interactive: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
 

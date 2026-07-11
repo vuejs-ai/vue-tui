@@ -100,7 +100,7 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   debug: scenario === "append",
-  fullscreen: scenario === "fullscreen",
+  mode: scenario === "fullscreen" ? "fullscreen" : "inline",
   exitOnCtrlC: false,
   maxFps: 0,
 });

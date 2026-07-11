@@ -1,6 +1,6 @@
 import type { Component } from "vue";
 import { shallowRef } from "vue";
-import { createRenderer } from "@vue/runtime-core";
+import { createRenderer } from "vue";
 import { EventEmitter } from "node:events";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
@@ -256,7 +256,6 @@ function createNoOpAppContext(isScreenReaderEnabled = false): AppContext {
     stderr: process.stderr,
     stdin: process.stdin,
     debug: false,
-    interactive: false,
     isScreenReaderEnabled,
     isRawModeSupported: false,
     setRawMode: () => {},

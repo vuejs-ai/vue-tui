@@ -1,4 +1,4 @@
-import { queuePostFlushCb } from "@vue/runtime-core";
+import { queuePostFlushCb } from "vue";
 
 export interface CommitScheduler {
   schedule: () => void;

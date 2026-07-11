@@ -1,6 +1,6 @@
 # Fullscreen output contract
 
-The current runtime selects this behavior with `fullscreen: true`, with `alternateScreen` as a deprecated implementation alias. The accepted clean-slate target instead uses optional `mode: "inline" | "fullscreen"` with Inline as the omission default and removes both booleans directly; that replacement remains later F1 implementation work. The alternate screen is the terminal mechanism used to implement the full-screen model, and Fullscreen becomes effective only when live updates are enabled and `stdout` is a TTY. An explicit live-update override on a non-TTY stream cannot bypass that gate.
+The runtime selects this behavior with optional `mode: "inline" | "fullscreen"`; omission requests Inline. Own `fullscreen`, `alternateScreen`, and `interactive` mount fields are removed programming errors and fail before terminal inspection or mutation. `liveUpdates` separately controls output cadence and does not grant a screen model. Fullscreen becomes effective only on a visual TTY with usable terminal dimensions; an explicit live-update override on a non-TTY stream cannot acquire the alternate screen, fixed viewport, or hit map. A screen-reader request for Fullscreen instead resolves to an Inline linear transcript on the main screen.
 
 ## The surface vue-tui owns
 
@@ -24,8 +24,8 @@ Persistent fullscreen history belongs in ordinary reactive application state ren
 
 ## Boundaries
 
-- Inline rendering keeps the relative writer and terminal-owned scrollback semantics.
-- Screen-reader rendering remains a linear transcript and does not use the fixed visual-surface path, even if fullscreen was requested.
+- Inline rendering keeps the relative writer and terminal-owned scrollback semantics while F1.6 defines the exact ownership and overflow contract.
+- Screen-reader rendering remains a linear transcript on the main screen and resolves a Fullscreen request to effective Inline.
 - `debug: true` still exposes committed frames to the test frame sink, but an effective fullscreen app replaces the viewport instead of appending each debug frame on screen. `app.clear()` remains a no-op in debug mode, including fullscreen debug.
 - Resize recomputes the terminal-sized Yoga layout and repaints the fixed viewport synchronously.
 - Unmount, exit, and signals restore cursor, input modes, raw mode, and the original screen through the existing teardown path.

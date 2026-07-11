@@ -65,7 +65,7 @@ function mountOpts(stdout: NodeJS.WriteStream) {
     stdout,
     stdin: makeTtyStdin(),
     stderr: makeTtyStderr(),
-    interactive: true,
+    liveUpdates: true,
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -320,7 +320,7 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
       stdout,
       stdin: makeTtyStdin(),
       stderr: makeTtyStderr(),
-      interactive: false,
+      liveUpdates: false,
       exitOnCtrlC: false,
       patchConsole: false,
     });
@@ -372,7 +372,7 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
       stdin: makeTtyStdin(),
       stderr: makeTtyStderr(),
       debug: true,
-      fullscreen: true,
+      mode: "fullscreen",
       exitOnCtrlC: false,
       patchConsole: false,
     });

@@ -14,7 +14,7 @@ import { exampleDir, launch, tsdownBin, viteBin, type Launched } from "./helpers
 // shim. This suite guards that the shipped examples still launch and paint on both paths, so a
 // regression that reintroduces a module-system crash fails CI on every change.
 //
-// Why a real PTY: a TUI gates its full paint on an interactive TTY (`interactive = !isInCi && isTTY`),
+// Why a real PTY: a TUI gates live painting on a TTY (`liveUpdates = !isInCi && isTTY` by default),
 // so a piped/non-TTY child renders nothing — a non-PTY smoke test would be a false negative. Each
 // runnable example is launched under a pseudo-terminal and we wait for its title to paint.
 //

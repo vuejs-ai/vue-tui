@@ -28,6 +28,13 @@ function visibleLines(terminal: InstanceType<typeof Terminal>): string[] {
   );
 }
 
+function allBufferLines(terminal: InstanceType<typeof Terminal>): string[] {
+  const buffer = terminal.buffer.active;
+  return Array.from({ length: buffer.length }, (_, row) =>
+    (buffer.getLine(row)?.translateToString(true) ?? "").trimEnd(),
+  );
+}
+
 async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
   const ps = term("fullscreen-origin", ["8", scenario]);
   let exited = false;
@@ -132,22 +139,43 @@ test("fullscreen hard-clips text expanded by a paint transform", async () => {
   await assertStableFullscreenSurface("horizontal-transform");
 });
 
-test("fullscreen screen-reader output keeps the existing linear transcript path", async () => {
+test("fullscreen screen-reader request uses a main-screen linear transcript", async () => {
   const ps = term("fullscreen-origin", ["8", "screen-reader"]);
   let exited = false;
 
   try {
     await ps.waitForOutput((output) => output.includes("__SETTLED__:screen-reader"));
     expect(ps.output).not.toContain("\x1b[2J\x1b[H");
+    expect(ps.output).not.toContain("\x1b[?1049h");
+    expect(ps.output).not.toContain("\x1b[?1049l");
+    expect(ps.output).not.toContain("\x1b[?25l");
+    expect(ps.output).not.toContain("\x1b[?1000h");
+    expect(ps.output).not.toContain("\x1b[?1002h");
+    expect(ps.output).not.toContain("\x1b[?1003h");
 
     const terminal = await emulate(ps.output);
-    expect(terminal.buffer.active.type).toBe("alternate");
-    expect(visibleLines(terminal)[0]).toBe("BUTTON");
+    expect(terminal.buffer.active.type).toBe("normal");
+    expect(allBufferLines(terminal)).toContain("__READY__");
+    expect(visibleLines(terminal)).toContain("BUTTON");
 
-    ps.write("q");
-    await ps.waitForOutput((output) => output.includes("__CLICKED__:screen-reader"));
+    // A real targeted handler is mounted above. Even when mouse bytes are fed
+    // directly into the PTY, screen-reader fallback must neither arm reporting
+    // nor deliver the event through a hidden full-screen hit map.
+    ps.write("\x1b[<0;1;1M\x1b[<0;1;1mq");
+    await ps.waitForOutput((output) => output.includes("__CLICKED__:"));
     await ps.waitForExit();
     exited = true;
+
+    expect(ps.output).toContain("__CLICKED__:screen-reader");
+    expect(ps.output).not.toContain("__CLICKED__:screen-reader-pointer");
+    expect(ps.output).not.toContain("\x1b[?1000h");
+    expect(ps.output).not.toContain("\x1b[?1002h");
+    expect(ps.output).not.toContain("\x1b[?1003h");
+
+    const restored = await emulate(ps.output);
+    expect(restored.buffer.active.type).toBe("normal");
+    expect(allBufferLines(restored)).toContain("__READY__");
+    expect(allBufferLines(restored).some((line) => line.includes("BUTTON"))).toBe(true);
   } finally {
     if (!exited) ps.kill("SIGTERM");
   }

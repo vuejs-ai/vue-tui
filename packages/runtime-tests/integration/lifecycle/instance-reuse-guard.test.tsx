@@ -44,7 +44,7 @@ test("warn + skip wiring when mount() is called on an already-live stdout", asyn
 
   // ---- First app: mounts normally ----
   const app1 = createApp(App);
-  app1.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
+  app1.mount({ stdout, stdin, stderr: process.stderr, liveUpdates: false });
 
   // ---- Second app: same stdout → warn + no-op ----
   const app2 = createApp(App);
@@ -57,7 +57,7 @@ test("warn + skip wiring when mount() is called on an already-live stdout", asyn
     return (originalWrite as Function)(...args);
   }) as NodeJS.WriteStream["write"];
 
-  app2.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
+  app2.mount({ stdout, stdin, stderr: process.stderr, liveUpdates: false });
 
   // (a) A warning containing the key phrase was written to process.stderr.
   stderrSpy.mockRestore();
@@ -104,7 +104,7 @@ test("warn + skip wiring when mount() is called on an already-live stdout", asyn
     return true;
   });
   const app3 = createApp(App);
-  app3.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
+  app3.mount({ stdout, stdin, stderr: process.stderr, liveUpdates: false });
   thirdSpy.mockRestore();
   expect(thirdWrites.join("")).toContain("this stdout already has a live app");
 
@@ -126,12 +126,12 @@ test("unmounting first app allows a subsequent mount on the same stdout (no warn
 
   // Mount app1, then unmount it.
   const app1 = createApp(App);
-  app1.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
+  app1.mount({ stdout, stdin, stderr: process.stderr, liveUpdates: false });
   app1.unmount();
 
   // Mount app2 on the same stdout — must work normally (no warning).
   const app2 = createApp(App);
-  app2.mount({ stdout, stdin, stderr: process.stderr, interactive: false });
+  app2.mount({ stdout, stdin, stderr: process.stderr, liveUpdates: false });
 
   stderrSpy.mockRestore();
 

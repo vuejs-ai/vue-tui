@@ -51,7 +51,7 @@ type MutableWheelEvent = TuiWheelEvent & {
 
 const CLICK_DETAIL_WINDOW_MS = 500;
 const INLINE_MOUSE_WARNING =
-  "[vue-tui] Mouse handlers only fire in fullscreen mode. Use app.mount({ fullscreen: true }) for targeted element mouse events, or useMouseInput() for raw inline mouse input.";
+  '[vue-tui] Mouse handlers only fire in fullscreen mode. Use app.mount({ mode: "fullscreen" }) for targeted element mouse events, or useMouseInput() for raw inline mouse input.';
 
 function hasMouseHandlers(node: TuiNode): boolean {
   const handlers = (node as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;

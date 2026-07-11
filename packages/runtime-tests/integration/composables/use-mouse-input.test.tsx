@@ -243,7 +243,7 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
     debug: true,
     exitOnCtrlC: false,
     rawMode: "auto",
-    fullscreen: true,
+    mode: "fullscreen",
   });
   await settle();
 

@@ -62,6 +62,7 @@ export function createDelayedWriteCallbackStdout({
   }) as unknown as NodeJS.WriteStream;
 
   stdout.columns = 100;
+  stdout.rows = 100;
   stdout.isTTY = true;
   return stdout;
 }

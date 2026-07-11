@@ -66,7 +66,7 @@ function mountOpts(stdout: NodeJS.WriteStream) {
     stdout,
     stdin: makeTtyStdin(),
     stderr: makeTtyStderr(),
-    interactive: true,
+    liveUpdates: true,
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,

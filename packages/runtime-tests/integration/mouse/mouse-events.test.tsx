@@ -53,7 +53,7 @@ function mountMouseApp(
     debug: true,
     exitOnCtrlC: false,
     rawMode: "auto",
-    fullscreen,
+    mode: fullscreen ? "fullscreen" : "inline",
   });
   return { app, stdin, writes };
 }
@@ -294,7 +294,7 @@ test("inline element mouse handlers warn once and do not arm SGR mouse", async (
   await settle();
 
   expect(warn).toHaveBeenCalledTimes(1);
-  expect(warn.mock.calls[0]![0]).toContain("app.mount({ fullscreen: true })");
+  expect(warn.mock.calls[0]![0]).toContain('app.mount({ mode: "fullscreen" })');
   expect(warn.mock.calls[0]![0]).toContain("useMouseInput()");
   expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
 

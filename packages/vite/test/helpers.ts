@@ -4,8 +4,8 @@
 // concurrently. This file is not a test (no .test/.spec suffix), just their shared toolkit.
 
 // Install the process-global frame sink and return a reader for the accumulated output.
-// Only `write` + `isTTY:false` are needed: a non-TTY stdout disables the renderer's
-// interactive path (cursor moves, ANSI erases, resize listener), so the mock can be a
+// Only `write` + `isTTY:false` are needed: a non-TTY stdout selects final-stream
+// output (no cursor moves, ANSI erases, or resize listener), so the mock can be a
 // minimal sink that just accumulates the emitted frames.
 export function capture(): () => string {
   let buf = "";

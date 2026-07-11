@@ -21,12 +21,13 @@ A pure composition of `<Text>` + `useAnimation` — no new runtime export needed
 
 ## Behavior
 
-- **Always animates.** It does NOT gate on app interactivity — there is no public signal for
-  `interactive` (it lives only on the internal `AppContext`), and reaching for it would break the
+- **Always animates.** It does not gate on live output cadence. F1.4 records that cadence in the
+  internal render session rather than `AppContext`; the readonly public session hooks remain
+  deliberately unexported until F1 closes. Reaching into the internal service would break the
   pure-composition rule. This mirrors the third-party `ink-spinner`, which likewise just animates
-  (unverified parity — not run-checked); the runtime governs
-  non-interactive output one layer down. (If a static-when-non-interactive affordance is ever
-  wanted, it needs the runtime to expose interactivity publicly first.)
+  (unverified parity — not run-checked); the runtime governs final-stream versus live-update output
+  one layer down. A future static-output affordance would derive from the public session contract,
+  not restore an `interactive` boolean.
 - Switching `type` changes the preset interval; `useAnimation` resets `frame` to 0 on a live
   interval change — acceptable for a spinner.
 

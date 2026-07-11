@@ -36,7 +36,6 @@ function createTestAppContext(): AppContext {
     stderr: process.stderr,
     stdin: process.stdin,
     debug: false,
-    interactive: false,
     isScreenReaderEnabled: false,
     isRawModeSupported: false,
     setRawMode: () => {},

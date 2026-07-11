@@ -125,7 +125,7 @@ commit — see the divergence "Resize unconditionally cancels the pending traili
 ### Non-TTY output defaults to a final stream while explicit live updates remain possible
 
 The stdout policy deliberately matches Ink v7.0.4. Both runtimes [resolve live updates](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L979-L981) as the explicit override when present, otherwise as
-`!isInCi && Boolean(stdout.isTTY)`. With normal
+`!isInCi && Boolean(stdout.isTTY)`. Ink names the override `interactive`; vue-tui's public name is the narrower `liveUpdates`, recorded as an API divergence below. With normal
 `debug: false` output and live updates disabled, newly committed `Static` bytes are written
 immediately, dynamic commits only replace the retained latest frame, and teardown writes that
 latest dynamic frame plus a newline. This keeps ordinary redirected output useful and avoids
@@ -140,7 +140,7 @@ stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a 
 This alignment is about output policy, not a broad claim that the application has no input. A TTY
 stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
 `debug: true` is also a separate append-oriented diagnostic branch that writes complete current
-content on commits and only adds a newline at non-interactive teardown. Finally, Ink's screen-reader
+content on commits and only adds a newline at final-stream teardown. Finally, Ink's screen-reader
 flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen
 screen-reader request to a main-screen transcript is a separate product decision from the
 non-TTY alignment.
@@ -604,13 +604,19 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   keeping the running app stable beats auto-tearing it down (which would churn on a re-render
   glitch). KEEP. [VOUCHED @hyf0] Test: `instance-reuse-guard.test.tsx`.
 
-### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
+### Screen mode and live output cadence use separate mount fields
+
+- **Ink:** `alternateScreen?: boolean` requests the alternate buffer and `interactive?: boolean` controls its broad live-output policy. The resolved state is not available as one public fact, and the word “interactive” can be mistaken for stdin or logical-input availability.
+- **vue-tui:** `mode?: "inline" | "fullscreen"` requests one of the two terminal screen models, while `liveUpdates?: boolean` only overrides output cadence. Omission requests Inline and otherwise follows Ink's `!isInCi && Boolean(stdout.isTTY)` default. Own `fullscreen`, `alternateScreen`, and `interactive` keys fail synchronously before terminal mutation; there are no compatibility aliases. The internal render session keeps the request, effective mode, fallback, output, dimensions, and capabilities distinct.
+- **Why:** the screen model and whether dynamic bytes update live are different decisions. A non-TTY stream may update live without acquiring either terminal mode; a TTY may use final-stream output; stdin can have its own availability. Separate, accurately named fields prevent application code from treating one boolean as all three facts. The direct replacement is appropriate while vue-tui is experimental, and one `createApp` still owns the shared Vue lifecycle. Introduced in F1.4; no VOUCHED stamp has been added.
+
+### Raw mode is owned for the live-update-request lifetime by default (`rawMode` option)
 
 - **Ink:** raw mode is **lazy / reference-counted to input hooks**. `useInput` /
   `useFocus` / `usePaste` enable it on mount and release it when the last one unmounts, so
   a screen with no input handler falls back to cooked mode. There is no option to hold it.
 - **vue-tui:** the `rawMode` mount option defaults to **`'always'`**. Raw mode is enabled at
-  mount and held for the whole interactive run (when `interactive` and stdin is a TTY),
+  mount and held for the whole run when live updates were requested and stdin is a TTY,
   regardless of which input composables are mounted. `rawMode: 'auto'` opts back into Ink's
   exact lazy behavior.
 - **Why:** for a long-running interactive app (a full-screen TUI, a coding agent), Ink's
@@ -704,7 +710,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `console.log`, and patched `console.error` writes move the dynamic frame down one more row each.
   With `debug: true`, rerenders append in place (`DYNAMICFRAME-1FRAME-2`) instead of replacing the
   alternate-screen surface.
-- **vue-tui:** effective `fullscreen` visual rendering owns the current `columns × rows` viewport.
+- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport.
   Yoga receives both dimensions; paint and hit testing clip to them; every commit clears, homes, and
   repaints the complete frame from `(0,0)`, hiding the caret until a declared position is restored.
   Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
@@ -718,8 +724,10 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   even when `incrementalRendering: true`; a later absolute-cell diff may optimize bytes without
   changing this contract.
 - **Boundary:** direct `process.stdout.write()` / `process.stderr.write()` calls bypass the runtime
-  coordinator and cannot be repaired automatically. Screen-reader output stays on its linear
-  transcript path. Introduced 2026-07-11. Tests: `fullscreen-origin.test.ts`; full contract:
+  coordinator and cannot be repaired automatically. Screen-reader presentation stays on its linear
+  transcript path; unlike Ink, a Fullscreen request resolves to effective Inline and remains on the
+  main screen without targeted mouse. Introduced 2026-07-11 and completed for live mounts in F1.4.
+  Tests: `fullscreen-origin.test.ts`; full contract:
   [fullscreen-output.md](./fullscreen-output.md).
 
 ### Degenerate boxes do not lay out or paint children when the content area is gone

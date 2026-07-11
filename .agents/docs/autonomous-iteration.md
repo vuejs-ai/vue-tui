@@ -10,16 +10,16 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Close F1.4, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): implement the accepted clean-slate live mount surface and the authoritative internal resolver that will later back the selected readonly [`useRenderSession()` contract](./render-session.md).
+Close F1.5, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint): replace implicit testing and string-render environments with finite hosts backed by the authoritative session service, without publishing the still incomplete readonly [`useRenderSession()` contract](./render-session.md).
 
-1. add optional `mode`, remove the old Fullscreen booleans directly, and reject every invalid/removed-key case before any terminal mutation;
-2. derive live-host mode resolution, output destination/dynamic updates/presentation, terminal/layout dimensions, and semantic capabilities from one pure resolver used by behavior and internal session state;
-3. provide the internal session before setup with stable identity and reactive dimensions/capabilities, but do not export a public hook while test/string hosts and Inline bounds are incomplete;
-4. make Fullscreen plus screen-reader rendering use the accepted main-screen Inline transcript fallback and map default/forced non-TTY output without acquiring false terminal capabilities;
-5. retain current public fact hooks temporarily while making them derive from the one live resolution source, and record the next disposition of `interactive`/`debug` wherever they would contradict the selected output contract;
-6. prove the mount slice through type/runtime guards, focused lifecycle/integration tests, real PTY behavior, a clean packed consumer, `vp run ready`, and fresh `CI=true vp run ci`.
+1. replace `@vue-tui/testing`'s arbitrary `debug`, fake-TTY, and `liveUpdates` combination with a finite production-like host model whose impossible combinations fail immediately;
+2. keep committed content-frame observations separate from the final emulated terminal screen, and make a final-stream preset reproduce production cadence instead of debug cadence;
+3. provide the same session service and deliberate dimensions to deterministic test components, public visual string rendering, and the internal screen-reader string helper without reading process streams;
+4. make public `renderToString()` reject recognizable hidden screen-reader or mode passthrough before rendering, while the internal helper selects screen-reader presentation deliberately;
+5. define unavailable string-host operations honestly, including `useApp()` exit/flush behavior and inert terminal I/O, without silently pretending a live app exists;
+6. prove the host matrix through testing-package API/type/runtime guards, string-render lifecycle tests, clean tarball consumers, `vp run ready`, and fresh `CI=true vp run ci`.
 
-F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, source audit, peer comparison, host mapping, lifetime, test-host picture, and current-API dispositions. F1.4 implements the live behavior source without publishing a partial facts API; F1.5 owns deterministic testing and string rendering, F1.6 owns Inline history/overflow, F1.7 owns remaining lifecycle behavior, and F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, or activate F2 early.
+F1.2 is complete with the accepted mount/host decisions. F1.3 is complete with the unstamped readonly-session proposal, and F1.4 is complete with the verified private live behavior source. F1.5 now owns deterministic testing and string rendering; F1.6 owns Inline history/overflow, F1.7 owns remaining lifecycle behavior, and F1.8 publishes and closes the complete F1 surface. Do not reopen the two screen models, treat the Inline default as product hierarchy, or activate F2 early.
 
 ## Baseline for the current foundation
 

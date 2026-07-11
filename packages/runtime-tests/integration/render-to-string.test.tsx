@@ -1,6 +1,6 @@
 import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
 import chalk from "chalk";
-import { describe, test, expect } from "vite-plus/test";
+import { describe, test, expect, vi } from "vite-plus/test";
 import {
   renderToString,
   Box,
@@ -728,14 +728,20 @@ describe("renderToString", () => {
     });
 
     test("useWindowSize does not throw in renderToString", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const App = defineComponent(() => {
         // Resolves dimensions from ctx.stdout (process.stdout in the no-op
         // context) with the terminal-size fallback; never throws.
         const { columns, rows } = useWindowSize();
         return () => <Text>size {columns.value > 0 && rows.value > 0 ? "ok" : "fallback"}</Text>;
       });
-      const output = renderToString(App);
-      expect(output).toContain("size");
+      try {
+        const output = renderToString(App);
+        expect(output).toContain("size");
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     test("useAnimation does not throw in renderToString (frame frozen at 0)", () => {

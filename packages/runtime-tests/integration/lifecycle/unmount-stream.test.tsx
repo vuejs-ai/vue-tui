@@ -71,7 +71,7 @@ test("non-interactive mode writes only last frame at unmount", async () => {
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -161,8 +161,8 @@ test("explicit interactive override writes live frames to non-TTY without altern
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: true,
-    fullscreen: true,
+    liveUpdates: true,
+    mode: "fullscreen",
   });
 
   await nextTick();
@@ -208,7 +208,7 @@ test("non-interactive empty final frame still writes trailing newline at unmount
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -242,7 +242,7 @@ test("non-interactive unmount skips final frame when stdout is not writable", as
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -276,7 +276,7 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -322,7 +322,7 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();

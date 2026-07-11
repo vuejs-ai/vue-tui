@@ -13,8 +13,8 @@ import {
 // A NON-TTY writable (isTTY=false). makeFakeWritable() forces isTTY=true, which
 // makes the app interactive; for the non-interactive non-debug race below we need
 // a piped stream so `interactive` derives false (render.ts:
-// `options.interactive ?? (!isInCi && Boolean(stdout.isTTY))`). We also pass
-// `interactive: false` explicitly so the case is deterministic regardless of CI.
+// `options.liveUpdates ?? (!isInCi && Boolean(stdout.isTTY))`). We also pass
+// `liveUpdates: false` explicitly so the case is deterministic regardless of CI.
 function makeNonTtyWritable(): NodeJS.WriteStream {
   const s = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(s, { columns: 100, rows: 100, isTTY: false });
@@ -238,8 +238,8 @@ test("non-interactive non-debug: update-flush throw + synchronous unmount() stil
   });
 
   const app = createApp(ThrowsOnUpdate);
-  // Non-interactive (piped stdout), non-debug, interactive:false pinned.
-  app.mount({ stdout, stdin, stderr, interactive: false, exitOnCtrlC: false });
+  // Non-interactive (piped stdout), non-debug, liveUpdates:false pinned.
+  app.mount({ stdout, stdin, stderr, liveUpdates: false, exitOnCtrlC: false });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -315,7 +315,7 @@ test("non-interactive non-debug: error paint MATCHES main (no overview frame, ju
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, interactive: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: false, exitOnCtrlC: false });
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));

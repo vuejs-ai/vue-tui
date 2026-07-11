@@ -1,4 +1,4 @@
-import { type RendererOptions } from "@vue/runtime-core";
+import { type RendererOptions } from "vue";
 import {
   createBox,
   createComment as createCommentNode,

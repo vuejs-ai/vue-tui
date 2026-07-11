@@ -11,12 +11,14 @@ export interface RenderOptions {
   props?: Record<string, unknown>;
   exitOnCtrlC?: boolean;
   /**
-   * Whether the rendered app runs in interactive mode. Defaults to `true` so the
+   * Whether the rendered app emits live updates. Defaults to `true` so the
    * harness is deterministic: `terminal.resize()` triggers a re-layout and the
-   * lifetime raw-mode hold engages regardless of the host environment. Set to
-   * `false` to assert non-interactive behavior.
+   * current lifetime input hold engages regardless of the host environment. Set
+   * to `false` to disable those runtime paths. The current debug-backed frame
+   * observer still captures each commit; it does not model production final-stream
+   * cadence until F1.5 replaces this host.
    */
-  interactive?: boolean;
+  liveUpdates?: boolean;
 }
 
 export interface Terminal {
@@ -101,14 +103,15 @@ export async function render(
     stdin,
     stderr,
     debug: true,
-    // Pin interactive ON by default so the harness is deterministic and
+    // Pin live updates ON by default so the harness is deterministic and
     // independent of ambient CI/TTY detection. The runtime otherwise derives
-    // `interactive = !isInCi && Boolean(stdout.isTTY)` (render.ts), and `isInCi`
-    // is evaluated ONCE at import time — so a consumer running tests in CI would
-    // silently get a non-interactive app: `terminal.resize()` would not re-lay-out
-    // and the lifetime raw-mode hold would never engage, breaking both APIs this
-    // helper advertises. `options.interactive` keeps non-interactive testable.
-    interactive: options.interactive ?? true,
+    // the default as `!isInCi && Boolean(stdout.isTTY)`, and `isInCi` is
+    // evaluated ONCE at import time — so a consumer running tests in CI would
+    // silently get final-stream output: `terminal.resize()` would not re-lay-out
+    // and the current lifetime input hold would never engage, breaking both APIs
+    // this helper advertises. `options.liveUpdates` keeps that host behavior
+    // directly testable until F1.5 replaces this debug-backed host.
+    liveUpdates: options.liveUpdates ?? true,
     exitOnCtrlC: options.exitOnCtrlC ?? false,
     [INTERNAL_FRAME_SINK]: frameSink,
   } as Parameters<TuiApp["mount"]>[0]);

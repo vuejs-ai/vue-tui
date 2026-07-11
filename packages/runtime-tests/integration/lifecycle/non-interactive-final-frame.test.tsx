@@ -37,7 +37,7 @@ test("non-interactive teardown flushes a deferred trailing commit into the final
   const app = createApp(App);
   // debug is left unset (false): debug forces `unthrottled`, which would set
   // renderThrottleMs=0 and erase the very throttle this bug needs.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false });
 
   await nextTick();
   await nextTick();

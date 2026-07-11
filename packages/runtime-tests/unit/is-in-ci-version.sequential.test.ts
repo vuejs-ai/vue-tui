@@ -9,8 +9,8 @@ afterEach(() => {
 });
 
 // vue-tui pins is-in-ci to ^2.0.0 to match Ink (Ink package.json), aligning the
-// CI-detection formula that feeds the `interactive` default (render.ts:503) and
-// shouldSynchronize (write-synchronized.ts:9). v1 and v2 diverge on edge env configs;
+// CI-detection formula that feeds the `liveUpdates` default and synchronized-output
+// policy. v1 and v2 diverge on edge env configs;
 // this locks that we resolve v2's formula.
 //
 // v2: `check(k) = k in env && env[k] !== '0' && env[k] !== 'false'`, then

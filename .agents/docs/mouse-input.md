@@ -25,8 +25,9 @@
 > origin. Terminal-wide raw mouse remains conceptually separate from targeted pointer delivery, but
 > the current root `useMouseInput` name, export path, coordinate base, and vertical-wheel-only shape
 > are reopened rather than preserved for compatibility. The accepted mount target is one
-> `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default; shipped
-> v1 still uses `fullscreen` and `alternateScreen` until later F1 implementation replaces them.
+> `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default. F1.4
+> now implements that mount contract and removes `fullscreen`, `alternateScreen`, and `interactive`
+> directly. The targeted-pointer replacement itself remains F6 work.
 > Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 
@@ -102,7 +103,7 @@ Mouse capture is a second, independent concern. Enabling tracking redirects term
 selection and wheel behavior to the application in either rendering mode. Alternate screen changes
 surface ownership; it does not remove the user's possible desire to select terminal text.
 
-### 3.1 Shipped policy: full-screen gate and automatic acquisition
+### 3.1 Historical v1 policy: full-screen gate and automatic acquisition
 
 **The mount option is renamed `alternateScreen` → `fullscreen`** (with `alternateScreen` kept as a
 deprecated alias). It names the user's intent, not the terminal mechanism.
@@ -121,7 +122,7 @@ runtime owns minimum-level acquisition and restoration internally.
 The shipped runtime has no opt-out beyond removing all pointer handlers and `useDraggable`
 consumers.
 
-### 3.2 Telling an inline author that `@click` won't work
+### 3.2 Historical v1 behavior when an inline author uses `@click`
 
 In v1, `@click` type-checks on the common `Box` and `Text` in every application. Inline registration
 warns once and the handler never fires:
@@ -220,7 +221,7 @@ Every author-facing name maps to a real precedent, none invented:
 | `useDraggable`                                                                                                     | VueUse `useDraggable`, exact                                                                                  |
 | `useElementHover` (deferred)                                                                                       | VueUse `useElementHover`, exact                                                                               |
 | `useMouseInput`, `MouseInputEvent`                                                                                 | existing vue-tui exports in v1 (#237); target names and shape reopened                                        |
-| `fullscreen` mount option                                                                                          | historical v1 replacement for `alternateScreen`; accepted target is the optional `mode` field                 |
+| `mode: "fullscreen"` mount option                                                                                  | current full-screen request; replaces the historical `fullscreen` and `alternateScreen` fields                |
 
 Only the two names that collide with a DOM global are prefixed. `Tui` — not the brand `VueTui`, and
 not a namespace — is the deliberate call: it matches PixiJS (a non-DOM renderer with DOM-shaped
@@ -396,9 +397,9 @@ must not change the public event / `MouseTarget.rect` contract.
   object if real examples need it. A future `handle` option remains open.
 - **Settled v1 mechanics** — handler storage lives on the node; pointer capture is owned and released
   by `useDraggable`, including when the capturing node unmounts; mouse composables use a local
-  `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` is the supported mount-option name
-  and `alternateScreen` remains only as a deprecated alias in shipped v1. The accepted target
-  replaces both with `mode`, without a compatibility alias. This naming decision does not settle
+  `tryOnScopeDispose` helper for scope-safe cleanup; `fullscreen` was the supported mount-option name
+  and `alternateScreen` its deprecated alias in shipped v1. F1.4 replaced both with `mode`, without
+  a compatibility alias. This naming decision does not settle
   whether full-screen or inline should be the product's primary mode; see
   [goal.md](./goal.md#rendering-modes).
 

@@ -38,7 +38,7 @@ test("alternate screen - disabled by default", async () => {
   const stdin = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr: makeTtyStream(), interactive: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr: makeTtyStream(), liveUpdates: true, exitOnCtrlC: false });
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -59,8 +59,8 @@ test("alternate screen - ignored when non-interactive", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: false,
+    mode: "fullscreen",
+    liveUpdates: false,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -83,7 +83,7 @@ test("alternate screen - ignored when isTTY is false", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
+    mode: "fullscreen",
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -106,8 +106,8 @@ test("alternate screen - ignored when isTTY is false even if interactive is true
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -130,8 +130,8 @@ test("alternate screen - enters on mount and exits on unmount", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -166,8 +166,8 @@ test("alternate screen - hides cursor as part of the enter sequence", async () =
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -198,8 +198,8 @@ test("alternate screen - content is rendered between enter and exit", async () =
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -229,8 +229,8 @@ test("alternate screen - unmount() exits the alternate screen", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -254,8 +254,8 @@ test("alternate screen - cursor restored after exit", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -285,8 +285,8 @@ test("alternate screen - does not replay exit(Error) output on primary screen", 
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   const exited = app.waitUntilExit();
@@ -319,8 +319,8 @@ test("alternate screen - does not replay teardown output on primary screen", asy
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();
@@ -358,8 +358,8 @@ test("alternate screen - cleanup console output does not leak into managed strea
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     exitOnCtrlC: false,
     patchConsole: true,
   });
@@ -384,8 +384,8 @@ test("alternate screen - still activates in debug mode", async () => {
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    alternateScreen: true,
-    interactive: true,
+    mode: "fullscreen",
+    liveUpdates: true,
     debug: true,
     exitOnCtrlC: false,
   });

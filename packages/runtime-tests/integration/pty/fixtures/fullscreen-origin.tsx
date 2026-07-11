@@ -144,7 +144,7 @@ const App = defineComponent(() => {
         <Box
           width={7}
           height={1}
-          onClick={scenario === "screen-reader" ? undefined : () => exit("clicked")}
+          onClick={() => exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked")}
         >
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
@@ -155,7 +155,7 @@ const App = defineComponent(() => {
 
 const app = createApp(App);
 app.mount({
-  fullscreen: true,
+  mode: "fullscreen",
   debug: scenario === "debug",
   isScreenReaderEnabled: scenario === "screen-reader",
   incrementalRendering: scenario === "stdout",

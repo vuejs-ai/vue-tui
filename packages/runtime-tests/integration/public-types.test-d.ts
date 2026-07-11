@@ -48,6 +48,7 @@ import type {
   MouseInputEvent,
   MouseTarget,
   MouseTargetRect,
+  MountOptions,
   TuiMouseEvent,
   TuiMouseEventType,
   TuiWheelEvent,
@@ -63,6 +64,29 @@ import type {
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
+
+const defaultMountOptions: MountOptions = {};
+const inlineMountOptions: MountOptions = { mode: "inline", liveUpdates: false };
+const fullscreenMountOptions: MountOptions = { mode: "fullscreen", liveUpdates: true };
+expectTypeOf(defaultMountOptions).toMatchTypeOf<MountOptions>();
+expectTypeOf(inlineMountOptions).toMatchTypeOf<MountOptions>();
+expectTypeOf(fullscreenMountOptions).toMatchTypeOf<MountOptions>();
+
+// @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
+const removedFullscreenOption: MountOptions = { fullscreen: true };
+// @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
+const removedAlternateScreenOption: MountOptions = { alternateScreen: true };
+// @ts-expect-error Output policy is named liveUpdates, not broad interactivity.
+const removedInteractiveOption: MountOptions = { interactive: true };
+// @ts-expect-error Only the two finite render-mode values are accepted.
+const invalidModeOption: MountOptions = { mode: "full-screen" };
+// @ts-expect-error liveUpdates is a boolean override.
+const invalidLiveUpdatesOption: MountOptions = { liveUpdates: "yes" };
+void removedFullscreenOption;
+void removedAlternateScreenOption;
+void removedInteractiveOption;
+void invalidModeOption;
+void invalidLiveUpdatesOption;
 
 // Prop types carry their component's real, declared props.
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<

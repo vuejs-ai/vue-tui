@@ -111,7 +111,7 @@ export function stripKittyQueryResponsesAndTrailingPartial(buffer: number[]): nu
 }
 
 export interface KittyKeyboardController {
-  init(options: KittyKeyboardOptions | undefined, interactive: boolean): void;
+  init(options: KittyKeyboardOptions | undefined, allowAutoDetection: boolean): void;
   /**
    * @param sync When true, write the disable-kitty escape synchronously
    * (fs.writeSync) so it reaches the fd before an abrupt signal-driven exit
@@ -176,7 +176,7 @@ export function createKittyKeyboardController(
       return enabled;
     },
 
-    init(options, interactive) {
+    init(options, allowAutoDetection) {
       if (!options) return;
 
       const mode = options.mode ?? "auto";
@@ -193,7 +193,7 @@ export function createKittyKeyboardController(
 
       // auto mode
       if (
-        !interactive ||
+        !allowAutoDetection ||
         !(stdin as { isTTY?: boolean }).isTTY ||
         !(stdout as { isTTY?: boolean }).isTTY
       ) {

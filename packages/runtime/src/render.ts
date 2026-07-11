@@ -9,7 +9,7 @@ import {
   onErrorCaptured,
   shallowRef,
 } from "vue";
-import { createRenderer } from "@vue/runtime-core";
+import { createRenderer } from "vue";
 import { EventEmitter } from "node:events";
 import { writeSync as fsWriteSync } from "node:fs";
 import isInCi from "is-in-ci";
@@ -47,6 +47,24 @@ import {
   type StdinContext,
 } from "./context.ts";
 import {
+  InternalRenderSessionKey,
+  createLiveRenderSessionService,
+  needsTerminalSizeProbe,
+  normalizeRequestedMode,
+  resolveLiveDimensions,
+  resolveLiveSurface,
+  validateLiveUpdates,
+  type InternalRenderSessionService,
+  type ResolvedLiveDimensions,
+  type RenderMode,
+} from "./render-session.ts";
+import {
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  probeControllingTerminalSize,
+  type TerminalSizeProbe,
+  type TerminalSizeProbeResult,
+} from "./terminal-size-probe.ts";
+import {
   devState,
   DevStateKey,
   isDevConnected,
@@ -57,13 +75,21 @@ import {
 } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { ErrorOverview, isErrorInput, messageForNonError } from "./components/error-overview.ts";
-import { resolveSize } from "./composables/useWindowSize.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
   stdin?: NodeJS.ReadStream;
   stderr?: NodeJS.WriteStream;
   debug?: boolean;
+  /**
+   * Select the terminal screen model requested by this application.
+   * Omission requests Inline. A host that cannot acquire a live terminal
+   * surface still produces stream output without pretending the mode became
+   * effective.
+   *
+   * @default 'inline'
+   */
+  mode?: RenderMode;
   exitOnCtrlC?: boolean;
   /**
    * Controls when the app holds the terminal's raw mode, which suppresses the
@@ -77,25 +103,23 @@ export interface MountOptions {
    *   screen with no input handler returns to the terminal's normal cooked mode
    *   (native echo, line-editing, Ctrl+C/Ctrl+Z). This is Ink's original behavior.
    *
-   * Has no effect when non-interactive or when stdin is not a TTY (raw mode is
-   * unsupported there).
+   * Has no effect when stdin is not a TTY (raw mode is unsupported there).
    *
    * @default 'always'
    */
   rawMode?: "always" | "auto";
   /**
-   * Override automatic interactive mode detection.
+   * Override whether the dynamic output region updates while the app is
+   * mounted. This is an output policy, not a statement about stdin or logical
+   * interaction support.
    *
-   * By default, vue-tui detects whether the environment is interactive based
-   * on CI detection (via `is-in-ci`) and `stdout.isTTY`. Most users should
-   * not need to set this.
+   * By default, live updates are disabled in CI and when stdout is not a TTY.
+   * Setting this to true may emit ANSI update bytes to a non-TTY stream, but it
+   * cannot acquire a terminal screen mode there.
    *
-   * When non-interactive, vue-tui disables ANSI erase sequences, cursor
-   * manipulation, resize handling, writing only the final frame at unmount.
-   *
-   * @default true (false if in CI or `stdout.isTTY` is falsy)
+   * @default true outside CI when stdout is a TTY; false otherwise
    */
-  interactive?: boolean;
+  liveUpdates?: boolean;
   /**
    * Patch `console.*` methods to route output through the TUI frame
    * coordinator (writeToStdout / writeToStderr) so that console.log
@@ -137,33 +161,6 @@ export interface MountOptions {
    * @default false
    */
   incrementalRendering?: boolean;
-  /**
-   * Render as a fullscreen terminal app in the alternate screen buffer. For
-   * normal visual rendering, the runtime owns a fixed terminal-sized viewport,
-   * lays out and paints from `(0, 0)`, clips content outside it, and restores
-   * the original screen on unmount. Screen-reader mode remains a linear
-   * transcript and does not use this fixed visual-surface path.
-   *
-   * Writes made through `useStdout()`, `useStderr()`, or the default patched
-   * `console.*` are coordinated with a viewport repaint. Direct writes to
-   * `process.stdout` or `process.stderr` bypass that coordination.
-   *
-   * `<Static>` is an inline-scrollback primitive: its bytes are emitted but are
-   * not retained on the fullscreen surface. Keep persistent fullscreen history
-   * in ordinary app state, typically inside a bounded `ScrollBox`.
-   *
-   * Element mouse handlers (`@click`, `@wheel`, etc.) only fire in fullscreen
-   * mode because terminal mouse coordinates are absolute screen cells.
-   *
-   * Requires interactive mode and a TTY stdout. Silently ignored otherwise.
-   *
-   * @default false
-   */
-  fullscreen?: boolean;
-  /**
-   * @deprecated Use `fullscreen` instead.
-   */
-  alternateScreen?: boolean;
   /**
    * Configure kitty keyboard protocol support for enhanced keyboard input.
    * Enables additional modifiers (super, hyper, capsLock, numLock) and
@@ -297,7 +294,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedDebug = false;
-  let mountedInteractive = true;
+  let mountedDynamicUpdatesLive = true;
+  let mountedRenderSession: InternalRenderSessionService | null = null;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
   // re-imports the entry. Held per-app so teardown() can unregister exactly its
@@ -311,6 +309,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedAlternateScreen = false;
   let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
+  // True once Vue's original mount has begun. Pre-Vue terminal setup failures
+  // still need our teardown, but calling Vue unmount before mount begins emits
+  // an internal "app is not mounted" warning to the user's stderr.
+  let vueMountStarted = false;
   // Tracks whether this app currently owns the liveInstances entry for its
   // stdout — set when a mount() actually wires a renderer, cleared when
   // teardown() evicts the entry. A mount() that hits the instance-reuse guard
@@ -468,7 +470,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (
       mountedCommit &&
       stdoutWritable &&
-      (mountedInteractive || mountedDebug || !isErrorInput(pendingExitError))
+      (mountedDynamicUpdatesLive || mountedDebug || !isErrorInput(pendingExitError))
     ) {
       try {
         mountedCommit();
@@ -481,10 +483,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedRestoreConsole();
       mountedRestoreConsole = null;
     }
-    try {
-      originalUnmount();
-    } catch {
-      // Vue's unmount may throw on double-unmount; swallow for idempotency.
+    if (vueMountStarted) {
+      vueMountStarted = false;
+      try {
+        originalUnmount();
+      } catch {
+        // Vue's unmount may throw on a partially-started or duplicate unmount;
+        // cleanup remains best-effort and teardown stays idempotent.
+      }
     }
     // Dispose the animation scheduler after Vue unmount: each useAnimation's
     // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
@@ -496,7 +502,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedKittyController.dispose(sync);
       mountedKittyController = null;
     }
-    if (!mountedInteractive && mountedAppContext) {
+    if (!mountedDynamicUpdatesLive && mountedAppContext) {
       // Non-interactive teardown write, mirroring Ink's finishUnmount branch
       // (ink.tsx:812-819: `stdout.write(this.options.debug ? '\n' : this.lastOutput + '\n')`).
       // In DEBUG each render already wrote its full frame to stdout (and the
@@ -512,7 +518,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writeBestEffort(mountedAppContext.stdout, lastFrame + "\n");
       }
     }
-    if (mountedWriter && !mountedDebug && mountedInteractive && stdoutWritable)
+    if (mountedWriter && !mountedDebug && mountedDynamicUpdatesLive && stdoutWritable)
       mountedWriter.done();
     if (mountedAlternateScreen && mountedAppContext) {
       writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
@@ -520,7 +526,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedAlternateScreen = false;
     } else if (
       !mountedDebug &&
-      mountedInteractive &&
+      mountedDynamicUpdatesLive &&
       mountedAppContext &&
       Boolean(mountedAppContext.stdout.isTTY)
     ) {
@@ -546,6 +552,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // kitty/cursor/alt-screen restores above.
       mountedStdinController.dispose(sync);
     }
+    mountedRenderSession?.dispose();
+    mountedRenderSession = null;
     // Drop this app's full-reload registration so a stale teardown can't run on
     // the next reload. Identity-guarded inside unregisterDevApp: during a reload
     // the old app unregisters here before the new app registers.
@@ -649,6 +657,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const app = baseApp as unknown as TuiApp;
 
   app.mount = function mount(options: MountOptions = {}): ComponentPublicInstance {
+    // The mount contract is validated before reading stream getters, checking
+    // stream ownership, or mutating Vue/terminal state. Removed-option errors
+    // deliberately win over an invalid mode value.
+    const requestedMode = normalizeRequestedMode(options);
+    const liveUpdatesOverride = validateLiveUpdates(
+      (options as { readonly liveUpdates?: unknown }).liveUpdates,
+    );
     const stdout = options.stdout ?? process.stdout;
     const stdin = options.stdin ?? process.stdin;
     const stderr = options.stderr ?? process.stderr;
@@ -662,6 +677,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // stdout (static-history chunk, then dynamic frame), MINUS escapes, so the
     // testing helper's frames[] are provably content-only.
     const frameSink = (options as { [INTERNAL_FRAME_SINK]?: FrameSink })[INTERNAL_FRAME_SINK];
+    const configuredTerminalSizeProbe = (
+      options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
+    )[INTERNAL_TERMINAL_SIZE_PROBE];
+    // Process-global fallbacks describe the process's controlling terminal, not
+    // an arbitrary custom WriteStream. A custom TTY must provide a complete
+    // columns/rows pair; deterministic hosts can supply the internal modeled
+    // probe explicitly.
+    const terminalSizeProbe: TerminalSizeProbe =
+      configuredTerminalSizeProbe ??
+      (stdout === process.stdout || stdout === process.stderr
+        ? probeControllingTerminalSize
+        : () => ({ kind: "unavailable" }));
 
     // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
     // already rendering to this stdout, warn on stderr and skip wiring a second
@@ -683,40 +710,78 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return {} as ComponentPublicInstance;
     }
 
-    // Register this app as the owner of the stdout entry.
-    liveInstances.set(stdout, app);
-    mountedAsOwner = true;
+    const requestedScreenReaderPresentation =
+      options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
+    const stdoutFacts = {
+      isTTY: Boolean(stdout.isTTY),
+      columns: stdout.columns,
+      rows: stdout.rows,
+    } as const;
+    const terminalProbe: TerminalSizeProbeResult = needsTerminalSizeProbe(stdoutFacts)
+      ? terminalSizeProbe()
+      : { kind: "unavailable" };
+    const surface = resolveLiveSurface({
+      requestedMode,
+      liveUpdatesOverride,
+      isCI: isInCi,
+      presentation: requestedScreenReaderPresentation ? "screen-reader" : "visual",
+      stdout: stdoutFacts,
+      terminalProbe,
+    });
+    const renderSession = createLiveRenderSessionService(surface);
+    const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
+    const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
+    // F3 will replace this temporary input-lifecycle policy. It intentionally
+    // remains separate from the effective output surface now: a visual TTY can
+    // lose live output because its dimensions are unavailable without changing
+    // what the caller requested for input acquisition.
+    const inputLifecycleActive = surface.liveUpdatesRequested;
+    const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
+    const targetedMouseInputAvailable =
+      fixedFullscreenSurface &&
+      supportsTerminalMouse() &&
+      Boolean((stdin as { isTTY?: boolean }).isTTY);
+
+    function readCurrentDimensions(): ResolvedLiveDimensions | null {
+      const currentStdout = {
+        isTTY: Boolean(stdout.isTTY),
+        columns: stdout.columns,
+        rows: stdout.rows,
+      } as const;
+      const currentProbe = needsTerminalSizeProbe(currentStdout)
+        ? terminalSizeProbe()
+        : ({ kind: "unavailable" } as const);
+      const next = resolveLiveDimensions(currentStdout, currentProbe);
+
+      if (surface.kind === "fullscreen-terminal") {
+        if (next.terminal === null) return null;
+        return { ...next, layout: next.terminal };
+      }
+      if (
+        surface.kind === "inline-terminal" &&
+        surface.session.output.presentation === "visual" &&
+        next.terminal === null
+      ) {
+        return null;
+      }
+      return next;
+    }
+
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
     // 'always' (default): own raw mode for the whole interactive run; 'auto':
     // Ink's lazy model where input composables acquire it on demand. See the
     // MountOptions.rawMode docs and .agents/docs/ink-divergences.md.
     const rawMode = options.rawMode ?? "always";
     const onRender = options.onRender;
+    const incrementalRendering = options.incrementalRendering;
+    const patchConsole = options.patchConsole;
+    const kittyKeyboard = options.kittyKeyboard;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
     // the render throttle engages by default — without this the animation
     // coalescing (G02) never kicks in on the normal non-debug path.
     const maxFps = options.maxFps ?? 30;
-    const isScreenReaderEnabled =
-      options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
     mountedDebug = debug;
-
-    // Interactive mode detection — matches Ink's logic:
-    // CI detection takes precedence: even a TTY stdout in CI defaults to
-    // non-interactive. Using Boolean(isTTY) (rather than an 'in' guard)
-    // correctly handles piped streams where the property is absent.
-    const interactive = options.interactive ?? (!isInCi && Boolean(stdout.isTTY));
-    mountedInteractive = interactive;
-    const fullscreen =
-      Boolean(options.fullscreen ?? options.alternateScreen) &&
-      interactive &&
-      Boolean(stdout.isTTY);
-    // Screen-reader rendering is a linear transcript, not a fixed cell surface.
-    // Keep its existing path separate; the fullscreen/SR interaction is a
-    // pre-existing contract question and must not be changed incidentally by
-    // the fixed-viewport correctness work here.
-    const fixedFullscreenSurface = fullscreen && !isScreenReaderEnabled;
-    const mouseFullscreen =
-      fullscreen && supportsTerminalMouse() && Boolean((stdin as { isTTY?: boolean }).isTTY);
+    mountedDynamicUpdatesLive = dynamicUpdatesLive;
 
     // Frame coordination state — tracks the last rendered output so
     // writeToStdout/writeToStderr can clear and restore the active frame.
@@ -735,7 +800,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountedGetLastOutput = () => frameState.lastOutput;
 
     function restoreLastOutput() {
-      if (!interactive) return;
+      if (!dynamicUpdatesLive) return;
       // Clear() resets log-update's cursor state, so replay the latest cursor
       // intent before restoring output after external stdout/stderr writes.
       writer.setCursorPosition(cursorPosition);
@@ -767,7 +832,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameSink?.(out);
         return;
       }
-      if (!interactive) {
+      if (isScreenReaderEnabled && dynamicUpdatesLive) {
+        repaintTranscript(() => stdout.write(data));
+        return;
+      }
+      if (!dynamicUpdatesLive) {
         stdout.write(data);
         return;
       }
@@ -800,7 +869,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameSink?.(replay);
         return;
       }
-      if (!interactive) {
+      if (isScreenReaderEnabled && dynamicUpdatesLive) {
+        repaintTranscript(() => stderr.write(data));
+        return;
+      }
+      if (!dynamicUpdatesLive) {
         stderr.write(data);
         return;
       }
@@ -864,7 +937,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       stderr,
       stdin,
       debug,
-      interactive,
       isScreenReaderEnabled,
       isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
       setRawMode(mode: boolean) {
@@ -894,6 +966,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       },
     };
     mountedAppContext = appContext;
+    // Reserve the stream only after every mount option and session fact needed
+    // above has been read successfully. From this point teardown can always
+    // find mountedAppContext and release the reservation on a setup failure.
+    liveInstances.set(stdout, app);
+    mountedAsOwner = true;
+    mountedRenderSession = renderSession;
 
     const focusContext: FocusContext = createFocusController();
     const stdinController = createStdinController(stdin, {
@@ -928,7 +1006,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // must not seize raw mode. The matching release happens in the controller's
       // dispose() at teardown. (Diverges from Ink's lazy default — see
       // .agents/docs/ink-divergences.md.)
-      if (rawMode === "always" && interactive && stdinController.isRawModeSupported) {
+      if (rawMode === "always" && inputLifecycleActive && stdinController.isRawModeSupported) {
         stdinController.holdRawModeForLifetime();
       }
 
@@ -940,7 +1018,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // cancelDetection: removes the listener, clears the timer) run on that
       // throw, instead of leaking a dangling stdin listener until the timer fires.
       mountedKittyController = kittyController;
-      kittyController.init(options.kittyKeyboard, interactive);
+      kittyController.init(kittyKeyboard, inputLifecycleActive);
 
       tuiRoot = createRoot(appContext);
       attachYoga(tuiRoot);
@@ -948,7 +1026,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // detachYoga(mountedRoot)` frees the just-allocated yoga node even if
       // setWidth (or anything below) throws.
       mountedRoot = tuiRoot;
-      tuiRoot.yoga.setWidth(resolveSize(stdout).columns);
+      tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
     } catch (err) {
       try {
         teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
@@ -968,16 +1046,30 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     const writer = createFrameWriter(stdout, {
       debug,
-      incremental: options.incrementalRendering,
+      incremental: incrementalRendering,
     });
     mountedWriter = writer;
     mountedClear = () => {
-      if (!interactive || debug) return;
+      if (!dynamicUpdatesLive || debug) return;
       if (fixedFullscreenSurface) {
         if (synchronize) stdout.write(bsu);
         try {
           stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
           writer.sync("", { cursor: false });
+        } finally {
+          if (synchronize) stdout.write(esu);
+        }
+        return;
+      }
+      if (isScreenReaderEnabled) {
+        if (synchronize) stdout.write(bsu);
+        try {
+          if (frameState.outputHeight > 0) {
+            stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
+          }
+          frameState.lastOutput = "";
+          frameState.lastOutputToRender = "";
+          frameState.outputHeight = 0;
         } finally {
           if (synchronize) stdout.write(esu);
         }
@@ -997,7 +1089,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         cursor: false,
       });
     };
-    const synchronize = shouldSynchronize(stdout, interactive);
+    const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
+
+    function repaintTranscript(writeBefore: () => void) {
+      if (synchronize) stdout.write(bsu);
+      try {
+        if (frameState.outputHeight > 0) {
+          stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
+        }
+        writeBefore();
+        // Preserve the existing transcript updater's empty-frame fallback:
+        // after a coordinated write an empty live region still restores one
+        // newline (`lastOutput + "\n"`), matching the pinned Ink behavior.
+        stdout.write(frameState.lastOutput || "\n");
+      } finally {
+        if (synchronize) stdout.write(esu);
+      }
+    }
 
     function repaintFullscreen(
       output: string,
@@ -1031,9 +1139,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
       const hasStaticOutput = staticOutput !== "";
       const isTty = !!stdout.isTTY;
-      // Keep non-TTY → 24 fallback (matching Ink: non-tty viewportRows is always 24).
-      // Use resolveSize for TTY to handle the 0-columns/rows case (Ink parity G12).
-      const viewportRows = isTty ? resolveSize(stdout).rows : 24;
+      const viewportRows = renderSession.legacyWindowRows.value;
 
       if (fixedFullscreenSurface) {
         const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
@@ -1185,8 +1291,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       // Capture static output as a string (for both interactive and non-interactive paths)
-      // Use resolveSize to handle 0-columns case from non-TTY stdout (Ink parity G12).
-      const w = resolveSize(stdout).columns;
+      const w = renderSession.session.dimensions.layout.columns;
       let staticOutput = "";
       for (const stat of findStatics(tuiRoot)) {
         const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
@@ -1210,7 +1315,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.fullStaticOutput += staticOutput;
       }
 
-      if (!interactive && !debug) {
+      if (!dynamicUpdatesLive && !debug) {
         // Non-interactive: compute the dynamic frame now, write static output
         // after onRender, and defer dynamic frame output until unmount.
         tuiRoot.yoga.setWidth(w);
@@ -1236,7 +1341,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return;
       }
 
-      const viewportRows = fixedFullscreenSurface ? resolveSize(stdout).rows : undefined;
+      const viewportRows = fixedFullscreenSurface
+        ? (renderSession.session.dimensions.layout.rows ?? undefined)
+        : undefined;
       tuiRoot.yoga.setWidth(w);
       const restoreLayoutGuards = calculateLayoutWithContentGuards(
         tuiRoot,
@@ -1246,7 +1353,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       );
       try {
         emitLayoutListeners(tuiRoot);
-        const hitMap = mouseFullscreen ? [] : undefined;
+        const hitMap = surface.session.capabilities.elementHitTesting ? [] : undefined;
         const frame = renderFrame(w, hitMap, viewportRows);
         mouseController.updateHitMap(hitMap ?? []);
         const outputHeight = frame === "" ? 0 : frame.split("\n").length;
@@ -1392,7 +1499,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     });
     const mouseController = createMouseController({
       stdin: stdinController,
-      fullscreen: mouseFullscreen,
+      fullscreen: targetedMouseInputAvailable,
       now: scheduler.now,
     });
     appContext.internal_mouse = mouseController;
@@ -1403,6 +1510,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Internal provides — set before the actual mount so components can inject
     // them. User .use/.provide calls made earlier on the chain stay intact;
     // our keys are Symbols so there's no collision risk.
+    baseApp.provide(InternalRenderSessionKey, renderSession);
     baseApp.provide(AppContextKey, appContext);
     baseApp.provide(FocusContextKey, focusContext);
     baseApp.provide(StdinContextKey, stdinController);
@@ -1454,11 +1562,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Fullscreen: enter the alternate screen BEFORE rendering starts (matching Ink ink.tsx:428).
     // Requires fullscreen option + interactive + isTTY. Emit home explicitly so
     // targeted mouse hit-testing can treat the frame origin as screen (0,0).
-    if (fullscreen) {
+    if (fixedFullscreenSurface) {
       writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H");
       writeBestEffort(stdout, "\x1b[?25l");
     }
-    mountedAlternateScreen = fullscreen;
+    mountedAlternateScreen = fixedFullscreenSurface;
 
     // Patch console.log/warn/error etc. to route through writeToStdout /
     // writeToStderr so console output doesn't corrupt the rendered frame.
@@ -1469,7 +1577,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // The mount-throw catch below runs teardown(), which restores the console,
     // so a synchronous mount failure cannot leak a patched console.
     // Disabled in debug mode (matching Ink).
-    if (options.patchConsole !== false && !debug) {
+    if (patchConsole !== false && !debug) {
       try {
         mountedRestoreConsole = patchConsoleFn((stream, data) => {
           if (stream === "stdout") {
@@ -1523,6 +1631,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // teardown only runs on a throw, so the last visibility change on a normal
     // mount is still the SHOW emitted by the first commit.
     let proxy: ComponentPublicInstance;
+    vueMountStarted = true;
     try {
       proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
     } catch (err) {
@@ -1554,13 +1663,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // ~32ms throttle can leave stale/overlapping content on screen for a frame
     // and makes the clearTerminal-on-overflow behavior depend on wall-clock
     // timing rather than the resize itself.
-    if (interactive) {
+    if (dynamicUpdatesLive) {
       // Track last known terminal width so we can detect narrowing on resize
       // (Ink parity G11: ink.tsx:302 declares lastTerminalWidth, ink.tsx:402
       // initializes it in the constructor).
-      let lastTerminalWidth = resolveSize(stdout).columns;
+      let lastTerminalWidth = renderSession.session.dimensions.layout.columns;
 
       const onResize = () => {
+        const nextDimensions = readCurrentDimensions();
+        // Once a visual terminal mode is acquired its immutable mode does not
+        // flip to unavailable because of a transient invalid resize report.
+        // Keep the last coherent pair and wait for the next valid event.
+        if (nextDimensions === null) return;
+
         // Cancel any pending trailing commit before painting synchronously.
         // Otherwise the throttle timer fires a second doCommit() right after
         // this paint, and because shouldClearTerminalForFrame clears whenever
@@ -1574,7 +1689,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // the previous wider frame and the new narrower frame can overlap and
         // produce duplicate/corrupted output. Width increase and pure height
         // changes do not trigger this path — only genuine narrowing does.
-        const currentWidth = resolveSize(stdout).columns;
+        renderSession.updateDimensions(nextDimensions);
+        const currentWidth = nextDimensions.layout.columns;
         if (currentWidth < lastTerminalWidth && !fixedFullscreenSurface) {
           writer.clear();
           // Reset last-output strings so commit() repaints from scratch
@@ -1620,7 +1736,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // torn-down) app instance from re-registering on a same-instance remount,
     // which would otherwise leak — the next unmount() returns early at the
     // teardownStarted guard before it could unsubscribe.
-    if (interactive && !mountedUnsubscribeExit && !teardownStarted) {
+    if (inputLifecycleActive && !mountedUnsubscribeExit && !teardownStarted) {
       // sync=true: signal-exit re-raises the signal right after this callback
       // returns, so the restore escapes must be flushed to the fd
       // synchronously (Finding A) — a buffered async write can be lost.

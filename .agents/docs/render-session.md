@@ -1,6 +1,6 @@
 # Readonly render session
 
-> **Status:** completed F1.3 public-API proposal, unstamped. This record selects one target readonly session shape and maps it to every accepted host class. It does not claim that the public API, the clean-slate mount surface, or the remaining F1 runtime behavior is implemented.
+> **Status:** completed F1.3 public-API proposal and F1.4 private live-source implementation; F1.5 test/string-host implementation is active, unstamped. This record selects one target readonly session shape and maps it to every accepted host class. The public projection remains intentionally unexported until test/string hosts, Inline bounds, lifecycle, and publication gates are complete.
 
 ## Outcome and scope
 
@@ -188,7 +188,7 @@ History and exit behavior follow those combinations. Inline visual or transcript
 
 `dimensions.terminal` is the real or deliberately modeled terminal window size. It is `null` for a non-TTY stream and string rendering; a hardcoded `80×24` fallback must not masquerade as a detected terminal. `dimensions.layout` is the root area the renderer actually promises to lay out. `layout.rows: null` means the surface is not row-bounded. A numeric row value is a renderer-enforced bound: exact height for Fullscreen, maximum live-region height for the target Inline renderer. Both objects update together on an accepted resize before the next committed layout.
 
-The live resolver uses one exact size chain. A positive `stdout.columns`/`stdout.rows` pair is authoritative. If either is missing, it tries the same controlling-terminal probe used by the pinned Ink baseline. A successful positive pair may establish terminal dimensions when stdout claims TTY; otherwise only a positive probed column value supplies layout width. If no positive layout width exists, layout columns default to 80. The default is a layout choice, never a detected terminal. Visual TTY mode acquisition requires a positive terminal pair; without one it falls back to final stream output as `"terminal-size-unavailable"`. Test and string hosts receive deliberate sizes and never run this live process-global probe.
+The live resolver uses one exact size chain. A positive `stdout.columns`/`stdout.rows` pair is authoritative. If that pair is incomplete, a complete positive pair from the same controlling-terminal probe used by the pinned Ink baseline may replace it; the resolver never splices one stdout field and one probed field into a claimed viewport. Process-global probing runs only for `process.stdout` or `process.stderr`. An arbitrary custom TTY must provide its own complete pair, while a deterministic internal host may supply an explicit modeled probe. A valid partial field can still inform unbounded layout width or the transitional row projection when no terminal pair is claimed. If no positive layout width exists, layout columns default to 80. The default is a layout choice, never a detected terminal. Visual TTY mode acquisition requires one coherent positive terminal pair; without one it falls back to final stream output as `"terminal-size-unavailable"`. Test and string hosts receive deliberate sizes and never run this live process-global probe.
 
 This distinction follows Ratatui's useful separation between backend terminal size and the current frame render area. It also removes the current `renderToString()` defect in which layout uses the supplied columns while `useWindowSize()` reads the developer's real `process.stdout` and may register a real resize listener.
 
@@ -254,7 +254,7 @@ vue-tui is experimental, so these are direct target dispositions rather than com
 
 ## Testing and string-host contract
 
-`@vue-tui/testing` must stop constructing an implicit environment through `debug: true`, `interactive`, and fake streams that always claim TTY. Its target host control uses a finite production-like preset: TTY or stream output, requested mode, visual or screen-reader presentation, final or explicitly live stream updates where applicable, input-host class, and deliberate dimensions. The resolver rejects impossible combinations instead of accepting an arbitrary bag of internal booleans. Omission models a visual Inline TTY session. The component receives the modeled production `host: "live"`; only `RenderResult` identifies the deterministic test observation environment.
+`@vue-tui/testing` must stop constructing an implicit environment through `debug: true`, `liveUpdates`, and fake streams that always claim TTY. Its target host control uses a finite production-like preset: TTY or stream output, requested mode, visual or screen-reader presentation, final or explicitly live stream updates where applicable, input-host class, and deliberate dimensions. The resolver rejects impossible combinations instead of accepting an arbitrary bag of internal booleans. Omission models a visual Inline TTY session. The component receives the modeled production `host: "live"`; only `RenderResult` identifies the deterministic test observation environment.
 
 The test result exposes three different observations:
 
@@ -262,7 +262,7 @@ The test result exposes three different observations:
 - content frames: renderer output before terminal-control emulation;
 - emulated terminal screen: the final cell surface after applying output bytes.
 
-A final-stream test uses the real final-output policy, not `debug: true` plus `interactive: false`. A Fullscreen test may model effective Fullscreen and its capabilities without writing to the developer's real alternate screen. Application code behaves from the modeled production facts and cannot branch on a public test host.
+A final-stream test uses the real final-output policy, not `debug: true` plus `liveUpdates: false`. A Fullscreen test may model effective Fullscreen and its capabilities without writing to the developer's real alternate screen. Application code behaves from the modeled production facts and cannot branch on a public test host.
 
 Public `renderToString()` continues to reject rendering mode and screen-reader presentation at the type level. Its session is always string/document/visual with no dynamic updates, uses only the supplied or default columns, has no terminal size or bounded rows, and reports every terminal-only capability unavailable. JavaScript or `any` passing the recognizable internal `isScreenReaderEnabled` option to the public function fails synchronously rather than activating a hidden host. The unsupported `renderToStringWithScreenReader()` internal helper remains deliberate and provides string/document/screen-reader facts to its component tree. Neither path reads or subscribes to `process.stdin`, `process.stdout`, or `terminal-size` through a no-op context. `useApp()` remains injectable so a shared component may create callbacks during setup, but `exit()` throws a clear unavailable-operation error synchronously and `waitUntilRenderFlush()` returns a rejected promise if invoked in a string render. Neither silently pretends to operate on a mounted app. F1.5 implements these direct target behaviors and migrates the existing accessibility tests to the shared session service.
 
@@ -296,13 +296,19 @@ The selected public shape is implemented behind the runtime boundary before it i
 
 Publishing the live subset after F1.4 was rejected: the same component would receive no truthful session under `renderToString()`, and current Inline would have to claim a row bound it does not enforce. One internal resolver may land incrementally; one public contract ships only when every advertised host agrees.
 
+F1.4 selects `liveUpdates?: boolean` as the public output-cadence override and removes own `interactive` keys synchronously. CI and stdout TTY state choose only its omission default. The resolved live surface, rather than the requested mode or another boolean, now drives alternate-screen entry, fixed viewport layout, transcript fallback, hit-map construction, update cadence, and resize dimensions. The internal service is provided before root setup, has stable identity, replaces dimensions atomically, and stops updating after teardown. `useWindowSize()` and `useIsScreenReaderEnabled()` temporarily derive live facts from that service while retaining explicit string-only legacy fallbacks until F1.5.
+
+The live adapter uses a provenance-aware terminal-size probe because `terminal-size@4` hides whether `80×24` was detected or synthesized. A complete positive stdout pair wins; otherwise a complete sourced pair replaces it atomically, and partial fields are never combined across sources into a claimed viewport. Custom streams cannot borrow process-global dimensions. The 80-column layout default and transitional 24-row projection never establish terminal dimensions. A visual TTY without a coherent positive pair becomes final stream output with `terminal-size-unavailable`. Fullscreen plus screen-reader presentation becomes an effective Inline main-screen transcript and acquires neither alternate screen nor targeted mouse. The adapted probe retains the upstream MIT notice in the published runtime tarball.
+
+The current public `debug` option remains a deliberately bounded F1.5 exception. It appends observed content commits and can therefore differ from the internal session's normal-output cadence. It does not alter effective mode or capabilities, and the session remains private while the test harness still depends on it. F1.5 replaces that implicit host construction with an orthogonal observer and production-like test presets; F1.4 does not present debug facts as a complete public contract.
+
 ## Implementation constraints and evidence
 
 The implementation checkpoints that follow F1.3 must collectively:
 
 1. create one pure resolver whose output drives both runtime behavior and public session facts;
 2. validate the accepted `mode` contract before creating the session or mutating the terminal;
-3. prevent old `fullscreen`, `interactive`, `debug`, and raw stream fields from becoming alternate public truth sources;
+3. reject removed `fullscreen`, `alternateScreen`, and `interactive` mount fields, keep `debug` as the explicit F1.5 exception above, and prevent raw stream fields from becoming alternate public truth sources;
 4. make live, test, and string hosts use deliberate dimensions instead of independently reading process globals;
 5. provide the session before Vue setup, replace `useWindowSize()` with the derived `useLayoutSize()`, and remove `useIsScreenReaderEnabled()` from exports, implementation, docs, examples, and type guards;
 6. type-check template and TSX consumers of every discriminated branch;

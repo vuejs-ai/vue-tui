@@ -1,53 +1,38 @@
-import { inject, onScopeDispose, shallowRef, type ShallowRef } from "vue";
-import terminalSize from "terminal-size";
+import { computed, inject, shallowRef, type Ref } from "vue";
 import { AppContextKey } from "../context.ts";
+import { useOptionalInternalRenderSession } from "../render-session.ts";
 
-/**
- * A terminal's character-cell dimensions. Mirrors Ink's `WindowSize` exactly
- * (`columns`/`rows`, not `width`/`height`).
- *
- * Note the Vue-vs-React shape: Ink's `useWindowSize()` returns a `WindowSize`
- * snapshot, whereas vue-tui's `useWindowSize()` returns reactive **refs** of
- * these dimensions
- * (`{ columns: ShallowRef<number>; rows: ShallowRef<number> }`). The data shape
- * is the same; the reactivity wrapper is the framework difference.
- */
+/** A terminal's character-cell dimensions. */
 export interface WindowSize {
   readonly columns: number;
   readonly rows: number;
 }
 
 /**
- * Resolve terminal dimensions with a fallback chain:
- * 1. stdout.columns / stdout.rows (available in TTY mode)
- * 2. terminal-size package (works even when stdout is redirected)
- * 3. Hardcoded defaults (80x24)
+ * Return the current layout width and the legacy numeric row projection.
+ *
+ * F1.4 keeps this public hook temporarily, but its facts now come from the
+ * application's single render-session resolver. It no longer probes process
+ * globals or registers one resize listener per consumer. F1.8 replaces it with
+ * useLayoutSize(), whose rows value can honestly be null for unbounded Inline.
  */
-export function resolveSize(stdout: NodeJS.WriteStream): WindowSize {
-  const cols = stdout.columns;
-  const rowsVal = stdout.rows;
-  if (cols && rowsVal) return { columns: cols, rows: rowsVal };
-
-  // stdout doesn't report dimensions — use terminal-size as fallback
-  const fallback = terminalSize();
-  return {
-    columns: cols || fallback.columns || 80,
-    rows: rowsVal || fallback.rows || 24,
-  };
-}
-
-export function useWindowSize(): { columns: ShallowRef<number>; rows: ShallowRef<number> } {
-  const ctx = inject(AppContextKey);
-  if (!ctx) throw new Error("useWindowSize() must be called inside a vue-tui render tree");
-  const initial = resolveSize(ctx.stdout);
-  const columns = shallowRef(initial.columns);
-  const rows = shallowRef(initial.rows);
-  function onResize() {
-    const size = resolveSize(ctx!.stdout);
-    columns.value = size.columns;
-    rows.value = size.rows;
+export function useWindowSize(): {
+  columns: Readonly<Ref<number>>;
+  rows: Readonly<Ref<number>>;
+} {
+  const service = useOptionalInternalRenderSession();
+  if (!service) {
+    // Temporary string-renderer compatibility until F1.5 supplies the same
+    // render-session service to document hosts.
+    const ctx = inject(AppContextKey);
+    if (!ctx) throw new Error("useWindowSize() must be called inside a vue-tui render tree");
+    return {
+      columns: shallowRef(ctx.stdout.columns || 80),
+      rows: shallowRef(ctx.stdout.rows || 24),
+    };
   }
-  ctx.stdout.on("resize", onResize);
-  onScopeDispose(() => ctx.stdout.off("resize", onResize));
-  return { columns, rows };
+  return {
+    columns: computed(() => service.session.dimensions.layout.columns),
+    rows: service.legacyWindowRows,
+  };
 }

@@ -56,7 +56,7 @@ test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd
   // raw-mode hold during mount → holdRawModeForLifetime → acquireRawMode →
   // setRawMode(true), which throws. mount() must rethrow (caller still sees it).
   const app = createApp(App);
-  expect(() => app.mount({ stdout, stdin, stderr, interactive: true, rawMode: "always" })).toThrow(
+  expect(() => app.mount({ stdout, stdin, stderr, liveUpdates: true, rawMode: "always" })).toThrow(
     "ERR_TTY_INIT_FAILED",
   );
 

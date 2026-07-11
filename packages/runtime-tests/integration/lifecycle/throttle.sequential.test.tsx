@@ -439,7 +439,7 @@ test.sequential("resize does not double-clear when a throttled commit is pending
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
     await nextTick();
     await nextTick();
 
@@ -483,7 +483,7 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
     await nextTick();
     await nextTick();
 
@@ -537,7 +537,7 @@ test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: true, maxFps: 1 });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
     await nextTick();
     await nextTick();
 

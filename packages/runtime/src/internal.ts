@@ -23,6 +23,11 @@ export {
   type KittyKeyboardController,
 } from "./io/kitty-keyboard.ts";
 export { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
+export {
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  type TerminalSizeProbe,
+  type TerminalSizeProbeResult,
+} from "./terminal-size-probe.ts";
 // Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.

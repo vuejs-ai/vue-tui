@@ -2,14 +2,21 @@ import BoxSfc from "./components/box.vue";
 import TextSfc from "./components/text.vue";
 import StaticSfc from "./components/static.vue";
 import SpacerSfc from "./components/spacer.vue";
-import type { WithChildren } from "./components/with-children.ts";
+import NewlineSfc from "./components/newline.vue";
+import type { PublicComponent, PublicLeafComponent } from "./components/with-children.ts";
+import type { BoxProps } from "./components/box-props.ts";
+import type { TextProps } from "./components/text-props.ts";
 import type { StaticChildren, StaticProps, StaticSlot } from "./components/static-props.ts";
 import type { SpacerProps } from "./components/spacer-props.ts";
+import type { NewlineProps } from "./components/newline-props.ts";
 
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
 
-export const Box = BoxSfc as WithChildren<typeof BoxSfc>;
+// Publish only the stable author-facing constructor shape. Exposing the SFC's
+// generated `DefineComponent` type bakes the build-time Vue patch release's
+// private generic arity into our tarball and breaks other supported Vue patches.
+export const Box = BoxSfc as unknown as PublicComponent<BoxProps>;
 export type {
   AriaRole,
   AriaState,
@@ -17,9 +24,9 @@ export type {
   BoxStyle,
   BoxProps,
 } from "./components/box-props.ts";
-export const Text = TextSfc as WithChildren<typeof TextSfc>;
+export const Text = TextSfc as unknown as PublicComponent<TextProps>;
 export type { TextProps } from "./components/text-props.ts";
-export { default as Newline } from "./components/newline.vue";
+export const Newline = NewlineSfc as unknown as PublicLeafComponent<NewlineProps>;
 export type { NewlineProps } from "./components/newline-props.ts";
 // Spacer takes no props and no children; the `children?: never` cast makes
 // `<Spacer>x</Spacer>` a type error under the automatic JSX runtime (parity with

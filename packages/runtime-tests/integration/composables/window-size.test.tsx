@@ -173,8 +173,8 @@ test("resize listener is cleaned up via onScopeDispose", async () => {
   let disposeCalled = false;
 
   const App = defineComponent(() => {
-    // useWindowSize registers an onScopeDispose listener internally;
-    // we also register one to verify the scope is properly disposed on unmount.
+    // useWindowSize reads the app-owned session. This separate callback verifies
+    // ordinary component scope disposal while the app removes its one listener.
     useWindowSize();
     onScopeDispose(() => {
       disposeCalled = true;
@@ -192,7 +192,7 @@ test("resize listener is cleaned up via onScopeDispose", async () => {
 // Mirrors Ink terminal-resize.tsx:91-108 ("falls back to a positive column
 // count when stdout.columns is 0"). When the mount stdout reports columns 0,
 // resolveSize() falls through to the terminal-size package / 80 default, so the
-// captured value must be a positive number (never 0).
+// session layout fallback, so the captured value must be positive (never 0).
 test("useWindowSize falls back to a positive column count when stdout.columns is 0", async () => {
   const stdout = makeTtyStream(0, 24);
   const stderr = makeTtyStream(0, 24);
@@ -217,9 +217,9 @@ test("useWindowSize falls back to a positive column count when stdout.columns is
 });
 
 // Mirrors Ink terminal-resize.tsx:43-64 ("removes resize listener on unmount").
-// The resize listener count must grow by mounting a useWindowSize component
-// and return exactly to baseline after unmount (no leaked listener).
-test("useWindowSize resize listener returns to baseline on unmount", async () => {
+// One render session owns one resize listener. Calling useWindowSize repeatedly
+// must not register another environment resolver per consumer.
+test("multiple useWindowSize consumers share one app resize listener", async () => {
   const stdout = makeTtyStream(80, 24);
   const stderr = makeTtyStream(80, 24);
   const stdin = makeFakeStdin();
@@ -227,10 +227,11 @@ test("useWindowSize resize listener returns to baseline on unmount", async () =>
   const baseline = stdout.listenerCount("resize");
 
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const first = useWindowSize();
+    const second = useWindowSize();
     return () => (
       <Text>
-        {columns.value}x{rows.value}
+        {first.columns.value}x{first.rows.value}:{second.columns.value}x{second.rows.value}
       </Text>
     );
   });
@@ -239,7 +240,7 @@ test("useWindowSize resize listener returns to baseline on unmount", async () =>
   app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
   await new Promise<void>((r) => setTimeout(r, 60));
 
-  expect(stdout.listenerCount("resize")).toBeGreaterThan(baseline);
+  expect(stdout.listenerCount("resize")).toBe(baseline + 1);
 
   app.unmount();
   expect(stdout.listenerCount("resize")).toBe(baseline);
