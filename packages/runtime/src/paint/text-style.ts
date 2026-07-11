@@ -10,6 +10,66 @@ import type { TextProps } from "../host/nodes.ts";
 // must fall through to bare text.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
+const foregroundResetColors = new Set(["revert", "initial"]);
+const foregroundResetOpen = "\x1b[39m";
+const foregroundResetClose = "\x1b[39m";
+// Keep reset spans distinguishable from ordinary chalk color closes until parent
+// Text colors have had a chance to skip over them.
+const foregroundResetMarkerOpen = "\uE000";
+const foregroundResetMarkerClose = "\uE001";
+
+function isForegroundResetColor(color: unknown): boolean {
+  return typeof color === "string" && foregroundResetColors.has(color);
+}
+
+function resetForeground(text: string): string {
+  return chalk.level > 0 ? foregroundResetMarkerOpen + text + foregroundResetMarkerClose : text;
+}
+
+export function finalizeForegroundResets(text: string): string {
+  return text
+    .replaceAll(foregroundResetMarkerOpen, foregroundResetOpen)
+    .replaceAll(foregroundResetMarkerClose, foregroundResetClose);
+}
+
+function colorizeAroundForegroundResets(text: string, color: unknown): string {
+  const colorize = applyColor(chalk, color, false);
+  let out = "";
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const resetStart = text.indexOf(foregroundResetMarkerOpen, cursor);
+    if (resetStart === -1) {
+      out += colorize(text.slice(cursor));
+      break;
+    }
+
+    out += colorize(text.slice(cursor, resetStart));
+    const resetEnd = text.indexOf(
+      foregroundResetMarkerClose,
+      resetStart + foregroundResetMarkerOpen.length,
+    );
+    if (resetEnd === -1) {
+      out += colorize(text.slice(resetStart));
+      break;
+    }
+
+    out +=
+      foregroundResetOpen +
+      text.slice(resetStart + foregroundResetMarkerOpen.length, resetEnd) +
+      foregroundResetClose;
+    cursor = resetEnd + foregroundResetMarkerClose.length;
+  }
+
+  return out;
+}
+
+function applyForegroundColor(text: string, color: unknown): string {
+  if (isForegroundResetColor(color)) return resetForeground(text);
+  const colorize = applyColor(chalk, color, false);
+  if (text.includes(foregroundResetMarkerOpen)) return colorizeAroundForegroundResets(text, color);
+  return colorize(text);
+}
 
 export function applyColor(c: ChalkInstance, color: unknown, bg: boolean): ChalkInstance {
   if (typeof color !== "string") return c;
@@ -117,7 +177,7 @@ export function applyChalk(text: string, props: TextProps): string {
   // different, non-Ink byte sequence for any multi-style Text (G68).
   let s = text;
   if (props.dimColor) s = chalk.dim(s);
-  if (props.color) s = applyColor(chalk, props.color, false)(s);
+  if (props.color) s = applyForegroundColor(s, props.color);
   if (props.backgroundColor) s = applyColor(chalk, props.backgroundColor, true)(s);
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);
