@@ -18,15 +18,19 @@ Advance F3, normalized input and routing, the sole [current checkpoint](./api-fo
 4. extend F3.3 leases to boundary, focus, default, and external activation, then connect the private planner to the actual controller without letting registration time become priority or pulling F4 focus selection forward;
 5. preserve exact post-protocol source spans or explicitly retain the narrower normalized UTF-8 external contract; prove direct stdin cannot duplicate routed delivery, protocol replies cannot escape, and key, text, paste and uninterpreted facts retain order in a real PTY;
 6. give current `useInput`, `usePaste`, and direct stdin access an explicit retain, replace, or remove disposition only after live integration shows one coherent model; then cover template/TSX types, both modes, non-TTY and string hosts where callable, teardown, HMR, and real PTY input/fallthrough;
-7. run focused gates, full `vp run ready`, fresh `CI=true vp run ci`, clean package consumers, and independent review; update the F3 contract, commit coherent review boundaries, and open draft stacked PRs without adding a VOUCHED stamp.
+7. run focused gates, full `vp run ready`, fresh `CI=true vp run ci`, clean package consumers, and independent review; update the F3 contract, commit coherent review boundaries, and push them to the single active foundation PR without adding a VOUCHED stamp.
 
 F1 and F2 are Done. The public readonly render session supplies truthful host facts, and the private rendered-target controller supplies one proven attachment lifetime without exposing renderer nodes. F3 may consume both but must not reopen the two screen models, treat the Inline default as product hierarchy, or publish focus, geometry, pointer, scroll-composition, or selection contracts early.
 
 ## Baseline for the current foundation
 
-- PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F3 must treat that renderer behavior, F1's public session facts, F2's [rendered-target lifetime](./rendered-target-lifetime.md), F3.1's serialized ingress, F3.2's semantic fact boundary, F3.3's route-lifetime control, and F3.4's private executable policy evidence as established inputs.
+- PR [#264](https://github.com/vuejs-ai/vue-tui/pull/264) consolidated the former #255–#264 stack and merged as `25df36d`; normal visual full-screen, F1's public session facts, F2's [rendered-target lifetime](./rendered-target-lifetime.md), F3.1's serialized ingress, F3.2's semantic fact boundary, F3.3's route-lifetime control, and F3.4's private executable policy evidence are now established inputs on `main`.
 - Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose a sound target API from stale inputs.
 - Keep later foundations free of new public APIs while F3 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F4–F8 early or turning F2's private controller into a generic public target API.
+
+## Pull-request policy
+
+The remaining F3–F8 program uses one active draft PR rather than a stack. Each coherent unit remains a small Conventional Commit with its own focused evidence, but it is pushed to the same branch and PR. Do not create a new PR for a checkpoint, review batch, corrective follow-up, or public-API proposal while that PR remains active. After the maintainer merges or closes it, fetch the new `main` before creating the next single active PR.
 
 ## Where work comes from
 
@@ -57,7 +61,7 @@ The foundation roadmap is the single ordered backlog for this program. This live
 6. Implement the smallest coherent change. Update affected examples, public documentation, and unstamped records in the same change.
 7. Run the focused test, then `vp run ready`. For changes sensitive to CI environment or task ordering, also run `CI=true vp run ci` from a fresh build.
 8. Follow the shipped visual development guide for terminal-visible changes and use the repository controller for this repository. If both modes are affected, inspect both; if one mode is affected, inspect it plus a no-regression journey for the other when practical.
-9. Commit one independently reviewable unit and publish it only as a draft PR under the run's granted authority. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
+9. Commit one independently reviewable unit and push it to the program's single active draft PR under the run's granted authority; create that PR only when none exists, and never use another foundation branch as its base. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
 10. Overwrite the live objective, candidates, evidence, and blockers. After at most three small units or one public-API proposal, stop and draft the distillation for the maintainer.
 
 ## Verification rules
@@ -80,7 +84,7 @@ Autonomous work may:
 - improve `@vue-tui/testing`, examples, starter material, and shipped documentation when the gap is objectively verifiable;
 - implement a component or composable whose public shape is already accepted and whose need passes the vouched [inclusion bar](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed);
 - correct unstamped records and keep them current with the code;
-- create local commits and draft PRs for review.
+- create local commits and update the single active draft PR for review.
 
 ## Stop and return to the maintainer
 
@@ -133,6 +137,6 @@ Return a concise review that contains:
 - any record or vouch whose scope may be affected;
 - inline and full-screen findings without choosing the hierarchy;
 - the remaining blocker, current foundation state, and next queued foundation;
-- the exact commits and draft PRs produced.
+- the exact commits and single active draft PR updated.
 
 No amount of passing autonomous work vouches this plan, the product goal, or any new direction. The maintainer reviews the distillation, decides what to keep, and explicitly vouches only the direction that should continue to hold.
