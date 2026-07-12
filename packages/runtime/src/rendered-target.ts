@@ -25,7 +25,7 @@ export interface RenderedTargetController {
  */
 export interface RenderedTargetTransactionHost {
   /** Delay derived publication until one complete attach/detach operation settles. */
-  transaction(change: () => void): void;
+  transaction(kind: "reconcile" | "cleanup", change: () => void): void;
   /**
    * Called after every matching registration is logically detached and before
    * any cleanup callback runs. A route owner can synchronously invalidate the
@@ -89,14 +89,14 @@ export function createRenderedTargetController(
   let reconcileRequested = false;
   let transactionDepth = 0;
 
-  const transaction = (change: () => void): void => {
+  const transaction = (kind: "reconcile" | "cleanup", change: () => void): void => {
     if (!transactionHost || transactionDepth > 0) {
       change();
       return;
     }
     transactionDepth++;
     try {
-      transactionHost.transaction(change);
+      transactionHost.transaction(kind, change);
     } finally {
       transactionDepth--;
     }
@@ -175,7 +175,7 @@ export function createRenderedTargetController(
       return;
     }
 
-    transaction(() => {
+    transaction("reconcile", () => {
       reconciling = true;
       const errors: unknown[] = [];
       try {
@@ -211,7 +211,7 @@ export function createRenderedTargetController(
         reconcile,
         dispose() {
           if (!registration.active) return;
-          transaction(() => {
+          transaction("cleanup", () => {
             registration.active = false;
             registrations.delete(registration);
             detach(registration);
@@ -222,7 +222,7 @@ export function createRenderedTargetController(
     reconcile,
     invalidateSubtree(target) {
       if (disposed) return;
-      transaction(() => {
+      transaction("cleanup", () => {
         descendantsOf(target, invalidatedTargets);
         // Select and logically detach the whole batch before invoking any
         // disposer. A disposer can synchronously mutate another node's parent or
@@ -252,7 +252,7 @@ export function createRenderedTargetController(
     },
     dispose() {
       if (disposed) return;
-      transaction(() => {
+      transaction("cleanup", () => {
         disposed = true;
         const cleanups: RenderedTargetCleanup[] = [];
         for (const registration of Array.from(registrations)) {

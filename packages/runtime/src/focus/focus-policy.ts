@@ -74,6 +74,7 @@ export interface InternalFocusPolicy {
   blur(target?: InternalFocusTarget): boolean;
   focusNext(): boolean;
   focusPrevious(): boolean;
+  hasSequentialTarget(): boolean;
   route(): InternalFocusRoute;
 }
 
@@ -688,6 +689,9 @@ export function createInternalFocusPolicy(): InternalFocusPolicy {
       select(previous ?? candidates.at(-1)!, boundary);
       publishOrSchedule();
       return true;
+    },
+    hasSequentialTarget() {
+      return sequentialTargets(boundary).length > 0;
     },
     route() {
       return publishedRoute;

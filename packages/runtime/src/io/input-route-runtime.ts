@@ -56,6 +56,13 @@ export interface InternalInputTopologySelectionOptions {
    * @default true
    */
   readonly inputDemand?: boolean;
+  /** Revalidate the caller's complete candidate after fallible host acquisition. */
+  readonly isCurrent?: () => boolean;
+}
+
+export interface InternalInputSelectionEnd {
+  readonly accepted: boolean;
+  (): void;
 }
 
 interface SelectionGeneration {
@@ -101,7 +108,7 @@ export interface InternalInputRoutingRuntime {
   select(
     selection: InternalInputTopologySelection,
     options?: InternalInputTopologySelectionOptions,
-  ): () => void;
+  ): InternalInputSelectionEnd;
   capture(): InternalInputTopologySnapshot;
   /** Resolve every captured lease once, before the first recipient callback. */
   resolve(snapshot: InternalInputTopologySnapshot): InternalInputTopologyResolution;
@@ -144,6 +151,9 @@ export function createInternalInputRoutingRuntime(
   let currentSelection: SelectionGeneration | undefined;
   let selectionRevision = 0;
   let lifecycleRevision = 0;
+
+  const selectionEnd = (accepted: boolean, end: () => void): InternalInputSelectionEnd =>
+    Object.assign(end, { accepted });
 
   const releaseInputDemandSafely = (
     inputDemandLease: InternalInputRoutingDemandLease | undefined,
@@ -335,7 +345,20 @@ export function createInternalInputRoutingRuntime(
         // A re-entrant select/clear is the later intent. Do not let the outer
         // operation overwrite it after its host callback returns.
         releaseInputDemandSafely(inputDemandLease);
-        return () => {};
+        return selectionEnd(false, () => {});
+      }
+      if (options.isCurrent) {
+        let callerCurrent: boolean;
+        try {
+          callerCurrent = options.isCurrent();
+        } catch (error) {
+          releaseInputDemandSafely(inputDemandLease);
+          throw error;
+        }
+        if (!callerCurrent) {
+          releaseInputDemandSafely(inputDemandLease);
+          return selectionEnd(false, () => {});
+        }
       }
       try {
         // A hostile host callback may synchronously end one of the proposed
@@ -357,7 +380,7 @@ export function createInternalInputRoutingRuntime(
       if (previous) deactivateSelection(previous, true);
 
       let ended = false;
-      return () => {
+      return selectionEnd(true, () => {
         if (ended) return;
         ended = true;
         if (currentSelection === next) {
@@ -365,7 +388,7 @@ export function createInternalInputRoutingRuntime(
           currentSelection = undefined;
         }
         deactivateSelection(next, true);
-      };
+      });
     },
     capture() {
       return Object.freeze({

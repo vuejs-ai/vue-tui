@@ -449,10 +449,62 @@ describe("internal live input route activations", () => {
 
     reenter = true;
     const endSupersededOuter = runtime.select({ activeBoundary: outer.lease });
+    expect(endSupersededOuter.accepted).toBe(false);
     expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("nested");
     expect(held.size).toBe(1);
     endSupersededOuter();
     expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("nested");
+  });
+
+  test("keeps the accepted selection when the caller candidate changes during acquisition", () => {
+    const transitions: string[] = [];
+    let current = true;
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        transitions.push("acquire");
+        current = false;
+        return demandLease(() => transitions.push("release"));
+      },
+    });
+    const accepted = runtime.registerSemantic({ id: "accepted", handle: continueRoute });
+    const replacement = runtime.registerSemantic({ id: "replacement", handle: continueRoute });
+    runtime.select({ activeBoundary: accepted.lease }, { inputDemand: false });
+
+    const endReplacement = runtime.select(
+      { activeBoundary: replacement.lease },
+      { isCurrent: () => current },
+    );
+
+    expect(endReplacement.accepted).toBe(false);
+    expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("accepted");
+    expect(transitions).toEqual(["acquire", "release"]);
+  });
+
+  test("releases candidate demand when caller revalidation throws", () => {
+    const transitions: string[] = [];
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        transitions.push("acquire");
+        return demandLease(() => transitions.push("release"));
+      },
+    });
+    const accepted = runtime.registerSemantic({ id: "accepted", handle: continueRoute });
+    const replacement = runtime.registerSemantic({ id: "replacement", handle: continueRoute });
+    runtime.select({ activeBoundary: accepted.lease }, { inputDemand: false });
+
+    expect(() =>
+      runtime.select(
+        { activeBoundary: replacement.lease },
+        {
+          isCurrent() {
+            throw new Error("candidate validation failed");
+          },
+        },
+      ),
+    ).toThrow("candidate validation failed");
+
+    expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("accepted");
+    expect(transitions).toEqual(["acquire", "release"]);
   });
 
   test("does not let a hostile demand release interrupt replacement or clear", () => {

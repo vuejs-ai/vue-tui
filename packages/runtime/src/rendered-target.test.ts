@@ -23,12 +23,12 @@ describe("rendered-target controller", () => {
     const events: string[] = [];
     let current: TuiBox | null = first;
     const controller = createRenderedTargetController(root, {
-      transaction(change) {
-        events.push("begin");
+      transaction(kind, change) {
+        events.push(`begin:${kind}`);
         try {
           change();
         } finally {
-          events.push("commit");
+          events.push(`commit:${kind}`);
         }
       },
       beforeInvalidateSubtree() {},
@@ -47,7 +47,12 @@ describe("rendered-target controller", () => {
     current = second;
     controller.reconcile();
 
-    expect(events).toEqual(["begin", "detach:first", "attach:second", "commit"]);
+    expect(events).toEqual([
+      "begin:reconcile",
+      "detach:first",
+      "attach:second",
+      "commit:reconcile",
+    ]);
   });
 
   test("announces a logically invalidated subtree before any cleanup callback", () => {
@@ -56,12 +61,12 @@ describe("rendered-target controller", () => {
     const child = connect(parent, createBox());
     const events: string[] = [];
     const controller = createRenderedTargetController(root, {
-      transaction(change) {
-        events.push("begin");
+      transaction(kind, change) {
+        events.push(`begin:${kind}`);
         try {
           change();
         } finally {
-          events.push("commit");
+          events.push(`commit:${kind}`);
         }
       },
       beforeInvalidateSubtree(target) {
@@ -82,11 +87,11 @@ describe("rendered-target controller", () => {
     controller.invalidateSubtree(parent);
 
     expect(events).toEqual([
-      "begin",
+      "begin:cleanup",
       "invalidate:parent",
       "cleanup",
       "cleanup:reconciled",
-      "commit",
+      "commit:cleanup",
     ]);
   });
 
