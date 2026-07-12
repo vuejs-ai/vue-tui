@@ -1,6 +1,6 @@
 # Application API design
 
-> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, the completed F1 readonly render-session foundation, and the completed private F2 rendered-target lifetime. F3 normalized input and routing is Active. The completed implementations are not VOUCHED stamps, and this record does not select the future input event surface, candidate pointer name or signature, semantic target-ref and event details, target disposition of current pointer and input APIs, a component catalog, or a 1.0 surface.
+> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, the completed F1 readonly render-session foundation, and the completed private F2 rendered-target lifetime. F3 normalized input and routing is Active with its public contract accepted and implementation still pending. The completed implementations and accepted F3 contract are not VOUCHED stamps, and the exact F4 target/focus attachment, pointer name or signature, semantic target-ref and event details, target disposition of current pointer APIs, component catalog, and 1.0 surface remain unselected.
 
 ## Current conclusion
 
@@ -315,6 +315,10 @@ Do not publish a mode-dependent editor, overlay, viewport, pointer, geometry, or
 
 ## Second design packet: focus and input inside the rendering-mode contract
 
+The completed F3 mechanism and accepted [public input contract](./input-routing.md#accepted-public-input-contract) expose a dependency boundary that the earlier questions did not resolve. Normalized readonly facts, synchronous handler outcomes, one all-run application-global layer, delayed defaults, input availability, and current-hook dispositions can be selected before focus. A complete public `global → boundary → focused owner → ancestors → defaults → external` attachment cannot: publishing it now would either expose the private atomic topology or require applications to compute the focused owner and ancestor path manually. That would recreate issue #250 and make F4 a second state owner.
+
+The accepted boundary is therefore narrow. F3 publishes one normalized application-global layer and the handler/result types. Every global captured for one fact runs and the layer merges their results, so registration time is not hidden priority; numeric priority was explicitly rejected at this foundation. F4 selects the target-bound/local hook, one logical focus owner, ancestor derivation, modal boundary, restoration, and the public external-owner attachment using the same F3 result contract. This keeps implementation dependency order intact: F3 owns parsing and delivery semantics, while F4 owns which local rendered recipient becomes part of the route. The rejected exact low-level selection API and its costs remain in the decision record rather than hidden behind a role string or another `isActive` boolean.
+
 Once the rendering-mode contract is explicit, input design can share what both modes actually have in common. If vue-tui promises delivery to a focused owner, the app runtime must maintain one effective logical-focus state. The current `activeId` is a partial version of that ownership; the missing contract is how focus attaches to rendered or semantic elements, how scopes affect it, and how input reaches that owner.
 
 Focus ownership and keyboard priority are separate questions:
@@ -335,18 +339,18 @@ terminal bytes
   -> optionally hand an unhandled event to an external owner such as a PTY pane
 ```
 
-This flow is not an accepted dispatch order. The proposal must answer:
+The non-pointer portion of this flow is now the proved private F3 order. The accepted public contract answers the first question, the application-global half of the second and sixth questions, and the input-availability half of the eighth question; F4 still must answer the target/local parts before making them ordinary authoring API:
 
 1. How does a handler distinguish handled, continue routing, prevent a component default, and return input to an external owner?
 2. Which registrations follow setup-scope lifetime, and which must follow the actual rendered node or `v-if` branch lifetime required by #250?
 3. How are logical focus, active collection item, text insertion point, selection and terminal cursor kept separate and coordinated?
 4. How do nested focus scopes trap focus, derive traversal order, skip hidden or disabled targets, and restore focus after unmount?
 5. Are shortcuts expressed as normalized key events, typed commands and overridable bindings, or both? How can help or status UI inspect active bindings without stringly typed application actions?
-6. What remains the purpose and target contract of low-level `useInput` and terminal-wide raw mouse input? Direct stdin is retained under the vouched raw escape-hatch contract in [normalized input and routing](./input-routing.md#direct-stdin-is-a-parallel-escape-hatch-not-fallthrough).
+6. How does F4's target-bound input attachment compose with the accepted application-global `useInput`, and what purpose, if any, remains for terminal-wide raw mouse input? Direct stdin is retained under the vouched raw escape-hatch contract in [normalized input and routing](./input-routing.md#direct-stdin-is-a-parallel-escape-hatch-not-fallthrough).
 7. What semantic element or rectangle type lets focus, mouse, measurement, scrolling and a real terminal caret refer to the same rendered object without exposing a host node?
 8. Which shared focus and input operations remain meaningful in static, non-interactive and screen-reader environments, and how does each ineffective operation report itself?
 
-Do not publish a new input or focus API until one model handles #250, a modal approval, a global app shortcut, two focusable regions, unmount restoration, both rendering modes, and optional PTY fallthrough without manual boolean coordination.
+Do not publish a target-bound/local input or focus API until one model handles #250, a modal approval, a global app shortcut, two focusable regions, unmount restoration, both rendering modes, and optional PTY fallthrough without manual boolean coordination. This restriction does not require the application-global normalized fact and handler-result contract to expose the private selection graph before F4.
 
 ## Vertical validation journeys
 
@@ -392,7 +396,7 @@ Every proposal should state:
 
 This record does not decide to:
 
-- publish a `useTerminal`, key event, command, focus-scope, editor, list, overlay or cell-surface API under any particular name; F1.3's selected `useRenderSession()` is the explicit exception recorded in [render-session.md](./render-session.md);
+- publish a `useTerminal`, command, focus-scope, editor, list, overlay, or cell-surface API under any particular name; the accepted F3 `TuiInputEvent` contract and F1.3's selected `useRenderSession()` are the explicit named exceptions recorded in [input-routing.md](./input-routing.md#accepted-public-input-contract) and [render-session.md](./render-session.md);
 - implement the direct replacement of current mount, targeted-listener, drag, input, focus, raw-mouse, or direct-stream APIs before each target contract and its evidence are accepted; the experimental policy removes the backward-compatibility gate but does not choose the new API shape;
 - build a Table, TextInput, Dialog, Tree, Command Palette, TaskList or other catalog item merely because another framework has one;
 - create `@vue-tui/use` before an accepted independent behavior requires it;

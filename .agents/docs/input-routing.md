@@ -1,6 +1,6 @@
 # Normalized input and routing
 
-> **Status:** active F3 implementation record. Only the direct-stdin contract below is maintainer-vouched; the remaining conclusions are unstamped. F3.1 owns one serialized ingress and structural framing per physical stdin. F3.2 normalizes each structural event once into one shared immutable semantic fact. F3.3 captures non-reusable app-route leases when each framed fact begins and routes parser-distinct facts independently of Node chunk grouping. F3.4 defines the executable private policy, and the live bridge now captures an atomic selected topology plus recipient activations with each application snapshot, resolves them once before callbacks, and dispatches the proved route through the real controller in both modes. Product-boundary, prior-art, implementation, and nested-PTY evidence select semantic facts plus an honestly labeled normalized UTF-8 sequence rather than post-protocol raw spans. The maintainer-vouched contract retains `useStdin().stdin` as a raw escape hatch outside framework event semantics and safe routing composition. The additional unstamped host policies accepted on 2026-07-13 are now implemented: managed semantic routing excludes non-TTY streams; public `setRawMode`, `isRawModeSupported`, and mount `rawMode` are removed; and semantic-route demand owns raw mode, the shared listener, stdin ref state, and Kitty negotiation. F3 now advances to the final public input proposal. This record does not yet select a public event type, hook name, handler return convention, focus route, external-PTY API, or the final disposition of `useInput`, `usePaste`, `useMouseInput`, and `exitOnCtrlC`.
+> **Status:** active F3 implementation record and accepted public-API contract. Only the direct-stdin contract below is maintainer-vouched; the remaining conclusions are accepted but unstamped. F3.1 owns one serialized ingress and structural framing per physical stdin. F3.2 normalizes each structural event once into one shared immutable semantic fact. F3.3 captures non-reusable app-route leases when each framed fact begins and routes parser-distinct facts independently of Node chunk grouping. F3.4 defines the executable private policy, and the live bridge now captures an atomic selected topology plus recipient activations with each application snapshot, resolves them once before callbacks, and dispatches the proved route through the real controller in both modes. Product-boundary, prior-art, implementation, and nested-PTY evidence select semantic facts plus an honestly labeled normalized UTF-8 sequence rather than post-protocol raw spans. The maintainer-vouched contract retains `useStdin().stdin` as a raw escape hatch outside framework event semantics and safe routing composition. The additional unstamped host policies accepted on 2026-07-13 are implemented: managed semantic routing excludes non-TTY streams; public `setRawMode`, `isRawModeSupported`, and mount `rawMode` are removed; and semantic-route demand owns raw mode, the shared listener, stdin ref state, and Kitty negotiation. On 2026-07-13 the maintainer also accepted the complete public input contract below: normalized facts, a required synchronous route result, one all-run application-global F3 hook, an independent availability query, fail-fast activation on an unavailable live host, removal of `exitOnCtrlC`, and F4 ownership of target/local/external attachment. An inactive registration creates no demand, and string rendering remains inert. F3 remains Active until that contract is implemented and passes every gate.
 
 ## Product problem
 
@@ -56,7 +56,7 @@ Plain UTF-8 is recorded as text rather than guessed to be a physical key. For ex
 
 The Kitty parser now follows the official [`CSI primary[:shifted[:base]];modifiers:event;text u` grammar](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). It accepts alternate keys, base-layout-only keys, pure-text events with primary zero, and all defined modifiers. Invalid Unicode scalars, associated control text, modifier zero, event values outside press/repeat/release, C0 key codepoints that Kitty does not define as functional keys, and letter-form special sequences whose first parameter is not one remain uninterpreted with their exact decoded source sequence. Alt and Meta stay distinct internally. The current public `Key.meta` compatibility projection still combines them.
 
-The current hooks are adapters, not the fact source. `useInput` reads one cached Ink-shaped projection shared by all current listeners; Ctrl+C, focus defaults, and mouse delivery read the same normalized fact and never parse its sequence again. A paste whose event-start route snapshot contains a paste owner goes to that paste route; otherwise the event-start input route receives the payload verbatim with no fabricated key flags. Paste-contained Ctrl+C, arrow, mouse, and query-like bytes therefore remain text and cannot execute an application default or disappear as a protocol reply. The richer internal key identity is deliberately not published while routing semantics remain open.
+The current hooks are adapters, not the fact source. `useInput` reads one cached Ink-shaped projection shared by all current listeners; Ctrl+C, focus defaults, and mouse delivery read the same normalized fact and never parse its sequence again. A paste whose event-start route snapshot contains a paste owner goes to that paste route; otherwise the event-start input route receives the payload verbatim with no fabricated key flags. Paste-contained Ctrl+C, arrow, mouse, and query-like bytes therefore remain text and cannot execute an application default or disappear as a protocol reply. The richer identity remains internal in the current implementation; the accepted public projection below replaces this lossy edge during the next migration.
 
 ## Implemented F3.3 route-lifetime boundary
 
@@ -88,7 +88,7 @@ The deterministic terminal-workbench journey selects either pane A with an expli
 
 The external representation remains deliberately labeled `normalized-utf8-sequence`. A committed ingress test proves that source byte `80` and canonical UTF-8 `EF BF BD` both become the same frozen U+FFFD text fact and re-encode as `EF BF BD`; the original source cannot be recovered afterward. Outer Kitty encodings, bracketed-paste negotiation, pointer coordinates and a child terminal's protocol state make automatic `pty.write(fact.sequence)` unsound as a general framework promise. An explicit application or specialized terminal-engine adapter receives the semantic fact and normalized sequence, then encodes known input against its child terminal's own state. Whole-terminal suspension remains a separate ownership operation.
 
-The policy and its live topology source remain private and absent from the package root. A narrow `@vue-tui/runtime/internal` fixture helper exposes it only so package integration tests can exercise the real controller. The current controller and nested-PTY fixture now satisfy the selected representation, protocol-isolation, fact-order, both-mode, live child-delivery, automatic selected-topology demand, non-TTY exclusion, and route-owned raw/listener/ref/Kitty evidence. The direct-stdin escape hatch and host policies are settled; the final public input proposal is the remaining F3 design stage.
+The policy and its live topology source remain private and absent from the package root. A narrow `@vue-tui/runtime/internal` fixture helper exposes it only so package integration tests can exercise the real controller. The current controller and nested-PTY fixture now satisfy the selected representation, protocol-isolation, fact-order, both-mode, live child-delivery, automatic selected-topology demand, non-TTY exclusion, and route-owned raw/listener/ref/Kitty evidence. The direct-stdin escape hatch, host policies, and public contract are settled; public implementation and migration are the remaining F3 work.
 
 ## Selected external-owner representation and real-PTY evidence
 
@@ -130,15 +130,15 @@ The first F3 red tests require ordinary bytes around a query reply to arrive onc
 
 Before F3.2, `parseKeypress()` already knew a key name, code, raw sequence, modifiers, Kitty source, printable text, and press/repeat/release state. `useInput()` exposed only a text-like `input` string and a small boolean `Key`; F1, Insert, keypad, media, and modifier-only keys became indistinguishable empty events. Ctrl+C caused a second parse in the controller, and every active listener parsed the same event again.
 
-The internal stream now retains those facts once. The current hook projection still intentionally demonstrates the information loss of the old public shape; whether the final public surface exposes all fields directly remains open.
+The internal stream now retains those facts once. The current hook projection still demonstrates the information loss of the old public shape; the accepted public surface exposes the readonly projection below when the migration lands.
 
 ### Paste meaning depends on subscribers
 
-Before F3.2, the existence of any `usePaste` listener changed the event kind for the whole app. With a listener, every paste listener received the payload and no `useInput` listener did. Without one, boundaries disappeared and the payload was interpreted as ordinary keys: pasted Ctrl+C could trigger application exit, and pasted `ESC[A` could become Arrow Up. The shared fact is now always paste. Listener count only selects the temporary edge adapter, and fallback content is verbatim text. The final route and hook disposition remain open.
+Before F3.2, the existence of any `usePaste` listener changed the event kind for the whole app. With a listener, every paste listener received the payload and no `useInput` listener did. Without one, boundaries disappeared and the payload was interpreted as ordinary keys: pasted Ctrl+C could trigger application exit, and pasted `ESC[A` could become Arrow Up. The shared fact is now always paste. Listener count only selects the temporary edge adapter, and fallback content is verbatim text. The accepted migration removes that adapter and delivers paste through normalized `useInput`.
 
 ### Framework default ordering
 
-Before the live bridge, Escape blurred and Tab or Shift+Tab moved the current flat focus registry before ordinary application listeners ran. The bridge moves those actions after semantic delivery. Current void handlers still cannot prevent them, while the private policy proves that semantic continuation and default prevention are independent decisions. A future public surface must preserve that separation rather than make one boolean stand for both.
+Before the live bridge, Escape blurred and Tab or Shift+Tab moved the current flat focus registry before ordinary application listeners ran. The bridge moves those actions after semantic delivery. Current void handlers still cannot prevent them, while the private policy proves that semantic continuation and default prevention are independent decisions. The accepted required result preserves that separation rather than making one boolean stand for both.
 
 ### App and route generations solve different lifetimes
 
@@ -168,6 +168,241 @@ The former `inputLifecycleActive` condition and app-lifetime raw hold are remove
 
 The maintainer accepted both recommended policies on 2026-07-13 without adding a VOUCHED stamp, and they are now implemented. Managed semantic routing excludes a non-TTY `Readable`: a pipe has no terminal key or protocol boundary, and applications that need its bytes use the vouched raw `stdin` escape hatch. A future socket or PTY transport must explicitly declare terminal semantics instead of being inferred from `Readable`. `useStdin()` exposes only that actual stream; the public `setRawMode`, `isRawModeSupported`, and mount `rawMode` option are removed rather than repaired with another user-owned lease. Recognizable JavaScript mount input containing the removed option fails before stream access or terminal mutation. Framework semantic routes own raw mode, the shared listener, ref state, and Kitty negotiation for exactly their active demand; a direct stream consumer remains an explicitly unsafe-composition escape hatch. This prevents one API from releasing another owner's route, removes the hidden output-dependent lifetime hold, preserves natural final-output exit, lets string-host components remain inert, and makes live unavailable hosts fail before terminal mutation.
 
+## Accepted public input contract
+
+The source audit, issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250), issue [#266](https://github.com/vuejs-ai/vue-tui/issues/266), the first-party coding-agent and ScrollBox examples, pinned `mo` and `machud`, the two-mode workbench and nested-PTY journeys, and the reverified peer routes supplied the evidence for this contract. They did not determine one complete attachment API without also deciding F4's logical focus and target ownership. The maintainer accepted the five recommended choices together on 2026-07-13 without adding a VOUCHED stamp; the alternatives remain below only as decision history.
+
+### Evidence-backed current-API dispositions
+
+- **Replace `useInput`.** The name may remain for the application-global hook, but the Ink-shaped `(input: string, key: Key) => void` signature and lossy `Key` type are removed directly. A normalized handler receives key, text, paste, or uninterpreted input and must return an explicit synchronous route result.
+- **Remove `usePaste`.** Paste is always one normalized fact. Any active semantic-input demand owns bracketed-paste negotiation, so listener presence can no longer change event classification or decide whether the terminal reports paste boundaries.
+- **Remove public `Key`.** The normalized key detail below preserves functional identity, alternate and base-layout codepoints, exact modifiers, phase, and terminal-reported text instead of expanding another boolean bag.
+- **Keep `useStdin().stdin` unchanged.** It remains the vouched exact mounted-stream escape hatch outside semantic routing, protocol filtering, priority, and safe-composition guarantees.
+- **Defer `useMouseInput` and all pointer facts to F6.** A syntactically valid SGR report remains an internal fact, but pointer names, delivery, coordinates, target lifetime, and terminal reporting are not smuggled into the F3 union.
+- **Keep `UseInputOptions.isActive` for the application-global hook.** It may enable or disable that global registration. It must not select focus, a rendered branch, a modal boundary, or an external owner; F4 owns those states.
+
+### Accepted normalized public facts
+
+The public data shape is a faithful readonly projection of the proved internal fact. `null` means the active terminal protocol did not provide that fact; it is not filled from keyboard-layout guesses. `sequence` is the decoded, framework-protocol-filtered Unicode sequence. Its constant fidelity label prevents an application or child-PTY adapter from treating it as original bytes or as a child terminal's negotiated encoding.
+
+```ts
+export interface TuiInputModifiers {
+  readonly shift: boolean;
+  readonly alt: boolean;
+  readonly ctrl: boolean;
+  readonly super: boolean;
+  readonly hyper: boolean;
+  readonly meta: boolean;
+  readonly capsLock: boolean;
+  readonly numLock: boolean;
+}
+
+export type TuiInputPhase = "press" | "repeat" | "release";
+
+export interface TuiInputSource {
+  readonly sequence: string;
+  readonly fidelity: "normalized-utf8-sequence";
+}
+
+export type TuiInputEvent =
+  | (TuiInputSource & {
+      readonly kind: "key";
+      readonly key: {
+        readonly protocol: "legacy" | "kitty";
+        readonly name: string | null;
+        readonly code: string | null;
+        readonly primaryCodepoint: number | null;
+        readonly shiftedCodepoint: number | null;
+        readonly baseLayoutCodepoint: number | null;
+        readonly functionalCode: number | null;
+        readonly modifiers: TuiInputModifiers;
+        readonly phase: TuiInputPhase | null;
+        readonly printable: boolean;
+        readonly reportedText: string | null;
+      };
+    })
+  | (TuiInputSource & {
+      readonly kind: "text";
+      readonly text: string;
+      readonly protocol: "plain" | "kitty";
+      readonly phase: TuiInputPhase | null;
+      readonly primaryCodepoint: number | null;
+      readonly textOrigin: "reported" | null;
+    })
+  | (TuiInputSource & {
+      readonly kind: "paste";
+      readonly text: string;
+    })
+  | (TuiInputSource & {
+      readonly kind: "uninterpreted";
+    });
+```
+
+Plain text remains text because a legacy byte stream does not reveal one physical key boundary. A Kitty key can carry `reportedText`, while a Kitty pure-text fact stays text. Release is never silently relabeled as a press. Paste content remains one payload even when it contains Ctrl+C, Escape, mouse-like, or query-like sequences. Every object is frozen, and the same fact identity may be observed by all recipients selected for that framed event.
+
+### Handler result: required return value
+
+The public handler keeps four outcomes independent and uses a required synchronous return instead of mutable methods on the fact:
+
+```ts
+export interface InputRouteDecision {
+  readonly action: "none" | "performed";
+  readonly routing: "continue" | "stop";
+  readonly defaultAction: "allow" | "prevent";
+  readonly external: "allow" | "block";
+}
+
+export type InputHandlerResult = "continue" | "consume" | InputRouteDecision;
+export type InputHandler = (event: TuiInputEvent) => InputHandlerResult;
+```
+
+`"continue"` expands to `{ action: "none", routing: "continue", defaultAction: "allow", external: "allow" }`. `"consume"` expands to `{ action: "performed", routing: "stop", defaultAction: "prevent", external: "block" }`. `routing: "stop"` means do not advance beyond the current explicit priority layer; it does not cancel equal-layer recipients already captured for the fact. Every other combination uses all four named fields; partial objects, `undefined`, a Promise, or an unknown value are programming errors. A thrown or invalid result fails closed for that application's current dispatch: later semantic handlers, defaults, and external delivery do not run, while the shared ingress can continue other applications and terminal teardown still restores owned state.
+
+The rejected alternative was a synchronous control object:
+
+```ts
+export interface InputRouteControl {
+  markPerformed(): void;
+  stopRouting(): void;
+  preventDefault(): void;
+  blockExternal(): void;
+}
+
+export type InputHandler = (event: TuiInputEvent, control: InputRouteControl) => void;
+```
+
+This resembles OpenTUI and Textual and makes the common observer callback shorter. It was rejected because the immutable fact would gain a second mutable lifetime, an `async` handler is structurally accepted by TypeScript, a retained control can be called after routing has finished unless runtime guards are added, and forgetting one method silently changes the route. The accepted required result makes completion and every exceptional combination inspectable at the callback boundary.
+
+### Attachment boundary: publish one global hook in F3, choose local attachment in F4
+
+The accepted F3 boundary keeps only an application-global registration public:
+
+```ts
+export interface UseInputOptions {
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+}
+
+export function useInput(handler: MaybeRef<InputHandler>, options?: UseInputOptions): void;
+```
+
+All application-global handlers captured for one fact form one explicit priority layer before the selected boundary and future focused path. Every live member of that layer runs; registration order is only a deterministic callback order and cannot let one global suppress another global. After the layer finishes, its results are merged monotonically: any `performed` records an action, any `routing: "stop"` stops the later boundary/focus path, any `defaultAction: "prevent"` suppresses delayed defaults, and any `external: "block"` vetoes external delivery. This preserves deliberate application-global broadcast without making registration time a hidden priority. A callback failure still fails the current application's dispatch closed. Registration lifetime follows the Vue setup scope because an application-global command has no rendered target.
+
+The rejected alternative added `priority?: number` to `UseInputOptions`, ran larger values first, and treated equal values as the same all-run layer. It was rejected at this foundation because the proved semantic priority is already global layer → selected boundary → focused owner → ancestors → defaults → external, while a numeric global keymap would introduce ordering policy before multi-key bindings, commands, and inspectable shortcuts have scenario evidence.
+
+F4 then chooses one effective logical owner, semantic ancestor path, modal boundary, target lifetime, and focus restoration. Its target-bound hook reuses `TuiInputEvent`, `InputHandler`, and the same route result. The public external-owner attachment is selected with that boundary so a closed modal cannot accidentally expose a background PTY. F3 already defines the external result and normalized source contract; deferring the attachment does not defer parser, route, default, or fallthrough behavior.
+
+The rejected low-level alternative exposed the private selection graph immediately:
+
+```ts
+export interface InputRecipient<Kind extends "semantic" | "default" | "external"> {
+  readonly kind: Kind;
+  readonly __inputRecipient: unique symbol;
+}
+
+export function useInputRecipient(handler: MaybeRef<InputHandler>): InputRecipient<"semantic">;
+
+export interface InputDefaultDecision {
+  readonly action: "none" | "performed";
+  readonly routing: "continue" | "stop";
+  readonly external: "allow" | "block";
+}
+
+export type InputDefaultHandlerResult = "continue" | "consume" | InputDefaultDecision;
+export type InputDefaultHandler = (event: TuiInputEvent) => InputDefaultHandlerResult;
+
+export interface ExternalInputSource {
+  readonly event: TuiInputEvent;
+  readonly sequence: string;
+  readonly fidelity: "normalized-utf8-sequence";
+}
+
+export type ExternalInputHandler = (source: ExternalInputSource) => void;
+
+export function useInputDefault(handler: MaybeRef<InputDefaultHandler>): InputRecipient<"default">;
+
+export function useExternalInput(
+  handler: MaybeRef<ExternalInputHandler>,
+): InputRecipient<"external">;
+
+export interface InputSelection {
+  readonly applicationGlobal?: readonly InputRecipient<"semantic">[];
+  readonly activeBoundary?: InputRecipient<"semantic">;
+  readonly selectedOwner?: InputRecipient<"semantic">;
+  readonly logicalAncestors?: readonly InputRecipient<"semantic">[];
+  readonly ownerDefaults?: readonly InputRecipient<"default">[];
+  readonly applicationDefaults?: readonly InputRecipient<"default">[];
+  readonly external?: InputRecipient<"external">;
+}
+
+export function useInputSelection(selection: MaybeRefOrGetter<InputSelection | null>): void;
+```
+
+This alternative was rejected because it makes the author compute the focused owner, ancestor order, active modal, and external route manually; it exposes private leases; it creates many invalid combinations; and F4 would later become a second owner of the same state. It would reproduce issue #250 as a larger reactive selection object. A target-bound attachment is the accepted direction, but selecting its target type and logical ancestry in F3 would simply implement F4 under another name.
+
+### Input availability: independent query and fail-fast active live registration
+
+The accepted query is independent from raw stdin, input registration, and the render session:
+
+```ts
+export type InputAvailability =
+  | { readonly status: "available" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "string-host" | "stdin-not-tty" | "stdin-not-controllable";
+    };
+
+export interface UseInputAvailabilityReturn {
+  readonly availability: Readonly<Ref<InputAvailability>>;
+}
+
+export function useInputAvailability(): UseInputAvailabilityReturn;
+```
+
+The same component can query this finite fact instead of inspecting `stdin.isTTY`, inferring input from output mode, or relying on a predictable unavailable-host exception. The readonly ref is stable for one mount; suspension keeps the capability available while temporarily releasing physical ownership. A host that appears controllable can still reject a later raw-mode operation. That is an acquisition error which preflight cannot promise away and which still propagates through the normal application error path.
+
+The rejected alternative location returned the same app-owned ref from the registration itself:
+
+```ts
+export interface UseInputReturn {
+  readonly availability: Readonly<Ref<InputAvailability>>;
+}
+
+export function useInput(
+  handler: MaybeRef<InputHandler>,
+  options?: UseInputOptions,
+): UseInputReturn;
+```
+
+The separate query was accepted because capability inspection should not install a global handler or input demand, and local F4 registrations will need the same app fact. Returning it from every registration would duplicate one shared fact across every attachment and would not serve a component that only chooses its non-interactive presentation.
+
+Unavailable-host behavior was decided independently from query location:
+
+- a string document reports `string-host`, and registration remains inert because a fixed document never acquires live application services;
+- a live non-TTY or uncontrollable TTY reports its reason, and activating a managed registration fails before a data listener, raw/ref ownership, or terminal write and emits no warning;
+- a deterministic host models the matching live behavior rather than manufacturing input.
+
+This fail-fast live behavior follows Ink's useful guard/failure split while replacing its raw-mode fact with the semantic capability vue-tui actually supports. Pinned `machud` can replace its expected-host `try/catch` with the explicit preflight; a genuine later acquisition failure remains an error.
+
+The rejected behavior made live unavailable registrations inert as well as string registrations. That better supports one unchanged tree across a TTY, redirected output, and issue #266's ignored stdin, but an author can ignore the availability fact and ship a silently dead shortcut. The accepted independent query therefore does not change the accepted fail-fast live behavior.
+
+### Ctrl+C policy: remove the mount boolean
+
+The accepted clean-slate disposition removes `MountOptions.exitOnCtrlC` and the matching testing option. An exact unmodified Ctrl+C remains a framework delayed default while managed routing is active. A handler prevents it for one event with `defaultAction: "prevent"`, independently from later semantic routing and external permission. With no managed-input demand, stdin stays cooked and Ctrl+C remains the operating system's signal behavior.
+
+The rejected alternative retained `exitOnCtrlC?: boolean` as an application-wide delayed-default switch, defaulting to `true`, while adding the same per-event prevention. It would save a small root handler for applications that never want managed Ctrl+C exit, but it would preserve a second policy surface for behavior already expressible by the route result.
+
+### Accepted maintainer decisions
+
+The maintainer accepted all five choices together on 2026-07-13:
+
+1. publish normalized facts and an all-run application-global `useInput` layer in F3, while F4 owns target/local/external attachment rather than exposing the private topology or adding numeric global priority now;
+2. use the required `InputHandlerResult` return model rather than mutable dispatch methods;
+3. publish the independent `useInputAvailability()` rather than returning the app capability only from registrations;
+4. fail fast for an active live registration on an unavailable host, while string rendering stays inert;
+5. remove `exitOnCtrlC` and preserve Ctrl+C exit only as a preventable delayed default.
+
+This acceptance authorizes implementation, public/type guards, repository migration, package consumption, and the F3 closure gates. It does not add a VOUCHED stamp, select F4's target or focus API, or authorize F6 pointer work.
+
 ## Pinned Ink baseline
 
 The repository baseline is Ink v7.0.4 at [`40b3a757`](https://github.com/vadimdemedes/ink/tree/40b3a7578811fd616341ca4e31cc7748aeeff12f). Ink v7.1.0 at [`25766aec`](https://github.com/vadimdemedes/ink/tree/25766aec618bd62030069f57dd081e5ebdd46add) has identical `use-input`, `use-paste`, `use-focus`, input-parser, and keypress-parser objects; its relevant addition is whole-terminal suspension.
@@ -186,21 +421,21 @@ The baseline is evidence, not a target for known failures. Pinned Ink also leaks
 
 No inspected framework automatically forwards a semantically unhandled event as original bytes to an embedded PTY:
 
-| Framework                                                                                                                                                                         | Observed route                                                                        | Continue or default mechanism                                                                                                                                     | Embedded-PTY fallback |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| [OpenTUI](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/lib/KeyHandler.ts#L130-L200)                                       | global listeners, then one focused renderable                                         | propagation and default prevention are separate; the optional keymap also distinguishes command rejection, keymap fallthrough, and preventing later core delivery | none                  |
-| [Textual](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/app.py#L4121-L4146)                                                     | priority bindings, then focused widget and parent bubbling                            | stop propagation and prevent the current node's default are separate                                                                                              | none                  |
-| [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit/blob/236bfb7c15c62e921dc81bac5aefcabb16450f0c/src/prompt_toolkit/application/application.py#L1447-L1499) | choose the highest-priority match assembled from focused, parent, and global bindings | one match runs; no match is discarded                                                                                                                             | none                  |
-| [pi-tui](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/src/tui.ts#L761-L834)                                                     | global listeners, then one focused component                                          | global listeners can consume or rewrite; focused delivery has no continue result                                                                                  | none                  |
-| [Bubble Tea](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/tea.go#L741-L880)                                                           | one message to the root model                                                         | the root explicitly calls child updates                                                                                                                           | none                  |
+| Framework                                                                                                                                                                         | Observed route                                                                                                                             | Continue or default mechanism                                                                                                                                                                                 | Embedded-PTY fallback |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| [OpenTUI core and keymap](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/keymap/src/types.ts#L244-L279)                              | global listeners, then one focused renderable; keymap layers may be global, exact-focus, or focus-within and use explicit numeric priority | core propagation and default prevention are separate; keymap fallthrough continues through later bindings while prevention blocks later host delivery, but neither surface separates all four vue-tui results | none                  |
+| [Textual](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/app.py#L4121-L4146)                                                     | priority bindings, then focused widget and parent bubbling                                                                                 | stop propagation and prevent the current node's default are separate                                                                                                                                          | none                  |
+| [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit/blob/236bfb7c15c62e921dc81bac5aefcabb16450f0c/src/prompt_toolkit/application/application.py#L1447-L1499) | choose the highest-priority match assembled from focused, parent, and global bindings                                                      | one match runs; no match is discarded                                                                                                                                                                         | none                  |
+| [pi-tui](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/src/tui.ts#L761-L834)                                                     | global listeners, then one focused component                                                                                               | global listeners can consume or rewrite; focused delivery has no continue result                                                                                                                              | none                  |
+| [Bubble Tea](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/tea.go#L741-L880)                                                           | one message to the root model                                                                                                              | the root explicitly calls child updates                                                                                                                                                                       | none                  |
 
 These projects show viable mechanisms, not one industry rule. The decisive vue-tui evidence must come from its two journeys and must keep semantic application routing distinct from transparent PTY byte transport.
 
-## Internal experiment order
+## Internal experiment history
 
-The experiment proceeds without selecting public names:
+The experiment established the mechanism before public names were selected:
 
-Each route trace keeps four results independent: whether a recipient performed a semantic action, whether later semantic recipients still receive the fact, whether a delayed default remains allowed, and whether an explicit external owner may receive the normalized source sequence. An active modal boundary also chooses the candidate route before handlers run; an unrecognized key inside an approval overlay must not reach the background composer merely because the overlay performed no action. These are internal test terms, not proposed public fields.
+Each route trace keeps four results independent: whether a recipient performed a semantic action, whether later semantic recipients still receive the fact, whether a delayed default remains allowed, and whether an explicit external owner may receive the normalized source sequence. An active modal boundary also chooses the candidate route before handlers run; an unrecognized key inside an approval overlay must not reach the background composer merely because the overlay performed no action. These began as internal test terms and now map to the accepted public route-result fields without exposing the private topology.
 
 1. **Implemented in F3.1:** give byte decoding, structural framing, and protocol detection one serialized ingress per physical stdin; preserve bracketed-paste payloads; retain ordered event-start multi-app multicast; and separate total from unsuspended raw ownership;
 2. **Implemented in F3.2:** normalize each structurally framed event once into a shared immutable semantic key, text, paste, pointer, or uninterpreted fact, and adapt the current hooks at the edge;
@@ -213,22 +448,23 @@ Each route trace keeps four results independent: whether a recipient performed a
 9. **Selected and proved:** retain normalized UTF-8 rather than post-protocol source spans, and pass slow protocol isolation plus ordered text, key, paste and uninterpreted delivery through an explicit adapter into a real child PTY in Inline and Fullscreen;
 10. **Selected under the vouched direct-stdin contract:** retain physical `useStdin().stdin` as the actual mounted stream outside framework event and safe-composition guarantees;
 11. **Implemented:** acquire and release controller input demand transactionally, retain demand for independent globals after a selected path becomes stale, and pass both-mode, screen-reader, final-stream, shared-stdin, suspension, teardown, acquisition-rollback, HMR, and real-PTY evidence without a mount-time raw policy;
-12. **Implemented host boundary:** exclude non-TTY streams from managed semantic routing; expose only the actual raw stdin stream; remove public raw-mode operations and mount policy; and make semantic-route demand own raw/listener/ref and Kitty negotiation. The next step is retaining, replacing, or removing the remaining current hooks and selecting public names and types.
+12. **Implemented host boundary:** exclude non-TTY streams from managed semantic routing; expose only the actual raw stdin stream; remove public raw-mode operations and mount policy; and make semantic-route demand own raw/listener/ref and Kitty negotiation;
+13. **Accepted public contract:** replace the lossy `useInput`, remove `usePaste`, public `Key`, and `exitOnCtrlC`, retain direct stdin, publish normalized facts with a required route result and independent availability query, use one all-run global F3 layer, fail fast when a registration becomes active on an unavailable live host, keep inactive and string-host registration inert, and leave target/local/external attachment to F4.
 
-The first route order to test is application-global commands → current active boundary → later focused owner and logical ancestors → delayed default → explicit external owner. Framework protocol replies stay before the route. Default `exitOnCtrlC` behavior moves conceptually to the delayed-default position in this experiment so an application can interrupt an active agent or let a focused terminal pane receive Ctrl+C; no public mount change is selected yet.
+The proved route order is application-global commands → current active boundary → later focused owner and logical ancestors → delayed default → explicit external owner. Framework protocol replies stay before the route. Default Ctrl+C behavior is at the delayed-default position so an application can interrupt an active agent or let a focused terminal pane receive Ctrl+C; the accepted public contract removes the mount switch and exposes per-event prevention through the route result.
 
 ## Ordered evidence matrix
 
-| Area            | Required observable evidence                                                                                                                                                                                                                                                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Protocol        | ordinary input during detection arrives once; complete and slow-split replies never reach application code; timeout preserves safe non-protocol input; ordering is stable                                                                                                                                                                                                |
-| Key and text    | legacy and Kitty letter, Enter, Tab, Escape, arrows, Insert, F1, keypad or media examples retain identity, modifiers, text, phase, and recoverable source sequence                                                                                                                                                                                                       |
-| Paste           | multiline and escape-containing paste remains one paste fact; pasted Ctrl+C does not exit; listener count does not reclassify content                                                                                                                                                                                                                                    |
-| Current control | two active listeners receive exactly once; inactive listeners do not; split-event replacement cannot inherit; persistent routes and other apps remain; same-tick changes do not lose raw ownership                                                                                                                                                                       |
-| Route           | live controller mounts in effective Inline and Fullscreen sessions prove explicit layer order, atomic selected generations, split and same-chunk replacement, frozen removal, re-entry, modal isolation, delayed defaults, external fallthrough, per-app failure isolation, and transactional automatic input demand; only the final public surface remains open         |
-| External owner  | the pure workbench plan and a two-mode nested-PTY fixture forward continued text, control keys, paste and uninterpreted normalized sequences once and in order; the explicit adapter translates child paste state, slow framework replies cannot escape, invalid bytes become U+FFFD, and the raw-stdin escape hatch remains explicitly outside managed-route guarantees |
-| Lifecycle       | Inline and Fullscreen share semantics; suspension, teardown, error, HMR, and shared stdin leave no stale listener, parser state, raw lease, or protocol mode                                                                                                                                                                                                             |
-| Host            | controllable and externally pre-raw live TTYs, unsupported setterless TTYs, deterministic final-output tests, screen-reader transcripts, and string documents report, route, clean up, or fail without manufacturing input capability; managed semantic routing is unavailable on non-TTY streams, whose raw bytes remain directly accessible                            |
+| Area            | Required observable evidence                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protocol        | ordinary input during detection arrives once; complete and slow-split replies never reach application code; timeout preserves safe non-protocol input; ordering is stable                                                                                                                                                                                                   |
+| Key and text    | legacy and Kitty letter, Enter, Tab, Escape, arrows, Insert, F1, keypad or media examples retain identity, modifiers, text, phase, and recoverable source sequence                                                                                                                                                                                                          |
+| Paste           | multiline and escape-containing paste remains one paste fact; pasted Ctrl+C does not exit; listener count does not reclassify content                                                                                                                                                                                                                                       |
+| Current control | two active listeners receive exactly once; inactive listeners do not; split-event replacement cannot inherit; persistent routes and other apps remain; same-tick changes do not lose raw ownership                                                                                                                                                                          |
+| Route           | live controller mounts in effective Inline and Fullscreen sessions prove explicit layer order, atomic selected generations, split and same-chunk replacement, frozen removal, re-entry, modal isolation, delayed defaults, external fallthrough, per-app failure isolation, and transactional automatic input demand; the accepted public surface remains to be implemented |
+| External owner  | the pure workbench plan and a two-mode nested-PTY fixture forward continued text, control keys, paste and uninterpreted normalized sequences once and in order; the explicit adapter translates child paste state, slow framework replies cannot escape, invalid bytes become U+FFFD, and the raw-stdin escape hatch remains explicitly outside managed-route guarantees    |
+| Lifecycle       | Inline and Fullscreen share semantics; suspension, teardown, error, HMR, and shared stdin leave no stale listener, parser state, raw lease, or protocol mode                                                                                                                                                                                                                |
+| Host            | controllable and externally pre-raw live TTYs, unsupported setterless TTYs, deterministic final-output tests, screen-reader transcripts, and string documents report, route, clean up, or fail without manufacturing input capability; managed semantic routing is unavailable on non-TTY streams, whose raw bytes remain directly accessible                               |
 
 ## Issue #250 acceptance role
 
@@ -236,8 +472,8 @@ The first route order to test is application-global commands → current active 
 
 ## Deliberate non-decisions
 
-- No public `InputEvent`, `KeyEvent`, hook, directive, component listener, or handler return value is selected.
+- F4 target/local/external attachment is not selected by this contract; only the F3 global hook, shared event, result, and availability types are accepted.
 - No DOM capture/bubble analogy is assumed; terminal routes may use explicit ordered owners instead.
-- No current hook is protected for compatibility, but none is removed before the experiment supplies a coherent replacement.
+- No current hook is protected for compatibility. The accepted contract replaces `useInput` and removes `usePaste` and public `Key` directly, without a compatibility period.
 - No focus scope, target-ref input behavior, pointer propagation, scroll routing, selection, or copy design is pulled forward from F4–F8.
 - No automatic embedded-PTY forwarding is promised. Semantic facts plus normalized sequences now support an explicit adapter in the nested-PTY journey; child protocol state and byte encoding remain specialized-engine responsibilities.
