@@ -3,6 +3,7 @@ import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { Text, useFocus, useInput } from "../index.ts";
 import { StdinContextKey } from "../context.ts";
+import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import { createApp, type MountOptions } from "../render.ts";
 import type { RenderMode } from "../render-session.ts";
 import type { InternalInputRouteDecision } from "./input-route-policy.ts";
@@ -36,9 +37,34 @@ function createStdin(): NodeJS.ReadStream {
   return stdin;
 }
 
-function createWritable(): NodeJS.WriteStream {
+function createTrackedStdin(): {
+  stdin: NodeJS.ReadStream;
+  rawModeCalls: boolean[];
+  refBalance: () => number;
+} {
+  const stdin = createStdin();
+  const rawModeCalls: boolean[] = [];
+  let refs = 0;
+  Object.assign(stdin, {
+    isRaw: false,
+    setRawMode(this: NodeJS.ReadStream & { isRaw: boolean }, mode: boolean) {
+      rawModeCalls.push(mode);
+      this.isRaw = mode;
+      return this;
+    },
+    ref() {
+      refs++;
+    },
+    unref() {
+      refs--;
+    },
+  });
+  return { stdin, rawModeCalls, refBalance: () => refs };
+}
+
+function createWritable(isTTY = true): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
-  Object.assign(stream, { isTTY: true, columns: 80, rows: 24 });
+  Object.assign(stream, { isTTY, columns: 80, rows: 24 });
   return stream;
 }
 
@@ -62,6 +88,171 @@ function requireRouting(): InternalInputRoutingRuntime {
 }
 
 describe.each(modes)("live selected input topology in %s mode", (mode) => {
+  test("owns automatic input only while a selected generation is active", async () => {
+    const calls: string[] = [];
+    let replace!: () => void;
+    let endSelection!: () => void;
+    const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+    const App = defineComponent(() => {
+      const routing = requireRouting();
+      const first = routing.registerSemantic({
+        id: "first",
+        handle: (fact) => (calls.push(`first:${fact.sequence}`), continueRoute()),
+      });
+      const second = routing.registerSemantic({
+        id: "second",
+        handle: (fact) => (calls.push(`second:${fact.sequence}`), continueRoute()),
+      });
+      endSelection = routing.select({ activeBoundary: first.lease });
+      replace = () => {
+        // Vue removes an old conditional branch before mounting its same-tick
+        // replacement. Ending the route first must not create a physical gap.
+        first.end();
+        endSelection = routing.select({ activeBoundary: second.lease });
+      };
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true],
+        refs: 1,
+        listeners: 1,
+      });
+
+      stdin.emit("data", "x");
+      replace();
+      stdin.emit("data", "y");
+      expect(calls).toEqual(["first:x", "second:y"]);
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true],
+        refs: 1,
+        listeners: 1,
+      });
+
+      endSelection();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true, false],
+        refs: 0,
+        listeners: 0,
+      });
+    } finally {
+      app.unmount();
+    }
+  });
+
+  test("does not publish a selected generation when automatic input acquisition fails", async () => {
+    const calls: string[] = [];
+    let selectRoute!: () => () => void;
+    const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+    const tracked = stdin as NodeJS.ReadStream & {
+      isRaw: boolean;
+      setRawMode(mode: boolean): NodeJS.ReadStream;
+    };
+    const App = defineComponent(() => {
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      const setRawMode = tracked.setRawMode.bind(tracked);
+      let failEnable = true;
+      tracked.setRawMode = (raw) => {
+        setRawMode(raw);
+        if (raw && failEnable) {
+          failEnable = false;
+          throw new Error("raw enable failed");
+        }
+        return tracked;
+      };
+
+      expect(selectRoute).toThrow("raw enable failed");
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true, false],
+        refs: 0,
+        listeners: 0,
+      });
+      stdin.emit("data", "x");
+      expect(calls).toEqual([]);
+
+      const endSelection = selectRoute();
+      stdin.emit("data", "y");
+      expect(calls).toEqual(["y"]);
+      endSelection();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true, false, true, false],
+        refs: 0,
+        listeners: 0,
+      });
+    } finally {
+      app.unmount();
+    }
+  });
+
+  test("keeps automatic input for an independent global after the selected path becomes stale", async () => {
+    const calls: string[] = [];
+    let endBoundary!: () => void;
+    let endGlobal!: () => void;
+    const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+    const App = defineComponent(() => {
+      const routing = requireRouting();
+      const global = routing.registerSemantic({
+        id: "global",
+        handle: (fact) => (calls.push(`global:${fact.sequence}`), continueRoute()),
+      });
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(`boundary:${fact.sequence}`), continueRoute()),
+      });
+      endBoundary = () => boundary.end();
+      endGlobal = () => global.end();
+      routing.select({ applicationGlobal: [global.lease], activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      stdin.emit("data", "\x1b[");
+      endBoundary();
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true],
+        refs: 1,
+        listeners: 1,
+      });
+      stdin.emit("data", "A");
+      stdin.emit("data", "x");
+      expect(calls).toEqual(["global:\x1b[A", "global:x"]);
+
+      endGlobal();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true, false],
+        refs: 0,
+        listeners: 0,
+      });
+    } finally {
+      app.unmount();
+    }
+  });
+
   test("executes explicit layers independently of registration order", () => {
     const calls: string[] = [];
     const App = defineComponent(() => {
@@ -474,3 +665,138 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     }
   });
 });
+
+test("selected topology composes across shared stdin suspension and teardown", async () => {
+  const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+  const firstCalls: string[] = [];
+  const secondCalls: string[] = [];
+  const suspensionHost = createManualSuspensionHost();
+  const SelectedApp = (id: string, calls: string[]) =>
+    defineComponent(() => {
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id,
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>{id}</Text>;
+    });
+
+  const first = createApp(SelectedApp("first", firstCalls));
+  const second = createApp(SelectedApp("second", secondCalls));
+  first.mount({
+    ...mountOptions("inline", stdin),
+    rawMode: "auto",
+    exitOnCtrlC: false,
+    [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+  } as MountOptions);
+  second.mount({
+    ...mountOptions("fullscreen", stdin),
+    rawMode: "auto",
+    exitOnCtrlC: false,
+  });
+  try {
+    expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+      rawModeCalls: [true],
+      refs: 1,
+      listeners: 1,
+    });
+
+    stdin.emit("data", "\x1b[");
+    await suspensionHost.suspend();
+    stdin.emit("data", "A");
+    expect(firstCalls).toEqual([]);
+    expect(secondCalls).toEqual(["\x1b[A"]);
+    expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+      rawModeCalls: [true],
+      refs: 1,
+      listeners: 1,
+    });
+
+    await suspensionHost.resume();
+    stdin.emit("data", "x");
+    expect(firstCalls).toEqual(["x"]);
+    expect(secondCalls).toEqual(["\x1b[A", "x"]);
+
+    first.unmount();
+    await Promise.resolve();
+    stdin.emit("data", "y");
+    expect(firstCalls).toEqual(["x"]);
+    expect(secondCalls).toEqual(["\x1b[A", "x", "y"]);
+    expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+      rawModeCalls: [true],
+      refs: 1,
+      listeners: 1,
+    });
+  } finally {
+    first.unmount();
+    second.unmount();
+  }
+  expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+    rawModeCalls: [true, false],
+    refs: 0,
+    listeners: 0,
+  });
+});
+
+test.each([
+  {
+    label: "screen-reader transcript",
+    options: { mode: "fullscreen", isScreenReaderEnabled: true, liveUpdates: true } as const,
+    stdout: createWritable(),
+  },
+  {
+    label: "final-output stream",
+    options: { mode: "fullscreen", liveUpdates: false } as const,
+    stdout: createWritable(false),
+  },
+])(
+  "selected topology input is independent from $label output policy",
+  async ({ options, stdout }) => {
+    const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+    const calls: string[] = [];
+    let endSelection!: () => void;
+    const App = defineComponent(() => {
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      endSelection = routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({
+      ...options,
+      stdout,
+      stderr: createWritable(false),
+      stdin,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      maxFps: 0,
+      patchConsole: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "x");
+      expect(calls).toEqual(["x"]);
+      expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [true],
+        refs: 1,
+        listeners: 1,
+      });
+      endSelection();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    } finally {
+      app.unmount();
+    }
+    expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
+      rawModeCalls: [true, false],
+      refs: 0,
+      listeners: 0,
+    });
+  },
+);

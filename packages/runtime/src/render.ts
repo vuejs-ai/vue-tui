@@ -2730,6 +2730,10 @@ interface StdinController extends StdinContext {
   startKittyQueryResponseDetection: StartKittyQueryResponseDetection;
   /** Deliver input retained while Vue installed the application's first route. */
   activateInputDelivery: () => void;
+  /** Acquire raw/listener ownership for one selected topology generation. */
+  acquireSelectedInputDemand: () => void;
+  /** Release one selected topology generation's raw/listener ownership. */
+  releaseSelectedInputDemand: () => void;
 }
 
 interface RawModeState {
@@ -2784,11 +2788,28 @@ function createStdinController(
 ): StdinController {
   const { appCtx, focusContext } = opts;
   const inputRoutes = createInternalInputRouteRegistry();
-  const inputRouting = createInternalInputRoutingRuntime([
-    { id: "framework:escape", handle: runEscapeDefault },
-    { id: "framework:tab", handle: runTabDefault },
-    { id: "framework:ctrl-c", handle: runCtrlCDefault },
-  ]);
+  let controller!: StdinController;
+  const inputRouting = createInternalInputRoutingRuntime(
+    [
+      { id: "framework:escape", handle: runEscapeDefault },
+      { id: "framework:tab", handle: runTabDefault },
+      { id: "framework:ctrl-c", handle: runCtrlCDefault },
+    ],
+    {
+      acquire() {
+        controller.acquireSelectedInputDemand();
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          // Vue removes an old branch before mounting its same-tick replacement.
+          // Keep the old physical lease until the microtask boundary so the
+          // replacement can acquire first without a listener/raw-mode gap.
+          queueMicrotask(() => controller.releaseSelectedInputDemand());
+        };
+      },
+    },
+  );
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
     readonly kind: "routes";
@@ -3479,7 +3500,7 @@ function createStdinController(
     }
   }
 
-  const controller: StdinController = {
+  controller = {
     stdin,
     setRawMode(mode: boolean) {
       if (disposed) {
@@ -3565,6 +3586,9 @@ function createStdinController(
         runTerminalCleanup(reconcileSharedSubscription);
         throw error;
       }
+    },
+    acquireSelectedInputDemand() {
+      controller.acquireRawMode();
     },
     holdRawModeForLifetime() {
       // Same as acquireRawMode (raw on + ref + data listener), but marks the
@@ -3737,6 +3761,9 @@ function createStdinController(
       // listener removal instead of surfacing an error that could abort the
       // remaining Vue scope disposals; dispose() retries the physical restore.
       void firstError;
+    },
+    releaseSelectedInputDemand() {
+      controller.releaseRawMode();
     },
     suspend(sync = false) {
       if (suspended) return;

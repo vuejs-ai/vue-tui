@@ -178,7 +178,9 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   mode: requestedMode,
-  rawMode: "always",
+  // The selected private topology, rather than an app-lifetime raw hold or a
+  // compatibility input hook, owns the outer terminal's input demand.
+  rawMode: "auto",
   exitOnCtrlC: true,
   maxFps: 0,
   patchConsole: false,
