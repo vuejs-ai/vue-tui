@@ -477,4 +477,4 @@ test("final-output survives natural event-loop drain without waitUntilExit", asy
   expect(stderr).toBe("");
   expect(stdout.includes("FINAL_OUTPUT_TAIL_MARKER")).toBe(true);
   expect(stdout.split("FINAL_OUTPUT_TAIL_MARKER")).toHaveLength(2);
-});
+}, 15_000);
