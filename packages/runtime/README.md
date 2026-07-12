@@ -98,9 +98,11 @@ useInput((input) => {
 | `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
 | `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
-| `useStdin()`                    | Access stdin stream and raw mode control                                                     |
+| `useStdin()`                    | Access the actual mounted stdin as a raw escape hatch, plus raw mode control                 |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
 | `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
+
+Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()` or `usePaste()`.
 
 ### Render-session facts
 

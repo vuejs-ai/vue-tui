@@ -9,6 +9,11 @@ import { StdinContextKey } from "../context.ts";
  * `inject(StdinContextKey)`, and are deliberately not part of this public surface.
  */
 export interface UseStdinReturn {
+  /**
+   * The actual stdin stream selected for the current mount. Bytes read from this raw
+   * escape hatch have no vue-tui event semantics and are not guaranteed to compose
+   * safely with framework-managed input routing.
+   */
   readonly stdin: NodeJS.ReadStream;
   readonly setRawMode: (mode: boolean) => void;
   readonly isRawModeSupported: boolean;

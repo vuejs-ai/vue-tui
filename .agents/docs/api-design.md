@@ -342,7 +342,7 @@ This flow is not an accepted dispatch order. The proposal must answer:
 3. How are logical focus, active collection item, text insertion point, selection and terminal cursor kept separate and coordinated?
 4. How do nested focus scopes trap focus, derive traversal order, skip hidden or disabled targets, and restore focus after unmount?
 5. Are shortcuts expressed as normalized key events, typed commands and overridable bindings, or both? How can help or status UI inspect active bindings without stringly typed application actions?
-6. What remains the purpose and target contract of low-level `useInput`, terminal-wide raw mouse input, and direct stdin access?
+6. What remains the purpose and target contract of low-level `useInput` and terminal-wide raw mouse input? Direct stdin is retained under the vouched raw escape-hatch contract in [normalized input and routing](./input-routing.md#direct-stdin-is-a-parallel-escape-hatch-not-fallthrough).
 7. What semantic element or rectangle type lets focus, mouse, measurement, scrolling and a real terminal caret refer to the same rendered object without exposing a host node?
 8. Which shared focus and input operations remain meaningful in static, non-interactive and screen-reader environments, and how does each ineffective operation report itself?
 
