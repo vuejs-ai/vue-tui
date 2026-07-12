@@ -145,6 +145,8 @@ Logical focus semantics do not vary between Inline and Fullscreen. The same targ
 
 The focus controller publishes one fully reconciled route generation after each authoritative renderer commit. The F3 bridge now allows that generation to remain logically selected without physical input demand; F4 requests demand only for the effective work listed above, while independently driven facts still retain one fact-start focus topology. Reading the route or any public readonly ref has no side effects and cannot reorder a pending scope activation. Target and scope disposal invalidates their route before Vue cleanup can expose a later fact to a stale recipient.
 
+The private focus policy now exposes an owner-bound checkpoint only to its app controller. Before a mutation that may acquire or replace an F3 generation, the controller can retain the last accepted focus, boundary, rendered order, memories, autofocus consumption, and fallback state. If lease validation or physical input acquisition fails, restoring that checkpoint removes transient handles and reinstates the exact previous policy generation before any public ref or route is published. Checkpoints from another application are rejected.
+
 ## Accepted public authoring surface
 
 The recommendation uses composable handles rather than listener props, a focusable component variant, a directive, or one option object containing every handler. It keeps common visual components passive, follows Vue template refs, and lets behaviors compose without a component Cartesian product.

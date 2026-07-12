@@ -15,6 +15,13 @@ export interface InternalFocusTarget {
   readonly debugLabel: string;
 }
 
+const focusCheckpointState: unique symbol = Symbol("vue-tui.internal.focus-checkpoint");
+
+/** Opaque rollback point for one accepted private focus-policy generation. */
+export interface InternalFocusCheckpoint {
+  readonly [focusCheckpointState]: FocusPolicyCheckpointState;
+}
+
 export interface InternalFocusRoute {
   readonly boundary: InternalFocusScope;
   readonly owner: InternalFocusTarget | null;
@@ -25,6 +32,8 @@ export interface InternalFocusRoute {
 export interface InternalFocusPolicy {
   readonly rootScope: InternalFocusScope;
   readonly current: InternalFocusTarget | null;
+  checkpoint(): InternalFocusCheckpoint;
+  restore(checkpoint: InternalFocusCheckpoint): void;
   createScope(options: {
     readonly debugLabel: string;
     readonly parent?: InternalFocusScope;
@@ -92,9 +101,44 @@ interface TargetState {
   fallbackOrder: readonly TargetState[] | null;
 }
 
+interface ScopeCheckpoint {
+  readonly state: ScopeState;
+  readonly active: boolean;
+  readonly trapped: boolean;
+  readonly removed: boolean;
+  readonly activation: number;
+  readonly remembered: TargetState | null;
+  readonly restoreAnchor: TargetState | null;
+}
+
+interface TargetCheckpoint {
+  readonly state: TargetState;
+  readonly disabled: boolean;
+  readonly hidden: boolean;
+  readonly tabIndex: 0 | -1;
+  readonly autoFocus: boolean;
+  readonly autoFocusConsumed: boolean;
+  readonly externalOwner: boolean;
+  readonly removed: boolean;
+  readonly fallbackOrder: readonly TargetState[] | null;
+}
+
+interface FocusPolicyCheckpointState {
+  readonly owner: symbol;
+  readonly activation: number;
+  readonly scopes: readonly ScopeCheckpoint[];
+  readonly targets: readonly TargetCheckpoint[];
+  readonly rendered: readonly TargetState[];
+  readonly focused: TargetState | null;
+  readonly boundary: ScopeState;
+  readonly pendingRestore: TargetState | null;
+  readonly preferredActivatedScope: ScopeState | null;
+}
+
 const rootLabel = "<root-focus-scope>";
 
 export function createInternalFocusPolicy(): InternalFocusPolicy {
+  const checkpointOwner = Symbol("vue-tui:focus-policy");
   const scopeStates = new Map<InternalFocusScope, ScopeState>();
   const targetStates = new Map<InternalFocusTarget, TargetState>();
   let activation = 0;
@@ -379,6 +423,102 @@ export function createInternalFocusPolicy(): InternalFocusPolicy {
     rootScope: rootHandle,
     get current() {
       return publishedCurrent?.handle ?? null;
+    },
+    checkpoint() {
+      if (batchDepth > 0 || reconciliationPending) {
+        throw new Error("Cannot checkpoint focus policy during reconciliation");
+      }
+      const state: FocusPolicyCheckpointState = Object.freeze({
+        owner: checkpointOwner,
+        activation,
+        scopes: Object.freeze(
+          [...scopeStates.values()].map((scope) =>
+            Object.freeze({
+              state: scope,
+              active: scope.active,
+              trapped: scope.trapped,
+              removed: scope.removed,
+              activation: scope.activation,
+              remembered: scope.remembered,
+              restoreAnchor: scope.restoreAnchor,
+            }),
+          ),
+        ),
+        targets: Object.freeze(
+          [...targetStates.values()].map((target) =>
+            Object.freeze({
+              state: target,
+              disabled: target.disabled,
+              hidden: target.hidden,
+              tabIndex: target.tabIndex,
+              autoFocus: target.autoFocus,
+              autoFocusConsumed: target.autoFocusConsumed,
+              externalOwner: target.externalOwner,
+              removed: target.removed,
+              fallbackOrder: target.fallbackOrder ? Object.freeze([...target.fallbackOrder]) : null,
+            }),
+          ),
+        ),
+        rendered: Object.freeze([...rendered]),
+        focused,
+        boundary,
+        pendingRestore,
+        preferredActivatedScope,
+      });
+      return Object.freeze({ [focusCheckpointState]: state });
+    },
+    restore(checkpoint) {
+      const saved = checkpoint?.[focusCheckpointState];
+      if (!saved || saved.owner !== checkpointOwner) {
+        throw new Error("Focus checkpoint belongs to a different policy");
+      }
+      if (batchDepth > 0) throw new Error("Cannot restore focus policy during reconciliation");
+
+      const savedScopes = new Set(saved.scopes.map((entry) => entry.state));
+      for (const scope of scopeStates.values()) {
+        if (savedScopes.has(scope)) continue;
+        scope.active = false;
+        scope.removed = true;
+      }
+      const savedTargets = new Set(saved.targets.map((entry) => entry.state));
+      for (const target of targetStates.values()) {
+        if (savedTargets.has(target)) continue;
+        target.removed = true;
+      }
+
+      scopeStates.clear();
+      for (const entry of saved.scopes) {
+        const scope = entry.state;
+        scope.active = entry.active;
+        scope.trapped = entry.trapped;
+        scope.removed = entry.removed;
+        scope.activation = entry.activation;
+        scope.remembered = entry.remembered;
+        scope.restoreAnchor = entry.restoreAnchor;
+        scopeStates.set(scope.handle, scope);
+      }
+      targetStates.clear();
+      for (const entry of saved.targets) {
+        const target = entry.state;
+        target.disabled = entry.disabled;
+        target.hidden = entry.hidden;
+        target.tabIndex = entry.tabIndex;
+        target.autoFocus = entry.autoFocus;
+        target.autoFocusConsumed = entry.autoFocusConsumed;
+        target.externalOwner = entry.externalOwner;
+        target.removed = entry.removed;
+        target.fallbackOrder = entry.fallbackOrder;
+        targetStates.set(target.handle, target);
+      }
+
+      activation = saved.activation;
+      rendered = [...saved.rendered];
+      focused = saved.focused;
+      boundary = saved.boundary;
+      pendingRestore = saved.pendingRestore;
+      preferredActivatedScope = saved.preferredActivatedScope;
+      reconciliationPending = false;
+      publish();
     },
     createScope(options) {
       const parent = options.parent ? stateForScope(options.parent) : root;

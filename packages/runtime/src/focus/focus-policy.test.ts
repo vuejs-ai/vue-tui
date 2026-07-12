@@ -11,6 +11,44 @@ import { normalizeInputEvent } from "../io/normalized-input.ts";
 const label = (target: InternalFocusTarget | null): string | null => target?.debugLabel ?? null;
 
 describe("internal F4 focus policy experiment", () => {
+  test("restores a complete accepted generation after a failed outer transaction", () => {
+    const focus = createInternalFocusPolicy();
+    const outer = focus.createTarget({ debugLabel: "outer", autoFocus: true });
+    const sibling = focus.createTarget({ debugLabel: "sibling" });
+    const modal = focus.createScope({ debugLabel: "modal", active: false, trapped: true });
+    const approval = focus.createTarget({
+      debugLabel: "approval",
+      scope: modal,
+      autoFocus: true,
+    });
+    focus.setRenderedOrder([outer, sibling, approval]);
+    const acceptedRoute = focus.route();
+    const checkpoint = focus.checkpoint();
+
+    focus.updateScope(modal, { active: true });
+    focus.removeTarget(outer);
+    const transient = focus.createTarget({ debugLabel: "transient" });
+    focus.setRenderedOrder([sibling, approval, transient]);
+    expect(label(focus.current)).toBe("approval");
+
+    focus.restore(checkpoint);
+
+    expect(focus.current).toBe(outer);
+    expect(focus.route()).toEqual(acceptedRoute);
+    expect(focus.focus(transient)).toBe(false);
+    expect(focus.focusNext()).toBe(true);
+    expect(focus.current).toBe(sibling);
+  });
+
+  test("rejects a checkpoint from another focus policy", () => {
+    const first = createInternalFocusPolicy();
+    const second = createInternalFocusPolicy();
+
+    expect(() => second.restore(first.checkpoint())).toThrow(
+      "Focus checkpoint belongs to a different policy",
+    );
+  });
+
   test("uses current rendered preorder instead of setup registration order", () => {
     const focus = createInternalFocusPolicy();
     const a = focus.createTarget({ debugLabel: "a", autoFocus: true });
