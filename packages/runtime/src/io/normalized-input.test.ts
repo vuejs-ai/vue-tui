@@ -350,6 +350,28 @@ describe("shared stdin normalization", () => {
     });
   });
 
+  test("does not claim byte provenance after invalid UTF-8 replacement", () => {
+    const invalidSource = collect([Uint8Array.from([0x80])]);
+    const canonicalReplacement = collect([Uint8Array.from([0xef, 0xbf, 0xbd])]);
+
+    expect(invalidSource).toEqual(canonicalReplacement);
+    expect(invalidSource).toEqual([
+      {
+        kind: "text",
+        sequence: "�",
+        text: "�",
+        protocol: "plain",
+        phase: undefined,
+        primaryCodepoint: undefined,
+        textOrigin: undefined,
+      },
+    ]);
+    // An external owner can honestly receive the normalized Unicode sequence,
+    // but the fact alone cannot tell whether its original bytes were 80 or the
+    // valid UTF-8 EF BF BD. Byte-exact forwarding needs ingress provenance.
+    expect(Buffer.from(invalidSource[0]!.sequence)).toEqual(Buffer.from([0xef, 0xbf, 0xbd]));
+  });
+
   test.each([
     {
       title: "Kitty key",
