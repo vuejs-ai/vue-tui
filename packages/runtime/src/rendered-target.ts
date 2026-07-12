@@ -19,6 +19,21 @@ export interface RenderedTargetController {
   dispose(): void;
 }
 
+/**
+ * Private owner transaction used by app-level behaviors that derive one
+ * generation from the complete rendered-target set.
+ */
+export interface RenderedTargetTransactionHost {
+  /** Delay derived publication until one complete attach/detach operation settles. */
+  transaction(change: () => void): void;
+  /**
+   * Called after every matching registration is logically detached and before
+   * any cleanup callback runs. A route owner can synchronously invalidate the
+   * removed subtree so re-entrant application cleanup cannot observe stale state.
+   */
+  beforeInvalidateSubtree(target: TuiNode): void;
+}
+
 // AppContext is exported from the unsupported-but-packaged `/internal` entry.
 // Keep this controller in a private side table so its generic target machinery
 // cannot leak into AppContext's generated declaration surface.
@@ -63,12 +78,29 @@ function throwFirst(errors: unknown[]): void {
  * the registration identity. Host removal invalidates a subtree synchronously,
  * which also rejects stale non-null refs left by older Vue versions.
  */
-export function createRenderedTargetController(root: TuiRoot): RenderedTargetController {
+export function createRenderedTargetController(
+  root: TuiRoot,
+  transactionHost?: RenderedTargetTransactionHost,
+): RenderedTargetController {
   const registrations = new Set<MutableRegistration>();
   const invalidatedTargets = new WeakSet<TuiNode>();
   let disposed = false;
   let reconciling = false;
   let reconcileRequested = false;
+  let transactionDepth = 0;
+
+  const transaction = (change: () => void): void => {
+    if (!transactionHost || transactionDepth > 0) {
+      change();
+      return;
+    }
+    transactionDepth++;
+    try {
+      transactionHost.transaction(change);
+    } finally {
+      transactionDepth--;
+    }
+  };
 
   const takeCleanup = (registration: MutableRegistration): RenderedTargetCleanup | undefined => {
     const cleanup = registration.cleanup;
@@ -143,23 +175,25 @@ export function createRenderedTargetController(root: TuiRoot): RenderedTargetCon
       return;
     }
 
-    reconciling = true;
-    const errors: unknown[] = [];
-    try {
-      do {
-        reconcileRequested = false;
-        for (const registration of Array.from(registrations)) {
-          try {
-            reconcileOne(registration);
-          } catch (error) {
-            errors.push(error);
+    transaction(() => {
+      reconciling = true;
+      const errors: unknown[] = [];
+      try {
+        do {
+          reconcileRequested = false;
+          for (const registration of Array.from(registrations)) {
+            try {
+              reconcileOne(registration);
+            } catch (error) {
+              errors.push(error);
+            }
           }
-        }
-      } while (reconcileRequested && !disposed);
-    } finally {
-      reconciling = false;
-    }
-    throwFirst(errors);
+        } while (reconcileRequested && !disposed);
+      } finally {
+        reconciling = false;
+      }
+      throwFirst(errors);
+    });
   };
 
   return {
@@ -177,55 +211,66 @@ export function createRenderedTargetController(root: TuiRoot): RenderedTargetCon
         reconcile,
         dispose() {
           if (!registration.active) return;
-          registration.active = false;
-          registrations.delete(registration);
-          detach(registration);
+          transaction(() => {
+            registration.active = false;
+            registrations.delete(registration);
+            detach(registration);
+          });
         },
       };
     },
     reconcile,
     invalidateSubtree(target) {
       if (disposed) return;
-      descendantsOf(target, invalidatedTargets);
-      // Select and logically detach the whole batch before invoking any
-      // disposer. A disposer can synchronously mutate another node's parent or
-      // reconcile another registration; neither may let a target that belonged
-      // to the removed subtree escape invalidation.
-      const cleanups: RenderedTargetCleanup[] = [];
-      for (const registration of Array.from(registrations)) {
-        if (!registration.target || !invalidatedTargets.has(registration.target)) continue;
-        const cleanup = takeCleanup(registration);
-        if (cleanup) cleanups.push(cleanup);
-      }
-      const errors: unknown[] = [];
-      for (const cleanup of cleanups) {
+      transaction(() => {
+        descendantsOf(target, invalidatedTargets);
+        // Select and logically detach the whole batch before invoking any
+        // disposer. A disposer can synchronously mutate another node's parent or
+        // reconcile another registration; neither may let a target that belonged
+        // to the removed subtree escape invalidation.
+        const cleanups: RenderedTargetCleanup[] = [];
+        for (const registration of Array.from(registrations)) {
+          if (!registration.target || !invalidatedTargets.has(registration.target)) continue;
+          const cleanup = takeCleanup(registration);
+          if (cleanup) cleanups.push(cleanup);
+        }
+        const errors: unknown[] = [];
         try {
-          cleanup();
+          transactionHost?.beforeInvalidateSubtree(target);
         } catch (error) {
           errors.push(error);
         }
-      }
-      throwFirst(errors);
+        for (const cleanup of cleanups) {
+          try {
+            cleanup();
+          } catch (error) {
+            errors.push(error);
+          }
+        }
+        throwFirst(errors);
+      });
     },
     dispose() {
       if (disposed) return;
-      disposed = true;
-      const cleanups: RenderedTargetCleanup[] = [];
-      for (const registration of Array.from(registrations)) {
-        registration.active = false;
-        const cleanup = takeCleanup(registration);
-        if (cleanup) cleanups.push(cleanup);
-      }
-      const errors: unknown[] = [];
-      for (const cleanup of cleanups) {
-        try {
-          cleanup();
-        } catch (error) {
-          errors.push(error);
+      transaction(() => {
+        disposed = true;
+        const cleanups: RenderedTargetCleanup[] = [];
+        for (const registration of Array.from(registrations)) {
+          registration.active = false;
+          const cleanup = takeCleanup(registration);
+          if (cleanup) cleanups.push(cleanup);
         }
-      }
-      registrations.clear();
-      throwFirst(errors);
+        const errors: unknown[] = [];
+        for (const cleanup of cleanups) {
+          try {
+            cleanup();
+          } catch (error) {
+            errors.push(error);
+          }
+        }
+        registrations.clear();
+        throwFirst(errors);
+      });
     },
   };
 }

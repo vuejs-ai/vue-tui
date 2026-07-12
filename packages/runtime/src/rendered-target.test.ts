@@ -16,6 +16,80 @@ function connect(parent: TuiContainer, child: TuiBox): TuiBox {
 }
 
 describe("rendered-target controller", () => {
+  test("runs one host transaction around a complete retarget reconciliation", () => {
+    const root = createRoot({} as AppContext);
+    const first = connect(root, createBox());
+    const second = connect(root, createBox());
+    const events: string[] = [];
+    let current: TuiBox | null = first;
+    const controller = createRenderedTargetController(root, {
+      transaction(change) {
+        events.push("begin");
+        try {
+          change();
+        } finally {
+          events.push("commit");
+        }
+      },
+      beforeInvalidateSubtree() {},
+    });
+    controller.register(
+      () => current,
+      (target) => {
+        const label = target === first ? "first" : "second";
+        events.push(`attach:${label}`);
+        return () => events.push(`detach:${label}`);
+      },
+    );
+
+    controller.reconcile();
+    events.length = 0;
+    current = second;
+    controller.reconcile();
+
+    expect(events).toEqual(["begin", "detach:first", "attach:second", "commit"]);
+  });
+
+  test("announces a logically invalidated subtree before any cleanup callback", () => {
+    const root = createRoot({} as AppContext);
+    const parent = connect(root, createBox());
+    const child = connect(parent, createBox());
+    const events: string[] = [];
+    const controller = createRenderedTargetController(root, {
+      transaction(change) {
+        events.push("begin");
+        try {
+          change();
+        } finally {
+          events.push("commit");
+        }
+      },
+      beforeInvalidateSubtree(target) {
+        events.push(target === parent ? "invalidate:parent" : "invalidate:other");
+      },
+    });
+    controller.register(
+      () => child,
+      () => () => {
+        events.push("cleanup");
+        controller.reconcile();
+        events.push("cleanup:reconciled");
+      },
+    );
+    controller.reconcile();
+    events.length = 0;
+
+    controller.invalidateSubtree(parent);
+
+    expect(events).toEqual([
+      "begin",
+      "invalidate:parent",
+      "cleanup",
+      "cleanup:reconciled",
+      "commit",
+    ]);
+  });
+
   test("attaches once, detaches before retargeting, and releases on disposal", () => {
     const root = createRoot({} as AppContext);
     const first = connect(root, createBox());

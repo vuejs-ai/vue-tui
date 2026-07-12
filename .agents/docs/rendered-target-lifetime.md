@@ -26,6 +26,8 @@ The contract is:
 
 Each live or deterministic renderer owns one controller for one `TuiRoot`. Vue-ref changes request reconciliation, and the renderer also reconciles after every authoritative commit. The second path is essential: a component proxy can remain stable while its `$el` changes, so no watcher of the proxy itself fires. A target is accepted only when walking its current parent chain reaches the controller's owning root.
 
+The controller now also accepts one private owner transaction host for F4 integration. A complete reconcile, registration disposal, subtree invalidation, or controller disposal runs inside one owner transaction, so focus can derive one generation after all detach/attach callbacks settle instead of publishing transient keyed-retarget states. During subtree removal, the host is notified after every matching registration is logically detached and before any cleanup callback runs; focus can therefore invalidate the whole removed route synchronously before re-entrant cleanup code observes it. Nested reconciliation reuses the outer transaction, and hook or cleanup failure still gives every selected cleanup its turn.
+
 `renderToString()` creates the same per-root controller, reconciles the one mounted tree before layout, and disposes it during the string-render transaction. The controller and renderer-node types remain internal and are not exported from the root package or `/internal`.
 
 ## First adapters
