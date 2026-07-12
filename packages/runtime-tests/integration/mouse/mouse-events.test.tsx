@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, shallowRef } from "vue";
+import { defineComponent, effectScope, nextTick, shallowRef, type Ref } from "vue";
 import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import {
   Box,
@@ -37,7 +37,7 @@ async function settle() {
 
 function mountMouseApp(
   component: ReturnType<typeof defineComponent>,
-  options: boolean | { fullscreen?: boolean; stdinIsTTY?: boolean } = true,
+  options: boolean | { fullscreen?: boolean; stdinIsTTY?: boolean; maxFps?: number } = true,
 ) {
   const fullscreen = typeof options === "boolean" ? options : (options.fullscreen ?? true);
   const app = createApp(component);
@@ -52,7 +52,7 @@ function mountMouseApp(
     stdout,
     stderr,
     stdin,
-    maxFps: 0,
+    maxFps: typeof options === "object" ? (options.maxFps ?? 0) : 0,
     exitOnCtrlC: false,
     rawMode: "auto",
     mode: fullscreen ? "fullscreen" : "inline",
@@ -509,6 +509,43 @@ test("hit-testing prefers the last-painted overlapping node", async () => {
   app.unmount();
 });
 
+test("a removed target cannot receive input before the throttled replacement frame paints", async () => {
+  const visible = shallowRef(true);
+  const calls: string[] = [];
+  const App = defineComponent(() => () => (
+    <Box width={10} height={2}>
+      {visible.value ? (
+        <Box
+          key="removed"
+          position="absolute"
+          width={2}
+          height={1}
+          onClick={() => calls.push("removed")}
+        />
+      ) : undefined}
+      <Box
+        position="absolute"
+        left={5}
+        width={2}
+        height={1}
+        onClick={() => calls.push("survivor")}
+      />
+    </Box>
+  ));
+  const { app, stdin } = mountMouseApp(App, { maxFps: 1 });
+  await settle();
+
+  visible.value = false;
+  // Vue has removed the host node, but the one-second renderer throttle keeps
+  // the previous physical frame and hit map observable for this exact gap.
+  await nextTick();
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await Promise.resolve();
+
+  expect(calls).toEqual([]);
+  app.unmount();
+});
+
 test("MouseTarget rect is cleared when a mounted node stops painting", async () => {
   const target = shallowRef<MouseTarget | null>(null);
   const hidden = shallowRef(false);
@@ -592,6 +629,156 @@ test("useDraggable tracks element position until release", async () => {
     ["drag", 9, 4, 7, 3, 7, 3],
     ["dragend", 9, 4, 7, 3, 0, 0],
   ]);
+  app.unmount();
+});
+
+test("useDraggable follows inner host insertion and removal while the component ref stays stable", async () => {
+  const phase = shallowRef<"empty" | "visible">("empty");
+  const starts: number[] = [];
+  const StableTarget = defineComponent(() => {
+    return () =>
+      phase.value === "visible" ? (
+        <Box key="visible" width={4} height={1}>
+          <Text>drag</Text>
+        </Box>
+      ) : null;
+  });
+  const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+  let isDragging: Readonly<Ref<boolean>> | undefined;
+  const App = defineComponent(() => {
+    isDragging = useDraggable(target, {
+      onStart: (_position, event) => starts.push(event.screenX),
+    }).isDragging;
+    return () => <StableTarget ref={target} />;
+  });
+  const { app, stdin, writes } = mountMouseApp(App);
+  await settle();
+
+  const stableInstance = target.value;
+  expect(stableInstance).not.toBeNull();
+  // A component whose current root is `null` has no rendered target. Its Vue
+  // comment anchor must not acquire terminal mouse reporting.
+  expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
+
+  const beforeInsert = writes.length;
+  phase.value = "visible";
+  await settle();
+  expect(target.value).toBe(stableInstance);
+  expect(writes.slice(beforeInsert).join("")).toContain(ENABLE_SGR_DRAG_MOUSE);
+
+  stdin.emit("data", "\x1b[<0;1;1M");
+  await settle();
+  expect(starts).toEqual([0]);
+  expect(isDragging?.value).toBe(true);
+
+  const beforeRemove = writes.length;
+  phase.value = "empty";
+  await settle();
+  expect(target.value).toBe(stableInstance);
+  expect(writes.slice(beforeRemove).join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(isDragging?.value).toBe(false);
+
+  stdin.emit("data", "\x1b[<32;2;1M\x1b[<0;2;1m");
+  await settle();
+  expect(starts).toEqual([0]);
+
+  const beforeRestore = writes.length;
+  phase.value = "visible";
+  await settle();
+  expect(target.value).toBe(stableInstance);
+  expect(writes.slice(beforeRestore).join("")).toContain(ENABLE_SGR_DRAG_MOUSE);
+
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+  // One physical press produces one registration callback after restoration;
+  // a stale or duplicate registration must not survive either transition.
+  expect(starts).toEqual([0, 0]);
+  app.unmount();
+});
+
+test("useDraggable follows a keyed inner-root replacement without changing the component ref", async () => {
+  const phase = shallowRef<"a" | "b">("a");
+  const targetRects: number[] = [];
+  const StableTarget = defineComponent(() => {
+    return () =>
+      phase.value === "a" ? (
+        <Box key="a" width={4} height={1}>
+          <Text>AAAA</Text>
+        </Box>
+      ) : (
+        <Box key="b" marginLeft={5} width={4} height={1}>
+          <Text>BBBB</Text>
+        </Box>
+      );
+  });
+  const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+  const App = defineComponent(() => {
+    useDraggable(target, {
+      onStart: (_position, event) => targetRects.push(event.currentTarget?.rect.x ?? -1),
+    });
+    return () => <StableTarget ref={target} />;
+  });
+  const { app, stdin } = mountMouseApp(App);
+  await settle();
+
+  const stableInstance = target.value;
+  expect(stableInstance).not.toBeNull();
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  await settle();
+  expect(targetRects).toEqual([0]);
+
+  phase.value = "b";
+  await settle();
+  expect(target.value).toBe(stableInstance);
+
+  // The old cell is no longer a target, while one press on the replacement
+  // must reach exactly one freshly attached registration.
+  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
+  stdin.emit("data", "\x1b[<0;6;1M\x1b[<0;6;1m");
+  await settle();
+  expect(targetRects).toEqual([0, 5]);
+  app.unmount();
+});
+
+test("useDraggable detaches and clears active capture when its owning effect scope stops", async () => {
+  const target = shallowRef<BoxInstance | null>(null);
+  const events: string[] = [];
+  let isDragging: Readonly<Ref<boolean>> | undefined;
+  let stopScope = () => {};
+  const App = defineComponent(() => {
+    const scope = effectScope();
+    stopScope = () => scope.stop();
+    scope.run(() => {
+      const drag = useDraggable(target, {
+        onStart: () => events.push("start"),
+        onMove: () => events.push("move"),
+        onEnd: () => events.push("end"),
+      });
+      isDragging = drag.isDragging;
+    });
+    return () => (
+      <Box ref={target} width={4} height={1}>
+        <Text>drag</Text>
+      </Box>
+    );
+  });
+  const { app, stdin, writes } = mountMouseApp(App);
+  await settle();
+
+  stdin.emit("data", "\x1b[<0;1;1M");
+  await settle();
+  expect(events).toEqual(["start"]);
+  expect(isDragging?.value).toBe(true);
+
+  const beforeStop = writes.length;
+  stopScope();
+  await settle();
+  expect(isDragging?.value).toBe(false);
+  expect(writes.slice(beforeStop).join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
+
+  stdin.emit("data", "\x1b[<32;2;1M\x1b[<0;2;1m");
+  await settle();
+  expect(events).toEqual(["start"]);
   app.unmount();
 });
 

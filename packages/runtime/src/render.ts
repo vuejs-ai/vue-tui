@@ -75,6 +75,7 @@ import {
   unregisterDevApp,
 } from "./hmr.ts";
 import { createDevOverlayWrapper } from "./overlay.ts";
+import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import {
   ErrorOverview,
   formatErrorForStderr,
@@ -287,6 +288,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedUnsubscribeSuspension: (() => void) | null = null;
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
+  let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
   let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
@@ -705,6 +707,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // re-enter process.exit() before terminal restoration completes. Runtime
         // resources below are released directly instead.
         if (!immediateTermination) runBestEffort(originalUnmount);
+      }
+      if (mountedRenderedTargets) {
+        const renderedTargets = mountedRenderedTargets;
+        mountedRenderedTargets = null;
+        setRenderedTargetController(appContext, null);
+        runBestEffort(() => renderedTargets.dispose());
       }
       // Dispose the animation scheduler after Vue unmount: each useAnimation's
       // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
@@ -1599,6 +1607,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // setWidth (or anything below) throws.
         mountedRoot = tuiRoot;
         tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
+        const renderedTargets = createRenderedTargetController(tuiRoot);
+        mountedRenderedTargets = renderedTargets;
+        setRenderedTargetController(appContext, renderedTargets);
       } catch (err) {
         try {
           teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
@@ -1887,6 +1898,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         try {
           const start = onRender ? performance.now() : 0;
+          mountedRenderedTargets?.reconcile();
 
           // Capture static output as a string (for both interactive and non-interactive paths)
           const w = renderSession.session.dimensions.layout.columns;
@@ -3162,7 +3174,17 @@ function createStdinController(
     acquireSgrMouseMode(level: SgrMouseMode = "button") {
       const token = Symbol("sgr-mouse");
       sgrMouseModeTokens.set(token, level);
-      reconcileSgrMouseMode();
+      try {
+        reconcileSgrMouseMode();
+      } catch (error) {
+        // A throwing terminal write means this call never returns its token, so
+        // leaving it in the request map would create an ownerless SGR lease.
+        // Remove the logical request and attempt to restore the previous level
+        // without replacing the original acquisition error.
+        sgrMouseModeTokens.delete(token);
+        runTerminalCleanup(reconcileSgrMouseMode);
+        throw error;
+      }
       return token;
     },
     releaseSgrMouseMode(token: symbol) {

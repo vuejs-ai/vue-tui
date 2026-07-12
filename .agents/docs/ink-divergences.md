@@ -228,6 +228,8 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   — a reasonable Vue-idiomatic adoption (the component-instance ref is the natural Vue path;
   the bare host-node ref stays Ink-identical). [VOUCHED @hyf0]
 
+> **Unstamped F2 implementation note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer now reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useBoxMetrics()` and `useDraggable()` are the first two adapters. See [rendered-target-lifetime.md](./rendered-target-lifetime.md). This note records implementation evidence and does not extend the VOUCHED public API decision above.
+
 ### Two apps sharing one stdin both receive input
 
 - **Ink:** raw-mode count and the input listener are **per-`App`** (`useRef`), and Ink reads

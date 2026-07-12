@@ -28,6 +28,9 @@
 > `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default. F1.4
 > now implements that mount contract and removes `fullscreen`, `alternateScreen`, and `interactive`
 > directly. The targeted-pointer replacement itself remains F6 work.
+>
+> **F2 implementation update (2026-07-12, unstamped):** current `useDraggable()` now consumes the shared internal [rendered-target lifetime](./rendered-target-lifetime.md). It follows insertion, keyed inner-root replacement, removal, scope disposal, HMR, and stale Vue 3.4 component refs by resolved host identity; active capture and raw/SGR ownership end when that host disappears. This fixes the lifecycle mechanism without accepting the current root export, public signature, event model, or common-component listeners as the F6 target API.
+>
 > Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
 

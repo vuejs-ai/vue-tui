@@ -5,6 +5,13 @@ function hasYoga(value: unknown): value is { yoga: YogaNode } {
   return Boolean(value && typeof value === "object" && "yoga" in value);
 }
 
+function isRenderedHostNode(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const node = value as Record<string, unknown>;
+  if (typeof node.type !== "string" || node.type === "comment") return false;
+  return !(node.type === "text-leaf" && node.value === "");
+}
+
 function hostElFromSubTree(instance: unknown): Record<string, unknown> | null {
   const subTree = (instance as { subTree?: unknown })?.subTree;
   return findHostEl(subTree);
@@ -13,10 +20,8 @@ function hostElFromSubTree(instance: unknown): Record<string, unknown> | null {
 function findHostEl(vnode: unknown): Record<string, unknown> | null {
   if (!vnode || typeof vnode !== "object") return null;
   const vn = vnode as { el?: unknown; component?: { subTree?: unknown }; children?: unknown };
-  const el = vn.el as Record<string, unknown> | undefined;
-  if (el && typeof el.type === "string" && el.type !== "comment") {
-    if (!(el.type === "text-leaf" && el.value === "")) return el;
-  }
+  const el = vn.el;
+  if (isRenderedHostNode(el)) return el as Record<string, unknown>;
   if (vn.component?.subTree) {
     const nested = findHostEl(vn.component.subTree);
     if (nested) return nested;
@@ -33,13 +38,11 @@ function findHostEl(vnode: unknown): Record<string, unknown> | null {
 export function resolveTuiNode(value: unknown): TuiNode | null {
   if (!value) return null;
   const obj = value as Record<string, unknown>;
-  if (typeof obj.type === "string") return obj as unknown as TuiNode;
-  const el = obj.$el as Record<string, unknown> | undefined;
-  if (el && typeof el.type === "string" && !(el.type === "text-leaf" && el.value === "")) {
-    return el as unknown as TuiNode;
-  }
+  if (isRenderedHostNode(obj)) return obj as unknown as TuiNode;
+  const el = obj.$el;
+  if (isRenderedHostNode(el)) return el as unknown as TuiNode;
   const host = hostElFromSubTree(obj.$);
-  if (host && typeof host.type === "string") return host as unknown as TuiNode;
+  if (isRenderedHostNode(host)) return host as unknown as TuiNode;
   return null;
 }
 

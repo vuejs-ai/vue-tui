@@ -1,10 +1,8 @@
 import {
   computed,
   inject,
-  nextTick,
   shallowRef,
   toValue,
-  watch,
   type ComponentPublicInstance,
   type MaybeRefOrGetter,
   type Ref,
@@ -12,7 +10,7 @@ import {
 import { AppContextKey } from "../context.ts";
 import { resolveTuiNode } from "../host/resolve-node.ts";
 import type { TuiMouseEvent } from "../mouse/events.ts";
-import { tryOnScopeDispose } from "./scope.ts";
+import { useRenderedTargetRegistration } from "../rendered-target.ts";
 
 export interface UseDraggablePosition {
   readonly x: number;
@@ -49,15 +47,8 @@ export function useDraggable(
   const position = computed(() => ({ x: x.value, y: y.value }));
   const isDragging = shallowRef(false);
   const axis = options.axis ?? "both";
-  let unregister: (() => void) | undefined;
   let startPosition: UseDraggablePosition = { x: x.value, y: y.value };
   let startPointer: UseDraggablePosition = { x: 0, y: 0 };
-
-  function clearRegistration() {
-    unregister?.();
-    unregister = undefined;
-    isDragging.value = false;
-  }
 
   function updatePosition(event: TuiMouseEvent) {
     const nextX = startPosition.x + event.screenX - startPointer.x;
@@ -66,46 +57,33 @@ export function useDraggable(
     if (axis !== "x") y.value = nextY;
   }
 
-  watch(
-    () => toValue(target),
-    (value, _oldValue, onCleanup) => {
-      clearRegistration();
-      if (!value) return;
-
-      let cancelled = false;
-      onCleanup(() => {
-        cancelled = true;
-        clearRegistration();
+  useRenderedTargetRegistration(
+    () => resolveTuiNode(toValue(target)),
+    (node) => {
+      const unregister = app.internal_mouse?.registerDraggable(node, {
+        onStart(event) {
+          const result = options.onStart?.(position.value, event) as unknown;
+          if (result === false) return false;
+          startPosition = { x: x.value, y: y.value };
+          startPointer = { x: event.screenX, y: event.screenY };
+          isDragging.value = true;
+        },
+        onMove(event) {
+          updatePosition(event);
+          options.onMove?.(position.value, event);
+        },
+        onEnd(event) {
+          updatePosition(event);
+          isDragging.value = false;
+          options.onEnd?.(position.value, event);
+        },
       });
-
-      void nextTick(() => {
-        if (cancelled) return;
-        const node = resolveTuiNode(value);
-        if (!node) return;
-        unregister = app.internal_mouse?.registerDraggable(node, {
-          onStart(event) {
-            const result = options.onStart?.(position.value, event) as unknown;
-            if (result === false) return false;
-            startPosition = { x: x.value, y: y.value };
-            startPointer = { x: event.screenX, y: event.screenY };
-            isDragging.value = true;
-          },
-          onMove(event) {
-            updatePosition(event);
-            options.onMove?.(position.value, event);
-          },
-          onEnd(event) {
-            updatePosition(event);
-            isDragging.value = false;
-            options.onEnd?.(position.value, event);
-          },
-        });
-      });
+      return () => {
+        unregister?.();
+        isDragging.value = false;
+      };
     },
-    { immediate: true, flush: "post" },
   );
-
-  tryOnScopeDispose(clearRegistration);
 
   return { x, y, position, isDragging };
 }

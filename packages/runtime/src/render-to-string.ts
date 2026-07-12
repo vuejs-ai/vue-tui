@@ -21,6 +21,7 @@ import {
   type StdinContext,
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
+import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import {
   InternalRenderSessionKey,
@@ -104,6 +105,8 @@ function renderStringDocument(
   // Create a standalone root node --- no stdout, stdin, or terminal bindings.
   const { appContext, stdinContext } = contexts;
   const root = createRoot(appContext);
+  const renderedTargets = createRenderedTargetController(root);
+  setRenderedTargetController(appContext, renderedTargets);
   let yogaAttached = false;
   let rootDetached = false;
   let appUnmounted = false;
@@ -178,6 +181,7 @@ function renderStringDocument(
     // Synchronously render the Vue tree into the root.
     app.mount(root);
     mounted = true;
+    renderedTargets.reconcile();
 
     const restoreLayoutGuards = calculateLayoutWithContentGuards(
       root,
@@ -247,6 +251,14 @@ function renderStringDocument(
       } catch {
         // Best-effort teardown: a throw here must not mask the original error.
       }
+    }
+
+    setRenderedTargetController(appContext, null);
+    try {
+      renderedTargets.dispose();
+    } catch {
+      // Best-effort: an adapter cleanup must not mask the render result or the
+      // original render failure after the remaining host resources are freed.
     }
 
     // Ensure native yoga memory is freed even if rendering or teardown threw.

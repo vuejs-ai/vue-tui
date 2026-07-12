@@ -12,6 +12,7 @@ export const fullscreenOriginScenarios = [
   "horizontal-overflow",
   "horizontal-wide",
   "horizontal-transform",
+  "target-lifetime",
   "screen-reader",
 ] as const;
 

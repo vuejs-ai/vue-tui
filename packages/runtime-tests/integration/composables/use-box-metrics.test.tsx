@@ -8,6 +8,18 @@ import { createBox, attachYoga } from "@vue-tui/runtime/internal";
 import { makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 describe("useBoxMetrics", () => {
+  test("returns inert zero metrics outside a render tree", () => {
+    const metrics = useBoxMetrics(ref(null));
+
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 0, height: 0, left: 0, top: 0, hasMeasured: false });
+  });
+
   test("returns layout dimensions after render", async () => {
     const dims = shallowRef({ w: 0, h: 0 });
     const App = defineComponent(() => {
@@ -535,6 +547,74 @@ describe("useBoxMetrics - resize and dynamic layout", () => {
     await nextTick();
     await nextTick();
     expect(lastFrame()).toContain("Tracked width: 40");
+  });
+
+  test("follows a stable component ref as its inner rendered root changes", async () => {
+    const phase = shallowRef<"empty" | "a" | "b">("empty");
+    const StableTarget = defineComponent(() => {
+      return () => {
+        if (phase.value === "empty") return null;
+        if (phase.value === "a") {
+          return (
+            <Box key="a" width={7} height={2}>
+              <Text>A</Text>
+            </Box>
+          );
+        }
+        return (
+          <Box key="b" width={11} height={3}>
+            <Text>B</Text>
+          </Box>
+        );
+      };
+    });
+    const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+    let metrics: ReturnType<typeof useBoxMetrics> | undefined;
+    const App = defineComponent(() => {
+      metrics = useBoxMetrics(target);
+      return () => (
+        <Box flexDirection="column">
+          <StableTarget ref={target} />
+        </Box>
+      );
+    });
+    const result = await render(App, { columns: 40 });
+    const readMetrics = () => ({
+      width: metrics!.width.value,
+      height: metrics!.height.value,
+      hasMeasured: metrics!.hasMeasured.value,
+    });
+    const settleTarget = async () => {
+      await nextTick();
+      await nextTick();
+      await result.waitUntilRenderFlush();
+      await nextTick();
+    };
+
+    const stableInstance = target.value;
+    expect(stableInstance).not.toBeNull();
+    expect(readMetrics()).toEqual({ width: 0, height: 0, hasMeasured: false });
+
+    phase.value = "a";
+    await settleTarget();
+    expect(target.value).toBe(stableInstance);
+    expect(readMetrics()).toEqual({ width: 7, height: 2, hasMeasured: true });
+
+    phase.value = "b";
+    await settleTarget();
+    expect(target.value).toBe(stableInstance);
+    expect(readMetrics()).toEqual({ width: 11, height: 3, hasMeasured: true });
+
+    phase.value = "empty";
+    await settleTarget();
+    expect(target.value).toBe(stableInstance);
+    expect(readMetrics()).toEqual({ width: 0, height: 0, hasMeasured: false });
+
+    phase.value = "b";
+    await settleTarget();
+    expect(target.value).toBe(stableInstance);
+    expect(readMetrics()).toEqual({ width: 11, height: 3, hasMeasured: true });
+    result.dispose();
   });
 
   test("updates when sibling content changes", async () => {

@@ -137,6 +137,86 @@ test("fullscreen hard-clips text expanded by a paint transform", async () => {
   await assertStableFullscreenSurface("horizontal-transform");
 });
 
+test("fullscreen target behavior follows a stable component ref's rendered host lifetime", async () => {
+  const ps = term("fullscreen-origin", ["8", "target-lifetime", "auto-exit"]);
+  let exited = false;
+
+  try {
+    await ps.waitForOutput((output) => output.includes("__SETTLED__:target-lifetime"));
+    expect(ps.output).not.toContain("\x1b[?1002h\x1b[?1006h");
+    let terminal = await emulate(ps.output);
+    expect(visibleLines(terminal)).toContain("phase=none");
+    expect(visibleLines(terminal)).toContain("target=0x0:false dragging=false");
+
+    let before = ps.output.length;
+    ps.write("1");
+    await ps.waitForOutput((output) => output.includes("__TARGET__:first"));
+    expect(ps.output.slice(before)).toContain("\x1b[?1002h\x1b[?1006h");
+    terminal = await emulate(ps.output);
+    expect(visibleLines(terminal)).toContain("FIRST");
+    expect(visibleLines(terminal)).toContain("target=7x2:true dragging=false");
+
+    before = ps.output.length;
+    ps.write("2");
+    await ps.waitForOutput((output) => output.includes("__TARGET__:second"));
+    const retargetOutput = ps.output.slice(before);
+    expect(retargetOutput).toContain("\x1b[?1002l\x1b[?1006l");
+    expect(retargetOutput.lastIndexOf("\x1b[?1002h\x1b[?1006h")).toBeGreaterThan(
+      retargetOutput.lastIndexOf("\x1b[?1002l\x1b[?1006l"),
+    );
+    terminal = await emulate(ps.output);
+    expect(visibleLines(terminal)).toContain("     TARGET-B");
+    expect(visibleLines(terminal)).toContain("target=11x1:true dragging=false");
+
+    // Send the old-origin down without its matching up, then ask the app for a
+    // synchronization marker. A stale registration would leave dragging true
+    // and increment the durable start count before the probe key is handled.
+    before = ps.output.length;
+    ps.write("\x1b[<0;1;2Mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__DRAG_STARTS__:0"));
+    terminal = await emulate(ps.output);
+    expect(visibleLines(terminal)).toContain("target=11x1:true dragging=false");
+
+    // Release the unmatched old-origin probe, then prove the replacement at
+    // x=5 has exactly one live registration by observing one start callback.
+    ps.write("\x1b[<0;1;2m");
+    before = ps.output.length;
+    ps.write("\x1b[<0;6;2M");
+    await ps.waitForOutput((output) => output.slice(before).includes("dragging=true"));
+    before = ps.output.length;
+    ps.write("p");
+    await ps.waitForOutput((output) => output.slice(before).includes("__DRAG_STARTS__:1"));
+    before = ps.output.length;
+    ps.write("\x1b[<0;6;2m");
+    await ps.waitForOutput((output) => output.slice(before).includes("dragging=false"));
+
+    // Begin another drag on the replacement, then remove its inner host while
+    // the component ref itself remains non-null. Removal must release capture
+    // and terminal mouse mode immediately. The PTY-only auto-exit avoids asking
+    // the test transport for another key after the app has disabled reporting;
+    // the visual-controller scenario remains manual.
+    before = ps.output.length;
+    ps.write("\x1b[<0;6;2M");
+    await ps.waitForOutput((output) => output.slice(before).includes("dragging=true"));
+    before = ps.output.length;
+    ps.write("x");
+    await ps.waitForOutput((output) => output.slice(before).includes("__TARGET__:none"));
+    const removalOutput = ps.output.slice(before);
+    expect(removalOutput).toContain("\x1b[?1002l\x1b[?1006l");
+    const removalMarker = "\x1b]0;__TARGET__:none\x07";
+    const removalEnd = ps.output.indexOf(removalMarker, before) + removalMarker.length;
+    terminal = await emulate(ps.output.slice(0, removalEnd));
+    expect(visibleLines(terminal)).toContain("target=0x0:false dragging=false");
+
+    await ps.waitForOutput((output) => output.includes("__CLICKED__:target-lifetime"));
+    await ps.waitForExit();
+    exited = true;
+    expect(ps.output).toContain("\x1b[?1002l\x1b[?1006l");
+  } finally {
+    if (!exited) ps.kill("SIGTERM");
+  }
+});
+
 test("fullscreen screen-reader request uses a main-screen linear transcript", async () => {
   const ps = term("fullscreen-origin", ["8", "screen-reader"]);
   let exited = false;
