@@ -143,7 +143,7 @@ Logical focus semantics do not vary between Inline and Fullscreen. The same targ
 - HMR template updates retain the logical handle while F2 follows the target. Script replacement ends the old handle and applies the same removal/restoration rules. Full reload disposes the controller and F3 route before the replacement app acquires input.
 - Suspension keeps logical focus and scope memory, releases physical input through F3, repaints the resolved surface on continuation, then reacquires and republishes the same current route.
 
-The focus controller publishes one fully reconciled route generation after each authoritative renderer commit. Reading the route or any public readonly ref has no side effects and cannot reorder a pending scope activation. Target and scope disposal invalidates their route before Vue cleanup can expose a later fact to a stale recipient.
+The focus controller publishes one fully reconciled route generation after each authoritative renderer commit. The F3 bridge now allows that generation to remain logically selected without physical input demand; F4 requests demand only for the effective work listed above, while independently driven facts still retain one fact-start focus topology. Reading the route or any public readonly ref has no side effects and cannot reorder a pending scope activation. Target and scope disposal invalidates their route before Vue cleanup can expose a later fact to a stale recipient.
 
 ## Accepted public authoring surface
 

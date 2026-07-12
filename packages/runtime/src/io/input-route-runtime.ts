@@ -44,6 +44,20 @@ export interface InternalInputTopologySelection {
   readonly external?: InternalInputActivationLease<InternalInputExternalRecipient>;
 }
 
+export interface InternalInputTopologySelectionOptions {
+  /**
+   * Whether this logical generation must own the physical semantic-input host.
+   *
+   * F4 publishes focus topology even when no currently effective focus node can
+   * consume input. Keeping that generation selected preserves fact-start route
+   * identity for input driven by an independent application-global owner without
+   * opening raw mode merely because logical focus state exists.
+   *
+   * @default true
+   */
+  readonly inputDemand?: boolean;
+}
+
 interface SelectionGeneration {
   active: boolean;
   readonly activeBoundary: InternalInputActivationLease<InternalInputRouteRecipient> | undefined;
@@ -84,7 +98,10 @@ export interface InternalInputRoutingRuntime {
     recipient: InternalInputExternalRecipient,
   ): InternalInputActivationRegistration<InternalInputExternalRecipient>;
   /** Atomically replace the already-selected boundary and supplied focus path. */
-  select(selection: InternalInputTopologySelection): () => void;
+  select(
+    selection: InternalInputTopologySelection,
+    options?: InternalInputTopologySelectionOptions,
+  ): () => void;
   capture(): InternalInputTopologySnapshot;
   /** Resolve every captured lease once, before the first recipient callback. */
   resolve(snapshot: InternalInputTopologySnapshot): InternalInputTopologyResolution;
@@ -291,7 +308,7 @@ export function createInternalInputRoutingRuntime(
     registerExternal(recipient) {
       return register("external", recipient);
     },
-    select(selection) {
+    select(selection, options = {}) {
       const next: SelectionGeneration = {
         active: true,
         activeBoundary: selection.activeBoundary,
@@ -312,7 +329,8 @@ export function createInternalInputRoutingRuntime(
       // the previous generation. This keeps raw mode and the shared listener
       // continuous across route replacement. Input synchronously produced by
       // acquisition still belongs to the previously published snapshot.
-      const inputDemandLease = inputDemandHost?.acquire();
+      const inputDemandLease =
+        options.inputDemand === false ? undefined : inputDemandHost?.acquire();
       if (observedRevision !== selectionRevision) {
         // A re-entrant select/clear is the later intent. Do not let the outer
         // operation overwrite it after its host callback returns.

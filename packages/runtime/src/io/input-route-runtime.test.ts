@@ -288,6 +288,100 @@ describe("internal live input route activations", () => {
     expect(transitions.at(-1)).toBe("release:3");
   });
 
+  test("publishes a selected topology without acquiring input demand", () => {
+    const transitions: string[] = [];
+    const calls: string[] = [];
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        transitions.push("acquire");
+        return demandLease(() => transitions.push("release"));
+      },
+    });
+    const boundary = runtime.registerSemantic({
+      id: "boundary",
+      handle: () => (calls.push("boundary"), continueRoute()),
+    });
+
+    runtime.select({ activeBoundary: boundary.lease }, { inputDemand: false });
+    const resolution = runtime.resolve(runtime.capture());
+    dispatchInternalInput(fact, captureInternalInputRoutePlan(resolution.candidate));
+
+    expect(resolution.kind).toBe("selected");
+    expect(calls).toEqual(["boundary"]);
+    expect(transitions).toEqual([]);
+  });
+
+  test("lets independent global demand drive a no-demand selected topology", () => {
+    const transitions: string[] = [];
+    const calls: string[] = [];
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        transitions.push("acquire");
+        return demandLease(() => transitions.push("release"));
+      },
+    });
+    const global = runtime.registerApplicationGlobal({
+      id: "global",
+      handle: () => (calls.push("global"), continueRoute()),
+    });
+    const boundary = runtime.registerSemantic({
+      id: "boundary",
+      handle: () => (calls.push("boundary"), continueRoute()),
+    });
+    const endSelection = runtime.select({ activeBoundary: boundary.lease }, { inputDemand: false });
+
+    dispatchInternalInput(
+      fact,
+      captureInternalInputRoutePlan(runtime.resolve(runtime.capture()).candidate),
+    );
+
+    expect(calls).toEqual(["global", "boundary"]);
+    expect(transitions).toEqual(["acquire"]);
+    endSelection();
+    expect(transitions).toEqual(["acquire"]);
+    global.end();
+    expect(transitions).toEqual(["acquire", "release"]);
+  });
+
+  test("keeps a no-demand logical selection when demand acquisition for its replacement fails", () => {
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        throw new Error("input unavailable");
+      },
+    });
+    const current = runtime.registerSemantic({ id: "current", handle: continueRoute });
+    const replacement = runtime.registerSemantic({ id: "replacement", handle: continueRoute });
+    runtime.select({ activeBoundary: current.lease }, { inputDemand: false });
+
+    expect(() => runtime.select({ activeBoundary: replacement.lease })).toThrow(
+      "input unavailable",
+    );
+    expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("current");
+  });
+
+  test("replaces a demanded selection with a logical-only selection before releasing demand", () => {
+    const observations: string[] = [];
+    let runtime!: ReturnType<typeof createInternalInputRoutingRuntime>;
+    runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        observations.push("acquire");
+        return demandLease(() => {
+          observations.push(
+            `release:${runtime.resolve(runtime.capture()).candidate.activeBoundary?.id ?? "none"}`,
+          );
+        });
+      },
+    });
+    const first = runtime.registerSemantic({ id: "first", handle: continueRoute });
+    const second = runtime.registerSemantic({ id: "second", handle: continueRoute });
+    runtime.select({ activeBoundary: first.lease });
+
+    runtime.select({ activeBoundary: second.lease }, { inputDemand: false });
+
+    expect(runtime.resolve(runtime.capture()).candidate.activeBoundary?.id).toBe("second");
+    expect(observations).toEqual(["acquire", "release:second"]);
+  });
+
   test("keeps the previous selection when replacement demand acquisition fails", () => {
     let failNext = false;
     const transitions: string[] = [];
