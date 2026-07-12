@@ -677,8 +677,13 @@ describe("useAnimation", () => {
       });
       const { unmount } = await render(App);
       await delay(180);
-      expect(f1.value).toBe(f2.value);
+      // The subscriptions start on adjacent performance.now() readings, so a
+      // real-time observation may land between their neighboring due times.
+      // Exact same-deadline dispatch is pinned by the scheduler's fake-timer
+      // test; end-to-end wall-clock behavior permits at most one frame of skew.
+      expect(Math.abs(f1.value - f2.value)).toBeLessThanOrEqual(1);
       expect(f1.value).toBeGreaterThanOrEqual(1);
+      expect(f2.value).toBeGreaterThanOrEqual(1);
       unmount();
     });
 
