@@ -24,7 +24,10 @@ import {
   useBoxMetrics,
   type RenderSession,
 } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import {
+  renderToStringWithScreenReader,
+  useInternalInputRoutingForTest,
+} from "@vue-tui/runtime/internal";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -140,6 +143,34 @@ describe("renderToString", () => {
     expect(output).toContain("with input");
   });
 
+  test.each([
+    ["success", false],
+    ["component error", true],
+  ] as const)("clears a selected string-host topology after %s", (_label, fail) => {
+    let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
+    const App = defineComponent(() => {
+      routing = useInternalInputRoutingForTest();
+      const boundary = routing.registerSemantic({
+        id: "string-boundary",
+        handle: () => ({
+          performed: false,
+          continue: true,
+          preventDefault: false,
+          blockExternal: false,
+        }),
+      });
+      routing.select({ activeBoundary: boundary.lease });
+      if (fail) throw new Error("string route failure");
+      return () => <Text>string route</Text>;
+    });
+
+    if (fail) expect(() => renderToString(App)).toThrow("string route failure");
+    else expect(renderToString(App)).toBe("string route");
+
+    expect(routing).toBeDefined();
+    expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
+  });
+
   test("useApp does not throw in renderToString", () => {
     const App = defineComponent(() => {
       const { exit } = useApp();
@@ -195,13 +226,15 @@ describe("renderToString", () => {
   });
 
   test("useStdin does not throw in renderToString", () => {
+    let rawModeSupported = true;
     const App = defineComponent(() => {
       const stdin = useStdin();
-      void stdin;
+      rawModeSupported = stdin.isRawModeSupported;
       return () => <Text>with stdin</Text>;
     });
     const output = renderToString(App);
     expect(output).toContain("with stdin");
+    expect(rawModeSupported).toBe(false);
   });
 
   test("useStdout does not throw in renderToString", () => {

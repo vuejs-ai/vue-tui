@@ -391,6 +391,7 @@ function createStringContexts(columns: number): {
     stdinContext,
     dispose() {
       stdinContext.internal_routes.clear();
+      stdinContext.internal_inputRouting.clear();
       stdin.destroy();
       stdout.destroy();
       stderr.destroy();

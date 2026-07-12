@@ -10,6 +10,7 @@ import {
   useStdout,
   type RenderSession,
 } from "@vue-tui/runtime";
+import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
 import { render, type RenderOptions, type TestRenderSession } from "../src/index.ts";
 
 test("result.session is the exact public session object seen by the component", async () => {
@@ -61,6 +62,40 @@ test("stream omission selects production final-output cadence", async () => {
     layout: { columns: 72, rows: null },
   });
   expect(result.terminal.rows).toBe(16);
+});
+
+test("a selected route owns deterministic TTY input independently from final output", async () => {
+  const calls: string[] = [];
+  let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
+  const App = defineComponent(() => {
+    routing = useInternalInputRoutingForTest();
+    const boundary = routing.registerSemantic({
+      id: "deterministic-boundary",
+      handle: (fact) => {
+        calls.push(fact.sequence);
+        return {
+          performed: true,
+          continue: true,
+          preventDefault: false,
+          blockExternal: false,
+        };
+      },
+    });
+    routing.select({ activeBoundary: boundary.lease });
+    return () => <Text>selected input</Text>;
+  });
+  const result = await render(App, {
+    host: { stdin: "tty", stdout: "stream", updates: "at-teardown" },
+  });
+
+  expect(result.session.output.dynamicUpdates).toBe("at-teardown");
+  expect(result.terminal.rawMode.current).toBe(true);
+  await result.stdin.write("x");
+  expect(calls).toEqual(["x"]);
+
+  result.dispose();
+  expect(result.terminal.rawMode.current).toBe(false);
+  expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
 });
 
 test("explicit live stream cannot manufacture a terminal mode", async () => {

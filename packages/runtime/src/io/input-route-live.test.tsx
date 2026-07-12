@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Text, useFocus, useInput } from "../index.ts";
+import { Text, useFocus, useInput, useStdin } from "../index.ts";
 import { StdinContextKey } from "../context.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import { createApp, type MountOptions } from "../render.ts";
@@ -62,6 +62,30 @@ function createTrackedStdin(): {
   return { stdin, rawModeCalls, refBalance: () => refs };
 }
 
+function createSetterlessTty(isRaw: boolean): {
+  stdin: NodeJS.ReadStream & { isRaw: boolean };
+  refBalance: () => number;
+} {
+  const stdin = new PassThrough() as unknown as NodeJS.ReadStream & { isRaw: boolean };
+  let refs = 0;
+  Object.assign(stdin, {
+    isTTY: true,
+    isRaw,
+    setEncoding(this: NodeJS.ReadStream) {
+      return this;
+    },
+    ref() {
+      refs++;
+      return stdin;
+    },
+    unref() {
+      refs--;
+      return stdin;
+    },
+  });
+  return { stdin, refBalance: () => refs };
+}
+
 function createWritable(isTTY = true): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(stream, { isTTY, columns: 80, rows: 24 });
@@ -88,6 +112,116 @@ function requireRouting(): InternalInputRoutingRuntime {
 }
 
 describe.each(modes)("live selected input topology in %s mode", (mode) => {
+  test("rejects a custom TTY that is neither pre-raw nor able to enter raw mode", () => {
+    const { stdin, refBalance } = createSetterlessTty(false);
+    let rawModeSupported = true;
+    let selectRoute!: () => () => void;
+    const calls: string[] = [];
+    const App = defineComponent(() => {
+      rawModeSupported = useStdin().isRawModeSupported;
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      expect(rawModeSupported).toBe(false);
+      expect(selectRoute).toThrow("Raw mode is not supported on the stdin provided to Vue TUI");
+      stdin.emit("data", "x");
+      expect(calls).toEqual([]);
+      expect({
+        raw: stdin.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: false, refs: 0, listeners: 0 });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+    }
+  });
+
+  test("rejects a setterless custom TTY that is no longer pre-raw when input is acquired", () => {
+    const { stdin, refBalance } = createSetterlessTty(true);
+    let selectRoute!: () => () => void;
+    const calls: string[] = [];
+    const App = defineComponent(() => {
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      stdin.isRaw = false;
+      expect(selectRoute).toThrow("Raw mode is not supported on the stdin provided to Vue TUI");
+      stdin.emit("data", "x");
+      expect(calls).toEqual([]);
+      expect({
+        raw: stdin.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: false, refs: 0, listeners: 0 });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+    }
+  });
+
+  test("uses and preserves an externally pre-raw custom TTY without a setter", async () => {
+    const { stdin, refBalance } = createSetterlessTty(true);
+    let rawModeSupported = false;
+    let endSelection!: () => void;
+    const calls: string[] = [];
+    const App = defineComponent(() => {
+      rawModeSupported = useStdin().isRawModeSupported;
+      const routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (calls.push(fact.sequence), continueRoute()),
+      });
+      endSelection = routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    try {
+      expect(rawModeSupported).toBe(true);
+      expect({
+        raw: stdin.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: true, refs: 1, listeners: 1 });
+      stdin.emit("data", "x");
+      expect(calls).toEqual(["x"]);
+
+      endSelection();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({
+        raw: stdin.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: true, refs: 0, listeners: 0 });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+    }
+    expect(stdin.isRaw).toBe(true);
+  });
+
   test("owns automatic input only while a selected generation is active", async () => {
     const calls: string[] = [];
     let replace!: () => void;

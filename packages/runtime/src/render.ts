@@ -228,6 +228,21 @@ const FULLSCREEN_STATIC_WARNING =
 // giving resize recovery a truthful bottom boundary without inventing 24 rows.
 const TERMINAL_BOTTOM_CLAMP_ROWS = 9999;
 
+function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
+  const input = stdin as NodeJS.ReadStream & {
+    readonly isRaw?: boolean;
+    readonly isTTY?: boolean;
+    readonly setRawMode?: (mode: boolean) => unknown;
+  };
+  if (input.isTTY !== true) return false;
+  // A pre-raw custom host can be observed without a setter; vue-tui preserves
+  // that externally-owned baseline. Otherwise the host must expose the
+  // operation needed to enter and later restore raw mode. The operation may
+  // still fail at acquisition time, which remains a transactional error rather
+  // than being guessed from this structural preflight.
+  return input.isRaw === true || typeof input.setRawMode === "function";
+}
+
 function supportsTerminalMouse(): boolean {
   return process.env["TERM"] !== "dumb";
 }
@@ -1514,7 +1529,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdout,
         stderr,
         stdin,
-        isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
+        isRawModeSupported: hasRawInputCapability(stdin),
         setRawMode(mode: boolean) {
           if (
             typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
@@ -3531,10 +3546,12 @@ function createStdinController(
       if (disposed) {
         throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
       }
-      if (!appCtx.isRawModeSupported) {
+      if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin)) {
         // The unguarded useInput path surfaces this throw directly; useFocus
         // guards before calling (see composables/useFocus.ts), so it degrades to
-        // a no-op like Ink.
+        // a no-op like Ink. Rechecking the structural capability also prevents
+        // a setterless host that was pre-raw at mount from silently attaching
+        // after its external owner returns it to cooked mode.
         throwRawModeUnsupported();
       }
       const state = getRawModeState(stdin);

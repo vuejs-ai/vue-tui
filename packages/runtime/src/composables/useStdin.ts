@@ -16,6 +16,10 @@ export interface UseStdinReturn {
    */
   readonly stdin: NodeJS.ReadStream;
   readonly setRawMode: (mode: boolean) => void;
+  /**
+   * Whether the mounted stdin is a TTY that is already raw or exposes the
+   * operation needed to enter raw mode. A later host operation can still fail.
+   */
   readonly isRawModeSupported: boolean;
 }
 

@@ -60,6 +60,26 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   return { error, unmount: () => app.unmount() };
 }
 
+test("useStdin exposes the exact custom stream mounted into the application", () => {
+  const stdout = makeFakeWritable();
+  const stdin = makeNonTtyStdin();
+  let observed: NodeJS.ReadStream | undefined;
+  const App = defineComponent(() => {
+    observed = useStdin().stdin;
+    return () => <Text>stdin identity</Text>;
+  });
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, rawMode: "auto", maxFps: 0, exitOnCtrlC: false });
+  try {
+    expect(observed).toBe(stdin);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+  }
+});
+
 // Test A: useInput on an unsupported stdin must surface Ink's descriptive error.
 test("useInput on a non-TTY stdin throws a descriptive raw-mode error", async () => {
   const App = defineComponent(() => {
