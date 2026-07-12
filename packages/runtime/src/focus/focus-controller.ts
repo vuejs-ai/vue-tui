@@ -434,6 +434,19 @@ export function createInternalFocusController(
       return;
     }
 
+    // With no focus or scope lifetime, this controller owns no selected path.
+    // Besides avoiding a meaningless empty generation, this lets private F3
+    // fixtures select an explicit topology in applications that do not use F4.
+    // Ending our previous generation is safe when a later owner already won:
+    // the F3 disposer only clears the selection when it still owns it.
+    if (targetRecords.size === 0 && scopeRecords.size === 0) {
+      const previous = currentGeneration;
+      currentGeneration = null;
+      commitRefs(null);
+      endGeneration(previous);
+      return;
+    }
+
     const superseded: FocusGeneration[] = [];
     while (true) {
       const observedRevision = revision;

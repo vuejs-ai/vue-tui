@@ -83,6 +83,28 @@ function createHarness(options: { failDemand?: () => boolean } = {}) {
 }
 
 describe("app-owned focus controller", () => {
+  test("does not displace an explicit F3 topology while no focus lifetime exists", () => {
+    const routing = createInternalInputRoutingRuntime();
+    const manual = routing.registerSemantic({ id: "manual", handle: stopRoute });
+    const endManual = routing.select({ focusedOwner: manual.lease });
+    const focus = createInternalFocusController({ root: createTree(), inputRouting: routing });
+
+    focus.reconcileRenderedTree();
+    expect(routing.resolve(routing.capture())).toMatchObject({
+      kind: "selected",
+      candidate: { focusedOwner: { id: "manual" } },
+    });
+
+    const target = focus.createTarget();
+    expect(routing.resolve(routing.capture()).candidate.focusedOwner).toBeUndefined();
+    focus.removeTarget(target);
+    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
+
+    endManual();
+    manual.end();
+    focus.dispose();
+  });
+
   test("uses rendered preorder, inherited display:none, and exact public handles", () => {
     const { focus, root } = createHarness();
     let hidden = false;

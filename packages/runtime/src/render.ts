@@ -101,6 +101,11 @@ import {
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import {
+  createInternalFocusController,
+  type InternalFocusController,
+} from "./focus/focus-controller.ts";
+import { InternalFocusControllerKey } from "./focus/focus-context.ts";
+import {
   ErrorOverview,
   formatErrorForStderr,
   isErrorInput,
@@ -299,6 +304,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
+  let mountedFocusController: InternalFocusController | null = null;
   let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
@@ -723,6 +729,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedRenderedTargets = null;
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
+      }
+      if (mountedFocusController) {
+        const focusController = mountedFocusController;
+        mountedFocusController = null;
+        runBestEffort(() => focusController.dispose());
       }
       // Dispose the animation scheduler after Vue unmount: each useAnimation's
       // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
@@ -1610,7 +1621,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // setWidth (or anything below) throws.
         mountedRoot = tuiRoot;
         tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
-        const renderedTargets = createRenderedTargetController(tuiRoot);
+        const focusController = createInternalFocusController({
+          root: tuiRoot,
+          inputRouting: stdinController.internal_inputRouting,
+        });
+        mountedFocusController = focusController;
+        const renderedTargets = createRenderedTargetController(tuiRoot, focusController);
         mountedRenderedTargets = renderedTargets;
         setRenderedTargetController(appContext, renderedTargets);
       } catch (err) {
@@ -2118,6 +2134,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(InternalRenderSessionKey, renderSession);
       baseApp.provide(AppContextKey, appContext);
       baseApp.provide(FocusContextKey, focusContext);
+      baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
       baseApp.provide(StdinContextKey, stdinController);
       // useAnimation coalesces ticks within this same window so committed deltas
       // accumulate to the real wall-clock elapsed time (the value committed to

@@ -24,6 +24,8 @@ import { createInternalInputRouteRegistry } from "./io/input-routes.ts";
 import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
 import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-availability.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
+import { createInternalFocusController } from "./focus/focus-controller.ts";
+import { InternalFocusControllerKey } from "./focus/focus-context.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import {
   InternalRenderSessionKey,
@@ -107,7 +109,12 @@ function renderStringDocument(
   // Create a standalone root node --- no stdout, stdin, or terminal bindings.
   const { appContext, stdinContext } = contexts;
   const root = createRoot(appContext);
-  const renderedTargets = createRenderedTargetController(root);
+  const focusController = createInternalFocusController({
+    root,
+    inputRouting: stdinContext.internal_inputRouting,
+    inert: true,
+  });
+  const renderedTargets = createRenderedTargetController(root, focusController);
   setRenderedTargetController(appContext, renderedTargets);
   let yogaAttached = false;
   let rootDetached = false;
@@ -158,6 +165,7 @@ function renderStringDocument(
     app.provide(InternalRenderSessionKey, renderSession);
     app.provide(AppContextKey, appContext);
     app.provide(FocusContextKey, createNoOpFocusContext());
+    app.provide(InternalFocusControllerKey, focusController);
     app.provide(StdinContextKey, stdinContext);
     app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
 
@@ -261,6 +269,11 @@ function renderStringDocument(
     } catch {
       // Best-effort: an adapter cleanup must not mask the render result or the
       // original render failure after the remaining host resources are freed.
+    }
+    try {
+      focusController.dispose();
+    } catch {
+      // Best-effort: F3/string-host cleanup below must still run.
     }
 
     // Ensure native yoga memory is freed even if rendering or teardown threw.
