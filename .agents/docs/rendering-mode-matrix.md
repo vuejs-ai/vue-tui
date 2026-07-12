@@ -62,13 +62,13 @@ An in-place Vue hot update keeps the mounted session and repaints through its ex
 
 stdin is independent of the output surface:
 
-| stdin and surface                           | Current behavior                                                                                                                                                                            |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| stdin is non-TTY                            | Raw mode is unsupported. `useInput` and `useMouseInput` can throw while guarded focus behavior degrades; targeted mouse is unavailable.                                                     |
-| stdin is TTY, stdout is non-TTY             | Input composables can acquire raw input even in L1-L3. Mouse and paste reporting cannot write their terminal control modes to the non-TTY stdout.                                           |
-| stdin and stdout are TTY, surface is not L6 | Terminal-wide input and `useMouseInput` can work, but targeted element mouse is unavailable. Inline mouse reporting still takes native selection and wheel behavior away from the terminal. |
-| stdin and stdout are TTY, surface is L6     | The current normal visual Fullscreen path can align terminal mouse coordinates with the clipped element hit map when the terminal supports SGR mouse.                                       |
-| stdin and stdout are TTY, surface is L7     | Keyboard/raw input can remain available, but Fullscreen-targeted mouse is not armed and the renderer reports no element hit-testing capability for the transcript.                          |
+| stdin and surface                           | Current behavior and accepted F3 target                                                                                                                                                                                                             |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| stdin is non-TTY                            | Current raw-mode hooks can throw while guarded focus behavior degrades. The accepted F3 target makes managed semantic input unavailable, removes the public raw-mode surface, and retains only direct raw stream access outside routing guarantees. |
+| stdin is TTY, stdout is non-TTY             | Input composables can acquire raw input even in L1-L3. Mouse and paste reporting cannot write their terminal control modes to the non-TTY stdout.                                                                                                   |
+| stdin and stdout are TTY, surface is not L6 | Terminal-wide input and `useMouseInput` can work, but targeted element mouse is unavailable. Inline mouse reporting still takes native selection and wheel behavior away from the terminal.                                                         |
+| stdin and stdout are TTY, surface is L6     | The current normal visual Fullscreen path can align terminal mouse coordinates with the clipped element hit map when the terminal supports SGR mouse.                                                                                               |
+| stdin and stdout are TTY, surface is L7     | Keyboard/raw input can remain available, but Fullscreen-targeted mouse is not armed and the renderer reports no element hit-testing capability for the transcript.                                                                                  |
 
 ## Current deterministic and string hosts
 

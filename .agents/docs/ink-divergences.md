@@ -233,7 +233,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyf0]
-- **F3.1–F3.4 plus live-bridge implementation update (unstamped):** one weakly registered framework ingress replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, normalizes each event once into the same immutable semantic fact for all eligible app controllers, and carries each app's fact-start route and selected-topology activations through split framing. Distinct facts dispatch serially and recapture after the preceding callback even when Node batches them into one chunk; plain text remains one fact when the wire provides no finer boundary. Current hooks consume a cached Ink-shaped edge projection; richer key identity remains internal. The private policy and live topology runtime execute explicit global, selected-boundary, supplied-focus-path, delayed-default, and optional-external layers in the actual controller while keeping action, continuation, defaults, and external permission independent. The bridge is not a public API and does not select focus. Product-boundary, prior-art, implementation, and real nested-PTY evidence select semantic facts plus normalized UTF-8; arbitrary original-byte recovery is deliberately not promised. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. The vouched direct-stdin contract retains the actual mounted stream as a raw escape hatch without framework event or safe routing-composition guarantees; automatic raw demand for a future selected-topology adapter, remaining host and lifecycle gates, current-hook disposition, and the final public route remain open. See [normalized input and routing](./input-routing.md).
+- **F3.1–F3.4 plus live-bridge implementation update (unstamped):** one weakly registered framework ingress replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, normalizes each event once into the same immutable semantic fact for all eligible app controllers, and carries each app's fact-start route and selected-topology activations through split framing. Distinct facts dispatch serially and recapture after the preceding callback even when Node batches them into one chunk; plain text remains one fact when the wire provides no finer boundary. Current hooks consume a cached Ink-shaped edge projection; richer key identity remains internal. The private policy and live topology runtime execute explicit global, selected-boundary, supplied-focus-path, delayed-default, and optional-external layers in the actual controller while keeping action, continuation, defaults, and external permission independent. The bridge is not a public API and does not select focus. Product-boundary, prior-art, implementation, and real nested-PTY evidence select semantic facts plus normalized UTF-8; arbitrary original-byte recovery is deliberately not promised. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. The vouched direct-stdin contract retains the actual mounted stream as a raw escape hatch without framework event or safe routing-composition guarantees. The accepted host target now excludes managed non-TTY routing and removes public raw-mode controls in favor of semantic-route demand; demand-driven Kitty, remaining lifecycle gates, current-hook disposition, and the final public route remain open. See [normalized input and routing](./input-routing.md).
 
 ## Vue API and Mental Model Divergences
 
@@ -601,36 +601,13 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **vue-tui:** own `debug` keys on live mounts and `@vue-tui/testing` render options are removed programming errors and fail before terminal or component mutation. The testing package installs a symbol-keyed internal render observer that receives structured `{ dynamic, staticOutput }` commits without selecting a host, changing stdout, disabling console handling, or changing scheduling. Terminal-visible assertions use an independent xterm emulator; `maxFps: 0` remains an unthrottled scheduler choice rather than an output mode.
 - **Why:** output policy and observation have different consumers. Making tests alter application bytes produced sessions that claimed production cadence while stdout followed an append-only diagnostic branch, and content frames had to be inferred from a stream containing terminal controls. Orthogonal observation lets the deterministic host exercise the real Inline, Fullscreen, screen-reader, live-stream, and final-stream paths while exposing both semantic commits and the resulting terminal screen. Direct removal is appropriate while vue-tui is experimental. Implemented and verified in F1.5.
 
-### Raw mode is owned for the live-update-request lifetime by default (`rawMode` option)
+### Raw mode follows semantic-route demand; public raw-mode controls are removed
 
-- **Ink:** raw mode is **lazy / reference-counted to input hooks**. `useInput` /
-  `useFocus` / `usePaste` enable it on mount and release it when the last one unmounts, so
-  a screen with no input handler falls back to cooked mode. There is no option to hold it.
-- **vue-tui:** the `rawMode` mount option defaults to **`'always'`**. Raw mode is enabled at
-  mount and held for the whole run when live updates were requested and stdin is a TTY,
-  regardless of which input composables are mounted. `rawMode: 'auto'` opts back into Ink's
-  exact lazy behavior.
-- **Why:** for a long-running interactive app (a full-screen TUI, a coding agent), Ink's
-  lazy model makes raw mode **toggle** as the user moves between input and no-input
-  screens. The main consequence is **echo**: on a no-input / streaming screen the terminal
-  is back in cooked mode, so typed keys echo into the half-drawn frame (and line-buffer).
-  Ctrl+C also changes path: on a no-input screen it is a kernel SIGINT rather than the
-  app's own `\x03` intercept. Note `exitOnCtrlC` defaults to `true` in both Ink and
-  vue-tui, so by default Ctrl+C exits either way; the divergence is only the exit path/code
-  (a clean exit `0` vs a re-raised SIGINT `130`). It matters for an app that sets
-  `exitOnCtrlC: false` to handle Ctrl+C itself: under the lazy model its opt-out is
-  bypassed on a no-input screen (the SIGINT still exits). Holding raw for the
-  lifetime keeps echo and Ctrl+C handling identical on every screen. This matches the
-  cross-framework norm: Bubble Tea, Textual, Ratatui, and prompt_toolkit all own the
-  terminal for the program lifetime. Ink's hook-driven model differs: its "cooked on a
-  no-input screen" behavior follows from refcounting input hooks rather than from an
-  explicit no-input-screen contract.
-- **Consequence:** owning raw mode `ref()`s stdin, so an `'always'` app stays alive until
-  you explicitly `unmount()` / `exit()`. It does **not** auto-exit when idle (the same way
-  an Ink app holding a `useInput` already does not). The "render and auto-exit" pattern
-  (Ink's inline-output use) is `rawMode: 'auto'`. Tests: `raw-mode-lifecycle.test.tsx`
-  (`'always'` holds raw with no input hook; `'auto'` stays cooked; no mid-session
-  oscillation). KEEP. [VOUCHED @hyf0]
+- **Ink:** raw mode is lazy and reference-counted to input hooks. `useInput`, `useFocus`, and `usePaste` acquire it on mount and release it when the last hook unmounts. There is no separate mount policy.
+- **Shipped vue-tui baseline:** the `rawMode` mount option defaults to `"always"`, while `"auto"` selects hook-driven ownership. `useStdin()` also exposes `setRawMode` and `isRawModeSupported`. This is implementation evidence, not the target API.
+- **Accepted vue-tui target:** managed semantic input excludes non-TTY streams. On a supported terminal host, active semantic routes own raw mode, the shared listener, and stdin ref state for exactly their demand. Public `useStdin().setRawMode`, `useStdin().isRawModeSupported`, and mount `rawMode` are removed. The vouched actual `stdin` stream remains available as a raw escape hatch whose direct reads and mutations are not guaranteed to compose safely with framework routing.
+- **Why:** an application-lifetime hold tied to output cadence can `ref()` a TTY stdin and prevent a final-output process with no input route from exiting naturally. Conversely, one public `setRawMode(false)` currently shares an anonymous counter with a selected route and can release raw mode, the listener, and the ref while that route remains active. Route-owned demand removes both conflicts and keeps input independent from Inline, Fullscreen, screen-reader, or stdout update cadence. Demand-driven Kitty negotiation supplies protocol/default coverage without keeping an input-free application alive.
+- **Decision history:** the former application-lifetime `rawMode: "always"` policy was previously vouched and its tests remain historical evidence, but the maintainer explicitly superseded that product direction on 2026-07-13 by accepting the route-owned target above. The replacement decision is accepted but unstamped. Implement it directly because the project is experimental and current API compatibility is not a constraint.
 
 ### `useCursor()` re-asserts the declared caret every commit (persistent declaration)
 
