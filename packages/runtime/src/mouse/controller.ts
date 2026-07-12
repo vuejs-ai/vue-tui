@@ -90,6 +90,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   let warnedInline = false;
   let rawModeAcquired = false;
   let mouseModeToken: symbol | undefined;
+  let detachInputRoute: (() => void) | undefined;
   let lastPointer: { screenX: number; screenY: number } | undefined;
   let lastDown: { node: TuiNode; button: MouseButton } | undefined;
   let lastClick:
@@ -124,7 +125,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     stdin.acquireRawMode();
     try {
       mouseModeToken = stdin.acquireSgrMouseMode("drag");
-      stdin.internal_eventEmitter.on("internal_mouse", onRawMouse);
+      detachInputRoute = stdin.internal_routes.attach("internal_mouse", onRawMouse);
       rawModeAcquired = true;
     } catch (error) {
       const token = mouseModeToken;
@@ -152,7 +153,8 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     mouseModeToken = undefined;
     const errors: unknown[] = [];
     try {
-      stdin.internal_eventEmitter.off("internal_mouse", onRawMouse);
+      detachInputRoute?.();
+      detachInputRoute = undefined;
     } catch (error) {
       errors.push(error);
     }

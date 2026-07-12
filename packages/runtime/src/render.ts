@@ -10,7 +10,6 @@ import {
   shallowRef,
 } from "vue";
 import { createRenderer } from "vue";
-import { EventEmitter } from "node:events";
 import { writeSync as fsWriteSync } from "node:fs";
 import isInCi from "is-in-ci";
 import { onExit } from "signal-exit";
@@ -23,6 +22,10 @@ import {
   type SharedStdinSubscription,
 } from "./io/stdin-ingress.ts";
 import type { NormalizedInputFact } from "./io/normalized-input.ts";
+import {
+  createInternalInputRouteRegistry,
+  type InternalInputRouteSnapshot,
+} from "./io/input-routes.ts";
 import { toMouseInputEvent } from "./io/parse-mouse.ts";
 import {
   createKittyKeyboardController,
@@ -2771,15 +2774,34 @@ function createStdinController(
   opts: CreateStdinControllerOptions,
 ): StdinController {
   const { appCtx, focusContext } = opts;
-  const emitter = new EventEmitter();
-  emitter.setMaxListeners(Infinity);
+  const inputRoutes = createInternalInputRouteRegistry();
   const sharedIngress = getSharedStdinIngress(stdin);
+  interface ApplicationInputSnapshot {
+    readonly kind: "routes";
+    readonly routes: InternalInputRouteSnapshot;
+    readonly sgrMouseMode: SgrMouseMode | undefined;
+  }
+  interface BootstrapApplicationInputSnapshot {
+    readonly kind: "bootstrap";
+    resolved: ApplicationInputSnapshot | undefined;
+  }
+  type CapturedApplicationInputSnapshot =
+    | ApplicationInputSnapshot
+    | BootstrapApplicationInputSnapshot;
+  interface PendingApplicationInput {
+    readonly fact: NormalizedInputFact;
+    readonly snapshot: CapturedApplicationInputSnapshot;
+  }
   let sharedSubscription: SharedStdinSubscription;
   let sharedSubscriptionActive = false;
   let activeKittyQueryDetections = 0;
   let inputDeliveryActive = false;
   let drainingApplicationInput = false;
-  const pendingApplicationInput: NormalizedInputFact[] = [];
+  const pendingApplicationInput: PendingApplicationInput[] = [];
+  let pendingBootstrapInputSnapshot: BootstrapApplicationInputSnapshot | undefined = {
+    kind: "bootstrap",
+    resolved: undefined,
+  };
   let bracketedPasteModeCount = 0;
   let reconcilingBracketedPaste = false;
   let bracketedPasteReconcileRequested = false;
@@ -3063,9 +3085,28 @@ function createStdinController(
     sharedSubscription.setActive(shouldBeActive);
   }
 
-  function acceptSharedInput(event: NormalizedInputFact): void {
+  function snapshotCurrentApplicationInput(): ApplicationInputSnapshot {
+    return Object.freeze({
+      kind: "routes",
+      routes: inputRoutes.snapshot(),
+      sgrMouseMode: activeSgrMouseMode,
+    });
+  }
+
+  function captureApplicationInputSnapshot(): CapturedApplicationInputSnapshot {
+    if (inputDeliveryActive) return snapshotCurrentApplicationInput();
+    if (!pendingBootstrapInputSnapshot) {
+      throw new Error("Bootstrap input snapshot is unavailable before input activation");
+    }
+    return pendingBootstrapInputSnapshot;
+  }
+
+  function acceptSharedInput(
+    fact: NormalizedInputFact,
+    snapshot: CapturedApplicationInputSnapshot,
+  ): void {
     if (disposed || suspended) return;
-    pendingApplicationInput.push(event);
+    pendingApplicationInput.push({ fact, snapshot });
     flushPendingApplicationInput();
   }
 
@@ -3080,14 +3121,21 @@ function createStdinController(
     drainingApplicationInput = true;
     try {
       while (pendingApplicationInput.length > 0) {
-        processInputEvent(pendingApplicationInput.shift()!);
+        const pending = pendingApplicationInput.shift()!;
+        const snapshot =
+          pending.snapshot.kind === "bootstrap" ? pending.snapshot.resolved : pending.snapshot;
+        if (!snapshot) {
+          pendingApplicationInput.unshift(pending);
+          break;
+        }
+        processInputEvent(pending.fact, snapshot);
       }
     } finally {
       drainingApplicationInput = false;
     }
   }
 
-  function emitInput(fact: NormalizedInputFact) {
+  function emitInput(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
     // exitOnCtrlC: intercept Ctrl+C here — at the always-on stdin controller,
     // BEFORE dispatching to any listener — so the app exits no matter which
     // composable holds raw mode (useInput / useFocus / usePaste, or none), and
@@ -3113,14 +3161,19 @@ function createStdinController(
         return;
       }
     }
-    if (activeSgrMouseMode && fact.kind === "pointer") {
+    if (snapshot.sgrMouseMode && fact.kind === "pointer") {
       const rawMouse = fact.pointer.event;
-      if (rawMouse && emitter.listenerCount("internal_mouse") > 0) {
-        emitter.emit("internal_mouse", rawMouse);
-      }
       const mouse = rawMouse ? toMouseInputEvent(rawMouse) : undefined;
-      if (mouse && emitter.listenerCount("mouse") > 0) {
-        emitter.emit("mouse", mouse);
+      // Freeze both pointer recipient groups before either callback runs. An
+      // internal handler may reconfigure routes, but that affects only the next
+      // physical event, not the public half of this one.
+      const internalMouseRecipients = inputRoutes.resolve(snapshot.routes, "internal_mouse");
+      const mouseRecipients = inputRoutes.resolve(snapshot.routes, "mouse");
+      if (rawMouse) {
+        for (const listener of internalMouseRecipients) listener(rawMouse);
+      }
+      if (mouse) {
+        for (const listener of mouseRecipients) listener(mouse);
       }
       return;
     }
@@ -3144,24 +3197,24 @@ function createStdinController(
         focusContext.blur();
       }
     }
-    emitter.emit("input", fact);
+    inputRoutes.emit(snapshot.routes, "input", fact);
   }
 
-  function processInputEvent(event: NormalizedInputFact): void {
+  function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed) return;
     if (event.kind === "paste") {
       // Preserve paste as a shared framing fact, then adapt it to the current
       // Ink-compatible channels at this app boundary.
-      if (emitter.listenerCount("paste") > 0) {
-        emitter.emit("paste", event.text);
+      if (inputRoutes.had(snapshot.routes, "paste")) {
+        inputRoutes.emit(snapshot.routes, "paste", event.text);
       } else {
         // The old useInput hook still receives one compatibility projection,
         // but application defaults never reinterpret paste contents as Ctrl+C,
         // focus navigation, pointer input, or a terminal query response.
-        emitter.emit("input", event);
+        inputRoutes.emit(snapshot.routes, "input", event);
       }
     } else {
-      emitInput(event);
+      emitInput(event, snapshot);
     }
   }
 
@@ -3178,7 +3231,7 @@ function createStdinController(
     reconcileSharedSubscription();
   }
 
-  sharedSubscription = sharedIngress.subscribe(acceptSharedInput);
+  sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
   // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
   const focusInputListener = (fact: NormalizedInputFact) => {
@@ -3194,7 +3247,7 @@ function createStdinController(
     if (modifiers.shift) focusContext.focusPrevious();
     else focusContext.focusNext();
   };
-  emitter.on("input", focusInputListener);
+  const detachFocusInputRoute = inputRoutes.attach("input", focusInputListener);
 
   // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
   // throws a descriptive error rather than silently no-opping. Two messages —
@@ -3386,7 +3439,7 @@ function createStdinController(
       }
     },
     isRawModeSupported: appCtx.isRawModeSupported,
-    internal_eventEmitter: emitter,
+    internal_routes: inputRoutes,
     internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
       if (disposed) {
@@ -3414,10 +3467,15 @@ function createStdinController(
           state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
           state.changedRawMode = !state.baselineRaw;
         }
-        if (localRefs === lifetimeFloor) {
+        if (localRefs === lifetimeFloor && inputDeliveryActive) {
           // A lifetime raw hold keeps protocol/default processing alive even
           // while no composable consumes application input. Starting the next
           // consumer invalidates framing units that began on that idle screen.
+          // Initial Vue setup is different: a terminal can synchronously send
+          // the prefix of an event beside the Kitty capability query before
+          // setup installs the first route. That prefix belongs to the initial
+          // bootstrap snapshot and must survive until activateInputDelivery()
+          // binds it to the complete initial route set.
           sharedSubscription.invalidate();
         }
         const participatesPhysically = !suspended;
@@ -3495,6 +3553,16 @@ function createStdinController(
     },
     activateInputDelivery() {
       if (inputDeliveryActive || disposed) return;
+      // Input received beside a synchronous Kitty query reply can predate Vue
+      // setup. Bind that bootstrap sentinel to the complete initial route set,
+      // then retain this exact snapshot even if a route changes before the
+      // split event finishes.
+      const initialSnapshot = snapshotCurrentApplicationInput();
+      if (pendingBootstrapInputSnapshot) pendingBootstrapInputSnapshot.resolved = initialSnapshot;
+      // Ingress recipient snapshots for events that actually began before
+      // activation retain the binding object. Drop the controller's reference
+      // so initial component callbacks are not kept alive for the full app.
+      pendingBootstrapInputSnapshot = undefined;
       inputDeliveryActive = true;
       flushPendingApplicationInput();
       if (activeKittyQueryDetections === 0 && localRefs === 0) {
@@ -3682,7 +3750,8 @@ function createStdinController(
       // A hostile stream may throw while removing the final data listener.
       // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
       runTerminalCleanup(() => sharedSubscription.dispose());
-      emitter.off("input", focusInputListener);
+      detachFocusInputRoute();
+      inputRoutes.clear();
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       runTerminalCleanup(() => reconcileSgrMouseMode(sync));
       if (sync) {

@@ -819,7 +819,7 @@ describe("renderToString", () => {
       let pasted = "";
       const App = defineComponent(() => {
         // usePaste injects StdinContext (no-op here) and attaches to its
-        // internal_eventEmitter — no terminal session, so the handler never fires.
+        // internal route registry — no terminal session, so the handler never fires.
         usePaste((text) => {
           pasted = text;
         });

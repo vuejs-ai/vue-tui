@@ -1,6 +1,6 @@
 import type { InjectionKey, ShallowRef } from "vue";
-import type { EventEmitter } from "node:events";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
+import type { InternalInputRouteRegistry } from "./io/input-routes.ts";
 import type { MouseController } from "./mouse/controller.ts";
 
 export interface CursorPosition {
@@ -44,7 +44,7 @@ export interface StdinContext {
   stdin: NodeJS.ReadStream;
   setRawMode: (mode: boolean) => void;
   isRawModeSupported: boolean;
-  internal_eventEmitter: EventEmitter;
+  internal_routes: InternalInputRouteRegistry;
   internal_exitOnCtrlC: boolean;
   acquireRawMode: () => void;
   releaseRawMode: () => void;

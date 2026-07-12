@@ -21,6 +21,7 @@ export function usePaste(handler: MaybeRef<PasteHandler>, options: UsePasteOptio
 
   let desiredActive = false;
   let attached = false;
+  let detachPasteRoute: (() => void) | undefined;
   let reconciling = false;
   let reconcileRequested = false;
 
@@ -48,7 +49,7 @@ export function usePaste(handler: MaybeRef<PasteHandler>, options: UsePasteOptio
               rawAcquired = true;
               stdin!.setBracketedPasteMode(true);
               pasteEnabled = true;
-              stdin!.internal_eventEmitter.on("paste", listener);
+              detachPasteRoute = stdin!.internal_routes.attach("paste", listener);
               attached = true;
               rawAcquired = false;
               pasteEnabled = false;
@@ -70,7 +71,8 @@ export function usePaste(handler: MaybeRef<PasteHandler>, options: UsePasteOptio
             }
           } else if (!desiredActive && attached) {
             attached = false;
-            stdin!.internal_eventEmitter.off("paste", listener);
+            detachPasteRoute?.();
+            detachPasteRoute = undefined;
             let releaseError: unknown;
             let releaseFailed = false;
             try {

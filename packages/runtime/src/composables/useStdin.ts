@@ -4,7 +4,7 @@ import { StdinContextKey } from "../context.ts";
 /**
  * The public stdin surface returned by {@link useStdin}. Mirrors Ink's `useStdin()`,
  * which returns its `PublicProps` — not the full context. The raw-mode ref-counting
- * primitives and the paste/event-emitter plumbing on the internal `StdinContext` are
+ * primitives and the typed input-route plumbing on the internal `StdinContext` are
  * reached by the framework's own composables (`useInput` / `useFocus` / `usePaste`) via
  * `inject(StdinContextKey)`, and are deliberately not part of this public surface.
  */

@@ -47,6 +47,7 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
 
   let desiredActive = false;
   let attached = false;
+  let detachInputRoute: (() => void) | undefined;
   let reconciling = false;
   let reconcileRequested = false;
 
@@ -81,7 +82,7 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
             try {
               stdin!.acquireRawMode();
               rawAcquired = true;
-              stdin!.internal_eventEmitter.on("input", listener);
+              detachInputRoute = stdin!.internal_routes.attach("input", listener);
               attached = true;
               rawAcquired = false;
             } catch (error) {
@@ -90,7 +91,8 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
             }
           } else if (!desiredActive && attached) {
             attached = false;
-            stdin!.internal_eventEmitter.off("input", listener);
+            detachInputRoute?.();
+            detachInputRoute = undefined;
             stdin!.releaseRawMode();
           }
         } catch (error) {

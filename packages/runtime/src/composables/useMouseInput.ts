@@ -20,6 +20,7 @@ export function useMouseInput(
 
   let desiredActive = false;
   let attached = false;
+  let detachMouseRoute: (() => void) | undefined;
   let mouseModeToken: symbol | undefined;
   let reconciling = false;
   let reconcileRequested = false;
@@ -47,7 +48,7 @@ export function useMouseInput(
               stdin!.acquireRawMode();
               rawAcquired = true;
               acquiredMouseToken = stdin!.acquireSgrMouseMode("button");
-              stdin!.internal_eventEmitter.on("mouse", listener);
+              detachMouseRoute = stdin!.internal_routes.attach("mouse", listener);
               mouseModeToken = acquiredMouseToken;
               attached = true;
               rawAcquired = false;
@@ -67,7 +68,8 @@ export function useMouseInput(
             }
           } else if (!desiredActive && attached) {
             attached = false;
-            stdin!.internal_eventEmitter.off("mouse", listener);
+            detachMouseRoute?.();
+            detachMouseRoute = undefined;
             let releaseError: unknown;
             let releaseFailed = false;
             if (mouseModeToken) {

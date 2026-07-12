@@ -17,6 +17,7 @@ import {
   useInput,
   useMouseInput,
   usePaste,
+  type Key,
   type TuiApp,
 } from "@vue-tui/runtime";
 import { defineComponent, h, nextTick, onErrorCaptured, shallowRef, type ShallowRef } from "vue";
@@ -1374,6 +1375,77 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
+  test("a pre-mount split event binds only the routes present after initial mount", async () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const showFirst = shallowRef(true);
+    const persistent: string[] = [];
+    const first: string[] = [];
+    const second: string[] = [];
+    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
+    const First = defineComponent(() => {
+      useInput((value, key) => first.push(label(value, key)));
+      return () => h("tui-text", null, "first");
+    });
+    const Second = defineComponent(() => {
+      useInput((value, key) => second.push(label(value, key)));
+      return () => h("tui-text", null, "second");
+    });
+    const App = defineComponent(() => {
+      useInput((value, key) => persistent.push(label(value, key)));
+      return () => h(showFirst.value ? First : Second);
+    });
+    const originalWrite = stdout.write.bind(stdout);
+    let injectedPrefix = false;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      if (!injectedPrefix && chunk === "\x1b[?u") {
+        injectedPrefix = true;
+        stdin.emit("data", "\x1b[");
+      }
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    const app = createApp(App);
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "auto",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "auto" },
+      });
+      expect(injectedPrefix).toBe(true);
+
+      showFirst.value = false;
+      await nextTick();
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect({ persistent, first, second }).toEqual({
+        persistent: ["up"],
+        first: [],
+        second: [],
+      });
+
+      stdin.emit("data", "x");
+      await flushInput();
+      expect({ persistent, first, second }).toEqual({
+        persistent: ["up", "x"],
+        first: [],
+        second: ["x"],
+      });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
   test("suspending one app does not release shared raw mode while another app still owns it", async () => {
     const { stream: stdin } = makeFakeStdin();
     const input = stdin as WritableTestStdin;
@@ -2216,7 +2288,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
-  test("detach re-entry preserves the replacement app listener and partial framing", async () => {
+  test("detach re-entry preserves the replacement app listener without backdating its route", async () => {
     const { stream: stdin } = makeFakeStdin();
     const stdoutA = makeFakeWritable();
     const stdoutB = makeFakeWritable();
@@ -2282,7 +2354,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin.emit("data", "A");
       await flushInput();
 
-      expect(inputsB).toEqual([""]);
+      // The host emitted the partial CSI while acquireRawMode was attaching the
+      // app subscription, before useInput committed its route lease. Framing is
+      // preserved, but the later lease cannot inherit that already-started key.
+      expect(inputsB).toEqual([]);
+
+      stdin.emit("data", "x");
+      await flushInput();
+      expect(inputsB).toEqual(["x"]);
     } finally {
       stdin.on = originalOn;
       stdin.off = originalOff;
@@ -2523,6 +2602,412 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin.destroy();
       stdoutA.destroy();
       stdoutB.destroy();
+    }
+  });
+
+  test("split CSI keeps independent route snapshots across two apps", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const showFirst = shallowRef(true);
+    const persistentA: string[] = [];
+    const first: string[] = [];
+    const second: string[] = [];
+    const persistentB: string[] = [];
+    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
+    const First = defineComponent(() => {
+      useInput((value, key) => first.push(label(value, key)));
+      return () => h("tui-text", null, "first");
+    });
+    const Second = defineComponent(() => {
+      useInput((value, key) => second.push(label(value, key)));
+      return () => h("tui-text", null, "second");
+    });
+    const AppA = defineComponent(() => {
+      useInput((value, key) => persistentA.push(label(value, key)));
+      return () => h(showFirst.value ? First : Second);
+    });
+    const AppB = defineComponent(() => {
+      useInput((value, key) => persistentB.push(label(value, key)));
+      return () => h("tui-text", null, "b");
+    });
+    const appA = createApp(AppA);
+    const appB = createApp(AppB);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[");
+      showFirst.value = false;
+      await nextTick();
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect({ persistentA, first, second, persistentB }).toEqual({
+        persistentA: ["up"],
+        first: [],
+        second: [],
+        persistentB: ["up"],
+      });
+
+      stdin.emit("data", "x");
+      await flushInput();
+      expect({ persistentA, first, second, persistentB }).toEqual({
+        persistentA: ["up", "x"],
+        first: [],
+        second: ["x"],
+        persistentB: ["up", "x"],
+      });
+    } finally {
+      appA.unmount();
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("isActive false then true creates a fresh route lease", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const active = shallowRef(true);
+    const persistent: string[] = [];
+    const toggled: string[] = [];
+    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
+    const App = defineComponent(() => {
+      useInput((value, key) => persistent.push(label(value, key)));
+      useInput((value, key) => toggled.push(label(value, key)), { isActive: active });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[");
+      active.value = false;
+      active.value = true;
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect(persistent).toEqual(["up"]);
+      expect(toggled).toEqual([]);
+
+      stdin.emit("data", "x");
+      await flushInput();
+      expect(persistent).toEqual(["up", "x"]);
+      expect(toggled).toEqual(["x"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("a handler ref update keeps its route lease and uses the latest callback", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const first: string[] = [];
+    const second: string[] = [];
+    const handler = shallowRef<(value: string, key: Key) => void>((value, key) => {
+      first.push(key.upArrow ? "up" : value);
+    });
+    const App = defineComponent(() => {
+      useInput(handler);
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[");
+      handler.value = (value, key) => second.push(key.upArrow ? "up" : value);
+      stdin.emit("data", "A");
+      stdin.emit("data", "x");
+      await flushInput();
+
+      expect(first).toEqual([]);
+      expect(second).toEqual(["up", "x"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("reentrant route changes affect the next fact, not current recipients", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const activeB = shallowRef(true);
+    const activeC = shallowRef(false);
+    const calls: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => {
+        calls.push(`A:${value}`);
+        if (value === "x") {
+          activeB.value = false;
+          activeC.value = true;
+          stdin.emit("data", "y");
+        }
+      });
+      useInput((value) => calls.push(`B:${value}`), { isActive: activeB });
+      useInput((value) => calls.push(`C:${value}`), { isActive: activeC });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "x");
+      await flushInput();
+
+      expect(calls).toEqual(["A:x", "B:x", "A:y", "C:y"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("a replacement paste route cannot inherit a paste begun by its predecessor", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const showFirst = shallowRef(true);
+    const inputs: string[] = [];
+    const first: string[] = [];
+    const second: string[] = [];
+    const First = defineComponent(() => {
+      usePaste((value) => first.push(value));
+      return () => h("tui-text", null, "first");
+    });
+    const Second = defineComponent(() => {
+      usePaste((value) => second.push(value));
+      return () => h("tui-text", null, "second");
+    });
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      return () => h(showFirst.value ? First : Second);
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[200~head");
+      showFirst.value = false;
+      await nextTick();
+      stdin.emit("data", "tail\x1b[201~");
+      await flushInput();
+
+      expect({ inputs, first, second }).toEqual({ inputs: [], first: [], second: [] });
+
+      stdin.emit("data", "\x1b[200~next\x1b[201~");
+      await flushInput();
+      expect({ inputs, first, second }).toEqual({ inputs: [], first: [], second: ["next"] });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("a paste route attached mid-paste cannot steal the input fallback", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const pasteActive = shallowRef(false);
+    const inputs: string[] = [];
+    const pastes: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      usePaste((value) => pastes.push(value), { isActive: pasteActive });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[200~head");
+      pasteActive.value = true;
+      stdin.emit("data", "tail\x1b[201~");
+      await flushInput();
+
+      expect(inputs).toEqual(["headtail"]);
+      expect(pastes).toEqual([]);
+
+      stdin.emit("data", "\x1b[200~next\x1b[201~");
+      await flushInput();
+      expect(inputs).toEqual(["headtail"]);
+      expect(pastes).toEqual(["next"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("a replacement mouse route cannot inherit a split SGR report", async () => {
+    const previousTerm = process.env["TERM"];
+    process.env["TERM"] = "xterm-256color";
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const showFirst = shallowRef(true);
+    const inputs: string[] = [];
+    const persistent: string[] = [];
+    const first: string[] = [];
+    const second: string[] = [];
+    const First = defineComponent(() => {
+      useMouseInput((event) => first.push(event.direction));
+      return () => h("tui-text", null, "first");
+    });
+    const Second = defineComponent(() => {
+      useMouseInput((event) => second.push(event.direction));
+      return () => h("tui-text", null, "second");
+    });
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      useMouseInput((event) => persistent.push(event.direction));
+      return () => h(showFirst.value ? First : Second);
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[<64;3;");
+      showFirst.value = false;
+      await nextTick();
+      stdin.emit("data", "4M");
+      await flushInput();
+
+      expect({ inputs, persistent, first, second }).toEqual({
+        inputs: [],
+        persistent: ["up"],
+        first: [],
+        second: [],
+      });
+
+      stdin.emit("data", "\x1b[<65;5;6M");
+      await flushInput();
+      expect({ inputs, persistent, first, second }).toEqual({
+        inputs: [],
+        persistent: ["up", "down"],
+        first: [],
+        second: ["down"],
+      });
+    } finally {
+      app.unmount();
+      if (previousTerm === undefined) delete process.env["TERM"];
+      else process.env["TERM"] = previousTerm;
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("mouse capture attached mid-report cannot reclassify the old report", async () => {
+    const previousTerm = process.env["TERM"];
+    process.env["TERM"] = "xterm-256color";
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const mouseActive = shallowRef(false);
+    const inputs: string[] = [];
+    const mice: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      useMouseInput((event) => mice.push(event.direction), { isActive: mouseActive });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[<64;3;");
+      mouseActive.value = true;
+      stdin.emit("data", "4M");
+      await flushInput();
+
+      expect(inputs).toEqual(["[<64;3;4M"]);
+      expect(mice).toEqual([]);
+
+      stdin.emit("data", "\x1b[<65;5;6M");
+      await flushInput();
+      expect(inputs).toEqual(["[<64;3;4M"]);
+      expect(mice).toEqual(["down"]);
+    } finally {
+      app.unmount();
+      if (previousTerm === undefined) delete process.env["TERM"];
+      else process.env["TERM"] = previousTerm;
+      stdin.destroy();
+      stdout.destroy();
     }
   });
 

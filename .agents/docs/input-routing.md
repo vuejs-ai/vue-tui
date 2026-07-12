@@ -1,6 +1,6 @@
 # Normalized input and routing
 
-> **Status:** unstamped active F3 implementation record. F3.1 owns one serialized ingress and structural framing per physical stdin. F3.2 normalizes each structural event once into one shared immutable semantic fact. Handler generations and the routing experiment remain active. This record does not select a public event type, hook name, handler return convention, focus route, external-PTY API, or the final disposition of `useInput`, `usePaste`, `useMouseInput`, `useStdin`, and `exitOnCtrlC`.
+> **Status:** unstamped active F3 implementation record. F3.1 owns one serialized ingress and structural framing per physical stdin. F3.2 normalizes each structural event once into one shared immutable semantic fact. F3.3 captures non-reusable app-route leases when the event begins. Priority, continuation, default prevention, external-owner fallthrough, and public names remain active. This record does not select a public event type, hook name, handler return convention, focus route, external-PTY API, or the final disposition of `useInput`, `usePaste`, `useMouseInput`, `useStdin`, and `exitOnCtrlC`.
 
 ## Product problem
 
@@ -56,7 +56,17 @@ Plain UTF-8 is recorded as text rather than guessed to be a physical key. For ex
 
 The Kitty parser now follows the official [`CSI primary[:shifted[:base]];modifiers:event;text u` grammar](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). It accepts alternate keys, base-layout-only keys, pure-text events with primary zero, and all defined modifiers. Invalid Unicode scalars, associated control text, modifier zero, event values outside press/repeat/release, C0 key codepoints that Kitty does not define as functional keys, and letter-form special sequences whose first parameter is not one remain uninterpreted with their exact decoded source sequence. Alt and Meta stay distinct internally. The current public `Key.meta` compatibility projection still combines them.
 
-The current hooks are adapters, not the fact source. `useInput` reads one cached Ink-shaped projection shared by all current listeners; Ctrl+C, focus defaults, and mouse delivery read the same normalized fact and never parse its sequence again. `usePaste` still wins over `useInput` when a paste listener exists. With no paste listener, one `useInput` callback receives the payload verbatim with no fabricated key flags. Paste-contained Ctrl+C, arrow, mouse, and query-like bytes therefore remain text and cannot execute an application default or disappear as a protocol reply. The richer internal key identity is deliberately not published while routing semantics remain open.
+The current hooks are adapters, not the fact source. `useInput` reads one cached Ink-shaped projection shared by all current listeners; Ctrl+C, focus defaults, and mouse delivery read the same normalized fact and never parse its sequence again. A paste whose event-start route snapshot contains a paste owner goes to that paste route; otherwise the event-start input route receives the payload verbatim with no fabricated key flags. Paste-contained Ctrl+C, arrow, mouse, and query-like bytes therefore remain text and cannot execute an application default or disappear as a protocol reply. The richer internal key identity is deliberately not published while routing semantics remain open.
+
+## Implemented F3.3 route-lifetime boundary
+
+Each app input attachment now owns a non-reusable internal lease on one typed `input`, `paste`, `mouse`, or `internal_mouse` route. Updating a handler ref keeps its lease and reads the latest callback. Deactivation, scope disposal, component replacement, and later reactivation end the old lease and create a new one; the listener function's JavaScript identity cannot revive an earlier attachment.
+
+The physical stdin ingress captures an app-specific route snapshot alongside the app generation when the first byte of an event arrives and carries it through split CSI, paste, pointer, and UTF-8 framing. Immediately before dispatch, the app filters the old snapshot's still-active leases once and freezes the recipients. A route removed before dispatch does not run, its replacement cannot inherit the event, unrelated persistent routes and other apps still receive it, removal during a callback does not cancel a later frozen recipient, and an addition waits for the next physical event. Re-entrant input begins with a fresh snapshot after synchronous route changes.
+
+Paste destination and mouse classification use the same event-start context. A paste that began with a paste owner cannot fall back to input after that owner disappears, and a paste that began without one cannot be stolen by a later paste attachment. An SGR report that began before mouse capture remains input for the current compatibility route; a report that began while capture was active remains pointer input even if that owner disappears. Internal and public mouse recipient lists are both resolved before either group runs.
+
+Kitty detection subscribes before Vue setup, so pre-mount ordinary input initially carries one bootstrap binding rather than an empty route snapshot. `activateInputDelivery()` resolves that binding once against the complete initial route set before invoking any handler; every earlier fact uses the same initial snapshot, and the controller then drops its binding reference so initial callbacks are not retained for the application lifetime. Suspension still invalidates the app generation rather than the component leases: an old split event may finish framing but cannot cross resume, while the first new event captures the still-live routes after terminal modes are restored.
 
 Two limits remain explicit. First, standard UTF-8 replacement already loses invalid source bytes before semantic normalization; `sequence` is enough for valid terminal UTF-8 but is not yet a byte-perfect external-PTY fallback. Second, an ordinary text run has no physical key boundary on the wire and may follow stream chunk boundaries. F3 must either preserve raw byte spans or narrow the eventual external-owner guarantee before claiming transparent PTY forwarding. Neither limit is hidden by calling the current fact lossless.
 
@@ -84,9 +94,9 @@ Before F3.2, the existence of any `usePaste` listener changed the event kind for
 
 Escape blurs and Tab or Shift+Tab moves the current flat focus registry before ordinary application listeners run, then the same event still broadcasts to all active listeners. No handler can prevent the default or stop later delivery. F3 must separately test two questions: whether routing continues to another owner, and whether the framework or component default runs. One boolean must not accidentally stand for both.
 
-### App-level generations do not yet define handler lifetime
+### App and route generations solve different lifetimes
 
-F3.1 snapshots app subscriptions, not individual hook routes. A reproduced boundary remains intentionally open: if a persistent `usePaste` keeps an app subscription active while `useInput` component A is replaced by B during a split CSI, B can receive the event that began during A's lifetime. Invalidating the whole app on every hook change would incorrectly discard the same event for unrelated persistent handlers. The normalized routing unit must add handler or route generations; F4 can then bind the selected route to logical focus and rendered lifetime. This is an explicit next acceptance case, not a raw-refcount patch.
+F3.1 snapshots app subscriptions; F3.3 adds individual hook-route leases inside each app. The reproduced failure used a persistent app route while `useInput` component A was replaced by B during a split CSI: completing the key formerly delivered it to B. Invalidating the whole app would also discard the event for an unrelated persistent handler. The implemented two-level snapshot drops only A's expired lease, excludes B's later lease, and still delivers to persistent routes and another app. F4 can bind a selected route to logical focus and rendered lifetime without reopening physical input ownership.
 
 ### Direct stdin is a parallel escape hatch, not fallthrough
 
@@ -136,7 +146,7 @@ Each route trace keeps four results independent: whether a recipient performed a
 2. **Implemented in F3.2:** normalize each structurally framed event once into a shared immutable semantic key, text, paste, pointer, or uninterpreted fact, and adapt the current hooks at the edge;
 3. **Control retained in F3.2:** keep pinned Ink broadcast, registration order, `isActive`, printable-release, and current public key projection behavior while the richer fact stays internal;
 4. **Corrected in F3.2:** preserve paste as a paste fact regardless of listener count and prove pasted control, escape, pointer, and query-like content never becomes an application default or protocol reply;
-5. add per-route leases captured at event start so a replacement handler cannot inherit a split event while unrelated persistent handlers still receive it;
+5. **Implemented in F3.3:** add per-route leases captured at event start so a replacement handler cannot inherit a split event while unrelated persistent handlers and other apps still receive it; fix paste destination and mouse classification at the same boundary while retaining ref updates and re-entrant broadcast behavior;
 6. run a coding-agent composer plus approval overlay and a finder or workbench route through explicit layers: global application command, active region or overlay, later focused control, component default, and optional external owner;
 7. test continuation and default prevention independently, including the case where every semantic layer continues and an external owner receives exactly one recoverable representation;
 8. only then retain, replace, or remove current hooks and select public names and types.
@@ -145,16 +155,16 @@ The first route order to test is application-global commands → current active 
 
 ## Ordered evidence matrix
 
-| Area            | Required observable evidence                                                                                                                                                    |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Protocol        | ordinary input during detection arrives once; complete and slow-split replies never reach application code; timeout preserves safe non-protocol input; ordering is stable       |
-| Key and text    | legacy and Kitty letter, Enter, Tab, Escape, arrows, Insert, F1, keypad or media examples retain identity, modifiers, text, phase, and recoverable source sequence              |
-| Paste           | multiline and escape-containing paste remains one paste fact; pasted Ctrl+C does not exit; listener count does not reclassify content                                           |
-| Current control | two active listeners receive exactly once; inactive listeners do not; same-tick replacement does not duplicate or lose raw ownership                                            |
-| Route           | explicit higher layer can handle; explicit continuation reaches the next layer; default prevention does not imply route termination; registration timing is not hidden priority |
-| External owner  | handled semantic input does not forward; fully continued key, text, paste, and uninterpreted input forward once and in order with enough source data                            |
-| Lifecycle       | Inline and Fullscreen share semantics; suspension, teardown, error, HMR, and shared stdin leave no stale listener, parser state, raw lease, or protocol mode                    |
-| Host            | live TTY, non-TTY, deterministic test, screen-reader transcript, and string document report or fail consistently without manufacturing input capability                         |
+| Area            | Required observable evidence                                                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protocol        | ordinary input during detection arrives once; complete and slow-split replies never reach application code; timeout preserves safe non-protocol input; ordering is stable                          |
+| Key and text    | legacy and Kitty letter, Enter, Tab, Escape, arrows, Insert, F1, keypad or media examples retain identity, modifiers, text, phase, and recoverable source sequence                                 |
+| Paste           | multiline and escape-containing paste remains one paste fact; pasted Ctrl+C does not exit; listener count does not reclassify content                                                              |
+| Current control | two active listeners receive exactly once; inactive listeners do not; split-event replacement cannot inherit; persistent routes and other apps remain; same-tick changes do not lose raw ownership |
+| Route           | explicit higher layer can handle; explicit continuation reaches the next layer; default prevention does not imply route termination; registration timing is not hidden priority                    |
+| External owner  | handled semantic input does not forward; fully continued key, text, paste, and uninterpreted input forward once and in order with enough source data                                               |
+| Lifecycle       | Inline and Fullscreen share semantics; suspension, teardown, error, HMR, and shared stdin leave no stale listener, parser state, raw lease, or protocol mode                                       |
+| Host            | live TTY, non-TTY, deterministic test, screen-reader transcript, and string document report or fail consistently without manufacturing input capability                                            |
 
 ## Issue #250 acceptance role
 

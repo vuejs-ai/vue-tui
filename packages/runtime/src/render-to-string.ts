@@ -1,7 +1,6 @@
 import type { Component } from "vue";
 import { shallowRef } from "vue";
 import { createRenderer } from "vue";
-import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
@@ -21,6 +20,7 @@ import {
   type StdinContext,
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
+import { createInternalInputRouteRegistry } from "./io/input-routes.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import {
@@ -389,7 +389,7 @@ function createStringContexts(columns: number): {
     appContext,
     stdinContext,
     dispose() {
-      stdinContext.internal_eventEmitter.removeAllListeners();
+      stdinContext.internal_routes.clear();
       stdin.destroy();
       stdout.destroy();
       stderr.destroy();
@@ -421,7 +421,7 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
     stdin,
     setRawMode: () => {},
     isRawModeSupported: false,
-    internal_eventEmitter: new EventEmitter(),
+    internal_routes: createInternalInputRouteRegistry(),
     internal_exitOnCtrlC: false,
     acquireRawMode: () => {},
     releaseRawMode: () => {},

@@ -304,8 +304,9 @@ describe("shared stdin normalization", () => {
   const collect = (chunks: Array<string | Uint8Array>): NormalizedInputFact[] => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
     const facts: NormalizedInputFact[] = [];
-    const subscription = getSharedStdinIngress(stdin).subscribe((inputFact) =>
-      facts.push(inputFact),
+    const subscription = getSharedStdinIngress(stdin).subscribe(
+      () => undefined,
+      (inputFact) => facts.push(inputFact),
     );
     subscription.setActive(true);
     for (const chunk of chunks) stdin.emit("data", chunk);
@@ -319,8 +320,14 @@ describe("shared stdin normalization", () => {
     const ingress = getSharedStdinIngress(stdin);
     const first: NormalizedInputFact[] = [];
     const second: NormalizedInputFact[] = [];
-    const firstSubscription = ingress.subscribe((inputFact) => first.push(inputFact));
-    const secondSubscription = ingress.subscribe((inputFact) => second.push(inputFact));
+    const firstSubscription = ingress.subscribe(
+      () => undefined,
+      (inputFact) => first.push(inputFact),
+    );
+    const secondSubscription = ingress.subscribe(
+      () => undefined,
+      (inputFact) => second.push(inputFact),
+    );
     firstSubscription.setActive(true);
     secondSubscription.setActive(true);
 

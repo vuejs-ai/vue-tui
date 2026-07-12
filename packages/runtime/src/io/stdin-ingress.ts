@@ -13,7 +13,10 @@ export interface SharedStdinSubscription {
 }
 
 export interface SharedStdinIngress {
-  subscribe(listener: (event: NormalizedInputFact) => void): SharedStdinSubscription;
+  subscribe<Context>(
+    capture: () => Context,
+    listener: (event: NormalizedInputFact, context: Context) => void,
+  ): SharedStdinSubscription;
   startKittyQueryResponseDetection(
     onResult: (supported: boolean) => void,
     owner?: SharedStdinSubscription,
@@ -21,7 +24,8 @@ export interface SharedStdinIngress {
 }
 
 interface Subscriber {
-  readonly listener: (event: NormalizedInputFact) => void;
+  readonly capture: () => unknown;
+  readonly listener: (event: NormalizedInputFact, context: unknown) => void;
   requestedActive: boolean;
   disposed: boolean;
   generation: number;
@@ -30,6 +34,7 @@ interface Subscriber {
 interface Recipient {
   readonly subscriber: Subscriber;
   readonly generation: number;
+  readonly context: unknown;
 }
 
 interface RecipientSnapshot {
@@ -112,7 +117,11 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     const recipients: Recipient[] = [];
     for (const subscriber of subscribers) {
       if (!subscriber.requestedActive || subscriber.disposed) continue;
-      recipients.push({ subscriber, generation: subscriber.generation });
+      recipients.push({
+        subscriber,
+        generation: subscriber.generation,
+        context: subscriber.capture(),
+      });
     }
     return { recipients };
   }
@@ -430,7 +439,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         continue;
       }
       try {
-        subscriber.listener(event);
+        subscriber.listener(event, recipient.context);
       } catch (error) {
         recordError(error);
       }
@@ -743,9 +752,13 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   const ingress: SharedStdinIngress = {
-    subscribe(listener) {
+    subscribe<Context>(
+      capture: () => Context,
+      listener: (event: NormalizedInputFact, context: Context) => void,
+    ) {
       const subscriber: Subscriber = {
-        listener,
+        capture,
+        listener: (event, context) => listener(event, context as Context),
         requestedActive: false,
         disposed: false,
         generation: 0,

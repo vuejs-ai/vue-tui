@@ -286,6 +286,57 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
   expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 });
 
+test("a targeted mouse handler cannot remove the public recipient of the current event", async () => {
+  const publicActive = shallowRef(true);
+  const targeted: string[] = [];
+  const publicEvents: MouseInputEvent[] = [];
+  const App = defineComponent(() => {
+    useMouseInput((event) => publicEvents.push(event), { isActive: publicActive });
+    return () => (
+      <Box
+        width={4}
+        height={2}
+        onWheel={() => {
+          targeted.push("wheel");
+          publicActive.value = false;
+        }}
+      >
+        <Text>target</Text>
+      </Box>
+    );
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 20, rows: 4 });
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({
+    stdout,
+    stderr,
+    stdin,
+    maxFps: 0,
+    exitOnCtrlC: false,
+    rawMode: "auto",
+    mode: "fullscreen",
+  });
+  await settle();
+
+  stdin.emit("data", "\x1b[<64;1;1M");
+  await settle();
+  expect(targeted).toEqual(["wheel"]);
+  expect(publicEvents).toEqual([
+    { type: "wheel", direction: "up", x: 1, y: 1, shift: false, meta: false, ctrl: false },
+  ]);
+
+  stdin.emit("data", "\x1b[<65;1;1M");
+  await settle();
+  expect(targeted).toEqual(["wheel", "wheel"]);
+  expect(publicEvents).toHaveLength(1);
+
+  app.unmount();
+});
+
 test("useMouseInput consumes unsupported SGR mouse events before keyboard input", async () => {
   const mouseEvents: MouseInputEvent[] = [];
   const keyboardEvents: string[] = [];

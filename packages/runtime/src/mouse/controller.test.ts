@@ -1,7 +1,7 @@
-import { EventEmitter } from "node:events";
 import { describe, expect, test, vi } from "vite-plus/test";
 import type { StdinContext } from "../context.ts";
 import { createBox } from "../host/nodes.ts";
+import { createInternalInputRouteRegistry } from "../io/input-routes.ts";
 import { createMouseController } from "./controller.ts";
 
 function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext {
@@ -9,7 +9,7 @@ function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext
     stdin: {} as NodeJS.ReadStream,
     setRawMode: vi.fn(),
     isRawModeSupported: true,
-    internal_eventEmitter: new EventEmitter(),
+    internal_routes: createInternalInputRouteRegistry(),
     internal_exitOnCtrlC: false,
     acquireRawMode: vi.fn(),
     releaseRawMode: vi.fn(),
@@ -47,7 +47,9 @@ describe("mouse controller cleanup", () => {
     expect(releaseRawMode).toHaveBeenCalledTimes(2);
     expect(acquireSgrMouseMode).toHaveBeenCalledTimes(2);
     expect(releaseSgrMouseMode).toHaveBeenCalledOnce();
-    expect(stdin.internal_eventEmitter.listenerCount("internal_mouse")).toBe(0);
+    expect(stdin.internal_routes.had(stdin.internal_routes.snapshot(), "internal_mouse")).toBe(
+      false,
+    );
   });
 
   test("releases raw mode even when releasing SGR mouse mode throws", () => {
@@ -62,6 +64,8 @@ describe("mouse controller cleanup", () => {
     expect(() => unregister()).toThrow("SGR release failed");
     expect(releaseSgrMouseMode).toHaveBeenCalledOnce();
     expect(releaseRawMode).toHaveBeenCalledOnce();
-    expect(stdin.internal_eventEmitter.listenerCount("internal_mouse")).toBe(0);
+    expect(stdin.internal_routes.had(stdin.internal_routes.snapshot(), "internal_mouse")).toBe(
+      false,
+    );
   });
 });
