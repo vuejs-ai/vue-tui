@@ -2809,6 +2809,186 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
+  test("same-chunk route changes affect the next framed fact", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const activeB = shallowRef(true);
+    const activeC = shallowRef(false);
+    const calls: string[] = [];
+    const label = (value: string, key: Key) => (key.backspace ? "backspace" : value);
+    const App = defineComponent(() => {
+      useInput((value, key) => {
+        calls.push(`A:${label(value, key)}`);
+        if (value === "x") {
+          activeB.value = false;
+          activeC.value = true;
+        }
+      });
+      useInput((value, key) => calls.push(`B:${label(value, key)}`), { isActive: activeB });
+      useInput((value, key) => calls.push(`C:${label(value, key)}`), { isActive: activeC });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      // Text and DEL are distinct framed facts even when one stream read batches
+      // them. The first callback replaces B with C; B still completes the current
+      // frozen delivery, while C owns the next fact just as it would in a second
+      // data chunk.
+      stdin.emit("data", "x\x7f");
+      await flushInput();
+
+      expect(calls).toEqual(["A:x", "B:x", "A:backspace", "C:backspace"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("same-chunk route changes bind a following split UTF-8 fact", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const activeB = shallowRef(true);
+    const activeC = shallowRef(false);
+    const calls: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => {
+        calls.push(`A:${value}`);
+        if (value === "x") {
+          activeB.value = false;
+          activeC.value = true;
+        }
+      });
+      useInput((value) => calls.push(`B:${value}`), { isActive: activeB });
+      useInput((value) => calls.push(`C:${value}`), { isActive: activeC });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      // The leading byte of € follows x in the same physical read, but it starts
+      // a distinct UTF-8 fact. Its route is selected after x finishes, then held
+      // while the continuation bytes arrive in the next read.
+      stdin.emit("data", Uint8Array.from([0x78, 0xe2]));
+      stdin.emit("data", Uint8Array.from([0x82, 0xac]));
+      await flushInput();
+
+      expect(calls).toEqual(["A:x", "B:x", "A:€", "C:€"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("same-chunk route changes bind a following split CSI fact", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const activeB = shallowRef(true);
+    const activeC = shallowRef(false);
+    const calls: string[] = [];
+    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
+    const App = defineComponent(() => {
+      useInput((value, key) => {
+        calls.push(`A:${label(value, key)}`);
+        if (value === "x") {
+          activeB.value = false;
+          activeC.value = true;
+        }
+      });
+      useInput((value, key) => calls.push(`B:${label(value, key)}`), { isActive: activeB });
+      useInput((value, key) => calls.push(`C:${label(value, key)}`), { isActive: activeC });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "x\x1b[");
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect(calls).toEqual(["A:x", "B:x", "A:up", "C:up"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("same-chunk route changes bind a following split paste fact", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const activeB = shallowRef(true);
+    const activeC = shallowRef(false);
+    const inputs: string[] = [];
+    const pastesB: string[] = [];
+    const pastesC: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => {
+        inputs.push(value);
+        if (value === "x") {
+          activeB.value = false;
+          activeC.value = true;
+        }
+      });
+      usePaste((value) => pastesB.push(value), { isActive: activeB });
+      usePaste((value) => pastesC.push(value), { isActive: activeC });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "x\x1b[200~pasted");
+      stdin.emit("data", "\x1b[201~");
+      await flushInput();
+
+      expect(inputs).toEqual(["x"]);
+      expect(pastesB).toEqual([]);
+      expect(pastesC).toEqual(["pasted"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
   test("a replacement paste route cannot inherit a paste begun by its predecessor", async () => {
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();

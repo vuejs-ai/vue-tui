@@ -38,7 +38,7 @@ interface Recipient {
 }
 
 interface RecipientSnapshot {
-  readonly recipients: readonly Recipient[];
+  recipients: readonly Recipient[];
 }
 
 interface KittyQueryDetection {
@@ -546,25 +546,52 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     segment: DecodedSegment,
     completedDetections: KittyQueryDetection[],
     completedDetectionSet: Set<KittyQueryDetection>,
+    deliveryState: { processedEvent: boolean },
   ): void {
     const hadPendingInput = inputParser.peekPending() !== "";
     const inheritedRecipients = pendingInputRecipients;
     const events = inputParser.push(segment.text);
 
-    // Commit the trailing unit's event-start context before invoking any user
-    // handler from the completed prefix. A handler may suspend or replace its
-    // route synchronously; invalidate({ retainPending: true }) must already be
-    // able to see the partial CSI/paste that follows it in the same chunk.
+    // Commit the trailing unit's stable framing identity before invoking any
+    // handler from the completed prefix. A handler may suspend synchronously;
+    // invalidate({ retainPending: true }) must already be able to see the
+    // partial CSI/paste that follows it in the same chunk. The route contents
+    // are refreshed below after the earlier complete facts have run.
+    let newPendingRecipients: RecipientSnapshot | undefined;
     if (inputParser.peekPending() === "") {
       pendingInputRecipients = undefined;
     } else if (!hadPendingInput || events.length > 0) {
-      pendingInputRecipients = segment.recipients;
+      // Install a stable placeholder before callbacks. A handler can suspend
+      // while a following CSI or paste prefix from the same chunk is already
+      // pending; invalidation must be able to retain this exact framing unit.
+      // Its recipient contents are refreshed after the earlier complete facts
+      // run, so route selection does not depend on Node's chunk boundaries.
+      newPendingRecipients = { recipients: segment.recipients.recipients };
+      pendingInputRecipients = newPendingRecipients;
     }
     dropFinishedRetainedSnapshots();
 
     for (let index = 0; index < events.length; index++) {
-      const recipients = index === 0 && hadPendingInput ? inheritedRecipients : segment.recipients;
+      const recipients =
+        index === 0 && hadPendingInput
+          ? inheritedRecipients
+          : deliveryState.processedEvent
+            ? snapshotActiveRecipients()
+            : segment.recipients;
       processInputEvent(events[index]!, recipients, completedDetections, completedDetectionSet);
+      deliveryState.processedEvent = true;
+    }
+
+    if (
+      newPendingRecipients &&
+      pendingInputRecipients === newPendingRecipients &&
+      inputParser.peekPending() !== "" &&
+      deliveryState.processedEvent
+    ) {
+      // The trailing framing unit starts after every complete fact before it in
+      // the serialized event stream. Keep the placeholder identity (retention
+      // maps may already reference it) but capture the now-current app routes.
+      newPendingRecipients.recipients = snapshotActiveRecipients().recipients;
     }
   }
 
@@ -635,8 +662,18 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     clearPendingFlush();
     const completedDetections: KittyQueryDetection[] = [];
     const completedDetectionSet = new Set<KittyQueryDetection>();
+    const deliveryState = { processedEvent: false };
     for (const segment of decodeChunk(chunk)) {
-      feedDecodedSegment(segment, completedDetections, completedDetectionSet);
+      feedDecodedSegment(segment, completedDetections, completedDetectionSet, deliveryState);
+    }
+    if (pendingBytes.length > 0 && deliveryState.processedEvent) {
+      // An incomplete UTF-8 scalar after a completed fact is the byte-level
+      // counterpart of the parser's trailing CSI/paste placeholder above. Keep
+      // the snapshot object that already owns the leading byte (retention maps
+      // may reference it), but bind its app routes after the earlier fact ran.
+      // Continuation bytes in a later read therefore cannot backdate the old
+      // route or let a still-later replacement inherit this scalar.
+      pendingBytes[0]!.recipients.recipients = snapshotActiveRecipients().recipients;
     }
 
     // Lifecycle operations requested by an application handler take effect only

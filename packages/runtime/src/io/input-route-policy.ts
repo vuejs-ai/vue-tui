@@ -57,7 +57,7 @@ export interface InternalInputExternalRecipient {
 
 export interface InternalInputRouteCandidate {
   readonly applicationGlobal?: readonly InternalInputRouteRecipient[];
-  /** The already-selected active region or modal for this physical event. */
+  /** The already-selected active region or modal for this framed fact. */
   readonly activeBoundary?: InternalInputRouteRecipient;
   /** Supplied by a later focus foundation; this experiment does not select it. */
   readonly focusedOwner?: InternalInputRouteRecipient;

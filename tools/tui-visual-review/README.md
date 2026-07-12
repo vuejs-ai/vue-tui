@@ -18,6 +18,15 @@ vp run visual:fullscreen-origin
 
 Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
 
+For input routing across multiple facts in one PTY write, use:
+
+```sh
+vp run visual:input-routing -- --scenario inline
+vp run visual:input-routing -- --scenario fullscreen
+```
+
+The fixture starts with route B active. Send `x` and Backspace in one `input` request; the visible trace must finish with `A:x | B:x | A:Backspace | C:Backspace`, exercising the end-to-end route transition and terminal restoration. The deterministic fake-stream matrix proves the exact one-chunk grouping because one PTY write does not require Node to emit one `data` chunk.
+
 The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 
 When an agent's command tool distinguishes one-shot commands from interactive sessions, use a persistent session or allocate a parent TTY so stdin remains open for later commands.
