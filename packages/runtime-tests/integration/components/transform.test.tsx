@@ -12,6 +12,69 @@ test("Transform uppercases descendant text", async () => {
   expect(lastFrame()).toContain("ABC");
 });
 
+test("Transform output cannot inject terminal clears or physical line breaks", async () => {
+  const { lastFrame } = await render(
+    () => (
+      <Transform transform={(line: string) => `safe\u001b[3J\n${line}`}>
+        <Text>x</Text>
+      </Transform>
+    ),
+    { columns: 20, rows: 2 },
+  );
+
+  expect(lastFrame({ raw: true })).toBe("safex");
+});
+
+test.each(["visual", "screen-reader"] as const)(
+  "nested Transform strips terminal controls but preserves structural lines in %s",
+  async (presentation) => {
+    const { lastFrame } = await render(
+      () => (
+        <Text>
+          before
+          <Transform transform={(line: string) => `safe\u001b[3J\n${line}`}>x</Transform>
+          after
+        </Text>
+      ),
+      { host: { presentation } },
+    );
+
+    expect(lastFrame({ raw: true })).toBe("beforesafe\nxafter");
+  },
+);
+
+test.each(["visual", "screen-reader"] as const)(
+  "ordinary Text strips geometry controls in %s presentation",
+  async (presentation) => {
+    const { lastFrame } = await render(
+      () => <Text>{"A\tB\rC\bD\vE\fF\u007fG\x1b[3J\nNEXT"}</Text>,
+      { host: { presentation } },
+    );
+
+    expect(lastFrame({ raw: true })).toBe("ABCDEFG\nNEXT");
+  },
+);
+
+test.each(["visual", "screen-reader"] as const)(
+  "a nested identity Transform preserves its Newline in %s presentation",
+  async (presentation) => {
+    const { lastFrame } = await render(
+      () => (
+        <Text>
+          before
+          <Transform transform={(value) => value}>
+            a<Newline />b
+          </Transform>
+          after
+        </Text>
+      ),
+      { host: { presentation } },
+    );
+
+    expect(lastFrame({ raw: true })).toBe("beforea\nbafter");
+  },
+);
+
 test("Newline inside Transform renders inline (text context via provide)", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (

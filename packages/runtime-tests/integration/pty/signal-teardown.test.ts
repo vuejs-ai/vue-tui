@@ -16,7 +16,7 @@ const EXIT_ALT_SCREEN = "\x1b[?1049l";
 // coincidental normal unmount emitting the same bytes: with the registration
 // removed, the default signal action kills the child uncaught and NO restore
 // bytes are emitted, so these assertions go red (verified RED on unfixed for
-// all three signals + debug mode).
+// all three signals + unthrottled output).
 //
 // We deliberately do NOT assert on node-pty's reported exit signal: a signalled
 // PTY death is reported nondeterministically (signal-exit sometimes intercepts
@@ -46,7 +46,7 @@ const assertRestored = async (ps: ReturnType<typeof term>) => {
 // Scoped retry (NOT config-wide): the runtime now flushes the restore escapes
 // SYNCHRONOUSLY on the signal path (render.ts/kitty-keyboard.ts Finding A), so
 // the child reliably emits show-cursor + leave-alt-screen before it dies
-// (verified 40/40 standalone spawns, normal + debug). The only residual
+// (verified 40/40 standalone spawns, normal + unthrottled). The only residual
 // flakiness is a PARENT-SIDE harness read-race: under `vp run ready` every core
 // is saturated by lint/build/other test pools, and a starved vitest worker can
 // fail to drain node-pty's buffered onData (the already-flushed restore bytes)
@@ -63,12 +63,10 @@ describe("signal-teardown", { retry: 2 }, () => {
       await assertRestored(ps);
     });
 
-    // Finding 1: debug mode still enters the alternate screen + hides the cursor,
-    // so a debug-but-interactive app must also restore on signal. This is RED if
-    // the runtime gates its signal-exit registration on `!debug` (the signal then
-    // kills the child uncaught, leaving the terminal corrupted).
-    it(`restores terminal on ${signal} in debug mode`, async () => {
-      const ps = term("signal-teardown", ["--debug"]);
+    // An unthrottled full-screen app owns the same terminal modes and must
+    // restore them on signals independently of commit scheduling.
+    it(`restores terminal on ${signal} with unthrottled commits`, async () => {
+      const ps = term("signal-teardown", ["--unthrottled"]);
       ps.kill(signal);
       await assertRestored(ps);
     });

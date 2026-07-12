@@ -1,7 +1,7 @@
 import Yoga from "yoga-layout";
 import type { TuiNode, TuiText, TuiVirtualText, TuiBox } from "../host/nodes.ts";
 import { advancesLineIndex } from "../host/nodes.ts";
-import { sanitizeAnsi } from "./sanitize-ansi.ts";
+import { sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 
 /**
  * Squash a single child of a text/transform context into plain SR text,
@@ -34,7 +34,7 @@ function squashChildSR(child: TuiNode, index: number): string {
       if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
-      innerText = child.transform(innerText, index);
+      innerText = sanitizeAnsiMultiline(child.transform(innerText, index));
     }
     return innerText;
   }
@@ -70,7 +70,7 @@ function squashTextContent(node: TuiText | TuiVirtualText): string {
   // (squash-text-nodes.ts:45). This is the SR twin of host/text-measure.ts:54.
   // Without it an embedded control sequence (e.g. `\x1b[2J`) survives into
   // screen-reader output.
-  return sanitizeAnsi(text);
+  return sanitizeAnsiMultiline(text);
 }
 
 /**
@@ -206,7 +206,7 @@ export function renderScreenReaderOutput(node: TuiNode, options: ScreenReaderOpt
     // squashTextNodes which returns sanitizeAnsi(text) (squash-text-nodes.ts:45).
     // Strip cursor/erase control sequences (keep SGR/OSC) so an embedded control
     // sequence does not survive into screen-reader output.
-    output = sanitizeAnsi(squashed);
+    output = sanitizeAnsiMultiline(squashed);
   }
 
   // Add accessibility annotations

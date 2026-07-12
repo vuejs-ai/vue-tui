@@ -1,0 +1,234 @@
+# Terminal UI prior art
+
+> **Status:** unstamped evidence ledger, last reverified 2026-07-12. This record compares how other terminal UI systems handle rendering mode, history ownership, runtime facts, input ownership, mouse tracking, targeted events, and public widget APIs. It supplies evidence and constraints; vue-tui product and API decisions remain in [goal.md](./goal.md), [product-scenarios.md](./product-scenarios.md), [api-design.md](./api-design.md), and [render-session.md](./render-session.md).
+
+## Scope and evidence rules
+
+This record exists so a future design does not rely on memory, on the word “inline” meaning the same thing everywhere, or on one familiar framework becoming the accidental default.
+
+- Prefer official source, versioned documentation, or a maintainer-authored issue. The source snapshots below make mutable projects re-checkable.
+- A framework implementation proves that a mechanism is possible in its own constraints. It does not prove that the same mechanism is portable, desirable for vue-tui, or compatible with Vue templates and TypeScript.
+- A user issue proves that a real failure or tradeoff occurred. It does not define that project's supported contract.
+- Self-reported benchmarks, compatibility, and production claims are hypotheses until vue-tui runs a relevant harness. This matters especially for young or rapidly changing projects.
+- Before a material API or architecture decision, reverify the relevant rows if the source has changed or the conclusion depends on terminal-specific behavior.
+
+Keep nearby topics in their canonical records:
+
+- Exact Ink alignment and divergence belongs in [ink-divergences.md](./ink-divergences.md), using the repository's pinned Ink baseline.
+- Renderer performance mechanisms and benchmark triggers belong in [performance.md](./performance.md).
+- Application-scenario evidence and the Herdr responsibility boundary belong in [product-scenarios.md](./product-scenarios.md).
+- Accessibility precedents belong in [accessibility-api.md](./accessibility-api.md).
+
+## Comparison terms
+
+### Terminal surface and history ownership
+
+The projects below use several different models that are often all called “inline”:
+
+- **Alternate-screen full-screen:** the application owns the visible alternate buffer until exit; normal shell contents are restored afterward.
+- **Main-screen full-viewport repaint:** the application paints the normal buffer like a full-screen surface. Avoiding the alternate buffer does not by itself preserve native scrollback.
+- **Bounded main-screen viewport:** the application owns a fixed-height or otherwise reserved region while ordinary output can exist above it.
+- **Scrollback-native transcript:** completed output becomes terminal-owned history and is no longer an editable application surface.
+- **Split footer or virtual inline:** the application coordinates an owned live region with captured, replayed, or application-managed history. This requires more bookkeeping than merely setting alternate screen off.
+
+A comparison must state the actual ownership model instead of using only `inline` or `fullscreen`.
+
+### Mouse and event delivery
+
+Three layers must also stay distinct:
+
+- **Terminal mouse capture:** enabling a terminal reporting protocol redirects click, drag, and wheel input from terminal-native behavior to the application. This is independent of alternate-screen selection.
+- **Raw or application-routed event:** the application receives coordinates or a global message and decides what they mean.
+- **Renderer-targeted event:** the renderer knows element geometry, hit-tests the coordinate, selects a target, and may bubble the event through a retained tree.
+
+An API can support terminal mouse input without supporting component-level `@click`. Conversely, a component event API still depends on terminal capture and a reliable coordinate model.
+
+### Runtime facts and capability exposure
+
+Environment input, resolved runtime state, and semantic capability are different layers:
+
+- **Request or environment input:** an application option, stream property, environment value, or test-host control before the runtime resolves behavior.
+- **Effective state:** the host and output surface the runtime actually selected after applying constraints and fallback.
+- **Semantic capability:** a guarantee a public operation can rely on, which may also depend on terminal negotiation or input availability and may initially be unknown.
+
+A raw stream or renderer lets an application inspect or mutate implementation details, but it does not by itself provide a coherent effective-state contract. A comparison must record whether one authority owns related facts, whether values are readonly, and whether terminal size is distinguished from the render area actually allocated to the current frame.
+
+## Source snapshots
+
+| System         | Snapshot used here                                                                                                  | Why it is in this comparison                                                                                       |
+| -------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Ink            | v7.0.4, [`40b3a757`](https://github.com/vadimdemedes/ink/tree/40b3a7578811fd616341ca4e31cc7748aeeff12f)             | vue-tui's direct lineage and current global-input/focus baseline; exact relationship stays in the dedicated record |
+| Ratatui        | [`de5168de`](https://github.com/ratatui/ratatui/tree/de5168de6ba2f4b310565c287764f213f249a61f)                      | explicit full-screen, inline, and fixed viewports with rendering separated from input                              |
+| Bubble Tea     | [`fc707bb7`](https://github.com/charmbracelet/bubbletea/tree/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1)              | global message routing with alternate-screen and mouse modes configured independently                              |
+| Rich           | [`9d8f9a37`](https://github.com/Textualize/rich/tree/9d8f9a372cc5916fd4781fec207ced7ddac2f08f)                      | bounded live output, explicit overflow policies, and durable console output above a live region                    |
+| Textual        | [`1d99508b`](https://github.com/Textualize/textual/tree/1d99508b928a771b51e1a527319c6b87dcff9e05)                   | mature application framework with widgets, focus, bindings, inline mode, and targeted events                       |
+| OpenTUI        | [`a0b90640`](https://github.com/anomalyco/opentui/tree/a0b90640761aa89a303c6b5b0d74ef3e6b945652)                    | TypeScript/Zig retained renderer with multiple screen modes, targeted input, and split-footer history coordination |
+| Silvery        | [`93f71404`](https://github.com/beorn/silvery/tree/93f7140400bc2187e529d224e3be8cced62eb234)                        | emerging React framework exploring explicit capability plugins and a three-zone inline history model               |
+| prompt_toolkit | [`236bfb7c`](https://github.com/prompt-toolkit/python-prompt-toolkit/tree/236bfb7c15c62e921dc81bac5aefcabb16450f0c) | mature input, focus, layout, and key-binding system with separate full-screen and mouse settings                   |
+| pi-tui         | [`4c186103`](https://github.com/badlogic/pi-mono/tree/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui)        | coding-agent-driven main-screen component renderer with focused input and line-based differential output           |
+| fzf            | [`24832e97`](https://github.com/junegunn/fzf/tree/24832e97ef9640e5f859ede8dc163cf3c27145cb)                         | specialized bounded main-screen application that implements pointer coordinates by tracking its physical origin    |
+| OpenAI Codex   | issues linked below, observed 2025-2026                                                                             | coding-agent application evidence for native selection, app scrolling, main-screen repaint, and terminal variation |
+| Herdr          | [`66be0b65`](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6)                   | terminal-workspace stress case; scenario evidence rather than a general renderer contract                          |
+
+## Runtime-fact observations
+
+No pinned peer exposes the complete requested mode → effective mode/surface → fallback reason contract required by vue-tui. The useful mechanisms and their limits are:
+
+| System     | Public fact delivery                                                                                                                                                                                                                                                                                                                                                                                                                 | Requested versus effective state                                                                                                                                                                                                                                  | Constraint for vue-tui                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ink        | Narrow hooks expose [`useWindowSize()`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-window-size.ts#L8-L40), [`useStdout()`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-stdout.ts#L4-L8), and the screen-reader flag.                                                                                                        | Its resolved interactivity and alternate-screen state stay internal, so a component cannot observe fallback without inferring from raw streams.                                                                                                                   | Keep focused lifecycle operations, but do not require components to reconstruct effective surface or capability from `stdout.isTTY`.                                       |
+| OpenTUI    | React's [`useRenderer()`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/react/src/hooks/use-renderer.ts#L1-L11) returns the mutable renderer; a narrower [`useTerminalDimensions()`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/react/src/hooks/use-terminal-dimensions.ts#L5-L22) subscribes to resize.                              | `screenMode` is resolved current state, but the original request is not retained; terminal [`capabilities`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderer.ts#L1811-L1821) are `null` until setup. | Reuse one injected authority and allow unknown capability discovery, but never expose a mutable renderer, screen-mode setter, mouse policy, Yoga tree, or controller.      |
+| Bubble Tea | Runtime facts arrive as messages, including [`WindowSizeMsg`](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/screen.go#L5-L12), [`EnvMsg`](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/environ.go#L5-L33), and [`CapabilityMsg`](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/termcap.go#L7-L47). | The model owns received snapshots; `View.AltScreen` is a current request rather than an inspectable effective-mode fact.                                                                                                                                          | Runtime-owned facts may update asynchronously and tests should inject deliberate dimensions, but Vue reactivity and injection replace a global message/model architecture. |
+| Ratatui    | [`Terminal::size()`](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/backend.rs#L40-L57) reports the backend window, while [`Frame::area()`](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/frame.rs#L60-L70) reports the stable area for the current render pass.                                            | The configured viewport stays runtime-owned rather than becoming widget state.                                                                                                                                                                                    | Distinguish terminal dimensions from the effective root layout area; components should use renderer-authoritative layout facts for the current commit.                     |
+
+Together these observations support one internal session service with a readonly reactive public projection. Narrow convenience hooks may derive from that service, but independently reading process globals or exporting a mutable renderer would recreate the ambiguity F1 is meant to remove. The selected vue-tui contract is recorded in [render-session.md](./render-session.md).
+
+## Inline overflow and durable-history observations
+
+The F1.6 decision rechecked mechanisms rather than copying one peer's visible result. These projects use different ownership guarantees, so the relevant comparison is what happens to completed rows, the bounded live area, and resize—not whether each project calls the mode “inline.”
+
+| System        | Observed mechanism                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Limit or lesson for vue-tui                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ink 7.0.4     | [Root Yoga layout receives no height bound](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L510-L519). Its overflow/full-height transition and teardown path writes [`clearTerminal + retained Static + current output`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L1037-L1102); ansi-escapes defines that reset as [`ED2 + ED3 + Home`](https://github.com/sindresorhus/ansi-escapes/blob/73e652efe7a353bdf25f456e592c858e4648db3d/base.js#L124-L130). [`Static` emits only items added since the prior render](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L42). | ED3 deletes pre-app scrollback, so this is negative evidence. Keep Static's explicit immutable transfer; do not keep the destructive replay fallback.                                                                                                                                                                                                                                                      |
+| Bubble Tea v2 | A non-alt-screen View taller than the terminal is bounded by [dropping top lines before paint](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/cursed_renderer.go#L313-L317), while [`Println`/`Printf`](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/renderer.go#L59-L90) insert persistent output above the live View.                                                                                                                                                                                                                                                                                                                             | It proves bounded live output plus explicit history is practical, but its generic tail is a framework-specific presentation choice that would hide headers and alter vue-tui component coordinates.                                                                                                                                                                                                        |
+| Rich Live     | Default overflow keeps the head and an ellipsis; `crop` keeps the head, while `visible` deliberately gives up reliable clearing ([implementation](https://github.com/Textualize/rich/blob/9d8f9a372cc5916fd4781fec207ced7ddac2f08f/rich/live_render.py#L86-L115), [documentation](https://github.com/Textualize/rich/blob/9d8f9a372cc5916fd4781fec207ced7ddac2f08f/docs/source/live.rst#L94-L106)). [Console output appears above Live](https://github.com/Textualize/rich/blob/9d8f9a372cc5916fd4781fec207ced7ddac2f08f/docs/source/live.rst#L109-L128) and persists; normal stop can print the complete final result once replacement is no longer needed.                                                                              | Replaceable and durable output are different states. An ellipsis consumes layout and changes geometry, so vue-tui should not inject one at the renderer root.                                                                                                                                                                                                                                              |
+| Ratatui       | [`Viewport::Inline(height)`](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/viewport.rs#L79-L99) is a terminal-clamped rectangle, and [`insert_before`](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/inline.rs#L7-L68) commits rows above it. Widgets render only inside the Frame area.                                                                                                                                                                                                                                                                                                                        | This supports top-origin bounded layout and explicit history insertion. [Horizontal shrink calls `ClearType::All` for the whole visible terminal](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/resize.rs#L41-L48); it does not delete scrollback, but it does not preserve pre-app visible shell rows, so vue-tui needs a stronger boundary. |
+| fzf           | `--height` uses a [terminal-clamped maximum height](https://github.com/junegunn/fzf/blob/24832e97ef9640e5f859ede8dc163cf3c27145cb/src/terminal.go#L1002-L1014), while list state [constrains the semantic offset around the current item](https://github.com/junegunn/fzf/blob/24832e97ef9640e5f859ede8dc163cf3c27145cb/src/terminal.go#L8398-L8403) rather than applying a generic head or tail crop. It queries a physical origin and invalidates related mouse assumptions after resume.                                                                                                                                                                                                                                               | Finder visibility belongs to the finder/viewport state. Physical-origin recovery is specialized state, not a capability ordinary Inline components can infer.                                                                                                                                                                                                                                              |
+| pi-tui        | The coding-agent renderer retains a logical transcript and shows its tail, but its [`fullRender(true)` path emits ED2 + Home + ED3](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/src/tui.ts#L1283-L1291), and [width/height changes](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/src/tui.ts#L1342-L1355) or [changes above the visible viewport](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/src/tui.ts#L1453-L1458) invoke it before full replay.                                                                                                                                | A retained transcript plus tail presentation does not by itself preserve terminal history. Coding-agent applications should commit completed output and keep only the current response/composer/status live.                                                                                                                                                                                               |
+
+The resulting vue-tui rule is deliberately narrower and stronger: the renderer supplies a maximum-height, hard-clipped, row-zero live surface; Static and geometry-safe coordinated TTY output are explicit history producers; semantic tail/follow/selection behavior belongs to application or component state; and any geometry change that invalidates physical row bookkeeping leaves the old snapshot untouched and establishes a new live region. Destructive main-screen reset remains outside the managed Inline path; returned raw streams are the explicit low-level bypass.
+
+## Framework observations
+
+### Ink
+
+Observed: Ink v7.0.4 exposes global [`useInput`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) subscriptions and a flat [`useFocus`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) registry. These APIs explain vue-tui's starting point. Its non-TTY default defers dynamic output until teardown while writing new Static content immediately, but an explicit `interactive: true` runs the live updater even on a non-TTY stream; alternate-screen entry still requires a TTY ([default and override tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1152-L1247), [alternate-screen tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1712-L1757)). Ink also uses public `debug` as a distinct append-oriented output path. vue-tui keeps the non-TTY default and explicit live override but removes `debug` in favor of output-independent deterministic observation; the exact decisions live in [ink-divergences.md](./ink-divergences.md#non-tty-output-defaults-to-a-final-stream-while-explicit-live-updates-remain-possible) and [the F1.5 observation divergence](./ink-divergences.md#deterministic-observation-is-separate-from-output-debug-is-removed).
+
+Establishes: a small inline-oriented component framework can be useful without making every rendered node an event target.
+
+Does not establish: that vue-tui should preserve Ink's flat focus model, public surface, diagnostic output switch, writer, or lack of a richer interaction layer. Exact behavior claims must follow [ink-divergences.md](./ink-divergences.md), not this summary.
+
+### Ratatui
+
+Observed: Ratatui models [`Fullscreen`, `Inline`, and `Fixed`](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui-core/src/terminal/viewport.rs#L5-L24) viewports. Inline has a current-row origin and reserved height; fixed accepts a caller-owned rectangle. Ratatui explicitly [does not include input handling](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui/src/lib.rs#L268-L273). Its open [`insert_before` issue](https://github.com/ratatui/ratatui/issues/1426) records wrapping, resizing, flicker, and output-above-viewport difficulties.
+
+Establishes: viewport ownership belongs above ordinary widgets, an inline region can have a non-zero origin, and keeping output plus a live region coherent is substantial renderer work.
+
+Does not establish: a component-event API for vue-tui. Ratatui avoids that question by leaving input and event routing to applications and backend libraries.
+
+### Bubble Tea
+
+Observed: Bubble Tea v2 places [`AltScreen` and `MouseMode` in separate `View` fields](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/tea.go#L149-L177). [`MouseModeNone` is the zero value](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/tea.go#L283-L305), so mouse is off until the view requests it, and input arrives as a global [`MouseMsg`](https://github.com/charmbracelet/bubbletea/blob/fc707bb7ea0161405bb6c653ec93f6a9c6a72fe1/mouse.go#L44-L63).
+
+Establishes: rendering mode and terminal mouse capture are independent runtime choices; an application-routed event model avoids promising per-widget pointer behavior.
+
+Does not establish: that Vue authors should manually hit-test coordinates or use a message-update architecture. Bubble Tea's Go and Elm-style authoring model has different API constraints.
+
+### Textual
+
+Observed: Textual's `run` API exposes [`inline` and `mouse` as separate parameters](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/app.py#L2220-L2237), and mouse defaults on even when inline is selected. Inline reuses the application and widget system and can opt into [`:inline` styling](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/how-to/style-inline-apps.md#L3-L42). Textual compensates for terminal mouse capture with framework-owned selection for most widgets and Ctrl+C copy; its [FAQ](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/FAQ.md#L38-L51) sends unsupported cases back to terminal-specific modifier keys. Its focused-widget and binding route is documented in the [input guide](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/guide/input.md#L118-L185).
+
+Establishes: the same high-level widget system can span more than one rendering mode while input ownership remains separately configurable. A full-screen-first framework can make mouse easy by also owning selection and copy; the mouse side effect has not disappeared.
+
+Does not establish: that common vue-tui components should inspect rendering mode or restyle themselves. Textual explicitly permits mode-specific CSS; vue-tui's current common-component invariant is stricter.
+
+### OpenTUI
+
+Observed: OpenTUI defines independent [`screenMode` and `useMouse`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderer.ts#L167-L180) options. Its screen modes are alternate screen, main screen, and split footer; the default is alternate screen and mouse defaults on. The current [renderer documentation](https://opentui.com/docs/core-concepts/renderer/) says `main-screen` still reserves a rendered region rather than providing scrollback-native inline output, while `split-footer` captures and replays output around an owned footer. Renderables expose [targeted mouse handlers](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/Renderable.ts#L105-L123), and its React layer provides [`selectable` text plus `useSelectionHandler`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/react/README.md#L310-L329). Unlike Ink, OpenTUI treats a custom non-TTY Writable as a terminal byte transport: it supplies fallback dimensions and still emits terminal setup and frame bytes, which its own test verifies contain ESC ([config](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderer.ts#L100-L126), [creation](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderer.ts#L666-L689), [test](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/tests/renderer.custom-stdout.test.ts#L127-L146)).
+
+Establishes: a full-screen-first framework can make element events the normal path, but main-screen history coordination remains a separate subsystem. It also independently supports treating rendering mode and mouse as different axes.
+
+Does not establish: that vue-tui should migrate to OpenTUI, enable mouse by default, or copy its renderable API. Those choices follow its product defaults and native renderer, not a universal terminal rule.
+
+### Silvery
+
+Observed: Silvery's lower-level app builder makes focus and DOM-like mouse dispatch explicit providers through [`withFocus()` and `withDomEvents()`](https://github.com/beorn/silvery/blob/93f7140400bc2187e529d224e3be8cced62eb234/packages/create/README.md#L9-L45). Its convenience `run()` derives the default mouse policy from rendering mode: on in full-screen and off in inline ([option contract](https://github.com/beorn/silvery/blob/93f7140400bc2187e529d224e3be8cced62eb234/packages/ag-term/src/runtime/run.tsx#L111-L129), [runtime resolution](https://github.com/beorn/silvery/blob/93f7140400bc2187e529d224e3be8cced62eb234/packages/ag-term/src/runtime/run.tsx#L651-L682)). When mouse is enabled, application-owned selection defaults on and copies through OSC 52. Its [`dynamic-scrollback` design](https://github.com/beorn/silvery/blob/93f7140400bc2187e529d224e3be8cced62eb234/docs/design/dynamic-scrollback.md#L1-L58) separates mounted live content, application-managed cached history, and terminal-owned history, and explicitly accepts ED3 clearing plus replay for structural redraws.
+
+Establishes: capability composition can make targeted events an explicit application layer, and a richer inline coding-agent experience needs an explicit history lifecycle rather than a boolean screen switch.
+
+Does not establish: Silvery's performance or compatibility claims, nor that its three-zone model is right for vue-tui. It is young, changes quickly, and its documentation is partly a design claim; re-run any mechanism that becomes load-bearing.
+
+### prompt_toolkit
+
+Observed: prompt_toolkit's `Application` stores [`full_screen` and `mouse_support` independently, both defaulting off](https://github.com/prompt-toolkit/python-prompt-toolkit/blob/236bfb7c15c62e921dc81bac5aefcabb16450f0c/src/prompt_toolkit/application/application.py#L180-L242). Its [full-screen guide](https://github.com/prompt-toolkit/python-prompt-toolkit/blob/236bfb7c15c62e921dc81bac5aefcabb16450f0c/docs/pages/full_screen_apps.rst#L1-L54) describes one application layout and key-binding system that can also run without alternate screen, consuming only the layout's required space.
+
+Establishes: independent rendering-mode and mouse settings are a mature precedent, and focus/layout/key bindings can form one application model without making alternate screen the definition of interactivity.
+
+Does not establish: the Vue component or package-export shape; prompt_toolkit's Python object model and input abstraction differ substantially.
+
+### pi-tui
+
+Observed: pi-tui's public component contract renders arrays of lines and gives input to the focused component through [`handleInput`](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/README.md#L149-L166). Its main-screen renderer documents three strategies: first output, full repaint when width or off-viewport content changes, and changed-line repaint for ordinary updates, all wrapped in synchronized output ([README](https://github.com/badlogic/pi-mono/blob/4c1861033b63a04563547ccdb5ed2bf31d4fdcd3/packages/tui/README.md#L591-L599)).
+
+Establishes: a coding-agent-oriented framework can prioritize focused keyboard editing and main-screen transcript rendering without first offering a general DOM-like pointer system.
+
+Does not establish: that line-array rendering scales to vue-tui's full application scenarios or that pointer input has low value. It reflects a narrower product and component model.
+
+## Application observations
+
+### fzf
+
+Observed: in non-full-screen mode, fzf sends a cursor-position report to [discover its origin](https://github.com/junegunn/fzf/blob/24832e97ef9640e5f859ede8dc163cf3c27145cb/src/tui/light_unix.go#L96-L114), stores a vertical offset, and [subtracts it from SGR mouse coordinates](https://github.com/junegunn/fzf/blob/24832e97ef9640e5f859ede8dc163cf3c27145cb/src/tui/light.go#L879-L900). After `SIGCONT`, it disables inline mouse because the old offset is likely invalid ([source](https://github.com/junegunn/fzf/blob/24832e97ef9640e5f859ede8dc163cf3c27145cb/src/tui/light.go#L1011-L1016)).
+
+Establishes: targeted pointer input in a bounded main-screen application is technically feasible; it requires physical-origin discovery, coordinate translation, invalidation rules, and fallback behavior.
+
+Does not establish: that the mechanism is reliable across every vue-tui target or with arbitrary external output and multiple dynamic regions. fzf controls a specialized region and interaction model.
+
+### OpenAI Codex
+
+Observed: Codex issue [#1247](https://github.com/openai/codex/issues/1247) describes the direct tradeoff between terminal-native text selection and application-owned mouse scrolling: disabling TUI mouse restores ordinary selection but removes the scroll events the TUI needs. Issue [#14277](https://github.com/openai/codex/issues/14277) reports that `--no-alt-screen` still fails to provide usable native scrollback in several xterm.js-based terminals; the reporter offers main-buffer clearing as a conditional explanation, not a confirmed cause.
+
+Establishes: these are current coding-agent product problems, not theoretical edge cases. Alternate-screen selection, scrollback preservation, mouse capture, and application scrolling must be specified separately.
+
+Does not establish: Codex's formal contract or a portable solution. These are issue reports from particular versions and terminals.
+
+### Herdr
+
+Observed: Herdr combines tabs, split panes, focus, resizing, mouse interaction, PTYs, persistent sessions, and terminal emulation. The pinned source and vue-tui responsibility boundary are recorded in [product-scenarios.md](./product-scenarios.md#terminal-workspace-and-multiplexer).
+
+Establishes: a multi-region terminal shell pressures layout, focus, input routing, overlays, resize, and cell-surface embedding at once.
+
+Does not establish: that vue-tui should own PTY lifecycle, VT parsing, session persistence, detach, transport, or process detection.
+
+## Cross-project constraints for vue-tui
+
+These are evidence-backed constraints to carry into proposals, not accepted public API names:
+
+1. Rendering mode and terminal mouse capture are independent mechanisms, but they need not become two mandatory peer-level settings in a public API. A framework can derive safe defaults from mode and active usage while preserving an explicit lower-level path.
+2. `inline` alone is not a sufficient contract. A proposal must identify the owned region, who owns completed history, whether the physical origin is known, what external output may do, and what resize or suspension invalidates.
+3. Terminal-level mouse input and renderer-targeted pointer events are different capabilities. A low-level coordinate stream is not an inline replacement for component `@click` unless the application also owns hit testing.
+4. Enabling mouse reporting changes terminal-native selection and wheel behavior even on the alternate screen. Automatic “when used” acquisition minimizes duration but does not remove the user-facing tradeoff; Textual, OpenTUI, and Silvery compensate with application-owned selection rather than proving the tradeoff absent.
+5. Inline targeted pointer is possible, as fzf demonstrates, but it is not free. vue-tui cannot promise it until its own writer tracks an origin and validates invalidation across target terminals.
+6. A bounded `ScrollBox` depends on an allocated rectangle and application-owned history, not intrinsically on alternate screen. Terminal-native transcript history is a different operation.
+7. Reusing one widget tree across modes does not require hiding mode-dependent capabilities. Established defaults vary: Bubble Tea and prompt_toolkit leave mouse off, Textual and OpenTUI default it on, and Silvery turns it on for full-screen but off for inline. No peer result requires vue-tui users to repeat an app-level mouse switch after explicitly choosing a targeted full-screen API.
+8. Peer API names do not settle Vue API names. Vue listener fallthrough, SFC compilation, TypeScript subpaths, refs, composables, and package layering require vue-tui-specific type and authoring decisions.
+9. Non-TTY output follows product boundaries rather than one universal TUI rule. Ink supplies a CLI-friendly final-stream default plus an explicit override, while OpenTUI treats the stream as terminal transport. vue-tui's application-framework positioning and existing stream semantics make Ink the closer behavior precedent; the override remains explicit and cannot manufacture terminal capabilities.
+10. A peer's component catalog is not a roadmap. New vue-tui components still need the evidence bar in [components-design-principles.md](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed).
+
+## Required peer check for future decisions
+
+Before accepting a public rendering-mode, input, pointer, focus, scrolling, renderer, or component architecture proposal:
+
+1. Name the representative vue-tui journey and observable problem.
+2. Describe the terminal surface and history ownership using the terms above.
+3. Select the relevant peers from this record and state where their constraints match and differ.
+4. Re-run or source-check any peer behavior that is load-bearing, terminal-dependent, self-reported, or newer than the pinned snapshot.
+5. Explain why the proposed Vue API follows from vue-tui's authoring model rather than from another language's syntax.
+6. Cover inline, full-screen, non-TTY/static, screen-reader, testing, teardown, and fallback behavior as applicable.
+7. Link the final local decision back here and update a stale snapshot or conclusion in the same change.
+
+## What this evidence does not decide
+
+This comparison does not decide:
+
+- whether inline or full-screen becomes vue-tui's primary rendering mode;
+- whether vue-tui adds a separate app creator or any particular export path;
+- whether pointer input is default, opt-in, or unavailable in a given release;
+- whether a `PointerBox`, directive, composable, or semantic action component becomes public;
+- which components belong in `@vue-tui/components`;
+- whether the renderer should migrate to another project or adopt native code;
+- whether another framework's benchmark or compatibility claim applies to vue-tui.
+
+Those decisions require vue-tui scenario evidence, its current implementation, and the review template in [api-design.md](./api-design.md#review-template-for-each-proposed-api).
+
+The current vue-tui discussion has now selected one `createApp`, the public `mode` term, passive common components, and a full-screen target-ref composable boundary. Those local choices live in [api-design.md](./api-design.md#current-mode-pointer-and-scrolling-boundary); they are not conclusions supplied by this evidence ledger alone.

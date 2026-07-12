@@ -1,27 +1,29 @@
-import logUpdate, { type LogUpdate, type SyncOptions } from "./log-update.ts";
+import logUpdate, { type LogUpdate, type ResetOptions, type SyncOptions } from "./log-update.ts";
 import type { CursorPosition } from "./cursor-helpers.ts";
 
 export interface FrameWriter {
   write: (frame: string) => void;
   done: () => void;
   clear: () => void;
+  /** Forget the previous physical frame without writing terminal bytes. */
+  reset: (options?: ResetOptions) => void;
+  /** Return bytes that move a declared caret back to the physical frame bottom. */
+  getCursorReturnToBottom: () => string;
   sync: (frame: string, options?: SyncOptions) => void;
   setCursorPosition: (pos: CursorPosition | undefined) => void;
+  isCursorHidden: () => boolean;
   isCursorDirty: () => boolean;
   willRender: (frame: string) => boolean;
 }
 
 export function createFrameWriter(
   stream: NodeJS.WriteStream,
-  options: { debug?: boolean; incremental?: boolean },
+  options: { incremental?: boolean },
 ): FrameWriter {
   // Sentinel: use a value that can never equal a real frame so the very first
   // write (even an empty string) is always emitted.
   let lastFrame: string | null = null;
-  const debug = options.debug ?? false;
-  const log: LogUpdate | null = debug
-    ? null
-    : logUpdate.create(stream, { incremental: options.incremental });
+  const log: LogUpdate = logUpdate.create(stream, { incremental: options.incremental });
 
   return {
     write(frame: string) {
@@ -31,20 +33,23 @@ export function createFrameWriter(
       // log-update so it emits buildCursorOnlySequence. log-update's own
       // hasChanges() then decides whether to actually write. Mirrors Ink,
       // which has no FrameWriter dedup layer and lets log-update own this.
-      if (frame === lastFrame && !(log && log.isCursorDirty())) return;
+      if (frame === lastFrame && !log.isCursorDirty()) return;
       lastFrame = frame;
-      if (debug) {
-        stream.write(frame + "\n");
-      } else {
-        log!(frame);
-      }
+      log(frame);
     },
     done() {
-      if (log) log.done();
+      log.done();
     },
     clear() {
       lastFrame = null;
-      if (log) log.clear();
+      log.clear();
+    },
+    reset(resetOptions?: ResetOptions) {
+      lastFrame = null;
+      log.reset(resetOptions);
+    },
+    getCursorReturnToBottom() {
+      return log.getCursorReturnToBottom();
     },
     sync(frame: string, options?: SyncOptions) {
       // Keep this writer's dedup baseline aligned with log-update's internal
@@ -52,19 +57,23 @@ export function createFrameWriter(
       // log-update (state synced) while a write() of the *pre-sync* lastFrame
       // passes this layer's dedup but is dropped by log-update — desyncing the
       // two dedup layers and dropping a legitimately-changed frame.
-      // `options` (e.g. { cursor: false } from app.clear()) is forwarded so the
+      // `options` (for example { cursor: false } after a fixed-viewport clear)
+      // is forwarded so the
       // caller can suppress the cursor emit on this sync — see log-update.sync.
       lastFrame = frame;
-      if (log) log.sync(frame, options);
+      log.sync(frame, options);
     },
     setCursorPosition(pos) {
-      if (log) log.setCursorPosition(pos);
+      log.setCursorPosition(pos);
+    },
+    isCursorHidden() {
+      return log.isCursorHidden();
     },
     isCursorDirty() {
-      return log ? log.isCursorDirty() : false;
+      return log.isCursorDirty();
     },
     willRender(frame: string) {
-      return log ? log.willRender(frame) : true;
+      return log.willRender(frame);
     },
   };
 }

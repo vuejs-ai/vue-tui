@@ -1,7 +1,8 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, nextTick } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { Box, createApp, Static, Text } from "@vue-tui/runtime";
+import ansiEscapes from "ansi-escapes";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("unmount does not write to ended stdout stream", async () => {
@@ -21,7 +22,7 @@ test("unmount does not write to ended stdout stream", async () => {
   const stderr = makeFakeWritable({ columns: 100 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
 
@@ -70,7 +71,7 @@ test("non-interactive mode writes only last frame at unmount", async () => {
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -86,6 +87,103 @@ test("non-interactive mode writes only last frame at unmount", async () => {
   // After unmount, the last frame should be written
   const postUnmountOutput = chunks.join("");
   expect(postUnmountOutput).toContain("the-content");
+});
+
+test("non-TTY default writes Static immediately and only the latest dynamic frame at teardown", async () => {
+  const items = shallowRef(["static-one"]);
+  const dynamic = shallowRef("dynamic-one");
+  const App = defineComponent(() => {
+    return () => (
+      <Box flexDirection="column">
+        <Static items={items.value}>
+          {{
+            default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
+          }}
+        </Static>
+        <Text>{dynamic.value}</Text>
+      </Box>
+    );
+  });
+
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+
+  const chunks: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    chunks.push(chunk.toString());
+  });
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+
+  await nextTick();
+  await app.waitUntilRenderFlush();
+  expect(chunks.join("")).toContain("static-one");
+  expect(chunks.join("")).not.toContain("dynamic-one");
+
+  items.value = ["static-one", "static-two"];
+  dynamic.value = "dynamic-two";
+  await nextTick();
+  await app.waitUntilRenderFlush();
+
+  const beforeTeardown = chunks.join("");
+  expect(beforeTeardown).toContain("static-two");
+  expect(beforeTeardown).not.toContain("dynamic-one");
+  expect(beforeTeardown).not.toContain("dynamic-two");
+
+  app.unmount();
+  await app.waitUntilExit();
+
+  const finalOutput = chunks.join("");
+  expect(finalOutput).toContain("dynamic-two");
+  expect(finalOutput).not.toContain("dynamic-one");
+});
+
+test("explicit interactive override writes live frames to non-TTY without alternate screen", async () => {
+  const value = shallowRef("first-frame");
+  const App = defineComponent(() => () => <Text>{value.value}</Text>);
+
+  const stdout = makeFakeWritable({ columns: 80, rows: 24 });
+  const stderr = makeFakeWritable({ columns: 80, rows: 24 });
+  const { stream: stdin } = makeFakeStdin();
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+
+  const chunks: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    chunks.push(chunk.toString());
+  });
+
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    stderr,
+    exitOnCtrlC: false,
+    liveUpdates: true,
+    mode: "fullscreen",
+  });
+
+  await nextTick();
+  await app.waitUntilRenderFlush();
+  expect(chunks.join("")).toContain("first-frame");
+  expect(chunks.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
+
+  chunks.length = 0;
+  value.value = "second-frame";
+  await nextTick();
+  await app.waitUntilRenderFlush();
+
+  const liveUpdate = chunks.join("");
+  expect(liveUpdate).toContain("second-frame");
+  expect(liveUpdate).toContain(ansiEscapes.eraseLines(1));
+  expect(liveUpdate).not.toContain(ansiEscapes.enterAlternativeScreen);
+
+  app.unmount();
+  await app.waitUntilExit();
+
+  expect(chunks.join("")).not.toContain(ansiEscapes.exitAlternativeScreen);
 });
 
 test("non-interactive empty final frame still writes trailing newline at unmount", async () => {
@@ -110,7 +208,7 @@ test("non-interactive empty final frame still writes trailing newline at unmount
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -144,7 +242,7 @@ test("non-interactive unmount skips final frame when stdout is not writable", as
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -178,7 +276,7 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();
@@ -224,7 +322,7 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
     stdin,
     stderr,
     exitOnCtrlC: false,
-    interactive: false,
+    liveUpdates: false,
   });
 
   await nextTick();

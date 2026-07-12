@@ -8,6 +8,7 @@ import {
   buildCursorOnlySequence,
   showCursorEscape,
   hideCursorEscape,
+  nextLineEscape,
 } from "./cursor-helpers.ts";
 
 describe("cursor-helpers", () => {
@@ -37,6 +38,11 @@ describe("cursor-helpers", () => {
   test("escape constants are the exact DECTCEM byte sequences", () => {
     expect(showCursorEscape).toBe("\x1b[?25h");
     expect(hideCursorEscape).toBe("\x1b[?25l");
+  });
+
+  test("next-line escape is NEL rather than bottom-clamped CNL", () => {
+    expect(nextLineEscape).toBe("\x1bE");
+    expect(nextLineEscape).not.toBe(ansiEscapes.cursorNextLine);
   });
 
   test("buildCursorSuffix returns empty for undefined position", () => {

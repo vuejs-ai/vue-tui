@@ -12,10 +12,11 @@
 // callback returns (`{alwaysLast:false}`), so a buffered ASYNC `stdout.write` of
 // a terminal-restore escape can be lost before the process dies. `teardown(true)`
 // already writes show-cursor / leave-alt-screen / disable-kitty SYNCHRONOUSLY
-// (`fs.writeSync(fd, …)`). The SGR mouse-disable escape must disable every mouse
-// tracking level (`1003`, `1002`, `1000`) plus SGR coordinates (`1006`) and must ALSO go out on the
-// SYNCHRONOUS path — otherwise, when dropped, the terminal stays in mouse
-// tracking mode and keeps suppressing native text selection window-wide.
+// (`fs.writeSync(fd, …)`). The SGR mouse-disable escape must release the exact
+// tracking level the app acquired (`1000`) plus SGR coordinates (`1006`) and
+// must ALSO go out on the SYNCHRONOUS path — otherwise, when dropped, the
+// terminal stays in mouse tracking mode and keeps suppressing native text
+// selection window-wide.
 import { PassThrough } from "node:stream";
 import * as fs from "node:fs";
 import os from "node:os";
@@ -25,7 +26,9 @@ import { afterEach, beforeEach, describe, test, expect, vi } from "vite-plus/tes
 import { createApp, Text, useMouseInput } from "@vue-tui/runtime";
 
 const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_OFF = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l";
+const DRAG_MOUSE_OFF = "\x1b[?1002l";
+const HOVER_MOUSE_OFF = "\x1b[?1003l";
 const SHOW_CURSOR = "\x1b[?25h";
 let previousTerm: string | undefined;
 
@@ -107,9 +110,9 @@ describe("SGR mouse disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(MouseApp);
-    // interactive: true forces the signal-exit handler to register regardless of
-    // ambient CI/TTY detection (the resolved `interactive` flag gates it).
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, interactive: true });
+    // Keep the live TTY path explicit; lifecycle cleanup now registers for every
+    // real mount regardless of output cadence.
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     // Let useMouseInput's attach enable SGR mouse tracking (writes
     // \x1b[?1000h\x1b[?1006h, async).
@@ -135,8 +138,10 @@ describe("SGR mouse disable on signal exit", () => {
     // not only the async stdout.write that signal-exit's re-raise can drop.
     expect(
       syncBytes,
-      "all SGR mouse levels must be disabled via fs.writeSync on the signal-exit path",
+      "the acquired SGR mouse level must be disabled via fs.writeSync on the signal-exit path",
     ).toContain(MOUSE_OFF);
+    expect(syncBytes).not.toContain(DRAG_MOUSE_OFF);
+    expect(syncBytes).not.toContain(HOVER_MOUSE_OFF);
   });
 
   test("the normal (non-signal) unmount still disables SGR mouse asynchronously", async () => {
@@ -144,7 +149,7 @@ describe("SGR mouse disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(MouseApp);
-    app.mount({ stdout, stdin, debug: false, exitOnCtrlC: false, interactive: true });
+    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(MOUSE_ON);
@@ -158,6 +163,8 @@ describe("SGR mouse disable on signal exit", () => {
 
     // Mouse-OFF still emitted, via the async stream.write (not the sync fd path).
     expect(asyncWrites.some((w) => w.includes(MOUSE_OFF))).toBe(true);
+    expect(asyncWrites.join("")).not.toContain(DRAG_MOUSE_OFF);
+    expect(asyncWrites.join("")).not.toContain(HOVER_MOUSE_OFF);
     expect(syncBytes).not.toContain(MOUSE_OFF);
   });
 });

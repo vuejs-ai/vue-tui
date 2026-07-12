@@ -10,9 +10,9 @@ component itself listens to **no** mouse or keyboard input.
 
 ## What it's for — and what to use instead
 
-- Use it for a **fixed-height scroll region inside a persistent layout** — a pane in a full-screen
-  (`fullscreen`) app (a dashboard, a multi-pane TUI) where content can't just flow into the
-  terminal's own scrollback.
+- Use it for an **app-owned bounded scroll region** in either rendering mode — for example a log pane
+  in a full-screen dashboard or a fixed-height preview inside an inline workflow. The parent must
+  allocate a height; mode does not create that bound by itself.
 - For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static`: let
   the content flow into the terminal's scrollback, where the terminal owns scrolling and text
   selection natively. vue-tui's own `coding-agent` example does exactly this — it uses `Static`, not
@@ -37,22 +37,40 @@ job, not a built-in prop:
 - **The best practice for terminal scroll input isn't settled**, and its tradeoffs leak terminal
   internals into a component API. Rather than bake in a half-answer, `ScrollBox` ships only the
   scroll **mechanism** and lets the app own the **policy**.
-- **The mouse wheel is a footgun.** Receiving wheel events requires enabling terminal mouse
-  tracking, which suppresses the terminal's native text selection **window-wide** (the Shift/Option
-  bypass is unreliable across terminals — verified broken in Warp and macOS Terminal.app). A scroll
-  region whose content you often want to read and copy is exactly the wrong place to silently break
-  copy. `useMouseInput` stays a runtime capability for an app that knowingly wants it.
+- **The mouse wheel is an application-level tradeoff.** Receiving wheel events requires enabling
+  terminal mouse tracking, which redirects terminal-native selection and wheel behavior to the
+  application. Modifier-key bypass behavior varies by terminal. A scroll region whose content users
+  need to read and copy must not silently make that choice; the evidence and terminology live in
+  [terminal UI prior art](../terminal-ui-prior-art.md#mouse-and-event-delivery).
 - **Keyboard input is global and collision-prone.** `useInput` is global (no focus routing baked
   in), so a built-in binding would grab keys app-wide and collide with a focused input — arrows move
   its cursor, `Home` / `End` are line-start / -end. Which keys scroll which region is the app's call.
-- **In a full-screen app the wheel works for free anyway.** Most terminals convert the wheel into
-  arrow keys on the alternate screen ("alternate scroll", DECSET 1007), so if the app binds arrow
-  keys to `scrollByLines`, the wheel scrolls the box **without** mouse tracking and **without**
-  breaking selection. That is the terminal's doing, delivered as ordinary keyboard events — not ScrollBox's.
+- **Do not rely on wheel-to-arrow translation as a framework contract.** It depends on terminal
+  configuration and modes that vue-tui does not currently negotiate. Keyboard bindings remain a
+  valid application policy, but they do not imply portable wheel support.
 
-Rich mouse interaction (wheel-follows-the-pointer + click / drag + copy) is a separate,
-framework-level concern: it needs mouse tracking plus an app-level selection + clipboard layer (OSC
-52), the way Textual and opencode do it. That is out of scope here and deferred.
+Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse
+ownership, reliable geometry, and hit testing. Preserving application-controlled text selection and
+copy after mouse capture would additionally require a selection and clipboard model. Both concerns
+are out of scope for this input-free component; see
+[terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
+
+The current unstamped API direction composes full-screen wheel behavior through a ref-bound runtime
+composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
+
+```ts
+import { usePointerEvent } from "@vue-tui/runtime/fullscreen";
+
+usePointerEvent(wheelTarget, "wheel", (event) => {
+  const moved = scrollBox.value?.scrollByLines(event.deltaY);
+  if (moved) event.stopPropagation();
+});
+```
+
+That example requires the proposed scroll methods to report whether the position actually changed;
+the return-type change and exact pointer-composable signature are not yet accepted. The durable
+boundary is that pointer input composes outside this component and follows the rendered target's
+lifetime.
 
 ## Future direction (not in scope now)
 

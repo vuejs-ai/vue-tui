@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, provide } from "vue";
-import { AppContextKey, TextContextKey } from "../context.ts";
+import { TextContextKey } from "../context.ts";
+import { useInternalRenderSession } from "../render-session.ts";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
 
@@ -16,9 +17,9 @@ const slots = defineSlots<{ default?: () => unknown }>();
 // provides true yet reads false here; descendants then see true and render inline.
 provide(TextContextKey, true);
 const insideText = inject(TextContextKey, false);
-const appCtx = inject(AppContextKey, null);
+const renderSession = useInternalRenderSession();
 
-const srEnabled = computed(() => appCtx?.isScreenReaderEnabled ?? false);
+const srEnabled = computed(() => renderSession.session.output.presentation === "screen-reader");
 const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 const srLabel = computed(() => (srEnabled.value && props.ariaLabel ? props.ariaLabel : null));
 const hasContent = computed(() => srLabel.value != null || slots.default != null);

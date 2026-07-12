@@ -12,7 +12,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Vue SFC & JSX** — `<template>`, TSX, or render functions — your choice
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
 - **Built-in input system** — keyboard handling, focus management, Tab navigation
-- **Terminal-native** — renders directly to stdout, purpose-built for CLI tools and AI agent interfaces
+- **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
 - **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
 `@vue-tui/runtime` is a terminal platform renderer parallel to `@vue/runtime-dom`, comparable to [React Ink](https://github.com/vadimdemedes/ink) but adapted for Vue's reactivity model.
@@ -31,7 +31,7 @@ If a coding agent changes visible terminal behavior, tell it to read the version
 node -p "require('node:path').join(require.resolve('@vue-tui/runtime/package.json'), '../docs/visual-development-feedback-loops.md')"
 ```
 
-The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`lastFrame()` from `@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) remains the fast assertion layer, but it is not the terminal's final post-emulation screen.
+The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) provides fast content-frame and modeled-screen assertions, while the visual loop exercises the built application through the real PTY path.
 
 `@vue-tui/runtime` ships the guide, not a controller, PTY library, terminal emulator, or image renderer. The coding-agent environment or application project supplies those capabilities.
 
@@ -87,19 +87,44 @@ useInput((input) => {
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `useInput(handler, opts?)`      | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
 | `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
+| `useDraggable(ref, opts?)`      | Full-screen element dragging — reactive position and drag state from a normal template ref   |
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
 | `useFocusManager()`             | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
-| `useWindowSize()`               | Reactive terminal dimensions — `{ columns, rows }`                                           |
+| `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities         |
+| `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |
 | `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
 | `useBoxMetrics(ref)`            | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
 | `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
 | `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
 | `useStdin()`                    | Access stdin stream and raw mode control                                                     |
-| `useStdout()`                   | Write directly to stdout                                                                     |
-| `useStderr()`                   | Write directly to stderr                                                                     |
-| `useIsScreenReaderEnabled()`    | Reactive `boolean` — whether screen-reader / accessibility mode is active                    |
+| `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
+| `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
+
+### Render-session facts
+
+`useRenderSession()` returns the authoritative readonly facts for the current render tree. The object identity stays stable for that tree. Its `host`, requested/effective `mode`, `output`, and `capabilities` are immutable session facts; `dimensions` is replaced atomically when the live host accepts a resize or refreshes dimensions after continuation. Use `session.output.presentation === "screen-reader"` when a component needs to adapt to the active linear presentation.
+
+| Session field         | Meaning                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `host`                | `"live"` for a mounted or modeled live app; `"string"` for synchronous document rendering               |
+| `mode`                | Requested mode, effective mode, and fallback for a live host; `null` for a string document              |
+| `output`              | Destination, dynamic-update cadence, and visual or screen-reader presentation                           |
+| `dimensions.terminal` | One coherent physical or modeled terminal size, or `null` when the host owns no terminal viewport       |
+| `dimensions.layout`   | Root layout columns and the numeric enforced row bound or `null` for unbounded height                   |
+| `capabilities`        | Immutable availability of stable origin, renderer-owned element hit testing, and coordinated suspension |
+
+`useLayoutSize()` derives readonly `columns` and `rows` refs from the same session, so destructuring preserves Vue reactivity. `rows.value` is `number | null`: a number is the enforced root layout bound, while `null` means the stream, transcript, or string document has no row bound. These composables must be called inside a vue-tui render tree.
+
+```ts
+import { useLayoutSize, useRenderSession } from "@vue-tui/runtime";
+
+const session = useRenderSession();
+const { columns, rows } = useLayoutSize();
+
+const isScreenReaderPresentation = session.output.presentation === "screen-reader";
+```
 
 ## App Lifecycle
 
@@ -118,20 +143,36 @@ await app.waitUntilExit();
 createApp(App).mount({ stdout, stdin, stderr });
 ```
 
+Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. Full-screen mode enables targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers on `<Box>` and `<Text>` when the app registers them; inline apps can still use the low-level `useMouseInput()` stream.
+
+Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use `<Static>` for completed history, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
+
+Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>`, `useStdout().write()`, `useStderr().write()`, and patched console calls coordinate with the live region and commit their output once. On a TTY, the coordinated `write()` functions accept styled multiline text: they retain SGR, OSC 8 hyperlinks, and line feeds while removing cursor/erase sequences, other OSC commands, and geometry-changing control bytes. Redirected stderr and non-TTY streams remain byte-exact. The `stdout`/`stderr` streams returned by those composables, direct `process.stdout.write()`, and other raw stream writes deliberately bypass sanitization and ownership coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
+
+If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
+
+On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that the session acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes the public session dimensions when available, otherwise keeps the last coherent size, starts a fresh Inline or transcript region, transactionally re-enters and repaints Fullscreen, or repaints a live stream using its refreshed unbounded layout, then restores still-requested input modes. This does not reserve the Ctrl+Z input byte.
+
+Normal Inline output remains on the main screen. Normal Fullscreen exit restores the previous main screen and does not replay the last viewport. Fatal exit is different: a durably painted Inline or transcript error remains visible, with a sanitized stderr report when that rich error was clipped, stdout was lost, or its first physical write failed; Fullscreen restores first and then writes the report to stderr. Final-stream fatal exit never prints a stale successful dynamic frame and writes the error to stderr.
+
+Mount, repaint, and teardown are exception-safe transactions. A partially initialized mount rolls back every resource it acquired, cleanup continues if one release throws, and an ordinary teardown or exit re-entered synchronously from a stream callback waits until the current acquisition or repaint is complete. A non-returning `process.exit()` or signal-exit callback instead restores owned terminal state immediately with synchronous writes and skips final user rendering and Vue lifecycle hooks. This protects the application's original error and prevents one failed cleanup from stranding another terminal mode.
+
 > **Dev (`@vue-tui/vite`) note:** in a dev entry, prefer fire-and-forget `mount()`. The dev
 > server already keeps the process alive, and a top-level `await app.waitUntilExit()` blocks the
 > entry module's evaluation — which wedges Vite's HMR full-reload queue after the first reload.
 > Reserve `await app.waitUntilExit()` for standalone/production entries (`node dist/main.js`).
 
-## Render to String
+## Render to string
 
-Render a component to a single output frame without driving a live terminal — useful for snapshots, logging, or non-interactive output:
+Render a component as a synchronous, width-constrained visual document without acquiring a terminal. The document has no terminal mode, bounded row count, input, resize lifecycle, or live updates:
 
 ```ts
 import { renderToString } from "@vue-tui/runtime";
 
-const frame = renderToString(App); // synchronous, returns a string
+const document = renderToString(App, { columns: 80 });
 ```
+
+The default width is 80 columns. Terminal mode and screen-reader presentation are deliberately not options on this public string API. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` or `useApp().waitUntilRenderFlush()` reports that the operation is unavailable.
 
 ## Links
 

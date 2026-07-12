@@ -230,7 +230,7 @@ describe("useCursor", () => {
     expect(lastFrame()).toContain("Hello");
   });
 
-  test("debug mode: useStdout().write() replays frame after write with cursor active", async () => {
+  test("deterministic host replays the frame after a stdout write with cursor active", async () => {
     let writeCount = 0;
     const App = defineComponent(() => {
       const { setCursorPosition } = useCursor();
@@ -256,8 +256,7 @@ describe("useCursor", () => {
 
     const { lastFrame } = await render(App);
     expect(lastFrame()).toContain("Hello");
-    // In debug mode, writeToStdout writes: data + fullStaticOutput + lastOutput.
-    // This means after the hook write, the frame should be replayed.
+    // The coordinated output path restores the active frame after the hook write.
     // At minimum, there should be more than one write (initial render + replay).
     expect(writeCount).toBeGreaterThan(1);
   });
@@ -313,16 +312,16 @@ describe("useCursor", () => {
     expect(positionAfterMount).toEqual({ x: 5, y: 0 });
   });
 
-  // --- Ink parity: debug mode stream isolation and replay ---
+  // --- Unthrottled live-stream isolation and replay ---
   //
   // These tests use createApp directly to access both stdout and stderr
-  // streams, mirroring the Ink tests that verify debug-mode write behavior.
+  // streams while keeping commit scheduling deterministic.
 
   /**
-   * Helper: mount a component via createApp in debug mode with access to
+   * Helper: mount a component via createApp with unthrottled commits and access to
    * both stdout and stderr streams.
    */
-  function mountDebug(component: ReturnType<typeof defineComponent>) {
+  function mountUnthrottled(component: ReturnType<typeof defineComponent>) {
     const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
     Object.assign(stdout, { columns: 100, rows: 100, isTTY: true });
     const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -346,7 +345,7 @@ describe("useCursor", () => {
     stderr.on("data", (chunk) => stderrWrites.push(chunk.toString()));
 
     const app = createApp(component);
-    app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
     return {
       stdoutWrites,
@@ -355,7 +354,7 @@ describe("useCursor", () => {
     };
   }
 
-  test("debug mode: useStdout().write() does not leak into stderr", async () => {
+  test("unthrottled mode: useStdout().write() does not leak into stderr", async () => {
     const App = defineComponent(() => {
       const { write } = useStdout();
 
@@ -366,7 +365,7 @@ describe("useCursor", () => {
       return () => <Text>Hello</Text>;
     });
 
-    const { stdoutWrites, stderrWrites, unmount } = mountDebug(App);
+    const { stdoutWrites, stderrWrites, unmount } = mountUnthrottled(App);
     await nextTick();
     await nextTick();
     await new Promise<void>((r) => setImmediate(r));
@@ -384,7 +383,7 @@ describe("useCursor", () => {
     unmount();
   });
 
-  test("debug mode: useStderr().write() replays latest frame without empty writes", async () => {
+  test("unthrottled mode: useStderr().write() replays latest frame without empty writes", async () => {
     const App = defineComponent(() => {
       const { write } = useStderr();
 
@@ -395,7 +394,7 @@ describe("useCursor", () => {
       return () => <Text>Hello</Text>;
     });
 
-    const { stdoutWrites, stderrWrites, unmount } = mountDebug(App);
+    const { stdoutWrites, stderrWrites, unmount } = mountUnthrottled(App);
     await nextTick();
     await nextTick();
     await new Promise<void>((r) => setImmediate(r));
@@ -420,7 +419,7 @@ describe("useCursor", () => {
     unmount();
   });
 
-  test("debug mode: useStdout().write() replays rerendered frame", async () => {
+  test("unthrottled mode: useStdout().write() replays the rerendered frame", async () => {
     const text = shallowRef("Initial");
     let triggerWrite: (() => void) | undefined;
 
@@ -440,30 +439,28 @@ describe("useCursor", () => {
       return () => <Text>{text.value}</Text>;
     });
 
-    const { stdoutWrites, unmount } = mountDebug(App);
+    const { stdoutWrites, unmount } = mountUnthrottled(App);
     await nextTick();
     await nextTick();
     await new Promise<void>((r) => setImmediate(r));
 
     // Trigger the write after re-render
+    const beforeExternalWrite = stdoutWrites.length;
     triggerWrite?.();
     await nextTick();
 
-    // The write should replay the UPDATED frame, not the initial one
-    expect(stdoutWrites.some((w) => w.includes("from stdout hook") && w.includes("Updated"))).toBe(
-      true,
-    );
-    // Should NOT replay the stale initial frame alongside the write
-    expect(stdoutWrites.some((w) => w.includes("from stdout hook") && w.includes("Initial"))).toBe(
-      false,
-    );
+    // The coordinated write and restored frame may be separate stream chunks.
+    const writesAfterExternal = stdoutWrites.slice(beforeExternalWrite).join("");
+    expect(writesAfterExternal).toContain("from stdout hook");
+    expect(writesAfterExternal).toContain("Updated");
+    expect(writesAfterExternal).not.toContain("Initial");
     // No empty writes
     expect(stdoutWrites.includes("")).toBe(false);
 
     unmount();
   });
 
-  test("debug mode: useStderr().write() replays rerendered frame", async () => {
+  test("unthrottled mode: useStderr().write() replays the rerendered frame", async () => {
     const text = shallowRef("Initial");
     let triggerWrite: (() => void) | undefined;
 
@@ -483,12 +480,13 @@ describe("useCursor", () => {
       return () => <Text>{text.value}</Text>;
     });
 
-    const { stdoutWrites, stderrWrites, unmount } = mountDebug(App);
+    const { stdoutWrites, stderrWrites, unmount } = mountUnthrottled(App);
     await nextTick();
     await nextTick();
     await new Promise<void>((r) => setImmediate(r));
 
     // Trigger the write after re-render
+    const beforeExternalWrite = stdoutWrites.length;
     triggerWrite?.();
     await nextTick();
 
@@ -499,12 +497,12 @@ describe("useCursor", () => {
     expect(stderrWrites.some((w) => w.includes("Initial"))).toBe(false);
 
     // stdout should replay the UPDATED frame after stderr write
-    const stdoutWritesAfterInitial = stdoutWrites.slice(1);
-    expect(stdoutWritesAfterInitial.some((w) => w.includes("Updated"))).toBe(true);
+    const stdoutWritesAfterExternal = stdoutWrites.slice(beforeExternalWrite);
+    expect(stdoutWritesAfterExternal.some((w) => w.includes("Updated"))).toBe(true);
     // Should NOT replay the stale initial frame
-    expect(stdoutWritesAfterInitial.some((w) => w.includes("Initial"))).toBe(false);
+    expect(stdoutWritesAfterExternal.some((w) => w.includes("Initial"))).toBe(false);
     // stderr data should NOT appear on stdout
-    expect(stdoutWritesAfterInitial.some((w) => w.includes("from stderr hook"))).toBe(false);
+    expect(stdoutWritesAfterExternal.some((w) => w.includes("from stderr hook"))).toBe(false);
 
     // No empty writes
     expect(stdoutWrites.includes("")).toBe(false);

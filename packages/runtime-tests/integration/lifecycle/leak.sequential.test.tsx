@@ -63,16 +63,20 @@ test.sequential("raw mode stays on when one of two useInput components unmounts"
   expect(terminal.rawMode.current).toBe(true);
 });
 
-test.sequential("waitUntilRenderFlush after unmount does not register beforeExit listener", async () => {
+test.sequential("mount owns one beforeExit listener until unmount", async () => {
   const App = defineComponent(() => () => <Text>Hello</Text>);
   const app = createApp(App);
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  const beforeMountCount = process.listenerCount("beforeExit");
 
-  const beforeWaitCount = process.listenerCount("beforeExit");
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  expect(process.listenerCount("beforeExit")).toBe(beforeMountCount + 1);
+
   app.unmount();
+  expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
+
   await app.waitUntilRenderFlush();
-  expect(process.listenerCount("beforeExit")).toBe(beforeWaitCount);
+  expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 });

@@ -1,4 +1,4 @@
-import type { VNodeChild } from "vue";
+import type { ComponentPublicInstance, VNodeChild } from "vue";
 
 export type DefaultSlot = () => VNodeChild;
 
@@ -13,6 +13,20 @@ export type DefaultChildren = VNodeChild | DefaultSlot | { default: DefaultSlot 
  * that prop to the default slot at runtime, so this is a type-only shim with no
  * runtime effect.
  */
-export type WithChildren<C, T = DefaultChildren> = C & {
-  new (): { $props: { children?: T } };
+export type PublicComponent<
+  Props,
+  Children = DefaultChildren,
+  Slots = { default?: DefaultSlot },
+> = {
+  new (): ComponentPublicInstance<Props> & {
+    $props: Props & { children?: Children };
+    $slots: Slots;
+  };
+};
+
+/** Public constructor shape for components that accept no children. */
+export type PublicLeafComponent<Props> = {
+  new (): ComponentPublicInstance<Props> & {
+    $props: Props & { children?: never };
+  };
 };

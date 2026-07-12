@@ -44,7 +44,7 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   });
 
   try {
-    app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
   } catch (e) {
     error = e as Error;
   }
@@ -135,7 +135,7 @@ test("useStdin().setRawMode is symmetric on a non-TTY: both enable AND disable t
 
   const app = createApp(App);
   app.waitUntilExit().catch(() => {});
-  app.mount({ stdout, stdin, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
   await nextTick();
   app.unmount();
   await nextTick();

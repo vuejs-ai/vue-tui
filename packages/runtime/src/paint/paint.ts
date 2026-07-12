@@ -9,7 +9,7 @@ import {
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
 import { applyChalk, applyColor } from "./text-style.ts";
-import { sanitizeAnsi } from "./sanitize-ansi.ts";
+import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
   TuiNode,
@@ -205,6 +205,10 @@ class Output {
       let offsetY = 0;
 
       for (let [index, line] of lines.entries()) {
+        // Every write operation is already split into structural rows. Remove
+        // C0/DEL and unsafe terminal controls before width calculation or
+        // clipping so the measured grid and emitted bytes stay identical.
+        line = sanitizeAnsi(line, { singleLine: true });
         const currentLine = output[y + offsetY];
 
         // Line can be missing if text is taller than pre-initialized output
@@ -246,7 +250,10 @@ class Output {
         // post-vertical-clip line index — unchanged from the loop counter, matching
         // Ink's `transformer(line, index)` where index is the entry index.
         for (const transformer of transformers) {
-          line = transformer(line, index);
+          // Transform is a line-to-line API. Sanitize every callback result so a
+          // transform cannot re-introduce cursor/erase controls after Text was
+          // sanitized or add physical rows that bypass layout and viewport bounds.
+          line = sanitizeAnsi(transformer(line, index), { singleLine: true });
         }
 
         const characters = this.caches.getStyledChars(line);
@@ -371,7 +378,7 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?
   // child wraps itself; the Box bg threads through unchanged), then wrap the whole
   // concatenation with THIS node's own style — Ink's parent-wraps-children model.
   const inner = squashInlineChildren(node.children, inheritedBg);
-  return sanitizeAnsi(applyOwnStyle(node.props, inner, inheritedBg));
+  return sanitizeAnsiMultiline(applyOwnStyle(node.props, inner, inheritedBg));
 }
 
 // Apply a Text node's OWN chalk styling as a wrap around its already-composed
@@ -438,7 +445,7 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
 // in the Output, never in squashTextNodes for the node it lives on. (G58)
 function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
-  return sanitizeAnsi(squashInlineChildren(node.children, inheritedBg));
+  return sanitizeAnsiMultiline(squashInlineChildren(node.children, inheritedBg));
 }
 
 // Squash a single inline child into styled text, recursing GENERICALLY into
@@ -482,7 +489,7 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
       if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
-      innerText = child.transform(innerText, index);
+      innerText = sanitizeAnsiMultiline(child.transform(innerText, index));
     }
     return innerText;
   }
@@ -710,7 +717,7 @@ function collectVirtualTextSpans(
     }
     if (child.type === "tui-transform") {
       const text = renderTransformAsText(child, inheritedBg);
-      out += text.length > 0 ? child.transform(text, 0) : text;
+      out += text.length > 0 ? sanitizeAnsiMultiline(child.transform(text, 0)) : text;
     }
   }
   return out;

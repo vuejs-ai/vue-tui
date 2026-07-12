@@ -1,17 +1,29 @@
 /// <reference types="vite-plus/test/globals" />
-import type { TuiApp } from "@vue-tui/runtime";
 
-const activeApps: TuiApp[] = [];
+const activeHosts = new Set<() => void>();
 
-export function trackApp(app: TuiApp): void {
-  activeApps.push(app);
+export function trackHost(dispose: () => void): () => void {
+  activeHosts.add(dispose);
+  return () => {
+    activeHosts.delete(dispose);
+  };
 }
 
 export function cleanup(): void {
-  for (const app of activeApps) {
-    app.unmount();
+  const disposers = Array.from(activeHosts);
+  activeHosts.clear();
+  const errors: unknown[] = [];
+
+  for (const dispose of disposers) {
+    try {
+      dispose();
+    } catch (error) {
+      errors.push(error);
+    }
   }
-  activeApps.length = 0;
+
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, "Failed to clean up test hosts.");
 }
 
 if (typeof afterEach === "function") {

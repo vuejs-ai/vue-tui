@@ -42,9 +42,6 @@ catalogs:
     strip-ansi:
       specifier: ^7.2.0
       version: 7.2.0
-    terminal-size:
-      specifier: ^4.0.1
-      version: 4.0.1
     tsdown:
       specifier: ^0.22.3
       version: 0.22.3
@@ -288,9 +285,6 @@ importers:
       '@alcalzone/ansi-tokenize':
         specifier: 'catalog:'
         version: 0.3.0
-      '@vue/runtime-core':
-        specifier: ^3.4.0
-        version: 3.5.34
       ansi-escapes:
         specifier: 'catalog:'
         version: 7.3.0
@@ -324,9 +318,6 @@ importers:
       string-width:
         specifier: ^8.0.0
         version: 8.2.1
-      terminal-size:
-        specifier: 'catalog:'
-        version: 4.0.1
       wrap-ansi:
         specifier: ^10.0.0
         version: 10.0.0
@@ -415,6 +406,12 @@ importers:
       '@vue-tui/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@xterm/addon-unicode11':
+        specifier: 'catalog:'
+        version: 0.9.0
+      '@xterm/headless':
+        specifier: 'catalog:'
+        version: 6.0.0
     devDependencies:
       '@types/node':
         specifier: ^24.12.4
@@ -2435,10 +2432,6 @@ packages:
     resolution: {integrity: sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==}
     engines: {node: '>=12'}
 
-  terminal-size@4.0.1:
-    resolution: {integrity: sha512-avMLDQpUI9I5XFrklECw1ZEUPJhqzcwSWsyyI8blhRLT+8N1jLJWLWWYQpB2q2xthq8xDvjZPISVh53T/+CLYQ==}
-    engines: {node: '>=18'}
-
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
 
@@ -4283,8 +4276,6 @@ snapshots:
   strip-ansi@7.2.0:
     dependencies:
       ansi-regex: 6.2.2
-
-  terminal-size@4.0.1: {}
 
   tinybench@2.9.0: {}
 

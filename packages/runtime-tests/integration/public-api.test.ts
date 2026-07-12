@@ -27,13 +27,13 @@ const PUBLIC_VALUE_EXPORTS = [
   "useFocus",
   "useFocusManager",
   "useInput",
-  "useIsScreenReaderEnabled",
+  "useLayoutSize",
   "useMouseInput",
   "usePaste",
+  "useRenderSession",
   "useStderr",
   "useStdin",
   "useStdout",
-  "useWindowSize",
   "measureElement",
   // Rendering
   "renderToString",
@@ -44,6 +44,11 @@ const PUBLIC_VALUE_EXPORTS = [
 
 test("public API surface is exactly the documented value-export set", () => {
   expect(Object.keys(api).sort()).toEqual([...PUBLIC_VALUE_EXPORTS].sort());
+});
+
+test("does not retain the superseded render-fact hooks", () => {
+  expect(api).not.toHaveProperty("useWindowSize");
+  expect(api).not.toHaveProperty("useIsScreenReaderEnabled");
 });
 
 // Ink keeps its `measure-text` module internal and does not re-export it. vue-tui

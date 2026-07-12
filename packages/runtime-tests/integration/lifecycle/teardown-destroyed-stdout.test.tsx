@@ -108,7 +108,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PlainApp);
-    app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
     // Let the initial render settle (cursor hidden at mount).
     await new Promise<void>((r) => setTimeout(r, 60));
@@ -132,7 +132,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(CursorApp);
-    app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     stdout.hardDestroy();
@@ -151,7 +151,6 @@ describe("teardown stdout writes on destroyed stdout", () => {
       stdout,
       stdin,
       stderr,
-      debug: false,
       exitOnCtrlC: false,
       // Force kitty enabled so dispose() attempts the disable-kitty escape.
       kittyKeyboard: { mode: "enabled" },
@@ -176,7 +175,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PlainApp);
-    app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
     await new Promise<void>((r) => setTimeout(r, 60));
 
@@ -197,7 +196,6 @@ describe("teardown stdout writes on destroyed stdout", () => {
       stdout,
       stdin,
       stderr,
-      debug: false,
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "enabled" },
     });

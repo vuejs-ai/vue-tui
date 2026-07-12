@@ -54,6 +54,24 @@ export interface SgrMouseWheelEvent {
 
 export type SgrMouseEvent = SgrMouseButtonEvent | SgrMouseWheelEvent;
 
+/**
+ * Lossless semantic view of one syntactically valid SGR mouse report.
+ *
+ * `event` is absent when the wire report uses a button/action combination the
+ * current runtime does not interpret. The report is still pointer input and
+ * keeps its source fields; callers must not turn it back into keyboard text.
+ */
+export interface SgrMouseReport {
+  readonly wireButton: number;
+  readonly x: number;
+  readonly y: number;
+  readonly final: "M" | "m";
+  readonly shift: boolean;
+  readonly meta: boolean;
+  readonly ctrl: boolean;
+  readonly event: SgrMouseEvent | undefined;
+}
+
 function parseSgrMouseSequence(input: string): SgrMouseSequence | undefined {
   const match = SGR_MOUSE_INPUT.exec(input);
   if (!match) return undefined;
@@ -62,7 +80,16 @@ function parseSgrMouseSequence(input: string): SgrMouseSequence | undefined {
   const x = Number(match[2]);
   const y = Number(match[3]);
   const final = match[4] as "M" | "m";
-  if (x < 1 || y < 1) return undefined;
+  if (
+    !Number.isSafeInteger(button) ||
+    button < 0 ||
+    !Number.isSafeInteger(x) ||
+    x < 1 ||
+    !Number.isSafeInteger(y) ||
+    y < 1
+  ) {
+    return undefined;
+  }
 
   return { button, x, y, final };
 }
@@ -107,53 +134,72 @@ function decodeWheelDirection(button: number): SgrMouseWheelEvent["direction"] |
   }
 }
 
-export function parseSgrMouseInput(input: string): SgrMouseEvent | undefined {
+export function parseSgrMouseReport(input: string): SgrMouseReport | undefined {
   const sequence = parseSgrMouseSequence(input);
   if (!sequence) return undefined;
 
   const modifiers = readModifiers(sequence.button);
 
-  if (sequence.final === "M") {
+  let event: SgrMouseEvent | undefined;
+
+  // JavaScript bitwise operators coerce through signed 32-bit integers. Keep
+  // larger valid decimal reports as pointer facts, but do not alias their low
+  // bits to a supported button or wheel action.
+  if (sequence.button > 0x7f) {
+    event = undefined;
+  } else if (sequence.final === "M") {
     const wheelButton = sequence.button & ~MODIFIER_MASK;
     const wheelDirection = decodeWheelDirection(wheelButton);
     if (wheelDirection) {
-      return {
+      event = {
         type: "wheel",
         direction: wheelDirection,
         x: sequence.x,
         y: sequence.y,
         ...modifiers,
       };
+    } else {
+      const isDrag = Boolean(sequence.button & DRAG_MASK);
+      const button = decodeButton(sequence.button & ~(MODIFIER_MASK | DRAG_MASK));
+      if (button) {
+        event = {
+          type: isDrag ? "drag" : "down",
+          button,
+          x: sequence.x,
+          y: sequence.y,
+          ...modifiers,
+        };
+      }
     }
-
-    const isDrag = Boolean(sequence.button & DRAG_MASK);
+  } else {
     const button = decodeButton(sequence.button & ~(MODIFIER_MASK | DRAG_MASK));
-    if (!button) return undefined;
-
-    return {
-      type: isDrag ? "drag" : "down",
-      button,
-      x: sequence.x,
-      y: sequence.y,
-      ...modifiers,
-    };
+    if (button) {
+      event = {
+        type: "up",
+        button,
+        x: sequence.x,
+        y: sequence.y,
+        ...modifiers,
+      };
+    }
   }
 
-  const button = decodeButton(sequence.button & ~(MODIFIER_MASK | DRAG_MASK));
-  if (!button) return undefined;
-
   return {
-    type: "up",
-    button,
+    wireButton: sequence.button,
     x: sequence.x,
     y: sequence.y,
+    final: sequence.final,
     ...modifiers,
+    event,
   };
 }
 
-export function parseMouseInput(input: string): MouseInputEvent | undefined {
-  const event = parseSgrMouseInput(input);
-  if (!event || event.type !== "wheel") return undefined;
+export function parseSgrMouseInput(input: string): SgrMouseEvent | undefined {
+  return parseSgrMouseReport(input)?.event;
+}
+
+export function toMouseInputEvent(event: SgrMouseEvent): MouseInputEvent | undefined {
+  if (event.type !== "wheel") return undefined;
   if (event.direction !== "up" && event.direction !== "down") return undefined;
 
   return {
@@ -165,4 +211,9 @@ export function parseMouseInput(input: string): MouseInputEvent | undefined {
     meta: event.meta,
     ctrl: event.ctrl,
   };
+}
+
+export function parseMouseInput(input: string): MouseInputEvent | undefined {
+  const event = parseSgrMouseInput(input);
+  return event ? toMouseInputEvent(event) : undefined;
 }

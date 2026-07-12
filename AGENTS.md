@@ -28,29 +28,28 @@
 - Behavior claims must be **run, not reasoned**: a parity assertion or `ink-divergences.md` "what Ink does" line is a hypothesis until a real harness against the pinned version (real frames/stderr/exit) confirms it. Source-reading and memory can mislead; when a run contradicts the code you read, trust the run.
 - `.agents/docs/ink-divergences.md` is the single record point for how vue-tui relates to Ink — deliberate divergences AND deliberate alignments (load-bearing or non-obvious parity), plus non-behavioral notes. When you make or discover such a decision, record it there and follow its "How to Classify an Entry" flow. Its governing principle: aligning to Ink is only a means to reduce bugs, never the goal — correctness and Vue philosophy outrank parity, so "because Ink does it" is never on its own a justification. Do not add placeholder or unsorted entries; if the classification is unclear, state that uncertainty in the entry's rationale. (Adding a `[VOUCHED @handle]` stamp still requires explicit human say-so.)
 
+<!-- PCR:START -->
 ## Project Context Records (PCR)
 
-This project follows **Project Context Records (PCR)** —
-methodology: https://github.com/hyf0/project-context-records. PCR keeps the
-project's durable design context — the _why_, the decisions, the architecture —
-so you inherit it instead of re-deriving or re-litigating what's already settled.
+This project follows **Project Context Records (PCR)** — methodology: https://github.com/hyf0/project-context-records. PCR keeps the project's durable design context — the *why*, the decisions, the architecture — so you inherit it instead of re-deriving or re-litigating what's already settled.
 
 When working here:
-
-- **Where they live.** Records are in `.agents/docs/` — one topic per file,
-  cross-linked with relative Markdown links (`[name](./name.md)`).
-- **Read first.** If a record covers the area you're touching, read it before acting.
-- **Record as you go.** Proactively write down context worth keeping — and whenever
-  a human asks you to. No required format, no fixed list of what qualifies: if it's
-  true about this project, not visible in the code, and useful beyond the moment,
-  it's worth a record.
-- **Keep it fresh.** If your change affects a record, update it in the same change —
-  a stale record is a trap, not an asset.
-- **Provenance.** An unstamped line is AI-accumulated: challenge and verify it freely.
-  A `[VOUCHED @handle]` stamp (on a line, or at the top of a file) means a human
-  vouched for it — treat it as settled; reopen or re-verify only on new evidence, a
-  changed constraint, or a human's say-so. Add a stamp only on a human's explicit
-  instruction; reading past a line, or not objecting, is not a stamp.
+- **Where they live.** Records are in `.agents/docs/`, one topic per file, cross-linked with relative Markdown links. A `README.md` there is the **map**: it routes code areas or hotspots to the exact record or heading. Create one when retrieval stops being a glance or one record grows into a long ledger.
+- **Read first.** Start from the map if present, else scan the folder. Open the exact records or headings that cover an area before changing or answering for it.
+- **Use the strongest durable form.** Put machine-checkable constraints in types, tests, lints, or CI; put local rationale beside the code with a link; use PCR for cross-cutting judgment, intent, and other context that must remain prose.
+- **Record as you go.** Capture context when a decision lands, a trap costs you, a human corrects you, or a human asks. If it is true about this project, not durable in a stronger form, and useful beyond the moment, it is worth a record. Report records you change so a human can review or vouch them.
+- **Keep it fresh.** Update affected records with the same change. When code and a record disagree, decide whether implementation drifted from intent or description went stale, then update the stale side; surface a vouched conflict. Back facts with durable evidence such as tests, reproducible commands, committed artifacts, stable URLs, or commit hashes — not ephemeral paths or missing screenshots.
+- **Provenance.** Unstamped text is AI-accumulated: challenge and verify it freely. `[VOUCHED @handle YYYY-MM-DD]` means the named human explicitly accepts the covered words as current project direction, not that a factual claim is proven. At a non-heading line's end it covers that line; on its own line as the first nonblank line below a non-title heading it covers that section; on its own line as the first nonblank line below the document title it covers the file. Never put a new stamp in heading text: it breaks link anchors. Legacy stamps before a title or in a heading retain the project's prior scope; never move or reinterpret them without explicit human approval. Add one only on explicit instruction. A stamp added by work under review counts only if the named human confirms it; an unchanged stamp on the target branch is inherited project state. Material edits or scope-boundary changes remove stamps; formatting keeps them only if the covered words stay identical. Legacy undated stamps remain valid until re-vouched.
+- **Distill when a human reviews.** Accumulation is noisy by design; the valve is a human review pass. Draft what to prune, merge, or promote, and flag vouches plausibly affected by changes to the areas or evidence they cover. The human decides and vouches.
+- **Unattended.** With no human between iterations: keep the running plan as one live record, overwritten as truth changes; tidy your own unstamped layer — merge duplicates, prune dead notes — never the vouched one; when evidence argues with vouched direction, record the conflict and stay inside that direction unless progress becomes impossible; end by drafting the distillation for the returning human, conflicts included. No run, however long or green, vouches anything.
+- **The basics.** The recommended starting list — most projects need these; draft the missing ones that apply:
+  - `goal.md` — audience, goal, and non-goals; enroll the README instead if it already covers them.
+  - `technology-stack.md` — why tools, restrictions, or pins exist; not a manifest dump.
+  - `architecture.md` — units, boundaries, and why the lines are where they are.
+  - `conventions.md` — deliberate departures from ecosystem defaults.
+  - `gotchas.md` — traps already paid for, each with its why.
+  - `DESIGN.md` — only for a visual surface; follow https://github.com/google-labs-code/design.md, keep it at the root, and enroll it in the map.
+<!-- PCR:END -->
 
 <!--VITE PLUS START-->
 

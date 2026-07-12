@@ -8,12 +8,26 @@ const KittyInput = defineComponent({
   },
   setup(props) {
     const { exit } = useApp();
+    const autoDetectionInputs: string[] = [];
 
     onMounted(() => {
       process.stdout.write("__READY__");
     });
 
     useInput((input, key) => {
+      if (props.test === "autoDetectionOnce") {
+        autoDetectionInputs.push(input);
+        if (input === "b") {
+          setTimeout(() => {
+            const observed = JSON.stringify(autoDetectionInputs);
+            process.stdout.write(`__AUTO_INPUTS__:${observed}`);
+            if (observed === '["a","b"]') exit();
+            else exit(new Error(`unexpected auto-detection input: ${observed}`));
+          }, 30);
+        }
+        return;
+      }
+
       if (props.test === "super" && input === "s" && key.super) {
         exit();
         return;
@@ -41,8 +55,8 @@ const KittyInput = defineComponent({
 
       // Ctrl+Shift+C must NOT be treated as Ctrl+C exit (it's "copy" in many
       // terminals). Even with exitOnCtrlC on, the kitty protocol disambiguates
-      // it (\x1b[67;6u -> input "C", ctrl+shift), so it must reach the handler.
-      if (props.test === "ctrlShiftC" && input === "C" && key.ctrl && key.shift) {
+      // it (\x1b[99;6u -> input "c", ctrl+shift), so it must reach the handler.
+      if (props.test === "ctrlShiftC" && input === "c" && key.ctrl && key.shift) {
         process.stdout.write("__CTRL_SHIFT_C__");
         exit();
         return;
@@ -136,6 +150,11 @@ const testName = process.argv[2];
 if (testName === "kittyCtrlCExit" || testName === "ctrlShiftC") {
   const app = createApp(KittyInput, { test: testName });
   app.mount({ exitOnCtrlC: true });
+  await app.waitUntilExit();
+  console.log("exited");
+} else if (testName === "autoDetectionOnce") {
+  const app = createApp(KittyInput, { test: testName });
+  app.mount({ exitOnCtrlC: false, kittyKeyboard: { mode: "auto" } });
   await app.waitUntilExit();
   console.log("exited");
 } else {

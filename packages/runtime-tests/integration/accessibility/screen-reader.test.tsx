@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Box, Text, Transform, Newline, Static, createApp } from "@vue-tui/runtime";
+import { Box, Text, Transform, Newline, Static, createApp, renderToString } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 import {
   createRoot,
@@ -9,7 +9,7 @@ import {
   createTextLeaf,
   attachYoga,
   renderScreenReaderOutput,
-  renderToStringWithScreenReader as renderToString,
+  renderToStringWithScreenReader,
   type AppContext,
 } from "@vue-tui/runtime/internal";
 import {
@@ -35,9 +35,6 @@ function createTestAppContext(): AppContext {
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
-    debug: false,
-    interactive: false,
-    isScreenReaderEnabled: false,
     isRawModeSupported: false,
     setRawMode: () => {},
     writeToStdout: () => {},
@@ -402,13 +399,12 @@ describe("Transform accessibility", () => {
   // G21 follow-up, finding 2: squashTextContent must pass the transform's
   // positional sibling index (not hardcoded 0) so SR output matches paint.
   test("nested <Transform> as 2nd child of <Text> gets index 1 in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Text>
           a<Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
         </Text>
       )),
-      { isScreenReaderEnabled: true },
     );
     // Transform is the 2nd child (index 1) of the Text node — must receive 1,
     // not 0, matching paint.ts and Ink squash-text-nodes.ts:13,38 behavior.
@@ -425,7 +421,7 @@ describe("Transform accessibility", () => {
   // nodes, line 34-39) — so a Transform directly under a Box yields the bare
   // concatenated children, no wrapping.
   test("<Transform> under <Box> concatenates children with no newline in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Transform transform={(s: string) => `[${s}]`}>
@@ -434,7 +430,6 @@ describe("Transform accessibility", () => {
           </Transform>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     // Children are concatenated ("ab"), NOT newline-joined ("a\nb").
     expect(output).toBe("ab");
@@ -448,9 +443,8 @@ describe("Transform accessibility", () => {
   // → "ab". Previously vue-tui dropped bare text-leaf children of a transform in
   // the SR squash, yielding "".
   test("G58: standalone <Transform> with bare-string children appears in screen-reader output", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => <Transform transform={(s: string) => `<${s}>`}>ab</Transform>),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("ab");
   });
@@ -464,13 +458,12 @@ describe("Transform accessibility", () => {
   // child transform via the top-level SR rule (which skips the child's own fn),
   // yielding "x".
   test("G58 MF3: nested <Transform>'s own fn IS applied inside a standalone <Transform> (SR)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => `(outer ${s})`}>
           <Transform transform={(s: string) => `{${s}}`}>x</Transform>
         </Transform>
       )),
-      { isScreenReaderEnabled: true },
     );
     // Inner (child) fn applied → "{x}"; outer (top-level) fn NOT applied.
     expect(output).toBe("{x}");
@@ -480,13 +473,12 @@ describe("Transform accessibility", () => {
   // contributes its line break to the squashed SR text. Ink reference:
   // `<Transform>a<Newline/>b</Transform>` SR → "a\nb".
   test("G58: standalone <Transform> with <Newline> appears in screen-reader output", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => `<${s}>`}>
           a<Newline />b
         </Transform>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("a\nb");
   });
@@ -497,14 +489,13 @@ describe("Transform accessibility", () => {
   // the SR squash path must skip comment nodes when indexing the transform —
   // staying in lockstep with paint and measurement.
   test("G52: null sibling does not shift nested <Transform> index in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Text>
           a{null}
           <Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
         </Text>
       )),
-      { isScreenReaderEnabled: true },
     );
     // The null produces a comment that must NOT take a slot: a=0, Transform=1.
     expect(output).toBe("ab[1]");
@@ -528,11 +519,10 @@ describe("Transform accessibility", () => {
   // Ink reference (v7.0.4, SR on): `<Transform accessibilityLabel="Acc"/>` → "".
   // Previously vue-tui ran the SR/label branch first and emitted "Acc".
   test("P19: childless <Transform accessibilityLabel> emits nothing in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => s} accessibilityLabel="Acc" />
       )),
-      { isScreenReaderEnabled: true },
     );
     // Null guard fires first → no node → no label text.
     expect(output).toBe("");
@@ -542,13 +532,12 @@ describe("Transform accessibility", () => {
   // <Transform accessibilityLabel="Acc"> that HAS children still emits the label
   // in SR mode. Ink reference (SR on): label substitutes for children → "Acc".
   test("P19 control: <Transform accessibilityLabel> WITH children still emits label in SR mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => s} accessibilityLabel="Acc">
           <Text>x</Text>
         </Transform>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Acc");
   });
@@ -565,32 +554,29 @@ describe("screen-reader ANSI sanitization (Ink parity)", () => {
   const ERASE_SCREEN = "\x1b[2J";
 
   test("strips an erase CSI embedded in <Text> in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => <Text>{`a${ERASE_SCREEN}b`}</Text>),
-      { isScreenReaderEnabled: true },
     );
     // The erase sequence is stripped; visible chars survive.
     expect(output).toBe("ab");
   });
 
   test("strips an erase CSI in <Text> nested under <Box> in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Text>{`x${ERASE_SCREEN}y`}</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("xy");
   });
 
   test("strips an erase CSI inside a standalone <Transform> in screen-reader mode", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => s}>{`p${ERASE_SCREEN}q`}</Transform>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("pq");
   });
@@ -601,9 +587,8 @@ describe("screen-reader ANSI sanitization (Ink parity)", () => {
     // sanitizeAnsi (sanitize-ansi.ts), not a blanket ANSI strip.
     // eslint-disable-next-line no-control-regex -- SGR codes are control chars; asserting they survive is the point
     const colored = "a\x1b[31mb\x1b[39mc";
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => <Text>{`${colored}${ERASE_SCREEN}`}</Text>),
-      { isScreenReaderEnabled: true },
     );
     // SGR kept, trailing erase stripped.
     expect(output).toBe(colored);
@@ -651,31 +636,29 @@ describe("integration: aria props via render", () => {
 
 describe("screen reader enabled mode", () => {
   test("render aria-label on Text in screen-reader mode replaces children", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Text aria-label="Screen-reader only">visible text</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Screen-reader only");
   });
 
   test("render aria-label on Box in screen-reader mode replaces children", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-label="Screen-reader only">
           <Text>Not visible to screen readers</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Screen-reader only");
   });
 
   test("omit ANSI styling in screen-reader output", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Text bold color="green" inverse underline>
@@ -683,20 +666,18 @@ describe("screen reader enabled mode", () => {
           </Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Styled content");
   });
 
   test("render multiple Text components", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column">
           <Text>Hello</Text>
           <Text>World</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Hello\nWorld");
   });
@@ -708,14 +689,13 @@ describe("screen reader enabled mode", () => {
   // mirrored into node.props, so an absent flexDirection must be treated as
   // "row" in screen-reader.ts. (Buggy behavior joined with "\n".)
   test("render default Box (no flexDirection) joins children with space", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Text>Hello</Text>
           <Text>World</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Hello World");
   });
@@ -725,14 +705,13 @@ describe("screen reader enabled mode", () => {
   // join with a SPACE *and* reverse child order (Ink parity: reverse directions
   // flip the visual/announced order).
   test("render Box flexDirection=row-reverse joins with space and reverses children", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="row-reverse">
           <Text>Hello</Text>
           <Text>World</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     // row-reverse: space separator + reversed order → "World Hello".
     expect(output).toBe("World Hello");
@@ -741,14 +720,13 @@ describe("screen reader enabled mode", () => {
   // G39 follow-up: column-reverse must join with a NEWLINE (non-row separator)
   // *and* reverse child order.
   test("render Box flexDirection=column-reverse joins with newline and reverses children", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column-reverse">
           <Text>Hello</Text>
           <Text>World</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     // column-reverse: newline separator + reversed order → "World\nHello".
     expect(output).toBe("World\nHello");
@@ -817,7 +795,7 @@ describe("screen reader enabled mode", () => {
   });
 
   test("render nested Box components with Text", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column">
           <Text>Hello</Text>
@@ -826,7 +804,6 @@ describe("screen reader enabled mode", () => {
           </Box>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Hello\nWorld");
   });
@@ -835,7 +812,7 @@ describe("screen reader enabled mode", () => {
     const NullComponent: FunctionalComponent = () => null;
     NullComponent.displayName = "NullComponent";
 
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column">
           <Text>Hello</Text>
@@ -843,49 +820,45 @@ describe("screen reader enabled mode", () => {
           <Text>World</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Hello\nWorld");
   });
 
   test("render with aria-state.busy", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-state={{ busy: true }}>
           <Text>Loading</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("(busy) Loading");
   });
 
   test("render with aria-state.disabled", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="button" aria-state={{ disabled: true }}>
           <Text>Submit</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("button: (disabled) Submit");
   });
 
   test("render with aria-state.expanded", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="combobox" aria-state={{ expanded: true }}>
           <Text>Select</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("combobox: (expanded) Select");
   });
 
   test("render multi-line text with roles", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column" aria-role="list">
           <Box aria-role="listitem">
@@ -896,19 +869,17 @@ describe("screen reader enabled mode", () => {
           </Box>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("list: listitem: Item 1\nlistitem: Item 2");
   });
 
   test("render text for screen readers with aria-hidden", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-hidden>
           <Text>Not visible to screen readers</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("");
   });
@@ -917,7 +888,7 @@ describe("screen reader enabled mode", () => {
     const items = ["Red", "Green", "Blue"];
     const selectedIndex = 1;
 
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="list" flexDirection="column">
           <Text>Select a color:</Text>
@@ -933,7 +904,6 @@ describe("screen reader enabled mode", () => {
           ))}
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe(
       "list: Select a color:\nlistitem: 1. Red\nlistitem: (selected) 2. Green\nlistitem: 3. Blue",
@@ -941,43 +911,40 @@ describe("screen reader enabled mode", () => {
   });
 
   test("render with aria-state.multiline", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="textbox" aria-state={{ multiline: true }}>
           <Text>Hello</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("textbox: (multiline) Hello");
   });
 
   test("render with aria-state.readonly", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="textbox" aria-state={{ readonly: true }}>
           <Text>Hello</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("textbox: (readonly) Hello");
   });
 
   test("render with aria-state.required", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="textbox" aria-state={{ required: true }}>
           <Text>Name</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("textbox: (required) Name");
   });
 
   test("render nested multi-line text", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="row">
           <Box flexDirection="column">
@@ -986,13 +953,12 @@ describe("screen reader enabled mode", () => {
           </Box>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Line 1\nLine 2");
   });
 
   test("render listbox with multiselectable options", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column" aria-role="listbox" aria-state={{ multiselectable: true }}>
           <Box aria-role="option" aria-state={{ selected: true }}>
@@ -1006,7 +972,6 @@ describe("screen reader enabled mode", () => {
           </Box>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe(
       "listbox: (multiselectable) option: (selected) Option 1\noption: Option 2\noption: (selected) Option 3",
@@ -1019,7 +984,7 @@ describe("screen reader enabled mode", () => {
   // skipStaticElements:true), discarding the captured static output. Ink's SR
   // renderer returns staticOutput when node.staticNode exists (renderer.ts:24-33).
   test("renderToString in SR mode includes <Static> item text (does not drop it)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["First", "Second"];
         return () => (
@@ -1037,7 +1002,6 @@ describe("screen reader enabled mode", () => {
           </Box>
         );
       }),
-      { isScreenReaderEnabled: true },
     );
     // Static content must be present (it was previously discarded).
     expect(output).toContain("First");
@@ -1055,7 +1019,7 @@ describe("screen reader enabled mode", () => {
   // matching how screen-reader.ts linearizes a container (row/row-reverse → " ",
   // *-reverse reverses children). The default column case still joins with "\n".
   test("renderToString in SR mode honors Static flexDirection=row (space separator)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["Alpha", "Beta"];
         return () => (
@@ -1066,14 +1030,13 @@ describe("screen reader enabled mode", () => {
           </Static>
         );
       }),
-      { isScreenReaderEnabled: true },
     );
     // Row direction uses a space separator (screen-reader.ts:76), not "\n".
     expect(output).toBe("Alpha Beta");
   });
 
   test("renderToString in SR mode honors Static flexDirection=row-reverse (reversed, space)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["Alpha", "Beta"];
         return () => (
@@ -1084,14 +1047,13 @@ describe("screen reader enabled mode", () => {
           </Static>
         );
       }),
-      { isScreenReaderEnabled: true },
     );
     // row-reverse reverses child order (screen-reader.ts:79-82) + space separator.
     expect(output).toBe("Beta Alpha");
   });
 
   test("renderToString in SR mode honors Static flexDirection=column-reverse (reversed, newline)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["Alpha", "Beta"];
         return () => (
@@ -1102,14 +1064,13 @@ describe("screen reader enabled mode", () => {
           </Static>
         );
       }),
-      { isScreenReaderEnabled: true },
     );
     // column-reverse reverses order, newline separator (default non-row).
     expect(output).toBe("Beta\nAlpha");
   });
 
   test("renderToString in SR mode default Static (column) joins with newline, forward order", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["Alpha", "Beta"];
         return () => (
@@ -1120,7 +1081,6 @@ describe("screen reader enabled mode", () => {
           </Static>
         );
       }),
-      { isScreenReaderEnabled: true },
     );
     // Default column: forward order, newline separator (unchanged behavior).
     expect(output).toBe("Alpha\nBeta");
@@ -1134,9 +1094,8 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // Ink screen-reader.tsx:78-84 — aria-label-only <Text> (no children) emits the
   // label. Component path: text.ts substitutes ariaLabel for an absent default slot.
   test("aria-label-only Text (no children) emits the label", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => <Text aria-label="Screen-reader only" />),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Screen-reader only");
   });
@@ -1145,9 +1104,8 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // label. Component path: box.ts builds a label text node when SR + ariaLabel and
   // there is no default slot.
   test("aria-label-only Box (no children) emits the label", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => <Box aria-label="Screen-reader only" />),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Screen-reader only");
   });
@@ -1157,7 +1115,7 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // the DISPLAY_NONE check in screen-reader.ts is exercised against live yoga, not
   // a hand-built fixture).
   test("display:none subtree is skipped (live component path)", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
           <Box display="none">
@@ -1166,7 +1124,6 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
           <Text>Visible</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Visible");
   });
@@ -1175,7 +1132,7 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // child is a ROW joins the grandchildren with a SPACE (the row separator),
   // distinct from the column case at :304-318 which joins with "\n".
   test("column parent containing a row child joins grandchildren with a space", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box flexDirection="column">
           <Box flexDirection="row">
@@ -1184,46 +1141,42 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
           </Box>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("Line 1 Line 2");
   });
 
   // Ink screen-reader.tsx:186-196 — single box, checkbox role + checked state.
   test("single box checkbox + checked", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="checkbox" aria-state={{ checked: true }}>
           <Text>Accept terms</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("checkbox: (checked) Accept terms");
   });
 
   // Ink screen-reader.tsx:277-287 — single box, option role + selected state.
   test("single box option + selected", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="option" aria-state={{ selected: true }}>
           <Text>Blue</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("option: (selected) Blue");
   });
 
   // Ink screen-reader.tsx:238-248 — single box, listbox role + multiselectable.
   test("single box listbox + multiselectable", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="listbox" aria-state={{ multiselectable: true }}>
           <Text>Options</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("listbox: (multiselectable) Options");
   });
@@ -1232,13 +1185,12 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // order is preserved (Object.keys), so checked precedes disabled. This pins the
   // multi-state join format, which Ink derives the same way from its aria-state object.
   test("multiple truthy aria-state keys join with comma-space", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="checkbox" aria-state={{ checked: true, disabled: true }}>
           <Text>X</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("checkbox: (checked, disabled) X");
   });
@@ -1246,13 +1198,12 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // Ink screen-reader.tsx:32-43 — role-only box (no state) via the component path
   // (the existing suite only covered this through the hand-built unit fixture).
   test("role-only box (button) via component path", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box aria-role="button">
           <Text>Click me</Text>
         </Box>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("button: Click me");
   });
@@ -1263,13 +1214,12 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
   // top-level transform fn to its caller). So a lowercase child + an uppercasing
   // transform still yields the bare label, NOT "X" uppercased nor "LOWERCASE".
   test("Transform accessibilityLabel replaces children; transform not applied at top level", () => {
-    const output = renderToString(
+    const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Transform transform={(s: string) => s.toUpperCase()} accessibilityLabel="X">
           <Text>lowercase</Text>
         </Transform>
       )),
-      { isScreenReaderEnabled: true },
     );
     expect(output).toBe("X");
   });

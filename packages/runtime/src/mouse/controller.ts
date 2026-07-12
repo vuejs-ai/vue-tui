@@ -51,7 +51,7 @@ type MutableWheelEvent = TuiWheelEvent & {
 
 const CLICK_DETAIL_WINDOW_MS = 500;
 const INLINE_MOUSE_WARNING =
-  "[vue-tui] Mouse handlers only fire in fullscreen mode. Use app.mount({ fullscreen: true }) for targeted element mouse events, or useMouseInput() for raw inline mouse input.";
+  '[vue-tui] Mouse handlers only fire in fullscreen mode. Use app.mount({ mode: "fullscreen" }) for targeted element mouse events, or useMouseInput() for raw inline mouse input.';
 
 function hasMouseHandlers(node: TuiNode): boolean {
   const handlers = (node as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;
@@ -90,6 +90,7 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   let warnedInline = false;
   let rawModeAcquired = false;
   let mouseModeToken: symbol | undefined;
+  let detachInputRoute: (() => void) | undefined;
   let lastPointer: { screenX: number; screenY: number } | undefined;
   let lastDown: { node: TuiNode; button: MouseButton } | undefined;
   let lastClick:
@@ -124,11 +125,23 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
     stdin.acquireRawMode();
     try {
       mouseModeToken = stdin.acquireSgrMouseMode("drag");
-      stdin.internal_eventEmitter.on("internal_mouse", onRawMouse);
+      detachInputRoute = stdin.internal_routes.attach("internal_mouse", onRawMouse);
       rawModeAcquired = true;
     } catch (error) {
+      const token = mouseModeToken;
       mouseModeToken = undefined;
-      stdin.releaseRawMode();
+      if (token) {
+        try {
+          stdin.releaseSgrMouseMode(token);
+        } catch {
+          // Preserve the attach failure while still attempting every rollback.
+        }
+      }
+      try {
+        stdin.releaseRawMode();
+      } catch {
+        // Preserve the attach failure; raw-mode teardown was still attempted.
+      }
       throw error;
     }
   }
@@ -136,12 +149,28 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   function detach() {
     if (!rawModeAcquired) return;
     rawModeAcquired = false;
-    stdin.internal_eventEmitter.off("internal_mouse", onRawMouse);
-    if (mouseModeToken) {
-      stdin.releaseSgrMouseMode(mouseModeToken);
-      mouseModeToken = undefined;
+    const token = mouseModeToken;
+    mouseModeToken = undefined;
+    const errors: unknown[] = [];
+    try {
+      detachInputRoute?.();
+      detachInputRoute = undefined;
+    } catch (error) {
+      errors.push(error);
     }
-    stdin.releaseRawMode();
+    if (token) {
+      try {
+        stdin.releaseSgrMouseMode(token);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    try {
+      stdin.releaseRawMode();
+    } catch (error) {
+      errors.push(error);
+    }
+    if (errors.length > 0) throw errors[0];
   }
 
   function reconcileArmed() {
@@ -387,6 +416,9 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
   function removeNode(node: TuiNode) {
     handlerNodes.delete(node);
     draggables.delete(node);
+    for (let index = hitMap.length - 1; index >= 0; index--) {
+      if (hitMap[index]!.node === node) hitMap.splice(index, 1);
+    }
     if (capturedNode === node) {
       capturedNode = undefined;
       activeDrag = undefined;
@@ -434,7 +466,21 @@ export function createMouseController(options: CreateMouseControllerOptions): Mo
       }
       registrations.add(registration);
       if (!fullscreen) warnInlineOnce();
-      reconcileArmed();
+      try {
+        reconcileArmed();
+      } catch (error) {
+        // The caller receives no disposer when acquisition throws. Roll the
+        // registration back here so it cannot become an ownerless request that
+        // keeps raw/SGR mouse state armed after a later registration releases.
+        registrations.delete(registration);
+        if (registrations.size === 0) draggables.delete(node);
+        try {
+          reconcileArmed();
+        } catch {
+          // Preserve the acquisition error after attempting rollback.
+        }
+        throw error;
+      }
       return () => {
         const current = draggables.get(node);
         if (!current) return;

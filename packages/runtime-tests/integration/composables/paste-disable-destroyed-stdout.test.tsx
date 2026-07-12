@@ -98,7 +98,7 @@ describe("bracketed-paste disable on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
     // Let the initial render + usePaste's attach (enables paste mode, writes
     // \x1b[?2004h) settle.
@@ -123,7 +123,7 @@ describe("bracketed-paste disable on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(stdout.chunks.join("")).toContain(PASTE_ON);

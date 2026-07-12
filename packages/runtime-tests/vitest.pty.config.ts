@@ -29,7 +29,7 @@ export default defineConfig({
     // they reach the fd before the process dies and the tests pass deterministically
     // without any retry. If a genuine parent-side onData read-race ever resurfaces,
     // scope a retry to that suite/test only (e.g. `test(name, { retry: 2 }, fn)`).
-    // CI:"false" so the runner's CI=true doesn't flip interactive detection off
+    // CI:"false" so the runner's CI=true doesn't flip default live updates off
     // for any in-process render tests under this config (the PTY child helpers
     // set it per-spawn, but vitest-level tests need it too).
     env: { FORCE_COLOR: "3", CI: "false" },

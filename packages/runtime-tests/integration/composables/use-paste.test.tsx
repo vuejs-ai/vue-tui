@@ -31,6 +31,34 @@ describe("usePaste", () => {
     expect(received.value).toBe("pasted");
   });
 
+  test("paste fallback never runs the application Ctrl+C default", async () => {
+    const received: Array<{ input: string; ctrl: boolean }> = [];
+    const App = defineComponent(() => {
+      useInput((input, key) => received.push({ input, ctrl: key.ctrl }));
+      return () => <Text>listening</Text>;
+    });
+    const { stdin, unmount } = await render(App, { exitOnCtrlC: true });
+
+    await stdin.write("\x1b[200~\x03\x1b[201~");
+
+    expect(received).toEqual([{ input: "\x03", ctrl: false }]);
+    unmount();
+  });
+
+  test("paste fallback preserves escape and query-like payload as text", async () => {
+    const received: Array<{ input: string; upArrow: boolean }> = [];
+    const App = defineComponent(() => {
+      useInput((input, key) => received.push({ input, upArrow: key.upArrow }));
+      return () => <Text>listening</Text>;
+    });
+    const { stdin } = await render(App);
+    const text = "\x1b[A\x1b[?31u";
+
+    await stdin.write(`\x1b[200~${text}\x1b[201~`);
+
+    expect(received).toEqual([{ input: text, upArrow: false }]);
+  });
+
   test("respects isActive option", async () => {
     const pasted = shallowRef("");
     const active = shallowRef(false);

@@ -169,26 +169,23 @@ const parseEscapeSequence = (input: string, escapeIndex: number): ParsedEscapeSe
 };
 
 /**
- * Split a chunk of non-escape text so that backspace bytes (`0x7F` and `0x08`)
- * become individual events. When a user holds the backspace key, the terminal
- * sends repeated bytes in a single stdin chunk. Without splitting,
- * `parseKeypress` receives the multi-byte string and fails to recognize it as a
- * key event, corrupting the input state.
- *
- * Other control characters like `\r` and `\t` are NOT split because they can
- * legitimately appear inside pasted text.
+ * Split C0 and DEL control bytes outside bracketed paste into individual
+ * events. A Node stdin chunk is not a key boundary and may batch ordinary text
+ * with Ctrl+C, Return, Tab, or repeated Backspace. Kitty keyboard text is UTF-8
+ * without C0 bytes, while bracketed paste has already been framed separately,
+ * so retaining a control inside a text run would lose a known key fact.
  */
-const splitBackspaceBytes = (text: string, events: InputEvent[]): void => {
+const splitControlBytes = (text: string, events: InputEvent[]): void => {
   let textSegmentStart = 0;
 
   for (let index = 0; index < text.length; index++) {
-    const character = text[index]!;
-    if (character === "" || character === "") {
+    const codeUnit = text.charCodeAt(index);
+    if (codeUnit <= 0x1f || codeUnit === 0x7f) {
       if (index > textSegmentStart) {
         events.push(text.slice(textSegmentStart, index));
       }
 
-      events.push(character);
+      events.push(text[index]!);
       textSegmentStart = index + 1;
     }
   }
@@ -209,7 +206,7 @@ const parseKeypresses = (input: string): ParsedInput => {
   while (index < input.length) {
     const escapeIndex = input.indexOf(escape, index);
     if (escapeIndex === -1) {
-      splitBackspaceBytes(input.slice(index), events);
+      splitControlBytes(input.slice(index), events);
       return {
         events,
         pending: "",
@@ -217,7 +214,7 @@ const parseKeypresses = (input: string): ParsedInput => {
     }
 
     if (escapeIndex > index) {
-      splitBackspaceBytes(input.slice(index, escapeIndex), events);
+      splitControlBytes(input.slice(index, escapeIndex), events);
     }
 
     const parsedEscapeSequence = parseEscapeSequence(input, escapeIndex);
@@ -249,6 +246,7 @@ const parseKeypresses = (input: string): ParsedInput => {
 
 export type InputParser = {
   push: (chunk: string) => InputEvent[];
+  peekPending: () => string;
   hasPendingEscape: () => boolean;
   flushPendingEscape: () => string | undefined;
   reset: () => void;
@@ -263,10 +261,18 @@ export const createInputParser = (): InputParser => {
       pending = parsedInput.pending;
       return parsedInput.events;
     },
+    peekPending() {
+      return pending;
+    },
     hasPendingEscape() {
       // Don't trigger the escape flush timer while assembling a paste start
-      // marker (`[200` and then `~`) or while waiting for paste end.
-      return pending.startsWith(escape) && !pending.startsWith(pasteStart) && pending !== "[200";
+      // marker once `ESC[2` makes that intent distinguishable, or while waiting
+      // for paste end. Bare `ESC` and `ESC[` retain the finite ambiguity timer
+      // so a real Escape key cannot be held forever.
+      const isRecognizablePasteStart = pending.length >= 3 && pasteStart.startsWith(pending);
+      return (
+        pending.startsWith(escape) && !isRecognizablePasteStart && !pending.startsWith(pasteStart)
+      );
     },
     flushPendingEscape() {
       if (!pending.startsWith(escape)) {

@@ -89,4 +89,34 @@ describe("build output: package.json exports resolve to built files", () => {
       });
     }
   }
+
+  test("runtime delegates renderer state and types to the consumer's single Vue peer", () => {
+    const pkgDir = path.join(packagesDir, "runtime");
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    };
+    const distDir = path.join(pkgDir, "dist");
+    const runtimeOutput = fs
+      .readdirSync(distDir)
+      .filter((file) => file.endsWith(".mjs"))
+      .map((file) => fs.readFileSync(path.join(distDir, file), "utf8"))
+      .join("\n");
+    const declarations = fs
+      .readdirSync(distDir)
+      .filter((file) => file.endsWith(".d.mts"))
+      .map((file) => fs.readFileSync(path.join(distDir, file), "utf8"))
+      .join("\n");
+
+    expect(pkg.peerDependencies?.vue).toBeDefined();
+    expect(pkg.dependencies?.["@vue/runtime-core"]).toBeUndefined();
+    expect(runtimeOutput).toContain('from "vue"');
+    expect(runtimeOutput).not.toContain('from "@vue/runtime-core"');
+    expect(declarations).toContain('from "vue"');
+    expect(declarations).not.toContain('from "@vue/runtime-core"');
+    expect(declarations).not.toContain("DefineComponent<");
+    // This Vue augmentation is present only when @vue/runtime-core declarations
+    // were accidentally inlined into our own public declaration bundle.
+    expect(declarations).not.toContain("runtimeCoreBailTypes");
+  });
 });

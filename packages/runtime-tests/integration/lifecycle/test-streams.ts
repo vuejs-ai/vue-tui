@@ -1,5 +1,6 @@
 import { PassThrough, Writable } from "node:stream";
 import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
+import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
 
 export interface FakeWritableOptions {
   columns?: number;
@@ -62,6 +63,7 @@ export function createDelayedWriteCallbackStdout({
   }) as unknown as NodeJS.WriteStream;
 
   stdout.columns = 100;
+  stdout.rows = 100;
   stdout.isTTY = true;
   return stdout;
 }
@@ -81,5 +83,7 @@ export function captureWrites(stdout: NodeJS.WriteStream): string[] {
 }
 
 export function getContentWrites(writes: string[]): string[] {
-  return writes.filter((w) => w !== "" && !w.startsWith("\x1b[?25") && w !== bsu && w !== esu);
+  return writes.filter(
+    (w) => w !== "" && w !== nextLineEscape && !w.startsWith("\x1b[?25") && w !== bsu && w !== esu,
+  );
 }

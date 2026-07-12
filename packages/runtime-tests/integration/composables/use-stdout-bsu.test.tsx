@@ -3,7 +3,7 @@
  * synchronized-update markers (BSU/ESU) when the stream is a TTY and the
  * runtime is in interactive mode — Ink parity G09.
  *
- * We use createApp with debug:false and a fake TTY stream so the interactive
+ * We use createApp with a fake TTY stream so the live
  * path is exercised.  The test config forces CI:"false" so isInCi() returns
  * false and shouldSynchronize() returns true.
  */
@@ -18,6 +18,13 @@ const ESU = "\x1b[?2026l";
 function makeTtyStream(): NodeJS.WriteStream & { chunks: string[] } {
   const s = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
   Object.assign(s, { columns: 80, rows: 24, isTTY: true, chunks: [] as string[] });
+  s.on("data", (chunk: Buffer) => s.chunks.push(chunk.toString()));
+  return s;
+}
+
+function makeRedirectedStream(): NodeJS.WriteStream & { chunks: string[] } {
+  const s = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
+  Object.assign(s, { isTTY: false, chunks: [] as string[] });
   s.on("data", (chunk: Buffer) => s.chunks.push(chunk.toString()));
   return s;
 }
@@ -52,7 +59,7 @@ test("writeToStdout wraps external write in BSU/ESU on TTY interactive stream", 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -103,7 +110,7 @@ test("writeToStderr wraps external write in BSU/ESU on stdout (Ink parity: stder
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -140,5 +147,28 @@ test("writeToStderr wraps external write in BSU/ESU on stdout (Ink parity: stder
     `expected synchronized order BSU(stdout) → DATA(stderr) → ESU(stdout); got ${JSON.stringify(timeline)}`,
   ).toEqual(["BSU", "DATA", "ESU"]);
 
+  app.unmount();
+});
+
+test("unterminated coordinated stderr output stays byte-exact when stderr is redirected", async () => {
+  const stdout = makeTtyStream();
+  const stderr = makeRedirectedStream();
+  const stdin = makeFakeStdin();
+  let writeRef: ((data: string) => void) | undefined;
+
+  const App = defineComponent(() => {
+    writeRef = useStderr().write;
+    return () => <Text>frame</Text>;
+  });
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  await new Promise<void>((resolve) => setTimeout(resolve, 60));
+  stderr.chunks.length = 0;
+
+  const payload = "external\r\terr\x1b[31mred\x1b[0m\x1b[2J";
+  writeRef!(payload);
+
+  expect(stderr.chunks.join("")).toBe(payload);
   app.unmount();
 });

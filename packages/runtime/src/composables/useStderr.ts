@@ -1,9 +1,11 @@
 import { inject } from "vue";
 import { AppContextKey } from "../context.ts";
 
-/** The public stderr surface returned by {@link useStderr}. Mirrors Ink's `useStderr()`. */
+/** Coordinated styled-line output plus the deliberately raw stderr escape hatch. */
 export interface UseStderrReturn {
+  /** Raw stream; writes through it bypass frame coordination and output sanitization. */
   readonly stderr: NodeJS.WriteStream;
+  /** Commit geometry-safe styled lines without corrupting the active live region. */
   readonly write: (data: string) => void;
 }
 

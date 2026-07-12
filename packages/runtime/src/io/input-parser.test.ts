@@ -295,14 +295,19 @@ describe("input-parser", () => {
       events: ["ab", "\x7F", "cd"],
     },
     {
-      title: "does not split pasted carriage return from text",
+      title: "splits carriage return from text outside bracketed paste",
       chunks: ["\rtest"],
-      events: ["\rtest"],
+      events: ["\r", "test"],
     },
     {
-      title: "does not split pasted tab from text",
+      title: "splits tab from text outside bracketed paste",
       chunks: ["\ttest"],
-      events: ["\ttest"],
+      events: ["\t", "test"],
+    },
+    {
+      title: "splits Ctrl+C from adjacent text",
+      chunks: ["a\x03b"],
+      events: ["a", "\x03", "b"],
     },
   ];
 
@@ -367,16 +372,16 @@ describe("input-parser", () => {
     expect(parser.push("~hello\x1b[201~")).toEqual([{ paste: "hello" }]);
   });
 
-  test("hasPendingEscape returns true for length-3 pasteStart prefix (\\x1b[2)", () => {
+  test("recognizable length-3 pasteStart prefix does not use the Escape timer", () => {
     const parser = createInputParser();
     expect(parser.push("\x1b[2")).toEqual([]);
-    expect(parser.hasPendingEscape()).toBe(true);
+    expect(parser.hasPendingEscape()).toBe(false);
   });
 
-  test("hasPendingEscape returns true for length-4 pasteStart prefix (\\x1b[20)", () => {
+  test("recognizable length-4 pasteStart prefix does not use the Escape timer", () => {
     const parser = createInputParser();
     expect(parser.push("\x1b[20")).toEqual([]);
-    expect(parser.hasPendingEscape()).toBe(true);
+    expect(parser.hasPendingEscape()).toBe(false);
   });
 
   test("paste event delivers backspace chars verbatim without splitting", () => {

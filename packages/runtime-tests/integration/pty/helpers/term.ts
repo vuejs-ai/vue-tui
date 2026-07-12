@@ -58,7 +58,15 @@ const term = (fixture: string, args: string[] = []) => {
     env,
   });
 
+  let exited = false;
+
   const result = {
+    get pid() {
+      return ps.pid;
+    },
+    get exited() {
+      return exited;
+    },
     write(input: string) {
       void readyPromise.then(() => {
         ps.write(input);
@@ -70,6 +78,21 @@ const term = (fixture: string, args: string[] = []) => {
       void readyPromise.then(() => {
         ps.kill(signal);
       });
+    },
+    // Immediate best-effort signal for `finally` cleanup. Unlike kill(), this
+    // does not wait for the fixture readiness marker, so a broken mount cannot
+    // leave a child (including a stopped child) behind.
+    killNow(signal: string) {
+      if (exited) return;
+      try {
+        ps.kill(signal);
+      } catch {
+        // The process can exit concurrently with cleanup.
+      }
+    },
+    async resize(columns: number, rows: number) {
+      await readyPromise;
+      ps.resize(columns, rows);
     },
     output: "",
     waitForExit: async () => exitPromise,
@@ -115,6 +138,7 @@ const term = (fixture: string, args: string[] = []) => {
   });
 
   ps.onExit(({ exitCode, signal }) => {
+    exited = true;
     exitInfoResolve({ exitCode, signal });
 
     if (exitCode === 0) {

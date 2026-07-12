@@ -12,7 +12,9 @@ import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/tes
 
 const ENABLE_SGR_MOUSE = "\x1b[?1000h\x1b[?1006h";
 const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l";
+const DISABLE_SGR_MOUSE = "\x1b[?1000l\x1b[?1006l";
+const DISABLE_SGR_DRAG_MOUSE = "\x1b[?1002l\x1b[?1006l";
+const DISABLE_SGR_HOVER_TRACKING = "\x1b[?1003l";
 let previousTerm: string | undefined;
 
 beforeEach(() => {
@@ -50,7 +52,7 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   expect(writes.join("")).toContain(ENABLE_SGR_MOUSE);
@@ -67,6 +69,8 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   await settle();
 
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 });
 
 test("useMouseInput accepts a handler ref", async () => {
@@ -83,7 +87,7 @@ test("useMouseInput accepts a handler ref", async () => {
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   stdin.emit("data", "\x1b[<64;1;1M");
@@ -129,7 +133,7 @@ test("useMouseInput keeps SGR mouse mode enabled until the last consumer release
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
@@ -146,6 +150,8 @@ test("useMouseInput keeps SGR mouse mode enabled until the last consumer release
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 
   app.unmount();
 });
@@ -164,7 +170,7 @@ test("useMouseInput respects isActive", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   expect(writes.join("")).not.toContain(ENABLE_SGR_MOUSE);
@@ -186,6 +192,8 @@ test("useMouseInput respects isActive", async () => {
   active.value = false;
   await settle();
   expect(writes.join("")).toContain(DISABLE_SGR_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_DRAG_MOUSE);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
 
   app.unmount();
 });
@@ -203,7 +211,7 @@ test("useMouseInput disables SGR mouse when support disappears before release", 
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
@@ -214,6 +222,8 @@ test("useMouseInput disables SGR mouse when support disappears before release", 
   await settle();
 
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
   app.unmount();
 });
 
@@ -240,16 +250,17 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
     stdout,
     stderr,
     stdin,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
     rawMode: "auto",
-    fullscreen: true,
+    mode: "fullscreen",
   });
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(0);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(0);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
 
   showTarget.value = true;
   await settle();
@@ -257,18 +268,73 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
   expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(0);
 
   showTarget.value = false;
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(2);
   expect(countOccurrences(writes.join(""), ENABLE_SGR_DRAG_MOUSE)).toBe(1);
-  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(2);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(1);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(1);
 
   app.unmount();
   await settle();
 
-  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(3);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_MOUSE)).toBe(2);
+  expect(countOccurrences(writes.join(""), DISABLE_SGR_DRAG_MOUSE)).toBe(1);
+  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
+});
+
+test("a targeted mouse handler cannot remove the public recipient of the current event", async () => {
+  const publicActive = shallowRef(true);
+  const targeted: string[] = [];
+  const publicEvents: MouseInputEvent[] = [];
+  const App = defineComponent(() => {
+    useMouseInput((event) => publicEvents.push(event), { isActive: publicActive });
+    return () => (
+      <Box
+        width={4}
+        height={2}
+        onWheel={() => {
+          targeted.push("wheel");
+          publicActive.value = false;
+        }}
+      >
+        <Text>target</Text>
+      </Box>
+    );
+  });
+
+  const app = createApp(App);
+  const stdout = makeFakeWritable({ columns: 20, rows: 4 });
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+
+  app.mount({
+    stdout,
+    stderr,
+    stdin,
+    maxFps: 0,
+    exitOnCtrlC: false,
+    rawMode: "auto",
+    mode: "fullscreen",
+  });
+  await settle();
+
+  stdin.emit("data", "\x1b[<64;1;1M");
+  await settle();
+  expect(targeted).toEqual(["wheel"]);
+  expect(publicEvents).toEqual([
+    { type: "wheel", direction: "up", x: 1, y: 1, shift: false, meta: false, ctrl: false },
+  ]);
+
+  stdin.emit("data", "\x1b[<65;1;1M");
+  await settle();
+  expect(targeted).toEqual(["wheel", "wheel"]);
+  expect(publicEvents).toHaveLength(1);
+
+  app.unmount();
 });
 
 test("useMouseInput consumes unsupported SGR mouse events before keyboard input", async () => {
@@ -285,7 +351,7 @@ test("useMouseInput consumes unsupported SGR mouse events before keyboard input"
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   stdin.emit("data", "\x1b[<0;10;5M\x1b[<0;10;5m\x1b[<64;10;5M");
@@ -313,7 +379,7 @@ test("useMouseInput does not consume bare CSI-like text", async () => {
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await settle();
 
   stdin.emit("data", "[<64;10;5M");

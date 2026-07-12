@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, inject } from "vue";
-import { AppContextKey } from "../context.ts";
+import { computed } from "vue";
+import { useInternalRenderSession } from "../render-session.ts";
 import { boxProps } from "./box-props.ts";
 import { assertBoxValid } from "./box-validate.ts";
 
@@ -10,8 +10,8 @@ import { assertBoxValid } from "./box-validate.ts";
 defineOptions({ name: "Box" });
 const props = defineProps(boxProps);
 defineSlots<{ default?: () => unknown }>();
-const appCtx = inject(AppContextKey, null);
-const srEnabled = computed(() => appCtx?.isScreenReaderEnabled ?? false);
+const renderSession = useInternalRenderSession();
+const srEnabled = computed(() => renderSession.session.output.presentation === "screen-reader");
 const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 </script>
 

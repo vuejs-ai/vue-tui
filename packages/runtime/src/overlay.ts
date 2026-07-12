@@ -1,4 +1,4 @@
-import { defineComponent, h, inject, type Component, type PropType } from "@vue/runtime-core";
+import { defineComponent, h, inject, type Component, type PropType } from "vue";
 import Box from "./components/box.vue";
 import Text from "./components/text.vue";
 import { DevStateKey, type DevState } from "./hmr.ts";

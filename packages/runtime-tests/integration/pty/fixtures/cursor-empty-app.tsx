@@ -2,8 +2,9 @@ import process from "node:process";
 import { createApp, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
-// An interactive app whose ROOT renders nothing. Ink emits ZERO cursor escapes
-// for an empty frame (its onRender outer gate `output !== lastOutput` is false
+// An interactive app whose ROOT renders nothing. Its initial commit emits no
+// log-update cursor escape; teardown may still restore cursor visibility. Ink's
+// onRender outer gate `output !== lastOutput` is false
 // when both are "", so log-update — and its lazy hide — is never reached, and
 // the only mount-time hide lives in setAlternateScreen). vue-tui must match:
 // a no-content interactive app must NOT hide the terminal cursor.

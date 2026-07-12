@@ -65,22 +65,22 @@ export interface TuiWheelEvent extends MouseEventShared {
 export interface MouseHandlerProps {
   /**
    * Fires only in `fullscreen` mode. For targeted element mouse events use
-   * `app.mount({ fullscreen: true })`; for raw inline mouse input use `useMouseInput()`.
+   * `app.mount({ mode: "fullscreen" })`; for raw inline mouse input use `useMouseInput()`.
    */
   onMousedown?: (event: TuiMouseEvent) => void;
   /**
    * Fires only in `fullscreen` mode. For targeted element mouse events use
-   * `app.mount({ fullscreen: true })`; for raw inline mouse input use `useMouseInput()`.
+   * `app.mount({ mode: "fullscreen" })`; for raw inline mouse input use `useMouseInput()`.
    */
   onMouseup?: (event: TuiMouseEvent) => void;
   /**
    * Fires only in `fullscreen` mode. For targeted element mouse events use
-   * `app.mount({ fullscreen: true })`; for raw inline mouse input use `useMouseInput()`.
+   * `app.mount({ mode: "fullscreen" })`; for raw inline mouse input use `useMouseInput()`.
    */
   onClick?: (event: TuiMouseEvent) => void;
   /**
    * Fires only in `fullscreen` mode. For targeted element mouse events use
-   * `app.mount({ fullscreen: true })`; for raw inline mouse input use `useMouseInput()`.
+   * `app.mount({ mode: "fullscreen" })`; for raw inline mouse input use `useMouseInput()`.
    */
   onWheel?: (event: TuiWheelEvent) => void;
 }

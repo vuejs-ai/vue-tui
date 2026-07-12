@@ -1,8 +1,13 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, onScopeDispose } from "vue";
+import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, createApp, Text, useWindowSize } from "@vue-tui/runtime";
+import { Box, createApp, Text, useLayoutSize } from "@vue-tui/runtime";
+import {
+  INTERNAL_RENDER_OBSERVER,
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  type InternalRenderObserver,
+} from "@vue-tui/runtime/internal";
 
 // A TTY-like writable that we control directly (columns/rows + resize listeners)
 // — the @vue-tui/testing render() helper hides the underlying stdout, but the
@@ -31,9 +36,9 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-test("useWindowSize reacts to resize event", async () => {
+test("useLayoutSize reacts to resize event", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const { columns, rows } = useLayoutSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -48,9 +53,9 @@ test("useWindowSize reacts to resize event", async () => {
   expect(lastFrame()).toContain("120x40");
 });
 
-test("useWindowSize returns initial terminal dimensions", async () => {
+test("useLayoutSize returns initial terminal dimensions", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const { columns, rows } = useLayoutSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -62,13 +67,14 @@ test("useWindowSize returns initial terminal dimensions", async () => {
   expect(lastFrame()).toContain("100x40");
 });
 
-test("useWindowSize removes resize listener on unmount", async () => {
-  // After unmount, further resize events should not cause errors
+test("useLayoutSize stops updating after unmount", async () => {
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const currentLayout = useLayoutSize();
+    layout = currentLayout;
     return () => (
       <Text>
-        {columns.value}x{rows.value}
+        {currentLayout.columns.value}x{currentLayout.rows.value}
       </Text>
     );
   });
@@ -77,27 +83,9 @@ test("useWindowSize removes resize listener on unmount", async () => {
   expect(lastFrame()).toContain("80x24");
 
   unmount();
-
-  // Resize after unmount should not throw
   await expect(terminal.resize(60, 20)).resolves.toBeUndefined();
-});
-
-test("useWindowSize does not crash when resize fires after unmount", async () => {
-  const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
-    return () => (
-      <Text>
-        {columns.value}x{rows.value}
-      </Text>
-    );
-  });
-
-  const { unmount, terminal } = await render(App, { columns: 80, rows: 24 });
-  unmount();
-
-  // Emitting resize after unmount should not crash
-  await terminal.resize(60, 20);
-  // If we reach here without throwing, the test passes
+  expect(layout!.columns.value).toBe(80);
+  expect(layout!.rows.value).toBe(24);
 });
 
 test("layout responds to terminal width change", async () => {
@@ -122,7 +110,7 @@ test("layout responds to terminal width change", async () => {
 
 test("multiple consecutive resizes all take effect", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const { columns, rows } = useLayoutSize();
     return () => (
       <Text>
         {columns.value}x{rows.value}
@@ -145,7 +133,7 @@ test("multiple consecutive resizes all take effect", async () => {
 
 test("terminal width decrease triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useWindowSize();
+    const { columns } = useLayoutSize();
     return () => <Text>{columns.value}</Text>;
   });
 
@@ -158,7 +146,7 @@ test("terminal width decrease triggers rerender", async () => {
 
 test("terminal width increase triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useWindowSize();
+    const { columns } = useLayoutSize();
     return () => <Text>{columns.value}</Text>;
   });
 
@@ -169,44 +157,23 @@ test("terminal width increase triggers rerender", async () => {
   expect(lastFrame()).toContain("100");
 });
 
-test("resize listener is cleaned up via onScopeDispose", async () => {
-  let disposeCalled = false;
-
-  const App = defineComponent(() => {
-    // useWindowSize registers an onScopeDispose listener internally;
-    // we also register one to verify the scope is properly disposed on unmount.
-    useWindowSize();
-    onScopeDispose(() => {
-      disposeCalled = true;
-    });
-    return () => <Text>watching</Text>;
-  });
-
-  const { unmount } = await render(App, { columns: 80, rows: 24 });
-  expect(disposeCalled).toBe(false);
-
-  unmount();
-  expect(disposeCalled).toBe(true);
-});
-
 // Mirrors Ink terminal-resize.tsx:91-108 ("falls back to a positive column
 // count when stdout.columns is 0"). When the mount stdout reports columns 0,
-// resolveSize() falls through to the terminal-size package / 80 default, so the
-// captured value must be a positive number (never 0).
-test("useWindowSize falls back to a positive column count when stdout.columns is 0", async () => {
+// the session must still choose a positive layout fallback (never 0).
+test("useLayoutSize falls back to a positive column count when stdout.columns is 0", async () => {
   const stdout = makeTtyStream(0, 24);
   const stderr = makeTtyStream(0, 24);
   const stdin = makeFakeStdin();
 
   let capturedColumns = -1;
   const App = defineComponent(() => {
-    const { columns } = useWindowSize();
+    const { columns } = useLayoutSize();
     capturedColumns = columns.value;
     return () => <Text>{String(columns.value)}</Text>;
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await new Promise<void>((r) => setTimeout(r, 60));
 
   try {
@@ -217,9 +184,9 @@ test("useWindowSize falls back to a positive column count when stdout.columns is
 });
 
 // Mirrors Ink terminal-resize.tsx:43-64 ("removes resize listener on unmount").
-// The resize listener count must grow by mounting a useWindowSize component
-// and return exactly to baseline after unmount (no leaked listener).
-test("useWindowSize resize listener returns to baseline on unmount", async () => {
+// One render session owns one resize listener. Calling useLayoutSize repeatedly
+// must not register another environment resolver per consumer.
+test("multiple useLayoutSize consumers share one app resize listener", async () => {
   const stdout = makeTtyStream(80, 24);
   const stderr = makeTtyStream(80, 24);
   const stdin = makeFakeStdin();
@@ -227,20 +194,106 @@ test("useWindowSize resize listener returns to baseline on unmount", async () =>
   const baseline = stdout.listenerCount("resize");
 
   const App = defineComponent(() => {
-    const { columns, rows } = useWindowSize();
+    const first = useLayoutSize();
+    const second = useLayoutSize();
     return () => (
       <Text>
-        {columns.value}x{rows.value}
+        {first.columns.value}x{first.rows.value}:{second.columns.value}x{second.rows.value}
       </Text>
     );
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
   await new Promise<void>((r) => setTimeout(r, 60));
 
-  expect(stdout.listenerCount("resize")).toBeGreaterThan(baseline);
+  expect(stdout.listenerCount("resize")).toBe(baseline + 1);
 
   app.unmount();
   expect(stdout.listenerCount("resize")).toBe(baseline);
+});
+
+test("useLayoutSize derives a bounded layout from an explicitly modeled terminal pair", async () => {
+  const stdout = makeTtyStream(0);
+  const stderr = makeTtyStream(0);
+  const stdin = makeFakeStdin();
+
+  let capturedRows: number | null = null;
+  const App = defineComponent(() => {
+    const { rows } = useLayoutSize();
+    capturedRows = rows.value;
+    return () => <Text>{String(rows.value)}</Text>;
+  });
+
+  const app = createApp(App);
+  try {
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      maxFps: 0,
+      exitOnCtrlC: false,
+      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
+        kind: "detected",
+        source: "environment",
+        size: { columns: 123, rows: 45 },
+      }),
+    } as Parameters<typeof app.mount>[0]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 60));
+
+    expect(capturedRows).toBe(45);
+  } finally {
+    app.unmount();
+  }
+});
+
+test("rapid resize events commit only the newest layout and participate in the render barrier", async () => {
+  const stdout = makeTtyStream(30, 8);
+  const stderr = makeTtyStream(30, 8);
+  const stdin = makeFakeStdin();
+  const frames: string[] = [];
+  const observer: InternalRenderObserver = {
+    onCommit(commit) {
+      if (commit.phase !== "teardown") frames.push(commit.dynamic);
+    },
+  };
+  const App = defineComponent(() => {
+    const { columns, rows } = useLayoutSize();
+    return () => <Text>{`${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+  });
+  const app = createApp(App);
+
+  try {
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      liveUpdates: true,
+      rawMode: "auto",
+      maxFps: 0,
+      patchConsole: false,
+      exitOnCtrlC: false,
+      [INTERNAL_RENDER_OBSERVER]: observer,
+    } as Parameters<typeof app.mount>[0]);
+    await app.waitUntilRenderFlush();
+    frames.length = 0;
+
+    stdout.columns = 24;
+    stdout.rows = 6;
+    stdout.emit("resize");
+    stdout.columns = 18;
+    stdout.rows = 5;
+    stdout.emit("resize");
+    await app.waitUntilRenderFlush();
+
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames).not.toContain("30x8");
+    expect(frames).not.toContain("24x6");
+    expect(frames.at(-1)).toBe("18x5");
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
 });

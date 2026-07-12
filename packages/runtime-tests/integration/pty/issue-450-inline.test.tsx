@@ -1,6 +1,7 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { test as it, expect } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
+import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
 import { createApp, Text } from "@vue-tui/runtime";
 import { makeFakeWritable, makeFakeStdin, captureWrites } from "../lifecycle/test-streams.ts";
 
@@ -20,7 +21,7 @@ it("#450: non-TTY full-height rerenders should never clear terminal", async () =
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
   await nextTick();
   await nextTick();
 
@@ -43,7 +44,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
   await nextTick();
   await nextTick();
 
@@ -56,7 +57,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   expect(clearCount).toBe(0);
 });
 
-it("#450: viewport shrink into overflow clears exactly once on resize", async () => {
+it("#450: viewport shrink commits the old snapshot and paints a fresh bounded region", async () => {
   const stdout = makeFakeWritable({ rows: 10 });
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -69,18 +70,21 @@ it("#450: viewport shrink into overflow clears exactly once on resize", async ()
   app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
   await nextTick();
   await nextTick();
-  const clearsBeforeResize = writes.filter((w) => w.includes(ansiEscapes.clearTerminal)).length;
-  expect(clearsBeforeResize).toBe(0); // 8 lines fit in 10 rows — no clear yet
+  const writeCountBeforeResize = writes.length;
 
-  // Shrink so the content overflows the viewport. The resize renders
-  // synchronously (matching Ink), so the overflow clear is emitted right here,
-  // not deferred through the commit throttle.
+  // Shrink so the old physical row mapping is no longer trustworthy.
   stdout.rows = 4;
   stdout.emit("resize");
   await nextTick();
 
-  const clearsAfterResize = writes.filter((w) => w.includes(ansiEscapes.clearTerminal)).length;
-  expect(clearsAfterResize - clearsBeforeResize).toBe(1);
+  const resizeOutput = writes.slice(writeCountBeforeResize).join("");
+  expect(resizeOutput).not.toContain("\x1b[2J");
+  expect(resizeOutput).not.toContain("\x1b[3J");
+  expect(resizeOutput).not.toContain("\x1b[H");
+  expect(resizeOutput).not.toContain("\x1b[2K");
+  expect(resizeOutput).toContain(ansiEscapes.cursorDown(4) + nextLineEscape);
+  for (let line = 1; line <= 4; line++) expect(resizeOutput).toContain(`line${line}`);
+  for (let line = 5; line <= 8; line++) expect(resizeOutput).not.toContain(`line${line}`);
 
   app.unmount();
 });

@@ -7,6 +7,8 @@ import {
   createApp,
   useApp,
   useCursor,
+  useBoxMetrics,
+  useDraggable,
   useInput,
   useStderr,
   useStdout,
@@ -17,15 +19,36 @@ type Scenario =
   | "stdout"
   | "stderr"
   | "console"
-  | "debug"
+  | "rerender"
   | "overflow"
   | "horizontal-overflow"
   | "horizontal-wide"
   | "horizontal-transform"
+  | "target-lifetime"
   | "screen-reader";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
+const autoExitTargetLifetime = process.argv[4] === "auto-exit";
 const label = shallowRef("BUTTON");
+const targetPhase = shallowRef<"none" | "first" | "second">("none");
+
+const LifetimeTarget = defineComponent(() => {
+  return () => {
+    if (targetPhase.value === "none") return null;
+    if (targetPhase.value === "first") {
+      return (
+        <Box key="first" width={7} height={2}>
+          <Text>FIRST</Text>
+        </Box>
+      );
+    }
+    return (
+      <Box key="second" marginLeft={5} width={11} height={1}>
+        <Text>TARGET-B</Text>
+      </Box>
+    );
+  };
+});
 
 // term() waits for this marker before sending input. Write it before entering
 // the alternate screen so it cannot move the fullscreen frame.
@@ -37,17 +60,59 @@ function markSettled(): void {
   process.stdout.write(`\x1b]0;__SETTLED__:${scenario}\x07`);
 }
 
+function markTargetPhase(): Promise<void> {
+  return nextTick()
+    .then(() => nextTick())
+    .then(() => {
+      process.stdout.write(`\x1b]0;__TARGET__:${targetPhase.value}\x07`);
+    });
+}
+
 const App = defineComponent(() => {
   const { exit } = useApp();
   const { setCursorPosition } = useCursor();
   const { write } = useStdout();
   const { write: writeError } = useStderr();
+  const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
+  const targetMetrics = useBoxMetrics(target);
+  let dragStarts = 0;
+  const drag = useDraggable(target, {
+    onStart() {
+      dragStarts += 1;
+    },
+  });
 
-  if (scenario !== "debug" && scenario !== "screen-reader") {
+  if (scenario !== "screen-reader") {
     setCursorPosition({ x: 3, y: 0 });
   }
 
   useInput((input) => {
+    if (scenario === "target-lifetime") {
+      let exitAfterTransition = false;
+      if (input === "1") targetPhase.value = "first";
+      else if (input === "2") targetPhase.value = "second";
+      else if (input === "p") {
+        // PTY synchronization point: report the durable start count only after
+        // all input bytes before this key have been routed and rendered.
+        void nextTick().then(() => {
+          process.stdout.write(`\x1b]0;__DRAG_STARTS__:${dragStarts}\x07`);
+        });
+        return;
+      } else if (input === "x") {
+        targetPhase.value = "none";
+        exitAfterTransition = autoExitTargetLifetime;
+      } else if (input === "q") {
+        exit("target-lifetime");
+        return;
+      } else return;
+      const marked = markTargetPhase();
+      if (exitAfterTransition) {
+        void marked.then(() => {
+          setTimeout(() => exit("target-lifetime"), 20);
+        });
+      }
+      return;
+    }
     if (scenario === "screen-reader" && input === "q") {
       exit("screen-reader");
     }
@@ -73,7 +138,7 @@ const App = defineComponent(() => {
         return;
       }
 
-      if (scenario === "debug") {
+      if (scenario === "rerender") {
         label.value = "UPDATED";
         void nextTick().then(markSettled);
         return;
@@ -84,6 +149,19 @@ const App = defineComponent(() => {
   });
 
   return () => {
+    if (scenario === "target-lifetime") {
+      return (
+        <Box flexDirection="column">
+          <Text>phase={targetPhase.value}</Text>
+          <LifetimeTarget ref={target} />
+          <Text>
+            target={targetMetrics.width.value}x{targetMetrics.height.value}:
+            {String(targetMetrics.hasMeasured.value)} dragging={String(drag.isDragging.value)}
+          </Text>
+        </Box>
+      );
+    }
+
     if (scenario === "horizontal-transform") {
       return (
         <Box width={1} height={1} flexShrink={0} onClick={() => exit("clicked")}>
@@ -144,7 +222,7 @@ const App = defineComponent(() => {
         <Box
           width={7}
           height={1}
-          onClick={scenario === "screen-reader" ? undefined : () => exit("clicked")}
+          onClick={() => exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked")}
         >
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
@@ -155,8 +233,7 @@ const App = defineComponent(() => {
 
 const app = createApp(App);
 app.mount({
-  fullscreen: true,
-  debug: scenario === "debug",
+  mode: "fullscreen",
   isScreenReaderEnabled: scenario === "screen-reader",
   incrementalRendering: scenario === "stdout",
   exitOnCtrlC: false,
