@@ -62,6 +62,11 @@ const KittyInput = defineComponent({
         return;
       }
 
+      if (props.test === "kittyCtrlCExit" && input === "c" && key.ctrl && !key.shift) {
+        process.stdout.write("__CTRL_C_HANDLER__");
+        return;
+      }
+
       if (props.test === "press" && key.eventType === "press") {
         exit();
         return;

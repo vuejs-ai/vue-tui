@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vite-plus/test";
 import type { StdinContext } from "../context.ts";
 import { createBox } from "../host/nodes.ts";
 import { createInternalInputRouteRegistry } from "../io/input-routes.ts";
+import { createInternalInputRoutingRuntime } from "../io/input-route-runtime.ts";
 import { createMouseController } from "./controller.ts";
 
 function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext {
@@ -10,6 +11,7 @@ function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext
     setRawMode: vi.fn(),
     isRawModeSupported: true,
     internal_routes: createInternalInputRouteRegistry(),
+    internal_inputRouting: createInternalInputRoutingRuntime(),
     internal_exitOnCtrlC: false,
     acquireRawMode: vi.fn(),
     releaseRawMode: vi.fn(),

@@ -54,11 +54,11 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
   function listener(fact: NormalizedInputFact) {
     const projection = getLegacyInputProjection(fact);
     if (!projection) return;
-    // Ctrl+C exit (both the legacy \x03 byte and the kitty CSI-u form) is
-    // handled once, upstream in the stdin controller, so when
-    // exitOnCtrlC is on Ctrl+C never reaches here — and useInput forwards every
-    // key it does receive. Keeping the exit in one always-on place is what makes
-    // it fire for useFocus/usePaste-only apps too; don't re-add a copy here.
+    // Ctrl+C exit (both the legacy \x03 byte and the Kitty CSI-u form) is a
+    // delayed controller default. Compatibility handlers observe the fact
+    // first; the controller then exits unless a future semantic route prevents
+    // defaults. Keeping exit in the always-on controller also covers apps whose
+    // only input consumer is useFocus/usePaste, or which have no hook at all.
     // The normalized fact and cached projection are shared, but the current
     // public Key type is mutable and historically supplied one object per
     // listener. Keep that edge isolation until F3 selects the public surface.

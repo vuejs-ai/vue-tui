@@ -26,6 +26,15 @@ import {
   createInternalInputRouteRegistry,
   type InternalInputRouteSnapshot,
 } from "./io/input-routes.ts";
+import {
+  captureInternalInputRoutePlan,
+  dispatchInternalInput,
+  type InternalInputRouteCandidate,
+} from "./io/input-route-policy.ts";
+import {
+  createInternalInputRoutingRuntime,
+  type InternalInputTopologySnapshot,
+} from "./io/input-route-runtime.ts";
 import { toMouseInputEvent } from "./io/parse-mouse.ts";
 import {
   createKittyKeyboardController,
@@ -2603,8 +2612,8 @@ export function createFocusController(): FocusControllerForTest {
     },
     // Ink parity (App.tsx focusNext/focusPrevious): NO isFocusEnabled guard here —
     // a programmatic focusNext()/focusPrevious() moves focus even while focus is
-    // disabled. The isFocusEnabled check lives only in the Tab/Shift-Tab handler
-    // (see focusInputListener). The focusables.length === 0 short-circuit stays so
+    // disabled. The isFocusEnabled check lives only in the delayed Tab default.
+    // The focusables.length === 0 short-circuit stays so
     // focusing on an empty tree is a harmless no-op; with 0 focusables activeId is
     // already null (remove() clears it), matching Ink (findNextFocusable and
     // firstFocusableId both undefined → activeFocusId undefined), and it also avoids
@@ -2775,10 +2784,16 @@ function createStdinController(
 ): StdinController {
   const { appCtx, focusContext } = opts;
   const inputRoutes = createInternalInputRouteRegistry();
+  const inputRouting = createInternalInputRoutingRuntime([
+    { id: "framework:escape", handle: runEscapeDefault },
+    { id: "framework:tab", handle: runTabDefault },
+    { id: "framework:ctrl-c", handle: runCtrlCDefault },
+  ]);
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
     readonly kind: "routes";
     readonly routes: InternalInputRouteSnapshot;
+    readonly topology: InternalInputTopologySnapshot;
     readonly sgrMouseMode: SgrMouseMode | undefined;
   }
   interface BootstrapApplicationInputSnapshot {
@@ -3089,6 +3104,7 @@ function createStdinController(
     return Object.freeze({
       kind: "routes",
       routes: inputRoutes.snapshot(),
+      topology: inputRouting.capture(),
       sgrMouseMode: activeSgrMouseMode,
     });
   }
@@ -3135,32 +3151,69 @@ function createStdinController(
     }
   }
 
-  function emitInput(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
-    // exitOnCtrlC: intercept Ctrl+C here — at the always-on stdin controller,
-    // BEFORE dispatching to any listener — so the app exits no matter which
-    // composable holds raw mode (useInput / useFocus / usePaste, or none), and
-    // there's a single source of truth (useInput no longer carries its own
-    // copy). Legacy Ctrl+C is the bare \x03 byte; the kitty keyboard protocol
-    // encodes it as a CSI-u sequence (\x1b[99;5u). The shared ingress has
-    // already normalized both forms, so this default reads the same fact every
-    // hook will receive instead of parsing the source a second time.
-    if (opts.exitOnCtrlC && fact.kind === "key" && fact.key.phase !== "release") {
-      const { modifiers } = fact.key;
-      const isCtrlC =
-        modifiers.ctrl &&
-        !modifiers.shift &&
-        !modifiers.alt &&
-        !modifiers.super &&
-        !modifiers.hyper &&
-        !modifiers.meta &&
-        (fact.key.name === "c" ||
-          fact.key.primaryCodepoint === 99 ||
-          fact.key.baseLayoutCodepoint === 99);
-      if (isCtrlC) {
-        appCtx.exit();
-        return;
-      }
+  function isUnmodifiedExceptShift(fact: NormalizedInputFact): boolean {
+    if (fact.kind !== "key") return false;
+    const { modifiers } = fact.key;
+    return (
+      !modifiers.alt && !modifiers.ctrl && !modifiers.super && !modifiers.hyper && !modifiers.meta
+    );
+  }
+
+  function noDefaultAction() {
+    return Object.freeze({ performed: false, continue: true, blockExternal: false });
+  }
+
+  function runEscapeDefault(fact: NormalizedInputFact) {
+    if (
+      fact.kind !== "key" ||
+      fact.key.name !== "escape" ||
+      fact.key.phase === "release" ||
+      fact.key.modifiers.shift ||
+      !isUnmodifiedExceptShift(fact) ||
+      !focusContext.enabled
+    ) {
+      return noDefaultAction();
     }
+    focusContext.blur();
+    return Object.freeze({ performed: true, continue: true, blockExternal: true });
+  }
+
+  function runTabDefault(fact: NormalizedInputFact) {
+    if (
+      fact.kind !== "key" ||
+      fact.key.name !== "tab" ||
+      fact.key.phase === "release" ||
+      !isUnmodifiedExceptShift(fact) ||
+      !focusContext.enabled
+    ) {
+      return noDefaultAction();
+    }
+    if (fact.key.modifiers.shift) focusContext.focusPrevious();
+    else focusContext.focusNext();
+    return Object.freeze({ performed: true, continue: true, blockExternal: true });
+  }
+
+  function runCtrlCDefault(fact: NormalizedInputFact) {
+    if (!opts.exitOnCtrlC || fact.kind !== "key" || fact.key.phase === "release") {
+      return noDefaultAction();
+    }
+    const { modifiers } = fact.key;
+    const isCtrlC =
+      modifiers.ctrl &&
+      !modifiers.shift &&
+      !modifiers.alt &&
+      !modifiers.super &&
+      !modifiers.hyper &&
+      !modifiers.meta &&
+      (fact.key.name === "c" ||
+        fact.key.primaryCodepoint === 99 ||
+        fact.key.baseLayoutCodepoint === 99);
+    if (!isCtrlC) return noDefaultAction();
+    appCtx.exit();
+    return Object.freeze({ performed: true, continue: false, blockExternal: true });
+  }
+
+  function deliverCapturedMouse(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
     if (snapshot.sgrMouseMode && fact.kind === "pointer") {
       const rawMouse = fact.pointer.event;
       const mouse = rawMouse ? toMouseInputEvent(rawMouse) : undefined;
@@ -3175,47 +3228,74 @@ function createStdinController(
       if (mouse) {
         for (const listener of mouseRecipients) listener(mouse);
       }
-      return;
+      return true;
+    }
+    return false;
+  }
+
+  function createCompatibilityRecipient(
+    fact: NormalizedInputFact,
+    snapshot: ApplicationInputSnapshot,
+  ) {
+    if (fact.kind === "paste" && inputRoutes.had(snapshot.routes, "paste")) {
+      const recipients = inputRoutes.resolve(snapshot.routes, "paste");
+      return Object.freeze({
+        id: "compatibility:paste",
+        handle: () => {
+          for (const listener of recipients) listener(fact.text);
+          return Object.freeze({
+            performed: recipients.length > 0,
+            continue: true,
+            preventDefault: false,
+            // A paste owner captured this framing fact. If that lease ended
+            // before dispatch, discard it rather than falling through or
+            // reclassifying it as ordinary input.
+            blockExternal: true,
+          });
+        },
+      });
     }
 
-    // Esc resets focus when focus is enabled
-    if (
-      fact.kind === "key" &&
-      fact.key.name === "escape" &&
-      fact.key.phase !== "release" &&
-      focusContext.enabled
-    ) {
-      const { modifiers } = fact.key;
-      if (
-        !modifiers.shift &&
-        !modifiers.alt &&
-        !modifiers.ctrl &&
-        !modifiers.super &&
-        !modifiers.hyper &&
-        !modifiers.meta
-      ) {
-        focusContext.blur();
-      }
-    }
-    inputRoutes.emit(snapshot.routes, "input", fact);
+    const hadInputOwner = inputRoutes.had(snapshot.routes, "input");
+    if (!hadInputOwner) return undefined;
+    const recipients = inputRoutes.resolve(snapshot.routes, "input");
+    return Object.freeze({
+      id: "compatibility:input",
+      handle: () => {
+        for (const listener of recipients) listener(fact);
+        return Object.freeze({
+          performed: recipients.length > 0,
+          continue: true,
+          preventDefault: false,
+          // Current void handlers cannot distinguish observation from
+          // ownership. Duplicating their input into a PTY would be worse than
+          // failing closed until the public F3 surface is selected.
+          blockExternal: true,
+        });
+      },
+    });
   }
 
   function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed) return;
-    if (event.kind === "paste") {
-      // Preserve paste as a shared framing fact, then adapt it to the current
-      // Ink-compatible channels at this app boundary.
-      if (inputRoutes.had(snapshot.routes, "paste")) {
-        inputRoutes.emit(snapshot.routes, "paste", event.text);
-      } else {
-        // The old useInput hook still receives one compatibility projection,
-        // but application defaults never reinterpret paste contents as Ctrl+C,
-        // focus navigation, pointer input, or a terminal query response.
-        inputRoutes.emit(snapshot.routes, "input", event);
+    if (deliverCapturedMouse(event, snapshot)) return;
+
+    // Resolve every topology and compatibility lease before the first callback.
+    // A callback may remove or replace later routes, but that only changes a
+    // re-entrant or later parser-defined fact.
+    const resolved = inputRouting.resolve(snapshot.topology);
+    let candidate: InternalInputRouteCandidate = resolved.candidate;
+    if (resolved.kind === "compatibility") {
+      const compatibility = createCompatibilityRecipient(event, snapshot);
+      if (compatibility) {
+        candidate = Object.freeze({
+          ...candidate,
+          applicationGlobal: Object.freeze([compatibility, ...(candidate.applicationGlobal ?? [])]),
+        });
       }
-    } else {
-      emitInput(event, snapshot);
     }
+    const plan = captureInternalInputRoutePlan(candidate);
+    dispatchInternalInput(event, plan);
   }
 
   function finishKittyQueryDetection(): void {
@@ -3232,22 +3312,6 @@ function createStdinController(
   }
 
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
-
-  // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
-  const focusInputListener = (fact: NormalizedInputFact) => {
-    // Ink parity (handleTabNavigation): Tab/Shift-Tab navigation is gated by the
-    // focus-enabled flag here — disableFocus() makes Tab a no-op, but a
-    // programmatic focusNext()/focusPrevious() still works (see createFocusController).
-    if (!focusContext.enabled) return;
-    if (fact.kind !== "key" || fact.key.name !== "tab" || fact.key.phase === "release") return;
-    const { modifiers } = fact.key;
-    if (modifiers.ctrl || modifiers.alt || modifiers.super || modifiers.hyper || modifiers.meta) {
-      return;
-    }
-    if (modifiers.shift) focusContext.focusPrevious();
-    else focusContext.focusNext();
-  };
-  const detachFocusInputRoute = inputRoutes.attach("input", focusInputListener);
 
   // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
   // throws a descriptive error rather than silently no-opping. Two messages —
@@ -3440,6 +3504,7 @@ function createStdinController(
     },
     isRawModeSupported: appCtx.isRawModeSupported,
     internal_routes: inputRoutes,
+    internal_inputRouting: inputRouting,
     internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
       if (disposed) {
@@ -3750,8 +3815,8 @@ function createStdinController(
       // A hostile stream may throw while removing the final data listener.
       // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
       runTerminalCleanup(() => sharedSubscription.dispose());
-      detachFocusInputRoute();
       inputRoutes.clear();
+      inputRouting.clear();
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       runTerminalCleanup(() => reconcileSgrMouseMode(sync));
       if (sync) {

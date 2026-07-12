@@ -164,6 +164,7 @@ it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
   const ps = term("use-input-kitty", ["kittyCtrlCExit"]);
   ps.write(kittyKey(99, 5));
   await ps.waitForExit();
+  expect(ps.output).toContain("__CTRL_C_HANDLER__");
   expect(ps.output).toContain("exited");
 });
 

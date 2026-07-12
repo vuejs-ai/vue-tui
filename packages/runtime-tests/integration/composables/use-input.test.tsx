@@ -428,7 +428,7 @@ test("useInput - handle page down", async () => {
 
 // --- exitOnCtrlC ---
 
-test("exitOnCtrlC intercepts \\x03 in raw mode", async () => {
+test("exitOnCtrlC runs after the compatibility handler in raw mode", async () => {
   const handler = vi.fn();
   const App = defineComponent(() => {
     useInput(handler);
@@ -436,8 +436,8 @@ test("exitOnCtrlC intercepts \\x03 in raw mode", async () => {
   });
   const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
   await stdin.write("\x03");
-  // Should exit without calling user handler
-  expect(handler).not.toHaveBeenCalled();
+  expect(handler).toHaveBeenCalledOnce();
+  expect(handler).toHaveBeenCalledWith("c", expect.objectContaining({ ctrl: true }));
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
 
@@ -479,10 +479,8 @@ test("useInput - kitty ctrl+letter RELEASE delivers the letter name (input='a'),
   expect(calls[0]?.key.eventType).toBe("release");
 });
 
-// VERIFY no spurious exit from a Ctrl+C RELEASE under exitOnCtrlC. The kitty
-// exit guard lives in emitInput (render.ts) and is scoped to `eventType !==
-// "release"`, so removing the useInput release guard must NOT make a release
-// exit. A Ctrl+C release should instead be delivered to the handler (input "c").
+// The delayed controller default ignores release events. A Ctrl+C release is
+// delivered without exit; a press is delivered first and then exits.
 test("useInput - kitty Ctrl+C RELEASE does not exit (delivered to handler); press still exits", async () => {
   const calls: Array<{ input: string; key: Key }> = [];
   const App = defineComponent(() => {
@@ -498,11 +496,11 @@ test("useInput - kitty Ctrl+C RELEASE does not exit (delivered to handler); pres
   expect(calls[0]?.key.ctrl).toBe(true);
   expect(calls[0]?.key.eventType).toBe("release");
 
-  // Ctrl+C PRESS still exits (unchanged divergence behavior).
+  // Ctrl+C PRESS reaches the handler, then the delayed default exits.
   await stdin.write("\x1b[99;5:1u");
   await expect(waitUntilExit()).resolves.toBeUndefined();
-  // Press was intercepted in emitInput and never reached the handler.
-  expect(calls.length).toBe(1);
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toMatchObject({ input: "c", key: { ctrl: true, eventType: "press" } });
 });
 
 test("useInput - richer Kitty facts keep the current hook projection", async () => {

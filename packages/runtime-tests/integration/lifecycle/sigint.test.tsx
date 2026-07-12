@@ -3,7 +3,7 @@ import { expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput } from "@vue-tui/runtime";
 
-test("exitOnCtrlC intercepts \\x03 and exits the app", async () => {
+test("exitOnCtrlC delivers \\x03 before its delayed exit default", async () => {
   const handler = vi.fn();
   const App = defineComponent(() => {
     useInput(handler);
@@ -12,8 +12,8 @@ test("exitOnCtrlC intercepts \\x03 and exits the app", async () => {
   const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
 
   await stdin.write("\x03");
-  // \x03 is intercepted before reaching useInput handlers
-  expect(handler).not.toHaveBeenCalled();
+  expect(handler).toHaveBeenCalledOnce();
+  expect(handler).toHaveBeenCalledWith("c", expect.objectContaining({ ctrl: true }));
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
 
@@ -61,6 +61,7 @@ test("exitOnCtrlC recognizes a Kitty base-layout Ctrl+C", async () => {
   // base-layout key separately so framework shortcuts can remain stable.
   await stdin.write("\x1b[1089::99;5u");
 
-  expect(handler).not.toHaveBeenCalled();
+  expect(handler).toHaveBeenCalledOnce();
+  expect(handler).toHaveBeenCalledWith("с", expect.objectContaining({ ctrl: true }));
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
