@@ -291,6 +291,8 @@ The rejected alternative added `priority?: number` to `UseInputOptions`, ran lar
 
 F4 then chooses one effective logical owner, semantic ancestor path, modal boundary, target lifetime, and focus restoration. Its target-bound hook reuses `TuiInputEvent`, `InputHandler`, and the same route result. The public external-owner attachment is selected with that boundary so a closed modal cannot accidentally expose a background PTY. F3 already defines the external result and normalized source contract; deferring the attachment does not defer parser, route, default, or fallthrough behavior.
 
+The maintainer accepted F4.1's complete unstamped [logical focus and focus scopes](./focus-and-scopes.md) contract on 2026-07-13. Its API-neutral policy and journeys select opaque F2-bound handles, target and scope handler aggregation, hard trapped boundaries, centralized restoration, and a focus-target external receiver. Public implementation is now active, while F3's public global contract and private route semantics remain unchanged.
+
 The rejected low-level alternative exposed the private selection graph immediately:
 
 ```ts
