@@ -1,4 +1,5 @@
 import { createInputParser, type InputEvent } from "./input-parser.ts";
+import { normalizeInputEvent, type NormalizedInputFact } from "./normalized-input.ts";
 
 const ESC = "\x1b";
 const FLUSH_DELAY = 20;
@@ -12,7 +13,7 @@ export interface SharedStdinSubscription {
 }
 
 export interface SharedStdinIngress {
-  subscribe(listener: (event: InputEvent) => void): SharedStdinSubscription;
+  subscribe(listener: (event: NormalizedInputFact) => void): SharedStdinSubscription;
   startKittyQueryResponseDetection(
     onResult: (supported: boolean) => void,
     owner?: SharedStdinSubscription,
@@ -20,7 +21,7 @@ export interface SharedStdinIngress {
 }
 
 interface Subscriber {
-  readonly listener: (event: InputEvent) => void;
+  readonly listener: (event: NormalizedInputFact) => void;
   requestedActive: boolean;
   disposed: boolean;
   generation: number;
@@ -414,7 +415,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function deliver(
-    event: InputEvent,
+    event: NormalizedInputFact,
     recipients: RecipientSnapshot | undefined,
     excluded?: Subscriber,
   ): void {
@@ -434,6 +435,15 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         recordError(error);
       }
     }
+  }
+
+  function normalizeAndDeliver(
+    event: InputEvent,
+    recipients: RecipientSnapshot | undefined,
+    excluded?: Subscriber,
+  ): void {
+    const fact = normalizeInputEvent(event);
+    if (fact) deliver(fact, recipients, excluded);
   }
 
   function appendDecodedSegment(
@@ -507,7 +517,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       const responseMatch = /^(.*)(\x1b\[\?\d+u)$/s.exec(event);
       if (responseMatch) {
         const prefix = responseMatch[1]!;
-        if (prefix !== "") deliver(prefix, recipients);
+        if (prefix !== "") normalizeAndDeliver(prefix, recipients);
         const detection = nextDetection(completedDetectionSet);
         if (detection) {
           completedDetections.push(detection);
@@ -515,12 +525,12 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
           return;
         }
         if (prefix !== "") {
-          deliver(responseMatch[2]!, recipients);
+          normalizeAndDeliver(responseMatch[2]!, recipients);
           return;
         }
       }
     }
-    deliver(event, recipients);
+    normalizeAndDeliver(event, recipients);
   }
 
   function feedDecodedSegment(
@@ -578,7 +588,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     pendingInputRecipients = undefined;
     dropFinishedRetainedSnapshots();
     if (released && !/^\x1b\[\?\d+$/.test(released)) {
-      deliver(released, recipients, excluded);
+      normalizeAndDeliver(released, recipients, excluded);
     }
   }
 
@@ -596,7 +606,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         const released = inputParser.flushPendingEscape();
         pendingInputRecipients = undefined;
         dropFinishedRetainedSnapshots();
-        if (released) deliver(released, recipients);
+        if (released) normalizeAndDeliver(released, recipients);
       });
     }, FLUSH_DELAY);
   }

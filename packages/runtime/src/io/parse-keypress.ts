@@ -125,6 +125,7 @@ const isCtrlKey = (code: string) => {
 export interface Keypress {
   name: string;
   ctrl: boolean;
+  alt?: boolean;
   meta: boolean;
   shift: boolean;
   sequence: string;
@@ -137,6 +138,11 @@ export interface Keypress {
   eventType?: "press" | "repeat" | "release";
   isKittyProtocol?: boolean;
   text?: string;
+  textOrigin?: "reported";
+  primaryCodepoint?: number;
+  shiftedCodepoint?: number;
+  baseLayoutCodepoint?: number;
+  functionalCode?: number;
   /**
    * Whether this key represents printable text input.
    * When false, the key is a control/function/modifier key that should not
@@ -147,8 +153,7 @@ export interface Keypress {
   ignore?: boolean;
 }
 
-// Kitty keyboard protocol: CSI codepoint ; modifiers [: eventType] [; text-as-codepoints] u
-const kittyKeyRe = /^\x1b\[(\d+)(?:;(\d+)(?::(\d+))?(?:;([\d:]+))?)?u$/;
+const kittyCsiURe = /^\x1b\[[\d:;]+u$/;
 
 // Kitty-enhanced special keys: CSI number ; modifiers : eventType {letter|~}
 // These are legacy CSI sequences enhanced with the :eventType field.
@@ -199,7 +204,6 @@ const kittyCodepointNames: Record<number, string> = {
   // in parseKittyKeypress so they can be marked as printable.
   9: "tab",
   127: "backspace",
-  8: "backspace",
   57358: "capslock",
   57359: "scrolllock",
   57360: "numlock",
@@ -291,24 +295,32 @@ const kittyCodepointNames: Record<number, string> = {
 const isValidCodepoint = (cp: number): boolean =>
   cp >= 0 && cp <= 0x10_ffff && !(cp >= 0xd8_00 && cp <= 0xdf_ff);
 
-const safeFromCodePoint = (cp: number): string =>
-  isValidCodepoint(cp) ? String.fromCodePoint(cp) : "?";
+const isAssociatedTextCodepoint = (cp: number): boolean =>
+  isValidCodepoint(cp) && !(cp < 0x20 || (cp >= 0x7f && cp <= 0x9f));
+
+const parseDecimal = (value: string): number | undefined => {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+};
 
 type EventType = "press" | "repeat" | "release";
 
-function resolveEventType(value: number): EventType {
+function resolveEventType(value: number): EventType | undefined {
   if (value === 3) return "release";
   if (value === 2) return "repeat";
-  return "press";
+  if (value === 1) return "press";
+  return undefined;
 }
 
 function parseKittyModifiers(
   modifiers: number,
-): Pick<Keypress, "ctrl" | "shift" | "meta" | "super" | "hyper" | "capsLock" | "numLock"> {
+): Pick<Keypress, "ctrl" | "alt" | "shift" | "meta" | "super" | "hyper" | "capsLock" | "numLock"> {
   return {
     ctrl: !!(modifiers & kittyModifiers.ctrl),
     shift: !!(modifiers & kittyModifiers.shift),
-    meta: !!(modifiers & (kittyModifiers.meta | kittyModifiers.alt)),
+    alt: !!(modifiers & kittyModifiers.alt),
+    meta: !!(modifiers & kittyModifiers.meta),
     super: !!(modifiers & kittyModifiers.super),
     hyper: !!(modifiers & kittyModifiers.hyper),
     capsLock: !!(modifiers & kittyModifiers.capsLock),
@@ -317,26 +329,90 @@ function parseKittyModifiers(
 }
 
 const parseKittyKeypress = (s: string): Keypress | null => {
-  const match = kittyKeyRe.exec(s);
-  if (!match) return null;
+  if (!kittyCsiURe.test(s)) return null;
 
-  const codepoint = parseInt(match[1]!, 10);
-  const modifiers = match[2] ? Math.max(0, parseInt(match[2], 10) - 1) : 0;
-  const eventType = match[3] ? parseInt(match[3], 10) : 1;
-  const textField = match[4];
+  const fields = s.slice(2, -1).split(";");
+  if (fields.length > 3) return null;
 
-  // Bail on invalid primary codepoint
-  if (!isValidCodepoint(codepoint)) {
-    return null;
+  const keyFields = fields[0]!.split(":");
+  if (keyFields.length > 3) return null;
+  const codepoint = parseDecimal(keyFields[0]!);
+  if (codepoint === undefined || !isValidCodepoint(codepoint)) return null;
+
+  let shiftedCodepoint: number | undefined;
+  let baseLayoutCodepoint: number | undefined;
+  if (keyFields.length >= 2) {
+    if (keyFields[1] !== "") {
+      shiftedCodepoint = parseDecimal(keyFields[1]!);
+      if (shiftedCodepoint === undefined || !isValidCodepoint(shiftedCodepoint)) return null;
+    } else if (keyFields.length < 3) {
+      return null;
+    }
+  }
+  if (keyFields.length === 3) {
+    baseLayoutCodepoint = parseDecimal(keyFields[2]!);
+    if (baseLayoutCodepoint === undefined || !isValidCodepoint(baseLayoutCodepoint)) return null;
   }
 
-  // Parse text-as-codepoints field (colon-separated Unicode codepoints)
+  const modifierFields = fields[1]?.split(":") ?? [];
+  if (modifierFields.length > 2) return null;
+  if (
+    (fields.length === 2 && modifierFields[0] === "") ||
+    (modifierFields.length === 2 && modifierFields[0] === "")
+  ) {
+    return null;
+  }
+  const encodedModifiers =
+    modifierFields.length === 0 || modifierFields[0] === "" ? 1 : parseDecimal(modifierFields[0]!);
+  if (encodedModifiers === undefined || encodedModifiers < 1 || encodedModifiers > 256) return null;
+  const modifiers = encodedModifiers - 1;
+  const eventTypeValue = modifierFields.length < 2 ? 1 : parseDecimal(modifierFields[1] ?? "");
+  if (eventTypeValue === undefined) return null;
+  const eventType = resolveEventType(eventTypeValue);
+  if (!eventType) return null;
+  if (shiftedCodepoint !== undefined && !(modifiers & kittyModifiers.shift)) return null;
+
   let text: string | undefined;
-  if (textField) {
-    text = textField
-      .split(":")
-      .map((cp) => safeFromCodePoint(parseInt(cp, 10)))
+  if (fields.length === 3) {
+    const textFields = fields[2]!.split(":");
+    if (textFields.length === 0 || textFields.some((field) => field === "")) return null;
+    const textCodepoints = textFields.map(parseDecimal);
+    if (
+      textCodepoints.some(
+        (textCodepoint) => textCodepoint === undefined || !isAssociatedTextCodepoint(textCodepoint),
+      )
+    ) {
+      return null;
+    }
+    // Associated text is terminal input and has no trustworthy argument-count
+    // bound. Spreading a large valid field into String.fromCodePoint can exceed
+    // the JavaScript engine's call-argument limit and crash input delivery.
+    text = (textCodepoints as number[])
+      .map((codepoint) => String.fromCodePoint(codepoint))
       .join("");
+  }
+
+  if (codepoint === 0) {
+    if (
+      !text ||
+      modifiers !== 0 ||
+      shiftedCodepoint !== undefined ||
+      baseLayoutCodepoint !== undefined
+    ) {
+      return null;
+    }
+    return {
+      name: "",
+      ...parseKittyModifiers(modifiers),
+      eventType,
+      sequence: s,
+      raw: s,
+      isKittyProtocol: true,
+      isPrintable: true,
+      text,
+      textOrigin: "reported",
+      primaryCodepoint: codepoint,
+    };
   }
 
   // Determine key name from codepoint
@@ -347,35 +423,33 @@ const parseKittyKeypress = (s: string): Keypress | null => {
     isPrintable = true;
   } else if (codepoint === 13) {
     name = "return";
-    isPrintable = true;
+    isPrintable = false;
   } else if (kittyCodepointNames[codepoint]) {
     name = kittyCodepointNames[codepoint]!;
     isPrintable = false;
-  } else if (codepoint >= 1 && codepoint <= 26) {
-    // Ctrl+letter comes as codepoint 1-26
-    name = String.fromCodePoint(codepoint + 96); // 'a' is 97
+  } else if (codepoint < 0x20 || (codepoint >= 0x7f && codepoint <= 0x9f)) {
+    return null;
+  } else if (codepoint >= 0xe000 && codepoint <= 0xf8ff) {
+    name = "";
     isPrintable = false;
   } else {
-    name = safeFromCodePoint(codepoint).toLowerCase();
+    name = String.fromCodePoint(codepoint).toLowerCase();
     isPrintable = true;
-  }
-
-  // Default text to the character from the codepoint when not explicitly
-  // provided by the protocol, so keys like space and return produce their
-  // expected text input (' ' and '\r' respectively).
-  if (isPrintable && !text) {
-    text = safeFromCodePoint(codepoint);
   }
 
   return {
     name,
     ...parseKittyModifiers(modifiers),
-    eventType: resolveEventType(eventType),
+    eventType,
     sequence: s,
     raw: s,
     isKittyProtocol: true,
     isPrintable,
     text,
+    textOrigin: text ? "reported" : undefined,
+    primaryCodepoint: codepoint,
+    shiftedCodepoint,
+    baseLayoutCodepoint,
   };
 };
 
@@ -385,24 +459,40 @@ const parseKittySpecialKey = (s: string): Keypress | null => {
   const match = kittySpecialKeyRe.exec(s);
   if (!match) return null;
 
-  const number = parseInt(match[1]!, 10);
-  const modifiers = Math.max(0, parseInt(match[2]!, 10) - 1);
-  const eventType = parseInt(match[3]!, 10);
+  const number = parseDecimal(match[1]!);
+  const encodedModifiers = parseDecimal(match[2]!);
+  if (
+    number === undefined ||
+    encodedModifiers === undefined ||
+    encodedModifiers < 1 ||
+    encodedModifiers > 256
+  ) {
+    return null;
+  }
+  const modifiers = encodedModifiers - 1;
+  const eventTypeValue = parseDecimal(match[3]!);
+  if (eventTypeValue === undefined) return null;
+  const eventType = resolveEventType(eventTypeValue);
+  if (!eventType) return null;
   const terminator = match[4]!;
+
+  if (terminator !== "~" && number !== 1) return null;
 
   const name =
     terminator === "~" ? kittySpecialNumberKeys[number] : kittySpecialLetterKeys[terminator];
 
-  if (!name) return null;
+  if (!name && terminator !== "~") return null;
 
   return {
-    name,
+    name: name ?? "",
     ...parseKittyModifiers(modifiers),
-    eventType: resolveEventType(eventType),
+    eventType,
     sequence: s,
     raw: s,
     isKittyProtocol: true,
     isPrintable: false,
+    code: terminator === "~" ? `[${number}~` : `[${terminator}`,
+    functionalCode: terminator === "~" ? number : undefined,
   };
 };
 
@@ -436,7 +526,7 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
   // If the input matched the kitty CSI-u pattern but was rejected (e.g.,
   // invalid codepoint), return a safe empty keypress instead of falling
   // through to legacy parsing which can produce unsafe states (undefined name)
-  if (kittyKeyRe.test(s)) {
+  if (kittyCsiURe.test(s)) {
     return {
       name: "",
       ctrl: false,
@@ -522,12 +612,21 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
     // the modifier key bitflag and any meaningless "1;" sequence
     const code = [parts[1], parts[2], parts[4], parts[6]].filter(Boolean).join("");
 
-    const modifier = ((parts[3] || parts[5] || 1) as number) - 1;
+    const encodedModifier = parseDecimal(parts[3] || parts[5] || "1");
+    if (encodedModifier === undefined || encodedModifier < 1 || encodedModifier > 256) {
+      return key;
+    }
+    const modifier = encodedModifier - 1;
 
     // Parse the key modifier
     key.ctrl = !!(modifier & 4);
-    key.meta = key.meta || !!(modifier & 10);
+    key.alt = !!(modifier & 2);
+    key.meta = key.meta || !!(modifier & 32);
     key.shift = !!(modifier & 1);
+    key.super = !!(modifier & 8);
+    key.hyper = !!(modifier & 16);
+    key.capsLock = !!(modifier & 64);
+    key.numLock = !!(modifier & 128);
     key.code = code;
 
     key.name = keyName[code] ?? "";

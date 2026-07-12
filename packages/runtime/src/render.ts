@@ -17,14 +17,13 @@ import { onExit } from "signal-exit";
 import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
-import type { InputEvent } from "./io/input-parser.ts";
 import {
   getSharedStdinIngress,
   type SharedStdinIngress,
   type SharedStdinSubscription,
 } from "./io/stdin-ingress.ts";
-import { isSgrMouseInput, parseMouseInput, parseSgrMouseInput } from "./io/parse-mouse.ts";
-import { parseKeypress } from "./io/parse-keypress.ts";
+import type { NormalizedInputFact } from "./io/normalized-input.ts";
+import { toMouseInputEvent } from "./io/parse-mouse.ts";
 import {
   createKittyKeyboardController,
   type KittyKeyboardOptions,
@@ -2780,7 +2779,7 @@ function createStdinController(
   let activeKittyQueryDetections = 0;
   let inputDeliveryActive = false;
   let drainingApplicationInput = false;
-  const pendingApplicationInput: InputEvent[] = [];
+  const pendingApplicationInput: NormalizedInputFact[] = [];
   let bracketedPasteModeCount = 0;
   let reconcilingBracketedPaste = false;
   let bracketedPasteReconcileRequested = false;
@@ -3064,7 +3063,7 @@ function createStdinController(
     sharedSubscription.setActive(shouldBeActive);
   }
 
-  function acceptSharedInput(event: InputEvent): void {
+  function acceptSharedInput(event: NormalizedInputFact): void {
     if (disposed || suspended) return;
     pendingApplicationInput.push(event);
     flushPendingApplicationInput();
@@ -3088,40 +3087,38 @@ function createStdinController(
     }
   }
 
-  function emitInput(input: string) {
+  function emitInput(fact: NormalizedInputFact) {
     // exitOnCtrlC: intercept Ctrl+C here — at the always-on stdin controller,
     // BEFORE dispatching to any listener — so the app exits no matter which
     // composable holds raw mode (useInput / useFocus / usePaste, or none), and
     // there's a single source of truth (useInput no longer carries its own
     // copy). Legacy Ctrl+C is the bare \x03 byte; the kitty keyboard protocol
-    // encodes it as a CSI-u sequence (\x1b[99;5u). Fast-path the \x03 byte and
-    // parse only escape-prefixed sequences, so ordinary keystrokes aren't parsed
-    // here just to be parsed again in useInput. (Ink only checks \x03 and so
-    // never exits under kitty; see .agents/docs/ink-divergences.md.)
-    if (opts.exitOnCtrlC) {
-      if (input === "\x03") {
+    // encodes it as a CSI-u sequence (\x1b[99;5u). The shared ingress has
+    // already normalized both forms, so this default reads the same fact every
+    // hook will receive instead of parsing the source a second time.
+    if (opts.exitOnCtrlC && fact.kind === "key" && fact.key.phase !== "release") {
+      const { modifiers } = fact.key;
+      const isCtrlC =
+        modifiers.ctrl &&
+        !modifiers.shift &&
+        !modifiers.alt &&
+        !modifiers.super &&
+        !modifiers.hyper &&
+        !modifiers.meta &&
+        (fact.key.name === "c" ||
+          fact.key.primaryCodepoint === 99 ||
+          fact.key.baseLayoutCodepoint === 99);
+      if (isCtrlC) {
         appCtx.exit();
         return;
       }
-      // Only an escape sequence can be a kitty-encoded Ctrl+C. `!key.shift`
-      // keeps Ctrl+Shift+C (kitty \x1b[67;6u, a distinct "copy" combo) from
-      // being read as Ctrl+C — the kitty parser lowercases `name` to "c", so
-      // shift is the only signal. (Legacy can't disambiguate the two: both send
-      // \x03 above, so legacy Ctrl+Shift+C still exits, as it always has.)
-      if (input.charCodeAt(0) === 0x1b) {
-        const key = parseKeypress(input);
-        if (key.name === "c" && key.ctrl && !key.shift && key.eventType !== "release") {
-          appCtx.exit();
-          return;
-        }
-      }
     }
-    if (activeSgrMouseMode && isSgrMouseInput(input)) {
-      const rawMouse = parseSgrMouseInput(input);
+    if (activeSgrMouseMode && fact.kind === "pointer") {
+      const rawMouse = fact.pointer.event;
       if (rawMouse && emitter.listenerCount("internal_mouse") > 0) {
         emitter.emit("internal_mouse", rawMouse);
       }
-      const mouse = parseMouseInput(input);
+      const mouse = rawMouse ? toMouseInputEvent(rawMouse) : undefined;
       if (mouse && emitter.listenerCount("mouse") > 0) {
         emitter.emit("mouse", mouse);
       }
@@ -3129,24 +3126,42 @@ function createStdinController(
     }
 
     // Esc resets focus when focus is enabled
-    if (input === "\x1b" && focusContext.enabled) {
-      focusContext.blur();
+    if (
+      fact.kind === "key" &&
+      fact.key.name === "escape" &&
+      fact.key.phase !== "release" &&
+      focusContext.enabled
+    ) {
+      const { modifiers } = fact.key;
+      if (
+        !modifiers.shift &&
+        !modifiers.alt &&
+        !modifiers.ctrl &&
+        !modifiers.super &&
+        !modifiers.hyper &&
+        !modifiers.meta
+      ) {
+        focusContext.blur();
+      }
     }
-    emitter.emit("input", input);
+    emitter.emit("input", fact);
   }
 
-  function processInputEvent(event: InputEvent): void {
+  function processInputEvent(event: NormalizedInputFact): void {
     if (suspended || disposed) return;
-    if (typeof event === "string") {
-      emitInput(event);
-    } else {
+    if (event.kind === "paste") {
       // Preserve paste as a shared framing fact, then adapt it to the current
       // Ink-compatible channels at this app boundary.
       if (emitter.listenerCount("paste") > 0) {
-        emitter.emit("paste", event.paste);
+        emitter.emit("paste", event.text);
       } else {
-        emitInput(event.paste);
+        // The old useInput hook still receives one compatibility projection,
+        // but application defaults never reinterpret paste contents as Ctrl+C,
+        // focus navigation, pointer input, or a terminal query response.
+        emitter.emit("input", event);
       }
+    } else {
+      emitInput(event);
     }
   }
 
@@ -3166,13 +3181,18 @@ function createStdinController(
   sharedSubscription = sharedIngress.subscribe(acceptSharedInput);
 
   // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
-  const focusInputListener = (data: string) => {
+  const focusInputListener = (fact: NormalizedInputFact) => {
     // Ink parity (handleTabNavigation): Tab/Shift-Tab navigation is gated by the
     // focus-enabled flag here — disableFocus() makes Tab a no-op, but a
     // programmatic focusNext()/focusPrevious() still works (see createFocusController).
     if (!focusContext.enabled) return;
-    if (data === "\t") focusContext.focusNext();
-    else if (data === "\x1b[Z") focusContext.focusPrevious();
+    if (fact.kind !== "key" || fact.key.name !== "tab" || fact.key.phase === "release") return;
+    const { modifiers } = fact.key;
+    if (modifiers.ctrl || modifiers.alt || modifiers.super || modifiers.hyper || modifiers.meta) {
+      return;
+    }
+    if (modifiers.shift) focusContext.focusPrevious();
+    else focusContext.focusNext();
   };
   emitter.on("input", focusInputListener);
 

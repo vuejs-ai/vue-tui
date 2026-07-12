@@ -172,10 +172,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 - **Ink:** exits only on the legacy `\x03` byte (in `App`), so a kitty-protocol Ctrl+C
   (`\x1b[99;5u`) parses fine but never exits. Its guard is byte-specific, not
   Ctrl+C-specific.
-- **vue-tui:** one encoding-agnostic exit in the always-on stdin controller (`emitInput`),
-  via `parseKeypress`. It matches Ctrl+C in both the legacy and kitty forms (but not
-  Ctrl+Shift+C), so it fires no matter which composable holds raw mode (`useInput` /
-  `useFocus` / `usePaste`, or none).
+- **vue-tui:** one encoding-agnostic exit in the always-on stdin controller (`emitInput`) reads the shared normalized key fact. It matches an exact Ctrl+C in legacy and kitty forms, including a kitty base-layout `c`. When a protocol reports Shift, Alt, Super, Hyper, or Meta separately, that combination remains an application shortcut; legacy terminals may encode Ctrl+Shift+C as the indistinguishable `\x03`, which still exits. The default therefore fires no matter which composable holds raw mode (`useInput` / `useFocus` / `usePaste`, or none).
 - **Why:** `exitOnCtrlC` is defined in terms of Ctrl+C, not one byte encoding. Keeping the
   exit at the single always-on layer avoids splitting the behavior across two places. Opt
   out with `exitOnCtrlC: false`. KEEP. [VOUCHED @hyf0] Tests:
@@ -236,7 +233,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyf0]
-- **F3.1 implementation update (unstamped):** one weakly registered framework ingress now replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes and parses structural control-sequence and paste events once, then delivers them to eligible app controllers. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. Current handlers still perform semantic key reduction. See [normalized input and routing](./input-routing.md).
+- **F3.1–F3.2 implementation update (unstamped):** one weakly registered framework ingress now replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, and normalizes each event once into the same immutable semantic fact for all eligible app controllers. Current hooks consume a cached Ink-shaped edge projection; richer key identity remains internal. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. Handler generations and the final public route remain open. See [normalized input and routing](./input-routing.md).
 
 ## Vue API and Mental Model Divergences
 

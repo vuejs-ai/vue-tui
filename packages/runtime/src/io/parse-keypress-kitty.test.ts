@@ -35,7 +35,7 @@ describe("kitty protocol - basic characters and modifiers", () => {
   });
 
   test("uppercase character (shift)", () => {
-    const result = parseKeypress(kittyKey(65, 2));
+    const result = parseKeypress(kittyKey(97, 2));
     expect(result.name).toBe("a");
     expect(result.shift).toBe(true);
     expect(result.ctrl).toBe(false);
@@ -53,7 +53,8 @@ describe("kitty protocol - basic characters and modifiers", () => {
   test("alt/option modifier", () => {
     const result = parseKeypress(kittyKey(97, 3));
     expect(result.name).toBe("a");
-    expect(result.meta).toBe(true);
+    expect(result.alt).toBe(true);
+    expect(result.meta).toBe(false);
     expect(result.ctrl).toBe(false);
     expect(result.eventType).toBe("press");
   });
@@ -133,10 +134,10 @@ describe("kitty protocol - special keys", () => {
     expect(result.eventType).toBe("press");
   });
 
-  test("backspace key (codepoint 8)", () => {
+  test("C0 codepoint 8 is not a Kitty backspace key", () => {
     const result = parseKeypress(kittyKey(8));
-    expect(result.name).toBe("backspace");
-    expect(result.eventType).toBe("press");
+    expect(result.name).toBe("");
+    expect(result.isPrintable).toBe(false);
   });
 
   test("backspace key (codepoint 127)", () => {
@@ -193,10 +194,10 @@ describe("kitty protocol - text and unicode", () => {
     expect(result.eventType).toBe("press");
   });
 
-  test("ctrl+letter via codepoint 1-26", () => {
+  test("rejects the non-standard C0 codepoint form for ctrl+letter", () => {
     const result = parseKeypress(kittyKey(1, 5));
-    expect(result.name).toBe("a");
-    expect(result.ctrl).toBe(true);
+    expect(result.name).toBe("");
+    expect(result.isPrintable).toBe(false);
   });
 
   test("preserves sequence and raw", () => {
@@ -232,9 +233,9 @@ describe("kitty protocol - text and unicode", () => {
     expect(result.isKittyProtocol).toBe(true);
   });
 
-  test("text defaults to character from codepoint", () => {
+  test("does not invent reported text when the field is absent", () => {
     const result = parseKeypress(kittyKey(97));
-    expect(result.text).toBe("a");
+    expect(result.text).toBeUndefined();
     expect(result.isKittyProtocol).toBe(true);
   });
 });
@@ -319,21 +320,23 @@ describe("kitty protocol - error handling", () => {
     expect(result.isPrintable).toBe(false);
   });
 
-  test("invalid text codepoint replaced with fallback", () => {
+  test("invalid text codepoint returns a safe uninterpreted keypress", () => {
     const result = parseKeypress(kittyKey(97, 1, 1, [1_114_112]));
-    expect(result.name).toBe("a");
-    expect(result.text).toBe("?");
+    expect(result.name).toBe("");
+    expect(result.text).toBeUndefined();
     expect(result.isKittyProtocol).toBe(true);
+    expect(result.isPrintable).toBe(false);
   });
 
-  test("malformed modifier 0 does not set all flags", () => {
+  test("malformed modifier 0 returns a safe uninterpreted keypress", () => {
     const result = parseKeypress("\x1b[97;0u");
-    expect(result.name).toBe("a");
+    expect(result.name).toBe("");
     expect(result.ctrl).toBe(false);
     expect(result.shift).toBe(false);
     expect(result.meta).toBe(false);
     expect(result.super ?? false).toBe(false);
     expect(result.isKittyProtocol).toBe(true);
+    expect(result.isPrintable).toBe(false);
   });
 });
 
@@ -389,8 +392,8 @@ describe("kitty protocol - isPrintable field", () => {
     expect(parseKeypress(kittyKey(27)).isPrintable).toBe(false);
   });
 
-  test("true for return", () => {
-    expect(parseKeypress(kittyKey(13)).isPrintable).toBe(true);
+  test("false for return", () => {
+    expect(parseKeypress(kittyKey(13)).isPrintable).toBe(false);
   });
 
   test("false for tab", () => {
@@ -402,11 +405,11 @@ describe("kitty protocol - isPrintable field", () => {
   });
 
   test("false for backspace", () => {
-    expect(parseKeypress(kittyKey(8)).isPrintable).toBe(false);
+    expect(parseKeypress(kittyKey(127)).isPrintable).toBe(false);
   });
 
-  test("false for ctrl+letter", () => {
-    expect(parseKeypress(kittyKey(1, 5)).isPrintable).toBe(false);
+  test("true for the printable key identity in ctrl+letter", () => {
+    expect(parseKeypress(kittyKey(97, 5)).isPrintable).toBe(true);
   });
 
   test("false for special keys (arrows)", () => {
@@ -491,14 +494,14 @@ describe("kitty protocol - non-printable key suppression", () => {
   });
 });
 
-describe("kitty protocol - space and return text", () => {
-  test("space key has text field set to space character", () => {
+describe("kitty protocol - absent associated text", () => {
+  test("space key does not fabricate a reported text field", () => {
     const result = parseKeypress(kittyKey(32));
-    expect(result.text).toBe(" ");
+    expect(result.text).toBeUndefined();
   });
 
-  test("return key has text field set to carriage return", () => {
+  test("return key does not fabricate a reported text field", () => {
     const result = parseKeypress(kittyKey(13));
-    expect(result.text).toBe("\r");
+    expect(result.text).toBeUndefined();
   });
 });

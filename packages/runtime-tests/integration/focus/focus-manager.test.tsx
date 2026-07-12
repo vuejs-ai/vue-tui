@@ -325,6 +325,18 @@ test("initial activeId is null; Tab from no focus lands on the first focusable t
 
   await stdin.write("\t");
   expect(activeId.value).toBe("b");
+
+  // Framework defaults consume the normalized key identity rather than one
+  // particular terminal encoding. Kitty Tab and Shift+Tab therefore match
+  // their legacy forms.
+  await stdin.write("\x1b[9;2u");
+  expect(activeId.value).toBe("a");
+
+  await stdin.write("\x1b[9u");
+  expect(activeId.value).toBe("b");
+
+  await stdin.write("\x1b[27u");
+  expect(activeId.value).toBeNull();
 });
 
 // LOCK: Esc must NOT clear focus while focus management is disabled. Mirrors Ink

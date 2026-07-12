@@ -295,14 +295,19 @@ describe("input-parser", () => {
       events: ["ab", "\x7F", "cd"],
     },
     {
-      title: "does not split pasted carriage return from text",
+      title: "splits carriage return from text outside bracketed paste",
       chunks: ["\rtest"],
-      events: ["\rtest"],
+      events: ["\r", "test"],
     },
     {
-      title: "does not split pasted tab from text",
+      title: "splits tab from text outside bracketed paste",
       chunks: ["\ttest"],
-      events: ["\ttest"],
+      events: ["\t", "test"],
+    },
+    {
+      title: "splits Ctrl+C from adjacent text",
+      chunks: ["a\x03b"],
+      events: ["a", "\x03", "b"],
     },
   ];
 

@@ -92,6 +92,23 @@ test("two useInput hooks both receive the same input", async () => {
   expect(b).toEqual(["z"]);
 });
 
+test("current useInput listeners receive isolated mutable Key projections", async () => {
+  let secondCtrl: boolean | undefined;
+  const App = defineComponent(() => {
+    useInput((_input, key) => {
+      key.ctrl = true;
+    });
+    useInput((_input, key) => {
+      secondCtrl = key.ctrl;
+    });
+    return () => <Text>x</Text>;
+  });
+
+  const { stdin } = await render(App);
+  await stdin.write("a");
+  expect(secondCtrl).toBe(false);
+});
+
 // --- Basic key input tests (ported from Ink term()-based tests) ---
 
 test("useInput - return key sets key.return", async () => {
@@ -453,10 +470,10 @@ test("useInput - kitty ctrl+letter RELEASE delivers the letter name (input='a'),
   });
 
   const { stdin } = await render(App);
-  // Ctrl+A via codepoint 1-26 form (codepoint 1), modifier 5 (ctrl),
-  // eventType 3 (release). Not printable, but the ctrl+letter branch must still
-  // flow the name "a" through on release — same as Ink.
-  await stdin.write("\x1b[1;5:3u");
+  // Ctrl+A uses the printable key codepoint plus the Ctrl modifier in the
+  // official Kitty grammar. The compatibility projection still flows the
+  // name "a" through on release — same as Ink's current hook shape.
+  await stdin.write("\x1b[97;5:3u");
   expect(calls[0]?.input).toBe("a");
   expect(calls[0]?.key.ctrl).toBe(true);
   expect(calls[0]?.key.eventType).toBe("release");
@@ -486,4 +503,29 @@ test("useInput - kitty Ctrl+C RELEASE does not exit (delivered to handler); pres
   await expect(waitUntilExit()).resolves.toBeUndefined();
   // Press was intercepted in emitInput and never reached the handler.
   expect(calls.length).toBe(1);
+});
+
+test("useInput - richer Kitty facts keep the current hook projection", async () => {
+  const calls: Array<{ input: string; key: Key }> = [];
+  const App = defineComponent(() => {
+    useInput((input, key) => calls.push({ input, key }));
+    return () => <Text>listening</Text>;
+  });
+  const { stdin } = await render(App, { exitOnCtrlC: false });
+
+  await stdin.write("\x1b[97:65:99;6:2;65u");
+  await stdin.write("\x1b[0;;229u");
+  await stdin.write("\x1b[0;1:3;229u");
+  await stdin.write("\x1b[97;3u");
+
+  expect(calls).toHaveLength(4);
+  expect(calls[0]).toMatchObject({
+    input: "A",
+    key: { ctrl: true, shift: true, meta: false, eventType: "repeat" },
+  });
+  expect(calls[1]).toMatchObject({ input: "å", key: { ctrl: false, shift: false } });
+  expect(calls[2]).toMatchObject({ input: "å", key: { eventType: "release" } });
+  // The old public Key has one `meta` bit. Its compatibility projection still
+  // represents exact internal Kitty Alt as meta until F3 selects a public API.
+  expect(calls[3]).toMatchObject({ input: "a", key: { meta: true } });
 });

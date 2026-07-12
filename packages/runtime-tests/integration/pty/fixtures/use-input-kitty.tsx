@@ -55,8 +55,8 @@ const KittyInput = defineComponent({
 
       // Ctrl+Shift+C must NOT be treated as Ctrl+C exit (it's "copy" in many
       // terminals). Even with exitOnCtrlC on, the kitty protocol disambiguates
-      // it (\x1b[67;6u -> input "C", ctrl+shift), so it must reach the handler.
-      if (props.test === "ctrlShiftC" && input === "C" && key.ctrl && key.shift) {
+      // it (\x1b[99;6u -> input "c", ctrl+shift), so it must reach the handler.
+      if (props.test === "ctrlShiftC" && input === "c" && key.ctrl && key.shift) {
         process.stdout.write("__CTRL_SHIFT_C__");
         exit();
         return;

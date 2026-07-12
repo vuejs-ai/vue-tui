@@ -151,9 +151,9 @@ it("useInput - kitty protocol return key produces carriage return input", async 
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - kitty protocol ctrl+letter via codepoint 1-26 produces input", async () => {
+it("useInput - kitty protocol ctrl+letter produces input", async () => {
   const ps = term("use-input-kitty", ["ctrlLetter"]);
-  ps.write(kittyKey(1, 5));
+  ps.write(kittyKey(97, 5));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
@@ -162,7 +162,7 @@ it("useInput - kitty protocol ctrl+letter via codepoint 1-26 produces input", as
 
 it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
   const ps = term("use-input-kitty", ["kittyCtrlCExit"]);
-  ps.write(kittyKey(3, 5));
+  ps.write(kittyKey(99, 5));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
@@ -192,7 +192,7 @@ it("usePaste-only app exits on kitty Ctrl+C", async () => {
 // handler rather than exit. The handler writes a marker to prove delivery.
 it("useInput - kitty Ctrl+Shift+C is delivered, not treated as Ctrl+C exit", async () => {
   const ps = term("use-input-kitty", ["ctrlShiftC"]);
-  ps.write(kittyKey(67, 6));
+  ps.write(kittyKey(99, 6));
   await ps.waitForExit();
   expect(ps.output).toContain("__CTRL_SHIFT_C__");
 });

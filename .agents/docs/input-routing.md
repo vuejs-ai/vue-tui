@@ -1,6 +1,6 @@
 # Normalized input and routing
 
-> **Status:** unstamped active F3 investigation. The current source audit, reproduced protocol failures, pinned peer behavior, and ordered experiment are recorded. This record does not select a public event type, hook name, handler return convention, focus route, external-PTY API, or the final disposition of `useInput`, `usePaste`, `useMouseInput`, `useStdin`, and `exitOnCtrlC`.
+> **Status:** unstamped active F3 implementation record. F3.1 owns one serialized ingress and structural framing per physical stdin. F3.2 normalizes each structural event once into one shared immutable semantic fact. Handler generations and the routing experiment remain active. This record does not select a public event type, hook name, handler return convention, focus route, external-PTY API, or the final disposition of `useInput`, `usePaste`, `useMouseInput`, `useStdin`, and `exitOnCtrlC`.
 
 ## Product problem
 
@@ -34,7 +34,7 @@ The controller's `handleReadable()` path existed but was never registered; live 
 
 ## Implemented F3.1 ingress and structural framing boundary
 
-The first internal unit now gives each physical stdin one framework-owned ingress through a weak registry. Production streams remain byte-oriented instead of installing Node's stream-level UTF-8 decoder, so the ingress can retain the lifecycle context of the byte that began a split scalar. It applies standard streaming UTF-8 replacement behavior, serializes re-entrant chunks through one FIFO, parses control sequences and bracketed paste once into structural `InputEvent` values, recognizes framework-owned Kitty query replies outside paste payloads, and multicasts each structural event to every app that was eligible when that event began. Semantic key normalization still happens in each current `useInput` listener; the shared structural parser is not yet the final lossless key fact or route.
+The first internal unit gives each physical stdin one framework-owned ingress through a weak registry. Production streams remain byte-oriented instead of installing Node's stream-level UTF-8 decoder, so the ingress can retain the lifecycle context of the byte that began a split scalar. It applies standard streaming UTF-8 replacement behavior, serializes re-entrant chunks through one FIFO, parses control sequences and bracketed paste once into structural `InputEvent` values, recognizes framework-owned Kitty query replies outside paste payloads, and snapshots every app eligible when the event begins. Outside a bracketed-paste frame, C0 and DEL bytes are individual control-key events even when Node batches them next to text; an unmarked paste is indistinguishable from typing at the terminal protocol boundary. F3.2 now supplies the semantic boundary before those app recipients are invoked.
 
 An app subscribes before Kitty auto-detection starts but retains ordinary input until Vue setup has installed its first handlers. This covers terminals whose query write synchronously produces `ordinary + reply + ordinary` input. Query completion and its protocol-enable write cannot overtake ordinary input from the data event that caused them; a throwing enable write is reported only after those ordinary segments have been delivered. Subscription deactivation is deferred until the current ingress transaction drains, so input synchronously produced by the enable write remains ordered after the outer data event.
 
@@ -48,6 +48,18 @@ Each input composable and terminal-mode controller now separates requested state
 
 The raw controller assumes Node-style idempotent `ref()` and `unref()` behavior. A custom stream that increments a private lease counter and then throws after the side effect is indistinguishable from one that throws before the side effect; no caller can infer which happened from the exception. Custom streams therefore need `ref()` and `unref()` to represent a boolean keep-alive state, as Node streams do, rather than a stack of counted leases.
 
+## Implemented F3.2 semantic fact boundary
+
+After query ownership and structural framing, the shared ingress now normalizes each event exactly once and sends the same frozen object to every eligible app. The internal discriminated facts are key, text, paste, pointer, and uninterpreted input. Every fact preserves its decoded source sequence. Paste also preserves its payload and reconstructed bracketed boundaries. A syntactically valid SGR pointer report preserves the wire button, coordinates, final byte, modifiers, and the decoded action when known; an unsupported button/action remains pointer input with no fabricated action. A complete Kitty query response produces no application fact.
+
+Plain UTF-8 is recorded as text rather than guessed to be a physical key. For example, a received `A` does not prove that Shift was held; it may come from Caps Lock, an IME, a keyboard layout, or unbracketed text. Recognized legacy controls and escape sequences become keys, but their phase remains unknown because legacy terminals do not distinguish initial press from repeat. Kitty CSI-u keys retain the primary, shifted, and base-layout codepoints; independent Shift, Alt, Ctrl, Super, Hyper, Meta, Caps Lock, and Num Lock bits; press, repeat, or release; known functional identity; and only text explicitly reported by the terminal. The current Ink-shaped compatibility adapter derives ordinary printable and Return input at the hook edge, so derived text is never confused with a reported protocol fact. Kitty pure-text facts retain protocol, primary zero, reported origin, and phase without inventing a key identity. Unknown Kitty functional PUA values remain non-printable keys with their numeric identity rather than becoming printable private-use characters.
+
+The Kitty parser now follows the official [`CSI primary[:shifted[:base]];modifiers:event;text u` grammar](https://sw.kovidgoyal.net/kitty/keyboard-protocol/). It accepts alternate keys, base-layout-only keys, pure-text events with primary zero, and all defined modifiers. Invalid Unicode scalars, associated control text, modifier zero, event values outside press/repeat/release, C0 key codepoints that Kitty does not define as functional keys, and letter-form special sequences whose first parameter is not one remain uninterpreted with their exact decoded source sequence. Alt and Meta stay distinct internally. The current public `Key.meta` compatibility projection still combines them.
+
+The current hooks are adapters, not the fact source. `useInput` reads one cached Ink-shaped projection shared by all current listeners; Ctrl+C, focus defaults, and mouse delivery read the same normalized fact and never parse its sequence again. `usePaste` still wins over `useInput` when a paste listener exists. With no paste listener, one `useInput` callback receives the payload verbatim with no fabricated key flags. Paste-contained Ctrl+C, arrow, mouse, and query-like bytes therefore remain text and cannot execute an application default or disappear as a protocol reply. The richer internal key identity is deliberately not published while routing semantics remain open.
+
+Two limits remain explicit. First, standard UTF-8 replacement already loses invalid source bytes before semantic normalization; `sequence` is enough for valid terminal UTF-8 but is not yet a byte-perfect external-PTY fallback. Second, an ordinary text run has no physical key boundary on the wire and may follow stream chunk boundaries. F3 must either preserve raw byte spans or narrow the eventual external-owner guarantee before claiming transparent PTY forwarding. Neither limit is hidden by calling the current fact lossless.
+
 ## Reproduced failures and constraints
 
 ### Protocol input has no single owner
@@ -56,17 +68,17 @@ Kitty auto detection and the application controller listen to the same `data` ev
 
 The controller also flushes an incomplete ordinary escape after 20ms while Kitty detection waits 200ms. Splitting `ESC[?1u` after `ESC[?`, waiting 35ms, and then sending `1u` delivered `"[?"` and `"1u"` to the application. Filtering a complete reply later in each `useInput` listener cannot repair a reply already split into application events.
 
-The first F3 red tests require ordinary bytes around a query reply to arrive once and in order and require a response split beyond the ordinary escape timeout to remain protocol input. The implemented correction is internal: one shared ingress owns byte decoding, structural framing, protocol recognition, and ordered multicast for a physical stdin, while each current handler still performs downstream semantic key reduction. This avoids replay and structural classification differences among apps sharing stdin without prematurely selecting a public route.
+The first F3 red tests require ordinary bytes around a query reply to arrive once and in order and require a response split beyond the ordinary escape timeout to remain protocol input. The implemented correction is internal: one shared ingress owns byte decoding, structural framing, protocol recognition, semantic normalization, and ordered multicast for a physical stdin. It creates one frozen fact before app delivery; the current `useInput` listeners read one cached compatibility projection instead of parsing or reducing the event again. This avoids replay and classification differences among apps sharing stdin without prematurely selecting a public route.
 
 ### Parsed facts are reduced before routing
 
-`parseKeypress()` already knows a key name, code, raw sequence, modifiers, Kitty source, printable text, and press/repeat/release state. `useInput()` exposes only a text-like `input` string and a small boolean `Key`; F1, Insert, keypad, media, and modifier-only keys become indistinguishable empty events. Ctrl+C can cause a second parse in the controller, and every active listener parses the same event again.
+Before F3.2, `parseKeypress()` already knew a key name, code, raw sequence, modifiers, Kitty source, printable text, and press/repeat/release state. `useInput()` exposed only a text-like `input` string and a small boolean `Key`; F1, Insert, keypad, media, and modifier-only keys became indistinguishable empty events. Ctrl+C caused a second parse in the controller, and every active listener parsed the same event again.
 
-The internal stream must retain at least semantic kind, known key identity, text when present, modifiers, event phase when known, original sequence or uninterpreted input, and ordering. Whether the final public surface exposes all fields directly remains open.
+The internal stream now retains those facts once. The current hook projection still intentionally demonstrates the information loss of the old public shape; whether the final public surface exposes all fields directly remains open.
 
 ### Paste meaning depends on subscribers
 
-Today the existence of any `usePaste` listener changes the event kind for the whole app. With a listener, every paste listener receives the payload and no `useInput` listener does. Without one, boundaries disappear and the payload is interpreted as ordinary keys: pasted Ctrl+C may trigger application exit, and pasted `ESC[A` may become Arrow Up. F3 must preserve a paste fact independently of who subscribes; later routing may adapt it to retained legacy hooks or replace those hooks directly.
+Before F3.2, the existence of any `usePaste` listener changed the event kind for the whole app. With a listener, every paste listener received the payload and no `useInput` listener did. Without one, boundaries disappeared and the payload was interpreted as ordinary keys: pasted Ctrl+C could trigger application exit, and pasted `ESC[A` could become Arrow Up. The shared fact is now always paste. Listener count only selects the temporary edge adapter, and fallback content is verbatim text. The final route and hook disposition remain open.
 
 ### Framework defaults run before application ownership
 
@@ -121,12 +133,13 @@ The experiment proceeds without selecting public names:
 Each route trace keeps four results independent: whether a recipient performed a semantic action, whether later semantic recipients still receive the fact, whether a delayed default remains allowed, and whether an explicit external owner may receive recoverable source input. An active modal boundary also chooses the candidate route before handlers run; an unrecognized key inside an approval overlay must not reach the background composer merely because the overlay performed no action. These are internal test terms, not proposed public fields.
 
 1. **Implemented in F3.1:** give byte decoding, structural framing, and protocol detection one serialized ingress per physical stdin; preserve bracketed-paste payloads; retain ordered event-start multi-app multicast; and separate total from unsuspended raw ownership;
-2. normalize each structurally framed event once into a lossless semantic key, text, paste, or uninterpreted fact and adapt the current hooks at the edge;
-3. keep the pinned Ink broadcast and `isActive` behavior as a control while proving the richer facts do not change current consumers accidentally;
-4. preserve paste as a paste fact regardless of listener count and prove pasted control or escape content never becomes a global command;
-5. run a coding-agent composer plus approval overlay and a finder or workbench route through explicit layers: global application command, active region or overlay, later focused control, component default, and optional external owner;
-6. test continuation and default prevention independently, including the case where every semantic layer continues and an external owner receives exactly one recoverable representation;
-7. only then retain, replace, or remove current hooks and select public names and types.
+2. **Implemented in F3.2:** normalize each structurally framed event once into a shared immutable semantic key, text, paste, pointer, or uninterpreted fact, and adapt the current hooks at the edge;
+3. **Control retained in F3.2:** keep pinned Ink broadcast, registration order, `isActive`, printable-release, and current public key projection behavior while the richer fact stays internal;
+4. **Corrected in F3.2:** preserve paste as a paste fact regardless of listener count and prove pasted control, escape, pointer, and query-like content never becomes an application default or protocol reply;
+5. add per-route leases captured at event start so a replacement handler cannot inherit a split event while unrelated persistent handlers still receive it;
+6. run a coding-agent composer plus approval overlay and a finder or workbench route through explicit layers: global application command, active region or overlay, later focused control, component default, and optional external owner;
+7. test continuation and default prevention independently, including the case where every semantic layer continues and an external owner receives exactly one recoverable representation;
+8. only then retain, replace, or remove current hooks and select public names and types.
 
 The first route order to test is application-global commands → current active boundary → later focused owner and logical ancestors → delayed default → explicit external owner. Framework protocol replies stay before the route. Default `exitOnCtrlC` behavior moves conceptually to the delayed-default position in this experiment so an application can interrupt an active agent or let a focused terminal pane receive Ctrl+C; no public mount change is selected yet.
 
