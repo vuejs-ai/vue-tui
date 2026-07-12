@@ -10,7 +10,9 @@ Coding agent is the current pilot journey, not the definition of all future work
 
 ## Current live objective
 
-Advance F3, normalized input and routing, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint). F3.1 has one serialized structural ingress per physical stdin, F3.2 has one shared immutable semantic fact per structural event, and F3.3 has non-reusable app-route leases captured per framed fact with parser-distinct route selection independent of Node chunk grouping. The private F3.4 pure model makes the candidate route policy executable through coding-agent and workbench journeys. The current unit must extend fact-start capture to boundary, focus-path, default and external activation leases, connect the private policy behind compatibility adapters, and prove actual live behavior without publishing a new event API.
+Advance F3, normalized input and routing, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint). F3.1 has one serialized structural ingress per physical stdin, F3.2 has one shared immutable semantic fact per structural event, and F3.3 has non-reusable app-route leases captured per framed fact with parser-distinct route selection independent of Node chunk grouping. The private F3.4 pure model makes the candidate route policy executable through coding-agent and workbench journeys. Inside each already-captured application snapshot, the current unit must add fact-start activation leases for its selected boundary, supplied focus path, delayed defaults and optional external owner, connect the private policy behind compatibility adapters, and prove actual route order, removal, replacement, re-entry, modal isolation and delayed Ctrl+C, Escape and Tab behavior without publishing a new event API.
+
+Operational checkpoint: PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) is the single open foundation PR at `70784e2`, based directly on merged `main` `25df36d`. Its remote gate is green and its current three commits contain only the one-PR policy plus two test-race corrections; no F3 live-routing implementation has started on this branch yet. Reverify these facts before implementation rather than treating the hashes as permanent.
 
 1. **Completed in the private model:** script a coding-agent composer/approval journey and a terminal-workbench journey that require global interrupt, local editing, paste boundaries, modal ownership, unhandled-key continuation, and external fallthrough without manual `isActive` booleans;
 2. **Completed for the concrete questions:** compare pinned Ink and the recorded peers, then keep semantic action, semantic continuation, delayed-default permission, and external permission independent while requiring semantic completion for external fallthrough;
@@ -30,7 +32,7 @@ F1 and F2 are Done. The public readonly render session supplies truthful host fa
 
 ## Pull-request policy
 
-The remaining F3–F8 program uses one active draft PR rather than a stack. Each coherent unit remains a small Conventional Commit with its own focused evidence, but it is pushed to the same branch and PR. Do not create a new PR for a checkpoint, review batch, corrective follow-up, or public-API proposal while that PR remains active. After the maintainer merges or closes it, fetch the new `main` before creating the next single active PR.
+The remaining F3–F8 program uses one active PR rather than a stack. Each coherent unit remains a small Conventional Commit with its own focused evidence, but it is pushed to the same branch and PR. Do not create a new PR for a checkpoint, review batch, corrective follow-up, or public-API proposal while that PR remains active. The PR's current draft or ready-for-review state does not change the work-selection order; do not toggle that state unless the maintainer asks. After the maintainer merges or closes it, fetch the new `main` before creating the next single active PR.
 
 ## Where work comes from
 
@@ -61,7 +63,7 @@ The foundation roadmap is the single ordered backlog for this program. This live
 6. Implement the smallest coherent change. Update affected examples, public documentation, and unstamped records in the same change.
 7. Run the focused test, then `vp run ready`. For changes sensitive to CI environment or task ordering, also run `CI=true vp run ci` from a fresh build.
 8. Follow the shipped visual development guide for terminal-visible changes and use the repository controller for this repository. If both modes are affected, inspect both; if one mode is affected, inspect it plus a no-regression journey for the other when practical.
-9. Commit one independently reviewable unit and push it to the program's single active draft PR under the run's granted authority; create that PR only when none exists, and never use another foundation branch as its base. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
+9. Commit one independently reviewable unit and push it to the program's single active PR under the run's granted authority; create that PR only when none exists, and never use another foundation branch as its base. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
 10. Overwrite the live objective, candidates, evidence, and blockers. After at most three small units or one public-API proposal, stop and draft the distillation for the maintainer.
 
 ## Verification rules
@@ -84,7 +86,7 @@ Autonomous work may:
 - improve `@vue-tui/testing`, examples, starter material, and shipped documentation when the gap is objectively verifiable;
 - implement a component or composable whose public shape is already accepted and whose need passes the vouched [inclusion bar](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed);
 - correct unstamped records and keep them current with the code;
-- create local commits and update the single active draft PR for review.
+- create local commits and update the single active PR for review.
 
 ## Stop and return to the maintainer
 
@@ -137,6 +139,6 @@ Return a concise review that contains:
 - any record or vouch whose scope may be affected;
 - inline and full-screen findings without choosing the hierarchy;
 - the remaining blocker, current foundation state, and next queued foundation;
-- the exact commits and single active draft PR updated.
+- the exact commits and single active PR updated.
 
 No amount of passing autonomous work vouches this plan, the product goal, or any new direction. The maintainer reviews the distillation, decides what to keep, and explicitly vouches only the direction that should continue to hold.
