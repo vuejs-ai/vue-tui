@@ -1,9 +1,6 @@
-import type { NormalizedInputFact } from "./normalized-input.ts";
 import type { MouseInputEvent, SgrMouseEvent } from "./parse-mouse.ts";
 
 export interface InternalInputRouteEvents {
-  readonly input: NormalizedInputFact;
-  readonly paste: string;
   readonly mouse: MouseInputEvent;
   readonly internal_mouse: SgrMouseEvent;
 }
@@ -43,7 +40,7 @@ type InternalInputRouteSets = {
   readonly [Name in InternalInputRouteName]: Set<InternalInputRoute<Name>>;
 };
 
-const routeNames = ["input", "paste", "mouse", "internal_mouse"] as const;
+const routeNames = ["mouse", "internal_mouse"] as const;
 
 /**
  * Internal event routes with non-reusable attachment identity.
@@ -56,8 +53,6 @@ const routeNames = ["input", "paste", "mouse", "internal_mouse"] as const;
  */
 export function createInternalInputRouteRegistry(): InternalInputRouteRegistry {
   const routes: InternalInputRouteSets = {
-    input: new Set(),
-    paste: new Set(),
     mouse: new Set(),
     internal_mouse: new Set(),
   };
@@ -83,8 +78,6 @@ export function createInternalInputRouteRegistry(): InternalInputRouteRegistry {
     },
     snapshot() {
       return Object.freeze({
-        input: Object.freeze([...routes.input]),
-        paste: Object.freeze([...routes.paste]),
         mouse: Object.freeze([...routes.mouse]),
         internal_mouse: Object.freeze([...routes.internal_mouse]),
       });

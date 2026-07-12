@@ -7,63 +7,33 @@ import {
   type MaybeRef,
   type MaybeRefOrGetter,
 } from "vue";
-import { AppContextKey, StdinContextKey } from "../context.ts";
-import { getLegacyInputProjection, type NormalizedInputFact } from "../io/normalized-input.ts";
-
-export interface Key {
-  upArrow: boolean;
-  downArrow: boolean;
-  leftArrow: boolean;
-  rightArrow: boolean;
-  pageDown: boolean;
-  pageUp: boolean;
-  home: boolean;
-  end: boolean;
-  return: boolean;
-  escape: boolean;
-  ctrl: boolean;
-  shift: boolean;
-  tab: boolean;
-  backspace: boolean;
-  delete: boolean;
-  meta: boolean;
-  super: boolean;
-  hyper: boolean;
-  capsLock: boolean;
-  numLock: boolean;
-  eventType?: "press" | "repeat" | "release";
-}
+import { StdinContextKey } from "../context.ts";
+import type { NormalizedInputFact } from "../io/normalized-input.ts";
+import {
+  normalizeInputHandlerResult,
+  projectPublicInputEvent,
+  type InputHandler,
+} from "../io/public-input.ts";
+import type { InternalInputApplicationGlobalRegistration } from "../io/input-route-runtime.ts";
 
 export interface UseInputOptions {
-  isActive?: MaybeRefOrGetter<boolean>;
+  readonly isActive?: MaybeRefOrGetter<boolean>;
 }
 
-type InputHandler = (input: string, key: Key) => void;
-
 export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptions = {}): void {
-  const app = inject(AppContextKey);
   const stdin = inject(StdinContextKey);
-  if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
+  if (!stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
 
   let desiredActive = false;
   let attached = false;
-  let detachInputRoute: (() => void) | undefined;
+  let registration: InternalInputApplicationGlobalRegistration | undefined;
   let reconciling = false;
   let reconcileRequested = false;
 
   function listener(fact: NormalizedInputFact) {
-    const projection = getLegacyInputProjection(fact);
-    if (!projection) return;
-    // Ctrl+C exit (both the legacy \x03 byte and the Kitty CSI-u form) is a
-    // delayed controller default. Compatibility handlers observe the fact
-    // first; the controller then exits unless a future semantic route prevents
-    // defaults. Any managed input demand keeps this controller route active, so
-    // useFocus/usePaste-only apps get the same default without a useInput hook.
-    // An input-free app stays cooked and leaves Ctrl+C signal handling to the OS.
-    // The normalized fact and cached projection are shared, but the current
-    // public Key type is mutable and historically supplied one object per
-    // listener. Keep that edge isolation until F3 selects the public surface.
-    unref(handler)(projection.input, { ...projection.key });
+    const event = projectPublicInputEvent(fact);
+    if (!event) return normalizeInputHandlerResult("continue");
+    return normalizeInputHandlerResult(unref(handler)(event));
   }
 
   function reconcileAttachment() {
@@ -79,22 +49,15 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
         reconcileRequested = false;
         try {
           if (desiredActive && !attached) {
-            let rawAcquired = false;
-            try {
-              stdin!.acquireRawMode();
-              rawAcquired = true;
-              detachInputRoute = stdin!.internal_routes.attach("input", listener);
-              attached = true;
-              rawAcquired = false;
-            } catch (error) {
-              if (rawAcquired) stdin!.releaseRawMode();
-              throw error;
-            }
+            registration = stdin!.internal_inputRouting.registerApplicationGlobal({
+              id: "useInput",
+              handle: listener,
+            });
+            attached = true;
           } else if (!desiredActive && attached) {
             attached = false;
-            detachInputRoute?.();
-            detachInputRoute = undefined;
-            stdin!.releaseRawMode();
+            registration?.end();
+            registration = undefined;
           }
         } catch (error) {
           if (hasError) break;

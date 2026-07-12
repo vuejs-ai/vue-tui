@@ -27,7 +27,7 @@ test("mount hides cursor, unmount shows cursor", async () => {
   const App = defineComponent(() => () => <Text>hello</Text>);
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
 
   // Cursor should be hidden after mount

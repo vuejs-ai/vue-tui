@@ -263,7 +263,6 @@ test("public hooks expose terminal-size fallback facts for a visual TTY without 
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
     } as never);
 
@@ -307,7 +306,6 @@ test("public hooks retain detected terminal dimensions when live updates are dis
       liveUpdates: false,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
     });
 
     expect(observed).toEqual({

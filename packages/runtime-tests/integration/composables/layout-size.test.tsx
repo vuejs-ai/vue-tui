@@ -173,7 +173,7 @@ test("useLayoutSize falls back to a positive column count when stdout.columns is
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   await new Promise<void>((r) => setTimeout(r, 60));
 
   try {
@@ -204,7 +204,7 @@ test("multiple useLayoutSize consumers share one app resize listener", async () 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   await new Promise<void>((r) => setTimeout(r, 60));
 
   expect(stdout.listenerCount("resize")).toBe(baseline + 1);
@@ -232,7 +232,6 @@ test("useLayoutSize derives a bounded layout from an explicitly modeled terminal
       stdin,
       stderr,
       maxFps: 0,
-      exitOnCtrlC: false,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
         kind: "detected",
         source: "environment",
@@ -271,7 +270,6 @@ test("rapid resize events commit only the newest layout and participate in the r
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_RENDER_OBSERVER]: observer,
     } as Parameters<typeof app.mount>[0]);
     await app.waitUntilRenderFlush();

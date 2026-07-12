@@ -34,7 +34,6 @@ export interface RenderOptions {
   /** Deliberate emulator height and TTY height. @default 100 */
   readonly rows?: number;
   readonly props?: Record<string, unknown>;
-  readonly exitOnCtrlC?: boolean;
 }
 
 export interface ContentFrame {
@@ -131,7 +130,6 @@ function dimension(value: unknown, fallback: number, name: string): number {
 
 function normalizeOptions(options: RenderOptions): {
   readonly props: Record<string, unknown> | undefined;
-  readonly exitOnCtrlC: boolean;
   readonly host: NormalizedTestHost;
 } {
   const root = assertObject(options, "render options");
@@ -140,7 +138,7 @@ function normalizeOptions(options: RenderOptions): {
       throw new TypeError(`render option "${removed}" was removed; configure the modeled host.`);
     }
   }
-  rejectUnknownKeys(root, ["host", "columns", "rows", "props", "exitOnCtrlC"], "render");
+  rejectUnknownKeys(root, ["host", "columns", "rows", "props"], "render");
 
   // Snapshot each accessor once. Validation and construction must use the same
   // value so a stateful getter cannot pass one check and mount with another.
@@ -148,7 +146,6 @@ function normalizeOptions(options: RenderOptions): {
   const columnsOption = root.columns;
   const rowsOption = root.rows;
   const propsOption = root.props;
-  const exitOnCtrlCOption = root.exitOnCtrlC;
 
   const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
   rejectUnknownKeys(host, ["mode", "presentation", "updates", "stdin", "stdout"], "render host");
@@ -183,14 +180,10 @@ function normalizeOptions(options: RenderOptions): {
   if (updates !== "live" && updates !== "at-teardown") {
     throw new TypeError('render host updates must be "live" or "at-teardown".');
   }
-  if (exitOnCtrlCOption !== undefined && typeof exitOnCtrlCOption !== "boolean") {
-    throw new TypeError("render option exitOnCtrlC must be a boolean or undefined.");
-  }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
 
   return {
     props: propsOption as Record<string, unknown> | undefined,
-    exitOnCtrlC: (exitOnCtrlCOption as boolean | undefined) ?? false,
     host: {
       mode,
       presentation,
@@ -322,7 +315,6 @@ export async function render(
       mode: host.mode,
       liveUpdates: host.updates === "live",
       isScreenReaderEnabled: host.presentation === "screen-reader",
-      exitOnCtrlC: normalized.exitOnCtrlC,
       patchConsole: false,
       maxFps: 0,
       [INTERNAL_RENDER_OBSERVER]: observer,

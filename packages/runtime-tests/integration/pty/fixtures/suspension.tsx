@@ -1,15 +1,7 @@
 import process from "node:process";
-import {
-  Box,
-  createApp,
-  Text,
-  useApp,
-  useInput,
-  useLayoutSize,
-  usePaste,
-  useStderr,
-} from "@vue-tui/runtime";
+import { Box, createApp, Text, useApp, useInput, useLayoutSize, useStderr } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
+import { inputText } from "./input-event.js";
 
 const mode = process.argv.includes("fullscreen") ? "fullscreen" : "inline";
 const marker = mode === "fullscreen" ? "FULLSCREEN_SNAPSHOT" : "INLINE_SNAPSHOT";
@@ -19,10 +11,13 @@ const App = defineComponent(() => {
   const { write } = useStderr();
   const { columns, rows } = useLayoutSize();
 
-  useInput((input) => {
-    if (input === "q") exit();
+  useInput((event) => {
+    if (inputText(event) === "q") {
+      exit();
+      return "consume";
+    }
+    return "continue";
   });
-  usePaste(() => {});
 
   onMounted(() => {
     // Announce only after mount returns so the test starts from a fully painted

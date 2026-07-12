@@ -47,7 +47,7 @@ test("writeToStdout: pre-unmount write works, post-unmount write is suppressed",
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Wait for initial render to settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -87,7 +87,7 @@ test("writeToStderr: pre-unmount write works, post-unmount write is suppressed",
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Wait for initial render to settle
   await new Promise<void>((r) => setTimeout(r, 60));

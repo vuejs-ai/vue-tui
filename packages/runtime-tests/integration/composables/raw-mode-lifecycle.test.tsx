@@ -58,11 +58,11 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const which = shallowRef<"a" | "b">("a");
 
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -71,7 +71,7 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Baseline: mounting the first useInput enables raw mode exactly once.
@@ -107,11 +107,17 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const bKeys: string[] = [];
 
   const A = defineComponent(() => {
-    useInput((input) => aKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") aKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") bKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -120,7 +126,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const { stream: stdin } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   which.value = "b";
@@ -150,7 +156,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
 // was [true] at this point and only became [true, false] after a drain.
 test("teardown disables raw mode synchronously so a signal exit can't leave the terminal raw (Ink parity)", async () => {
   const App = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>listening</Text>;
   });
 
@@ -158,7 +164,7 @@ test("teardown disables raw mode synchronously so a signal exit can't leave the 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   expect(setRawModeCalls).toEqual([true]);
@@ -195,11 +201,17 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
   const bKeys: string[] = [];
 
   const AppA = defineComponent(() => {
-    useInput((input) => aKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") aKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>a</Text>;
   });
   const AppB = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") bKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>b</Text>;
   });
 
@@ -209,8 +221,8 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
 
   const appA = createApp(AppA);
   const appB = createApp(AppB);
-  appA.mount({ stdout: stdout1, stdin, maxFps: 0, exitOnCtrlC: false });
-  appB.mount({ stdout: stdout2, stdin, maxFps: 0, exitOnCtrlC: false });
+  appA.mount({ stdout: stdout1, stdin, maxFps: 0 });
+  appB.mount({ stdout: stdout2, stdin, maxFps: 0 });
   await settle();
 
   // Raw mode enabled exactly once (shared refcount); both apps hold the one ref.
@@ -250,7 +262,7 @@ test("a no-input app never enables raw mode or holds stdin", async () => {
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Cooked: raw mode never acquired without an input composable.
@@ -267,7 +279,7 @@ test("a no-input app never enables raw mode or holds stdin", async () => {
 test("useInput acquires raw on mount and releases it on unmount", async () => {
   const showInput = shallowRef(true);
   const Child = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>input</Text>;
   });
   const App = defineComponent(() => () => (showInput.value ? <Child /> : <Text>idle</Text>));
@@ -276,7 +288,7 @@ test("useInput acquires raw on mount and releases it on unmount", async () => {
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Mounting the useInput consumer enables raw mode exactly once (0→1).
@@ -303,7 +315,7 @@ test("useInput acquires raw on mount and releases it on unmount", async () => {
 test("useInput isActive=false releases raw mode and true re-acquires it", async () => {
   const active = shallowRef(true);
   const App = defineComponent(() => {
-    useInput(() => {}, { isActive: () => active.value });
+    useInput(() => "continue", { isActive: () => active.value });
     return () => <Text>listening</Text>;
   });
 
@@ -311,7 +323,7 @@ test("useInput isActive=false releases raw mode and true re-acquires it", async 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Active on mount → raw acquired once.
@@ -341,11 +353,14 @@ test("a pending partial escape does not bleed across a useInput swap", async () 
   const which = shallowRef<"a" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") bKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -353,7 +368,7 @@ test("a pending partial escape does not bleed across a useInput swap", async () 
   const stdout = makeFakeWritable();
   const { stream: stdin } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Buffer a partial CSI escape, then swap A → B in the same tick.
@@ -374,11 +389,14 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   const screen = shallowRef<"a" | "idle" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.kind === "text") bKeys.push(event.text);
+      return "continue";
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(
@@ -388,7 +406,7 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   const stdout = makeFakeWritable();
   const { stream: stdin } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
 
   // Navigate to the idle (no-input) screen; A's useInput unmounts.

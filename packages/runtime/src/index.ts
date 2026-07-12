@@ -62,7 +62,21 @@ export type {
 export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
-export { useInput, type Key, type UseInputOptions } from "./composables/useInput.ts";
+export { useInput, type UseInputOptions } from "./composables/useInput.ts";
+export {
+  type InputHandler,
+  type InputHandlerResult,
+  type InputRouteDecision,
+  type TuiInputEvent,
+  type TuiInputModifiers,
+  type TuiInputPhase,
+  type TuiInputSource,
+} from "./io/public-input.ts";
+export {
+  useInputAvailability,
+  type UseInputAvailabilityReturn,
+} from "./composables/useInputAvailability.ts";
+export type { InputAvailability } from "./io/input-availability.ts";
 export {
   useMouseInput,
   type MouseInputEvent,
@@ -85,7 +99,6 @@ export type {
   TuiMouseEventType,
   TuiWheelEvent,
 } from "./mouse/events.ts";
-export { usePaste, type UsePasteOptions } from "./composables/usePaste.ts";
 export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";
 export { useFocusManager } from "./composables/useFocusManager.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";

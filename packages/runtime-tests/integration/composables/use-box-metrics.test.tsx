@@ -1063,7 +1063,6 @@ describe("useBoxMetrics - subtree drill (fragment-rooted Box resolution)", () =>
       stdout,
       stdin,
       stderr,
-      exitOnCtrlC: false,
       isScreenReaderEnabled: true,
     });
     try {

@@ -144,18 +144,31 @@ function restart(): void {
   Object.assign(world, makeWorld(best));
 }
 
-useInput((input, key) => {
-  if ((key.ctrl && input === "c") || input === "q") {
+useInput((event) => {
+  const isCtrlC =
+    event.kind === "key" &&
+    event.key.name === "c" &&
+    event.key.modifiers.ctrl &&
+    event.key.phase !== "release";
+  if (isCtrlC || (event.kind === "text" && event.text === "q")) {
     exit();
-    return;
+    return "consume";
   }
   if (world.dead) {
-    if (input === "r") restart();
-    return;
+    if (event.kind === "text" && event.text === "r") {
+      restart();
+      return "consume";
+    }
+    return "continue";
   }
-  if (input === " " || input === "w" || key.upArrow) {
+  const isFlapText = event.kind === "text" && (event.text === " " || event.text === "w");
+  const isUpArrow =
+    event.kind === "key" && event.key.name === "up" && event.key.phase !== "release";
+  if (isFlapText || isUpArrow) {
     flap();
+    return "consume";
   }
+  return "continue";
 });
 
 const tickId = setInterval(() => {

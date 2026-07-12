@@ -100,7 +100,7 @@ function makeFdBackedStdout(): {
 }
 
 const MouseApp = defineComponent(() => {
-  useMouseInput(() => {});
+  useMouseInput(() => "continue");
   return () => <Text>mouse</Text>;
 });
 
@@ -112,7 +112,7 @@ describe("SGR mouse disable on signal exit", () => {
     const app = createApp(MouseApp);
     // Keep the live TTY path explicit; lifecycle cleanup now registers for every
     // real mount regardless of output cadence.
-    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, liveUpdates: true });
 
     // Let useMouseInput's attach enable SGR mouse tracking (writes
     // \x1b[?1000h\x1b[?1006h, async).
@@ -149,7 +149,7 @@ describe("SGR mouse disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(MouseApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin, liveUpdates: true });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(MOUSE_ON);

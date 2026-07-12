@@ -1,529 +1,499 @@
 import { defineComponent, nextTick, shallowRef, toRef, type PropType } from "vue";
-import { expect, test, vi } from "vite-plus/test";
+import { describe, expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useInput, useStdout, type Key } from "@vue-tui/runtime";
+import { createApp, Text, useInput, type InputHandler, type TuiInputEvent } from "@vue-tui/runtime";
+import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
-test("useInput receives keyboard input", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
+const PASTE_ON = "\x1b[?2004h";
+const PASTE_OFF = "\x1b[?2004l";
 
-  const { stdin } = await render(App);
-  await stdin.write("x");
-  expect(calls[0]?.input).toBe("x");
-});
+describe("normalized public input", () => {
+  test("delivers one immutable key event object to every captured global handler", async () => {
+    const events: TuiInputEvent[] = [];
+    const order: string[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        order.push("first");
+        events.push(event);
+        return "consume";
+      });
+      useInput((event) => {
+        order.push("second");
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
+    });
 
-test("useInput receives arrow keys", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
+    const result = await render(App);
+    await result.stdin.write("\x03");
 
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[A");
-  expect(calls[0]?.key.upArrow).toBe(true);
-});
-
-test("useInput respects isActive ref", async () => {
-  const calls: string[] = [];
-  const active = shallowRef(false);
-  const App = defineComponent(() => {
-    useInput((input) => calls.push(input), { isActive: active });
-    return () => <Text>x</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("a");
-  expect(calls.length).toBe(0);
-
-  active.value = true;
-  await stdin.write("b");
-  expect(calls).toEqual(["b"]);
-});
-
-test("useInput accepts a handler ref and calls the latest function", async () => {
-  const calls: string[] = [];
-  const firstHandler = (input: string) => calls.push(`first:${input}`);
-  const secondHandler = (input: string) => calls.push(`second:${input}`);
-  const currentHandler = shallowRef(firstHandler);
-
-  const Child = defineComponent({
-    props: {
-      onInput: {
-        type: Function as PropType<(input: string, key: Key) => void>,
-        required: true,
+    expect(order).toEqual(["first", "second"]);
+    expect(events[0]).toBe(events[1]);
+    expect(events[0]).toEqual({
+      kind: "key",
+      sequence: "\x03",
+      fidelity: "normalized-utf8-sequence",
+      key: {
+        protocol: "legacy",
+        name: "c",
+        code: null,
+        primaryCodepoint: null,
+        shiftedCodepoint: null,
+        baseLayoutCodepoint: null,
+        functionalCode: null,
+        modifiers: {
+          shift: false,
+          alt: false,
+          ctrl: true,
+          super: false,
+          hyper: false,
+          meta: false,
+          capsLock: false,
+          numLock: false,
+        },
+        phase: null,
+        printable: true,
+        reportedText: null,
       },
-    },
-    setup(props) {
-      useInput(toRef(props, "onInput"));
-      return () => <Text>child</Text>;
-    },
-  });
-
-  const App = defineComponent(() => {
-    return () => <Child onInput={currentHandler.value} />;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("a");
-  expect(calls).toEqual(["first:a"]);
-
-  currentHandler.value = secondHandler;
-  await nextTick();
-  await stdin.write("b");
-  expect(calls).toEqual(["first:a", "second:b"]);
-});
-
-test("two useInput hooks both receive the same input", async () => {
-  const a: string[] = [];
-  const b: string[] = [];
-  const App = defineComponent(() => {
-    useInput((c) => a.push(c));
-    useInput((c) => b.push(c));
-    return () => <Text>x</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("z");
-  expect(a).toEqual(["z"]);
-  expect(b).toEqual(["z"]);
-});
-
-test("current useInput listeners receive isolated mutable Key projections", async () => {
-  let secondCtrl: boolean | undefined;
-  const App = defineComponent(() => {
-    useInput((_input, key) => {
-      key.ctrl = true;
     });
-    useInput((_input, key) => {
-      secondCtrl = key.ctrl;
+    const keyEvent = events[0];
+    if (keyEvent?.kind !== "key") throw new Error("Expected a key event");
+    expect(Object.isFrozen(keyEvent)).toBe(true);
+    expect(Object.isFrozen(keyEvent.key)).toBe(true);
+    expect(Object.isFrozen(keyEvent.key.modifiers)).toBe(true);
+    result.unmount();
+  });
+
+  test("preserves plain text as one text fact", async () => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
     });
-    return () => <Text>x</Text>;
+
+    const result = await render(App);
+    await result.stdin.write("hello");
+
+    expect(events).toEqual([
+      {
+        kind: "text",
+        sequence: "hello",
+        fidelity: "normalized-utf8-sequence",
+        text: "hello",
+        protocol: "plain",
+        phase: null,
+        primaryCodepoint: null,
+        textOrigin: null,
+      },
+    ]);
+    result.unmount();
   });
 
-  const { stdin } = await render(App);
-  await stdin.write("a");
-  expect(secondCtrl).toBe(false);
+  test("preserves rich Kitty key fields without collapsing modifiers", async () => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[97:65:99;6:2;65u");
+
+    expect(events).toEqual([
+      {
+        kind: "key",
+        sequence: "\x1b[97:65:99;6:2;65u",
+        fidelity: "normalized-utf8-sequence",
+        key: {
+          protocol: "kitty",
+          name: "a",
+          code: null,
+          primaryCodepoint: 97,
+          shiftedCodepoint: 65,
+          baseLayoutCodepoint: 99,
+          functionalCode: null,
+          modifiers: {
+            shift: true,
+            alt: false,
+            ctrl: true,
+            super: false,
+            hyper: false,
+            meta: false,
+            capsLock: false,
+            numLock: false,
+          },
+          phase: "repeat",
+          printable: true,
+          reportedText: "A",
+        },
+      },
+    ]);
+    result.unmount();
+  });
+
+  test("preserves Kitty-reported text and its release phase", async () => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[0;1:3;229u");
+
+    expect(events).toEqual([
+      {
+        kind: "text",
+        sequence: "\x1b[0;1:3;229u",
+        fidelity: "normalized-utf8-sequence",
+        text: "å",
+        protocol: "kitty",
+        phase: "release",
+        primaryCodepoint: 0,
+        textOrigin: "reported",
+      },
+    ]);
+    result.unmount();
+  });
+
+  test("delivers bracketed paste as one paste fact with opaque payload", async () => {
+    const events: TuiInputEvent[] = [];
+    const payload = "\x03\x1b[A\x1b[?31u";
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write(`\x1b[200~${payload}\x1b[201~`);
+
+    expect(events).toEqual([
+      {
+        kind: "paste",
+        sequence: `\x1b[200~${payload}\x1b[201~`,
+        fidelity: "normalized-utf8-sequence",
+        text: payload,
+      },
+    ]);
+
+    // Ctrl+C inside a paste is data, so the delayed Ctrl+C default must not exit.
+    await result.stdin.write("x");
+    expect(events).toHaveLength(2);
+    result.unmount();
+  });
+
+  test("delivers unknown terminal input as uninterpreted without losing bytes", async () => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+        return "continue";
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[?25h");
+
+    expect(events).toEqual([
+      {
+        kind: "uninterpreted",
+        sequence: "\x1b[?25h",
+        fidelity: "normalized-utf8-sequence",
+      },
+    ]);
+    result.unmount();
+  });
+
+  test("does not expose pointer facts through useInput", async () => {
+    const handler = vi.fn<InputHandler>(() => "continue");
+    const App = defineComponent(() => {
+      useInput(handler);
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[<0;4;5M");
+
+    expect(handler).not.toHaveBeenCalled();
+    result.unmount();
+  });
 });
 
-// --- Basic key input tests (ported from Ink term()-based tests) ---
+describe("handler lifetime and routing results", () => {
+  test("respects a reactive isActive source", async () => {
+    const events: string[] = [];
+    const active = shallowRef(false);
+    const App = defineComponent(() => {
+      useInput(
+        (event) => {
+          events.push(event.sequence);
+          return "continue";
+        },
+        { isActive: active },
+      );
+      return () => <Text>listening</Text>;
+    });
 
-test("useInput - return key sets key.return", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
+    const result = await render(App);
+    expect(result.terminal.rawMode.current).toBe(false);
+    await result.stdin.write("a");
+    expect(events).toEqual([]);
+
+    active.value = true;
+    await nextTick();
+    expect(result.terminal.rawMode.current).toBe(true);
+    await result.stdin.write("b");
+    expect(events).toEqual(["b"]);
+
+    active.value = false;
+    await nextTick();
+    await Promise.resolve();
+    expect(result.terminal.rawMode.current).toBe(false);
+    await result.stdin.write("c");
+    expect(events).toEqual(["b"]);
+    result.unmount();
   });
 
-  const { stdin } = await render(App);
-  await stdin.write("\r");
-  expect(calls[0]?.key.return).toBe(true);
+  test("accepts a handler ref and invokes the latest function", async () => {
+    const calls: string[] = [];
+    const firstHandler: InputHandler = (event) => {
+      calls.push(`first:${event.sequence}`);
+      return "continue";
+    };
+    const secondHandler: InputHandler = (event) => {
+      calls.push(`second:${event.sequence}`);
+      return "continue";
+    };
+    const currentHandler = shallowRef<InputHandler>(firstHandler);
+
+    const Child = defineComponent({
+      props: {
+        onInput: {
+          type: Function as PropType<InputHandler>,
+          required: true,
+        },
+      },
+      setup(props) {
+        useInput(toRef(props, "onInput"));
+        return () => <Text>child</Text>;
+      },
+    });
+    const App = defineComponent(() => () => <Child onInput={currentHandler.value} />);
+
+    const result = await render(App);
+    await result.stdin.write("a");
+    currentHandler.value = secondHandler;
+    await nextTick();
+    await result.stdin.write("b");
+
+    expect(calls).toEqual(["first:a", "second:b"]);
+    result.unmount();
+  });
+
+  test("freezes the global handler set at fact start", async () => {
+    const calls: string[] = [];
+    const secondActive = shallowRef(true);
+    const App = defineComponent(() => {
+      useInput((event) => {
+        calls.push(`first:${event.sequence}`);
+        secondActive.value = false;
+        return "continue";
+      });
+      useInput(
+        (event) => {
+          calls.push(`second:${event.sequence}`);
+          return "continue";
+        },
+        { isActive: secondActive },
+      );
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("a");
+    await result.stdin.write("b");
+
+    expect(calls).toEqual(["first:a", "second:a", "first:b"]);
+    result.unmount();
+  });
+
+  test("accepts a complete decision whose fields remain independent", async () => {
+    const calls: string[] = [];
+    const decision = {
+      action: "performed",
+      routing: "continue",
+      defaultAction: "prevent",
+      external: "allow",
+    } as const;
+    const App = defineComponent(() => {
+      useInput((event) => {
+        calls.push(event.sequence);
+        return decision;
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x03");
+    await result.stdin.write("x");
+
+    expect(calls).toEqual(["\x03", "x"]);
+    result.unmount();
+  });
+
+  test.each([
+    ["missing", undefined],
+    ["asynchronous", Promise.resolve("continue")],
+    ["partial", { action: "none", routing: "continue" }],
+  ])("fails the app closed for an %s handler result", async (_label, invalidResult) => {
+    const laterHandler = vi.fn<InputHandler>(() => "continue");
+    const App = defineComponent(() => {
+      useInput((() => invalidResult) as unknown as InputHandler);
+      useInput(laterHandler);
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await expect(result.stdin.write("\x03")).rejects.toThrow(
+      'useInput() handlers must synchronously return "continue", "consume", or a complete InputRouteDecision.',
+    );
+    expect(laterHandler).not.toHaveBeenCalled();
+    expect(result.terminal.rawMode.current).toBe(true);
+    result.unmount();
+  });
 });
 
-test("useInput - escape key sets key.escape", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
+describe("Ctrl+C delayed default", () => {
+  test("continue lets the default run after the handler", async () => {
+    const phases: string[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        phases.push(`handler:${event.sequence}`);
+        return "continue";
+      });
+      return () => <Text>running</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x03");
+
+    expect(phases).toEqual(["handler:\x03"]);
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+    result.dispose();
   });
 
-  const { stdin } = await render(App);
-  await stdin.write("\x1b");
-  expect(calls[0]?.key.escape).toBe(true);
+  test("consume prevents the default and keeps the app active", async () => {
+    const sequences: string[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        sequences.push(event.sequence);
+        return "consume";
+      });
+      return () => <Text>running</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x03");
+    await result.stdin.write("x");
+
+    expect(sequences).toEqual(["\x03", "x"]);
+    expect(result.terminal.rawMode.current).toBe(true);
+    result.unmount();
+  });
+
+  test("Kitty Ctrl+C release is observable but only a later press exits", async () => {
+    const phases: Array<string | null> = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        if (event.kind === "key") phases.push(event.key.phase);
+        return "continue";
+      });
+      return () => <Text>running</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[99;5:3u");
+    expect(phases).toEqual(["release"]);
+
+    await result.stdin.write("\x1b[99;5:1u");
+    expect(phases).toEqual(["release", "press"]);
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+    result.dispose();
+  });
 });
 
-test("useInput - backspace key sets key.backspace", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
+describe("semantic input terminal ownership", () => {
+  test("useInput enables bracketed paste while active and restores it on unmount", async () => {
+    const stdout = makeFakeWritable();
+    const stderr = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+    const App = defineComponent(() => {
+      useInput(() => "continue");
+      return () => <Text>listening</Text>;
+    });
+    const app = createApp(App);
+
+    app.mount({ stdout, stderr, stdin, maxFps: 0, patchConsole: false });
+    await nextTick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(writes).toContain(PASTE_ON);
+
+    app.unmount();
+    await nextTick();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(writes).toContain(PASTE_OFF);
+
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
   });
 
-  const { stdin } = await render(App);
-  await stdin.write("\x7f");
-  expect(calls[0]?.key.backspace).toBe(true);
-});
+  test("multiple handlers share one physical paste-mode lifetime", async () => {
+    const stdout = makeFakeWritable();
+    const stderr = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const writes = captureWrites(stdout);
+    const firstActive = shallowRef(true);
+    const secondActive = shallowRef(true);
+    const App = defineComponent(() => {
+      useInput(() => "continue", { isActive: firstActive });
+      useInput(() => "continue", { isActive: secondActive });
+      return () => <Text>listening</Text>;
+    });
+    const app = createApp(App);
 
-test("useInput - tab key sets key.tab", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
+    app.mount({ stdout, stderr, stdin, maxFps: 0, patchConsole: false });
+    await nextTick();
+    expect(writes.filter((write) => write === PASTE_ON)).toHaveLength(1);
+
+    firstActive.value = false;
+    await nextTick();
+    await Promise.resolve();
+    expect(writes).not.toContain(PASTE_OFF);
+
+    secondActive.value = false;
+    await nextTick();
+    await Promise.resolve();
+    expect(writes.filter((write) => write === PASTE_OFF)).toHaveLength(1);
+
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
   });
-
-  const { stdin } = await render(App);
-  await stdin.write("\t");
-  expect(calls[0]?.key.tab).toBe(true);
-});
-
-// --- Arrow key navigation tests (ported from hooks-use-input-navigation.tsx) ---
-
-test("useInput - handle up arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[A");
-  expect(calls[0]?.key.upArrow).toBe(true);
-  // Ink fixtures/use-input.tsx:111 gate on `key.upArrow && !key.meta`; lock that
-  // a plain arrow never spuriously sets meta.
-  expect(calls[0]?.key.meta).toBe(false);
-});
-
-test("useInput - handle down arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[B");
-  expect(calls[0]?.key.downArrow).toBe(true);
-  // Ink fixtures/use-input.tsx:116 gate on `key.downArrow && !key.meta`.
-  expect(calls[0]?.key.meta).toBe(false);
-});
-
-test("useInput - handle right arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[C");
-  expect(calls[0]?.key.rightArrow).toBe(true);
-  // Ink fixtures/use-input.tsx:126 gate on `key.rightArrow && !key.meta`.
-  expect(calls[0]?.key.meta).toBe(false);
-});
-
-test("useInput - handle left arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[D");
-  expect(calls[0]?.key.leftArrow).toBe(true);
-  // Ink fixtures/use-input.tsx:121 gate on `key.leftArrow && !key.meta`.
-  expect(calls[0]?.key.meta).toBe(false);
-});
-
-test("useInput - handles rapid arrows and enter in one chunk per write", async () => {
-  const keys: Key[] = [];
-  const App = defineComponent(() => {
-    useInput((_input, key) => keys.push(key));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  // Each escape sequence is written separately to match the render API
-  await stdin.write("\x1b[B");
-  await stdin.write("\x1b[B");
-  await stdin.write("\x1b[B");
-  await stdin.write("\r");
-  expect(keys.filter((k) => k.downArrow).length).toBe(3);
-  expect(keys.some((k) => k.return)).toBe(true);
-});
-
-// --- useInput isActive (from hooks.tsx) ---
-
-test("useInput - ignore input if not active (isActive: false)", async () => {
-  const calls: string[] = [];
-  const App = defineComponent(() => {
-    useInput((input) => calls.push(input), { isActive: false });
-    return () => <Text>x</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("x");
-  expect(calls.length).toBe(0);
-});
-
-test("useInput - ignore input if not active (isActive ref toggled)", async () => {
-  const calls: string[] = [];
-  const active = shallowRef(false);
-  const App = defineComponent(() => {
-    useInput((input) => calls.push(input), { isActive: active });
-    return () => <Text>x</Text>;
-  });
-
-  const { stdin } = await render(App);
-  await stdin.write("first");
-  expect(calls.length).toBe(0);
-
-  active.value = true;
-  await stdin.write("second");
-  expect(calls).toEqual(["second"]);
-});
-
-// --- useStdout (from hooks.tsx) ---
-
-test("useStdout - write to stdout", async () => {
-  let writeOutput: ((data: string) => void) | undefined;
-  const App = defineComponent(() => {
-    const { write } = useStdout();
-    writeOutput = write;
-    return () => <Text>Hello World</Text>;
-  });
-
-  const result = await render(App);
-  writeOutput?.("Hello from vue-tui to stdout\n");
-  // Direct output changes the emulated terminal, not renderer content frames.
-  const screen = await result.screen();
-  const allOutput = [...screen.scrollback, ...screen.lines].join("\n");
-  expect(allOutput).toContain("Hello from vue-tui to stdout");
-});
-
-// --- modifier+arrow keys, home, end, page up/down ---
-
-test("useInput - handle meta + up arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b\x1b[A");
-  expect(calls[0]?.key.upArrow).toBe(true);
-  expect(calls[0]?.key.meta).toBe(true);
-});
-
-test("useInput - handle meta + down arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b\x1b[B");
-  expect(calls[0]?.key.downArrow).toBe(true);
-  expect(calls[0]?.key.meta).toBe(true);
-});
-
-test("useInput - handle meta + left arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b\x1b[D");
-  expect(calls[0]?.key.leftArrow).toBe(true);
-  expect(calls[0]?.key.meta).toBe(true);
-});
-
-test("useInput - handle meta + right arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b\x1b[C");
-  expect(calls[0]?.key.rightArrow).toBe(true);
-  expect(calls[0]?.key.meta).toBe(true);
-});
-
-test("useInput - handle ctrl + up arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[1;5A");
-  expect(calls[0]?.key.upArrow).toBe(true);
-  expect(calls[0]?.key.ctrl).toBe(true);
-});
-
-test("useInput - handle ctrl + down arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[1;5B");
-  expect(calls[0]?.key.downArrow).toBe(true);
-  expect(calls[0]?.key.ctrl).toBe(true);
-});
-
-test("useInput - handle ctrl + left arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[1;5D");
-  expect(calls[0]?.key.leftArrow).toBe(true);
-  expect(calls[0]?.key.ctrl).toBe(true);
-});
-
-test("useInput - handle ctrl + right arrow", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[1;5C");
-  expect(calls[0]?.key.rightArrow).toBe(true);
-  expect(calls[0]?.key.ctrl).toBe(true);
-});
-
-test("useInput - handle home", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[H");
-  expect(calls[0]?.key.home).toBe(true);
-});
-
-test("useInput - handle end", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[F");
-  expect(calls[0]?.key.end).toBe(true);
-});
-
-test("useInput - handle page up", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[5~");
-  expect(calls[0]?.key.pageUp).toBe(true);
-});
-
-test("useInput - handle page down", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App);
-  await stdin.write("\x1b[6~");
-  expect(calls[0]?.key.pageDown).toBe(true);
-});
-
-// --- exitOnCtrlC ---
-
-test("exitOnCtrlC runs after the compatibility handler in raw mode", async () => {
-  const handler = vi.fn();
-  const App = defineComponent(() => {
-    useInput(handler);
-    return () => <Text>running</Text>;
-  });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
-  await stdin.write("\x03");
-  expect(handler).toHaveBeenCalledOnce();
-  expect(handler).toHaveBeenCalledWith("c", expect.objectContaining({ ctrl: true }));
-  await expect(waitUntilExit()).resolves.toBeUndefined();
-});
-
-// --- Kitty release events deliver the key, matching Ink (no release special-case) ---
-// Ink (use-input.ts:204-217) classifies a kitty event purely by isPrintable /
-// ctrl+letter, regardless of press/repeat/release. A printable release ('a' up,
-// CSI 97;1:3 u) therefore delivers input "a", not "". vue-tui previously had an
-// undocumented `eventType === "release"` guard that blanked input to ""; these
-// tests lock the Ink-matching behavior.
-
-test("useInput - kitty printable RELEASE delivers the key (input='a'), not ''", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  // 'a' release event (codepoint 97, modifier 1, eventType 3 = release)
-  await stdin.write("\x1b[97;1:3u");
-  expect(calls[0]?.input).toBe("a");
-  expect(calls[0]?.key.eventType).toBe("release");
-});
-
-test("useInput - kitty ctrl+letter RELEASE delivers the letter name (input='a'), not ''", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-
-  const { stdin } = await render(App);
-  // Ctrl+A uses the printable key codepoint plus the Ctrl modifier in the
-  // official Kitty grammar. The compatibility projection still flows the
-  // name "a" through on release — same as Ink's current hook shape.
-  await stdin.write("\x1b[97;5:3u");
-  expect(calls[0]?.input).toBe("a");
-  expect(calls[0]?.key.ctrl).toBe(true);
-  expect(calls[0]?.key.eventType).toBe("release");
-});
-
-// The delayed controller default ignores release events. A Ctrl+C release is
-// delivered without exit; a press is delivered first and then exits.
-test("useInput - kitty Ctrl+C RELEASE does not exit (delivered to handler); press still exits", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>running</Text>;
-  });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
-
-  // Ctrl+C RELEASE (codepoint 99 'c', modifier 5 = ctrl, eventType 3 = release):
-  // must NOT exit; flows to the handler with input "c".
-  await stdin.write("\x1b[99;5:3u");
-  expect(calls[0]?.input).toBe("c");
-  expect(calls[0]?.key.ctrl).toBe(true);
-  expect(calls[0]?.key.eventType).toBe("release");
-
-  // Ctrl+C PRESS reaches the handler, then the delayed default exits.
-  await stdin.write("\x1b[99;5:1u");
-  await expect(waitUntilExit()).resolves.toBeUndefined();
-  expect(calls).toHaveLength(2);
-  expect(calls[1]).toMatchObject({ input: "c", key: { ctrl: true, eventType: "press" } });
-});
-
-test("useInput - richer Kitty facts keep the current hook projection", async () => {
-  const calls: Array<{ input: string; key: Key }> = [];
-  const App = defineComponent(() => {
-    useInput((input, key) => calls.push({ input, key }));
-    return () => <Text>listening</Text>;
-  });
-  const { stdin } = await render(App, { exitOnCtrlC: false });
-
-  await stdin.write("\x1b[97:65:99;6:2;65u");
-  await stdin.write("\x1b[0;;229u");
-  await stdin.write("\x1b[0;1:3;229u");
-  await stdin.write("\x1b[97;3u");
-
-  expect(calls).toHaveLength(4);
-  expect(calls[0]).toMatchObject({
-    input: "A",
-    key: { ctrl: true, shift: true, meta: false, eventType: "repeat" },
-  });
-  expect(calls[1]).toMatchObject({ input: "å", key: { ctrl: false, shift: false } });
-  expect(calls[2]).toMatchObject({ input: "å", key: { eventType: "release" } });
-  // The old public Key has one `meta` bit. Its compatibility projection still
-  // represents exact internal Kitty Alt as meta until F3 selects a public API.
-  expect(calls[3]).toMatchObject({ input: "a", key: { meta: true } });
 });

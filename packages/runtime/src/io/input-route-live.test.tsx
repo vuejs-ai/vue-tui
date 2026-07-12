@@ -141,7 +141,6 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     app.mount({
       ...mountOptions(mode, stdin),
       stdout,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "enabled" },
     });
     try {
@@ -211,7 +210,6 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     app.mount({
       ...mountOptions(mode, stdin),
       stdout,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     const directCalls: string[] = [];
@@ -221,7 +219,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       expect(selectRoute).toThrow(
         "Managed input is unavailable because the mounted stdin is not a controllable TTY",
       );
-      expect(routing.resolve(routing.capture()).kind).toBe("compatibility");
+      expect(routing.resolve(routing.capture()).kind).toBe("unselected");
       expect({ rawModeCalls, refs, listeners: stdin.listenerCount("data") }).toEqual({
         rawModeCalls: [],
         refs: 0,
@@ -259,7 +257,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       expect(rawModeSupported).toBe(false);
       expect(selectRoute).toThrow(
@@ -293,7 +291,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       stdin.isRaw = false;
       expect(selectRoute).toThrow(
@@ -329,7 +327,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       expect(rawModeSupported).toBe(true);
       expect({
@@ -382,7 +380,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
         rawModeCalls: [true],
@@ -433,7 +431,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       const setRawMode = tracked.setRawMode.bind(tracked);
       let failEnable = true;
@@ -479,7 +477,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
     const App = defineComponent(() => {
       const routing = requireRouting();
-      const global = routing.registerSemantic({
+      const global = routing.registerApplicationGlobal({
         id: "global",
         handle: (fact) => (calls.push(`global:${fact.sequence}`), continueRoute()),
       });
@@ -489,12 +487,12 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       });
       endBoundary = () => boundary.end();
       endGlobal = () => global.end();
-      routing.select({ applicationGlobal: [global.lease], activeBoundary: boundary.lease });
+      routing.select({ activeBoundary: boundary.lease });
       return () => <Text>ready</Text>;
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
+    app.mount(mountOptions(mode, stdin));
     try {
       stdin.emit("data", "\x1b[");
       endBoundary();
@@ -555,12 +553,11 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
         id: "boundary",
         handle: () => (calls.push("boundary"), continueRoute()),
       });
-      const global = routing.registerSemantic({
+      routing.registerApplicationGlobal({
         id: "global",
         handle: () => (calls.push("global"), continueRoute()),
       });
       routing.select({
-        applicationGlobal: [global.lease],
         activeBoundary: boundary.lease,
         focusedOwner: owner.lease,
         logicalAncestors: [ancestor.lease],
@@ -595,7 +592,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     let replace!: () => void;
     const App = defineComponent(() => {
       const routing = requireRouting();
-      const global = routing.registerSemantic({
+      routing.registerApplicationGlobal({
         id: "global",
         handle: (fact) => (calls.push(`global:${fact.sequence}`), continueRoute()),
       });
@@ -629,7 +626,6 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
         const owner = semantic("owner");
         const ancestor = semantic("ancestor");
         routing.select({
-          applicationGlobal: [global.lease],
           activeBoundary: boundary.lease,
           focusedOwner: owner.lease,
           logicalAncestors: [ancestor.lease],
@@ -678,7 +674,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     const App = defineComponent(() => {
       const routing = requireRouting();
       let selectSecond!: () => void;
-      const global = routing.registerSemantic({
+      routing.registerApplicationGlobal({
         id: "global",
         handle: (fact) => {
           calls.push(`global:${fact.sequence}`);
@@ -719,14 +715,12 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       });
       selectSecond = () => {
         routing.select({
-          applicationGlobal: [global.lease],
           activeBoundary: secondBoundary.lease,
           logicalAncestors: [secondAncestor.lease],
           external: secondExternal.lease,
         });
       };
       routing.select({
-        applicationGlobal: [global.lease],
         activeBoundary: firstBoundary.lease,
         logicalAncestors: [firstAncestor.lease],
         external: firstExternal.lease,
@@ -795,7 +789,10 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       const second = useFocus({ id: "second" });
       currentFocus = () =>
         first.isFocused.value ? "first" : second.isFocused.value ? "second" : "none";
-      useInput((input) => calls.push(`compatibility:${input}`));
+      useInput((event) => {
+        calls.push(`application-global:${event.sequence}`);
+        return "continue";
+      });
       onUnmounted(() => calls.push("unmounted"));
 
       const paneExternal = routing.registerExternal({
@@ -851,7 +848,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
 
     const options = mountOptions(mode);
     const app = createApp(App);
-    app.mount({ ...options, exitOnCtrlC: true });
+    app.mount(options);
     const exited = app.waitUntilExit();
 
     options.stdin!.emit("data", "\x1b[15~");
@@ -867,11 +864,17 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     await exited;
 
     expect(calls).toEqual([
+      "application-global:\x1b[15~",
       "modal:\x1b[15~",
+      "application-global:\x1b",
       "modal:\x1b",
+      "application-global:\t",
       "pane:tab:first",
+      "application-global:\x03",
       "pane:ctrl-c:prevent",
+      "application-global:z",
       "pane:z",
+      "application-global:\x03",
       "pane:ctrl-c:allow",
       "unmounted",
     ]);
@@ -899,7 +902,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
         id: "later",
         handle: () => (firstCalls.push("later"), continueRoute()),
       });
-      const throwing = routing.registerSemantic({
+      routing.registerApplicationGlobal({
         id: "throwing",
         handle: () => {
           firstCalls.push("throwing");
@@ -907,7 +910,6 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
         },
       });
       routing.select({
-        applicationGlobal: [throwing.lease],
         activeBoundary: later.lease,
         ownerDefaults: [defaultRoute.lease],
         external: external.lease,
@@ -915,7 +917,10 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       return () => <Text>first</Text>;
     });
     const ReceivingApp = defineComponent(() => {
-      useInput((input) => secondCalls.push(input));
+      useInput((event) => {
+        secondCalls.push(event.sequence);
+        return "continue";
+      });
       return () => <Text>second</Text>;
     });
 
@@ -954,13 +959,9 @@ test("selected topology composes across shared stdin suspension and teardown", a
   const second = createApp(SelectedApp("second", secondCalls));
   first.mount({
     ...mountOptions("inline", stdin),
-    exitOnCtrlC: false,
     [INTERNAL_SUSPENSION_HOST]: suspensionHost,
   } as MountOptions);
-  second.mount({
-    ...mountOptions("fullscreen", stdin),
-    exitOnCtrlC: false,
-  });
+  second.mount(mountOptions("fullscreen", stdin));
   try {
     expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
       rawModeCalls: [true],
@@ -1038,7 +1039,6 @@ test.each([
       stdout,
       stderr: createWritable(false),
       stdin,
-      exitOnCtrlC: false,
       maxFps: 0,
       patchConsole: false,
       kittyKeyboard: { mode: "disabled" },

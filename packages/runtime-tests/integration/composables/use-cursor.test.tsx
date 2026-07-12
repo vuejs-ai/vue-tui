@@ -63,14 +63,19 @@ describe("useCursor", () => {
       const text = shallowRef("");
       const { setCursorPosition } = useCursor();
 
-      useInput((input, key) => {
-        if (key.backspace || key.delete) {
+      useInput((event) => {
+        if (
+          event.kind === "key" &&
+          (event.key.name === "backspace" || event.key.name === "delete")
+        ) {
           text.value = text.value.slice(0, -1);
-          return;
+          return "consume";
         }
-        if (!key.ctrl && !key.meta && input) {
-          text.value = text.value + input;
+        if (event.kind === "text") {
+          text.value += event.text;
+          return "consume";
         }
+        return "continue";
       });
 
       return () => {
@@ -101,10 +106,12 @@ describe("useCursor", () => {
       const text = shallowRef("");
       const { setCursorPosition } = useCursor();
 
-      useInput((input, key) => {
-        if (!key.ctrl && !key.meta && input) {
-          text.value = text.value + input;
+      useInput((event) => {
+        if (event.kind === "text") {
+          text.value += event.text;
+          return "consume";
         }
+        return "continue";
       });
 
       return () => {
@@ -160,10 +167,12 @@ describe("useCursor", () => {
       const text = shallowRef("");
       const { setCursorPosition } = useCursor();
 
-      useInput((input, key) => {
-        if (!key.ctrl && !key.meta && input) {
-          text.value = text.value + input;
+      useInput((event) => {
+        if (event.kind === "text") {
+          text.value += event.text;
+          return "consume";
         }
+        return "continue";
       });
 
       return () => {
@@ -345,7 +354,7 @@ describe("useCursor", () => {
     stderr.on("data", (chunk) => stderrWrites.push(chunk.toString()));
 
     const app = createApp(component);
-    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0 });
 
     return {
       stdoutWrites,

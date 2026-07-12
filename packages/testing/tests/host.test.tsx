@@ -95,7 +95,7 @@ test("a selected route owns deterministic TTY input independently from final out
 
   result.dispose();
   expect(result.terminal.rawMode.current).toBe(false);
-  expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
+  expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
 });
 
 test("a modeled non-TTY excludes managed routing but keeps direct stdin bytes available", async () => {
@@ -129,7 +129,7 @@ test("a modeled non-TTY excludes managed routing but keeps direct stdin bytes av
     expect(selectRoute).toThrow(
       "Managed input is unavailable because the mounted stdin is not a controllable TTY",
     );
-    expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
+    expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
     expect(result.terminal.rawMode.history).toEqual([]);
 
     await result.stdin.write("x");
@@ -160,7 +160,7 @@ test("forced live stream refreshes its public layout and frame before input resu
   const App = defineComponent(() => {
     const { columns, rows } = useLayoutSize();
     const { stdin } = useStdin();
-    useInput(() => {});
+    useInput(() => "continue");
     const frame = () => {
       rawModeSeenByFrame.push(Boolean((stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw));
       return `stream:${columns.value}x${rows.value ?? "unbounded"}`;
@@ -255,7 +255,7 @@ test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
 test("modeled Inline suspension releases input and repaints at the continued size", async () => {
   const App = defineComponent(() => {
     const { columns, rows } = useLayoutSize();
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>{`inline:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });
@@ -322,7 +322,7 @@ test("Fullscreen screen-reader request resolves to an Inline transcript", async 
 test("modeled screen-reader transcript suspends and resumes without acquiring Fullscreen", async () => {
   const App = defineComponent(() => {
     const { columns, rows } = useLayoutSize();
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>{`transcript:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, {
@@ -348,7 +348,7 @@ test.each(["at-teardown", "live"] as const)(
   "modeled %s stream restores input modes without manufacturing a terminal surface",
   async (updates) => {
     const App = defineComponent(() => {
-      useInput(() => {});
+      useInput(() => "continue");
       return () => <Text>{`stream:${updates}`}</Text>;
     });
     const result = await render(App, {
@@ -500,7 +500,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
       columns: getter("columns", 40, 0),
       rows: getter("rows", 10, 0),
       props: getter("props", { label: "first" }, null),
-      exitOnCtrlC: getter("exitOnCtrlC", false, "yes"),
     },
   );
 
@@ -513,7 +512,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
     columns: 1,
     rows: 1,
     props: 1,
-    exitOnCtrlC: 1,
     mode: 1,
     presentation: 1,
     updates: 1,
@@ -522,7 +520,7 @@ test("render snapshots every root and host accessor exactly once", async () => {
   });
 });
 
-test("an invalid accessor value fails before component setup", async () => {
+test("a removed option fails before its accessor or component setup runs", async () => {
   let setupRan = false;
   let reads = 0;
   const App = defineComponent(() => {
@@ -538,9 +536,9 @@ test("an invalid accessor value fails before component setup", async () => {
   });
 
   await expect(render(App, options as RenderOptions)).rejects.toThrow(
-    "render option exitOnCtrlC must be a boolean or undefined",
+    'Unknown render option "exitOnCtrlC"',
   );
-  expect(reads).toBe(1);
+  expect(reads).toBe(0);
   expect(setupRan).toBe(false);
 });
 
@@ -559,6 +557,7 @@ test.each([
   [{ rows: Number.NaN }, "render rows"],
   [{ liveUpdates: false }, 'render option "liveUpdates" was removed'],
   [{ debug: true }, 'render option "debug" was removed'],
+  [{ exitOnCtrlC: false }, 'Unknown render option "exitOnCtrlC"'],
 ] as const)("invalid modeled host %# fails before component setup", async (options, message) => {
   let setupRan = false;
   const App = defineComponent(() => {

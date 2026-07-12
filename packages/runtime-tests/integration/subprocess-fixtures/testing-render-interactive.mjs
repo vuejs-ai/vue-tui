@@ -25,7 +25,7 @@ function topBorderWidth(frame) {
 }
 
 const App = () => {
-  useInput(() => {});
+  useInput(() => "continue");
   return h(Box, { borderStyle: "round" }, () => h(Text, () => "x"));
 };
 

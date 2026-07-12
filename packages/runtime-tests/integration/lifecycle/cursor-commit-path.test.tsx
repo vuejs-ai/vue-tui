@@ -59,14 +59,16 @@ const InputApp = defineComponent(() => {
   const text = shallowRef("");
   const { setCursorPosition } = useCursor();
 
-  useInput((input, key) => {
-    if (key.backspace || key.delete) {
+  useInput((event) => {
+    if (event.kind === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
       text.value = text.value.slice(0, -1);
-      return;
+      return "consume";
     }
-    if (!key.ctrl && !key.meta && input) {
-      text.value = text.value + input;
+    if (event.kind === "text") {
+      text.value += event.text;
+      return "consume";
     }
+    return "continue";
   });
 
   return () => {
@@ -87,7 +89,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     // maxFps:0 makes commits immediate (no ~34ms throttle), so the first frame
     // is flushed synchronously through log-update.
     const app = createApp(InputApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     const output = writes.join("");
@@ -105,7 +107,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const stdin = makeTtyStdin();
 
     const app = createApp(InputApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     const output = writes.join("");
@@ -121,7 +123,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const stdin = makeTtyStdin();
 
     const app = createApp(InputApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     stdin.emit("data", "a");
@@ -145,7 +147,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const stdin = makeTtyStdin();
 
     const app = createApp(InputApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     stdin.emit("data", "a");
@@ -184,7 +186,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const stdin = makeTtyStdin();
 
     const app = createApp(StdoutWriteApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     // External write -> clear() + data + restoreLastOutput() (which re-shows
@@ -235,7 +237,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     });
 
     const app = createApp(KeyBumpApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0, patchConsole: false });
+    app.mount({ stdout, stdin, maxFps: 0, patchConsole: false });
     await app.waitUntilRenderFlush();
 
     // Only inspect the SECOND (idle) commit's writes — the first commit
@@ -288,7 +290,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const app = createApp(ThrowOnPatchApp);
     let mountThrew = false;
     try {
-      app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+      app.mount({ stdout, stdin, maxFps: 0 });
     } catch {
       mountThrew = true;
     }
@@ -337,7 +339,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const stdin = makeTtyStdin();
 
     const app = createApp(HostApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stdin, maxFps: 0 });
     await app.waitUntilRenderFlush();
 
     // While the child is mounted the cursor is SHOWN at its position (x=5).
@@ -409,7 +411,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     const app = createApp(ThrowOnPatchApp);
     let caught: unknown;
     try {
-      app.mount({ stdout, stdin, exitOnCtrlC: false, maxFps: 0 });
+      app.mount({ stdout, stdin, maxFps: 0 });
     } catch (err) {
       caught = err;
     }

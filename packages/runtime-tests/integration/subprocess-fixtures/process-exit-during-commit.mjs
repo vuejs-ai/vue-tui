@@ -11,7 +11,6 @@ app.mount({
   mode: "fullscreen",
   liveUpdates: true,
   patchConsole: false,
-  exitOnCtrlC: false,
   maxFps: 0,
   // process.exit() synchronously emits `exit` and then terminates without
   // returning to this commit. Its listener must therefore restore immediately,

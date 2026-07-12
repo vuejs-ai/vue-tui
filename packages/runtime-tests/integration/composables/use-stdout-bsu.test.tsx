@@ -59,7 +59,7 @@ test("writeToStdout wraps external write in BSU/ESU on TTY interactive stream", 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -110,7 +110,7 @@ test("writeToStderr wraps external write in BSU/ESU on stdout (Ink parity: stder
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Let the initial render settle
   await new Promise<void>((r) => setTimeout(r, 60));
@@ -162,7 +162,7 @@ test("unterminated coordinated stderr output stays byte-exact when stderr is red
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await new Promise<void>((resolve) => setTimeout(resolve, 60));
   stderr.chunks.length = 0;
 

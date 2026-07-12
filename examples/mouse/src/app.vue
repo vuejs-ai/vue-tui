@@ -14,8 +14,12 @@ const lastClick = shallowRef("none");
 const lastWheel = shallowRef("none");
 const dragRef = shallowRef<InstanceType<typeof Box> | null>(null);
 
-useInput((input) => {
-  if (input === "q") process.exit(0);
+useInput((event) => {
+  if (event.kind === "text" && event.text === "q") {
+    process.exit(0);
+    return "consume";
+  }
+  return "continue";
 });
 
 const { x: dragLeft, y: dragTop } = useDraggable(dragRef, {

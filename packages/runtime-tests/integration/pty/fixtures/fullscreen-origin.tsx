@@ -13,6 +13,7 @@ import {
   useStderr,
   useStdout,
 } from "@vue-tui/runtime";
+import { inputText } from "./input-event.js";
 
 type Scenario =
   | "static"
@@ -86,7 +87,8 @@ const App = defineComponent(() => {
     setCursorPosition({ x: 3, y: 0 });
   }
 
-  useInput((input) => {
+  useInput((event) => {
+    const input = inputText(event);
     if (scenario === "target-lifetime") {
       let exitAfterTransition = false;
       if (input === "1") targetPhase.value = "first";
@@ -97,25 +99,27 @@ const App = defineComponent(() => {
         void nextTick().then(() => {
           process.stdout.write(`\x1b]0;__DRAG_STARTS__:${dragStarts}\x07`);
         });
-        return;
+        return "consume";
       } else if (input === "x") {
         targetPhase.value = "none";
         exitAfterTransition = autoExitTargetLifetime;
       } else if (input === "q") {
         exit("target-lifetime");
-        return;
-      } else return;
+        return "consume";
+      } else return "continue";
       const marked = markTargetPhase();
       if (exitAfterTransition) {
         void marked.then(() => {
           setTimeout(() => exit("target-lifetime"), 20);
         });
       }
-      return;
+      return "consume";
     }
     if (scenario === "screen-reader" && input === "q") {
       exit("screen-reader");
+      return "consume";
     }
+    return "continue";
   });
 
   onMounted(() => {
@@ -236,7 +240,6 @@ app.mount({
   mode: "fullscreen",
   isScreenReaderEnabled: scenario === "screen-reader",
   incrementalRendering: scenario === "stdout",
-  exitOnCtrlC: false,
   maxFps: 0,
 });
 

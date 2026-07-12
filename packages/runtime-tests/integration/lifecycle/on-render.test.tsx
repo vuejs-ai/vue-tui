@@ -19,7 +19,6 @@ test("onRender callback is called with renderTime on each commit", async () => {
     stdin,
     stderr,
     maxFps: 0,
-    exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);
     },
@@ -53,7 +52,6 @@ test("onRender is called on subsequent state updates", async () => {
     stdin,
     stderr,
     maxFps: 0,
-    exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);
     },
@@ -100,7 +98,6 @@ test("no onRender callback when option is not provided", async () => {
     stdin,
     stderr,
     maxFps: 0,
-    exitOnCtrlC: false,
   });
 
   // Two ticks: first flushes Vue scheduler, second flushes commit scheduler.
@@ -133,7 +130,6 @@ async function expectOnRenderWriteBeforeFrame(
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     ...options,
     onRender: () => {
       stdout.write("R");
@@ -171,8 +167,9 @@ test("onRender fires on input-triggered state update", async () => {
   const received = shallowRef("init");
 
   const App = defineComponent(() => {
-    useInput((input) => {
-      received.value = input;
+    useInput((event) => {
+      if (event.kind === "text") received.value = event.text;
+      return "continue";
     });
     return () => <Text>{received.value}</Text>;
   });
@@ -187,7 +184,6 @@ test("onRender fires on input-triggered state update", async () => {
     stdin,
     stderr,
     maxFps: 0,
-    exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);
     },

@@ -56,10 +56,18 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 
 const count = shallowRef(0);
 
-useInput((input) => {
+useInput((event) => {
+  if (event.kind !== "text") return "continue";
   // "+" is Shift+"=" on most keyboards, so accept the bare "=" too.
-  if (input === "+" || input === "=") count.value++;
-  if (input === "-") count.value--;
+  if (event.text === "+" || event.text === "=") {
+    count.value++;
+    return "consume";
+  }
+  if (event.text === "-") {
+    count.value--;
+    return "consume";
+  }
+  return "continue";
 });
 </script>
 
@@ -144,10 +152,10 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 | Composable                      | Description                                                                                                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `useInput(handler, opts?)`      | Handle keyboard input — receives `(input, key)` with modifier and arrow key detection                                                                        |
+| `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result                                         |
+| `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                                                        |
 | `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                                               |
 | `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                                               |
-| `usePaste(handler, opts?)`      | Handle bracketed paste — receives the pasted `text` as a single event                                                                                        |
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                                                                                       |
 | `useFocusManager()`             | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                                                                                      |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                                                   |
@@ -160,9 +168,11 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useCursor()`                   | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates                                                                                 |
 | `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                                                 |
 
+`useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
+
 `useRenderSession()` is the authoritative way for a component to inspect what rendering surface actually became effective. The session object keeps one identity for the render tree; mode, output, host, and capabilities are immutable for that session, while a live-update surface refreshes `dimensions` reactively on accepted resize and continuation events. A final-output surface retains the dimensions resolved at mount because it has no runtime resize lifecycle. Use `session.output.presentation === "screen-reader"` to adapt to the active linear presentation. `useLayoutSize()` derives from that same session and keeps destructured dimensions reactive; its `rows` ref is `null` for a row-unbounded stream, transcript, or string document.
 
-`useStdin()` returns only the stream mounted into the application. Direct reads are raw: they may include terminal protocol replies and paste framing, and they have no vue-tui event semantics or safe-composition guarantee with managed input handlers. Managed input is available only on a controllable TTY; the first active managed input consumer acquires raw mode, the shared listener, stdin ref state, and any configured Kitty keyboard negotiation, and the last consumer releases them. A non-TTY stream remains available through `useStdin().stdin` for applications that intentionally consume pipe bytes. The removed `rawMode` mount option is rejected instead of being ignored.
+`useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` returns only the stream mounted into the application. Direct reads are raw: they may include terminal protocol replies and paste framing, and they have no vue-tui event semantics or safe-composition guarantee with managed input handlers. Managed input is available only on a controllable TTY; the first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and any configured Kitty keyboard negotiation, and the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. A non-TTY stream remains available through `useStdin().stdin` for applications that intentionally consume pipe bytes. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected instead of being ignored.
 
 ## Testing
 
@@ -181,9 +191,17 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 test("counter responds to + and - keys", async () => {
   const Counter = defineComponent(() => {
     const count = shallowRef(0);
-    useInput((input) => {
-      if (input === "+") count.value++;
-      if (input === "-") count.value--;
+    useInput((event) => {
+      if (event.kind !== "text") return "continue";
+      if (event.text === "+") {
+        count.value++;
+        return "consume";
+      }
+      if (event.text === "-") {
+        count.value--;
+        return "consume";
+      }
+      return "continue";
     });
     return () => (
       <Box>

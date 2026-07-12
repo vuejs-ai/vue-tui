@@ -49,13 +49,14 @@ test.sequential("swapping useInput components clears pending parser state (no le
   const showA = shallowRef(true);
 
   const StepA = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => h(Text, null, () => "A");
   });
 
   const StepB = defineComponent(() => {
-    useInput((input) => {
-      receivedByB.push(input);
+    useInput((event) => {
+      receivedByB.push(event.sequence);
+      return "continue";
     });
     return () => h(Text, null, () => "B");
   });
@@ -69,7 +70,7 @@ test.sequential("swapping useInput components clears pending parser state (no le
   const { stream: stdin } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   await nextTick();
 
   // Buffer a partial escape sequence (CSI start, no final byte). The parser
@@ -102,7 +103,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   // Two useInput components: dropping one and adding another in the same tick is
   // a release(false)+acquire(true) cycle while the deferred disable is pending.
   const Listener = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => h(Text, null, () => "x");
   });
 
@@ -115,7 +116,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   const { stream: stdin, rawMode } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   await nextTick();
 
   expect(rawMode.current).toBe(true);

@@ -53,7 +53,8 @@ export { messageForNonError } from "./components/error-overview.ts";
 // carries a `__subscriberMapSize()` probe so a test can assert empty subscriber
 // Sets are dropped on unsubscribe. See render.ts createFocusController.
 export { createFocusController, type FocusControllerForTest } from "./render.ts";
-// Private integration-test access for exercising the selected F3 input topology
-// through a real outer terminal and a real child PTY. This is deliberately kept
-// off the package root while the public input API remains undecided.
+// Private integration-test access for exercising F3's selected topology and
+// external fallthrough through a real outer terminal and a real child PTY.
+// Ordinary applications use the public application-global useInput() contract;
+// F4 owns the future target/local/external attachment instead of this test seam.
 export { useInternalInputRoutingForTest } from "./io/input-route-test.ts";

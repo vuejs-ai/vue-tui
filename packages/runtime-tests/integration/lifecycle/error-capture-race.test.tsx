@@ -51,7 +51,7 @@ test("update-flush throw then synchronous unmount(): waitUntilExit REJECTS with 
   });
 
   const app = createApp(ThrowsOnUpdate);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -104,7 +104,7 @@ test("two sibling throws in one flush: displayed overview and rejected error AGR
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
 
   type Reject = { kind: "rejected"; message: unknown } | { kind: "resolved" };
   const settled: Promise<Reject> = app.waitUntilExit().then(
@@ -174,7 +174,7 @@ test("captured throw then racing exit(err): displayed overview and rejected erro
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -239,7 +239,7 @@ test("final stream: update-flush throw + synchronous unmount() still REJECTS", a
 
   const app = createApp(ThrowsOnUpdate);
   // A piped stdout with liveUpdates:false selects final-stream output.
-  app.mount({ stdout, stdin, stderr, liveUpdates: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: false });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -289,7 +289,7 @@ test("unthrottled live output still paints the ErrorOverview frame", async () =>
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));
@@ -316,7 +316,7 @@ test("final-stream errors are written durably to stderr without a stale stdout f
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, liveUpdates: false, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: false });
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));

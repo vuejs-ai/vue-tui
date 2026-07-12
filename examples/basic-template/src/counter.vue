@@ -4,9 +4,17 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 
 const count = shallowRef(0);
 
-useInput((input) => {
-  if (input === "+") count.value++;
-  if (input === "-") count.value--;
+useInput((event) => {
+  if (event.kind !== "text") return "continue";
+  if (event.text === "+") {
+    count.value++;
+    return "consume";
+  }
+  if (event.text === "-") {
+    count.value--;
+    return "consume";
+  }
+  return "continue";
 });
 </script>
 

@@ -11,14 +11,14 @@ it("useInput - handle lowercase character", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - handle uppercase character", async () => {
+it("useInput - preserves uppercase plain text", async () => {
   const ps = term("use-input", ["uppercase"]);
   ps.write("Q");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - \\r should not count as an uppercase character", async () => {
+it("useInput - reports return as a key instead of uppercase text", async () => {
   const ps = term("use-input", ["uppercase"]);
   ps.write("\r");
   await ps.waitForExit();
@@ -39,7 +39,7 @@ it("useInput - bracketed paste preserves tab", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - receives bracketed paste when no usePaste handler is active", async () => {
+it("useInput - receives bracketed paste as a paste event", async () => {
   const ps = term("use-input", ["bracketedPaste"]);
   ps.write("[200~hello[201~");
   await ps.waitForExit();
@@ -85,7 +85,7 @@ it("useInput - handle meta + backspace (0x7F)", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - flushes ESC[ prefix as literal input", async () => {
+it("useInput - preserves an uninterpreted ESC[ sequence", async () => {
   const ps = term("use-input", ["escapeBracketPrefix"]);
   ps.write("[");
   await ps.waitForExit();
@@ -284,17 +284,17 @@ it("useInput - handle remove (delete)", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// useInput — Ctrl+C with exitOnCtrlC: false
+// useInput — Ctrl+C default prevention
 // ---------------------------------------------------------------------------
 
-it("useInput - handle Ctrl+C when exitOnCtrlC is false", async () => {
+it("useInput - a consuming handler can handle legacy Ctrl+C", async () => {
   const ps = term("use-input-ctrl-c");
   ps.write("");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - handle Ctrl+C via Kitty CSI-u when exitOnCtrlC is false", async () => {
+it("useInput - a consuming handler can handle Kitty Ctrl+C", async () => {
   const ps = term("use-input-ctrl-c");
   // Kitty reports the printable key codepoint plus the Ctrl modifier.
   ps.write("[99;5u");
@@ -357,11 +357,11 @@ it("useInput - discrete priority keeps states in sync during rapid input", async
 });
 
 // ---------------------------------------------------------------------------
-// usePaste
+// Normalized paste input
 // ---------------------------------------------------------------------------
 
-it("usePaste - receives bracketed paste as single text blob", async () => {
-  const ps = term("use-paste", ["basic"]);
+it("useInput - receives bracketed paste as one normalized event", async () => {
+  const ps = term("normalized-paste", ["basic"]);
   ps.write("[200~hello world[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
@@ -369,22 +369,22 @@ it("usePaste - receives bracketed paste as single text blob", async () => {
   expect(ps.output).toContain("[?2004l");
 });
 
-it("usePaste - paste content with escape sequences is delivered verbatim", async () => {
-  const ps = term("use-paste", ["escapeSequences"]);
+it("useInput - paste content with escape sequences is delivered verbatim", async () => {
+  const ps = term("normalized-paste", ["escapeSequences"]);
   ps.write("[200~hello[Aworld[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("usePaste - useInput does not receive bracketed paste content", async () => {
-  const ps = term("use-paste", ["noUseInput"]);
+it("useInput - bracketed paste is not split into text or key events", async () => {
+  const ps = term("normalized-paste", ["singleFact"]);
   ps.write("[200~hello[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("usePaste - multiple simultaneous hooks both receive the same paste event", async () => {
-  const ps = term("use-paste", ["multipleHooks"]);
+it("useInput - all simultaneous global hooks receive the same paste event", async () => {
+  const ps = term("normalized-paste", ["multipleHooks"]);
   ps.write("[200~hello[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");

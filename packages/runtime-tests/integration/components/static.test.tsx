@@ -104,7 +104,7 @@ test("Static flush clears the dynamic frame first on the live writer", async () 
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin: stdinStream, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin: stdinStream, stderr });
   await nextTick();
 
   // After initial render, dynamic frame should contain LIVE_FRAME

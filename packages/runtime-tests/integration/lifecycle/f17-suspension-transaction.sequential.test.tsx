@@ -65,7 +65,6 @@ test.sequential("registers suspension before the first terminal acquisition", ()
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
 
@@ -89,7 +88,7 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     const suspensionHost = createManualSuspensionHost();
     const content = shallowRef("before-suspend");
     const App = defineComponent(() => {
-      useInput(() => {});
+      useInput(() => "continue");
       return () => <Text>{content.value}</Text>;
     });
     const app = createApp(App);
@@ -124,7 +123,6 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
         liveUpdates: true,
         maxFps: 0,
         patchConsole: false,
-        exitOnCtrlC: false,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       } as Parameters<TuiApp["mount"]>[0]);
       expect(stdin.isRaw).toBe(true);
@@ -190,7 +188,6 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     await suspensionHost.suspend();
@@ -225,7 +222,7 @@ test.sequential("a resize reported by the continued frame is repainted before in
   const renderedFacts: string[] = [];
   const App = defineComponent(() => {
     const { columns } = useLayoutSize();
-    useInput(() => {});
+    useInput(() => "continue");
     const frame = () => {
       const facts = `${columns.value}:raw=${String(stdin.isRaw)}`;
       renderedFacts.push(facts);
@@ -256,7 +253,6 @@ test.sequential("a resize reported by the continued frame is repainted before in
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     await app.waitUntilRenderFlush();
@@ -311,7 +307,6 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     await suspensionHost.suspend();
@@ -372,7 +367,6 @@ test.sequential("a reentrant unmount cannot forward the initial Fullscreen paint
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      exitOnCtrlC: false,
     });
     await app.waitUntilExit();
 
@@ -421,7 +415,6 @@ test.sequential.each(["inline", "fullscreen"] as const)(
         liveUpdates: true,
         maxFps: 0,
         patchConsole: false,
-        exitOnCtrlC: false,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
       } as Parameters<TuiApp["mount"]>[0]);

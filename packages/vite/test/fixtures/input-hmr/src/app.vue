@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { onScopeDispose } from "vue";
-import { Text } from "@vue-tui/runtime";
-import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
+import { onScopeDispose, shallowRef } from "vue";
+import { Text, useInput } from "@vue-tui/runtime";
 
 const generation = "A";
 const testGlobal = globalThis as {
@@ -13,38 +12,26 @@ const testGlobal = globalThis as {
 };
 const mountGeneration = testGlobal.__VT_INPUT_ACTIVE_MOUNT__;
 if (mountGeneration === undefined) throw new Error("missing input HMR mount generation");
-const routing = useInternalInputRoutingForTest();
-let stopRoute = () => {};
+const active = shallowRef(true);
+useInput(
+  (event) => {
+    testGlobal.__VT_INPUT_CALLS__?.push(`${mountGeneration}:${generation}:${event.sequence}`);
+    return "continue";
+  },
+  { isActive: active },
+);
+const stopRoute = () => {
+  active.value = false;
+};
 const startRoute = () => {
-  stopRoute();
-  const boundary = routing.registerSemantic({
-    id: `input-hmr:${mountGeneration}:${generation}`,
-    handle(fact) {
-      testGlobal.__VT_INPUT_CALLS__?.push(`${mountGeneration}:${generation}:${fact.sequence}`);
-      return {
-        performed: true,
-        continue: true,
-        preventDefault: false,
-        blockExternal: false,
-      };
-    },
-  });
-  const endSelection = routing.select({ activeBoundary: boundary.lease });
-  let stopped = false;
-  stopRoute = () => {
-    if (stopped) return;
-    stopped = true;
-    endSelection();
-    boundary.end();
-  };
-  testGlobal.__VT_INPUT_STOP__ = stopRoute;
+  active.value = true;
 };
 testGlobal.__VT_INPUT_START__ = startRoute;
-startRoute();
+testGlobal.__VT_INPUT_STOP__ = stopRoute;
 testGlobal.__VT_INPUT_SETUPS__?.push(`${mountGeneration}:${generation}`);
 
 onScopeDispose(() => {
-  stopRoute();
+  active.value = false;
   if (testGlobal.__VT_INPUT_START__ === startRoute) delete testGlobal.__VT_INPUT_START__;
   if (testGlobal.__VT_INPUT_STOP__ === stopRoute) delete testGlobal.__VT_INPUT_STOP__;
 });

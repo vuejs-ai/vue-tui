@@ -6,9 +6,17 @@ import Clock from "./clock.vue";
 
 const showClock = shallowRef(true);
 
-useInput((input) => {
-  if (input === "c") showClock.value = !showClock.value;
-  if (input === "q") process.exit(0);
+useInput((event) => {
+  if (event.kind !== "text") return "continue";
+  if (event.text === "c") {
+    showClock.value = !showClock.value;
+    return "consume";
+  }
+  if (event.text === "q") {
+    process.exit(0);
+    return "consume";
+  }
+  return "continue";
 });
 </script>
 

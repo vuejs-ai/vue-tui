@@ -79,7 +79,7 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
 
     const { stdout, stderr, stdin } = makeStreams();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0 });
     await flush();
 
     // Advance just past one interval, then mount the second animation. The first
@@ -127,7 +127,7 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
 
     const { stdout, stderr, stdin } = makeStreams();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0 });
     await flush();
 
     await vi.advanceTimersByTimeAsync(25);
@@ -169,7 +169,7 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
 
     const { stdout, stderr, stdin } = makeStreams();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0 });
     await flush();
 
     // Advance past frame 1.
@@ -209,7 +209,7 @@ describe.sequential("useAnimation exact frame offsets (deterministic)", () => {
 
     const { stdout, stderr, stdin } = makeStreams();
     const app = createApp(App);
-    app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr, maxFps: 0 });
     await flush();
 
     tick.value = 1;

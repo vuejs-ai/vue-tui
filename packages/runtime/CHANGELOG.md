@@ -5,6 +5,12 @@ All notable changes to `@vue-tui/runtime` are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/). While on
 `0.x`, minor versions may include breaking changes.
 
+## Unreleased
+
+### Changed
+
+- Replaced the legacy string-plus-`Key` `useInput()` contract with frozen normalized key, text, paste, and uninterpreted events plus a required synchronous route result. Added `useInputAvailability()`, made active semantic input own its terminal resources, retained `useStdin().stdin` as the raw mounted-stream escape hatch, and removed `usePaste`, public `Key`, public raw-mode controls, mount `rawMode`, and `exitOnCtrlC`.
+
 ## 0.1.0 - 2026-06-19
 
 First public release of `@vue-tui/runtime` — Vue 3 for the terminal. Build CLI

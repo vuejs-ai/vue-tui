@@ -1,6 +1,15 @@
 import process from "node:process";
-import { Box, Text, createApp, useApp, useFocus, useInput, type Key } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  createApp,
+  useApp,
+  useFocus,
+  useInput,
+  type TuiInputEvent,
+} from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, shallowRef } from "vue";
+import { inputText, isKey } from "./input-event.js";
 
 const requestedMode = process.argv[2] === "fullscreen" ? "fullscreen" : "inline";
 const assertionRun = process.argv[3] === "assert";
@@ -18,23 +27,44 @@ const App = defineComponent(() => {
   const record = (value: string) => {
     calls.value = [...calls.value, value];
   };
-  const label = (input: string, key: Key) => (key.backspace ? "Backspace" : input);
+  const label = (event: TuiInputEvent) =>
+    isKey(event, "backspace")
+      ? "Backspace"
+      : event.kind === "key"
+        ? (event.key.name ?? event.sequence)
+        : (inputText(event) ?? event.sequence);
 
-  useInput((input, key) => {
-    if (key.tab) defaultObservation.value = `Tab handler saw focus ${currentFocus()}`;
-    if (key.escape) defaultObservation.value = `Escape handler saw focus ${currentFocus()}`;
-    record(`A:${label(input, key)}`);
-    if (input === "x") {
+  useInput((event) => {
+    if (isKey(event, "tab")) defaultObservation.value = `Tab handler saw focus ${currentFocus()}`;
+    if (isKey(event, "escape")) {
+      defaultObservation.value = `Escape handler saw focus ${currentFocus()}`;
+    }
+    record(`A:${label(event)}`);
+    if (inputText(event) === "x") {
       activeB.value = false;
       activeC.value = true;
     }
-    if (input === "q") exit();
+    if (inputText(event) === "q") {
+      exit();
+      return "consume";
+    }
+    return "continue";
   });
-  useInput((input, key) => record(`B:${label(input, key)}`), { isActive: activeB });
   useInput(
-    (input, key) => {
-      record(`C:${label(input, key)}`);
-      if (assertionRun && key.backspace) exit();
+    (event) => {
+      record(`B:${label(event)}`);
+      return "continue";
+    },
+    { isActive: activeB },
+  );
+  useInput(
+    (event) => {
+      record(`C:${label(event)}`);
+      if (assertionRun && isKey(event, "backspace")) {
+        exit();
+        return "consume";
+      }
+      return "continue";
     },
     { isActive: activeC },
   );
@@ -46,7 +76,7 @@ const App = defineComponent(() => {
   return () =>
     h(
       Box,
-      { flexDirection: "column", borderStyle: "round", width: 70 },
+      { flexDirection: "column", borderStyle: "round", width: 62 },
       {
         default: () => [
           h(Text, { bold: true }, { default: () => "Input route batching" }),
@@ -65,6 +95,6 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ mode: requestedMode, exitOnCtrlC: false, maxFps: 0, patchConsole: false });
+app.mount({ mode: requestedMode, maxFps: 0, patchConsole: false });
 await app.waitUntilExit();
 if (assertionRun) process.stdout.write("__ROUTE_BATCHING_OK__");

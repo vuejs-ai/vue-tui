@@ -51,9 +51,12 @@ import { Text, useInput } from "@vue-tui/runtime";
 const box = shallowRef<ScrollBoxExpose>();
 
 // ScrollBox ships no built-in wheel/keyboard — wire your own keys to the handle.
-useInput((_input, key) => {
-  if (key.upArrow) box.value?.scrollByLines(-1);
-  if (key.downArrow) box.value?.scrollByLines(1);
+useInput((event) => {
+  if (event.kind !== "key" || event.key.phase === "release") return "continue";
+  if (event.key.name === "up") box.value?.scrollByLines(-1);
+  else if (event.key.name === "down") box.value?.scrollByLines(1);
+  else return "continue";
+  return "consume";
 });
 </script>
 

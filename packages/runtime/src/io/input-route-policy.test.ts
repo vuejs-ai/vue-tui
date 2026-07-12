@@ -38,6 +38,62 @@ const isCtrlKey = (fact: NormalizedInputFact, name: string): boolean =>
   fact.key.phase !== "release";
 
 describe("internal input route policy experiment", () => {
+  test("runs every application-global recipient and merges their decisions monotonically", () => {
+    const calls: string[] = [];
+    const result = dispatchInternalInput(
+      normalize("x"),
+      captureInternalInputRoutePlan({
+        applicationGlobal: [
+          {
+            id: "first",
+            handle() {
+              calls.push("first");
+              return {
+                performed: true,
+                continue: false,
+                preventDefault: false,
+                blockExternal: false,
+              };
+            },
+          },
+          {
+            id: "second",
+            handle() {
+              calls.push("second");
+              return {
+                performed: false,
+                continue: true,
+                preventDefault: true,
+                blockExternal: true,
+              };
+            },
+          },
+        ],
+        activeBoundary: {
+          id: "boundary",
+          handle: () => (calls.push("boundary"), continueRoute()),
+        },
+        ownerDefaults: [
+          {
+            id: "default",
+            handle: () => (calls.push("default"), continueDefault()),
+          },
+        ],
+        external: { id: "external", receive: () => calls.push("external") },
+      }),
+    );
+
+    expect(calls).toEqual(["first", "second"]);
+    expect(result).toMatchObject({
+      performed: true,
+      semanticContinued: false,
+      defaultPrevented: true,
+      externalBlocked: true,
+      externalForwarded: false,
+    });
+    expect(result.trace).toEqual(["application-global:first", "application-global:second"]);
+  });
+
   test("keeps action, semantic continuation, defaults, and external permission independent", () => {
     const external: string[] = [];
     const defaultCalls: string[] = [];

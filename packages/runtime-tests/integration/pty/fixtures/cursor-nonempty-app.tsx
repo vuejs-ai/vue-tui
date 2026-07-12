@@ -16,6 +16,6 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ exitOnCtrlC: false });
+app.mount();
 await app.waitUntilExit();
 console.log("exited");

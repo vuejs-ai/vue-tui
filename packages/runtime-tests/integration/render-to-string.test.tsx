@@ -18,7 +18,6 @@ import {
   useStderr,
   useCursor,
   useLayoutSize,
-  usePaste,
   useRenderSession,
   useAnimation,
   useBoxMetrics,
@@ -136,7 +135,7 @@ describe("renderToString", () => {
 
   test("useInput does not throw in renderToString", () => {
     const App = defineComponent(() => {
-      useInput(() => {});
+      useInput(() => "continue");
       return () => <Text>with input</Text>;
     });
     const output = renderToString(App);
@@ -168,7 +167,7 @@ describe("renderToString", () => {
     else expect(renderToString(App)).toBe("string route");
 
     expect(routing).toBeDefined();
-    expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
+    expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
   });
 
   test("useApp does not throw in renderToString", () => {
@@ -833,7 +832,7 @@ describe("renderToString", () => {
   // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, usePaste, useAnimation, useBoxMetrics — so that
+  // useCursor, semantic input, useAnimation, useBoxMetrics — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -848,13 +847,12 @@ describe("renderToString", () => {
       expect(output).toBe("with cursor");
     });
 
-    test("usePaste does not throw in renderToString", () => {
+    test("paste handling through useInput stays inert in renderToString", () => {
       let pasted = "";
       const App = defineComponent(() => {
-        // usePaste injects StdinContext (no-op here) and attaches to its
-        // internal route registry — no terminal session, so the handler never fires.
-        usePaste((text) => {
-          pasted = text;
+        useInput((event) => {
+          if (event.kind === "paste") pasted = event.text;
+          return "continue";
         });
         return () => <Text>with paste</Text>;
       });
@@ -909,7 +907,7 @@ describe("renderToString", () => {
       const App = defineComponent(() => {
         const { setCursorPosition } = useCursor();
         setCursorPosition({ x: 1, y: 0 });
-        usePaste(() => {});
+        useInput(() => "continue");
         const { frame } = useAnimation({ interval: 30 });
         const boxRef = shallowRef(null);
         useBoxMetrics(boxRef);

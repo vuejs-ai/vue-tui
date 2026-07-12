@@ -3,18 +3,20 @@ import type { StdinContext } from "../context.ts";
 import { createBox } from "../host/nodes.ts";
 import { createInternalInputRouteRegistry } from "../io/input-routes.ts";
 import { createInternalInputRoutingRuntime } from "../io/input-route-runtime.ts";
+import { createInputAvailabilityRef } from "../io/input-availability.ts";
 import { createMouseController } from "./controller.ts";
 
 function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext {
   return {
     stdin: {} as NodeJS.ReadStream,
     isRawModeSupported: true,
+    inputAvailability: createInputAvailabilityRef(Object.freeze({ status: "available" })),
     internal_routes: createInternalInputRouteRegistry(),
     internal_inputRouting: createInternalInputRoutingRuntime(),
-    internal_exitOnCtrlC: false,
     acquireRawMode: vi.fn(),
     releaseRawMode: vi.fn(),
-    setBracketedPasteMode: vi.fn(),
+    acquireSemanticInput: vi.fn(),
+    releaseSemanticInput: vi.fn(),
     acquireSgrMouseMode: vi.fn(() => Symbol("mouse")),
     releaseSgrMouseMode: vi.fn(),
     ...overrides,

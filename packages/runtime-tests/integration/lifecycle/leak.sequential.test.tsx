@@ -42,7 +42,7 @@ test.sequential("raw mode stays on when one of two useInput components unmounts"
   const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>x</Text>;
   });
 
@@ -71,7 +71,7 @@ test.sequential("mount owns one beforeExit listener until unmount", async () => 
   const { stream: stdin } = makeFakeStdin();
   const beforeMountCount = process.listenerCount("beforeExit");
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount + 1);
 
   app.unmount();

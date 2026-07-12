@@ -11,13 +11,13 @@
  * lines 620/633-635).
  *
  * The runtime has two `?2004l` sites — the `setBracketedPasteMode(false)` disable
- * branch (reached at teardown via usePaste's onScopeDispose → detach) and the
+ * branch (reached when the semantic input registration is disposed) and the
  * stdin controller's `dispose()` backstop. Both must skip a dead stdout.
  */
 import { PassThrough } from "node:stream";
 import { defineComponent } from "vue";
 import { describe, test, expect } from "vite-plus/test";
-import { createApp, Text, usePaste } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 
 const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l";
@@ -87,7 +87,7 @@ function makeFakeStdin(): NodeJS.ReadStream {
 }
 
 const PasteApp = defineComponent(() => {
-  usePaste(() => {});
+  useInput(() => "continue");
   return () => <Text>paste</Text>;
 });
 
@@ -98,9 +98,9 @@ describe("bracketed-paste disable on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr });
 
-    // Let the initial render + usePaste's attach (enables paste mode, writes
+    // Let the initial render + semantic input attachment (enables paste mode, writes
     // \x1b[?2004h) settle.
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(stdout.chunks.join("")).toContain(PASTE_ON);
@@ -109,7 +109,7 @@ describe("bracketed-paste disable on destroyed stdout", () => {
     stdout.hardDestroy();
 
     // Teardown must not even ATTEMPT the paste-OFF write on a dead stdout, at
-    // either site (usePaste detach + dispose backstop), and must not throw.
+    // either site (semantic detach + dispose backstop), and must not throw.
     expect(() => app.unmount()).not.toThrow();
     expect(
       stdout.pasteOffWhileDead,
@@ -123,7 +123,7 @@ describe("bracketed-paste disable on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(stdout.chunks.join("")).toContain(PASTE_ON);

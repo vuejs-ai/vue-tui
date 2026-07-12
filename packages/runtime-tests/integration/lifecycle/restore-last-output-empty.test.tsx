@@ -70,7 +70,6 @@ test("restoreLastOutput re-emits lastOutput+'\\n' when lastOutputToRender is emp
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 

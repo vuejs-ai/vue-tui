@@ -60,7 +60,6 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      exitOnCtrlC: false,
       maxFps: 0,
       patchConsole: false,
     });
@@ -101,7 +100,6 @@ test.sequential("raw-mode teardown restores a pre-existing raw stdin baseline", 
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -145,7 +143,6 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -179,7 +176,7 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
   }) as NodeJS.ReadStream["setEncoding"];
   const app = createApp(
     defineComponent(() => {
-      useInput(() => {});
+      useInput(() => "continue");
       return () => null;
     }),
   );
@@ -189,7 +186,6 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -221,7 +217,7 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
   });
   const app = createApp(
     defineComponent(() => {
-      useInput(() => {});
+      useInput(() => "continue");
       return () => null;
     }),
   );
@@ -231,7 +227,6 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -261,7 +256,6 @@ test.sequential("exit settlement and beforeExit ownership are idempotent after t
     stderr,
     stdin,
     liveUpdates: false,
-    exitOnCtrlC: false,
     patchConsole: false,
   });
 
@@ -314,7 +308,6 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -375,7 +368,6 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
   });
@@ -429,7 +421,6 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
     stderr,
     stdin,
     liveUpdates: true,
-    exitOnCtrlC: false,
     // Keep the update below pending so unmount's synchronous final commit drives
     // the ordinary frame writer without throwing out of Vue's global post-flush
     // queue and contaminating another test in this worker.

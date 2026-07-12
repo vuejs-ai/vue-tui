@@ -37,7 +37,7 @@ test("non-interactive teardown flushes a deferred trailing commit into the final
   const app = createApp(App);
   // Keep the default maxFps so the real throttle remains active; maxFps: 0
   // would erase the very throttle this bug needs.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: false });
 
   await nextTick();
   await nextTick();

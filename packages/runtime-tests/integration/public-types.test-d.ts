@@ -21,9 +21,9 @@ import {
   useApp,
   useDraggable,
   useInput,
+  useInputAvailability,
   useLayoutSize,
   useMouseInput,
-  usePaste,
   useRenderSession,
   useStdin,
   useStdout,
@@ -32,6 +32,10 @@ import {
 import type {
   BoxProps,
   BoxLayoutStyle,
+  InputAvailability,
+  InputHandler,
+  InputHandlerResult,
+  InputRouteDecision,
   TextProps,
   StaticChildren,
   StaticProps,
@@ -41,13 +45,16 @@ import type {
   TransformProps,
   NewlineProps,
   SpacerProps,
-  Key,
   MouseButton,
   MouseHandlerProps,
   MouseInputEvent,
   MouseTarget,
   MouseTargetRect,
   MountOptions,
+  TuiInputEvent,
+  TuiInputModifiers,
+  TuiInputPhase,
+  TuiInputSource,
   TuiMouseEvent,
   TuiMouseEventType,
   TuiWheelEvent,
@@ -63,6 +70,8 @@ import type {
   RenderSession,
   RenderSize,
   UseLayoutSizeReturn,
+  UseInputAvailabilityReturn,
+  UseInputOptions,
   CursorPosition,
   UseAppReturn,
   UseStdinReturn,
@@ -87,6 +96,8 @@ const removedInteractiveOption: MountOptions = { interactive: true };
 const removedDebugOption: MountOptions = { debug: true };
 // @ts-expect-error Semantic input routes own raw mode; there is no mount policy.
 const removedRawModeOption: MountOptions = { rawMode: "auto" };
+// @ts-expect-error Ctrl+C is an input default that handlers prevent per event, not a mount policy.
+const removedExitOnCtrlCOption: MountOptions = { exitOnCtrlC: false };
 // @ts-expect-error Only the two finite render-mode values are accepted.
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error liveUpdates is a boolean override.
@@ -96,6 +107,7 @@ void removedAlternateScreenOption;
 void removedInteractiveOption;
 void removedDebugOption;
 void removedRawModeOption;
+void removedExitOnCtrlCOption;
 void invalidModeOption;
 void invalidLiveUpdatesOption;
 
@@ -274,11 +286,140 @@ expectTypeOf<UseAppReturn>().toEqualTypeOf<{
 }>();
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
 
-const inputHandler = shallowRef((_input: string, _key: Key) => {});
-expectTypeOf(inputHandler).toMatchTypeOf<Parameters<typeof useInput>[0]>();
+// Semantic input is one normalized, readonly event union. Public handlers must make an explicit
+// synchronous routing decision; paste is a union member rather than a separate composable.
+expectTypeOf<TuiInputPhase>().toEqualTypeOf<"press" | "repeat" | "release">();
+expectTypeOf<TuiInputSource>().toEqualTypeOf<{
+  readonly sequence: string;
+  readonly fidelity: "normalized-utf8-sequence";
+}>();
+expectTypeOf<TuiInputModifiers>().toEqualTypeOf<{
+  readonly shift: boolean;
+  readonly alt: boolean;
+  readonly ctrl: boolean;
+  readonly super: boolean;
+  readonly hyper: boolean;
+  readonly meta: boolean;
+  readonly capsLock: boolean;
+  readonly numLock: boolean;
+}>();
+expectTypeOf<TuiInputEvent>().toEqualTypeOf<
+  | (TuiInputSource & {
+      readonly kind: "key";
+      readonly key: {
+        readonly protocol: "legacy" | "kitty";
+        readonly name: string | null;
+        readonly code: string | null;
+        readonly primaryCodepoint: number | null;
+        readonly shiftedCodepoint: number | null;
+        readonly baseLayoutCodepoint: number | null;
+        readonly functionalCode: number | null;
+        readonly modifiers: TuiInputModifiers;
+        readonly phase: TuiInputPhase | null;
+        readonly printable: boolean;
+        readonly reportedText: string | null;
+      };
+    })
+  | (TuiInputSource & {
+      readonly kind: "text";
+      readonly text: string;
+      readonly protocol: "plain" | "kitty";
+      readonly phase: TuiInputPhase | null;
+      readonly primaryCodepoint: number | null;
+      readonly textOrigin: "reported" | null;
+    })
+  | (TuiInputSource & {
+      readonly kind: "paste";
+      readonly text: string;
+    })
+  | (TuiInputSource & {
+      readonly kind: "uninterpreted";
+    })
+>();
 
-const pasteHandler = shallowRef((_text: string) => {});
-expectTypeOf(pasteHandler).toMatchTypeOf<Parameters<typeof usePaste>[0]>();
+expectTypeOf<InputRouteDecision>().toEqualTypeOf<{
+  readonly action: "none" | "performed";
+  readonly routing: "continue" | "stop";
+  readonly defaultAction: "allow" | "prevent";
+  readonly external: "allow" | "block";
+}>();
+expectTypeOf<InputHandlerResult>().toEqualTypeOf<"continue" | "consume" | InputRouteDecision>();
+expectTypeOf<InputHandler>().toEqualTypeOf<(event: TuiInputEvent) => InputHandlerResult>();
+expectTypeOf<Parameters<typeof useInput>[0]>().toEqualTypeOf<MaybeRef<InputHandler>>();
+expectTypeOf<UseInputOptions>().toEqualTypeOf<{
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+}>();
+
+const inputHandler = shallowRef<InputHandler>((event) => {
+  if (event.kind === "paste") return "consume";
+  return "continue";
+});
+const inputActive = shallowRef(true);
+useInput(inputHandler, { isActive: inputActive });
+useInput(inputHandler, { isActive: () => inputActive.value });
+
+declare const inputEvent: TuiInputEvent;
+// @ts-expect-error Normalized input source facts are readonly.
+inputEvent.sequence = "replacement";
+if (inputEvent.kind === "key") {
+  expectTypeOf(inputEvent.key.name).toEqualTypeOf<string | null>();
+  expectTypeOf(inputEvent.key.reportedText).toEqualTypeOf<string | null>();
+  if (inputEvent.key.name !== null) {
+    expectTypeOf(inputEvent.key.name).toEqualTypeOf<string>();
+  }
+  // @ts-expect-error Nested normalized key facts are readonly.
+  inputEvent.key.name = "replacement";
+} else if (inputEvent.kind === "text") {
+  expectTypeOf(inputEvent.textOrigin).toEqualTypeOf<"reported" | null>();
+} else if (inputEvent.kind === "paste") {
+  expectTypeOf(inputEvent.text).toEqualTypeOf<string>();
+}
+
+// Every handler must return a supported synchronous decision.
+// @ts-expect-error A void handler leaves routing ambiguous.
+useInput((_event) => {});
+// @ts-expect-error Promise results are not part of synchronous input dispatch.
+useInput(async (_event) => "continue");
+// @ts-expect-error A structured routing decision must contain all four fields.
+useInput((_event) => ({
+  action: "performed",
+  routing: "stop",
+  defaultAction: "prevent",
+}));
+// @ts-expect-error Arbitrary result strings are not input decisions.
+useInput((_event) => "handled");
+
+expectTypeOf<InputAvailability>().toEqualTypeOf<
+  | { readonly status: "available" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: "string-host" | "stdin-not-tty" | "stdin-not-controllable";
+    }
+>();
+expectTypeOf<UseInputAvailabilityReturn>().toEqualTypeOf<{
+  readonly availability: Readonly<Ref<InputAvailability>>;
+}>();
+expectTypeOf<ReturnType<typeof useInputAvailability>>().toEqualTypeOf<UseInputAvailabilityReturn>();
+
+const inputAvailability = useInputAvailability();
+declare const availability: InputAvailability;
+if (availability.status === "available") {
+  // @ts-expect-error Available input has no unavailability reason.
+  void availability.reason;
+} else {
+  expectTypeOf(availability.reason).toEqualTypeOf<
+    "string-host" | "stdin-not-tty" | "stdin-not-controllable"
+  >();
+}
+// @ts-expect-error Input availability cannot be replaced through the readonly ref.
+inputAvailability.availability.value = { status: "available" };
+
+// @ts-expect-error Key was replaced by the normalized TuiInputEvent union.
+export type _LegacyKeyWasRemoved = import("@vue-tui/runtime").Key;
+// @ts-expect-error Paste is a TuiInputEvent member, so its separate options were removed.
+export type _UsePasteOptionsWereRemoved = import("@vue-tui/runtime").UsePasteOptions;
+// @ts-expect-error Paste is observed through useInput(), not a separate public composable.
+export type _UsePasteWasRemoved = typeof import("@vue-tui/runtime").usePaste;
 
 expectTypeOf<MouseInputEvent>().toEqualTypeOf<{
   readonly type: "wheel";

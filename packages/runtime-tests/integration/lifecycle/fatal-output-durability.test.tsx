@@ -57,7 +57,6 @@ test("one-row Inline leaves the first component error visible", async () => {
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-    exitOnCtrlC: false,
   });
 
   try {
@@ -95,7 +94,6 @@ test.each([1, 4])(
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-      exitOnCtrlC: false,
     });
 
     try {
@@ -133,7 +131,6 @@ test("a screen-reader Fullscreen request leaves its fatal transcript on the main
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-    exitOnCtrlC: false,
   });
 
   try {
@@ -171,7 +168,6 @@ test("a throttled Inline boundary error falls back to stderr when stdout is lost
     liveUpdates: true,
     patchConsole: false,
     maxFps: 1,
-    exitOnCtrlC: false,
   });
 
   try {
@@ -229,7 +225,6 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     // Keep the normal error repaint pending so the resize render barrier below
     // owns the first physical attempt after Vue produces the overview.
     maxFps: 1,
-    exitOnCtrlC: false,
   });
 
   try {
@@ -284,7 +279,6 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     // The error update is then pending when teardown cancels the scheduler, so
     // this exercises whether fatal final-output can replay that prior success.
     maxFps: 1,
-    exitOnCtrlC: false,
   });
 
   await nextTick();
@@ -384,7 +378,6 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-    exitOnCtrlC: false,
   });
 
   let settlement: "pending" | "resolved" | "rejected" = "pending";

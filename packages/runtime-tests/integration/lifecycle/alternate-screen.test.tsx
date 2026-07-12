@@ -38,7 +38,7 @@ test("alternate screen - disabled by default", async () => {
   const stdin = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr: makeTtyStream(), liveUpdates: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr: makeTtyStream(), liveUpdates: true });
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -61,7 +61,6 @@ test("alternate screen - ignored when non-interactive", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: false,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -84,7 +83,6 @@ test("alternate screen - ignored when isTTY is false", async () => {
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -108,7 +106,6 @@ test("alternate screen - ignored when isTTY is false even if interactive is true
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -132,7 +129,6 @@ test("alternate screen - enters on mount and exits on unmount", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -168,7 +164,6 @@ test("alternate screen - hides cursor as part of the enter sequence", async () =
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -200,7 +195,6 @@ test("alternate screen - content is rendered between enter and exit", async () =
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -231,7 +225,6 @@ test("alternate screen - unmount() exits the alternate screen", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -256,7 +249,6 @@ test("alternate screen - cursor restored after exit", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -287,7 +279,6 @@ test("alternate screen - restores the primary screen before writing a thrown err
     stderr: terminal,
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   const exited = app.waitUntilExit();
   await nextTick();
@@ -324,7 +315,6 @@ test("alternate screen - restores before reporting useApp().exit(error)", async 
     stderr: terminal,
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
 
   await expect(app.waitUntilExit()).rejects.toThrow("PROGRAMMATIC_DONE");
@@ -348,7 +338,6 @@ test("alternate screen - does not replay teardown output on primary screen", asy
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 
@@ -387,7 +376,6 @@ test("alternate screen - cleanup console output does not leak into managed strea
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
     patchConsole: true,
   });
   await nextTick();
@@ -414,7 +402,6 @@ test("alternate screen - still activates with unthrottled commits", async () => 
     mode: "fullscreen",
     liveUpdates: true,
     maxFps: 0,
-    exitOnCtrlC: false,
   });
   await nextTick();
 

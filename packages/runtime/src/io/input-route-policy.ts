@@ -1,12 +1,11 @@
 import type { NormalizedInputFact } from "./normalized-input.ts";
 
 /**
- * Private F3 routing-policy experiment.
+ * Private F3 routing-policy mechanism.
  *
  * These names and return shapes are deliberately not exported from the runtime
- * package. The experiment keeps four observable decisions separate before a
- * public authoring API is selected: action, semantic continuation, delayed
- * defaults, and delivery to an explicit external owner.
+ * package. The public InputRouteDecision maps the same four independent outcomes,
+ * while F4 still owns the target/focus/external topology that supplies recipients.
  */
 
 export interface InternalInputRouteDecision {
@@ -171,11 +170,16 @@ export function dispatchInternalInput(
   let externalBlocked = false;
 
   for (const { layer, recipient } of plan.semantic) {
-    if (!semanticContinued) break;
+    // Application globals are one all-run priority layer. A normal `stop`
+    // result prevents the selected boundary/focus path, but it does not hide
+    // the same physical fact from peers that were captured in that global
+    // layer. Exceptions still escape immediately and fail this app dispatch
+    // closed. Every other semantic position remains serial.
+    if (!semanticContinued && layer !== "application-global") break;
     const decision = recipient.handle(fact);
     trace.push(`${layer}:${recipient.id}`);
     performed ||= decision.performed;
-    semanticContinued = decision.continue;
+    semanticContinued &&= decision.continue;
     defaultPrevented ||= decision.preventDefault;
     externalBlocked ||= decision.blockExternal;
   }

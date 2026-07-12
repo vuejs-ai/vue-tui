@@ -132,7 +132,6 @@ const app = createApp(App);
 app.mount({
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
   isScreenReaderEnabled: scenario === "partial-row-screen-reader",
-  exitOnCtrlC: false,
   maxFps: 0,
   incrementalRendering: scenario === "post-teardown-cursor-incremental",
 });

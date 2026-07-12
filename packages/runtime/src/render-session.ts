@@ -172,6 +172,11 @@ export function normalizeRequestedMode(options: object): RenderMode {
       'Mount option "rawMode" was removed; semantic input routes own terminal raw mode.',
     );
   }
+  if (hasOwn(options, "exitOnCtrlC")) {
+    throw new TypeError(
+      'Mount option "exitOnCtrlC" was removed; Ctrl+C is a delayed input default that handlers can prevent per event.',
+    );
+  }
 
   const mode = (options as { readonly mode?: unknown }).mode;
   if (mode === undefined) return "inline";

@@ -21,7 +21,7 @@ it("#450: non-TTY full-height rerenders should never clear terminal", async () =
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
   await nextTick();
   await nextTick();
 
@@ -44,7 +44,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
   await nextTick();
   await nextTick();
 
@@ -67,7 +67,7 @@ it("#450: viewport shrink commits the old snapshot and paints a fresh bounded re
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
   await nextTick();
   const writeCountBeforeResize = writes.length;

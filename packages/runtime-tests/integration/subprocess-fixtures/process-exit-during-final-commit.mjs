@@ -10,7 +10,6 @@ app.mount({
   mode: "fullscreen",
   liveUpdates: true,
   patchConsole: false,
-  exitOnCtrlC: false,
   maxFps: 0,
   onRender() {
     renderCount++;

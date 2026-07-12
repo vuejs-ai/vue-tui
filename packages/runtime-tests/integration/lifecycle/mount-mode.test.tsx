@@ -16,7 +16,7 @@ function chunksFrom(stream: NodeJS.WriteStream): string[] {
   return chunks;
 }
 
-test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
+test.each(["fullscreen", "alternateScreen", "interactive", "debug", "exitOnCtrlC"] as const)(
   "removed %s option fails before another mount option is read",
   (removedKey) => {
     const options = Object.defineProperty({ [removedKey]: undefined }, "stdout", {
@@ -94,7 +94,6 @@ test("screen-reader Fullscreen request stays on the main screen", async () => {
     mode: "fullscreen",
     liveUpdates: true,
     isScreenReaderEnabled: true,
-    exitOnCtrlC: false,
   } as never);
 
   await nextTick();
@@ -123,7 +122,6 @@ test("visual TTY without detected dimensions uses final stream output", async ()
     stderr,
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
     [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
   } as Parameters<typeof app.mount>[0]);
 
@@ -152,7 +150,6 @@ test("a partial custom TTY size never borrows dimensions from the process termin
     stderr,
     mode: "fullscreen",
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
 
   await nextTick();

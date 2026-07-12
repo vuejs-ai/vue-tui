@@ -63,7 +63,6 @@ test("forced interactive + non-TTY stdout emits NO cursor hide/show escapes", as
     stdin,
     stderr: makeTtyStream(),
     liveUpdates: true,
-    exitOnCtrlC: false,
   });
   await nextTick();
 

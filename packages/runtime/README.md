@@ -55,9 +55,17 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 
 const count = shallowRef(0);
 
-useInput((input) => {
-  if (input === "+") count.value++;
-  if (input === "-") count.value--;
+useInput((event) => {
+  if (event.kind !== "text") return "continue";
+  if (event.text === "+") {
+    count.value++;
+    return "consume";
+  }
+  if (event.text === "-") {
+    count.value--;
+    return "consume";
+  }
+  return "continue";
 });
 </script>
 
@@ -85,7 +93,8 @@ useInput((input) => {
 
 | Composable                      | Description                                                                                  |
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`      | Keyboard input — `(input, key)` with modifier and arrow key detection                        |
+| `useInput(handler, opts?)`      | Normalized key, text, paste, and uninterpreted input with an explicit routing result         |
+| `useInputAvailability()`        | Readonly managed-input availability for the current host                                     |
 | `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
 | `useDraggable(ref, opts?)`      | Full-screen element dragging — reactive position and drag state from a normal template ref   |
 | `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
@@ -97,14 +106,15 @@ useInput((input) => {
 | `useBoxMetrics(ref)`            | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
 | `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
-| `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                            |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
 | `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
 
-Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()` or `usePaste()`.
+`useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event. For advanced routing, return a complete `InputRouteDecision` to choose action reporting, later routing, terminal defaults, and external forwarding independently. All application-global handlers run in registration order for each event before their decisions are merged.
 
-`useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while managed handlers fail before publishing a route or changing terminal state. Mount options containing the removed `rawMode` field are rejected before terminal mutation.
+Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()`.
+
+`useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed handler fails before publishing a route or changing terminal state. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected before terminal mutation.
 
 ### Render-session facts
 

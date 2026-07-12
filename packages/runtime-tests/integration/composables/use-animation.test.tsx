@@ -1155,7 +1155,6 @@ describe("useAnimation", () => {
       stdout,
       stdin,
       stderr,
-      exitOnCtrlC: false,
       maxFps: mountOpts.maxFps,
       liveUpdates: mountOpts.liveUpdates,
     });

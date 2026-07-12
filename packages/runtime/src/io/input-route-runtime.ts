@@ -13,7 +13,12 @@ interface ActivationState<Value> {
   readonly value: Value;
   active: boolean;
   readonly dependentSelections: Set<SelectionGeneration>;
-  readonly globalSelections: Set<SelectionGeneration>;
+}
+
+interface ApplicationGlobalState {
+  readonly recipient: InternalInputRouteRecipient;
+  active: boolean;
+  inputDemandLease: InternalInputRoutingDemandLease | undefined;
 }
 
 /** Opaque, non-reusable identity for one private input recipient attachment. */
@@ -26,9 +31,11 @@ export interface InternalInputActivationRegistration<Value> {
   end(): void;
 }
 
+export interface InternalInputApplicationGlobalRegistration {
+  end(): void;
+}
+
 export interface InternalInputTopologySelection {
-  /** These survive selection replacement when their own leases remain active. */
-  readonly applicationGlobal?: readonly InternalInputActivationLease<InternalInputRouteRecipient>[];
   readonly activeBoundary?: InternalInputActivationLease<InternalInputRouteRecipient>;
   readonly focusedOwner?: InternalInputActivationLease<InternalInputRouteRecipient>;
   readonly logicalAncestors?: readonly InternalInputActivationLease<InternalInputRouteRecipient>[];
@@ -39,7 +46,6 @@ export interface InternalInputTopologySelection {
 
 interface SelectionGeneration {
   active: boolean;
-  readonly applicationGlobal: readonly InternalInputActivationLease<InternalInputRouteRecipient>[];
   readonly activeBoundary: InternalInputActivationLease<InternalInputRouteRecipient> | undefined;
   readonly focusedOwner: InternalInputActivationLease<InternalInputRouteRecipient> | undefined;
   readonly logicalAncestors: readonly InternalInputActivationLease<InternalInputRouteRecipient>[];
@@ -47,22 +53,27 @@ interface SelectionGeneration {
   readonly applicationDefaults: readonly InternalInputActivationLease<InternalInputDefaultRecipient>[];
   readonly external: InternalInputActivationLease<InternalInputExternalRecipient> | undefined;
   dependencies: readonly AnyLease[];
-  releaseInputDemand: (() => void) | undefined;
+  inputDemandLease: InternalInputRoutingDemandLease | undefined;
 }
 
 /** Captured without calling application code when one framed input fact begins. */
 export interface InternalInputTopologySnapshot {
+  readonly applicationGlobal: readonly ApplicationGlobalState[];
   readonly selection: SelectionGeneration | undefined;
   readonly frameworkDefaults: readonly InternalInputActivationLease<InternalInputDefaultRecipient>[];
 }
 
 export interface InternalInputTopologyResolution {
   /** `stale` deliberately fails closed instead of selecting the replacement. */
-  readonly kind: "compatibility" | "selected" | "stale";
+  readonly kind: "unselected" | "selected" | "stale";
   readonly candidate: InternalInputRouteCandidate;
 }
 
 export interface InternalInputRoutingRuntime {
+  /** Register one application-global recipient, independent of selected focus topology. */
+  registerApplicationGlobal(
+    recipient: InternalInputRouteRecipient,
+  ): InternalInputApplicationGlobalRegistration;
   registerSemantic(
     recipient: InternalInputRouteRecipient,
   ): InternalInputActivationRegistration<InternalInputRouteRecipient>;
@@ -82,8 +93,15 @@ export interface InternalInputRoutingRuntime {
 
 /** Private host bridge for one selected topology's physical input ownership. */
 export interface InternalInputRoutingDemandHost {
-  /** Acquire one demand; the returned idempotent release must not throw. */
-  acquire(): () => void;
+  /** Acquire physical resources before publication; activation is logical and side-effect free. */
+  acquire(): InternalInputRoutingDemandLease;
+}
+
+export interface InternalInputRoutingDemandLease {
+  /** Mark the already-published route as eligible for facts that begin afterward. */
+  activate(): void;
+  /** Immediately deactivate logical eligibility and release physical resources safely. */
+  release(): void;
 }
 
 type AnyRecipient =
@@ -105,12 +123,16 @@ export function createInternalInputRoutingRuntime(
 ): InternalInputRoutingRuntime {
   const owner = Symbol("vue-tui:input-routing-runtime");
   const states = new Set<ActivationState<AnyRecipient>>();
+  const applicationGlobals = new Set<ApplicationGlobalState>();
   let currentSelection: SelectionGeneration | undefined;
   let selectionRevision = 0;
+  let lifecycleRevision = 0;
 
-  const releaseInputDemandSafely = (releaseInputDemand: (() => void) | undefined): void => {
+  const releaseInputDemandSafely = (
+    inputDemandLease: InternalInputRoutingDemandLease | undefined,
+  ): void => {
     try {
-      releaseInputDemand?.();
+      inputDemandLease?.release();
     } catch {
       // Input release is terminal cleanup. A hostile private host must not leave
       // a published replacement without a disposer or abort the rest of clear().
@@ -118,16 +140,10 @@ export function createInternalInputRoutingRuntime(
   };
 
   const releaseSelectionDemand = (selection: SelectionGeneration): void => {
-    const releaseInputDemand = selection.releaseInputDemand;
-    selection.releaseInputDemand = undefined;
-    for (const lease of selection.applicationGlobal) {
-      lease[activationState].globalSelections.delete(selection);
-    }
-    releaseInputDemandSafely(releaseInputDemand);
+    const inputDemandLease = selection.inputDemandLease;
+    selection.inputDemandLease = undefined;
+    releaseInputDemandSafely(inputDemandLease);
   };
-
-  const hasActiveApplicationGlobal = (selection: SelectionGeneration): boolean =>
-    selection.applicationGlobal.some((lease) => lease[activationState].active);
 
   const deactivateSelection = (selection: SelectionGeneration, endWholeSelection = false): void => {
     if (selection.active) {
@@ -136,9 +152,7 @@ export function createInternalInputRoutingRuntime(
         lease[activationState].dependentSelections.delete(selection);
       }
     }
-    if (endWholeSelection || !hasActiveApplicationGlobal(selection)) {
-      releaseSelectionDemand(selection);
-    }
+    if (endWholeSelection || !selection.active) releaseSelectionDemand(selection);
   };
 
   const register = <Value extends AnyRecipient>(
@@ -151,7 +165,6 @@ export function createInternalInputRoutingRuntime(
       value,
       active: true,
       dependentSelections: new Set(),
-      globalSelections: new Set(),
     };
     states.add(state as ActivationState<AnyRecipient>);
     const lease = Object.freeze({ [activationState]: state });
@@ -163,12 +176,6 @@ export function createInternalInputRoutingRuntime(
         states.delete(state as ActivationState<AnyRecipient>);
         for (const selection of state.dependentSelections) deactivateSelection(selection);
         state.dependentSelections.clear();
-        for (const selection of state.globalSelections) {
-          if (!selection.active && !hasActiveApplicationGlobal(selection)) {
-            releaseSelectionDemand(selection);
-          }
-        }
-        state.globalSelections.clear();
       },
     });
   };
@@ -205,7 +212,6 @@ export function createInternalInputRoutingRuntime(
   };
 
   const validateSelection = (selection: SelectionGeneration): readonly AnyLease[] => {
-    for (const lease of selection.applicationGlobal) requireActive(semanticState(lease));
     const selectedSemantic = [
       selection.activeBoundary,
       selection.focusedOwner,
@@ -250,6 +256,32 @@ export function createInternalInputRoutingRuntime(
     );
 
   return {
+    registerApplicationGlobal(recipient) {
+      const observedRevision = lifecycleRevision;
+      const inputDemandLease = inputDemandHost?.acquire();
+      if (observedRevision !== lifecycleRevision) {
+        releaseInputDemandSafely(inputDemandLease);
+        return Object.freeze({ end() {} });
+      }
+
+      const state: ApplicationGlobalState = {
+        recipient,
+        active: true,
+        inputDemandLease,
+      };
+      applicationGlobals.add(state);
+      inputDemandLease?.activate();
+      return Object.freeze({
+        end() {
+          if (!state.active) return;
+          state.active = false;
+          applicationGlobals.delete(state);
+          const release = state.inputDemandLease;
+          state.inputDemandLease = undefined;
+          releaseInputDemandSafely(release);
+        },
+      });
+    },
     registerSemantic(recipient) {
       return register("semantic", recipient);
     },
@@ -262,7 +294,6 @@ export function createInternalInputRoutingRuntime(
     select(selection) {
       const next: SelectionGeneration = {
         active: true,
-        applicationGlobal: freezeList(selection.applicationGlobal),
         activeBoundary: selection.activeBoundary,
         focusedOwner: selection.focusedOwner,
         logicalAncestors: freezeList(selection.logicalAncestors),
@@ -270,7 +301,7 @@ export function createInternalInputRoutingRuntime(
         applicationDefaults: freezeList(selection.applicationDefaults),
         external: selection.external,
         dependencies: Object.freeze([]),
-        releaseInputDemand: undefined,
+        inputDemandLease: undefined,
       };
 
       // Validate ownership and kinds before invalidating the current generation.
@@ -281,11 +312,11 @@ export function createInternalInputRoutingRuntime(
       // the previous generation. This keeps raw mode and the shared listener
       // continuous across route replacement. Input synchronously produced by
       // acquisition still belongs to the previously published snapshot.
-      const releaseInputDemand = inputDemandHost?.acquire();
+      const inputDemandLease = inputDemandHost?.acquire();
       if (observedRevision !== selectionRevision) {
         // A re-entrant select/clear is the later intent. Do not let the outer
         // operation overwrite it after its host callback returns.
-        releaseInputDemandSafely(releaseInputDemand);
+        releaseInputDemandSafely(inputDemandLease);
         return () => {};
       }
       try {
@@ -293,10 +324,10 @@ export function createInternalInputRoutingRuntime(
         // leases. Revalidate before publishing a route that could never own input.
         next.dependencies = validateSelection(next);
       } catch (error) {
-        releaseInputDemandSafely(releaseInputDemand);
+        releaseInputDemandSafely(inputDemandLease);
         throw error;
       }
-      next.releaseInputDemand = releaseInputDemand;
+      next.inputDemandLease = inputDemandLease;
 
       const previous = currentSelection;
       currentSelection = next;
@@ -304,9 +335,7 @@ export function createInternalInputRoutingRuntime(
       for (const lease of next.dependencies) {
         lease[activationState].dependentSelections.add(next);
       }
-      for (const lease of next.applicationGlobal) {
-        lease[activationState].globalSelections.add(next);
-      }
+      inputDemandLease?.activate();
       if (previous) deactivateSelection(previous, true);
 
       let ended = false;
@@ -322,22 +351,26 @@ export function createInternalInputRoutingRuntime(
     },
     capture() {
       return Object.freeze({
+        applicationGlobal: Object.freeze([...applicationGlobals]),
         selection: currentSelection,
         frameworkDefaults: frameworkDefaultLeases,
       });
     },
     resolve(snapshot) {
+      const applicationGlobal = Object.freeze(
+        snapshot.applicationGlobal.flatMap((state) => (state.active ? [state.recipient] : [])),
+      );
       const selection = snapshot.selection;
       if (!selection) {
         return Object.freeze({
-          kind: "compatibility" as const,
+          kind: "unselected" as const,
           candidate: Object.freeze({
+            applicationGlobal,
             applicationDefaults: activeValues(snapshot.frameworkDefaults, "default"),
           }),
         });
       }
 
-      const applicationGlobal = activeValues(selection.applicationGlobal, "semantic");
       if (!selection.active) {
         return Object.freeze({
           kind: "stale" as const,
@@ -364,18 +397,22 @@ export function createInternalInputRoutingRuntime(
       });
     },
     clear() {
+      lifecycleRevision++;
       selectionRevision++;
       const selected = currentSelection;
       currentSelection = undefined;
       if (selected) deactivateSelection(selected, true);
+      for (const state of applicationGlobals) {
+        state.active = false;
+        const release = state.inputDemandLease;
+        state.inputDemandLease = undefined;
+        releaseInputDemandSafely(release);
+      }
+      applicationGlobals.clear();
       for (const state of states) {
         state.active = false;
         for (const selection of state.dependentSelections) deactivateSelection(selection);
         state.dependentSelections.clear();
-        for (const selection of state.globalSelections) {
-          releaseSelectionDemand(selection);
-        }
-        state.globalSelections.clear();
       }
       states.clear();
     },

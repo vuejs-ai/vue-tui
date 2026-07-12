@@ -765,7 +765,6 @@ describe("screen reader enabled mode", () => {
       stdout,
       stdin,
       stderr,
-      exitOnCtrlC: false,
       isScreenReaderEnabled: true,
     });
 

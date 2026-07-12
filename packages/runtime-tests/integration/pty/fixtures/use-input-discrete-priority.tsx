@@ -24,10 +24,10 @@ const App = defineComponent(() => {
     });
   });
 
-  useInput((_input, key) => {
-    if (key.return) {
+  useInput((event) => {
+    if (event.kind === "key" && event.key.name === "return") {
       if (done) {
-        return;
+        return "consume";
       }
 
       done = true;
@@ -35,12 +35,15 @@ const App = defineComponent(() => {
         `\nFINAL query:${JSON.stringify(query.value)} deferred:${JSON.stringify(deferredQuery.value)}\n`,
       );
       exit();
-      return;
+      return "consume";
     }
 
-    if (key.backspace || key.delete) {
+    if (event.kind === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
       query.value = query.value.slice(0, -1);
+      return "consume";
     }
+
+    return "continue";
   });
 
   const filteredResult = computed(() => {

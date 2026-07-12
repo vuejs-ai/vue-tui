@@ -22,6 +22,7 @@ import {
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
 import { createInternalInputRouteRegistry } from "./io/input-routes.ts";
 import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
+import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-availability.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import {
@@ -422,12 +423,13 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
   return {
     stdin,
     isRawModeSupported: false,
+    inputAvailability: createInputAvailabilityRef(stringInputUnavailable),
     internal_routes: createInternalInputRouteRegistry(),
     internal_inputRouting: createInternalInputRoutingRuntime(),
-    internal_exitOnCtrlC: false,
     acquireRawMode: () => {},
     releaseRawMode: () => {},
-    setBracketedPasteMode: () => {},
+    acquireSemanticInput: () => {},
+    releaseSemanticInput: () => {},
     acquireSgrMouseMode: () => Symbol("noop-sgr-mouse"),
     releaseSgrMouseMode: () => {},
   };

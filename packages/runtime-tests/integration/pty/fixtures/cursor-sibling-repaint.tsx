@@ -1,6 +1,7 @@
 import process from "node:process";
 import { Box, Text, createApp, useCursor, useInput } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, shallowRef } from "vue";
+import { inputText } from "./input-event.js";
 
 // Sibling-topology storyboard for the persistent-cursor-re-assertion divergence.
 //
@@ -28,9 +29,12 @@ const Spinner = defineComponent(
 // The input owns the caret via useCursor; it re-declares on each keystroke.
 const Input = defineComponent(() => {
   const { setCursorPosition } = useCursor();
-  useInput((input, key) => {
-    if (key.ctrl || key.meta || !input) return;
-    typed.value = typed.value + input;
+  useInput((event) => {
+    if (event.kind !== "text") return "continue";
+    const text = inputText(event);
+    if (!text) return "continue";
+    typed.value += text;
+    return "consume";
   });
   return () => {
     // Caret sits just after the typed text on row 1 (the input is line 2).
@@ -47,7 +51,7 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ stdout: process.stdout, exitOnCtrlC: false });
+app.mount({ stdout: process.stdout });
 
 // Drive the storyboard once the app is mounted: the test writes "hi" to stdin,
 // we wait for it to land, fire ONE spinner-only repaint (no keystroke), then

@@ -1,67 +1,85 @@
 import { defineComponent } from "vue";
-import { expect, test, vi } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useInput } from "@vue-tui/runtime";
+import { Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
 
-test("exitOnCtrlC delivers \\x03 before its delayed exit default", async () => {
-  const handler = vi.fn();
+test("Ctrl+C reaches useInput before its delayed exit default", async () => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput(handler);
+    useInput((event) => {
+      events.push(event);
+      return "continue";
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+  const { stdin, waitUntilExit } = await render(App);
 
   await stdin.write("\x03");
-  expect(handler).toHaveBeenCalledOnce();
-  expect(handler).toHaveBeenCalledWith("c", expect.objectContaining({ ctrl: true }));
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    kind: "key",
+    sequence: "\x03",
+    key: { name: "c", modifiers: { ctrl: true } },
+  });
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
 
-test("exitOnCtrlC=false does not intercept \\x03", async () => {
-  const calls: Array<{ input: string }> = [];
+test("a handler can prevent the Ctrl+C default for one event", async () => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput((input) => calls.push({ input }));
+    useInput((event) => {
+      events.push(event);
+      return {
+        action: "performed",
+        routing: "continue",
+        defaultAction: "prevent",
+        external: "block",
+      };
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, unmount } = await render(App, { exitOnCtrlC: false });
+  const { stdin, unmount } = await render(App);
 
   await stdin.write("\x03");
-  // With exitOnCtrlC=false, Ctrl+C reaches the useInput handler
-  expect(calls.length).toBe(1);
-  expect(calls[0]?.input).toBe("c");
+  expect(events).toHaveLength(1);
   unmount();
 });
 
-test("exitOnCtrlC does not intercept Ctrl+C with another command modifier", async () => {
-  const calls: string[] = [];
+test("Ctrl+C with another command modifier is not the exit shortcut", async () => {
+  const sequences: string[] = [];
   const App = defineComponent(() => {
-    useInput((input) => calls.push(input));
+    useInput((event) => {
+      sequences.push(event.sequence);
+      return "continue";
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, unmount } = await render(App, { exitOnCtrlC: true });
+  const { stdin, unmount } = await render(App);
 
-  // Ctrl+Alt, Ctrl+Super, Ctrl+Hyper, and Ctrl+Meta are distinct shortcuts.
   for (const encodedModifiers of [7, 13, 21, 37]) {
     await stdin.write(`\x1b[99;${encodedModifiers}u`);
   }
 
-  expect(calls).toEqual(["c", "c", "c", "c"]);
+  expect(sequences).toEqual(["\x1b[99;7u", "\x1b[99;13u", "\x1b[99;21u", "\x1b[99;37u"]);
   unmount();
 });
 
-test("exitOnCtrlC recognizes a Kitty base-layout Ctrl+C", async () => {
-  const handler = vi.fn();
+test("Ctrl+C recognizes a Kitty base-layout codepoint", async () => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput(handler);
+    useInput((event) => {
+      events.push(event);
+      return "continue";
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+  const { stdin, waitUntilExit } = await render(App);
 
-  // The primary key follows the active layout; the protocol reports the US
-  // base-layout key separately so framework shortcuts can remain stable.
   await stdin.write("\x1b[1089::99;5u");
 
-  expect(handler).toHaveBeenCalledOnce();
-  expect(handler).toHaveBeenCalledWith("с", expect.objectContaining({ ctrl: true }));
+  expect(events[0]).toMatchObject({
+    kind: "key",
+    key: { primaryCodepoint: 1089, baseLayoutCodepoint: 99, modifiers: { ctrl: true } },
+  });
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });

@@ -18,7 +18,6 @@ const inlineTtyOptions: RenderOptions = {
   columns: 80,
   rows: 24,
   props: { label: "ready" },
-  exitOnCtrlC: true,
   host: {
     mode: "inline",
     presentation: "visual",
@@ -51,6 +50,8 @@ expectTypeOf(render(TestComponent, inlineTtyOptions)).toEqualTypeOf<Promise<Rend
 const removedLiveUpdates: RenderOptions = { liveUpdates: true };
 // @ts-expect-error Removed testing implementation detail; observation is always available.
 const removedDebug: RenderOptions = { debug: true };
+// @ts-expect-error Ctrl+C is a preventable delayed default, not a test-host option.
+const removedExitOnCtrlC: RenderOptions = { exitOnCtrlC: false };
 // @ts-expect-error Only Inline and Fullscreen are valid requested modes.
 const invalidMode: RenderOptions = { host: { mode: "full-screen" } };
 // @ts-expect-error Only visual and screen-reader presentations are modeled.
@@ -63,6 +64,7 @@ const invalidStdin: RenderOptions = { host: { stdin: "pipe" } };
 const invalidStdout: RenderOptions = { host: { stdout: "file" } };
 void removedLiveUpdates;
 void removedDebug;
+void removedExitOnCtrlC;
 void invalidMode;
 void invalidPresentation;
 void invalidUpdates;

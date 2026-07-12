@@ -11,7 +11,6 @@ const app = createApp(App);
 app.mount({
   liveUpdates: false,
   patchConsole: false,
-  exitOnCtrlC: false,
 });
 
 // Deliberately do not call unmount(), exit(), or waitUntilExit(). The runtime's

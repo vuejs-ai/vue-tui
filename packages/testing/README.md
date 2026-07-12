@@ -23,9 +23,17 @@ import { render } from "@vue-tui/testing";
 const Counter = defineComponent(() => {
   const count = shallowRef(0);
 
-  useInput((input) => {
-    if (input === "+") count.value++;
-    if (input === "-") count.value--;
+  useInput((event) => {
+    if (event.kind !== "text") return "continue";
+    if (event.text === "+") {
+      count.value++;
+      return "consume";
+    }
+    if (event.text === "-") {
+      count.value--;
+      return "consume";
+    }
+    return "continue";
   });
 
   return () => (
@@ -70,17 +78,15 @@ interface RenderOptions {
   readonly columns?: number;
   readonly rows?: number;
   readonly props?: Record<string, unknown>;
-  readonly exitOnCtrlC?: boolean;
 }
 ```
 
-| Render field  | Default   | Meaning                                         |
-| ------------- | --------- | ----------------------------------------------- |
-| `host`        | See below | Production-like environment modeled by the test |
-| `columns`     | `100`     | Layout and emulator width                       |
-| `rows`        | `100`     | Emulator height and TTY height                  |
-| `props`       | —         | Props passed to the root component              |
-| `exitOnCtrlC` | `false`   | Whether Ctrl+C exits the mounted application    |
+| Render field | Default   | Meaning                                         |
+| ------------ | --------- | ----------------------------------------------- |
+| `host`       | See below | Production-like environment modeled by the test |
+| `columns`    | `100`     | Layout and emulator width                       |
+| `rows`       | `100`     | Emulator height and TTY height                  |
+| `props`      | —         | Props passed to the root component              |
 
 `columns` and `rows` must be positive safe integers. They set both the modeled output dimensions and the emulator dimensions. `rows` still controls the emulator when `host.stdout` is `"stream"`, but a stream does not claim physical terminal rows in `session`.
 
@@ -113,7 +119,7 @@ These controls model production facts rather than setting unrelated internal boo
 - a Fullscreen screen-reader request resolves to an Inline transcript on the normal screen;
 - `updates: "at-teardown"` uses the final-stream policy even when the underlying output is a TTY.
 
-The removed `liveUpdates` and `debug` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available.
+The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can prevent it for one event by returning `"consume"` or a complete decision whose `defaultAction` is `"prevent"`.
 
 ### Examples
 

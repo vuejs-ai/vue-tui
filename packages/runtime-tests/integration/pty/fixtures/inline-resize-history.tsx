@@ -46,6 +46,5 @@ const App = defineComponent(() => {
 createApp(App).mount({
   mode: presentation === "screen-reader" ? "fullscreen" : "inline",
   isScreenReaderEnabled: presentation === "screen-reader",
-  exitOnCtrlC: false,
   maxFps: 0,
 });

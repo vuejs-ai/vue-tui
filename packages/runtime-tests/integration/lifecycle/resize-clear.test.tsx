@@ -37,8 +37,8 @@ async function mountInteractive(columns: number, rows: number) {
 
   const app = createApp(App);
   // liveUpdates: true forces the resize handler even in CI where isTTY alone
-  // would disable it. exitOnCtrlC: false so the app stays alive.
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  // would disable it. No managed input route is active, so the operating system owns Ctrl+C.
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
 
   // Flush initial render.
   await nextTick();
@@ -126,7 +126,7 @@ test("narrowing a tall Inline frame never clears terminal history", async () => 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
 
   // Flush initial render.
   await nextTick();
@@ -167,7 +167,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
   await nextTick();
   await nextTick();
 
@@ -234,7 +234,6 @@ test("screen-reader resize uses a physical-bottom clamp when terminal rows are u
     stderr,
     liveUpdates: true,
     isScreenReaderEnabled: true,
-    exitOnCtrlC: false,
     maxFps: 0,
   });
   await nextTick();

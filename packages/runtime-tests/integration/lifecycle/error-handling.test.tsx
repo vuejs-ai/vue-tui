@@ -97,7 +97,7 @@ test("raw mode is disabled on the thrown-error cleanup path", async () => {
   Object.assign(stderr, { isTTY: true, columns: 80, rows: 24 });
 
   const Boom = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     onMounted(() => {
       throw new Error("Error after raw mode enabled");
     });
@@ -105,7 +105,7 @@ test("raw mode is disabled on the thrown-error cleanup path", async () => {
   });
 
   const app = createApp(Boom);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // The thrown error routes through exit() and rejects waitUntilExit; swallow it.
   await expect(app.waitUntilExit()).rejects.toThrow("Error after raw mode enabled");

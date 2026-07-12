@@ -60,7 +60,7 @@ test("waitUntilRenderFlush resolves after stdout write callback", async () => {
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await app.waitUntilRenderFlush();
   expect(didInitialWriteCallbackFire).toBe(true);
@@ -78,7 +78,7 @@ test("waitUntilRenderFlush flushes pending throttled render", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 });
+  app.mount({ stdout, stdin, stderr, maxFps: 1 });
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);
@@ -105,7 +105,7 @@ test("waitUntilRenderFlush resolves when stdout is not writable", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 });
+  app.mount({ stdout, stdin, stderr, maxFps: 1 });
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);
@@ -159,7 +159,7 @@ test("waitUntilExit waits for stdout barrier when only writableLength is exposed
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false, patchConsole: false });
+  app.mount({ stdout, stdin, stderr, liveUpdates: false, patchConsole: false });
   await nextTick();
   await nextTick();
 
@@ -191,7 +191,7 @@ test("waitUntilRenderFlush waits for rerender write callback", async () => {
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await app.waitUntilRenderFlush();
   msg.value = "World";
@@ -214,7 +214,7 @@ test("waitUntilRenderFlush waits for all concurrent waiters on the same rerender
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await app.waitUntilRenderFlush();
 
   msg.value = "World";
@@ -250,7 +250,7 @@ test("waitUntilRenderFlush resolves after unmount", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   app.unmount();
   await app.waitUntilExit();
@@ -271,7 +271,7 @@ test("waitUntilRenderFlush waits for unmount write callback", async () => {
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   app.unmount();
   await app.waitUntilRenderFlush();
@@ -293,7 +293,7 @@ test("waitUntilRenderFlush resolves after exit with error", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   exitFn(new Error("boom"));
@@ -334,7 +334,7 @@ test("useApp waitUntilRenderFlush resolves after the first frame write callback"
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await app.waitUntilExit();
   expect(didInitialWriteCallbackFire).toBe(true);
@@ -380,7 +380,7 @@ test("useApp waitUntilRenderFlush waits for state update frame flush", async () 
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await app.waitUntilExit();
   expect(didWorldWriteCallbackFire).toBe(true);
@@ -414,7 +414,7 @@ test("onMounted runs before the first frame write callback (issue 596)", async (
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Let the mount + first write dispatch settle, but NOT past the write-callback
   // delay (delayMs defaults to 150). onMounted must have run; the first frame's
@@ -440,7 +440,7 @@ test("clear output", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
   await nextTick();
   expect(writes.some((w) => w.includes("A"))).toBe(true);

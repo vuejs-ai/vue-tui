@@ -1,6 +1,7 @@
 import process from "node:process";
 import { createApp, useInput, useApp } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
+import { inputText, isKey } from "./input-event.js";
 
 const UserInput = defineComponent({
   props: {
@@ -23,18 +24,21 @@ const UserInput = defineComponent({
       process.stdout.write("__READY__");
     });
 
-    useInput((input, key) => {
+    useInput((event) => {
+      const text = inputText(event);
+      const key = event.kind === "key" ? event.key : null;
+
       if (props.test === "rapidArrowsEnter") {
-        if (key.downArrow) {
+        if (isKey(event, "down")) {
           rapidDownArrowCount++;
-          return;
+          return "consume";
         }
 
-        if (key.return) {
+        if (isKey(event, "return")) {
           if (rapidDownArrowCount === 3) {
             clearTimeout(rapidTimeout);
             exit();
-            return;
+            return "consume";
           }
 
           throw new Error(`Expected enter after 3 down arrows, received ${rapidDownArrowCount}`);
@@ -43,192 +47,210 @@ const UserInput = defineComponent({
         throw new Error("Expected only down arrows and enter");
       }
 
-      if (props.test === "lowercase" && input === "q") {
+      if (props.test === "lowercase" && event.kind === "text" && event.text === "q") {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "uppercase" && input === "Q" && key.shift) {
+      if (props.test === "uppercase" && event.kind === "text" && event.text === "Q") {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "uppercase" && input === "\r" && !key.shift) {
+      if (props.test === "uppercase" && isKey(event, "return") && !key?.modifiers.shift) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "pastedCarriageReturn" && input === "\rtest") {
+      if (
+        props.test === "pastedCarriageReturn" &&
+        event.kind === "paste" &&
+        event.text === "\rtest"
+      ) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "pastedTab" && input === "\ttest") {
+      if (props.test === "pastedTab" && event.kind === "paste" && event.text === "\ttest") {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "bracketedPaste" && input === "hello") {
+      if (props.test === "bracketedPaste" && event.kind === "paste" && event.text === "hello") {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "escape" && key.escape) {
+      if (props.test === "escape" && isKey(event, "escape")) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "escapeNoMeta" && key.escape && !key.meta) {
+      if (props.test === "escapeNoMeta" && isKey(event, "escape") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "ctrl" && input === "f" && key.ctrl) {
+      if (props.test === "ctrl" && isKey(event, "f") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "meta" && input === "m" && key.meta) {
+      if (props.test === "meta" && isKey(event, "m") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "metaBackspace" && input === "" && key.meta && key.backspace) {
+      if (props.test === "metaBackspace" && isKey(event, "backspace") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "escapeBracketPrefix" && input === "[" && !key.meta) {
+      if (
+        props.test === "escapeBracketPrefix" &&
+        event.kind === "uninterpreted" &&
+        event.sequence === "\x1b["
+      ) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "metaUpperO" && input === "O" && key.meta) {
+      if (
+        props.test === "metaUpperO" &&
+        isKey(event, "o") &&
+        key?.modifiers.meta &&
+        key.modifiers.shift
+      ) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "upArrow" && key.upArrow && !key.meta) {
+      if (props.test === "upArrow" && isKey(event, "up") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "downArrow" && key.downArrow && !key.meta) {
+      if (props.test === "downArrow" && isKey(event, "down") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "leftArrow" && key.leftArrow && !key.meta) {
+      if (props.test === "leftArrow" && isKey(event, "left") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "rightArrow" && key.rightArrow && !key.meta) {
+      if (props.test === "rightArrow" && isKey(event, "right") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "upArrowMeta" && key.upArrow && key.meta) {
+      if (props.test === "upArrowMeta" && isKey(event, "up") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "downArrowMeta" && key.downArrow && key.meta) {
+      if (props.test === "downArrowMeta" && isKey(event, "down") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "leftArrowMeta" && key.leftArrow && key.meta) {
+      if (props.test === "leftArrowMeta" && isKey(event, "left") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "rightArrowMeta" && key.rightArrow && key.meta) {
+      if (props.test === "rightArrowMeta" && isKey(event, "right") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "upArrowCtrl" && key.upArrow && key.ctrl) {
+      if (props.test === "upArrowCtrl" && isKey(event, "up") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "downArrowCtrl" && key.downArrow && key.ctrl) {
+      if (props.test === "downArrowCtrl" && isKey(event, "down") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "leftArrowCtrl" && key.leftArrow && key.ctrl) {
+      if (props.test === "leftArrowCtrl" && isKey(event, "left") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "rightArrowCtrl" && key.rightArrow && key.ctrl) {
+      if (props.test === "rightArrowCtrl" && isKey(event, "right") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "pageDown" && key.pageDown && !key.meta) {
+      if (props.test === "pageDown" && isKey(event, "pagedown") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "pageUp" && key.pageUp && !key.meta) {
+      if (props.test === "pageUp" && isKey(event, "pageup") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "home" && key.home && !key.meta) {
+      if (props.test === "home" && isKey(event, "home") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "end" && key.end && !key.meta) {
+      if (props.test === "end" && isKey(event, "end") && !key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "tab" && input === "" && key.tab && !key.ctrl) {
+      if (props.test === "tab" && isKey(event, "tab") && !key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "shiftTab" && input === "" && key.tab && key.shift) {
+      if (props.test === "shiftTab" && isKey(event, "tab") && key?.modifiers.shift) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "backspace" && input === "" && key.backspace) {
+      if (props.test === "backspace" && isKey(event, "backspace")) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "delete" && input === "" && key.delete) {
+      if (props.test === "delete" && isKey(event, "delete")) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "remove" && input === "" && key.delete) {
+      if (props.test === "remove" && isKey(event, "delete")) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "returnMeta" && key.return && key.meta) {
+      if (props.test === "returnMeta" && isKey(event, "return") && key?.modifiers.meta) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "ctrlF1" && input === "" && key.ctrl) {
+      if (props.test === "ctrlF1" && isKey(event, "f1") && key?.modifiers.ctrl) {
         exit();
-        return;
+        return "consume";
       }
 
-      if (props.test === "unmappedCtrlSequence" && input === "" && key.ctrl) {
+      if (
+        props.test === "unmappedCtrlSequence" &&
+        event.kind === "key" &&
+        event.key.name === null &&
+        event.key.modifiers.ctrl
+      ) {
         exit();
-        return;
+        return "consume";
       }
 
-      throw new Error("Crash");
+      throw new Error(`Unexpected normalized input: ${JSON.stringify({ event, text })}`);
     });
 
     return () => null;

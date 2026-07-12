@@ -78,11 +78,8 @@ it("useInput - handle kitty protocol repeat event", async () => {
   expect(ps.output).toContain("exited");
 });
 
-// Ink (use-input.ts:204-217) has no release special-case: a printable 'a'
-// release delivers input "a" (the text), not "". The fixture exits only if
-// input === "a", so a regression to the old release->"" behavior would hang
-// (and fail). See .agents/docs/ink-divergences.md.
-it("useInput - release event delivers the key (input='a'), matching Ink", async () => {
+// A release preserves the normalized phase and printable codepoint.
+it("useInput - release event preserves its phase and printable codepoint", async () => {
   const ps = term("use-input-kitty", ["release"]);
   ps.write(kittyKey(97, 1, 3));
   await ps.waitForExit();
@@ -112,55 +109,55 @@ it("useInput - handle kitty protocol delete", async () => {
   expect(ps.output).toContain("exited");
 });
 
-// --- Non-printable keys produce empty input ---
+// --- Non-printable key facts ---
 
-it("useInput - non-printable kitty key (capslock) produces empty input", async () => {
+it("useInput - kitty capslock is a non-printable key fact", async () => {
   const ps = term("use-input-kitty", ["capslock-empty"]);
   ps.write(kittyKey(57358));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - non-printable kitty key (f13) produces empty input", async () => {
+it("useInput - kitty f13 is a non-printable key fact", async () => {
   const ps = term("use-input-kitty", ["f13-empty"]);
   ps.write(kittyKey(57376));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - non-printable kitty key (printscreen) produces empty input", async () => {
+it("useInput - kitty printscreen is a non-printable key fact", async () => {
   const ps = term("use-input-kitty", ["printscreen-empty"]);
   ps.write(kittyKey(57361));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-// --- Text input ---
+// --- Printable and control key facts ---
 
-it("useInput - kitty protocol space key produces space input", async () => {
+it("useInput - kitty space carries a printable codepoint", async () => {
   const ps = term("use-input-kitty", ["space"]);
   ps.write(kittyKey(32));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - kitty protocol return key produces carriage return input", async () => {
+it("useInput - kitty return is a named non-printable key fact", async () => {
   const ps = term("use-input-kitty", ["return"]);
   ps.write(kittyKey(13));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - kitty protocol ctrl+letter produces input", async () => {
+it("useInput - kitty ctrl+letter preserves the key and modifier", async () => {
   const ps = term("use-input-kitty", ["ctrlLetter"]);
   ps.write(kittyKey(97, 5));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-// --- Kitty Ctrl+C with exitOnCtrlC ---
+// --- Kitty Ctrl+C delayed default ---
 
-it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
+it("useInput - kitty Ctrl+C exits when the handler allows the default", async () => {
   const ps = term("use-input-kitty", ["kittyCtrlCExit"]);
   ps.write(kittyKey(99, 5));
   await ps.waitForExit();
@@ -168,28 +165,25 @@ it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
   expect(ps.output).toContain("exited");
 });
 
-// --- Ctrl+C exit without useInput (managed demand held by usePaste) ---
-// usePaste keeps the shared controller active even though no useInput handler is
-// mounted, so the encoding-agnostic delayed default must still exit. The legacy
-// case is the control; the Kitty case is Ink's gap because it only checks \x03.
+// --- Ctrl+C delayed default with managed semantic input demand ---
 
-it("usePaste-only app exits on legacy Ctrl+C (control)", async () => {
-  const ps = term("use-paste-ctrl-c");
+it("an input handler that allows defaults exits on legacy Ctrl+C", async () => {
+  const ps = term("input-default-ctrl-c");
   ps.write("\x03");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("usePaste-only app exits on kitty Ctrl+C", async () => {
-  const ps = term("use-paste-ctrl-c");
+it("an input handler that allows defaults exits on kitty Ctrl+C", async () => {
+  const ps = term("input-default-ctrl-c");
   ps.write(kittyKey(99, 5));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
 // Ctrl+Shift+C is a distinct combo (commonly "copy"), not Ctrl+C. The kitty
-// protocol disambiguates it, so even with exitOnCtrlC on it must reach the
-// handler rather than exit. The handler writes a marker to prove delivery.
+// protocol disambiguates it, so the Ctrl+C default must not run. The handler
+// writes a marker to prove delivery.
 it("useInput - kitty Ctrl+Shift+C is delivered, not treated as Ctrl+C exit", async () => {
   const ps = term("use-input-kitty", ["ctrlShiftC"]);
   ps.write(kittyKey(99, 6));

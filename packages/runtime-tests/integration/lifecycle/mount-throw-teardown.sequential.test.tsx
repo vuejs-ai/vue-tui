@@ -36,7 +36,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   const liveBefore = yogaNodeTracker.snapshot().live;
 
   const App = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>hello</Text>;
   });
   const PlainApp = defineComponent(() => () => <Text>hello</Text>);
@@ -67,7 +67,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 });
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -82,7 +82,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
 
 test.sequential("a Kitty push failure during first semantic demand tears down without poisoning stdout", async () => {
   const App = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>kitty</Text>;
   });
   const PlainApp = defineComponent(() => () => <Text>kitty</Text>);
@@ -118,7 +118,7 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();

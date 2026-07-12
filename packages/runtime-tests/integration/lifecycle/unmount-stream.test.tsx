@@ -22,7 +22,7 @@ test("unmount does not write to ended stdout stream", async () => {
   const stderr = makeFakeWritable({ columns: 100 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 });
   await nextTick();
   await nextTick();
 
@@ -70,7 +70,6 @@ test("non-interactive mode writes only last frame at unmount", async () => {
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: false,
   });
 
@@ -116,7 +115,7 @@ test("non-TTY default writes Static immediately and only the latest dynamic fram
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -160,7 +159,6 @@ test("explicit interactive override writes live frames to non-TTY without altern
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: true,
     mode: "fullscreen",
   });
@@ -207,7 +205,6 @@ test("non-interactive empty final frame still writes trailing newline at unmount
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: false,
   });
 
@@ -241,7 +238,6 @@ test("non-interactive unmount skips final frame when stdout is not writable", as
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: false,
   });
 
@@ -275,7 +271,6 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: false,
   });
 
@@ -321,7 +316,6 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: false,
   });
 

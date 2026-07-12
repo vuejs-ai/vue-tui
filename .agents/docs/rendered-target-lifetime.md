@@ -64,6 +64,6 @@ The `target-lifetime` real-PTY journey keeps one component ref stable while its 
 
 ## Deliberate limits
 
-F2 does not define normalized input or routing, hidden/disabled eligibility, logical focus, semantic rectangles, terminal caret placement, public pointer events, selection, or copy. It does not migrate `useInput`, `usePaste`, `useFocus`, `useFocusManager`, or `useCursor` early. Issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250) is evidence that setup-scope input lifetime is insufficient, but F3 and F4 must decide the input and focus contracts before those composables move onto this mechanism.
+F2 itself did not define normalized input or routing, hidden/disabled eligibility, logical focus, semantic rectangles, terminal caret placement, public pointer events, selection, or copy, and it did not migrate the input, focus, or cursor composables early. F3 later replaced `useInput`, removed `usePaste`, and established the shared event and route result. Issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250) remains evidence that setup-scope input lifetime is insufficient; F4 still owns focus and target attachment onto this mechanism.
 
 No generic public `useRenderedTarget()` or target-ref type is justified yet. F3 through F6 should consume the internal lifetime rule and publish only the semantic authoring types their own journeys require.

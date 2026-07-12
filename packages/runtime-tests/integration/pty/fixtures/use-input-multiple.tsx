@@ -1,13 +1,15 @@
 import process from "node:process";
-import { createApp, Text, useInput, useApp } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useApp, type TuiInputEvent } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted, shallowRef } from "vue";
+import { inputText } from "./input-event.js";
 
 const App = defineComponent(() => {
   const { exit } = useApp();
   const input = shallowRef("");
 
-  const handleInput = (char: string) => {
-    input.value = input.value + char;
+  const handleInput = (event: TuiInputEvent) => {
+    input.value += inputText(event) ?? "";
+    return "continue" as const;
   };
 
   useInput(handleInput);

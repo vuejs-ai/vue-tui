@@ -17,10 +17,10 @@ import {
   useFocus,
   useInput,
   useMouseInput,
-  usePaste,
-  type Key,
+  type InputHandler,
   type KittyKeyboardOptions,
   type TuiApp,
+  type TuiInputEvent,
 } from "@vue-tui/runtime";
 import { defineComponent, h, nextTick, onErrorCaptured, shallowRef, type ShallowRef } from "vue";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./lifecycle/test-streams.ts";
@@ -56,6 +56,39 @@ const continueInputRoute = () => ({
   preventDefault: false,
   blockExternal: false,
 });
+
+function inputLabel(event: TuiInputEvent): string {
+  if (event.kind === "text" || event.kind === "paste") return event.text;
+  if (event.kind === "key") return event.key.reportedText ?? "";
+  return event.sequence;
+}
+
+function namedKeyOrInput(event: TuiInputEvent, name: string): string {
+  return event.kind === "key" && event.key.name === name ? name : inputLabel(event);
+}
+
+function collectInput(values: string[]): InputHandler {
+  return (event) => {
+    values.push(inputLabel(event));
+    return "continue";
+  };
+}
+
+function collectNonPasteInput(values: string[]): InputHandler {
+  return (event) => {
+    if (event.kind !== "paste") values.push(inputLabel(event));
+    return "continue";
+  };
+}
+
+function collectPaste(values: string[]): InputHandler {
+  return (event) => {
+    if (event.kind === "paste") values.push(event.text);
+    return "continue";
+  };
+}
+
+const observeInput: InputHandler = () => "continue";
 
 function createKittyKeyboardController(
   stdin: NodeJS.ReadStream,
@@ -873,7 +906,7 @@ describe("kitty lifecycle - auto-detection", () => {
 
 const Dummy = defineComponent(() => () => null);
 const InputDummy = defineComponent(() => {
-  useInput(() => {});
+  useInput(observeInput);
   return () => null;
 });
 
@@ -934,7 +967,7 @@ describe("kitty lifecycle - mount/unmount integration", () => {
     (stdin as { unref?: () => NodeJS.ReadStream }).unref = () => stdin;
     const inputs: string[] = [];
     const App = defineComponent(() => {
-      useInput((input) => inputs.push(input));
+      useInput(collectInput(inputs));
       return () => null;
     });
 
@@ -943,7 +976,6 @@ describe("kitty lifecycle - mount/unmount integration", () => {
       stdout,
       stdin,
       kittyKeyboard: { mode: "auto" },
-      exitOnCtrlC: false,
     });
     stdin.emit("data", "x");
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -1003,9 +1035,7 @@ function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" | "disabled" }
 
   const inputs: string[] = [];
   const App = defineComponent(() => {
-    useInput((input) => {
-      inputs.push(input);
-    });
+    useInput(collectInput(inputs));
     return () => h("tui-text", null, "x");
   });
 
@@ -1027,12 +1057,12 @@ function mountWithRealInput(kittyKeyboard: { mode: "auto" | "enabled" | "disable
   };
   const inputs: string[] = [];
   const App = defineComponent(() => {
-    useInput((value) => inputs.push(value));
+    useInput(collectInput(inputs));
     return () => h("tui-text", null, "x");
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, kittyKeyboard, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, kittyKeyboard });
   return { app, input, inputs, stdout, writes };
 }
 
@@ -1114,7 +1144,7 @@ describe("kitty query-response - end-to-end filtering", () => {
     try {
       input.write("\x1b[?");
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
-      expect(inputs).toEqual(["[?"]);
+      expect(inputs).toEqual(["\x1b[?"]);
     } finally {
       app.unmount();
       input.destroy();
@@ -1122,8 +1152,8 @@ describe("kitty query-response - end-to-end filtering", () => {
   });
 
   test.each([
-    ["response without digits", "\x1b[?u", "[?u"],
-    ["invalid query-like sequence", "\x1b[?1x", "[?1x"],
+    ["response without digits", "\x1b[?u", "\x1b[?u"],
+    ["invalid query-like sequence", "\x1b[?1x", "\x1b[?1x"],
   ])("auto mode preserves %s", async (_name, sequence, expected) => {
     const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
     try {
@@ -1143,7 +1173,7 @@ describe("kitty query-response - end-to-end filtering", () => {
     const visible = shallowRef(true);
     const inputs: string[] = [];
     const Child = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       return () => h("tui-text", null, "input");
     });
     const App = defineComponent(
@@ -1156,7 +1186,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -1186,7 +1215,7 @@ describe("kitty query-response - end-to-end filtering", () => {
     const stdout = makeFakeWritable();
     const visible = shallowRef(true);
     const Child = defineComponent(() => {
-      useInput(() => {});
+      useInput(observeInput);
       return () => h("tui-text", null, "input");
     });
     const App = defineComponent(
@@ -1199,7 +1228,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     const externalListener = () => {};
@@ -1233,7 +1261,7 @@ describe("kitty query-response - end-to-end filtering", () => {
     const stdout = makeFakeWritable();
     const visible = shallowRef(true);
     const Child = defineComponent(() => {
-      useInput(() => {});
+      useInput(observeInput);
       return () => h("tui-text", null, "input");
     });
     const App = defineComponent(
@@ -1246,7 +1274,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     const externalListener = () => {};
@@ -1328,7 +1355,7 @@ describe("kitty query-response - end-to-end filtering", () => {
     const suspensionHost = createManualSuspensionHost();
     const inputs: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -1348,7 +1375,6 @@ describe("kitty query-response - end-to-end filtering", () => {
         stdout,
         stdin,
         kittyKeyboard: { mode: "auto" },
-        exitOnCtrlC: false,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       } as Parameters<TuiApp["mount"]>[0]);
       expect(queryCount).toBe(1);
@@ -1423,7 +1449,7 @@ function mountInputAppOnStreams({
 }) {
   const inputs: string[] = [];
   const App = defineComponent(() => {
-    useInput((value) => inputs.push(value));
+    useInput(collectInput(inputs));
     return () => h("tui-text", null, "x");
   });
   const app = createApp(App);
@@ -1433,7 +1459,6 @@ function mountInputAppOnStreams({
     patchConsole: false,
     liveUpdates: true,
     maxFps: 0,
-    exitOnCtrlC: false,
     ...(kittyMode ? { kittyKeyboard: { mode: kittyMode } } : {}),
     ...(suspensionHost ? { [INTERNAL_SUSPENSION_HOST]: suspensionHost } : {}),
   } as Parameters<TuiApp["mount"]>[0]);
@@ -1484,7 +1509,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     });
     const app = createApp(App);
 
-    app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true });
     expect(selectRoute).toThrow("on failed after attach");
     expect(stdin.listenerCount("data")).toBe(0);
 
@@ -1508,12 +1533,12 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }) as typeof stdin.on;
     const inputs: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
     try {
-      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false });
+      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true });
 
       expect(dataOnCalls).toBe(1);
       expect(inputs).toEqual(["a"]);
@@ -1531,9 +1556,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const suspensionHost = createManualSuspensionHost();
     const inputsA: string[] = [];
     const AppA = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         inputsA.push(value);
         if (value === "a") void suspensionHost.suspend();
+        return "continue";
       });
       return () => h("tui-text", null, "a");
     });
@@ -1544,7 +1571,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -1666,7 +1692,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const visible = shallowRef(true);
     const inputs: string[] = [];
     const Child = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       return () => null;
     });
     const App = defineComponent(() => () => (visible.value ? h(Child) : null));
@@ -1676,7 +1702,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     try {
@@ -1716,7 +1741,10 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const visible = shallowRef(true);
     const pastes: string[] = [];
     const Child = defineComponent(() => {
-      usePaste((value) => pastes.push(value));
+      useInput((event) => {
+        if (event.kind === "paste") pastes.push(event.text);
+        return "continue";
+      });
       return () => h("tui-text", null, "paste");
     });
     const App = defineComponent(
@@ -1729,7 +1757,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     try {
@@ -1760,7 +1787,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     try {
@@ -1802,7 +1828,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     expect(selectRoute).toThrow("query write rejected");
@@ -1942,9 +1967,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const { stream: stdin } = makeFakeStdin();
     const inputs: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         inputs.push(value);
         if (value === "a") stdin.emit("data", "x");
+        return "continue";
       });
       return () => h("tui-text", null, "x");
     });
@@ -1968,7 +1995,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        exitOnCtrlC: false,
         kittyKeyboard: { mode: "auto" },
       });
       expect(inputs).toEqual(["a", "b", "x"]);
@@ -1986,17 +2012,25 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const persistent: string[] = [];
     const first: string[] = [];
     const second: string[] = [];
-    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
     const First = defineComponent(() => {
-      useInput((value, key) => first.push(label(value, key)));
+      useInput((event) => {
+        first.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h("tui-text", null, "first");
     });
     const Second = defineComponent(() => {
-      useInput((value, key) => second.push(label(value, key)));
+      useInput((event) => {
+        second.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h("tui-text", null, "second");
     });
     const App = defineComponent(() => {
-      useInput((value, key) => persistent.push(label(value, key)));
+      useInput((event) => {
+        persistent.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h(showFirst.value ? First : Second);
     });
     const originalWrite = stdout.write.bind(stdout);
@@ -2019,7 +2053,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        exitOnCtrlC: false,
         kittyKeyboard: { mode: "auto" },
       });
       expect(injectedPrefix).toBe(true);
@@ -2116,7 +2149,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -2166,7 +2198,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
       }
@@ -2189,7 +2220,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -2245,7 +2275,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
         throw new Error("unref failed after taking effect");
@@ -2261,7 +2290,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -2292,14 +2320,16 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       label: "bracketed paste",
       enable: "\x1b[?2004h",
       disable: "\x1b[?2004l",
+      capturesDisableError: false,
       install: (active: ShallowRef<boolean>) => {
-        usePaste(() => {}, { isActive: active });
+        useInput(observeInput, { isActive: active });
       },
     },
     {
       label: "SGR mouse",
       enable: "\x1b[?1000h\x1b[?1006h",
       disable: "\x1b[?1000l\x1b[?1006l",
+      capturesDisableError: true,
       install: (active: ShallowRef<boolean>) => {
         useMouseInput(() => {}, { isActive: active });
       },
@@ -2361,7 +2391,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
         failEnable = true;
@@ -2391,7 +2420,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
   test.each(terminalModeCases)(
     "$label disable releases raw input even when stdout throws after the write",
-    async ({ enable, disable, install }) => {
+    async ({ enable, disable, capturesDisableError, install }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
@@ -2444,7 +2473,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
         failDisable = true;
@@ -2452,7 +2480,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         await nextTick();
         await flushInput();
 
-        expect(errors).toHaveLength(1);
+        expect(errors).toHaveLength(capturesDisableError ? 1 : 0);
         expect(writes.filter((value) => value === enable || value === disable)).toEqual([
           enable,
           disable,
@@ -2475,7 +2503,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
   test.each(terminalModeCases)(
     "$label reconciles a re-entrant final active state before surfacing a disable error",
-    async ({ enable, disable, install }) => {
+    async ({ enable, disable, capturesDisableError, install }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
@@ -2529,7 +2557,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
         reactivateAndFail = true;
@@ -2537,14 +2564,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         await nextTick();
         await flushInput();
 
-        expect(errors).toHaveLength(1);
+        expect(errors).toHaveLength(capturesDisableError ? 1 : 0);
         expect(active.value).toBe(true);
-        expect(writes.filter((value) => value === enable || value === disable)).toEqual([
-          enable,
-          disable,
-          disable,
-          enable,
-        ]);
+        expect(writes.filter((value) => value === enable || value === disable)).toEqual(
+          capturesDisableError ? [enable, disable, disable, enable] : [enable, disable, enable],
+        );
         expect({
           isRaw: input.isRaw,
           refBalance,
@@ -2564,7 +2588,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     {
       label: "useInput",
       install: (active: ShallowRef<boolean>) => {
-        useInput(() => {}, { isActive: active });
+        useInput(observeInput, { isActive: active });
       },
     },
     {
@@ -2621,7 +2645,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
       toggleAndFail = true;
@@ -2694,7 +2717,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
           [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         } as Parameters<TuiApp["mount"]>[0]);
@@ -2743,7 +2765,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -2802,7 +2823,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
 
@@ -2838,7 +2858,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       return stdin;
     };
     const App = defineComponent(() => {
-      usePaste(() => {});
+      useInput(observeInput);
       useMouseInput(() => {});
       return () => h("tui-text", null, "x");
     });
@@ -2858,7 +2878,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
 
@@ -2885,11 +2904,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeB = shallowRef(false);
     const inputsB: string[] = [];
     const AppA = defineComponent(() => {
-      useInput(() => {});
+      useInput(observeInput);
       return () => h("tui-text", null, "a");
     });
     const AppB = defineComponent(() => {
-      useInput((value) => inputsB.push(value), { isActive: activeB });
+      useInput(collectInput(inputsB), { isActive: activeB });
       return () => h("tui-text", null, "b");
     });
     const appA = createApp(AppA);
@@ -2900,7 +2919,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     appB.mount({
@@ -2909,7 +2927,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
 
@@ -2967,11 +2984,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeB = shallowRef(false);
     const inputsB: string[] = [];
     const AppA = defineComponent(() => {
-      useInput(() => {});
+      useInput(observeInput);
       return () => h("tui-text", null, "a");
     });
     const AppB = defineComponent(() => {
-      useInput((value) => inputsB.push(value), { isActive: activeB });
+      useInput(collectInput(inputsB), { isActive: activeB });
       return () => h("tui-text", null, "b");
     });
     const appA = createApp(AppA);
@@ -2982,7 +2999,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     appB.mount({
@@ -2991,7 +3007,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     const originalPause = stdin.pause.bind(stdin);
@@ -3059,7 +3074,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputs: string[] = [];
     const mice: unknown[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       useMouseInput((event) => mice.push(event));
       return () => h("tui-text", null, "x");
     });
@@ -3080,7 +3095,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3112,7 +3126,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       const stdout = makeFakeWritable();
       const visible = shallowRef(true);
       const Child = defineComponent(() => {
-        useInput(() => {});
+        useInput(observeInput);
         return () => h("tui-text", null, "input");
       });
       const App = defineComponent(
@@ -3125,7 +3139,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
       try {
@@ -3151,7 +3164,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const visibleA = shallowRef(true);
     const inputsA: string[] = [];
     const ChildA = defineComponent(() => {
-      useInput((value) => inputsA.push(value));
+      useInput(collectInput(inputsA));
       return () => h("tui-text", null, "a");
     });
     const AppA = defineComponent(
@@ -3164,7 +3177,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
@@ -3197,21 +3209,32 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const first: string[] = [];
     const second: string[] = [];
     const persistentB: string[] = [];
-    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
     const First = defineComponent(() => {
-      useInput((value, key) => first.push(label(value, key)));
+      useInput((event) => {
+        first.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h("tui-text", null, "first");
     });
     const Second = defineComponent(() => {
-      useInput((value, key) => second.push(label(value, key)));
+      useInput((event) => {
+        second.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h("tui-text", null, "second");
     });
     const AppA = defineComponent(() => {
-      useInput((value, key) => persistentA.push(label(value, key)));
+      useInput((event) => {
+        persistentA.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h(showFirst.value ? First : Second);
     });
     const AppB = defineComponent(() => {
-      useInput((value, key) => persistentB.push(label(value, key)));
+      useInput((event) => {
+        persistentB.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
       return () => h("tui-text", null, "b");
     });
     const appA = createApp(AppA);
@@ -3222,7 +3245,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     appB.mount({
@@ -3231,7 +3253,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3271,10 +3292,18 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const active = shallowRef(true);
     const persistent: string[] = [];
     const toggled: string[] = [];
-    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
     const App = defineComponent(() => {
-      useInput((value, key) => persistent.push(label(value, key)));
-      useInput((value, key) => toggled.push(label(value, key)), { isActive: active });
+      useInput((event) => {
+        persistent.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      });
+      useInput(
+        (event) => {
+          toggled.push(namedKeyOrInput(event, "up"));
+          return "continue";
+        },
+        { isActive: active },
+      );
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3284,7 +3313,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3313,8 +3341,9 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const stdout = makeFakeWritable();
     const first: string[] = [];
     const second: string[] = [];
-    const handler = shallowRef<(value: string, key: Key) => void>((value, key) => {
-      first.push(key.upArrow ? "up" : value);
+    const handler = shallowRef<InputHandler>((event) => {
+      first.push(namedKeyOrInput(event, "up"));
+      return "continue";
     });
     const App = defineComponent(() => {
       useInput(handler);
@@ -3327,12 +3356,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
       stdin.emit("data", "\x1b[");
-      handler.value = (value, key) => second.push(key.upArrow ? "up" : value);
+      handler.value = (event) => {
+        second.push(namedKeyOrInput(event, "up"));
+        return "continue";
+      };
       stdin.emit("data", "A");
       stdin.emit("data", "x");
       await flushInput();
@@ -3353,16 +3384,30 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeC = shallowRef(false);
     const calls: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         calls.push(`A:${value}`);
         if (value === "x") {
           activeB.value = false;
           activeC.value = true;
           stdin.emit("data", "y");
         }
+        return "continue";
       });
-      useInput((value) => calls.push(`B:${value}`), { isActive: activeB });
-      useInput((value) => calls.push(`C:${value}`), { isActive: activeC });
+      useInput(
+        (event) => {
+          calls.push(`B:${inputLabel(event)}`);
+          return "continue";
+        },
+        { isActive: activeB },
+      );
+      useInput(
+        (event) => {
+          calls.push(`C:${inputLabel(event)}`);
+          return "continue";
+        },
+        { isActive: activeC },
+      );
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3372,7 +3417,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3393,17 +3437,30 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeB = shallowRef(true);
     const activeC = shallowRef(false);
     const calls: string[] = [];
-    const label = (value: string, key: Key) => (key.backspace ? "backspace" : value);
     const App = defineComponent(() => {
-      useInput((value, key) => {
-        calls.push(`A:${label(value, key)}`);
+      useInput((event) => {
+        const value = inputLabel(event);
+        calls.push(`A:${namedKeyOrInput(event, "backspace")}`);
         if (value === "x") {
           activeB.value = false;
           activeC.value = true;
         }
+        return "continue";
       });
-      useInput((value, key) => calls.push(`B:${label(value, key)}`), { isActive: activeB });
-      useInput((value, key) => calls.push(`C:${label(value, key)}`), { isActive: activeC });
+      useInput(
+        (event) => {
+          calls.push(`B:${namedKeyOrInput(event, "backspace")}`);
+          return "continue";
+        },
+        { isActive: activeB },
+      );
+      useInput(
+        (event) => {
+          calls.push(`C:${namedKeyOrInput(event, "backspace")}`);
+          return "continue";
+        },
+        { isActive: activeC },
+      );
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3413,7 +3470,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3439,15 +3495,29 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeC = shallowRef(false);
     const calls: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         calls.push(`A:${value}`);
         if (value === "x") {
           activeB.value = false;
           activeC.value = true;
         }
+        return "continue";
       });
-      useInput((value) => calls.push(`B:${value}`), { isActive: activeB });
-      useInput((value) => calls.push(`C:${value}`), { isActive: activeC });
+      useInput(
+        (event) => {
+          calls.push(`B:${inputLabel(event)}`);
+          return "continue";
+        },
+        { isActive: activeB },
+      );
+      useInput(
+        (event) => {
+          calls.push(`C:${inputLabel(event)}`);
+          return "continue";
+        },
+        { isActive: activeC },
+      );
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3457,7 +3527,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3482,17 +3551,30 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const activeB = shallowRef(true);
     const activeC = shallowRef(false);
     const calls: string[] = [];
-    const label = (value: string, key: Key) => (key.upArrow ? "up" : value);
     const App = defineComponent(() => {
-      useInput((value, key) => {
-        calls.push(`A:${label(value, key)}`);
+      useInput((event) => {
+        const value = inputLabel(event);
+        calls.push(`A:${namedKeyOrInput(event, "up")}`);
         if (value === "x") {
           activeB.value = false;
           activeC.value = true;
         }
+        return "continue";
       });
-      useInput((value, key) => calls.push(`B:${label(value, key)}`), { isActive: activeB });
-      useInput((value, key) => calls.push(`C:${label(value, key)}`), { isActive: activeC });
+      useInput(
+        (event) => {
+          calls.push(`B:${namedKeyOrInput(event, "up")}`);
+          return "continue";
+        },
+        { isActive: activeB },
+      );
+      useInput(
+        (event) => {
+          calls.push(`C:${namedKeyOrInput(event, "up")}`);
+          return "continue";
+        },
+        { isActive: activeC },
+      );
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3502,7 +3584,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3527,15 +3608,18 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const pastesB: string[] = [];
     const pastesC: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        if (event.kind === "paste") return "continue";
+        const value = inputLabel(event);
         inputs.push(value);
         if (value === "x") {
           activeB.value = false;
           activeC.value = true;
         }
+        return "continue";
       });
-      usePaste((value) => pastesB.push(value), { isActive: activeB });
-      usePaste((value) => pastesC.push(value), { isActive: activeC });
+      useInput(collectPaste(pastesB), { isActive: activeB });
+      useInput(collectPaste(pastesC), { isActive: activeC });
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3545,7 +3629,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3571,15 +3654,15 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const first: string[] = [];
     const second: string[] = [];
     const First = defineComponent(() => {
-      usePaste((value) => first.push(value));
+      useInput(collectPaste(first));
       return () => h("tui-text", null, "first");
     });
     const Second = defineComponent(() => {
-      usePaste((value) => second.push(value));
+      useInput(collectPaste(second));
       return () => h("tui-text", null, "second");
     });
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectNonPasteInput(inputs));
       return () => h(showFirst.value ? First : Second);
     });
     const app = createApp(App);
@@ -3589,7 +3672,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3611,15 +3693,15 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
-  test("a paste route attached mid-paste cannot steal the input fallback", async () => {
+  test("a paste observer attached mid-paste cannot receive the old paste", async () => {
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
     const pasteActive = shallowRef(false);
     const inputs: string[] = [];
     const pastes: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
-      usePaste((value) => pastes.push(value), { isActive: pasteActive });
+      useInput(collectInput(inputs));
+      useInput(collectPaste(pastes), { isActive: pasteActive });
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3629,7 +3711,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3643,7 +3724,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
       stdin.emit("data", "\x1b[200~next\x1b[201~");
       await flushInput();
-      expect(inputs).toEqual(["headtail"]);
+      expect(inputs).toEqual(["headtail", "next"]);
       expect(pastes).toEqual(["next"]);
     } finally {
       app.unmount();
@@ -3671,7 +3752,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       return () => h("tui-text", null, "second");
     });
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       useMouseInput((event) => persistent.push(event.direction));
       return () => h(showFirst.value ? First : Second);
     });
@@ -3682,7 +3763,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3725,7 +3805,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputs: string[] = [];
     const mice: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
+      useInput(collectInput(inputs));
       useMouseInput((event) => mice.push(event.direction), { isActive: mouseActive });
       return () => h("tui-text", null, "x");
     });
@@ -3736,7 +3816,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3745,12 +3824,12 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin.emit("data", "4M");
       await flushInput();
 
-      expect(inputs).toEqual(["[<64;3;4M"]);
+      expect(inputs).toEqual([]);
       expect(mice).toEqual([]);
 
       stdin.emit("data", "\x1b[<65;5;6M");
       await flushInput();
-      expect(inputs).toEqual(["[<64;3;4M"]);
+      expect(inputs).toEqual([]);
       expect(mice).toEqual(["down"]);
     } finally {
       app.unmount();
@@ -3767,7 +3846,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const visible = shallowRef(true);
     const suspensionHost = createManualSuspensionHost();
     const Child = defineComponent(() => {
-      useInput(() => {});
+      useInput(observeInput);
       return () => h("tui-text", null, "input");
     });
     const App = defineComponent(
@@ -3780,7 +3859,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3810,11 +3888,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputs: string[] = [];
     const pastes: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        if (event.kind === "paste") return "continue";
+        const value = inputLabel(event);
         inputs.push(value);
         if (value === "a") void suspensionHost.suspend();
+        return "continue";
       });
-      usePaste((value) => pastes.push(value));
+      useInput(collectPaste(pastes));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -3824,7 +3905,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     try {
@@ -3847,9 +3927,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const suspensionHost = createManualSuspensionHost();
     const inputsA: string[] = [];
     const AppA = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         inputsA.push(value);
         if (value === "a") void suspensionHost.suspend();
+        return "continue";
       });
       return () => h("tui-text", null, "a");
     });
@@ -3860,7 +3942,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3917,16 +3998,19 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const pastesA: string[] = [];
     const pastesB: string[] = [];
     const AppA = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        if (event.kind === "paste") return "continue";
+        const value = inputLabel(event);
         inputsA.push(value);
         if (value === "a") void suspensionHost.suspend();
+        return "continue";
       });
-      usePaste((value) => pastesA.push(value));
+      useInput(collectPaste(pastesA));
       return () => h("tui-text", null, "a");
     });
     const AppB = defineComponent(() => {
-      useInput(() => {});
-      usePaste((value) => pastesB.push(value));
+      useInput(observeInput);
+      useInput(collectPaste(pastesB));
       return () => h("tui-text", null, "b");
     });
     const appA = createApp(AppA);
@@ -3937,7 +4021,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3947,7 +4030,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -3977,17 +4059,19 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputsA: string[] = [];
     const inputsB: string[] = [];
     const AppA = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         inputsA.push(value);
         if (value === "a") {
           void suspensionHost.suspend();
           stdin.emit("data", "x");
         }
+        return "continue";
       });
       return () => h("tui-text", null, "a");
     });
     const AppB = defineComponent(() => {
-      useInput((value) => inputsB.push(value));
+      useInput(collectInput(inputsB));
       return () => h("tui-text", null, "b");
     });
     const appA = createApp(AppA);
@@ -3997,7 +4081,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     appB.mount({
@@ -4005,7 +4088,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
     });
     try {
       stdin.emit("data", "a");
@@ -4034,8 +4116,8 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const pastesB: string[] = [];
     const makeApp = (inputs: string[], pastes: string[]) =>
       defineComponent(() => {
-        useInput((value) => inputs.push(value));
-        usePaste((value) => pastes.push(value));
+        useInput(collectNonPasteInput(inputs));
+        useInput(collectPaste(pastes));
         return () => h("tui-text", null, "x");
       });
     const appA = createApp(makeApp(inputsA, pastesA));
@@ -4045,7 +4127,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     appB.mount({
@@ -4053,7 +4134,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
     });
     try {
       stdin.emit("data", "\x1b[200~before");
@@ -4084,8 +4164,8 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputs: string[] = [];
     const pastes: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
-      usePaste((value) => pastes.push(value));
+      useInput(collectNonPasteInput(inputs));
+      useInput(collectPaste(pastes));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -4094,7 +4174,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     try {
@@ -4124,8 +4203,8 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const pastesB: string[] = [];
     const makeApp = (inputs: string[], pastes: string[]) =>
       defineComponent(() => {
-        useInput((value) => inputs.push(value));
-        usePaste((value) => pastes.push(value));
+        useInput(collectNonPasteInput(inputs));
+        useInput(collectPaste(pastes));
         return () => h("tui-text", null, "x");
       });
     const appA = createApp(makeApp(inputsA, pastesA));
@@ -4135,7 +4214,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     appB.mount({
@@ -4143,7 +4221,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
     });
     try {
       stdin.emit("data", "\x1b[20");
@@ -4170,8 +4247,8 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const inputs: string[] = [];
     const pastes: string[] = [];
     const App = defineComponent(() => {
-      useInput((value) => inputs.push(value));
-      usePaste((value) => pastes.push(value));
+      useInput(collectNonPasteInput(inputs));
+      useInput(collectPaste(pastes));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -4181,7 +4258,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
     try {
@@ -4361,9 +4437,11 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const suspensionHost = createManualSuspensionHost();
     const inputsA: string[] = [];
     const AppA = defineComponent(() => {
-      useInput((value) => {
+      useInput((event) => {
+        const value = inputLabel(event);
         inputsA.push(value);
         if (value === "a") void suspensionHost.suspend();
+        return "continue";
       });
       return () => h("tui-text", null, "a");
     });
@@ -4373,7 +4451,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -4427,7 +4504,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     const input = stdin as WritableTestStdin;
     const pastes: string[] = [];
     const App = defineComponent(() => {
-      usePaste((value) => pastes.push(value));
+      useInput(collectPaste(pastes));
       return () => h("tui-text", null, "x");
     });
     const app = createApp(App);
@@ -4437,7 +4514,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     try {

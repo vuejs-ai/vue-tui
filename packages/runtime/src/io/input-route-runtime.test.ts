@@ -14,7 +14,88 @@ const continueDefault = () => ({ performed: false, continue: true, blockExternal
 
 const fact = normalizeInputEvent("x")!;
 
+const demandLease = (release: () => void, activate: () => void = () => {}) => ({
+  activate,
+  release,
+});
+
 describe("internal live input route activations", () => {
+  test("owns independently captured application-global registrations", () => {
+    const transitions: string[] = [];
+    const calls: string[] = [];
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        transitions.push("acquire");
+        return demandLease(() => transitions.push("release"));
+      },
+    });
+    const first = runtime.registerApplicationGlobal({
+      id: "first",
+      handle: () => (calls.push("first"), continueRoute()),
+    });
+    const capturedPlan = captureInternalInputRoutePlan(
+      runtime.resolve(runtime.capture()).candidate,
+    );
+    first.end();
+    const second = runtime.registerApplicationGlobal({
+      id: "second",
+      handle: () => (calls.push("second"), continueRoute()),
+    });
+
+    dispatchInternalInput(fact, capturedPlan);
+    dispatchInternalInput(
+      fact,
+      captureInternalInputRoutePlan(runtime.resolve(runtime.capture()).candidate),
+    );
+
+    expect(calls).toEqual(["first", "second"]);
+    expect(transitions).toEqual(["acquire", "release", "acquire"]);
+    second.end();
+    expect(transitions).toEqual(["acquire", "release", "acquire", "release"]);
+  });
+
+  test("does not publish a global registration when input demand acquisition fails", () => {
+    const runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        throw new Error("input unavailable");
+      },
+    });
+
+    expect(() =>
+      runtime.registerApplicationGlobal({ id: "global", handle: continueRoute }),
+    ).toThrow("input unavailable");
+    expect(runtime.resolve(runtime.capture()).candidate.applicationGlobal).toEqual([]);
+  });
+
+  test("activates demand only after a global is published and releases after removal", () => {
+    const observations: string[] = [];
+    let runtime!: ReturnType<typeof createInternalInputRoutingRuntime>;
+    runtime = createInternalInputRoutingRuntime([], {
+      acquire() {
+        observations.push(
+          `acquire:${runtime.resolve(runtime.capture()).candidate.applicationGlobal?.length ?? 0}`,
+        );
+        return demandLease(
+          () => {
+            observations.push(
+              `release:${runtime.resolve(runtime.capture()).candidate.applicationGlobal?.length ?? 0}`,
+            );
+          },
+          () => {
+            observations.push(
+              `activate:${runtime.resolve(runtime.capture()).candidate.applicationGlobal?.length ?? 0}`,
+            );
+          },
+        );
+      },
+    });
+
+    const registration = runtime.registerApplicationGlobal({ id: "global", handle: continueRoute });
+    registration.end();
+
+    expect(observations).toEqual(["acquire:0", "activate:1", "release:0"]);
+  });
+
   test("uses selected layer order rather than registration order", () => {
     const calls: string[] = [];
     const runtime = createInternalInputRoutingRuntime();
@@ -42,13 +123,12 @@ describe("internal live input route activations", () => {
       id: "boundary",
       handle: () => (calls.push("boundary"), continueRoute()),
     });
-    const global = runtime.registerSemantic({
+    runtime.registerApplicationGlobal({
       id: "global",
       handle: () => (calls.push("global"), continueRoute()),
     });
 
     runtime.select({
-      applicationGlobal: [global.lease],
       activeBoundary: boundary.lease,
       focusedOwner: owner.lease,
       logicalAncestors: [ancestor.lease],
@@ -112,7 +192,7 @@ describe("internal live input route activations", () => {
         handle: () => (calls.push("framework-default"), continueDefault()),
       },
     ]);
-    const global = runtime.registerSemantic({
+    runtime.registerApplicationGlobal({
       id: "global",
       handle: () => (calls.push("global"), continueRoute()),
     });
@@ -125,7 +205,6 @@ describe("internal live input route activations", () => {
       receive: () => calls.push("external"),
     });
     runtime.select({
-      applicationGlobal: [global.lease],
       activeBoundary: boundary.lease,
       external: external.lease,
     });
@@ -173,11 +252,11 @@ describe("internal live input route activations", () => {
         const demand = ++nextDemand;
         transitions.push(`acquire:${demand}`);
         let released = false;
-        return () => {
+        return demandLease(() => {
           if (released) return;
           released = true;
           transitions.push(`release:${demand}`);
-        };
+        });
       },
     });
     const first = runtime.registerSemantic({ id: "first", handle: continueRoute });
@@ -216,7 +295,7 @@ describe("internal live input route activations", () => {
       acquire() {
         transitions.push("acquire");
         if (failNext) throw new Error("input unavailable");
-        return () => transitions.push("release");
+        return demandLease(() => transitions.push("release"));
       },
     });
     const current = runtime.registerSemantic({ id: "current", handle: continueRoute });
@@ -236,20 +315,20 @@ describe("internal live input route activations", () => {
     const runtime = createInternalInputRoutingRuntime([], {
       acquire() {
         transitions.push("acquire");
-        return () => transitions.push("release");
+        return demandLease(() => transitions.push("release"));
       },
     });
-    const global = runtime.registerSemantic({ id: "global", handle: continueRoute });
+    const global = runtime.registerApplicationGlobal({ id: "global", handle: continueRoute });
     const boundary = runtime.registerSemantic({ id: "boundary", handle: continueRoute });
-    runtime.select({ applicationGlobal: [global.lease], activeBoundary: boundary.lease });
+    runtime.select({ activeBoundary: boundary.lease });
 
     boundary.end();
     expect(runtime.resolve(runtime.capture()).kind).toBe("stale");
     expect(runtime.resolve(runtime.capture()).candidate.applicationGlobal?.[0]?.id).toBe("global");
-    expect(transitions).toEqual(["acquire"]);
+    expect(transitions).toEqual(["acquire", "acquire", "release"]);
 
     global.end();
-    expect(transitions).toEqual(["acquire", "release"]);
+    expect(transitions).toEqual(["acquire", "acquire", "release", "release"]);
   });
 
   test("lets a selection made re-entrantly during acquisition win", () => {
@@ -266,7 +345,7 @@ describe("internal live input route activations", () => {
           reenter = false;
           runtime.select({ activeBoundary: nested.lease });
         }
-        return () => held.delete(demand);
+        return demandLease(() => held.delete(demand));
       },
     });
     const current = runtime.registerSemantic({ id: "current", handle: continueRoute });
@@ -285,9 +364,9 @@ describe("internal live input route activations", () => {
   test("does not let a hostile demand release interrupt replacement or clear", () => {
     const runtime = createInternalInputRoutingRuntime([], {
       acquire() {
-        return () => {
+        return demandLease(() => {
           throw new Error("release failed");
-        };
+        });
       },
     });
     const first = runtime.registerSemantic({ id: "first", handle: continueRoute });

@@ -40,7 +40,7 @@ test("a [Vue warn] from the initial mount is filtered (patch installed before mo
 
   try {
     const app = createApp(SetupThrower);
-    app.mount({ stdout, stderr, stdin, exitOnCtrlC: false, maxFps: 0 });
+    app.mount({ stdout, stderr, stdin, maxFps: 0 });
     await expect(app.waitUntilExit()).rejects.toThrow("setup boom");
   } finally {
     console.warn = realWarn;
@@ -78,7 +78,7 @@ test("console is restored when mount throws synchronously", () => {
   const warnBefore = console.warn;
 
   const app = createApp(ThrowOnPatchApp);
-  expect(() => app.mount({ stdout, stderr, stdin, exitOnCtrlC: false, maxFps: 0 })).toThrow(
+  expect(() => app.mount({ stdout, stderr, stdin, maxFps: 0 })).toThrow(
     "boom from vnode type getter",
   );
 

@@ -90,9 +90,10 @@ try {
           strict: true,
           skipLibCheck: false,
           noEmit: true,
+          jsx: "preserve",
           types: ["node"],
         },
-        include: ["consumer.ts"],
+        include: ["consumer.ts", "consumer.tsx"],
       },
       null,
       2,
@@ -119,7 +120,22 @@ try {
   );
   writeFileSync(
     join(consumerDirectory, "consumer.ts"),
-    `import { useStdin, type MountOptions, type UseStdinReturn } from "@vue-tui/runtime";
+    `import { shallowRef } from "vue";
+import {
+  useInput,
+  useInputAvailability,
+  useStdin,
+  type InputAvailability,
+  type InputHandler,
+  type InputHandlerResult,
+  type InputRouteDecision,
+  type MountOptions,
+  type TuiInputEvent,
+  type UseInputAvailabilityReturn,
+  type UseInputOptions,
+  type UseStdinReturn,
+} from "@vue-tui/runtime";
+import type { MaybeRef, MaybeRefOrGetter, Ref } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -128,6 +144,69 @@ type Expect<T extends true> = T;
 type _ExactStdinSurface = Expect<
   Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
 >;
+type _ExactDecision = Expect<
+  Equal<
+    InputRouteDecision,
+    {
+      readonly action: "none" | "performed";
+      readonly routing: "continue" | "stop";
+      readonly defaultAction: "allow" | "prevent";
+      readonly external: "allow" | "block";
+    }
+  >
+>;
+type _ExactResult = Expect<
+  Equal<InputHandlerResult, "continue" | "consume" | InputRouteDecision>
+>;
+type _ExactHandler = Expect<
+  Equal<InputHandler, (event: TuiInputEvent) => InputHandlerResult>
+>;
+type _ExactHandlerInput = Expect<
+  Equal<Parameters<typeof useInput>[0], MaybeRef<InputHandler>>
+>;
+type _ExactInputOptions = Expect<
+  Equal<UseInputOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
+>;
+type _ExactAvailability = Expect<
+  Equal<
+    InputAvailability,
+    | { readonly status: "available" }
+    | {
+        readonly status: "unavailable";
+        readonly reason: "string-host" | "stdin-not-tty" | "stdin-not-controllable";
+      }
+  >
+>;
+type _ExactAvailabilityReturn = Expect<
+  Equal<
+    UseInputAvailabilityReturn,
+    { readonly availability: Readonly<Ref<InputAvailability>> }
+  >
+>;
+
+const active = shallowRef(true);
+const handler = shallowRef<InputHandler>((event) => {
+  if (event.kind === "key") {
+    const name: string | null = event.key.name;
+    const reportedText: string | null = event.key.reportedText;
+    void name;
+    void reportedText;
+  } else if (event.kind === "text") {
+    const origin: "reported" | null = event.textOrigin;
+    void origin;
+  } else if (event.kind === "paste") {
+    event.text;
+  }
+  return "continue";
+});
+useInput(handler, { isActive: () => active.value });
+
+const inputAvailability = useInputAvailability();
+if (inputAvailability.availability.value.status === "unavailable") {
+  inputAvailability.availability.value.reason;
+}
+// @ts-expect-error Availability is a runtime-readonly ref.
+inputAvailability.availability.value = { status: "available" };
 
 useStdin().stdin;
 // @ts-expect-error Raw-mode control is internal to semantic input routes.
@@ -136,15 +215,58 @@ useStdin().setRawMode(false);
 useStdin().isRawModeSupported;
 // @ts-expect-error The removed mount option must not survive in packaged declarations.
 const removedRawMode: MountOptions = { rawMode: "auto" };
+// @ts-expect-error Ctrl+C policy is expressed by an input result, not a mount option.
+const removedExitOnCtrlC: MountOptions = { exitOnCtrlC: false };
+// @ts-expect-error A void handler does not make an input routing decision.
+useInput((_event) => {});
+// @ts-expect-error Input routing is synchronous.
+useInput(async (_event) => "continue");
+// @ts-expect-error Structured decisions require every field.
+useInput((_event) => ({ action: "none", routing: "continue", defaultAction: "allow" }));
+// @ts-expect-error Key was replaced by TuiInputEvent.
+type _RemovedKey = import("@vue-tui/runtime").Key;
+// @ts-expect-error Paste is a TuiInputEvent member, not a separate composable.
+type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
+// @ts-expect-error The separate paste options were removed with usePaste().
+type _RemovedUsePasteOptions = import("@vue-tui/runtime").UsePasteOptions;
 void removedRawMode;
+void removedExitOnCtrlC;
+`,
+  );
+  writeFileSync(
+    join(consumerDirectory, "consumer.tsx"),
+    `import { Text, useInput, useInputAvailability } from "@vue-tui/runtime";
+import { defineComponent } from "vue";
+
+export const InputProbe = defineComponent(() => {
+  const { availability } = useInputAvailability();
+  useInput(
+    (event) => {
+      if (event.kind === "key" && event.key.name !== null) {
+        event.key.name.toUpperCase();
+      }
+      return "continue";
+    },
+    { isActive: () => availability.value.status === "available" },
+  );
+  return () => <Text>normalized input</Text>;
+});
 `,
   );
   writeFileSync(
     join(consumerDirectory, "App.vue"),
     `<script setup lang="ts">
-import { Text, useStdin } from "@vue-tui/runtime";
+import { Text, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
 
 const mountedStdin = useStdin();
+const { availability } = useInputAvailability();
+useInput(
+  (event) => {
+    if (event.kind === "paste") event.text.toUpperCase();
+    return "continue";
+  },
+  { isActive: () => availability.value.status === "available" },
+);
 mountedStdin.stdin;
 // @ts-expect-error Raw-mode control is not exposed by useStdin().
 mountedStdin.setRawMode(false);
@@ -159,39 +281,53 @@ mountedStdin.setRawMode(false);
     join(consumerDirectory, "runtime.mjs"),
     `import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
-import { createApp, Text, useInput, useStdin } from "@vue-tui/runtime";
+import * as runtime from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h } from "vue";
 
+const { createApp, Text, useInput, useInputAvailability, useStdin } = runtime;
+assert.equal("usePaste" in runtime, false);
+
 const stdin = new PassThrough();
 const stdout = new PassThrough();
-let observed;
+let observedStdin;
+let observedAvailability;
 const Probe = defineComponent(() => {
-  observed = useStdin();
+  observedStdin = useStdin();
+  const firstAvailability = useInputAvailability();
+  const secondAvailability = useInputAvailability();
+  assert.equal(firstAvailability.availability, secondAvailability.availability);
+  observedAvailability = firstAvailability;
   return () => h(Text, null, () => "probe");
 });
 const live = createApp(Probe);
 live.mount({ stdin, stdout, liveUpdates: false, patchConsole: false });
-assert.equal(observed.stdin, stdin);
-assert.deepEqual(Reflect.ownKeys(observed), ["stdin"]);
-assert.equal("setRawMode" in observed, false);
-assert.equal("isRawModeSupported" in observed, false);
+assert.equal(observedStdin.stdin, stdin);
+assert.deepEqual(Reflect.ownKeys(observedStdin), ["stdin"]);
+assert.equal("setRawMode" in observedStdin, false);
+assert.equal("isRawModeSupported" in observedStdin, false);
+assert.deepEqual(observedAvailability.availability.value, {
+  status: "unavailable",
+  reason: "stdin-not-tty",
+});
 live.unmount();
 
-let stdoutRead = false;
-const invalidOptions = { rawMode: "always" };
-Object.defineProperty(invalidOptions, "stdout", {
-  get() {
-    stdoutRead = true;
-    throw new Error("stdout getter must not run");
-  },
-});
-const invalid = createApp(Probe);
-assert.throws(
-  () => invalid.mount(invalidOptions),
-  /Mount option "rawMode" was removed/,
-);
-assert.equal(stdoutRead, false);
+function assertRemovedMountOption(name, value, message) {
+  let stdoutRead = false;
+  const invalidOptions = { [name]: value };
+  Object.defineProperty(invalidOptions, "stdout", {
+    get() {
+      stdoutRead = true;
+      throw new Error("stdout getter must not run");
+    },
+  });
+  const invalid = createApp(Probe);
+  assert.throws(() => invalid.mount(invalidOptions), message);
+  assert.equal(stdoutRead, false);
+}
+
+assertRemovedMountOption("rawMode", "always", /Mount option "rawMode" was removed/);
+assertRemovedMountOption("exitOnCtrlC", false, /Mount option "exitOnCtrlC" was removed/);
 
 const NoInput = defineComponent(() => () => h(Text, null, () => "idle"));
 const idle = await render(NoInput);
@@ -199,14 +335,50 @@ assert.equal(idle.terminal.rawMode.current, false);
 assert.deepEqual(idle.terminal.rawMode.history, []);
 idle.dispose();
 
+const events = [];
+let activeAvailability;
 const WithInput = defineComponent(() => {
-  useInput(() => {});
+  activeAvailability = useInputAvailability();
+  useInput((event) => {
+    events.push(event);
+    return {
+      action: "performed",
+      routing: "stop",
+      defaultAction: "prevent",
+      external: "block",
+    };
+  });
   return () => h(Text, null, () => "active");
 });
 const active = await render(WithInput);
+assert.deepEqual(activeAvailability.availability.value, { status: "available" });
 assert.equal(active.terminal.rawMode.current, true);
+await active.stdin.write("a");
+assert.equal(events.length, 1);
+assert.deepEqual(events[0], {
+  kind: "text",
+  sequence: "a",
+  fidelity: "normalized-utf8-sequence",
+  text: "a",
+  protocol: "plain",
+  phase: null,
+  primaryCodepoint: null,
+  textOrigin: null,
+});
+assert.equal(Object.isFrozen(events[0]), true);
 active.dispose();
 assert.equal(active.terminal.rawMode.current, false);
+
+const InvalidResult = defineComponent(() => {
+  useInput(() => undefined);
+  return () => h(Text, null, () => "invalid");
+});
+const invalidResult = await render(InvalidResult);
+await assert.rejects(
+  invalidResult.stdin.write("x"),
+  /handlers must synchronously return "continue", "consume", or a complete InputRouteDecision/,
+);
+invalidResult.dispose();
 `,
   );
 

@@ -13,6 +13,8 @@ The public-surface guards remain important. They make every change deliberate, p
 
 F1.8 applied that process to the public render-session surface: `useRenderSession()` and `useLayoutSize()` are verified exports, while `useWindowSize()` and `useIsScreenReaderEnabled()` were removed rather than retained as aliases. The named `RenderMode`, `RenderModeResolution`, `RenderOutput`, `RenderSession`, `RenderSize`, `RenderLayoutSize`, and `UseLayoutSizeReturn` types are part of the guarded public type contract. Repository, packed-consumer, PTY, visual, restoration, CI, and independent-review gates all agree with those exports, so F1 is complete.
 
+F3 applied the same process to input. `useInput()` now receives a frozen `TuiInputEvent` key, text, paste, or uninterpreted union and requires an `InputHandlerResult`; `useInputAvailability()` publishes one stable readonly host capability. The guarded public types include `TuiInputEvent`, `TuiInputSource`, `TuiInputModifiers`, `TuiInputPhase`, `InputHandler`, `InputHandlerResult`, `InputRouteDecision`, `InputAvailability`, `UseInputOptions`, and `UseInputAvailabilityReturn`. `usePaste`, public `Key`, public raw-mode controls, mount and testing `rawMode`, and `exitOnCtrlC` were removed directly, while `useStdin().stdin` remains the exact raw mounted-stream escape hatch. Repository, public/type, clean-consumer, host, lifecycle, HMR, PTY, visual, restoration, CI, and independent-review gates agree with that surface, so F3 is complete.
+
 ## The contract = public exports **and their user-consumable types**
 
 The public API is everything exported from the main barrel (`@vue-tui/runtime`): components,

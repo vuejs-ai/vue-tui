@@ -28,12 +28,18 @@ onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
 
-useInput((input, key) => {
-  if (input === "q") exit();
-  else if (key.upArrow) box.value?.scrollByLines(-1);
-  else if (key.downArrow) box.value?.scrollByLines(1);
-  else if (key.home) box.value?.scrollToTop();
-  else if (key.end) box.value?.scrollToBottom();
+useInput((event) => {
+  if (event.kind === "text" && event.text === "q") {
+    exit();
+    return "consume";
+  }
+  if (event.kind !== "key" || event.key.phase === "release") return "continue";
+  if (event.key.name === "up") box.value?.scrollByLines(-1);
+  else if (event.key.name === "down") box.value?.scrollByLines(1);
+  else if (event.key.name === "home") box.value?.scrollToTop();
+  else if (event.key.name === "end") box.value?.scrollToBottom();
+  else return "continue";
+  return "consume";
 });
 </script>
 

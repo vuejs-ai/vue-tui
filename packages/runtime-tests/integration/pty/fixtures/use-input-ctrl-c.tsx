@@ -5,10 +5,15 @@ import { defineComponent, onMounted } from "vue";
 const UserInput = defineComponent(() => {
   const { exit } = useApp();
 
-  useInput((input, key) => {
-    if (input === "c" && key.ctrl) {
+  useInput((event) => {
+    if (
+      event.kind === "key" &&
+      event.key.name === "c" &&
+      event.key.modifiers.ctrl &&
+      !event.key.modifiers.shift
+    ) {
       exit();
-      return;
+      return "consume";
     }
 
     throw new Error("Crash");
@@ -22,6 +27,6 @@ const UserInput = defineComponent(() => {
 });
 
 const app = createApp(UserInput);
-app.mount({ exitOnCtrlC: false });
+app.mount();
 await app.waitUntilExit();
 console.log("exited");

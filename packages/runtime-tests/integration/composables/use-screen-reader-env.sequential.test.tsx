@@ -56,7 +56,7 @@ test.sequential("INK_SCREEN_READER=true auto-detects SR mode at mount (no explic
   const writes = captureWrites(stdout);
 
   // NO isScreenReaderEnabled option — the env var alone must enable SR mode.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   await nextTick();
@@ -87,7 +87,7 @@ test.sequential("the render session reports screen-reader presentation under INK
   const stderr = makeFakeWritable({ columns: 80 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   await nextTick();
@@ -120,7 +120,7 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   const writes = captureWrites(stdout);
 
   // Explicit false must win over the env var.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, isScreenReaderEnabled: false });
+  app.mount({ stdout, stdin, stderr, isScreenReaderEnabled: false });
 
   await nextTick();
   await nextTick();

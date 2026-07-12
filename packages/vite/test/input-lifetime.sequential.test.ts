@@ -88,6 +88,8 @@ function createTrackedStdout(trace: string[]): {
     output += text;
     if (text.includes("\x1b[>1u")) trace.push("kitty:push");
     if (text.includes("\x1b[<u")) trace.push("kitty:pop");
+    if (text.includes("\x1b[?2004h")) trace.push("paste:on");
+    if (text.includes("\x1b[?2004l")) trace.push("paste:off");
   });
   return { stdout, read: () => output };
 }
@@ -132,7 +134,7 @@ afterEach(async () => {
   delete testGlobal().__VT_TEST_STDOUT__;
 });
 
-test("selected input ownership survives template, script, and full HMR lifetimes", async () => {
+test("public input ownership survives template, script, and full HMR lifetimes", async () => {
   const { stdin, rawModeCalls, refBalance, trace } = createTrackedStdin();
   const { stdout, read } = createTrackedStdout(trace);
   Object.assign(testGlobal(), {
@@ -216,8 +218,8 @@ test("selected input ownership survives template, script, and full HMR lifetimes
     listeners: 1,
   });
   const reloadTrace = trace.slice(reloadTraceStart);
-  const releases = ["kitty:pop", "data:off", "raw:false", "unref"];
-  const acquisitions = ["kitty:push", "raw:true", "ref", "data:on"];
+  const releases = ["paste:off", "kitty:pop", "data:off", "raw:false", "unref"];
+  const acquisitions = ["kitty:push", "raw:true", "ref", "data:on", "paste:on"];
   for (const event of [...releases, ...acquisitions]) {
     expect(reloadTrace.filter((entry) => entry === event)).toHaveLength(1);
   }

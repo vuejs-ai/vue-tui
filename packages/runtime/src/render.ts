@@ -37,6 +37,10 @@ import {
 } from "./io/input-route-runtime.ts";
 import { toMouseInputEvent } from "./io/parse-mouse.ts";
 import {
+  classifyLiveInputAvailability,
+  createInputAvailabilityRef,
+} from "./io/input-availability.ts";
+import {
   createKittyKeyboardController,
   type KittyKeyboardOptions,
   type StartKittyQueryResponseDetection,
@@ -121,7 +125,6 @@ export interface MountOptions {
    * @default 'inline'
    */
   mode?: RenderMode;
-  exitOnCtrlC?: boolean;
   /**
    * Override whether the dynamic output region updates while the app is
    * mounted. This is an output policy, not a statement about stdin or logical
@@ -212,18 +215,7 @@ const FULLSCREEN_STATIC_WARNING =
 const TERMINAL_BOTTOM_CLAMP_ROWS = 9999;
 
 function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
-  const input = stdin as NodeJS.ReadStream & {
-    readonly isRaw?: boolean;
-    readonly isTTY?: boolean;
-    readonly setRawMode?: (mode: boolean) => unknown;
-  };
-  if (input.isTTY !== true) return false;
-  // A pre-raw custom host can be observed without a setter; vue-tui preserves
-  // that externally-owned baseline. Otherwise the host must expose the
-  // operation needed to enter and later restore raw mode. The operation may
-  // still fail at acquisition time, which remains a transactional error rather
-  // than being guessed from this structural preflight.
-  return input.isRaw === true || typeof input.setRawMode === "function";
+  return classifyLiveInputAvailability(stdin).status === "available";
 }
 
 function supportsTerminalMouse(): boolean {
@@ -1080,7 +1072,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return next;
     }
 
-    const exitOnCtrlC = options.exitOnCtrlC ?? true;
     const onRender = options.onRender;
     const incrementalRendering = options.incrementalRendering;
     const patchConsole = options.patchConsole;
@@ -1580,7 +1571,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const focusContext: FocusContext = createFocusController();
       let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
-        exitOnCtrlC,
         appCtx: appContext,
         focusContext,
         acquireKittyKeyboardDemand() {
@@ -2702,10 +2692,12 @@ interface StdinController extends StdinContext {
   startKittyQueryResponseDetection: StartKittyQueryResponseDetection;
   /** Deliver input retained while Vue installed the application's first route. */
   activateInputDelivery: () => void;
-  /** Acquire raw/listener ownership for one selected topology generation. */
-  acquireSelectedInputDemand: () => void;
-  /** Release one selected topology generation's raw/listener ownership. */
-  releaseSelectedInputDemand: () => void;
+  /** Make one already-published semantic route eligible for later fact starts. */
+  activateSemanticInput: () => void;
+  /** End one semantic route's logical eligibility before its physical lease is coalesced. */
+  deactivateSemanticInput: () => void;
+  /** Adjust the private bracketed-paste reference count transactionally. */
+  setBracketedPasteMode: (enabled: boolean) => void;
 }
 
 interface RawModeState {
@@ -2749,7 +2741,6 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
 }
 
 interface CreateStdinControllerOptions {
-  exitOnCtrlC: boolean;
   appCtx: AppContext;
   focusContext: FocusContext;
   acquireKittyKeyboardDemand: () => () => void;
@@ -2760,6 +2751,7 @@ function createStdinController(
   opts: CreateStdinControllerOptions,
 ): StdinController {
   const { appCtx, focusContext } = opts;
+  const inputAvailability = createInputAvailabilityRef(classifyLiveInputAvailability(stdin));
   const inputRoutes = createInternalInputRouteRegistry();
   let controller!: StdinController;
   const inputRouting = createInternalInputRoutingRuntime(
@@ -2770,16 +2762,27 @@ function createStdinController(
     ],
     {
       acquire() {
-        controller.acquireSelectedInputDemand();
+        controller.acquireSemanticInput();
         let released = false;
-        return () => {
-          if (released) return;
-          released = true;
-          // Vue removes an old branch before mounting its same-tick replacement.
-          // Keep the old physical lease until the microtask boundary so the
-          // replacement can acquire first without a listener/raw-mode gap.
-          queueMicrotask(() => controller.releaseSelectedInputDemand());
-        };
+        let active = false;
+        return Object.freeze({
+          activate() {
+            if (released || active) return;
+            active = true;
+            controller.activateSemanticInput();
+          },
+          release() {
+            if (released) return;
+            released = true;
+            // Route removal is immediately visible to fact-start capture. Keep
+            // only the physical terminal lease alive for same-tick replacement.
+            if (active) controller.deactivateSemanticInput();
+            // Vue removes an old branch before mounting its same-tick replacement.
+            // Keep the old physical lease until the microtask boundary so the
+            // replacement can acquire first without a listener/raw-mode gap.
+            queueMicrotask(() => runTerminalCleanup(() => controller.releaseSemanticInput()));
+          },
+        });
       },
     },
   );
@@ -2789,6 +2792,8 @@ function createStdinController(
     readonly routes: InternalInputRouteSnapshot;
     readonly topology: InternalInputTopologySnapshot;
     readonly sgrMouseMode: SgrMouseMode | undefined;
+    /** Whether this app had a logical managed-input owner when the fact began. */
+    readonly managedInputActive: boolean;
   }
   interface BootstrapApplicationInputSnapshot {
     readonly kind: "bootstrap";
@@ -2829,9 +2834,14 @@ function createStdinController(
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
+  // Physical semantic leases cover acquisition through deferred release. Their
+  // published subset alone grants public/selected route eligibility. Other raw
+  // consumers (focus and mouse) remain logical demand through localRefs.
+  let semanticPhysicalRefs = 0;
+  let publishedSemanticRefs = 0;
 
   // True once bracketed paste has been enabled at least once on this controller
-  // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
+  // (semantic input was active). Lets signal-exit teardown re-issue a SYNCHRONOUS
   // paste-OFF even after Vue's unmount already ran the async disable and zeroed
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
@@ -3170,6 +3180,7 @@ function createStdinController(
       routes: inputRoutes.snapshot(),
       topology: inputRouting.capture(),
       sgrMouseMode: activeSgrMouseMode,
+      managedInputActive: publishedSemanticRefs > 0 || localRefs > semanticPhysicalRefs,
     });
   }
 
@@ -3258,7 +3269,7 @@ function createStdinController(
   }
 
   function runCtrlCDefault(fact: NormalizedInputFact) {
-    if (!opts.exitOnCtrlC || fact.kind !== "key" || fact.key.phase === "release") {
+    if (fact.kind !== "key" || fact.key.phase === "release") {
       return noDefaultAction();
     }
     const { modifiers } = fact.key;
@@ -3297,67 +3308,16 @@ function createStdinController(
     return false;
   }
 
-  function createCompatibilityRecipient(
-    fact: NormalizedInputFact,
-    snapshot: ApplicationInputSnapshot,
-  ) {
-    if (fact.kind === "paste" && inputRoutes.had(snapshot.routes, "paste")) {
-      const recipients = inputRoutes.resolve(snapshot.routes, "paste");
-      return Object.freeze({
-        id: "compatibility:paste",
-        handle: () => {
-          for (const listener of recipients) listener(fact.text);
-          return Object.freeze({
-            performed: recipients.length > 0,
-            continue: true,
-            preventDefault: false,
-            // A paste owner captured this framing fact. If that lease ended
-            // before dispatch, discard it rather than falling through or
-            // reclassifying it as ordinary input.
-            blockExternal: true,
-          });
-        },
-      });
-    }
-
-    const hadInputOwner = inputRoutes.had(snapshot.routes, "input");
-    if (!hadInputOwner) return undefined;
-    const recipients = inputRoutes.resolve(snapshot.routes, "input");
-    return Object.freeze({
-      id: "compatibility:input",
-      handle: () => {
-        for (const listener of recipients) listener(fact);
-        return Object.freeze({
-          performed: recipients.length > 0,
-          continue: true,
-          preventDefault: false,
-          // Current void handlers cannot distinguish observation from
-          // ownership. Duplicating their input into a PTY would be worse than
-          // failing closed until the public F3 surface is selected.
-          blockExternal: true,
-        });
-      },
-    });
-  }
-
   function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
-    if (suspended || disposed) return;
+    if (suspended || disposed || !snapshot.managedInputActive) return;
     if (deliverCapturedMouse(event, snapshot)) return;
 
-    // Resolve every topology and compatibility lease before the first callback.
+    // Resolve the independent global layer and selected topology before the first callback.
     // A callback may remove or replace later routes, but that only changes a
     // re-entrant or later parser-defined fact.
-    const resolved = inputRouting.resolve(snapshot.topology);
-    let candidate: InternalInputRouteCandidate = resolved.candidate;
-    if (resolved.kind === "compatibility") {
-      const compatibility = createCompatibilityRecipient(event, snapshot);
-      if (compatibility) {
-        candidate = Object.freeze({
-          ...candidate,
-          applicationGlobal: Object.freeze([compatibility, ...(candidate.applicationGlobal ?? [])]),
-        });
-      }
-    }
+    const candidate: InternalInputRouteCandidate = inputRouting.resolve(
+      snapshot.topology,
+    ).candidate;
     const plan = captureInternalInputRoutePlan(candidate);
     dispatchInternalInput(event, plan);
   }
@@ -3531,9 +3491,9 @@ function createStdinController(
   controller = {
     stdin,
     isRawModeSupported: appCtx.isRawModeSupported,
+    inputAvailability,
     internal_routes: inputRoutes,
     internal_inputRouting: inputRouting,
-    internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
       if (disposed) {
         throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
@@ -3596,8 +3556,28 @@ function createStdinController(
         throw error;
       }
     },
-    acquireSelectedInputDemand() {
-      controller.acquireRawMode();
+    acquireSemanticInput() {
+      semanticPhysicalRefs++;
+      try {
+        controller.acquireRawMode();
+        try {
+          controller.setBracketedPasteMode(true);
+        } catch (error) {
+          try {
+            controller.releaseRawMode();
+          } catch {}
+          throw error;
+        }
+      } catch (error) {
+        semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
+        throw error;
+      }
+    },
+    activateSemanticInput() {
+      publishedSemanticRefs++;
+    },
+    deactivateSemanticInput() {
+      publishedSemanticRefs = Math.max(0, publishedSemanticRefs - 1);
     },
     startKittyQueryResponseDetection(onResult) {
       let settled = false;
@@ -3748,8 +3728,21 @@ function createStdinController(
       // remaining Vue scope disposals; dispose() retries the physical restore.
       void firstError;
     },
-    releaseSelectedInputDemand() {
-      controller.releaseRawMode();
+    releaseSemanticInput() {
+      let firstError: unknown;
+      try {
+        controller.setBracketedPasteMode(false);
+      } catch (error) {
+        firstError = error;
+      }
+      try {
+        controller.releaseRawMode();
+      } catch (error) {
+        firstError ??= error;
+      } finally {
+        semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
+      }
+      if (firstError !== undefined) throw firstError;
     },
     suspend(sync = false) {
       if (suspended) return;
@@ -3836,8 +3829,8 @@ function createStdinController(
       if (sync) {
         // Signal-exit path (Finding A): the paste-OFF escape must flush
         // synchronously. By the time dispose() runs, Vue's unmount has usually
-        // already fired usePaste's onScopeDispose → detach → setBracketedPasteMode
-        // (false), which wrote `\x1b[?2004l` ASYNC and zeroed the count — and that
+        // already disposed the semantic-input lease, which wrote `\x1b[?2004l`
+        // ASYNC and zeroed the count — and that
         // async write is exactly what signal-exit's immediate re-raise can drop.
         // So re-issue it SYNCHRONOUSLY here whenever paste was ever enabled, not
         // gated on the (now-zero) live count. Re-sending paste-OFF is idempotent:

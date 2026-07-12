@@ -86,34 +86,81 @@ async function submit() {
   state.value = "idle";
 }
 
-useInput((input, key) => {
-  if (key.ctrl && input === "c") {
+useInput((event) => {
+  const isCtrlC =
+    event.kind === "key" &&
+    event.key.name === "c" &&
+    event.key.modifiers.ctrl &&
+    event.key.phase !== "release";
+  if (isCtrlC) {
     exit();
-    return;
+    return "consume";
   }
 
   if (state.value === "approving") {
-    if (key.return) {
+    if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
       state.value = "streaming";
       approvalResolve?.(true);
       approvalResolve = null;
-    } else if (key.escape) {
+      return "consume";
+    }
+    if (event.kind === "key" && event.key.name === "escape" && event.key.phase !== "release") {
       state.value = "streaming";
       approvalResolve?.(false);
       approvalResolve = null;
+      return "consume";
     }
-    return;
+    return {
+      action: "none",
+      routing: "stop",
+      defaultAction: "prevent",
+      external: "block",
+    };
   }
 
-  if (state.value !== "idle") return;
+  if (state.value !== "idle") {
+    return {
+      action: "none",
+      routing: "stop",
+      defaultAction: "prevent",
+      external: "block",
+    };
+  }
 
-  if (key.return) {
+  if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
     void submit();
-  } else if (key.backspace || key.delete) {
-    inputText.value = inputText.value.slice(0, -1);
-  } else if (input && !key.ctrl && !key.meta) {
-    inputText.value += input;
+    return "consume";
   }
+  if (
+    event.kind === "key" &&
+    (event.key.name === "backspace" || event.key.name === "delete") &&
+    event.key.phase !== "release"
+  ) {
+    inputText.value = inputText.value.slice(0, -1);
+    return "consume";
+  }
+  if (event.kind === "paste") {
+    inputText.value += event.text;
+    return "consume";
+  }
+  if (event.kind === "text") {
+    inputText.value += event.text;
+    return "consume";
+  }
+  if (
+    event.kind === "key" &&
+    event.key.reportedText !== null &&
+    event.key.phase !== "release" &&
+    !event.key.modifiers.ctrl &&
+    !event.key.modifiers.alt &&
+    !event.key.modifiers.meta &&
+    !event.key.modifiers.super &&
+    !event.key.modifiers.hyper
+  ) {
+    inputText.value += event.key.reportedText;
+    return "consume";
+  }
+  return "continue";
 });
 </script>
 

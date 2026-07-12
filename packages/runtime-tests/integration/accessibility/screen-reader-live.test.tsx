@@ -32,7 +32,6 @@ test.sequential("live commit path emits linear screen-reader text (no border gly
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 
@@ -68,7 +67,6 @@ test.sequential("forced live screen-reader output updates a non-TTY without alte
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     liveUpdates: true,
     mode: "fullscreen",
     isScreenReaderEnabled: true,
@@ -113,7 +111,6 @@ test.sequential("live commit path WITHOUT SR still emits 2D grid with border gly
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
   });
 
   await nextTick();
@@ -162,7 +159,6 @@ test.sequential("live static channel emits linear screen-reader text (no border 
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 
@@ -205,7 +201,6 @@ test.sequential("empty SR frame does not write a spurious blank trailing line", 
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 
@@ -251,7 +246,6 @@ test.sequential("non-empty multi-line SR frame appends no trailing newline and e
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 
@@ -331,7 +325,6 @@ test.sequential("tall/overflowing SR transcript never clears terminal, replays s
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });
 

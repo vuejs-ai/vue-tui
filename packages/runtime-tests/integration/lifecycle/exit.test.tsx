@@ -289,7 +289,7 @@ test("retained exit() re-entered DURING unmount teardown writes is a no-op", asy
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Let the app mount and capture exitFn, then trigger unmount. unmount()'s
   // final commit writes to stdout, which re-enters exit("reentrant") while
@@ -352,7 +352,7 @@ test("waitUntilExit resolves FIRST exit value when duplicate exits happen during
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   const exitPromise = app.waitUntilExit();
   await new Promise((r) => setTimeout(r, 0));
@@ -401,7 +401,7 @@ test("waitUntilExit resolves FIRST exit value when exit is re-entered during unm
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   const result = await app.waitUntilExit();
   expect(didReenterExit).toBe(true);
@@ -449,7 +449,7 @@ test("exit with cross-realm Error rejects after stdout write callback", async ()
   const app = createApp(App);
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Cross-realm Error is detected via the [object Error] brand check, so exit
   // rejects with the foreign error (matching Ink) rather than resolving it as

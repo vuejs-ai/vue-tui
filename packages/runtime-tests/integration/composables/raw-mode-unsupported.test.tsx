@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import { nextTick, defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useFocus, useInput, usePaste, useStdin } from "@vue-tui/runtime";
+import { createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
 import { makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 // Builds a stdin that is NOT a TTY, so isRawModeSupported is false. This mirrors
@@ -44,7 +44,7 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   });
 
   try {
-    app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, maxFps: 0 });
   } catch (e) {
     error = e as Error;
   }
@@ -70,7 +70,7 @@ test("useStdin exposes only the exact custom stream mounted into the application
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   try {
     expect(observed?.stdin).toBe(stdin);
     expect(Reflect.ownKeys(observed!)).toEqual(["stdin"]);
@@ -87,7 +87,7 @@ test("useStdin exposes only the exact custom stream mounted into the application
 
 test("useInput on a non-TTY stdin explains the managed-input boundary", async () => {
   const App = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => "continue");
     return () => <Text>listening</Text>;
   });
 
@@ -101,7 +101,7 @@ test("useInput on a non-TTY stdin explains the managed-input boundary", async ()
   );
 });
 
-test("usePaste on a non-TTY publishes no route, listener, ref, or terminal mode", async () => {
+test("active semantic input on a non-TTY publishes no route, listener, ref, or terminal mode", async () => {
   const setRawModeCalls: boolean[] = [];
   const refCalls: string[] = [];
   const stdin = makeNonTtyStdin(setRawModeCalls);
@@ -117,12 +117,12 @@ test("usePaste on a non-TTY publishes no route, listener, ref, or terminal mode"
   const writes: string[] = [];
   (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => writes.push(chunk.toString()));
   const App = defineComponent(() => {
-    usePaste(() => {});
+    useInput(() => "continue");
     return () => <Text>paste</Text>;
   });
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0 });
   await expect(app.waitUntilExit()).rejects.toThrow(
     "Managed input is unavailable because the mounted stdin is not a controllable TTY",
   );

@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import process from "node:process";
-import { createApp, Text, useApp, usePaste } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
 import { defineComponent, onMounted } from "vue";
 
@@ -125,9 +125,6 @@ const App = defineComponent(() => {
   requestExit = exit;
   maybeRequestOuterExit();
   const inputRouting = useInternalInputRoutingForTest();
-  usePaste(() => {
-    throw new Error("the explicit selected topology must bypass the compatibility paste route");
-  });
 
   const boundary = inputRouting.registerSemantic({
     id: "pane",
@@ -178,9 +175,7 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   mode: requestedMode,
-  // The selected private topology, rather than an app-lifetime raw hold or a
-  // compatibility input hook, owns the outer terminal's input demand.
-  exitOnCtrlC: true,
+  // The selected private topology owns the outer terminal's input demand.
   maxFps: 0,
   patchConsole: false,
   kittyKeyboard: { mode: "auto" },

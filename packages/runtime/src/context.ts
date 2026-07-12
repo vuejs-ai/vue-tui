@@ -1,8 +1,9 @@
-import type { InjectionKey, ShallowRef } from "vue";
+import type { InjectionKey, Ref, ShallowRef } from "vue";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
 import type { InternalInputRouteRegistry } from "./io/input-routes.ts";
 import type { InternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
 import type { MouseController } from "./mouse/controller.ts";
+import type { InputAvailability } from "./io/input-availability.ts";
 
 export interface CursorPosition {
   x: number;
@@ -44,12 +45,13 @@ export interface FocusContext {
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
+  readonly inputAvailability: Readonly<Ref<InputAvailability>>;
   internal_routes: InternalInputRouteRegistry;
   internal_inputRouting: InternalInputRoutingRuntime;
-  internal_exitOnCtrlC: boolean;
   acquireRawMode: () => void;
   releaseRawMode: () => void;
-  setBracketedPasteMode: (enabled: boolean) => void;
+  acquireSemanticInput: () => void;
+  releaseSemanticInput: () => void;
   acquireSgrMouseMode: (level?: SgrMouseMode) => symbol;
   releaseSgrMouseMode: (token: symbol) => void;
 }

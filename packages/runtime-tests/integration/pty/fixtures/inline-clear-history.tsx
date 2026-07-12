@@ -14,7 +14,7 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ mode: "inline", exitOnCtrlC: false, maxFps: 0 });
+app.mount({ mode: "inline", maxFps: 0 });
 await app.waitUntilRenderFlush();
 
 app.clear();
