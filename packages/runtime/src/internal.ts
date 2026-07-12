@@ -53,3 +53,7 @@ export { messageForNonError } from "./components/error-overview.ts";
 // carries a `__subscriberMapSize()` probe so a test can assert empty subscriber
 // Sets are dropped on unsubscribe. See render.ts createFocusController.
 export { createFocusController, type FocusControllerForTest } from "./render.ts";
+// Private integration-test access for exercising the selected F3 input topology
+// through a real outer terminal and a real child PTY. This is deliberately kept
+// off the package root while the public input API remains undecided.
+export { useInternalInputRoutingForTest } from "./io/input-route-test.ts";

@@ -45,7 +45,9 @@ export interface InternalNormalizedInputSource {
   /**
    * The sequence is the normalized Unicode string retained by F3.2. When the
    * source was canonical UTF-8 or ASCII, re-encoding recovers it; invalid source
-   * bytes that the streaming decoder already replaced are not recoverable.
+   * bytes that the streaming decoder already replaced are not recoverable. It
+   * is not generally a child-PTY encoding: a terminal adapter must encode known
+   * keys and paste against the child terminal's own negotiated protocol state.
    */
   readonly fidelity: "normalized-utf8-sequence";
 }
