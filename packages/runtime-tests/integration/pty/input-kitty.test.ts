@@ -13,6 +13,18 @@ function kittyKey(codepoint: number, modifiers?: number, eventType?: number): st
   return seq;
 }
 
+it("kitty auto detection owns its reply and delivers adjacent input once", async () => {
+  const ps = term("use-input-kitty", ["autoDetectionOnce"]);
+  await ps.waitForOutput((output) => output.includes("__READY__") && output.includes("\x1b[?u"));
+  ps.write("a\x1b[?1ub");
+  await ps.waitForExit();
+
+  expect(ps.output).toContain('__AUTO_INPUTS__:["a","b"]');
+  expect(ps.output).toContain("\x1b[>1u");
+  expect(ps.output).toContain("\x1b[<u");
+  expect(ps.output).toContain("exited");
+});
+
 // --- Kitty modifiers through useInput ---
 
 it("useInput - handle kitty protocol super modifier", async () => {

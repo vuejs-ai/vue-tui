@@ -146,11 +146,12 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
   });
 });
 
-test.sequential("raw-mode acquisition rolls back when stdin.setEncoding throws", () => {
+test.sequential("raw-byte ingress never installs a stream-level text decoder", () => {
   const stdout = makeTtyWritable();
   const stderr = makeTtyWritable();
   const { stream: stdin, calls: rawModeCalls } = makeRawTrackingStdin();
   let refBalance = 0;
+  let setEncodingCalls = 0;
   stdin.ref = () => {
     refBalance++;
     return stdin;
@@ -160,27 +161,36 @@ test.sequential("raw-mode acquisition rolls back when stdin.setEncoding throws",
     return stdin;
   };
   stdin.setEncoding = (() => {
+    setEncodingCalls++;
     throw new Error("stdin.setEncoding failed");
   }) as NodeJS.ReadStream["setEncoding"];
   const app = createApp(defineComponent(() => () => null));
 
-  expect(() =>
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      rawMode: "always",
-      exitOnCtrlC: false,
-      maxFps: 0,
-      patchConsole: false,
-    }),
-  ).toThrow("stdin.setEncoding failed");
+  app.mount({
+    stdout,
+    stderr,
+    stdin,
+    liveUpdates: true,
+    rawMode: "always",
+    exitOnCtrlC: false,
+    maxFps: 0,
+    patchConsole: false,
+  });
 
-  expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
+  expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance, setEncodingCalls }).toEqual({
+    isRaw: true,
+    rawModeCalls: [true],
+    refBalance: 1,
+    setEncodingCalls: 0,
+  });
+
+  app.unmount();
+
+  expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance, setEncodingCalls }).toEqual({
     isRaw: false,
     rawModeCalls: [true, false],
     refBalance: 0,
+    setEncodingCalls: 0,
   });
 });
 

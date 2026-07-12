@@ -181,25 +181,11 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   out with `exitOnCtrlC: false`. KEEP. [VOUCHED @hyf0] Tests:
   `usePaste-only app exits on {legacy,kitty} Ctrl+C` in `input-kitty.test.ts`.
 
-### `parseKeypress` filters kitty query-responses
+### The stdin ingress owns kitty query-responses
 
-- **Ink:** filters kitty keyboard-protocol query-responses (`ESC[?Nu`) in exactly **one**
-  place: the auto-detection lifecycle in `ink.tsx`
-  (`stripKittyQueryResponsesAndTrailingPartial` on a private `onData` buffer). Its
-  `parse-keypress.ts` has no query-response branch.
-- **vue-tui:** mirrors that detection layer (in `kitty-keyboard.ts`) **and** adds a
-  parser-level filter: `parseKeypress` returns `{ ignore: true }` for `ESC[?Nu`, which
-  `useInput` then drops.
-- **Why:** the detection layer does **not** cover the runtime input pipeline (`stdin 'data'`
-  -> `inputParser` -> `emitInput` -> `useInput` -> `parseKeypress`). In `enabled` mode it
-  never runs; in `auto` mode its `onData` listener and the stdin controller's
-  `handleData` both subscribe to the same `'data'` event, so stripping its private buffer
-  cannot stop the chunk reaching `handleData`; and after detection settles the listener is
-  gone. Empirically (Layer 2 removed, rebuilt) a stray query-response reaches a `useInput`
-  handler as spurious `"[?1u"` input in all of those cases, including a response split
-  across two reads, which `inputParser` reassembles before dispatch. The parser-level
-  filter is therefore intentional, not redundant. Introduced 2026-05-31. Tests: "kitty
-  query-response - end-to-end filtering" in `kitty-lifecycle.test.ts` (RED without it).
+- **Ink:** its auto-detection lifecycle listens to stdin in parallel with application input, strips replies from a private buffer, and `unshift()`s the remaining bytes. Its ordinary key parser has no query-response branch. Pinned v7.0.4 runs prove that a complete reply can still reach `useInput`.
+- **vue-tui:** one weakly registered ingress per physical stdin is the only framework listener for byte decoding, structural control-sequence and paste framing, detection, and ordered application multicast. It consumes complete `ESC[?Nu` replies outside bracketed-paste payloads before application delivery. Each accepted query owns a 200ms FIFO slot; cancellation leaves a callback-free tombstone that retains query-shaped partial replies, the same owner can revive that slot on continuation, and a rejected write aborts an unwritten slot. Structural events are sent once to app generations eligible when the event began. A semantic parser-level `ignore` remains the backstop for explicitly enabled mode and late or stray complete replies.
+- **Why:** competing listeners cannot establish ownership, and per-app filters can classify the same physical bytes differently. The previous detector replayed ordinary bytes already handled by the application controller, a reply split after 35ms escaped as `"[?"` plus `"1u"`, and reply-shaped bytes inside a paste were deleted. Protocol input must be removed once before application routing, not repaired independently in every public listener. The finite 200ms query window and ordinary 20ms Escape ambiguity boundary are explicit. Real-stream tests cover interleaved ordinary input, re-entrant and throwing protocol-enable writes, overlapping, cancelled, revived, rejected, staggered, long-split and late queries, invalid prefixes and UTF-8, consecutive Escape, paste payloads, flow pause and resume, synchronous mount and continuation responses, teardown, and shared-stdin behavior. See [normalized input and routing](./input-routing.md). This is an unstamped F3 implementation decision; the final semantic facts, handler generations, and public input surface remain open.
 
 ### `useAnimation()` outside a render tree drives a standalone animation
 
@@ -250,6 +236,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyf0]
+- **F3.1 implementation update (unstamped):** one weakly registered framework ingress now replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes and parses structural control-sequence and paste events once, then delivers them to eligible app controllers. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. Current handlers still perform semantic key reduction. See [normalized input and routing](./input-routing.md).
 
 ## Vue API and Mental Model Divergences
 

@@ -2,8 +2,6 @@
 
 import { writeSync as fsWriteSync } from "node:fs";
 
-const textEncoder = new TextEncoder();
-
 export const kittyFlags = {
   disambiguateEscapeCodes: 1,
   reportEventTypes: 2,
@@ -126,14 +124,19 @@ export interface KittyKeyboardController {
   readonly isEnabled: boolean;
 }
 
+export type StartKittyQueryResponseDetection = (
+  onResult: (supported: boolean) => void,
+) => (options?: { readonly discard?: boolean }) => void;
+
 export function createKittyKeyboardController(
   stdin: NodeJS.ReadStream,
   stdout: NodeJS.WriteStream,
+  startQueryResponseDetection: StartKittyQueryResponseDetection,
 ): KittyKeyboardController {
   let enabled = false;
   let disposed = false;
   let suspended = false;
-  let cancelDetection: (() => void) | undefined;
+  let cancelDetection: ReturnType<StartKittyQueryResponseDetection> | undefined;
   let configuredMode: "auto" | "enabled" | "disabled" = "disabled";
   let configuredFlags: KittyFlagName[] = ["disambiguateEscapeCodes"];
   let allowConfiguredAutoDetection = false;
@@ -141,11 +144,27 @@ export function createKittyKeyboardController(
   let resumeDetection = false;
 
   function enableProtocol(flags: KittyFlagName[]): void {
-    stdout.write(`\x1b[>${resolveFlags(flags)}u`);
+    // Record ownership before the write: custom streams can synchronously
+    // re-enter app suspension or teardown from write(). Those paths must see the
+    // pushed protocol level and pop it before returning. If the acquisition
+    // throws, preserve that original error while attempting the same best-effort
+    // pop; dispose can retry when the compensating write also fails.
     enabled = true;
+    try {
+      stdout.write(`\x1b[>${resolveFlags(flags)}u`);
+    } catch (error) {
+      if (enabled) disableProtocol();
+      throw error;
+    }
   }
 
   function disableProtocol(sync = false): boolean {
+    const ownedBeforeWrite = enabled;
+    // Mirror enableProtocol's re-entry rule: resume() called synchronously from
+    // the pop write must observe that the old level is gone and push a new one.
+    // A failed pop restores ownership so a later resume avoids a duplicate push
+    // and dispose can retry.
+    enabled = false;
     try {
       if (sync) {
         const streamFd = (stdout as { fd?: number }).fd;
@@ -160,58 +179,46 @@ export function createKittyKeyboardController(
           // guess process fd 1; write through the stream that was actually used.
           stdout.write("\x1b[<u");
         } else {
+          enabled ||= ownedBeforeWrite;
           return false;
         }
       } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
         stdout.write("\x1b[<u");
       } else {
+        enabled ||= ownedBeforeWrite;
         return false;
       }
-      enabled = false;
       return true;
     } catch {
       // Terminal restoration is best-effort; a failed Kitty write must not
       // prevent the remaining cursor, screen, paste, mouse, or raw cleanup. Keep
       // physical ownership so resume cannot push a duplicate protocol level and
       // dispose can retry the pop.
+      enabled ||= ownedBeforeWrite;
       return false;
     }
   }
 
   function confirmKittySupport(flags: KittyFlagName[]): void {
-    let responseBuffer: number[] = [];
-
-    const cleanup = (): void => {
+    cancelDetection = startQueryResponseDetection((supported) => {
       cancelDetection = undefined;
-      clearTimeout(timer);
-      stdin.removeListener("data", onData);
+      if (supported && !disposed && !suspended) enableProtocol(flags);
+    });
 
-      const remaining = stripKittyQueryResponsesAndTrailingPartial(responseBuffer);
-      responseBuffer = [];
-      if (remaining.length > 0) {
-        stdin.unshift(Uint8Array.from(remaining) as unknown as string);
+    try {
+      stdout.write("\x1b[?u");
+    } catch (error) {
+      // A synchronous write rejection did not accept a query, so its detector
+      // must not remain as a FIFO tombstone ahead of the next mount's reply.
+      try {
+        cancelDetection?.({ discard: true });
+      } catch {
+        // Preserve the query write failure; detector teardown is best-effort.
+      } finally {
+        cancelDetection = undefined;
       }
-    };
-
-    const onData = (data: Uint8Array | string): void => {
-      const chunk = typeof data === "string" ? textEncoder.encode(data) : data;
-      for (const byte of chunk) {
-        responseBuffer.push(byte);
-      }
-
-      if (hasCompleteKittyQueryResponse(responseBuffer)) {
-        cleanup();
-        if (!disposed && !suspended) {
-          enableProtocol(flags);
-        }
-      }
-    };
-
-    stdin.on("data", onData);
-    const timer = setTimeout(cleanup, 200);
-    cancelDetection = cleanup;
-
-    stdout.write("\x1b[?u");
+      throw error;
+    }
   }
 
   const controller: KittyKeyboardController = {
@@ -278,7 +285,18 @@ export function createKittyKeyboardController(
         (stdin as { isTTY?: boolean }).isTTY &&
         (stdout as { isTTY?: boolean }).isTTY
       ) {
-        confirmKittySupport(configuredFlags);
+        // Mark the controller resumed before writing the query: a terminal may
+        // synchronously reply from stdout.write(), and that reply must be able to
+        // enable the protocol. Roll the logical state back if either registering
+        // detection or writing the query fails.
+        suspended = false;
+        try {
+          confirmKittySupport(configuredFlags);
+        } catch (error) {
+          suspended = true;
+          resumeDetection = true;
+          throw error;
+        }
       }
       suspended = false;
       resumeEnabled = false;

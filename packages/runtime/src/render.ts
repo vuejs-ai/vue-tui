@@ -17,10 +17,19 @@ import { onExit } from "signal-exit";
 import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
-import { createInputParser, type InputEvent } from "./io/input-parser.ts";
+import type { InputEvent } from "./io/input-parser.ts";
+import {
+  getSharedStdinIngress,
+  type SharedStdinIngress,
+  type SharedStdinSubscription,
+} from "./io/stdin-ingress.ts";
 import { isSgrMouseInput, parseMouseInput, parseSgrMouseInput } from "./io/parse-mouse.ts";
 import { parseKeypress } from "./io/parse-keypress.ts";
-import { createKittyKeyboardController, type KittyKeyboardOptions } from "./io/kitty-keyboard.ts";
+import {
+  createKittyKeyboardController,
+  type KittyKeyboardOptions,
+  type StartKittyQueryResponseDetection,
+} from "./io/kitty-keyboard.ts";
 import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
@@ -1098,6 +1107,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       };
       let inlineRegionStarted = false;
       let terminalSuspended = false;
+      let pendingMountSuspension = false;
       let terminalResumeInProgress = false;
       let terminalResumePainting = false;
       let resizeEventGeneration = 0;
@@ -1171,17 +1181,30 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       function suspendSession(): void {
         if (teardownStarted || terminalSuspended) return;
+        if (leaveMountLifecycleTransaction !== null && lifecycleTransactionDepth > 0) {
+          // A hostile raw/stream callback can request suspension while mount is
+          // only halfway through acquiring terminal resources. Finish the mount
+          // transaction first, then release the complete resource set once.
+          pendingMountSuspension = true;
+          return;
+        }
         runLifecycleTransaction(() => {
           terminalSuspended = true;
           terminalResumeInProgress = false;
           runSuspensionStep(() => mountedScheduler?.cancel());
-          runSuspensionStep(() => mountedStdinController?.suspend(true));
           runSuspensionStep(() => mountedKittyController?.suspend(true));
+          runSuspensionStep(() => mountedStdinController?.suspend(true));
           releaseOutputSurfaceForSuspension(true);
         });
       }
 
       async function resumeSession(): Promise<void> {
+        if (pendingMountSuspension) {
+          // The host resumed before the mount transaction reached its deferred
+          // suspend boundary, so no physical transition is needed.
+          pendingMountSuspension = false;
+          return;
+        }
         if (teardownStarted || !terminalSuspended || terminalResumeInProgress) return;
         let applyPreparedSurface: (() => void) | null = null;
         let resumeCoveredResizeGeneration = resizeHandledGeneration;
@@ -1262,18 +1285,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               // re-entrant stream can report another resize while the repaint or
               // input-mode escapes are being written; release any partial input
               // acquisition and repaint that newer geometry before returning.
-              mountedKittyController?.resume();
-              if (teardownStarted) return;
-              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
-                runSuspensionStep(() => mountedKittyController?.suspend(true));
-                retryForNewerResize = true;
-                return;
-              }
               mountedStdinController?.resume();
               if (teardownStarted) return;
               if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
                 runSuspensionStep(() => mountedStdinController?.suspend(true));
+                retryForNewerResize = true;
+                return;
+              }
+              mountedKittyController?.resume();
+              if (teardownStarted) return;
+              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
                 runSuspensionStep(() => mountedKittyController?.suspend(true));
+                runSuspensionStep(() => mountedStdinController?.suspend(true));
                 retryForNewerResize = true;
                 return;
               }
@@ -1314,8 +1337,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         } catch {
           if (!teardownStarted) {
             runLifecycleTransaction(() => {
-              runSuspensionStep(() => mountedStdinController?.suspend(true));
               runSuspensionStep(() => mountedKittyController?.suspend(true));
+              runSuspensionStep(() => mountedStdinController?.suspend(true));
               releaseOutputSurfaceForSuspension(false);
             });
           }
@@ -1590,13 +1613,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           stdinController.holdRawModeForLifetime();
         }
 
-        kittyController = createKittyKeyboardController(stdin, stdout);
-        // Register BEFORE init(): in auto mode, init() installs a stdin 'data'
-        // listener + a 200ms detection timer and only THEN writes the support
+        kittyController = createKittyKeyboardController(
+          stdin,
+          stdout,
+          stdinController.startKittyQueryResponseDetection,
+        );
+        // Register BEFORE init(): in auto mode, init() asks StdinController's
+        // single ingress to detect the reply and only THEN writes the support
         // query ("\x1b[?u") — which can throw on a broken stream. Assigning
-        // mountedKittyController first lets teardown's dispose() (which calls
-        // cancelDetection: removes the listener, clears the timer) run on that
-        // throw, instead of leaking a dangling stdin listener until the timer fires.
+        // mountedKittyController first lets teardown's dispose() cancel that
+        // pending detector and its timer on such a throw.
         mountedKittyController = kittyController;
         kittyController.init(kittyKeyboard, inputLifecycleActive);
 
@@ -2233,6 +2259,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       vueMountStarted = true;
       try {
         proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+        // Kitty auto-detection begins before Vue mounts so a synchronous terminal
+        // reply cannot race past the shared stdin ingress. Ordinary input beside
+        // that reply is retained until setup has installed the application's
+        // first input handlers, then delivered in its original order here.
+        stdinController.activateInputDelivery();
       } catch (err) {
         try {
           teardown(); // best-effort cursor/alt-screen restore
@@ -2412,6 +2443,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
       leaveMountLifecycleTransaction = null;
       leaveLifecycleTransaction();
+      if (pendingMountSuspension && !teardownStarted) {
+        pendingMountSuspension = false;
+        suspendSession();
+      }
       return proxy;
     } catch (error) {
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
@@ -2680,6 +2715,10 @@ interface StdinController extends StdinContext {
   // listener) that input composables stack on top of, with the per-consumer
   // input-state cleanup re-based to this floor.
   holdRawModeForLifetime: () => void;
+  /** Own the Kitty support reply on this controller's single physical stdin ingress. */
+  startKittyQueryResponseDetection: StartKittyQueryResponseDetection;
+  /** Deliver input retained while Vue installed the application's first route. */
+  activateInputDelivery: () => void;
 }
 
 interface RawModeState {
@@ -2691,8 +2730,13 @@ interface RawModeState {
   pendingDisable: boolean;
   baselineRaw: boolean;
   changedRawMode: boolean;
-  suspended: boolean;
+  activeRefs: number;
+  physicalActive: boolean;
+  physicalRawUncertain: boolean;
   physicalRefHeld: boolean;
+  physicalRefUncertain: boolean;
+  reconcilingPhysical: boolean;
+  physicalReconcileRequested: boolean;
 }
 const rawModeRegistry = new WeakMap<NodeJS.ReadStream, RawModeState>();
 
@@ -2704,8 +2748,13 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
       pendingDisable: false,
       baselineRaw: false,
       changedRawMode: false,
-      suspended: false,
+      activeRefs: 0,
+      physicalActive: false,
+      physicalRawUncertain: false,
       physicalRefHeld: false,
+      physicalRefUncertain: false,
+      reconcilingPhysical: false,
+      physicalReconcileRequested: false,
     };
     rawModeRegistry.set(stdin, state);
   }
@@ -2725,15 +2774,33 @@ function createStdinController(
   const { appCtx, focusContext } = opts;
   const emitter = new EventEmitter();
   emitter.setMaxListeners(Infinity);
-  const inputParser = createInputParser();
-  let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
-  const FLUSH_DELAY = 20; // ms, matching Ink
+  const sharedIngress = getSharedStdinIngress(stdin);
+  let sharedSubscription: SharedStdinSubscription;
+  let sharedSubscriptionActive = false;
+  let activeKittyQueryDetections = 0;
+  let inputDeliveryActive = false;
+  let drainingApplicationInput = false;
+  const pendingApplicationInput: InputEvent[] = [];
   let bracketedPasteModeCount = 0;
+  let reconcilingBracketedPaste = false;
+  let bracketedPasteReconcileRequested = false;
+  let bracketedPasteSyncRequested = false;
   const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
   let activeSgrMouseMode: SgrMouseMode | undefined;
+  let sgrMousePhysicalUncertain = false;
+  let reconcilingSgrMouse = false;
+  let sgrMouseReconcileRequested = false;
+  let sgrMouseSyncRequested = false;
   const ownedSgrMouseModes = new Set<SgrMouseMode>();
   let suspended = false;
+  let disposed = false;
   let bracketedPastePhysicallyEnabled = false;
+  let bracketedPastePhysicalUncertain = false;
+  let localRefs = 0;
+  // 0 normally; 1 once the App takes a lifetime raw-mode hold (rawMode 'always').
+  // The hold keeps raw mode + the shared data ingress alive for the whole run,
+  // so the per-consumer input-state cleanup is re-based to this floor.
+  let lifetimeFloor = 0;
 
   // True once bracketed paste has been enabled at least once on this controller
   // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
@@ -2754,30 +2821,27 @@ function createStdinController(
   }
 
   function canUseSgrMouseMode(): boolean {
-    return !suspended && canWriteTerminalMode() && supportsTerminalMouse();
+    return !disposed && !suspended && canWriteTerminalMode() && supportsTerminalMouse();
   }
 
   function writeTerminalMode(data: string, sync = false): boolean {
     if (!canWriteTerminalMode()) return false;
     const stdout = appCtx.stdout;
     if (sync) {
-      try {
-        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
-        const streamFd = (stdout as { fd?: number }).fd;
-        if (typeof streamFd === "number") {
-          fsWriteSync(streamFd, data);
-        } else if (stdout === process.stdout) {
-          fsWriteSync(1, data);
-        } else if (stdout === process.stderr) {
-          fsWriteSync(2, data);
-        } else {
-          stdout.write(data);
-        }
-        return true;
-      } catch {
-        // Best-effort restore during abrupt shutdown.
-        return false;
+      // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
+      // Let failures propagate to the reconciler: OFF transitions are retried
+      // once before the outer signal/suspension cleanup swallows the error.
+      const streamFd = (stdout as { fd?: number }).fd;
+      if (typeof streamFd === "number") {
+        fsWriteSync(streamFd, data);
+      } else if (stdout === process.stdout) {
+        fsWriteSync(1, data);
+      } else if (stdout === process.stderr) {
+        fsWriteSync(2, data);
+      } else {
+        stdout.write(data);
       }
+      return true;
     }
     stdout.write(data);
     return true;
@@ -2793,19 +2857,72 @@ function createStdinController(
     }
   }
 
-  // sync (Finding A): on the signal-exit path signal-exit re-raises the signal
-  // IMMEDIATELY after the teardown callback returns (`{alwaysLast:false}`), so a
-  // buffered async `stdout.write` of `\x1b[?2004l` (CSI ? 2004 l — bracketed-
-  // paste OFF) can be lost before the process dies, leaving the shell wrapping
-  // later pastes in \x1b[200~…\x1b[201~. A synchronous fd write guarantees the
-  // bytes reach the fd first — same rationale (and mechanism) as the show-cursor
-  // / leave-alt-screen / disable-kitty restores. An arbitrary custom stream is
-  // written through its own API rather than being misdirected to process fd 1.
-  function disableBracketedPaste(sync = false, force = false): boolean {
-    if (!bracketedPastePhysicallyEnabled && !force) return true;
-    const disabled = writeTerminalMode("\x1b[?2004l", sync);
-    if (disabled) bracketedPastePhysicallyEnabled = false;
-    return disabled;
+  function reconcileBracketedPasteMode(sync = false): void {
+    bracketedPasteSyncRequested ||= sync;
+    if (reconcilingBracketedPaste) {
+      bracketedPasteReconcileRequested = true;
+      return;
+    }
+
+    reconcilingBracketedPaste = true;
+    let firstError: unknown;
+    let hasError = false;
+    let recoveringAfterError = false;
+    try {
+      while (true) {
+        bracketedPasteReconcileRequested = false;
+        const useSync = bracketedPasteSyncRequested;
+        bracketedPasteSyncRequested = false;
+        const shouldEnable =
+          !disposed && !suspended && bracketedPasteModeCount > 0 && canWriteTerminalMode();
+        if (shouldEnable === bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain) {
+          if (!bracketedPasteReconcileRequested) break;
+          continue;
+        }
+
+        bracketedPastePhysicallyEnabled = shouldEnable;
+        bracketedPastePhysicalUncertain = false;
+        if (shouldEnable) everEnabledBracketedPaste = true;
+        try {
+          if (!writeTerminalMode(shouldEnable ? "\x1b[?2004h" : "\x1b[?2004l", useSync)) {
+            bracketedPastePhysicallyEnabled = false;
+            break;
+          }
+        } catch (error) {
+          // stdout.write() can throw before or after it hands the escape to the
+          // terminal. Keep an explicit unknown state so acquisition rollback or
+          // teardown sends the idempotent OFF escape instead of assuming the
+          // terminal never entered paste mode.
+          bracketedPastePhysicalUncertain = true;
+          if (!hasError) {
+            firstError = error;
+            hasError = true;
+            // OFF is an idempotent safety restore. Retry it once even without
+            // re-entry because a custom stdout may throw before handing the
+            // escape to the terminal. ON is retried only for a surviving
+            // re-entrant owner; an ordinary failed acquisition rolls back to
+            // OFF in setBracketedPasteMode().
+            recoveringAfterError = bracketedPasteReconcileRequested || !shouldEnable;
+            if (recoveringAfterError) bracketedPasteSyncRequested ||= useSync;
+          } else {
+            break;
+          }
+          if (!recoveringAfterError) break;
+        }
+      }
+    } finally {
+      reconcilingBracketedPaste = false;
+    }
+    if (hasError) throw firstError;
+  }
+
+  // On an abrupt signal path Vue cleanup may already have issued the normal
+  // async OFF and cleared the logical count. Re-issuing OFF synchronously is
+  // idempotent and guarantees the restore reaches the terminal before re-raise.
+  function forceDisableBracketedPaste(sync: boolean): void {
+    writeTerminalMode("\x1b[?2004l", sync);
+    bracketedPastePhysicallyEnabled = false;
+    bracketedPastePhysicalUncertain = false;
   }
 
   function mouseDisableSequence(levels: Iterable<SgrMouseMode>): string {
@@ -2823,22 +2940,15 @@ function createStdinController(
     return sequence === "" || writeTerminalMode(sequence, sync);
   }
 
-  function enableSgrMouse(level: SgrMouseMode): boolean {
-    let sequence: string;
+  function mouseEnableSequence(level: SgrMouseMode): string {
     switch (level) {
       case "button":
-        sequence = "\x1b[?1000h\x1b[?1006h";
-        break;
+        return "\x1b[?1000h\x1b[?1006h";
       case "drag":
-        sequence = "\x1b[?1002h\x1b[?1006h";
-        break;
+        return "\x1b[?1002h\x1b[?1006h";
       case "hover":
-        sequence = "\x1b[?1003h\x1b[?1006h";
+        return "\x1b[?1003h\x1b[?1006h";
     }
-    if (!writeTerminalMode(sequence)) return false;
-    ownedSgrMouseModes.add(level);
-    everEnabledSgrMouse = true;
-    return true;
   }
 
   function sgrMouseModeRank(level: SgrMouseMode): number {
@@ -2862,33 +2972,119 @@ function createStdinController(
     return highest;
   }
 
-  function reconcileSgrMouseMode() {
-    const next = highestRequestedSgrMouseMode();
-    if (!canUseSgrMouseMode()) {
-      if (activeSgrMouseMode && disableSgrMouse([activeSgrMouseMode])) {
-        activeSgrMouseMode = undefined;
-      }
-      return;
-    }
-    if (next === activeSgrMouseMode) return;
-    if (!next) {
-      if (activeSgrMouseMode && disableSgrMouse([activeSgrMouseMode])) {
-        activeSgrMouseMode = undefined;
-      }
+  function reconcileSgrMouseMode(sync = false): void {
+    sgrMouseSyncRequested ||= sync;
+    if (reconcilingSgrMouse) {
+      sgrMouseReconcileRequested = true;
       return;
     }
 
-    if (activeSgrMouseMode) {
-      if (!disableSgrMouse([activeSgrMouseMode])) return;
-      activeSgrMouseMode = undefined;
+    reconcilingSgrMouse = true;
+    let firstError: unknown;
+    let hasError = false;
+    let recoveringAfterError = false;
+    try {
+      while (true) {
+        sgrMouseReconcileRequested = false;
+        const useSync = sgrMouseSyncRequested;
+        sgrMouseSyncRequested = false;
+        const next = canUseSgrMouseMode() ? highestRequestedSgrMouseMode() : undefined;
+        if (next === activeSgrMouseMode && !sgrMousePhysicalUncertain) {
+          if (!sgrMouseReconcileRequested) break;
+          continue;
+        }
+
+        if (activeSgrMouseMode) {
+          const previous = activeSgrMouseMode;
+          activeSgrMouseMode = undefined;
+          sgrMousePhysicalUncertain = false;
+          try {
+            if (!disableSgrMouse([previous], useSync)) {
+              break;
+            }
+          } catch (error) {
+            activeSgrMouseMode = previous;
+            sgrMousePhysicalUncertain = true;
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+              // A disable escape is idempotent. During suspension/disposal no
+              // mouse owner survives, so retry once before declaring the
+              // terminal restored even when no callback re-entered us.
+              recoveringAfterError = sgrMouseReconcileRequested || next === undefined;
+              if (recoveringAfterError) sgrMouseSyncRequested ||= useSync;
+            } else {
+              break;
+            }
+            if (!recoveringAfterError) break;
+          }
+          continue;
+        }
+
+        if (next) {
+          activeSgrMouseMode = next;
+          sgrMousePhysicalUncertain = false;
+          ownedSgrMouseModes.add(next);
+          everEnabledSgrMouse = true;
+          try {
+            if (!writeTerminalMode(mouseEnableSequence(next), useSync)) {
+              activeSgrMouseMode = undefined;
+              break;
+            }
+          } catch (error) {
+            // Keep the attempted mode as possibly owned. If the logical
+            // acquisition rolls back, the next pass emits an idempotent OFF;
+            // if a re-entrant owner survives, it retries until that owner's
+            // requested mode is known to be active.
+            sgrMousePhysicalUncertain = true;
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+              recoveringAfterError = sgrMouseReconcileRequested;
+              if (recoveringAfterError) sgrMouseSyncRequested ||= useSync;
+            } else {
+              break;
+            }
+            if (!recoveringAfterError) break;
+          }
+          continue;
+        }
+      }
+    } finally {
+      reconcilingSgrMouse = false;
     }
-    activeSgrMouseMode = enableSgrMouse(next) ? next : undefined;
+    if (hasError) throw firstError;
   }
 
-  function clearPendingFlush() {
-    if (pendingFlushTimer !== undefined) {
-      clearTimeout(pendingFlushTimer);
-      pendingFlushTimer = undefined;
+  function reconcileSharedSubscription(): void {
+    const shouldBeActive =
+      !disposed && !suspended && (localRefs > 0 || activeKittyQueryDetections > 0);
+    if (shouldBeActive === sharedSubscriptionActive) return;
+    sharedSubscriptionActive = shouldBeActive;
+    sharedSubscription.setActive(shouldBeActive);
+  }
+
+  function acceptSharedInput(event: InputEvent): void {
+    if (disposed || suspended) return;
+    pendingApplicationInput.push(event);
+    flushPendingApplicationInput();
+  }
+
+  function flushPendingApplicationInput(): void {
+    if (
+      !inputDeliveryActive ||
+      suspended ||
+      drainingApplicationInput ||
+      pendingApplicationInput.length === 0
+    )
+      return;
+    drainingApplicationInput = true;
+    try {
+      while (pendingApplicationInput.length > 0) {
+        processInputEvent(pendingApplicationInput.shift()!);
+      }
+    } finally {
+      drainingApplicationInput = false;
     }
   }
 
@@ -2939,63 +3135,35 @@ function createStdinController(
     emitter.emit("input", input);
   }
 
-  function schedulePendingFlush() {
-    clearPendingFlush();
-    pendingFlushTimer = setTimeout(() => {
-      pendingFlushTimer = undefined;
-      const pending = inputParser.flushPendingEscape();
-      if (pending) emitInput(pending);
-    }, FLUSH_DELAY);
-  }
-
-  // Use 'readable' event + stdin.read() loop instead of 'data'
-  function handleReadable() {
-    clearPendingFlush();
-    let chunk: string | null;
-    while ((chunk = stdin.read() as string | null) !== null) {
-      const events: InputEvent[] = inputParser.push(
-        typeof chunk === "string" ? chunk : String(chunk),
-      );
-      for (const event of events) {
-        if (typeof event === "string") {
-          emitInput(event);
-        } else {
-          // Paste event: if paste listeners exist, emit there; else fall through to input
-          if (emitter.listenerCount("paste") > 0) {
-            emitter.emit("paste", event.paste);
-          } else {
-            emitInput(event.paste);
-          }
-        }
-      }
-    }
-    if (inputParser.hasPendingEscape()) {
-      schedulePendingFlush();
-    }
-  }
-
-  // Also handle "data" events for compatibility with test fake stdin streams
-  // that emit "data" directly (PassThrough streams in non-flowing mode don't
-  // fire "readable" when data is pushed via emit).
-  function handleData(chunk: Buffer | string) {
-    clearPendingFlush();
-    const data = typeof chunk === "string" ? chunk : chunk.toString();
-    const events: InputEvent[] = inputParser.push(data);
-    for (const event of events) {
-      if (typeof event === "string") {
-        emitInput(event);
+  function processInputEvent(event: InputEvent): void {
+    if (suspended || disposed) return;
+    if (typeof event === "string") {
+      emitInput(event);
+    } else {
+      // Preserve paste as a shared framing fact, then adapt it to the current
+      // Ink-compatible channels at this app boundary.
+      if (emitter.listenerCount("paste") > 0) {
+        emitter.emit("paste", event.paste);
       } else {
-        if (emitter.listenerCount("paste") > 0) {
-          emitter.emit("paste", event.paste);
-        } else {
-          emitInput(event.paste);
-        }
+        emitInput(event.paste);
       }
     }
-    if (inputParser.hasPendingEscape()) {
-      schedulePendingFlush();
-    }
   }
+
+  function finishKittyQueryDetection(): void {
+    activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
+    // Query detection temporarily subscribes the app before Vue has installed
+    // its routes. Once mount is ready and no real input consumer exists, end
+    // that temporary generation so an unfinished CSI/paste cannot keep stdin
+    // flowing forever after the detector settles.
+    if (activeKittyQueryDetections === 0 && localRefs === 0 && inputDeliveryActive) {
+      sharedSubscription.invalidate();
+      pendingApplicationInput.length = 0;
+    }
+    reconcileSharedSubscription();
+  }
+
+  sharedSubscription = sharedIngress.subscribe(acceptSharedInput);
 
   // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
   const focusInputListener = (data: string) => {
@@ -3007,14 +3175,6 @@ function createStdinController(
     else if (data === "\x1b[Z") focusContext.focusPrevious();
   };
   emitter.on("input", focusInputListener);
-
-  let localRefs = 0;
-  // 0 normally; 1 once the App takes a lifetime raw-mode hold (rawMode 'always').
-  // The hold keeps raw mode + the data listener alive for the whole run, so the
-  // per-consumer "clear input state" must fire when localRefs returns to THIS
-  // floor (last input composable gone), not 0 — otherwise a buffered partial
-  // escape would survive into the next composable.
-  let lifetimeFloor = 0;
 
   // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
   // throws a descriptive error rather than silently no-opping. Two messages —
@@ -3031,49 +3191,163 @@ function createStdinController(
     );
   };
 
-  function releasePhysicalRawMode(state: RawModeState): void {
-    let firstError: unknown;
-    if (state.changedRawMode) {
-      try {
-        appCtx.setRawMode(state.baselineRaw);
-      } catch (error) {
-        firstError = error;
-      }
+  function reconcilePhysicalRawMode(state: RawModeState): void {
+    if (state.reconcilingPhysical) {
+      state.physicalReconcileRequested = true;
+      return;
     }
-    if (state.physicalRefHeld && typeof stdin.unref === "function") {
-      try {
-        stdin.unref();
-      } catch (error) {
-        firstError ??= error;
-      }
-    }
-    state.physicalRefHeld = false;
-    if (firstError !== undefined) throw firstError;
-  }
 
-  function acquirePhysicalRawMode(state: RawModeState): void {
-    // The caller owns rollback so an acquisition failure is released exactly
-    // once together with any later listener/mode acquisition in its transaction.
-    if (state.changedRawMode) appCtx.setRawMode(true);
-    if (typeof stdin.ref === "function") {
-      // Mark before calling: a custom ref() may throw after taking the keepalive
-      // lease, and unref() is idempotent for Node streams.
-      state.physicalRefHeld = true;
-      stdin.ref();
+    state.reconcilingPhysical = true;
+    let firstError: unknown;
+    let hasError = false;
+    let mustConvergeAfterError = false;
+    const retriedTransitions = new Set<"raw-on" | "ref" | "raw-off" | "unref">();
+
+    function recordTransitionError(
+      error: unknown,
+      transition: "raw-on" | "ref" | "raw-off" | "unref",
+      recoverWithoutReentry = false,
+    ): boolean {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      // A nested acquire/release returned while this host callback was still
+      // running. Finish *all* raw + ref transitions required by that surviving
+      // owner before surfacing the original error to the outer caller. Each
+      // physical operation gets one recovery attempt, so a raw restore and an
+      // unref that both fail once can still converge without looping forever on
+      // a permanently hostile custom stream.
+      const shouldRecover =
+        state.physicalReconcileRequested || recoverWithoutReentry || mustConvergeAfterError;
+      if (!shouldRecover || retriedTransitions.has(transition)) return false;
+      retriedTransitions.add(transition);
+      mustConvergeAfterError = true;
+      return true;
     }
+
+    try {
+      while (true) {
+        state.physicalReconcileRequested = false;
+        const shouldBeActive = state.activeRefs > 0 || state.pendingDisable;
+
+        if (shouldBeActive) {
+          if (!state.physicalActive || state.physicalRawUncertain) {
+            // Commit the transition before calling a hostile stream. Re-entrant
+            // suspend/release updates the desired counts; the next loop then
+            // compensates instead of letting the outer acquisition overwrite it.
+            state.physicalActive = true;
+            state.physicalRawUncertain = false;
+            if (state.changedRawMode) {
+              try {
+                appCtx.setRawMode(true);
+              } catch (error) {
+                // A throwing custom stream may have failed before or after the
+                // ioctl. Mark the state uncertain so the next desired owner
+                // retries enable, or the no-owner cleanup explicitly restores
+                // the baseline instead of trusting this transition.
+                state.physicalActive = false;
+                state.physicalRawUncertain = true;
+                if (!recordTransitionError(error, "raw-on")) break;
+              }
+            }
+            continue;
+          }
+          if (
+            (!state.physicalRefHeld || state.physicalRefUncertain) &&
+            typeof stdin.ref === "function"
+          ) {
+            state.physicalRefHeld = true;
+            state.physicalRefUncertain = false;
+            try {
+              stdin.ref();
+            } catch (error) {
+              state.physicalRefHeld = false;
+              state.physicalRefUncertain = true;
+              if (!recordTransitionError(error, "ref")) break;
+            }
+            continue;
+          }
+        } else {
+          if (state.physicalActive || state.physicalRawUncertain) {
+            state.physicalActive = false;
+            state.physicalRawUncertain = false;
+            if (state.changedRawMode) {
+              try {
+                appCtx.setRawMode(state.baselineRaw);
+              } catch (error) {
+                // A failed release may have left the terminal raw. Retain the
+                // ownership fact so teardown can retry instead of assuming the
+                // terminal is already restored.
+                state.physicalRawUncertain = true;
+                // Restoring cooked mode is idempotent. A one-shot host failure
+                // during suspension/unmount must not leave the shell raw after
+                // the framework has dropped its input listener.
+                if (!recordTransitionError(error, "raw-off", true)) break;
+              }
+            }
+            continue;
+          }
+          if (
+            (state.physicalRefHeld || state.physicalRefUncertain) &&
+            typeof stdin.unref === "function"
+          ) {
+            state.physicalRefHeld = false;
+            state.physicalRefUncertain = false;
+            try {
+              stdin.unref();
+            } catch (error) {
+              state.physicalRefUncertain = true;
+              // Node's unref() is idempotent. Retry a failed final release once
+              // so a transient custom-stream error cannot keep the process
+              // alive after the controller is disposed.
+              if (!recordTransitionError(error, "unref", true)) break;
+            }
+            continue;
+          }
+        }
+
+        if (!state.physicalReconcileRequested) break;
+      }
+    } finally {
+      state.reconcilingPhysical = false;
+    }
+    if (hasError) throw firstError;
   }
 
   function resetRawModeState(state: RawModeState): void {
     state.pendingDisable = false;
-    state.suspended = false;
+    state.activeRefs = 0;
+    state.physicalActive = false;
+    state.physicalRawUncertain = false;
     state.physicalRefHeld = false;
+    state.physicalRefUncertain = false;
     state.baselineRaw = false;
     state.changedRawMode = false;
+    state.physicalReconcileRequested = false;
+  }
+
+  function resetRawModeStateIfIdle(state: RawModeState): void {
+    if (
+      state.refs === 0 &&
+      state.activeRefs === 0 &&
+      !state.pendingDisable &&
+      !state.physicalActive &&
+      !state.physicalRawUncertain &&
+      !state.physicalRefHeld &&
+      !state.physicalRefUncertain &&
+      !state.reconcilingPhysical
+    ) {
+      resetRawModeState(state);
+    }
   }
 
   const controller: StdinController = {
     stdin,
     setRawMode(mode: boolean) {
+      if (disposed) {
+        throw new Error("Cannot change raw mode after the vue-tui application has unmounted");
+      }
       // Guard at the TOP — BEFORE the enable/disable split — so the PUBLIC
       // useStdin().setRawMode throws symmetrically on an unsupported stdin,
       // matching Ink's handleSetRawMode (App.tsx:317-327): both setRawMode(true)
@@ -3095,6 +3369,9 @@ function createStdinController(
     internal_eventEmitter: emitter,
     internal_exitOnCtrlC: opts.exitOnCtrlC,
     acquireRawMode() {
+      if (disposed) {
+        throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
+      }
       if (!appCtx.isRawModeSupported) {
         // The unguarded useInput path surfaces this throw directly; useFocus
         // guards before calling (see composables/useFocus.ts), so it degrades to
@@ -3103,44 +3380,46 @@ function createStdinController(
       }
       const state = getRawModeState(stdin);
       const firstSharedRef = state.refs === 0;
-      let listenerAttached = false;
+      const localRefsBefore = localRefs;
+      let committedRef = false;
       try {
-        if (firstSharedRef) {
-          // SHARED (per-stdin) terminal raw-mode enable. If a same-tick swap left
-          // raw mode physically enabled, cancel its deferred release without
-          // acquiring a second raw/ref lease.
-          const alreadyEnabled = state.pendingDisable;
-          state.pendingDisable = false;
-          if (!alreadyEnabled) {
-            state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
-            state.changedRawMode = !state.baselineRaw;
-            if (!state.suspended) acquirePhysicalRawMode(state);
-          }
-          if (
-            typeof (stdin as { setEncoding?: (encoding: string) => void }).setEncoding ===
-            "function"
-          ) {
-            (stdin as { setEncoding: (encoding: string) => void }).setEncoding("utf8");
-          }
-        }
-        if (localRefs === 0 && !suspended) {
-          // PER-CONTROLLER input listener. Each render tree owns its listener;
-          // the raw terminal lease above remains shared by stdin identity.
-          stdin.on("data", handleData);
-          listenerAttached = true;
+        if (
+          firstSharedRef &&
+          !state.pendingDisable &&
+          !state.physicalActive &&
+          !state.physicalRawUncertain &&
+          !state.physicalRefHeld &&
+          !state.physicalRefUncertain
+        ) {
+          state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
+          state.changedRawMode = !state.baselineRaw;
         }
         if (localRefs === lifetimeFloor) {
-          inputParser.reset();
-          clearPendingFlush();
+          // A lifetime raw hold keeps protocol/default processing alive even
+          // while no composable consumes application input. Starting the next
+          // consumer invalidates framing units that began on that idle screen.
+          sharedSubscription.invalidate();
         }
+        const participatesPhysically = !suspended;
         state.refs++;
+        if (participatesPhysically) state.activeRefs++;
         localRefs++;
+        committedRef = true;
+        if (participatesPhysically) state.pendingDisable = false;
+        reconcilePhysicalRawMode(state);
+        reconcileSharedSubscription();
       } catch (error) {
-        if (listenerAttached) runTerminalCleanup(() => stdin.off("data", handleData));
-        if (firstSharedRef && state.refs === 0) {
-          runTerminalCleanup(() => releasePhysicalRawMode(state));
-          resetRawModeState(state);
+        // A re-entrant dispose/release may already have consumed this logical
+        // acquisition. Roll it back only while its local count still exists.
+        if (committedRef && !disposed && localRefs > localRefsBefore) {
+          state.refs = Math.max(0, state.refs - 1);
+          if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
+          localRefs = Math.max(0, localRefs - 1);
         }
+        if (state.activeRefs === 0) state.pendingDisable = false;
+        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+        resetRawModeStateIfIdle(state);
+        runTerminalCleanup(reconcileSharedSubscription);
         throw error;
       }
     },
@@ -3152,27 +3431,83 @@ function createStdinController(
       // listener stay alive across no-input screens, but a buffered partial escape
       // is still cleared when an input composable unmounts — no bleed into the next.
       controller.acquireRawMode();
-      lifetimeFloor = 1;
+      if (!disposed) lifetimeFloor = 1;
     },
-    setBracketedPasteMode(enabled: boolean) {
-      if (enabled) {
-        if (bracketedPasteModeCount === 0 && !suspended && appCtx.stdout.isTTY) {
-          if (writeTerminalMode("\x1b[?2004h")) {
-            everEnabledBracketedPaste = true;
-            bracketedPastePhysicallyEnabled = true;
+    startKittyQueryResponseDetection(onResult) {
+      let settled = false;
+      let cancelSharedDetection:
+        | ReturnType<SharedStdinIngress["startKittyQueryResponseDetection"]>
+        | undefined;
+      activeKittyQueryDetections++;
+      try {
+        reconcileSharedSubscription();
+        cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
+          if (settled) return;
+          settled = true;
+          try {
+            onResult(supported);
+          } finally {
+            finishKittyQueryDetection();
+          }
+        }, sharedSubscription);
+      } catch (error) {
+        activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
+        runTerminalCleanup(reconcileSharedSubscription);
+        throw error;
+      }
+      return (options) => {
+        if (settled) return;
+        settled = true;
+        let firstError: unknown;
+        try {
+          cancelSharedDetection?.(options);
+        } catch (error) {
+          firstError = error;
+        } finally {
+          try {
+            finishKittyQueryDetection();
+          } catch (error) {
+            firstError ??= error;
           }
         }
+        if (firstError !== undefined) throw firstError;
+      };
+    },
+    activateInputDelivery() {
+      if (inputDeliveryActive || disposed) return;
+      inputDeliveryActive = true;
+      flushPendingApplicationInput();
+      if (activeKittyQueryDetections === 0 && localRefs === 0) {
+        sharedSubscription.invalidate();
+        pendingApplicationInput.length = 0;
+        reconcileSharedSubscription();
+      }
+    },
+    setBracketedPasteMode(enabled: boolean) {
+      if (disposed) return;
+      if (enabled) {
         bracketedPasteModeCount++;
+        try {
+          reconcileBracketedPasteMode();
+        } catch (error) {
+          bracketedPasteModeCount = Math.max(0, bracketedPasteModeCount - 1);
+          runTerminalCleanup(reconcileBracketedPasteMode);
+          throw error;
+        }
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
-        if (bracketedPasteModeCount === 0 && !suspended) {
-          disableBracketedPaste();
+        try {
+          reconcileBracketedPasteMode();
+        } catch (error) {
+          runTerminalCleanup(reconcileBracketedPasteMode);
+          throw error;
         }
       }
     },
     acquireSgrMouseMode(level: SgrMouseMode = "button") {
       const token = Symbol("sgr-mouse");
+      if (disposed) return token;
       sgrMouseModeTokens.set(token, level);
       try {
         reconcileSgrMouseMode();
@@ -3189,151 +3524,147 @@ function createStdinController(
     },
     releaseSgrMouseMode(token: symbol) {
       if (!sgrMouseModeTokens.delete(token)) return;
-      reconcileSgrMouseMode();
+      if (!disposed) {
+        try {
+          reconcileSgrMouseMode();
+        } catch (error) {
+          runTerminalCleanup(reconcileSgrMouseMode);
+          throw error;
+        }
+      }
     },
     releaseRawMode() {
       if (!appCtx.isRawModeSupported) return;
       if (localRefs === 0) return;
       const state = getRawModeState(stdin);
       state.refs = Math.max(0, state.refs - 1);
+      if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
       localRefs = Math.max(0, localRefs - 1);
+      let firstError: unknown;
       if (localRefs === lifetimeFloor) {
-        // PER-CONSUMER: the last input composable on THIS controller released.
-        // Clear pending parser state SYNCHRONOUSLY (Ink's clearInputState,
-        // App.tsx:212-216,357): reset the parser and cancel the pending-escape
-        // flush, so a partial escape (e.g. a lone ESC during a screen swap) can't
-        // bleed into the next composable. Re-based to `lifetimeFloor`: under rawMode
-        // 'always' the App holds a floor ref (and keeps the listener), so this fires
-        // when consumers return to 1, not 0.
-        inputParser.reset();
-        clearPendingFlush();
-      }
-      if (localRefs === 0) {
-        // CONTROLLER fully released (no App hold, no consumers): detach the input
-        // listeners too. Gated on localRefs, not the shared refcount, so another
-        // app on the same stdin keeps its own listener intact.
-        stdin.off("readable", handleReadable);
-        stdin.off("data", handleData);
-      }
-      if (state.refs === 0) {
-        if (state.suspended) {
-          runTerminalCleanup(() => releasePhysicalRawMode(state));
-          resetRawModeState(state);
-          return;
+        // End this app-level delivery generation. Handler-level route snapshots
+        // belong to the later routing/lifetime checkpoint; once no app consumer remains, orphaned
+        // framing is discarded and the physical listener may detach.
+        try {
+          sharedSubscription.invalidate();
+        } catch (error) {
+          firstError = error;
         }
+        pendingApplicationInput.length = 0;
+      }
+      try {
+        reconcileSharedSubscription();
+      } catch (error) {
+        firstError ??= error;
+      }
+      if (
+        state.activeRefs === 0 &&
+        (state.physicalActive ||
+          state.physicalRawUncertain ||
+          state.physicalRefHeld ||
+          state.physicalRefUncertain)
+      ) {
         // Defer ONLY the SHARED terminal raw-mode toggle (Ink defers just disableRawMode,
         // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
-        // the old before mounting the new, so refs briefly hits 0. Disabling
+        // the old before mounting the new, so activeRefs briefly hits 0. Disabling
         // synchronously would drop raw mode between the two mounts; the microtask
         // short-circuits if a replacement re-acquired in the meantime — which it
         // signals by clearing pendingDisable (matching Ink's flag, App.tsx:362-365).
         state.pendingDisable = true;
         queueMicrotask(() => {
-          if (!state.pendingDisable) return;
+          if (!state.pendingDisable || state.activeRefs > 0) return;
           state.pendingDisable = false;
-          runTerminalCleanup(() => releasePhysicalRawMode(state));
-          resetRawModeState(state);
+          runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+          resetRawModeStateIfIdle(state);
         });
+      } else {
+        resetRawModeStateIfIdle(state);
       }
+      // Release is terminal cleanup. Preserve progress across a hostile
+      // listener removal instead of surfacing an error that could abort the
+      // remaining Vue scope disposals; dispose() retries the physical restore.
+      void firstError;
     },
     suspend(sync = false) {
       if (suspended) return;
       suspended = true;
-      clearPendingFlush();
-      inputParser.reset();
-      stdin.off("readable", handleReadable);
-      stdin.off("data", handleData);
+      // Keep a physical framing unit that began before suspension long enough
+      // to find its boundary, but invalidate this app as a recipient. That lets
+      // a sole app resume after a split CSI/paste/UTF-8 unit without receiving
+      // the old unit's tail. Ordinary consumer release does not retain framing.
+      runTerminalCleanup(() => sharedSubscription.invalidate({ retainPending: true }));
+      pendingApplicationInput.length = 0;
+      runTerminalCleanup(reconcileSharedSubscription);
 
-      if (bracketedPastePhysicallyEnabled) {
-        runTerminalCleanup(() => disableBracketedPaste(sync));
-      }
-      if (activeSgrMouseMode) {
-        const activeMode = activeSgrMouseMode;
-        runTerminalCleanup(() => {
-          if (disableSgrMouse([activeMode], sync)) activeSgrMouseMode = undefined;
-        });
-      }
+      runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
+      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
 
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
-        if (!state.suspended && (state.refs > 0 || state.pendingDisable)) {
-          state.pendingDisable = false;
-          let released = true;
-          try {
-            releasePhysicalRawMode(state);
-          } catch {
-            released = false;
-          }
-          if (state.refs > 0 || !released) state.suspended = true;
-          else resetRawModeState(state);
-        }
+        state.activeRefs = Math.max(0, state.activeRefs - localRefs);
+        state.pendingDisable = false;
+        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+        resetRawModeStateIfIdle(state);
       }
     },
     resume() {
       if (!suspended) return;
       const state = appCtx.isRawModeSupported ? getRawModeState(stdin) : undefined;
-      const rawNeedsResume = Boolean(state?.suspended);
-      let acquiredSharedRaw = false;
-      let listenerAttached = false;
-      let acquiredPaste = false;
-      const mouseBefore = activeSgrMouseMode;
+      let addedActiveRawRefs = 0;
 
-      // Let the mode reconciler acquire the requested mouse level, but only
-      // commit the controller's resumed state after every acquisition succeeds.
       suspended = false;
       try {
-        if (
-          bracketedPasteModeCount > 0 &&
-          !bracketedPastePhysicallyEnabled &&
-          appCtx.stdout.isTTY
-        ) {
-          if (writeTerminalMode("\x1b[?2004h")) {
-            everEnabledBracketedPaste = true;
-            bracketedPastePhysicallyEnabled = true;
-            acquiredPaste = true;
-          }
+        // Reacquire raw input first. The shared reconciler re-checks desired
+        // counts after every host callback, so a synchronous re-entrant suspend
+        // wins without leaving an active logical ref on a cooked terminal.
+        if (state && localRefs > 0) {
+          state.pendingDisable = false;
+          state.activeRefs += localRefs;
+          addedActiveRawRefs = localRefs;
+          reconcilePhysicalRawMode(state);
         }
+        if (suspended || disposed) return;
+        reconcileBracketedPasteMode();
+        if (suspended || disposed) return;
         reconcileSgrMouseMode();
-
-        if (state?.suspended) {
-          if (state.refs > 0) {
-            acquiredSharedRaw = true;
-            acquirePhysicalRawMode(state);
-            state.suspended = false;
-          } else {
-            // A failed release from the suspend boundary has no remaining
-            // logical consumer. Retry that release instead of reacquiring raw.
-            releasePhysicalRawMode(state);
-            resetRawModeState(state);
-          }
-        }
-
-        if (localRefs > 0) {
-          stdin.on("data", handleData);
-          listenerAttached = true;
-        }
+        if (suspended || disposed) return;
+        // Only expose buffered input after every parser-affecting terminal mode
+        // is active. A custom ReadStream may synchronously deliver from resume();
+        // SGR mouse must already be classified as mouse rather than useInput text.
+        reconcileSharedSubscription();
+        flushPendingApplicationInput();
       } catch (error) {
-        if (listenerAttached) runTerminalCleanup(() => stdin.off("data", handleData));
-        if (acquiredSharedRaw && state) {
-          runTerminalCleanup(() => releasePhysicalRawMode(state));
-          state.suspended = rawNeedsResume;
+        if (addedActiveRawRefs > 0 && state && !suspended && !disposed) {
+          state.activeRefs = Math.max(
+            0,
+            state.activeRefs - Math.min(addedActiveRawRefs, localRefs),
+          );
         }
-        if (mouseBefore === undefined && activeSgrMouseMode !== undefined) {
-          const acquiredMouse = activeSgrMouseMode;
-          runTerminalCleanup(() => {
-            if (disableSgrMouse([acquiredMouse])) activeSgrMouseMode = undefined;
-          });
+        if (!disposed) suspended = true;
+        runTerminalCleanup(reconcileBracketedPasteMode);
+        runTerminalCleanup(reconcileSgrMouseMode);
+        if (state) {
+          state.pendingDisable = false;
+          runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+          resetRawModeStateIfIdle(state);
         }
-        if (acquiredPaste) runTerminalCleanup(() => disableBracketedPaste());
-        suspended = true;
+        runTerminalCleanup(reconcileSharedSubscription);
         throw error;
       }
     },
     dispose(sync = false) {
-      clearPendingFlush();
-      stdin.off("readable", handleReadable);
-      stdin.off("data", handleData);
+      if (disposed) return;
+      disposed = true;
+      pendingApplicationInput.length = 0;
+      inputDeliveryActive = false;
+      drainingApplicationInput = false;
+      sharedSubscriptionActive = false;
+      // A hostile stream may throw while removing the final data listener.
+      // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
+      runTerminalCleanup(() => sharedSubscription.dispose());
       emitter.off("input", focusInputListener);
+      runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
+      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
       if (sync) {
         // Signal-exit path (Finding A): the paste-OFF escape must flush
         // synchronously. By the time dispose() runs, Vue's unmount has usually
@@ -3346,21 +3677,26 @@ function createStdinController(
         // sync write after a surviving async one is harmless. If detach hasn't run
         // yet (count still > 0), this single sync write still covers it.
         if (everEnabledBracketedPaste) {
-          runTerminalCleanup(() => disableBracketedPaste(true, true));
+          runTerminalCleanup(() => forceDisableBracketedPaste(true));
         }
         if (everEnabledSgrMouse) {
           runTerminalCleanup(() => {
-            if (disableSgrMouse(ownedSgrMouseModes, true)) activeSgrMouseMode = undefined;
+            if (disableSgrMouse(ownedSgrMouseModes, true)) {
+              activeSgrMouseMode = undefined;
+              sgrMousePhysicalUncertain = false;
+            }
           });
         }
       } else {
-        if (bracketedPastePhysicallyEnabled) {
-          runTerminalCleanup(() => disableBracketedPaste());
+        if (bracketedPastePhysicalUncertain) {
+          runTerminalCleanup(() => forceDisableBracketedPaste(false));
         }
-        if (activeSgrMouseMode) {
-          const activeMode = activeSgrMouseMode;
+        if (sgrMousePhysicalUncertain) {
           runTerminalCleanup(() => {
-            if (disableSgrMouse([activeMode])) activeSgrMouseMode = undefined;
+            if (disableSgrMouse(ownedSgrMouseModes)) {
+              activeSgrMouseMode = undefined;
+              sgrMousePhysicalUncertain = false;
+            }
           });
         }
       }
@@ -3371,41 +3707,26 @@ function createStdinController(
         const state = getRawModeState(stdin);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already
         // released them via onScopeDispose → releaseRawMode).
-        let releasedLastRef = false;
         if (localRefs > 0) {
+          if (!suspended) {
+            state.activeRefs = Math.max(0, state.activeRefs - localRefs);
+          }
           state.refs = Math.max(0, state.refs - localRefs);
           localRefs = 0;
-          releasedLastRef = state.refs === 0;
         }
-        // Force the terminal raw-mode disable SYNCHRONOUSLY when raw mode is no
-        // longer owned. This covers BOTH teardown orderings:
+        // Reconcile terminal raw mode synchronously when ownership changes. This
+        // covers BOTH teardown orderings:
         //   (1) dispose() ran while this controller still held refs (above), or
         //   (2) Vue's unmount already fired releaseRawMode (localRefs is 0) which
         //       DEFERRED the disable to a microtask — but on the signal-exit path
         //       (teardown(true) re-raises the signal without draining microtasks)
         //       that microtask never runs, so the terminal would be left raw and
         //       the shell stops echoing after Ctrl+C.
-        // Mirrors Ink's unmount cleanup guard `rawModeEnabledCount > 0 ||
-        // pendingDisableRawModeRef.current` (App.tsx:626-631). Clearing
-        // pendingDisable also cancels the queued microtask so it can't double-unref.
-        if (
-          state.refs === 0 &&
-          (releasedLastRef ||
-            state.pendingDisable ||
-            state.suspended ||
-            state.changedRawMode ||
-            state.physicalRefHeld)
-        ) {
-          // Unconditionally setRawMode(false) — Ink's disableRawMode (App.tsx:218-222)
-          // never restores a captured prior raw state. (A restored prevRaw could be
-          // the framework's own raw=true snapshotted during a sync swap, which would
-          // leave the terminal raw on exit.)
-          state.pendingDisable = false;
-          state.suspended = false;
-          runTerminalCleanup(() => releasePhysicalRawMode(state));
-          resetRawModeState(state);
-          runTerminalCleanup(() => inputParser.reset());
-        }
+        // Clearing pendingDisable also cancels the queued microtask so it cannot
+        // double-unref. The shared reconciler keeps another app's active lease.
+        state.pendingDisable = false;
+        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+        resetRawModeStateIfIdle(state);
       }
       suspended = false;
     },

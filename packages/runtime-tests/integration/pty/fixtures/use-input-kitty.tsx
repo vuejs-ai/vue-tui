@@ -8,12 +8,26 @@ const KittyInput = defineComponent({
   },
   setup(props) {
     const { exit } = useApp();
+    const autoDetectionInputs: string[] = [];
 
     onMounted(() => {
       process.stdout.write("__READY__");
     });
 
     useInput((input, key) => {
+      if (props.test === "autoDetectionOnce") {
+        autoDetectionInputs.push(input);
+        if (input === "b") {
+          setTimeout(() => {
+            const observed = JSON.stringify(autoDetectionInputs);
+            process.stdout.write(`__AUTO_INPUTS__:${observed}`);
+            if (observed === '["a","b"]') exit();
+            else exit(new Error(`unexpected auto-detection input: ${observed}`));
+          }, 30);
+        }
+        return;
+      }
+
       if (props.test === "super" && input === "s" && key.super) {
         exit();
         return;
@@ -136,6 +150,11 @@ const testName = process.argv[2];
 if (testName === "kittyCtrlCExit" || testName === "ctrlShiftC") {
   const app = createApp(KittyInput, { test: testName });
   app.mount({ exitOnCtrlC: true });
+  await app.waitUntilExit();
+  console.log("exited");
+} else if (testName === "autoDetectionOnce") {
+  const app = createApp(KittyInput, { test: testName });
+  app.mount({ exitOnCtrlC: false, kittyKeyboard: { mode: "auto" } });
   await app.waitUntilExit();
   console.log("exited");
 } else {

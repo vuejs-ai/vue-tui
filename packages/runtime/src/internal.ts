@@ -21,6 +21,7 @@ export {
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
   type KittyKeyboardController,
+  type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
 export {
   INTERNAL_RENDER_OBSERVER,

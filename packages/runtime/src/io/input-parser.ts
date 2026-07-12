@@ -249,6 +249,7 @@ const parseKeypresses = (input: string): ParsedInput => {
 
 export type InputParser = {
   push: (chunk: string) => InputEvent[];
+  peekPending: () => string;
   hasPendingEscape: () => boolean;
   flushPendingEscape: () => string | undefined;
   reset: () => void;
@@ -263,10 +264,18 @@ export const createInputParser = (): InputParser => {
       pending = parsedInput.pending;
       return parsedInput.events;
     },
+    peekPending() {
+      return pending;
+    },
     hasPendingEscape() {
       // Don't trigger the escape flush timer while assembling a paste start
-      // marker (`[200` and then `~`) or while waiting for paste end.
-      return pending.startsWith(escape) && !pending.startsWith(pasteStart) && pending !== "[200";
+      // marker once `ESC[2` makes that intent distinguishable, or while waiting
+      // for paste end. Bare `ESC` and `ESC[` retain the finite ambiguity timer
+      // so a real Escape key cannot be held forever.
+      const isRecognizablePasteStart = pending.length >= 3 && pasteStart.startsWith(pending);
+      return (
+        pending.startsWith(escape) && !isRecognizablePasteStart && !pending.startsWith(pasteStart)
+      );
     },
     flushPendingEscape() {
       if (!pending.startsWith(escape)) {

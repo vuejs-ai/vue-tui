@@ -45,7 +45,10 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
   const stdin = inject(StdinContextKey);
   if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
 
+  let desiredActive = false;
   let attached = false;
+  let reconciling = false;
+  let reconcileRequested = false;
 
   function listener(data: string) {
     const keypress = parseKeypress(data);
@@ -117,29 +120,61 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     unref(handler)(input, key);
   }
 
-  function attach() {
-    if (attached) return;
-    attached = true;
-    stdin!.acquireRawMode();
-    stdin!.internal_eventEmitter.on("input", listener);
-  }
-
-  function detach() {
-    if (!attached) return;
-    attached = false;
-    stdin!.internal_eventEmitter.off("input", listener);
-    stdin!.releaseRawMode();
+  function reconcileAttachment() {
+    if (reconciling) {
+      reconcileRequested = true;
+      return;
+    }
+    reconciling = true;
+    let firstError: unknown;
+    let hasError = false;
+    try {
+      while (true) {
+        reconcileRequested = false;
+        try {
+          if (desiredActive && !attached) {
+            let rawAcquired = false;
+            try {
+              stdin!.acquireRawMode();
+              rawAcquired = true;
+              stdin!.internal_eventEmitter.on("input", listener);
+              attached = true;
+              rawAcquired = false;
+            } catch (error) {
+              if (rawAcquired) stdin!.releaseRawMode();
+              throw error;
+            }
+          } else if (!desiredActive && attached) {
+            attached = false;
+            stdin!.internal_eventEmitter.off("input", listener);
+            stdin!.releaseRawMode();
+          }
+        } catch (error) {
+          if (hasError) break;
+          firstError = error;
+          hasError = true;
+          if (!reconcileRequested) break;
+        }
+        if (!reconcileRequested && desiredActive === attached) break;
+      }
+    } finally {
+      reconciling = false;
+    }
+    if (hasError) throw firstError;
   }
 
   const isActive = options.isActive ?? true;
   watch(
     () => toValue(isActive),
     (value) => {
-      if (value) attach();
-      else detach();
+      desiredActive = value;
+      reconcileAttachment();
     },
     { immediate: true, flush: "sync" },
   );
 
-  onScopeDispose(detach);
+  onScopeDispose(() => {
+    desiredActive = false;
+    reconcileAttachment();
+  });
 }

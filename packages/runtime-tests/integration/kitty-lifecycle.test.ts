@@ -1,14 +1,26 @@
 import { describe, test, expect, vi } from "vite-plus/test";
 import EventEmitter from "node:events";
+import { PassThrough } from "node:stream";
 import {
-  createKittyKeyboardController,
+  createKittyKeyboardController as createInternalKittyKeyboardController,
+  createManualSuspensionHost,
+  INTERNAL_SUSPENSION_HOST,
   matchKittyQueryResponse,
   hasCompleteKittyQueryResponse,
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
+  type StartKittyQueryResponseDetection,
 } from "@vue-tui/runtime/internal";
-import { createApp, useInput } from "@vue-tui/runtime";
-import { defineComponent, h } from "vue";
+import {
+  createApp,
+  useFocus,
+  useInput,
+  useMouseInput,
+  usePaste,
+  type TuiApp,
+} from "@vue-tui/runtime";
+import { defineComponent, h, nextTick, onErrorCaptured, shallowRef, type ShallowRef } from "vue";
+import { captureWrites, makeFakeStdin, makeFakeWritable } from "./lifecycle/test-streams.ts";
 
 const textEncoder = new TextEncoder();
 
@@ -30,12 +42,35 @@ function createFakeStdin() {
   (stdin as any).setRawMode = vi.fn();
   (stdin as any).setEncoding = vi.fn();
   (stdin as any).read = vi.fn();
-  const unshifted: Uint8Array[] = [];
-  stdin.unshift = ((chunk: Uint8Array) => {
-    unshifted.push(Uint8Array.from(chunk));
-    return true;
-  }) as typeof stdin.unshift;
-  return { stdin, unshifted };
+  return { stdin };
+}
+
+const noQueryDetection: StartKittyQueryResponseDetection = () => () => {};
+
+function createKittyKeyboardController(
+  stdin: NodeJS.ReadStream,
+  stdout: NodeJS.WriteStream,
+  startQueryResponseDetection: StartKittyQueryResponseDetection = noQueryDetection,
+) {
+  return createInternalKittyKeyboardController(stdin, stdout, startQueryResponseDetection);
+}
+
+function createQueryDetectionHarness() {
+  let listener: ((supported: boolean) => void) | undefined;
+  const start: StartKittyQueryResponseDetection = (onResult) => {
+    listener = onResult;
+    return () => {
+      if (listener === onResult) listener = undefined;
+    };
+  };
+  return {
+    start,
+    settle(supported: boolean) {
+      const current = listener;
+      listener = undefined;
+      current?.(supported);
+    },
+  };
 }
 
 describe("kitty query/response matching", () => {
@@ -133,6 +168,88 @@ describe("kitty lifecycle - init/cleanup", () => {
     expect(ctrl.isEnabled).toBe(false);
   });
 
+  test("a reentrant dispose from the enable write pops the acquired protocol", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") ctrl.dispose();
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout);
+
+    ctrl.init({ mode: "enabled" }, true);
+
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
+  });
+
+  test("a reentrant suspend from the enable write pops and later reacquires the protocol", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let suspendFromWrite = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (suspendFromWrite && data === "\x1b[>1u") {
+        suspendFromWrite = false;
+        ctrl.suspend();
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout);
+
+    ctrl.init({ mode: "enabled" }, true);
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
+
+    ctrl.resume();
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(true);
+
+    ctrl.dispose();
+    expect(written.at(-1)).toBe("\x1b[<u");
+  });
+
+  test("a reentrant resume from the protocol pop reacquires a fresh level", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let resumeFromPop = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (resumeFromPop && data === "\x1b[<u") {
+        resumeFromPop = false;
+        ctrl.resume();
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout);
+
+    ctrl.init({ mode: "enabled" }, true);
+    ctrl.suspend();
+
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(true);
+    ctrl.dispose();
+  });
+
+  test("an enable write failure preserves the error after a best-effort pop", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") throw new Error("kitty push failed");
+      return true;
+    }) as typeof stdout.write;
+    const ctrl = createKittyKeyboardController(stdin, stdout);
+
+    expect(() => ctrl.init({ mode: "enabled" }, true)).toThrow("kitty push failed");
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
+  });
+
   test("not enabled when stdin is not TTY", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
@@ -198,22 +315,15 @@ describe("kitty lifecycle - custom flags", () => {
   });
 
   test("auto mode with custom flags passes them through", () => {
-    const { stdout } = createFakeStdout();
+    const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const writtenStrings: string[] = [];
+    const detection = createQueryDetectionHarness();
 
-    stdout.write = ((data: string) => {
-      writtenStrings.push(data);
-      if (data === "\x1b[?u") {
-        stdin.emit("data", "\x1b[?1u");
-      }
-      return true;
-    }) as typeof stdout.write;
-
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
     ctrl.init({ mode: "auto", flags: ["disambiguateEscapeCodes", "reportEventTypes"] }, true);
+    detection.settle(true);
 
-    expect(writtenStrings).toContain("\x1b[>3u");
+    expect(written).toContain("\x1b[>3u");
     ctrl.dispose();
   });
 });
@@ -222,10 +332,11 @@ describe("kitty lifecycle - auto-detection", () => {
   test("enables protocol when terminal responds", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const detection = createQueryDetectionHarness();
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
 
     ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?1u");
+    detection.settle(true);
 
     expect(written).toContain("\x1b[>1u");
     expect(ctrl.isEnabled).toBe(true);
@@ -237,167 +348,59 @@ describe("kitty lifecycle - auto-detection", () => {
     const { stdout } = createFakeStdout();
     const { stdin } = createFakeStdin();
     const writtenStrings: string[] = [];
+    const detection = createQueryDetectionHarness();
 
     stdout.write = ((data: string) => {
       writtenStrings.push(data);
       if (data === "\x1b[?u") {
-        stdin.emit("data", "\x1b[?1u");
+        detection.settle(true);
       }
       return true;
     }) as typeof stdout.write;
 
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
     ctrl.init({ mode: "auto" }, true);
 
     expect(writtenStrings).toContain("\x1b[>1u");
     ctrl.dispose();
   });
 
-  test("handles Uint8Array response", () => {
-    const { stdout, written } = createFakeStdout();
-    const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", textEncoder.encode("\x1b[?1u"));
-
-    expect(written).toContain("\x1b[>1u");
-    ctrl.dispose();
-  });
-
   test("does not enable after dispose", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const detection = createQueryDetectionHarness();
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
 
     ctrl.init({ mode: "auto" }, true);
     ctrl.dispose();
-    stdin.emit("data", "\x1b[?1u");
+    detection.settle(true);
 
     expect(written.filter((s) => s === "\x1b[>1u")).toHaveLength(0);
   });
 
-  test("preserves split UTF-8 input bytes", async () => {
-    const { stdout } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-
-    stdin.emit("data", new Uint8Array([0xf0, 0x9f]));
-    stdin.emit("data", new Uint8Array([0x92, 0xa9]));
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    const allBytes: number[] = [];
-    for (const chunk of unshifted) {
-      for (const b of chunk) allBytes.push(b);
-    }
-    expect(allBytes).toEqual([0xf0, 0x9f, 0x92, 0xa9]);
-
-    ctrl.dispose();
-  });
-
-  test("timeout does not leak partial query response", async () => {
-    const { stdout } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?1");
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    expect(unshifted).toHaveLength(0);
-    ctrl.dispose();
-  });
-
-  test("timeout preserves query prefix without digits", async () => {
-    const { stdout, written } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?");
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    expect(written.filter((s) => s === "\x1b[>1u")).toHaveLength(0);
-    expect(unshifted.map((c) => [...c])).toEqual([[0x1b, 0x5b, 0x3f]]);
-
-    ctrl.dispose();
-  });
-
-  test("ignores response without digits", async () => {
-    const { stdout, written } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?u");
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    expect(written.filter((s) => s === "\x1b[>1u")).toHaveLength(0);
-    expect(unshifted.map((c) => [...c])).toEqual([[0x1b, 0x5b, 0x3f, 0x75]]);
-
-    ctrl.dispose();
-  });
-
-  test("preserves invalid query-like escape sequence", async () => {
-    const { stdout, written } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?1x");
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    expect(written.filter((s) => s === "\x1b[>1u")).toHaveLength(0);
-    expect(unshifted.map((c) => [...c])).toEqual([[0x1b, 0x5b, 0x3f, 0x31, 0x78]]);
-
-    ctrl.dispose();
-  });
-
-  test("response \\x1b[?0u is valid support confirmation", () => {
+  test("a failed resumed query rolls back and can be retried", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const detection = createQueryDetectionHarness();
+    const originalWrite = stdout.write.bind(stdout);
+    let failQuery = false;
+    stdout.write = ((data: string) => {
+      if (failQuery && data === "\x1b[?u") throw new Error("query failed");
+      return originalWrite(data);
+    }) as typeof stdout.write;
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
 
     ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?0u");
+    ctrl.suspend();
+    failQuery = true;
+    expect(() => ctrl.resume()).toThrow("query failed");
 
+    failQuery = false;
+    ctrl.resume();
+    detection.settle(true);
     expect(written).toContain("\x1b[>1u");
-    ctrl.dispose();
-  });
+    expect(ctrl.isEnabled).toBe(true);
 
-  test("split response across two data chunks", () => {
-    const { stdout, written } = createFakeStdout();
-    const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "\x1b[?");
-    stdin.emit("data", "1u");
-
-    expect(written).toContain("\x1b[>1u");
-    ctrl.dispose();
-  });
-
-  test("non-query bytes interleaved with response are re-emitted", () => {
-    const { stdout } = createFakeStdout();
-    const { stdin, unshifted } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
-
-    ctrl.init({ mode: "auto" }, true);
-    stdin.emit("data", "a\x1b[?1ub");
-
-    const allBytes: number[] = [];
-    for (const chunk of unshifted) {
-      for (const b of chunk) allBytes.push(b);
-    }
-    expect(allBytes).toEqual([0x61, 0x62]);
     ctrl.dispose();
   });
 });
@@ -452,25 +455,12 @@ describe("kitty lifecycle - mount/unmount integration", () => {
   });
 });
 
-// --- Query-response must never reach a useInput handler (Layer 2 regression) ---
+// --- Query responses must never reach a useInput handler ---
 //
-// vue-tui filters kitty query-responses (ESC[?Nu) in TWO places:
-//   Layer 1 — the one-shot auto-detection onData listener in kitty-keyboard.ts
-//             (a faithful port of Ink's ink.tsx detection): strips responses
-//             from ITS OWN private buffer and unshifts the non-query remainder.
-//   Layer 2 — parseKeypress returns {ignore:true} for ESC[?Nu; useInput drops it.
-//
-// Layer 1 alone does NOT cover the real input pipeline
-// (stdin 'data' → inputParser → emitInput → useInput → parseKeypress):
-//   * In `enabled` mode no detection listener exists at all.
-//   * In `auto` mode the detection onData and the controller's handleData are
-//     both subscribed to the SAME 'data' event, so stripping Layer 1's private
-//     buffer doesn't stop the chunk reaching handleData.
-//   * After detection settles, the detection listener is gone entirely.
-// In every case the query-response flows to parseKeypress, so Layer 2 is
-// load-bearing — Ink lacks it (a documented additive divergence). These tests
-// lock that: with Layer 2 removed they fail (handler sees a spurious "[?1u").
-function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" }) {
+// In auto mode StdinController's single physical ingress consumes the one reply
+// owned by the outstanding query before application parsing. parseKeypress's
+// `ignore` result remains the backstop for enabled mode and late/stray replies.
+function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" | "disabled" }) {
   const { stdout } = createFakeStdout();
   const { stdin } = createFakeStdin();
   (stdin as any).read = vi.fn(() => null);
@@ -494,9 +484,359 @@ function mountWithInput(kittyKeyboard: { mode: "auto" | "enabled" }) {
   return { app, stdin, inputs };
 }
 
+function mountWithRealInput(kittyKeyboard: { mode: "auto" | "enabled" | "disabled" }) {
+  const stdout = makeFakeWritable();
+  const writes = captureWrites(stdout);
+  const { stream: stdin } = makeFakeStdin();
+  const input = stdin as NodeJS.ReadStream & {
+    write(chunk: string | Uint8Array): boolean;
+  };
+  const inputs: string[] = [];
+  const App = defineComponent(() => {
+    useInput((value) => inputs.push(value));
+    return () => h("tui-text", null, "x");
+  });
+
+  const app = createApp(App);
+  app.mount({ stdout, stdin, kittyKeyboard, exitOnCtrlC: false });
+  return { app, input, inputs, stdout, writes };
+}
+
 describe("kitty query-response - end-to-end filtering", () => {
+  test("auto mode delivers ordinary input around a query response exactly once and in order", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("a\x1b[?1ub");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual(["a", "b"]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode owns a query response split beyond the ordinary escape timeout", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b[?");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      input.write("1u");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual([]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode delivers ordinary input once when the query times out", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("a");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual(["a"]);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 230));
+      expect(inputs).toEqual(["a"]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode preserves split UTF-8 input exactly once", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write(new Uint8Array([0xf0, 0x9f]));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual([]);
+
+      input.write(new Uint8Array([0x92, 0xa9]));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual(["💩"]);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 230));
+      expect(inputs).toEqual(["💩"]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode consumes an incomplete digit-bearing reply on timeout", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b[?1");
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+      expect(inputs).toEqual([]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode releases an ordinary query prefix on timeout", async () => {
+    const { app, input, inputs } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b[?");
+      await new Promise<void>((resolve) => setTimeout(resolve, 250));
+      expect(inputs).toEqual(["[?"]);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test.each([
+    ["response without digits", "\x1b[?u", "[?u"],
+    ["invalid query-like sequence", "\x1b[?1x", "[?1x"],
+  ])("auto mode preserves %s", async (_name, sequence, expected) => {
+    const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write(sequence);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual([expected]);
+      expect(writes.filter((value) => value === "\x1b[>1u")).toHaveLength(0);
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("the last listener pauses framework-owned flowing so idle bytes remain buffered", async () => {
+    const stdin = makeRawByteStdin();
+    const stdout = makeFakeWritable();
+    const visible = shallowRef(true);
+    const inputs: string[] = [];
+    const Child = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      return () => h("tui-text", null, "input");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+    );
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      expect(stdin.readableFlowing).toBe(true);
+      visible.value = false;
+      await nextTick();
+
+      expect(stdin.listenerCount("data")).toBe(0);
+      expect(stdin.readableFlowing).toBe(false);
+      stdin.write("x");
+      await flushInput();
+      expect(inputs).toEqual([]);
+
+      visible.value = true;
+      await nextTick();
+      await flushInput();
+      expect(inputs).toEqual(["x"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("an external idle resume takes over flow ownership from the next app lifetime", async () => {
+    const stdin = makeRawByteStdin();
+    const stdout = makeFakeWritable();
+    const visible = shallowRef(true);
+    const Child = defineComponent(() => {
+      useInput(() => {});
+      return () => h("tui-text", null, "input");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+    );
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    const externalListener = () => {};
+    try {
+      visible.value = false;
+      await nextTick();
+      expect(stdin.readableFlowing).toBe(false);
+
+      stdin.on("data", externalListener);
+      stdin.resume();
+      stdin.off("data", externalListener);
+      expect(stdin.readableFlowing).toBe(true);
+      expect(stdin.listenerCount("data")).toBe(0);
+
+      visible.value = true;
+      await nextTick();
+      visible.value = false;
+      await nextTick();
+
+      expect(stdin.listenerCount("data")).toBe(0);
+      expect(stdin.readableFlowing).toBe(true);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("detaching the framework preserves an external owner's paused state", async () => {
+    const stdin = makeRawByteStdin();
+    const stdout = makeFakeWritable();
+    const visible = shallowRef(true);
+    const Child = defineComponent(() => {
+      useInput(() => {});
+      return () => h("tui-text", null, "input");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+    );
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    const externalListener = () => {};
+    try {
+      stdin.on("data", externalListener);
+      stdin.pause();
+      expect(stdin.readableFlowing).toBe(false);
+
+      visible.value = false;
+      await nextTick();
+
+      expect(stdin.listenerCount("data")).toBe(1);
+      expect(stdin.listeners("data")).toContain(externalListener);
+      expect(stdin.readableFlowing).toBe(false);
+    } finally {
+      stdin.off("data", externalListener);
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("auto mode accepts zero as a valid support response", async () => {
+    const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b[?0u");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual([]);
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode accepts a Uint8Array support response", async () => {
+    const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write(textEncoder.encode("\x1b[?1u"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(inputs).toEqual([]);
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode recognizes a response after an ordinary Escape", async () => {
+    const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b\x1b[?1u");
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(inputs).toEqual([""]);
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode releases an ordinary Escape after the response that settles detection", async () => {
+    const { app, input, inputs, writes } = mountWithRealInput({ mode: "auto" });
+    try {
+      input.write("\x1b[?1u\x1b");
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+      expect(inputs).toEqual([""]);
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      app.unmount();
+      input.destroy();
+    }
+  });
+
+  test("auto mode captures a synchronous query response while resuming", async () => {
+    const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    const { stream: stdin } = makeFakeStdin();
+    const suspensionHost = createManualSuspensionHost();
+    const inputs: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    const originalWrite = stdout.write.bind(stdout);
+    let queryCount = 0;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      if (chunk === "\x1b[?u" && ++queryCount === 2) {
+        stdin.emit("data", "\x1b[?1u");
+      }
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        kittyKeyboard: { mode: "auto" },
+        exitOnCtrlC: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      } as Parameters<TuiApp["mount"]>[0]);
+      expect(queryCount).toBe(1);
+
+      await suspensionHost.suspend();
+      await suspensionHost.resume();
+
+      expect(queryCount).toBe(2);
+      expect(writes).toContain("\x1b[>1u");
+      expect(inputs).toEqual([]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
   test("enabled mode: stray query-response never reaches useInput", () => {
-    // No auto-detection runs in `enabled` mode, so Layer 1 is absent here.
+    // No auto-detection runs in enabled mode; parseKeypress is the backstop.
     const { app, stdin, inputs } = mountWithInput({ mode: "enabled" });
     stdin.emit("data", "\x1b[?1u");
     expect(inputs).toEqual([]);
@@ -504,7 +844,7 @@ describe("kitty query-response - end-to-end filtering", () => {
   });
 
   test("auto mode: query-response during detection never reaches useInput", () => {
-    // Detection onData and the controller's handleData both see this chunk.
+    // The single ingress consumes the response before application parsing.
     const { app, stdin, inputs } = mountWithInput({ mode: "auto" });
     stdin.emit("data", "\x1b[?1u");
     expect(inputs).toEqual([]);
@@ -513,7 +853,7 @@ describe("kitty query-response - end-to-end filtering", () => {
 
   test("auto mode: query-response after detection settled never reaches useInput", () => {
     const { app, stdin, inputs } = mountWithInput({ mode: "auto" });
-    stdin.emit("data", "\x1b[?1u"); // settles detection; removes Layer 1 listener
+    stdin.emit("data", "\x1b[?1u"); // settles detection
     inputs.length = 0;
     stdin.emit("data", "\x1b[?1u"); // stray, late response
     expect(inputs).toEqual([]);
@@ -522,11 +862,2474 @@ describe("kitty query-response - end-to-end filtering", () => {
 
   test("enabled mode: query-response split across two chunks never reaches useInput", () => {
     // inputParser reassembles "\x1b[?" + "1u" into a full CSI sequence before
-    // dispatch, so Layer 2 (not Layer 1's trailing-partial logic) is what filters it.
+    // dispatch, so parseKeypress's backstop filters it.
     const { app, stdin, inputs } = mountWithInput({ mode: "enabled" });
     stdin.emit("data", "\x1b[?");
     stdin.emit("data", "1u");
     expect(inputs).toEqual([]);
     app.unmount();
+  });
+});
+
+type WritableTestStdin = NodeJS.ReadStream & {
+  write(chunk: string | Uint8Array): boolean;
+  isRaw?: boolean;
+  setRawMode(mode: boolean): NodeJS.ReadStream;
+};
+
+const flushInput = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+function mountInputAppOnStreams({
+  stdin,
+  stdout,
+  kittyMode,
+  suspensionHost,
+}: {
+  stdin: NodeJS.ReadStream;
+  stdout: NodeJS.WriteStream;
+  kittyMode?: "auto" | "enabled" | "disabled";
+  suspensionHost?: ReturnType<typeof createManualSuspensionHost>;
+}) {
+  const inputs: string[] = [];
+  const App = defineComponent(() => {
+    useInput((value) => inputs.push(value));
+    return () => h("tui-text", null, "x");
+  });
+  const app = createApp(App);
+  app.mount({
+    stdout,
+    stdin,
+    patchConsole: false,
+    liveUpdates: true,
+    maxFps: 0,
+    rawMode: "auto",
+    exitOnCtrlC: false,
+    ...(kittyMode ? { kittyKeyboard: { mode: kittyMode } } : {}),
+    ...(suspensionHost ? { [INTERNAL_SUSPENSION_HOST]: suspensionHost } : {}),
+  } as Parameters<TuiApp["mount"]>[0]);
+  return { app, inputs };
+}
+
+function makeRawByteStdin(): NodeJS.ReadStream & PassThrough {
+  const stdin = new PassThrough() as NodeJS.ReadStream & PassThrough;
+  Object.assign(stdin, {
+    isTTY: true,
+    isRaw: false,
+    setRawMode(mode: boolean) {
+      stdin.isRaw = mode;
+      return stdin;
+    },
+    ref() {},
+    unref() {},
+  });
+  return stdin;
+}
+
+describe("kitty query-response - adversarial ingress ordering", () => {
+  test("a data-listener acquisition that attaches then throws rolls back exactly", () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const originalOn = stdin.on.bind(stdin) as unknown as (
+      event: string | symbol,
+      listener: (...args: unknown[]) => void,
+    ) => typeof stdin;
+    let failDataOn = true;
+    stdin.on = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
+      const result = originalOn(event, listener);
+      if (event === "data" && failDataOn) {
+        failDataOn = false;
+        throw new Error("on failed after attach");
+      }
+      return result;
+    }) as typeof stdin.on;
+    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+
+    expect(() =>
+      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false }),
+    ).toThrow("on failed after attach");
+    expect(stdin.listenerCount("data")).toBe(0);
+
+    stdin.destroy();
+    stdout.destroy();
+  });
+
+  test("synchronous data from listener acquisition does not recursively attach", () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const originalOn = stdin.on.bind(stdin) as unknown as (
+      event: string | symbol,
+      listener: (...args: unknown[]) => void,
+    ) => typeof stdin;
+    let dataOnCalls = 0;
+    stdin.on = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
+      const result = originalOn(event, listener);
+      if (event === "data" && ++dataOnCalls === 1) stdin.emit("data", "a");
+      return result;
+    }) as typeof stdin.on;
+    const inputs: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    try {
+      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false });
+
+      expect(dataOnCalls).toBe(1);
+      expect(inputs).toEqual(["a"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("cancelling from an earlier event cannot expose an in-flight reply in the same chunk", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput((value) => {
+        inputsA.push(value);
+        if (value === "a") void suspensionHost.suspend();
+      });
+      return () => h("tui-text", null, "a");
+    });
+    const appA = createApp(AppA);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      stdin.emit("data", "a\x1b[?1u");
+      await flushInput();
+
+      expect(inputsA).toEqual(["a"]);
+      expect(b.inputs).toEqual(["a"]);
+    } finally {
+      appA.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a cancelled query keeps its FIFO reply slot ahead of a newer query", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const writesB = captureWrites(stdoutB);
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({
+      stdin,
+      stdout: stdoutA,
+      kittyMode: "auto",
+      suspensionHost,
+    });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
+    try {
+      await suspensionHost.suspend();
+      input.write("\x1b[?1u\x1b[?1u");
+      await flushInput();
+
+      expect(a.inputs).toEqual([]);
+      expect(b.inputs).toEqual([]);
+      expect(writesB).toContain("\x1b[>1u");
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a cancelled query tombstone retains a split query-shaped late reply", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, kittyMode: "auto" });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      a.app.unmount();
+      input.write("\x1b[?1");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      input.write("u");
+      await flushInput();
+
+      expect(b.inputs).toEqual([]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a cancelled query tombstone consumes its reply without an application subscriber", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, kittyMode: "auto" });
+    try {
+      a.app.unmount();
+      expect(stdin.listenerCount("data")).toBe(1);
+
+      input.write("\x1b[?1u");
+      await flushInput();
+      expect(stdin.listenerCount("data")).toBe(0);
+
+      const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+      try {
+        input.write("x");
+        await flushInput();
+        expect(b.inputs).toEqual(["x"]);
+      } finally {
+        b.app.unmount();
+      }
+    } finally {
+      a.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("an active query does not retain an orphaned paste from a released consumer", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    const visible = shallowRef(true);
+    const pastes: string[] = [];
+    const Child = defineComponent(() => {
+      usePaste((value) => pastes.push(value));
+      return () => h("tui-text", null, "paste");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+    );
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    try {
+      stdin.emit("data", "\x1b[200~unfinished");
+      visible.value = false;
+      await nextTick();
+      stdin.emit("data", "\x1b[?1u");
+      await flushInput();
+
+      expect(pastes).toEqual([]);
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("query-only delivery drops unfinished framing when detection times out", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const app = createApp(defineComponent(() => () => h("tui-text", null, "idle")));
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    try {
+      stdin.emit("data", "\x1b[200~unfinished");
+      expect(stdin.listenerCount("data")).toBe(1);
+      await new Promise<void>((resolve) => setTimeout(resolve, 230));
+
+      expect(stdin.listenerCount("data")).toBe(0);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("a rejected query write does not leave a ghost FIFO slot for the next mount", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const writesB = captureWrites(stdoutB);
+    const originalWriteA = stdoutA.write.bind(stdoutA);
+    stdoutA.write = ((...args: unknown[]) => {
+      if (String(args[0]) === "\x1b[?u") throw new Error("query write rejected");
+      return (originalWriteA as (...writeArgs: unknown[]) => boolean)(...args);
+    }) as NodeJS.WriteStream["write"];
+    const appA = createApp(defineComponent(() => () => h("tui-text", null, "a")));
+
+    expect(() =>
+      appA.mount({
+        stdout: stdoutA,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "always",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "auto" },
+      }),
+    ).toThrow("query write rejected");
+
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
+    try {
+      stdin.emit("data", "\x1b[?1u");
+      await flushInput();
+
+      expect(writesB).toContain("\x1b[>1u");
+    } finally {
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a reentrant enable write cannot overtake the data event that caused it", async () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const originalWrite = stdout.write.bind(stdout);
+    let inject = false;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      if (inject && chunk === "\x1b[>1u") stdin.emit("data", "x");
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    const { app, inputs } = mountInputAppOnStreams({ stdin, stdout, kittyMode: "auto" });
+    try {
+      inject = true;
+      input.write("a\x1b[?1ub");
+      await flushInput();
+
+      expect(inputs).toEqual(["a", "b", "x"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("an enable write failure cannot discard ordinary input from the same data event", () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const originalWrite = stdout.write.bind(stdout);
+    let failEnable = false;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      if (failEnable && chunk === "\x1b[>1u") throw new Error("enable failed");
+      return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+    }) as NodeJS.WriteStream["write"];
+
+    const { app, inputs } = mountInputAppOnStreams({ stdin, stdout, kittyMode: "auto" });
+    try {
+      failEnable = true;
+      expect(() => stdin.emit("data", "a\x1b[?1ub")).toThrow("enable failed");
+      expect(inputs).toEqual(["a", "b"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("two apps sharing stdin observe the same order through reentrant enable writes", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const originalWriteA = stdoutA.write.bind(stdoutA);
+    const originalWriteB = stdoutB.write.bind(stdoutB);
+    let inject = false;
+    stdoutA.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWriteA as (...writeArgs: unknown[]) => boolean)(...args);
+      if (inject && chunk === "\x1b[>1u") stdin.emit("data", "x");
+      return result;
+    }) as NodeJS.WriteStream["write"];
+    stdoutB.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWriteB as (...writeArgs: unknown[]) => boolean)(...args);
+      if (inject && chunk === "\x1b[>1u") stdin.emit("data", "y");
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, kittyMode: "auto" });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
+    try {
+      inject = true;
+      input.write("a\x1b[?1ub\x1b[?1uc");
+      await flushInput();
+
+      expect(a.inputs).toEqual(["a", "b", "c", "x", "y"]);
+      expect(b.inputs).toEqual(a.inputs);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("ordinary input beside an initial synchronous reply is delivered after mount", async () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const originalWrite = stdout.write.bind(stdout);
+    let replied = false;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      if (!replied && chunk === "\x1b[?u") {
+        replied = true;
+        stdin.emit("data", "a\x1b[?1ub");
+      }
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    const { app, inputs } = mountInputAppOnStreams({ stdin, stdout, kittyMode: "auto" });
+    try {
+      await flushInput();
+      expect(inputs).toEqual(["a", "b"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("retained pre-mount input stays ahead of input emitted by its first handler", () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const inputs: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => {
+        inputs.push(value);
+        if (value === "a") stdin.emit("data", "x");
+      });
+      return () => h("tui-text", null, "x");
+    });
+    const originalWrite = stdout.write.bind(stdout);
+    let replied = false;
+    stdout.write = ((...args: unknown[]) => {
+      const chunk = String(args[0]);
+      const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      if (!replied && chunk === "\x1b[?u") {
+        replied = true;
+        stdin.emit("data", "a\x1b[?1ub");
+      }
+      return result;
+    }) as NodeJS.WriteStream["write"];
+
+    const app = createApp(App);
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "auto",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "auto" },
+      });
+      expect(inputs).toEqual(["a", "b", "x"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("suspending one app does not release shared raw mode while another app still owns it", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const rawModeCalls: boolean[] = [];
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModeCalls.push(mode);
+      input.isRaw = mode;
+      return stdin;
+    };
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, suspensionHost });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB });
+    try {
+      expect(rawModeCalls).toEqual([true]);
+      // The two applications share one framework-owned physical ingress.
+      expect(stdin.listenerCount("data")).toBe(1);
+
+      await suspensionHost.suspend();
+
+      expect(stdin.listenerCount("data")).toBe(1);
+      expect(input.isRaw).toBe(true);
+      expect(rawModeCalls).toEqual([true]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("raw enable re-entry through suspension reconciles before resume", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const rawModeCalls: boolean[] = [];
+    let refBalance = 0;
+    let suspendOnFirstEnable = true;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModeCalls.push(mode);
+      input.isRaw = mode;
+      if (mode && suspendOnFirstEnable) {
+        suspendOnFirstEnable = false;
+        void suspensionHost.suspend();
+      }
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      return stdin;
+    };
+    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "always",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false],
+        isRaw: false,
+        refBalance: 0,
+      });
+
+      await suspensionHost.resume();
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false, true],
+        isRaw: true,
+        refBalance: 1,
+      });
+    } finally {
+      app.unmount();
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false, true, false],
+        isRaw: false,
+        refBalance: 0,
+      });
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("raw disable re-entry can transfer ownership to a newly mounted app", () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const rawModeCalls: boolean[] = [];
+    let refBalance = 0;
+    let mountBOnDisable = false;
+    let mountedB = false;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModeCalls.push(mode);
+      input.isRaw = mode;
+      if (!mode && mountBOnDisable && !mountedB) {
+        mountedB = true;
+        appB.mount({
+          stdout: stdoutB,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "always",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+        });
+      }
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      return stdin;
+    };
+    const Root = defineComponent(() => () => h("tui-text", null, "x"));
+    const appA = createApp(Root);
+    const appB = createApp(Root);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "always",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      mountBOnDisable = true;
+      appA.unmount();
+
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance, mountedB }).toEqual({
+        rawModeCalls: [true, false, true],
+        isRaw: true,
+        refBalance: 1,
+        mountedB: true,
+      });
+    } finally {
+      appB.unmount();
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false, true, false],
+        isRaw: false,
+        refBalance: 0,
+      });
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("an unref failure still converges every raw-mode invariant for a re-entrant owner", () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const rawModeCalls: boolean[] = [];
+    let refBalance = 0;
+    let mountBAndFailUnref = false;
+    let mountedB = false;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModeCalls.push(mode);
+      input.isRaw = mode;
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      if (mountBAndFailUnref) {
+        mountBAndFailUnref = false;
+        mountedB = true;
+        appB.mount({
+          stdout: stdoutB,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "always",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+        });
+        throw new Error("unref failed after taking effect");
+      }
+      return stdin;
+    };
+    const Root = defineComponent(() => () => h("tui-text", null, "x"));
+    const appA = createApp(Root);
+    const appB = createApp(Root);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "always",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      mountBAndFailUnref = true;
+      expect(() => appA.unmount()).not.toThrow();
+
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance, mountedB }).toEqual({
+        rawModeCalls: [true, false, true],
+        isRaw: true,
+        refBalance: 1,
+        mountedB: true,
+      });
+    } finally {
+      appB.unmount();
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false, true, false],
+        isRaw: false,
+        refBalance: 0,
+      });
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  const terminalModeCases = [
+    {
+      label: "bracketed paste",
+      enable: "\x1b[?2004h",
+      disable: "\x1b[?2004l",
+      install: (active: ShallowRef<boolean>) => {
+        usePaste(() => {}, { isActive: active });
+      },
+    },
+    {
+      label: "SGR mouse",
+      enable: "\x1b[?1000h\x1b[?1006h",
+      disable: "\x1b[?1000l\x1b[?1006l",
+      install: (active: ShallowRef<boolean>) => {
+        useMouseInput(() => {}, { isActive: active });
+      },
+    },
+  ];
+
+  test.each(terminalModeCases)(
+    "$label enable restores the terminal when stdout throws after the write",
+    async ({ enable, disable, install }) => {
+      const previousTerm = process.env["TERM"];
+      process.env["TERM"] = "xterm-256color";
+      const { stream: stdin } = makeFakeStdin();
+      const input = stdin as WritableTestStdin;
+      const stdout = makeFakeWritable();
+      const writes = captureWrites(stdout);
+      const active = shallowRef(false);
+      const errors: unknown[] = [];
+      let refBalance = 0;
+      let failEnable = false;
+      input.isRaw = false;
+      input.setRawMode = (mode: boolean) => {
+        input.isRaw = mode;
+        return stdin;
+      };
+      stdin.ref = () => {
+        refBalance++;
+        return stdin;
+      };
+      stdin.unref = () => {
+        refBalance--;
+        return stdin;
+      };
+      const originalWrite = stdout.write.bind(stdout);
+      stdout.write = ((...args: unknown[]) => {
+        const value = String(args[0]);
+        const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+        if (failEnable && value === enable) {
+          failEnable = false;
+          throw new Error("enable failed after write");
+        }
+        return result;
+      }) as NodeJS.WriteStream["write"];
+      const Child = defineComponent(() => {
+        install(active);
+        return () => h("tui-text", null, "x");
+      });
+      const App = defineComponent(() => {
+        onErrorCaptured((error) => {
+          errors.push(error);
+          return false;
+        });
+        return () => h(Child);
+      });
+      const app = createApp(App);
+      try {
+        app.mount({
+          stdout,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "auto",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+        });
+        failEnable = true;
+        active.value = true;
+        await nextTick();
+        await flushInput();
+
+        expect(errors).toHaveLength(1);
+        expect(writes.filter((value) => value === enable || value === disable)).toEqual([
+          enable,
+          disable,
+        ]);
+        expect({
+          isRaw: input.isRaw,
+          refBalance,
+          dataListeners: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: false, refBalance: 0, dataListeners: 0 });
+      } finally {
+        app.unmount();
+        if (previousTerm === undefined) delete process.env["TERM"];
+        else process.env["TERM"] = previousTerm;
+        stdin.destroy();
+        stdout.destroy();
+      }
+    },
+  );
+
+  test.each(terminalModeCases)(
+    "$label disable releases raw input even when stdout throws after the write",
+    async ({ enable, disable, install }) => {
+      const previousTerm = process.env["TERM"];
+      process.env["TERM"] = "xterm-256color";
+      const { stream: stdin } = makeFakeStdin();
+      const input = stdin as WritableTestStdin;
+      const stdout = makeFakeWritable();
+      const writes = captureWrites(stdout);
+      const active = shallowRef(true);
+      const errors: unknown[] = [];
+      let refBalance = 0;
+      let failDisable = false;
+      input.isRaw = false;
+      input.setRawMode = (mode: boolean) => {
+        input.isRaw = mode;
+        return stdin;
+      };
+      stdin.ref = () => {
+        refBalance++;
+        return stdin;
+      };
+      stdin.unref = () => {
+        refBalance--;
+        return stdin;
+      };
+      const originalWrite = stdout.write.bind(stdout);
+      stdout.write = ((...args: unknown[]) => {
+        const value = String(args[0]);
+        const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+        if (failDisable && value === disable) {
+          failDisable = false;
+          throw new Error("disable failed after write");
+        }
+        return result;
+      }) as NodeJS.WriteStream["write"];
+      const Child = defineComponent(() => {
+        install(active);
+        return () => h("tui-text", null, "x");
+      });
+      const App = defineComponent(() => {
+        onErrorCaptured((error) => {
+          errors.push(error);
+          return false;
+        });
+        return () => h(Child);
+      });
+      const app = createApp(App);
+      try {
+        app.mount({
+          stdout,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "auto",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+        });
+        failDisable = true;
+        active.value = false;
+        await nextTick();
+        await flushInput();
+
+        expect(errors).toHaveLength(1);
+        expect(writes.filter((value) => value === enable || value === disable)).toEqual([
+          enable,
+          disable,
+          disable,
+        ]);
+        expect({
+          isRaw: input.isRaw,
+          refBalance,
+          dataListeners: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: false, refBalance: 0, dataListeners: 0 });
+      } finally {
+        app.unmount();
+        if (previousTerm === undefined) delete process.env["TERM"];
+        else process.env["TERM"] = previousTerm;
+        stdin.destroy();
+        stdout.destroy();
+      }
+    },
+  );
+
+  test.each(terminalModeCases)(
+    "$label reconciles a re-entrant final active state before surfacing a disable error",
+    async ({ enable, disable, install }) => {
+      const previousTerm = process.env["TERM"];
+      process.env["TERM"] = "xterm-256color";
+      const { stream: stdin } = makeFakeStdin();
+      const input = stdin as WritableTestStdin;
+      const stdout = makeFakeWritable();
+      const writes = captureWrites(stdout);
+      const active = shallowRef(true);
+      const errors: unknown[] = [];
+      let refBalance = 0;
+      let reactivateAndFail = false;
+      input.isRaw = false;
+      input.setRawMode = (mode: boolean) => {
+        input.isRaw = mode;
+        return stdin;
+      };
+      stdin.ref = () => {
+        refBalance++;
+        return stdin;
+      };
+      stdin.unref = () => {
+        refBalance--;
+        return stdin;
+      };
+      const originalWrite = stdout.write.bind(stdout);
+      stdout.write = ((...args: unknown[]) => {
+        const value = String(args[0]);
+        const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+        if (reactivateAndFail && value === disable) {
+          reactivateAndFail = false;
+          active.value = true;
+          throw new Error("disable failed after reactivation");
+        }
+        return result;
+      }) as NodeJS.WriteStream["write"];
+      const Child = defineComponent(() => {
+        install(active);
+        return () => h("tui-text", null, "x");
+      });
+      const App = defineComponent(() => {
+        onErrorCaptured((error) => {
+          errors.push(error);
+          return false;
+        });
+        return () => h(Child);
+      });
+      const app = createApp(App);
+      try {
+        app.mount({
+          stdout,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "auto",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+        });
+        reactivateAndFail = true;
+        active.value = false;
+        await nextTick();
+        await flushInput();
+
+        expect(errors).toHaveLength(1);
+        expect(active.value).toBe(true);
+        expect(writes.filter((value) => value === enable || value === disable)).toEqual([
+          enable,
+          disable,
+          disable,
+          enable,
+        ]);
+        expect({
+          isRaw: input.isRaw,
+          refBalance,
+          dataListeners: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: true, refBalance: 1, dataListeners: 1 });
+      } finally {
+        app.unmount();
+        if (previousTerm === undefined) delete process.env["TERM"];
+        else process.env["TERM"] = previousTerm;
+        stdin.destroy();
+        stdout.destroy();
+      }
+    },
+  );
+
+  test.each([
+    {
+      label: "useInput",
+      install: (active: ShallowRef<boolean>) => {
+        useInput(() => {}, { isActive: active });
+      },
+    },
+    {
+      label: "useFocus",
+      install: (active: ShallowRef<boolean>) => {
+        useFocus({ isActive: active });
+      },
+    },
+  ])("$label reconciles re-entrant activation after a raw-mode error", async ({ install }) => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    const active = shallowRef(false);
+    const errors: unknown[] = [];
+    const rawModeCalls: boolean[] = [];
+    let refBalance = 0;
+    let toggleAndFail = false;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      rawModeCalls.push(mode);
+      input.isRaw = mode;
+      if (mode && toggleAndFail) {
+        toggleAndFail = false;
+        active.value = false;
+        active.value = true;
+        throw new Error("raw enable failed after reactivation");
+      }
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      return stdin;
+    };
+    const Child = defineComponent(() => {
+      install(active);
+      return () => h("tui-text", null, "x");
+    });
+    const App = defineComponent(() => {
+      onErrorCaptured((error) => {
+        errors.push(error);
+        return false;
+      });
+      return () => h(Child);
+    });
+    const app = createApp(App);
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "auto",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "disabled" },
+      });
+      toggleAndFail = true;
+      active.value = true;
+      await nextTick();
+      await flushInput();
+
+      expect(errors).toHaveLength(1);
+      expect(active.value).toBe(true);
+      expect({ rawModeCalls, isRaw: input.isRaw, refBalance }).toEqual({
+        rawModeCalls: [true, false, true],
+        isRaw: true,
+        refBalance: 1,
+      });
+      expect(stdin.listenerCount("data")).toBe(1);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test.each(terminalModeCases)(
+    "$label suspension retries a one-shot restore failure before returning",
+    async ({ disable, install }) => {
+      const previousTerm = process.env["TERM"];
+      process.env["TERM"] = "xterm-256color";
+      const { stream: stdin } = makeFakeStdin();
+      const input = stdin as WritableTestStdin;
+      const stdout = makeFakeWritable();
+      const active = shallowRef(true);
+      const suspensionHost = createManualSuspensionHost();
+      let refBalance = 0;
+      let failDisable = false;
+      let disableAttempts = 0;
+      input.isRaw = false;
+      input.setRawMode = (mode: boolean) => {
+        input.isRaw = mode;
+        return stdin;
+      };
+      stdin.ref = () => {
+        refBalance++;
+        return stdin;
+      };
+      stdin.unref = () => {
+        refBalance--;
+        return stdin;
+      };
+      const originalWrite = stdout.write.bind(stdout);
+      stdout.write = ((...args: unknown[]) => {
+        const value = String(args[0]);
+        if (value === disable) {
+          disableAttempts++;
+          if (failDisable) {
+            failDisable = false;
+            throw new Error("disable failed before write");
+          }
+        }
+        return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+      }) as NodeJS.WriteStream["write"];
+      const App = defineComponent(() => {
+        install(active);
+        return () => h("tui-text", null, "x");
+      });
+      const app = createApp(App);
+      try {
+        app.mount({
+          stdout,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+          rawMode: "auto",
+          exitOnCtrlC: false,
+          kittyKeyboard: { mode: "disabled" },
+          [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+        } as Parameters<TuiApp["mount"]>[0]);
+        failDisable = true;
+        await suspensionHost.suspend();
+
+        expect(disableAttempts).toBe(2);
+        expect({
+          isRaw: input.isRaw,
+          refBalance,
+          dataListeners: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: false, refBalance: 0, dataListeners: 0 });
+      } finally {
+        app.unmount();
+        if (previousTerm === undefined) delete process.env["TERM"];
+        else process.env["TERM"] = previousTerm;
+        stdin.destroy();
+        stdout.destroy();
+      }
+    },
+  );
+
+  test("suspension and unmount retry one-shot raw-mode restore failures", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    let failDisable = false;
+    let disableAttempts = 0;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      if (!mode) {
+        disableAttempts++;
+        if (failDisable) {
+          failDisable = false;
+          throw new Error("raw disable failed before taking effect");
+        }
+      }
+      input.isRaw = mode;
+      return stdin;
+    };
+    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "always",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      failDisable = true;
+      await suspensionHost.suspend();
+      expect({ disableAttempts, isRaw: input.isRaw }).toEqual({
+        disableAttempts: 2,
+        isRaw: false,
+      });
+
+      await suspensionHost.resume();
+      expect(input.isRaw).toBe(true);
+      failDisable = true;
+      app.unmount();
+      expect({ disableAttempts, isRaw: input.isRaw }).toEqual({
+        disableAttempts: 4,
+        isRaw: false,
+      });
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("unmount retries a one-shot stdin.unref failure", () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    let refBalance = 0;
+    let failUnref = true;
+    let unrefAttempts = 0;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      input.isRaw = mode;
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      unrefAttempts++;
+      if (failUnref) {
+        failUnref = false;
+        throw new Error("unref failed before taking effect");
+      }
+      refBalance--;
+      return stdin;
+    };
+    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "always",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+
+    expect(() => app.unmount()).not.toThrow();
+    expect({ isRaw: input.isRaw, refBalance, unrefAttempts }).toEqual({
+      isRaw: false,
+      refBalance: 0,
+      unrefAttempts: 2,
+    });
+    stdin.destroy();
+    stdout.destroy();
+  });
+
+  test("listener detach failure cannot skip paste, mouse, or raw cleanup", () => {
+    const previousTerm = process.env["TERM"];
+    process.env["TERM"] = "xterm-256color";
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    let refBalance = 0;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      input.isRaw = mode;
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      return stdin;
+    };
+    const App = defineComponent(() => {
+      usePaste(() => {});
+      useMouseInput(() => {});
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    const originalOff = stdin.off.bind(stdin) as typeof stdin.off;
+    let failedDataOffCalls = 0;
+    stdin.off = ((event: string | symbol, listener: (...args: any[]) => void) => {
+      if (event === "data" && failedDataOffCalls++ < 2) {
+        throw new Error("data off failed");
+      }
+      return originalOff(event, listener);
+    }) as typeof stdin.off;
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "always",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "disabled" },
+      });
+
+      expect(() => app.unmount()).not.toThrow();
+      expect({ isRaw: input.isRaw, refBalance }).toEqual({ isRaw: false, refBalance: 0 });
+      expect(writes.join("")).toContain("\x1b[?2004l");
+      expect(writes.join("")).toContain("\x1b[?1000l\x1b[?1006l");
+    } finally {
+      stdin.off = originalOff;
+      for (const listener of stdin.listeners("data")) {
+        stdin.off("data", listener as (...args: any[]) => void);
+      }
+      if (previousTerm === undefined) delete process.env["TERM"];
+      else process.env["TERM"] = previousTerm;
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("detach re-entry preserves the replacement app listener and partial framing", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const activeB = shallowRef(false);
+    const inputsB: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput(() => {});
+      return () => h("tui-text", null, "a");
+    });
+    const AppB = defineComponent(() => {
+      useInput((value) => inputsB.push(value), { isActive: activeB });
+      return () => h("tui-text", null, "b");
+    });
+    const appA = createApp(AppA);
+    const appB = createApp(AppB);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+
+    const originalOn = stdin.on.bind(stdin) as typeof stdin.on;
+    const originalOff = stdin.off.bind(stdin) as typeof stdin.off;
+    let injectPartialOnAttach = false;
+    let reentered = false;
+    stdin.on = ((event: string | symbol, listener: (...args: any[]) => void) => {
+      const result = originalOn(event as string, listener);
+      if (event === "data" && injectPartialOnAttach) {
+        injectPartialOnAttach = false;
+        listener("\x1b[");
+      }
+      return result;
+    }) as typeof stdin.on;
+    stdin.off = ((event: string | symbol, listener: (...args: any[]) => void) => {
+      if (event === "data" && !reentered) {
+        reentered = true;
+        injectPartialOnAttach = true;
+        activeB.value = true;
+        originalOff(event as string, listener);
+        throw new Error("off failed after remove");
+      }
+      return originalOff(event as string, listener);
+    }) as typeof stdin.off;
+
+    try {
+      expect(() => appA.unmount()).not.toThrow();
+      expect(stdin.listenerCount("data")).toBe(1);
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect(inputsB).toEqual([""]);
+    } finally {
+      stdin.on = originalOn;
+      stdin.off = originalOff;
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("pause re-entry leaves a newly active replacement app flowing", async () => {
+    const stdin = makeRawByteStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const activeB = shallowRef(false);
+    const inputsB: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput(() => {});
+      return () => h("tui-text", null, "a");
+    });
+    const AppB = defineComponent(() => {
+      useInput((value) => inputsB.push(value), { isActive: activeB });
+      return () => h("tui-text", null, "b");
+    });
+    const appA = createApp(AppA);
+    const appB = createApp(AppB);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    const originalPause = stdin.pause.bind(stdin);
+    let reentered = false;
+    stdin.pause = (() => {
+      if (!reentered) {
+        reentered = true;
+        activeB.value = true;
+      }
+      return originalPause();
+    }) as typeof stdin.pause;
+    try {
+      appA.unmount();
+
+      expect(stdin.listenerCount("data")).toBe(1);
+      expect(stdin.readableFlowing).toBe(true);
+      stdin.write("z");
+      await flushInput();
+      expect(inputsB).toEqual(["z"]);
+    } finally {
+      stdin.pause = originalPause;
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("suspension cannot retain ordinary input emitted while a Kitty query is pending", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      input.isRaw = mode;
+      if (!mode) stdin.emit("data", "x");
+      return stdin;
+    };
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const { app, inputs } = mountInputAppOnStreams({
+      stdin,
+      stdout,
+      kittyMode: "auto",
+      suspensionHost,
+    });
+    try {
+      await suspensionHost.suspend();
+      await suspensionHost.resume();
+      await flushInput();
+
+      expect(inputs).toEqual([]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("continuation restores mouse classification before synchronous buffered input", async () => {
+    const previousTerm = process.env["TERM"];
+    process.env["TERM"] = "xterm-256color";
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputs: string[] = [];
+    const mice: unknown[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      useMouseInput((event) => mice.push(event));
+      return () => h("tui-text", null, "x");
+    });
+    const originalResume = stdin.resume.bind(stdin);
+    let emitMouseOnResume = false;
+    stdin.resume = (() => {
+      const result = originalResume();
+      if (emitMouseOnResume) {
+        emitMouseOnResume = false;
+        stdin.emit("data", "\x1b[<64;1;1M");
+      }
+      return result;
+    }) as typeof stdin.resume;
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      await suspensionHost.suspend();
+      emitMouseOnResume = true;
+      await suspensionHost.resume();
+      await flushInput();
+
+      expect(inputs).toEqual([]);
+      expect(mice).toHaveLength(1);
+    } finally {
+      app.unmount();
+      if (previousTerm === undefined) delete process.env["TERM"];
+      else process.env["TERM"] = previousTerm;
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test.each([
+    ["CSI", "\x1b["],
+    ["bracketed paste", "\x1b[200~unfinished"],
+    ["UTF-8 scalar", new Uint8Array([0xf0, 0x9f])],
+  ] as const)(
+    "the last consumer release discards an orphaned partial %s",
+    async (_name, partial) => {
+      const { stream: stdin } = makeFakeStdin();
+      const stdout = makeFakeWritable();
+      const visible = shallowRef(true);
+      const Child = defineComponent(() => {
+        useInput(() => {});
+        return () => h("tui-text", null, "input");
+      });
+      const App = defineComponent(
+        () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+      );
+      const app = createApp(App);
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        rawMode: "auto",
+        exitOnCtrlC: false,
+        kittyKeyboard: { mode: "disabled" },
+      });
+      try {
+        stdin.emit("data", partial);
+        expect(stdin.listenerCount("data")).toBe(1);
+
+        visible.value = false;
+        await nextTick();
+
+        expect(stdin.listenerCount("data")).toBe(0);
+      } finally {
+        app.unmount();
+        stdin.destroy();
+        stdout.destroy();
+      }
+    },
+  );
+
+  test("a partial event stays framed for another recipient that saw its start", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const visibleA = shallowRef(true);
+    const inputsA: string[] = [];
+    const ChildA = defineComponent(() => {
+      useInput((value) => inputsA.push(value));
+      return () => h("tui-text", null, "a");
+    });
+    const AppA = defineComponent(
+      () => () => (visibleA.value ? h(ChildA) : h("tui-text", null, "idle")),
+    );
+    const appA = createApp(AppA);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      stdin.emit("data", "\x1b[");
+      visibleA.value = false;
+      await nextTick();
+
+      expect(stdin.listenerCount("data")).toBe(1);
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect(inputsA).toEqual([]);
+      expect(b.inputs).toEqual([""]);
+    } finally {
+      appA.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("consumer release clears a pending frame retained across suspend and resume", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const visible = shallowRef(true);
+    const suspensionHost = createManualSuspensionHost();
+    const Child = defineComponent(() => {
+      useInput(() => {});
+      return () => h("tui-text", null, "input");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Child) : h("tui-text", null, "idle")),
+    );
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      stdin.emit("data", "\x1b[");
+      await suspensionHost.suspend();
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      await suspensionHost.resume();
+      visible.value = false;
+      await nextTick();
+
+      expect(stdin.listenerCount("data")).toBe(0);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test.each([
+    ["one physical chunk", ["a\x1b[200~p\x1b[201~b"]],
+    ["three physical chunks", ["a", "\x1b[200~p\x1b[201~", "b"]],
+  ])("suspension stops later semantic events independent of %s", async (_name, chunks) => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const suspensionHost = createManualSuspensionHost();
+    const inputs: string[] = [];
+    const pastes: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => {
+        inputs.push(value);
+        if (value === "a") void suspensionHost.suspend();
+      });
+      usePaste((value) => pastes.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      for (const chunk of chunks) stdin.emit("data", chunk);
+      await flushInput();
+
+      expect(inputs).toEqual(["a"]);
+      expect(pastes).toEqual([]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("same-chunk suspension retains the following partial CSI context", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput((value) => {
+        inputsA.push(value);
+        if (value === "a") void suspensionHost.suspend();
+      });
+      return () => h("tui-text", null, "a");
+    });
+    const appA = createApp(AppA);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      stdin.emit("data", "a\x1b[");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      await suspensionHost.resume();
+      stdin.emit("data", "Az");
+      await flushInput();
+
+      expect(inputsA).toEqual(["a", "z"]);
+      expect(b.inputs).toEqual(["a", "", "z"]);
+    } finally {
+      appA.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("suspension drops an ambiguous lone Escape before the first resumed key", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const { app, inputs } = mountInputAppOnStreams({
+      stdin,
+      stdout,
+      kittyMode: "disabled",
+      suspensionHost,
+    });
+    try {
+      stdin.emit("data", "\x1b");
+      await suspensionHost.suspend();
+      await suspensionHost.resume();
+      stdin.emit("data", "a");
+      await flushInput();
+
+      expect(inputs).toEqual(["a"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("same-chunk suspension retains the following partial paste context", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const pastesA: string[] = [];
+    const pastesB: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput((value) => {
+        inputsA.push(value);
+        if (value === "a") void suspensionHost.suspend();
+      });
+      usePaste((value) => pastesA.push(value));
+      return () => h("tui-text", null, "a");
+    });
+    const AppB = defineComponent(() => {
+      useInput(() => {});
+      usePaste((value) => pastesB.push(value));
+      return () => h("tui-text", null, "b");
+    });
+    const appA = createApp(AppA);
+    const appB = createApp(AppB);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "a\x1b[20");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      await suspensionHost.resume();
+      stdin.emit("data", "0~p\x1b[201~z");
+      await flushInput();
+
+      expect(inputsA).toEqual(["a", "z"]);
+      expect(pastesA).toEqual([]);
+      expect(pastesB).toEqual(["p"]);
+    } finally {
+      appA.unmount();
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("input emitted after reentrant suspension is not replayed on resume", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const inputsB: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput((value) => {
+        inputsA.push(value);
+        if (value === "a") {
+          void suspensionHost.suspend();
+          stdin.emit("data", "x");
+        }
+      });
+      return () => h("tui-text", null, "a");
+    });
+    const AppB = defineComponent(() => {
+      useInput((value) => inputsB.push(value));
+      return () => h("tui-text", null, "b");
+    });
+    const appA = createApp(AppA);
+    const appB = createApp(AppB);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+    });
+    try {
+      stdin.emit("data", "a");
+      await suspensionHost.resume();
+      await flushInput();
+
+      expect(inputsA).toEqual(["a"]);
+      expect(inputsB).toEqual(["a", "x"]);
+    } finally {
+      appA.unmount();
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("an app resumed inside a shared paste skips to its end marker", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const inputsB: string[] = [];
+    const pastesA: string[] = [];
+    const pastesB: string[] = [];
+    const makeApp = (inputs: string[], pastes: string[]) =>
+      defineComponent(() => {
+        useInput((value) => inputs.push(value));
+        usePaste((value) => pastes.push(value));
+        return () => h("tui-text", null, "x");
+      });
+    const appA = createApp(makeApp(inputsA, pastesA));
+    const appB = createApp(makeApp(inputsB, pastesB));
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+    });
+    try {
+      stdin.emit("data", "\x1b[200~before");
+      await suspensionHost.suspend();
+      stdin.emit("data", "middle");
+      await suspensionHost.resume();
+      stdin.emit("data", "after\x1b[201~z");
+      await flushInput();
+
+      expect({ inputs: inputsA, pastes: pastesA }).toEqual({ inputs: ["z"], pastes: [] });
+      expect({ inputs: inputsB, pastes: pastesB }).toEqual({
+        inputs: ["z"],
+        pastes: ["beforemiddleafter"],
+      });
+    } finally {
+      appA.unmount();
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("the sole app resumed inside a paste recovers after its end", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputs: string[] = [];
+    const pastes: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      usePaste((value) => pastes.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    try {
+      stdin.emit("data", "\x1b[200~before");
+      await suspensionHost.suspend();
+      await suspensionHost.resume();
+      stdin.emit("data", "after\x1b[201~z");
+      await flushInput();
+
+      expect(inputs).toEqual(["z"]);
+      expect(pastes).toEqual([]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("reactivation during a partial paste start excludes the old paste but keeps later input", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const inputsB: string[] = [];
+    const pastesA: string[] = [];
+    const pastesB: string[] = [];
+    const makeApp = (inputs: string[], pastes: string[]) =>
+      defineComponent(() => {
+        useInput((value) => inputs.push(value));
+        usePaste((value) => pastes.push(value));
+        return () => h("tui-text", null, "x");
+      });
+    const appA = createApp(makeApp(inputsA, pastesA));
+    const appB = createApp(makeApp(inputsB, pastesB));
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    appB.mount({
+      stdout: stdoutB,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+    });
+    try {
+      stdin.emit("data", "\x1b[20");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      await suspensionHost.suspend();
+      await suspensionHost.resume();
+      stdin.emit("data", "0~p\x1b[201~z");
+      await flushInput();
+
+      expect({ inputs: inputsA, pastes: pastesA }).toEqual({ inputs: ["z"], pastes: [] });
+      expect({ inputs: inputsB, pastes: pastesB }).toEqual({ inputs: ["z"], pastes: ["p"] });
+    } finally {
+      appA.unmount();
+      appB.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a slow partial paste start remains one paste without suspension", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdout = makeFakeWritable();
+    const inputs: string[] = [];
+    const pastes: string[] = [];
+    const App = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      usePaste((value) => pastes.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    try {
+      stdin.emit("data", "\x1b[20");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      stdin.emit("data", "0~p\x1b[201~z");
+      await flushInput();
+
+      expect(inputs).toEqual(["z"]);
+      expect(pastes).toEqual(["p"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("reactivation cannot receive the tail of a CSI key begun before suspension", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, suspensionHost });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB });
+    try {
+      stdin.emit("data", "\x1b[");
+      await suspensionHost.suspend();
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      await suspensionHost.resume();
+      stdin.emit("data", "A");
+      await flushInput();
+
+      expect(a.inputs).toEqual([]);
+      expect(b.inputs).toEqual([""]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("reactivation cannot receive a UTF-8 scalar begun while suspended", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, suspensionHost });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB });
+    try {
+      await suspensionHost.suspend();
+      stdin.emit("data", new Uint8Array([0xf0, 0x9f]));
+      await suspensionHost.resume();
+      stdin.emit("data", new Uint8Array([0x92, 0xa9, 0x7a]));
+      await flushInput();
+
+      expect(a.inputs).toEqual(["z"]);
+      expect(b.inputs).toEqual(["💩", "z"]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("the production ingress keeps raw byte boundaries instead of installing a decoder", async () => {
+    const stdin = makeRawByteStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({
+      stdin,
+      stdout: stdoutA,
+      kittyMode: "disabled",
+      suspensionHost,
+    });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      await suspensionHost.suspend();
+      stdin.write(new Uint8Array([0xf0, 0x9f]));
+      await suspensionHost.resume();
+      stdin.write(new Uint8Array([0x92, 0xa9, 0x7a]));
+      await flushInput();
+
+      expect(stdin.readableEncoding).toBeNull();
+      expect(a.inputs).toEqual(["z"]);
+      expect(b.inputs).toEqual(["💩", "z"]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test.each([
+    ["E0 overlong", [0xe0], [0x80, 0x80], "��"],
+    ["ED surrogate", [0xed], [0xa0, 0x80], "��"],
+    ["F0 overlong", [0xf0], [0x80, 0x80, 0x80], "���"],
+    ["F4 above Unicode", [0xf4], [0x90, 0x80, 0x80], "���"],
+  ] as const)(
+    "invalid UTF-8 keeps later byte recipients (%s)",
+    async (_name, leadingBytes, laterBytes, expectedLaterText) => {
+      const stdin = makeRawByteStdin();
+      const stdoutA = makeFakeWritable();
+      const stdoutB = makeFakeWritable();
+      const suspensionHost = createManualSuspensionHost();
+      const a = mountInputAppOnStreams({
+        stdin,
+        stdout: stdoutA,
+        kittyMode: "disabled",
+        suspensionHost,
+      });
+      try {
+        stdin.write(new Uint8Array(leadingBytes));
+        await suspensionHost.suspend();
+        const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+        try {
+          stdin.write(new Uint8Array(laterBytes));
+          await flushInput();
+
+          expect(a.inputs).toEqual([]);
+          expect(b.inputs.join("")).toBe(expectedLaterText);
+        } finally {
+          b.app.unmount();
+        }
+      } finally {
+        a.app.unmount();
+        stdin.destroy();
+        stdoutA.destroy();
+        stdoutB.destroy();
+      }
+    },
+  );
+
+  test("a string chunk terminates pending bytes before its own text", async () => {
+    const stdin = makeRawByteStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({
+      stdin,
+      stdout: stdoutA,
+      kittyMode: "disabled",
+      suspensionHost,
+    });
+    try {
+      stdin.write(new Uint8Array([0xf0, 0x9f]));
+      await suspensionHost.suspend();
+      const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+      try {
+        stdin.emit("data", "x");
+        stdin.write(new Uint8Array([0x92, 0xa9]));
+        await flushInput();
+
+        expect(a.inputs).toEqual([]);
+        expect(b.inputs).toEqual(["x", "��"]);
+      } finally {
+        b.app.unmount();
+      }
+    } finally {
+      a.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("owner cancellation cannot move a held prefix before earlier input", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const inputsA: string[] = [];
+    const AppA = defineComponent(() => {
+      useInput((value) => {
+        inputsA.push(value);
+        if (value === "a") void suspensionHost.suspend();
+      });
+      return () => h("tui-text", null, "a");
+    });
+    const appA = createApp(AppA);
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      stdin.emit("data", "a\x1b");
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+      expect(inputsA).toEqual(["a"]);
+      expect(b.inputs).toEqual(["a", ""]);
+    } finally {
+      appA.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("cancelling one query releases a safe prefix only to the other active app", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const suspensionHost = createManualSuspensionHost();
+    const a = mountInputAppOnStreams({
+      stdin,
+      stdout: stdoutA,
+      kittyMode: "auto",
+      suspensionHost,
+    });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "disabled" });
+    try {
+      stdin.emit("data", "\x1b");
+      await suspensionHost.suspend();
+      await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+      expect(a.inputs).toEqual([]);
+      expect(b.inputs).toEqual([""]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("reply-shaped bytes inside bracketed paste remain application payload", async () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const pastes: string[] = [];
+    const App = defineComponent(() => {
+      usePaste((value) => pastes.push(value));
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      rawMode: "auto",
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    try {
+      input.write("\x1b[200~before\x1b[?1uafter\x1b[201~");
+      await flushInput();
+
+      expect(pastes).toEqual(["before\x1b[?1uafter"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test.each(["auto-first", "disabled-first"] as const)(
+    "auto and disabled apps do not diverge on a slow reply split (%s)",
+    async (order) => {
+      const { stream: stdin } = makeFakeStdin();
+      const input = stdin as WritableTestStdin;
+      const stdoutAuto = makeFakeWritable();
+      const stdoutDisabled = makeFakeWritable();
+      const mountAuto = () =>
+        mountInputAppOnStreams({ stdin, stdout: stdoutAuto, kittyMode: "auto" });
+      const mountDisabled = () =>
+        mountInputAppOnStreams({ stdin, stdout: stdoutDisabled, kittyMode: "disabled" });
+      const first = order === "auto-first" ? mountAuto() : mountDisabled();
+      const second = order === "auto-first" ? mountDisabled() : mountAuto();
+      const auto = order === "auto-first" ? first : second;
+      const disabled = order === "auto-first" ? second : first;
+      try {
+        input.write("\x1b[?");
+        await new Promise<void>((resolve) => setTimeout(resolve, 35));
+        input.write("1u");
+        await flushInput();
+
+        expect(auto.inputs).toEqual([]);
+        expect(disabled.inputs).toEqual(auto.inputs);
+      } finally {
+        first.app.unmount();
+        second.app.unmount();
+        stdin.destroy();
+        stdoutAuto.destroy();
+        stdoutDisabled.destroy();
+      }
+    },
+  );
+
+  test("a detector that is still active owns a reply after another app times out", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, kittyMode: "auto" });
+    await new Promise<void>((resolve) => setTimeout(resolve, 60));
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 160));
+      input.write("\x1b[?1u");
+      await flushInput();
+
+      expect(a.inputs).toEqual([]);
+      expect(b.inputs).toEqual([]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("each overlapping query owns one response, including a slow second response", async () => {
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdoutA = makeFakeWritable();
+    const stdoutB = makeFakeWritable();
+    const a = mountInputAppOnStreams({ stdin, stdout: stdoutA, kittyMode: "auto" });
+    const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
+    try {
+      input.write("\x1b[?1u");
+      input.write("\x1b[?");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      input.write("1u");
+      await flushInput();
+
+      expect(a.inputs).toEqual([]);
+      expect(b.inputs).toEqual([]);
+    } finally {
+      a.app.unmount();
+      b.app.unmount();
+      stdin.destroy();
+      stdoutA.destroy();
+      stdoutB.destroy();
+    }
+  });
+
+  test("a reply completed after the finite detection window is ordinary input", async () => {
+    const stdout = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const { app, inputs } = mountInputAppOnStreams({ stdin, stdout, kittyMode: "auto" });
+    try {
+      input.write("\x1b[?1");
+      await new Promise<void>((resolve) => setTimeout(resolve, 230));
+      input.write("u");
+      await flushInput();
+
+      expect(inputs).toEqual(["u"]);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
   });
 });
