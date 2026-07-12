@@ -1,12 +1,8 @@
-import { createApp, Text, useStdin } from "@vue-tui/runtime";
-import { defineComponent, onMounted } from "vue";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { defineComponent } from "vue";
 
 const App = defineComponent(() => {
-  const { setRawMode } = useStdin();
-
-  onMounted(() => {
-    setRawMode(true);
-  });
+  useInput(() => {});
 
   return () => <Text>Hello World</Text>;
 });

@@ -22,6 +22,6 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ rawMode: "auto", exitOnCtrlC: false });
+app.mount({ exitOnCtrlC: false });
 await app.waitUntilExit();
 console.log("exited");

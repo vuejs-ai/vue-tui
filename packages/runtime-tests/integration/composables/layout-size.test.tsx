@@ -269,7 +269,6 @@ test("rapid resize events commit only the newest layout and participate in the r
       stdin,
       stderr,
       liveUpdates: true,
-      rawMode: "auto",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,

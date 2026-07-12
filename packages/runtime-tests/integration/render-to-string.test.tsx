@@ -226,15 +226,15 @@ describe("renderToString", () => {
   });
 
   test("useStdin does not throw in renderToString", () => {
-    let rawModeSupported = true;
+    let captured: ReturnType<typeof useStdin> | undefined;
     const App = defineComponent(() => {
-      const stdin = useStdin();
-      rawModeSupported = stdin.isRawModeSupported;
+      captured = useStdin();
       return () => <Text>with stdin</Text>;
     });
     const output = renderToString(App);
     expect(output).toContain("with stdin");
-    expect(rawModeSupported).toBe(false);
+    expect(Reflect.ownKeys(captured!)).toEqual(["stdin"]);
+    expect(captured?.stdin.isTTY).toBe(false);
   });
 
   test("useStdout does not throw in renderToString", () => {

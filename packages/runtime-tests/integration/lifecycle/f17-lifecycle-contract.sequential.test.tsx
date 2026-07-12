@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useStdout } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useStdout } from "@vue-tui/runtime";
+import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
 import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
 
 function makeTtyWritable(): NodeJS.WriteStream & { chunks: string[] } {
@@ -59,7 +60,6 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      rawMode: "always",
       exitOnCtrlC: false,
       maxFps: 0,
       patchConsole: false,
@@ -86,7 +86,7 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
     error: "resize registration failed",
     leftAlternateScreen: true,
     rawMode: false,
-    rawModeCalls: [true, false],
+    rawModeCalls: [],
   });
 });
 
@@ -101,7 +101,6 @@ test.sequential("raw-mode teardown restores a pre-existing raw stdin baseline", 
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "always",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -124,26 +123,40 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
     refBalance--;
     return stdin;
   };
-  const app = createApp(defineComponent(() => () => null));
+  let selectRoute!: () => () => void;
+  const App = defineComponent(() => {
+    const routing = useInternalInputRoutingForTest();
+    const boundary = routing.registerSemantic({
+      id: "boundary",
+      handle: () => ({
+        performed: false,
+        continue: true,
+        preventDefault: false,
+        blockExternal: false,
+      }),
+    });
+    selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+    return () => null;
+  });
+  const app = createApp(App);
 
-  expect(() =>
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      rawMode: "always",
-      exitOnCtrlC: false,
-      maxFps: 0,
-      patchConsole: false,
-    }),
-  ).toThrow("stdin.ref failed");
+  app.mount({
+    stdout,
+    stderr,
+    stdin,
+    liveUpdates: true,
+    exitOnCtrlC: false,
+    maxFps: 0,
+    patchConsole: false,
+  });
+  expect(selectRoute).toThrow("stdin.ref failed");
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
     isRaw: false,
     rawModeCalls: [true, false],
     refBalance: 0,
   });
+  app.unmount();
 });
 
 test.sequential("raw-byte ingress never installs a stream-level text decoder", () => {
@@ -164,14 +177,18 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
     setEncodingCalls++;
     throw new Error("stdin.setEncoding failed");
   }) as NodeJS.ReadStream["setEncoding"];
-  const app = createApp(defineComponent(() => () => null));
+  const app = createApp(
+    defineComponent(() => {
+      useInput(() => {});
+      return () => null;
+    }),
+  );
 
   app.mount({
     stdout,
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "always",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -202,14 +219,18 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
     ref: { configurable: true, value: undefined },
     unref: { configurable: true, value: undefined },
   });
-  const app = createApp(defineComponent(() => () => null));
+  const app = createApp(
+    defineComponent(() => {
+      useInput(() => {});
+      return () => null;
+    }),
+  );
 
   app.mount({
     stdout,
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "always",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -240,7 +261,6 @@ test.sequential("exit settlement and beforeExit ownership are idempotent after t
     stderr,
     stdin,
     liveUpdates: false,
-    rawMode: "auto",
     exitOnCtrlC: false,
     patchConsole: false,
   });
@@ -294,7 +314,6 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "auto",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -356,7 +375,6 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "auto",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,
@@ -411,7 +429,6 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "auto",
     exitOnCtrlC: false,
     // Keep the update below pending so unmount's synchronous final commit drives
     // the ordinary frame writer without throwing out of Vue's global post-flush

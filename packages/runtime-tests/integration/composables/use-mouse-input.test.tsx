@@ -52,7 +52,7 @@ test("useMouseInput enables SGR mouse mode and emits wheel events", async () => 
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   expect(writes.join("")).toContain(ENABLE_SGR_MOUSE);
@@ -87,7 +87,7 @@ test("useMouseInput accepts a handler ref", async () => {
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   stdin.emit("data", "\x1b[<64;1;1M");
@@ -133,7 +133,7 @@ test("useMouseInput keeps SGR mouse mode enabled until the last consumer release
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
@@ -170,7 +170,7 @@ test("useMouseInput respects isActive", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   expect(writes.join("")).not.toContain(ENABLE_SGR_MOUSE);
@@ -211,7 +211,7 @@ test("useMouseInput disables SGR mouse when support disappears before release", 
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   expect(countOccurrences(writes.join(""), ENABLE_SGR_MOUSE)).toBe(1);
@@ -252,7 +252,6 @@ test("element mouse handlers upgrade useMouseInput to drag mode and downgrade on
     stdin,
     maxFps: 0,
     exitOnCtrlC: false,
-    rawMode: "auto",
     mode: "fullscreen",
   });
   await settle();
@@ -317,7 +316,6 @@ test("a targeted mouse handler cannot remove the public recipient of the current
     stdin,
     maxFps: 0,
     exitOnCtrlC: false,
-    rawMode: "auto",
     mode: "fullscreen",
   });
   await settle();
@@ -351,7 +349,7 @@ test("useMouseInput consumes unsupported SGR mouse events before keyboard input"
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   stdin.emit("data", "\x1b[<0;10;5M\x1b[<0;10;5m\x1b[<64;10;5M");
@@ -379,7 +377,7 @@ test("useMouseInput does not consume bare CSI-like text", async () => {
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stderr, stdin, maxFps: 0, exitOnCtrlC: false });
   await settle();
 
   stdin.emit("data", "[<64;10;5M");

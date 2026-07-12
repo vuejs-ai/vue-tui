@@ -109,7 +109,8 @@ export function stripKittyQueryResponsesAndTrailingPartial(buffer: number[]): nu
 }
 
 export interface KittyKeyboardController {
-  init(options: KittyKeyboardOptions | undefined, allowAutoDetection: boolean): void;
+  /** Acquire one semantic-input demand and return its idempotent release. */
+  acquireDemand(): () => void;
   /** Temporarily release the physical protocol while retaining its desired configuration. */
   suspend(sync?: boolean): void;
   /** Reacquire the protocol state that was active before suspend(). */
@@ -132,41 +133,79 @@ export function createKittyKeyboardController(
   stdin: NodeJS.ReadStream,
   stdout: NodeJS.WriteStream,
   startQueryResponseDetection: StartKittyQueryResponseDetection,
+  options?: KittyKeyboardOptions,
 ): KittyKeyboardController {
   let enabled = false;
   let disposed = false;
   let suspended = false;
   let cancelDetection: ReturnType<StartKittyQueryResponseDetection> | undefined;
-  let configuredMode: "auto" | "enabled" | "disabled" = "disabled";
-  let configuredFlags: KittyFlagName[] = ["disambiguateEscapeCodes"];
-  let allowConfiguredAutoDetection = false;
-  let resumeEnabled = false;
-  let resumeDetection = false;
+  const configuredMode: "auto" | "enabled" | "disabled" = options
+    ? (options.mode ?? "auto")
+    : "disabled";
+  const configuredFlags: KittyFlagName[] = options?.flags ?? ["disambiguateEscapeCodes"];
+  let autoSupport: "unknown" | "supported" | "unsupported" = "unknown";
+  let demandCount = 0;
+  let pendingDeactivate = false;
+  let protocolEnabling = false;
+  let protocolDisabling = false;
+  let deferredDisableSync = false;
+
+  function canUseControlOutput(): boolean {
+    return (
+      (stdin as { readonly isTTY?: boolean }).isTTY === true &&
+      (stdout as { readonly isTTY?: boolean }).isTTY === true &&
+      !(stdout as { readonly destroyed?: boolean }).destroyed &&
+      !(stdout as { readonly writableEnded?: boolean }).writableEnded &&
+      (stdout as { readonly writable?: boolean }).writable !== false
+    );
+  }
 
   function enableProtocol(flags: KittyFlagName[]): void {
-    // Record ownership before the write: custom streams can synchronously
-    // re-enter app suspension or teardown from write(). Those paths must see the
-    // pushed protocol level and pop it before returning. If the acquisition
-    // throws, preserve that original error while attempting the same best-effort
-    // pop; dispose can retry when the compensating write also fails.
-    enabled = true;
+    // A Node-compliant synchronous write rejection means the PUSH was not
+    // accepted, so do not claim a stack level or compensate with a POP that
+    // could remove an external owner's level. Re-entrant suspension, teardown,
+    // or demand changes are recorded while the write is in flight and reconciled
+    // only after a successful PUSH.
+    protocolEnabling = true;
     try {
       stdout.write(`\x1b[>${resolveFlags(flags)}u`);
     } catch (error) {
-      if (enabled) disableProtocol();
+      protocolEnabling = false;
+      deferredDisableSync = false;
       throw error;
+    }
+    protocolEnabling = false;
+    enabled = true;
+
+    const shouldDisable = () => disposed || suspended || demandCount === 0;
+    if (shouldDisable()) {
+      const sync = deferredDisableSync;
+      deferredDisableSync = false;
+      disableProtocol(sync);
+      // Match the bounded restoration rule used by suspend, last release, and
+      // dispose. Re-read desired state because the first POP may re-enter resume
+      // or acquire a replacement demand whose new level must remain active.
+      if (enabled && shouldDisable()) disableProtocol(sync);
+    } else {
+      deferredDisableSync = false;
     }
   }
 
   function disableProtocol(sync = false): boolean {
-    const ownedBeforeWrite = enabled;
-    // Mirror enableProtocol's re-entry rule: resume() called synchronously from
-    // the pop write must observe that the old level is gone and push a new one.
-    // A failed pop restores ownership so a later resume avoids a duplicate push
-    // and dispose can retry.
-    enabled = false;
+    if (!enabled) return true;
+    if (protocolDisabling) {
+      deferredDisableSync ||= sync;
+      return false;
+    }
+
+    // Keep ownership committed until the POP write succeeds. A re-entrant resume
+    // or demand acquisition must not push a replacement while the old level may
+    // still exist; a synchronous rejection means the POP was not accepted.
+    protocolDisabling = true;
+    const effectiveSync = sync || deferredDisableSync;
+    deferredDisableSync = false;
     try {
-      if (sync) {
+      if (effectiveSync) {
         const streamFd = (stdout as { fd?: number }).fd;
         if (typeof streamFd === "number") {
           fsWriteSync(streamFd, "\x1b[<u");
@@ -179,31 +218,96 @@ export function createKittyKeyboardController(
           // guess process fd 1; write through the stream that was actually used.
           stdout.write("\x1b[<u");
         } else {
-          enabled ||= ownedBeforeWrite;
+          protocolDisabling = false;
           return false;
         }
       } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
         stdout.write("\x1b[<u");
       } else {
-        enabled ||= ownedBeforeWrite;
+        protocolDisabling = false;
         return false;
       }
-      return true;
     } catch {
       // Terminal restoration is best-effort; a failed Kitty write must not
-      // prevent the remaining cursor, screen, paste, mouse, or raw cleanup. Keep
-      // physical ownership so resume cannot push a duplicate protocol level and
-      // dispose can retry the pop.
-      enabled ||= ownedBeforeWrite;
+      // prevent the remaining cursor, screen, paste, mouse, or raw cleanup. The
+      // rejected POP leaves the old level owned so active demand needs no new
+      // PUSH, while suspension or teardown can retry the POP.
+      protocolDisabling = false;
       return false;
     }
+
+    protocolDisabling = false;
+    enabled = false;
+    deferredDisableSync = false;
+
+    // A resume or replacement demand may have arrived while the accepted POP
+    // was in flight. Reacquire only after committing the old level inactive. If
+    // the first PUSH is synchronously rejected, give the surviving committed
+    // demand one bounded retry before surfacing that first error.
+    if (!disposed && !suspended && demandCount > 0) {
+      try {
+        activateDemand();
+      } catch (error) {
+        try {
+          activateDemand();
+        } catch {
+          // Preserve the first restoration error.
+        }
+        throw error;
+      }
+    }
+    return true;
   }
 
   function confirmKittySupport(flags: KittyFlagName[]): void {
-    cancelDetection = startQueryResponseDetection((supported) => {
-      cancelDetection = undefined;
-      if (supported && !disposed && !suspended) enableProtocol(flags);
-    });
+    // Publish a starting sentinel before calling the host. A custom detector may
+    // synchronously re-enter demand acquisition or even settle before returning;
+    // neither path may start a duplicate query or leave a stale cancel handle.
+    const startingDetection = () => {};
+    let settled = false;
+    cancelDetection = startingDetection;
+    let cancel: ReturnType<StartKittyQueryResponseDetection>;
+    try {
+      cancel = startQueryResponseDetection((supported) => {
+        settled = true;
+        cancelDetection = undefined;
+        autoSupport = supported ? "supported" : "unsupported";
+        if (supported && demandCount > 0 && !disposed && !suspended && canUseControlOutput()) {
+          try {
+            enableProtocol(flags);
+          } catch (error) {
+            // Detection settles after the acquiring route has committed. A
+            // one-shot PUSH rejection must not strand that surviving demand;
+            // retry once while preserving the first host error for the ingress.
+            try {
+              activateDemand();
+            } catch {
+              // Preserve the first protocol-enable error.
+            }
+            throw error;
+          }
+        }
+      });
+    } catch (error) {
+      if (cancelDetection === startingDetection) cancelDetection = undefined;
+      throw error;
+    }
+
+    if (!settled && cancelDetection === startingDetection) {
+      cancelDetection = cancel;
+    } else if (!settled) {
+      // The controller was suspended, disposed, or otherwise cancelled while
+      // the detector host was on the stack. End the returned detector instead
+      // of publishing it after that lifecycle transition.
+      try {
+        cancel();
+      } catch {
+        // The lifecycle transition already owns cleanup; keep its state.
+      }
+      return;
+    }
+
+    if (settled || disposed || suspended || demandCount === 0) return;
 
     try {
       stdout.write("\x1b[?u");
@@ -221,99 +325,151 @@ export function createKittyKeyboardController(
     }
   }
 
+  function activateDemand(): void {
+    if (
+      disposed ||
+      suspended ||
+      demandCount === 0 ||
+      configuredMode === "disabled" ||
+      enabled ||
+      protocolEnabling ||
+      protocolDisabling ||
+      cancelDetection ||
+      !canUseControlOutput()
+    ) {
+      return;
+    }
+
+    if (configuredMode === "enabled" || autoSupport === "supported") {
+      enableProtocol(configuredFlags);
+      return;
+    }
+    if (autoSupport === "unknown") confirmKittySupport(configuredFlags);
+  }
+
+  function deactivateDemand(sync = false): void {
+    let firstError: unknown;
+    if (cancelDetection) {
+      const cancel = cancelDetection;
+      cancelDetection = undefined;
+      try {
+        // Ordinary cancellation deliberately leaves the finite ingress tombstone
+        // so a late reply cannot settle a newer application's query.
+        cancel();
+      } catch (error) {
+        firstError = error;
+      }
+    }
+    // Cancelling the old detector is host code and may synchronously acquire a
+    // replacement demand that starts and enables a new generation. Re-read the
+    // desired state before popping so the old cleanup cannot disable that new
+    // owner's protocol level.
+    if (protocolEnabling && (disposed || suspended || demandCount === 0)) {
+      deferredDisableSync ||= sync;
+    }
+    if (enabled && (disposed || suspended || demandCount === 0)) disableProtocol(sync);
+    if (firstError !== undefined) throw firstError;
+  }
+
+  function scheduleDeactivate(): void {
+    if (pendingDeactivate) return;
+    pendingDeactivate = true;
+    queueMicrotask(() => {
+      if (!pendingDeactivate || demandCount > 0 || disposed) return;
+      pendingDeactivate = false;
+      try {
+        deactivateDemand();
+        // Match dispose's bounded cleanup: under the normal Writable contract a
+        // synchronous throw rejects the pop before acceptance, so retry once at
+        // the exact last-demand boundary instead of retaining the protocol until
+        // whole-app teardown.
+        if (enabled && demandCount === 0) disableProtocol();
+      } catch {
+        // A release is terminal cleanup. The ingress has already ended the
+        // logical detector even if a hostile listener removal reports failure;
+        // dispose remains the final restoration backstop.
+      }
+    });
+  }
+
   const controller: KittyKeyboardController = {
     get isEnabled() {
       return enabled;
     },
 
-    init(options, allowAutoDetection) {
-      if (!options) return;
-
-      const mode = options.mode ?? "auto";
-      configuredMode = mode;
-      configuredFlags = options.flags ?? ["disambiguateEscapeCodes"];
-      allowConfiguredAutoDetection = allowAutoDetection;
-      if (mode === "disabled") return;
-
-      const flags = configuredFlags;
-
-      if (mode === "enabled") {
-        if ((stdin as { isTTY?: boolean }).isTTY && (stdout as { isTTY?: boolean }).isTTY) {
-          enableProtocol(flags);
+    acquireDemand() {
+      if (disposed) {
+        throw new Error("Cannot acquire Kitty keyboard input after the application unmounted");
+      }
+      demandCount++;
+      if (pendingDeactivate) pendingDeactivate = false;
+      try {
+        // Always reconcile. A prior hostile host callback may have changed the
+        // physical protocol while another logical demand survived.
+        activateDemand();
+      } catch (error) {
+        demandCount = Math.max(0, demandCount - 1);
+        try {
+          if (!disposed && !suspended && demandCount > 0) activateDemand();
+          else deactivateDemand();
+        } catch {
+          // Preserve the outer acquisition error. A later lifecycle transition
+          // or acquisition will reconcile the surviving desired state again.
         }
-        return;
+        throw error;
       }
 
-      // auto mode
-      if (
-        !allowAutoDetection ||
-        !(stdin as { isTTY?: boolean }).isTTY ||
-        !(stdout as { isTTY?: boolean }).isTTY
-      ) {
-        return;
-      }
-
-      confirmKittySupport(flags);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        demandCount = Math.max(0, demandCount - 1);
+        if (demandCount === 0) scheduleDeactivate();
+      };
     },
 
     suspend(sync = false) {
       if (disposed || suspended) return;
       suspended = true;
-      resumeDetection = cancelDetection !== undefined;
-      if (cancelDetection) cancelDetection();
-      resumeEnabled = enabled;
-      if (enabled) disableProtocol(sync);
+      pendingDeactivate = false;
+      try {
+        deactivateDemand(sync);
+      } finally {
+        // Under the Node Writable contract, a synchronous POP rejection means
+        // the escape was not accepted. Retry once before suspension completes;
+        // a re-entrant resume clears `suspended` and protects its replacement
+        // level from this retry.
+        if (enabled && (disposed || suspended || demandCount === 0)) disableProtocol(sync);
+      }
     },
 
     resume() {
       if (disposed || !suspended) return;
-      const shouldEnable = resumeEnabled;
-      const shouldDetect = resumeDetection;
-      if (shouldEnable) {
-        // A failed suspend pop leaves the original protocol level active. In
-        // that case continuation must not push another level.
-        if (!enabled) enableProtocol(configuredFlags);
-        suspended = false;
-        resumeEnabled = false;
-        resumeDetection = false;
-        return;
-      }
-      if (
-        shouldDetect &&
-        configuredMode === "auto" &&
-        allowConfiguredAutoDetection &&
-        (stdin as { isTTY?: boolean }).isTTY &&
-        (stdout as { isTTY?: boolean }).isTTY
-      ) {
-        // Mark the controller resumed before writing the query: a terminal may
-        // synchronously reply from stdout.write(), and that reply must be able to
-        // enable the protocol. Roll the logical state back if either registering
-        // detection or writing the query fails.
-        suspended = false;
-        try {
-          confirmKittySupport(configuredFlags);
-        } catch (error) {
-          suspended = true;
-          resumeDetection = true;
-          throw error;
-        }
-      }
       suspended = false;
-      resumeEnabled = false;
-      resumeDetection = false;
+      try {
+        activateDemand();
+      } catch (error) {
+        suspended = true;
+        throw error;
+      }
     },
 
     dispose(sync = false) {
-      disposed = true;
-      if (cancelDetection) {
-        cancelDetection();
+      if (!disposed) {
+        disposed = true;
+        pendingDeactivate = false;
+        demandCount = 0;
       }
-      if (enabled) {
-        disableProtocol(sync);
+      try {
+        deactivateDemand(sync);
+      } catch {
+        // Cleanup continues through the remaining terminal resources.
       }
+      // A synchronous stream failure normally means the first pop was not
+      // accepted. Retry once inside the same terminal-cleanup pass, and keep
+      // repeated dispose calls useful if a hostile stream fails more than once.
+      if (enabled) disableProtocol(sync);
       suspended = false;
-      resumeEnabled = false;
-      resumeDetection = false;
     },
   };
 

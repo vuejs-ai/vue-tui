@@ -2,7 +2,7 @@ import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
 import { PassThrough } from "node:stream";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, createApp, Text, useApp, useStdin } from "@vue-tui/runtime";
+import { Box, createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 
 test("setup() throw rejects render()", async () => {
   const Boom = defineComponent(() => {
@@ -97,9 +97,8 @@ test("raw mode is disabled on the thrown-error cleanup path", async () => {
   Object.assign(stderr, { isTTY: true, columns: 80, rows: 24 });
 
   const Boom = defineComponent(() => {
-    const { setRawMode } = useStdin();
+    useInput(() => {});
     onMounted(() => {
-      setRawMode(true);
       throw new Error("Error after raw mode enabled");
     });
     return () => <Text>Test</Text>;

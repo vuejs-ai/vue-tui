@@ -167,6 +167,11 @@ export function normalizeRequestedMode(options: object): RenderMode {
       'Mount option "debug" was removed; use "liveUpdates" for output cadence and @vue-tui/testing for deterministic content frames.',
     );
   }
+  if (hasOwn(options, "rawMode")) {
+    throw new TypeError(
+      'Mount option "rawMode" was removed; semantic input routes own terminal raw mode.',
+    );
+  }
 
   const mode = (options as { readonly mode?: unknown }).mode;
   if (mode === undefined) return "inline";

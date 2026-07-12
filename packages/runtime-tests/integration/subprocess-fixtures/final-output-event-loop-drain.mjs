@@ -10,7 +10,6 @@ const App = defineComponent(() => () => h(Text, null, { default: () => payload }
 const app = createApp(App);
 app.mount({
   liveUpdates: false,
-  rawMode: "auto",
   patchConsole: false,
   exitOnCtrlC: false,
 });

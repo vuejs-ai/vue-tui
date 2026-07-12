@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { Text, useLayoutSize, useRenderSession } from "@vue-tui/runtime";
+import { Text, useLayoutSize, useRenderSession, useStdin } from "@vue-tui/runtime";
 
 const session = useRenderSession();
 const { columns, rows } = useLayoutSize();
+const { stdin } = useStdin();
+void stdin;
+// @ts-expect-error Raw-mode control is internal to semantic input demand.
+useStdin().setRawMode(false);
 </script>
 
 <template>

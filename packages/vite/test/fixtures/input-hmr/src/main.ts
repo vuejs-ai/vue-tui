@@ -18,7 +18,6 @@ app.mount({
   liveUpdates: true,
   patchConsole: false,
   maxFps: 0,
-  rawMode: "auto",
   exitOnCtrlC: false,
   kittyKeyboard: { mode: "enabled" },
 });

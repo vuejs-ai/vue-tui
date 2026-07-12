@@ -10,6 +10,7 @@
     "check:type": "vp run -r check:type",
     "test": "vp run -r test",
     "build": "vp run -r build",
+    "verify:package-consumer": "node packages/runtime-tests/scripts/verify-clean-consumer.mjs",
     "visual:basic-template": "vp run @vue-tui/runtime#build && vp run @vue-tui/example-basic-template#build && vp run @vue-tui/tui-visual-review#start",
     "visual:fullscreen-origin": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#fullscreen-origin",
     "visual:input-routing": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#input-routing",

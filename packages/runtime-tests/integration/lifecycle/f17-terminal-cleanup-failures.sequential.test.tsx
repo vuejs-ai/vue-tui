@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, usePaste } from "@vue-tui/runtime";
+import { createApp, useInput, usePaste } from "@vue-tui/runtime";
 
 function makeRawTrackingStdin(initialRaw = false): {
   stream: NodeJS.ReadStream & { isRaw: boolean };
@@ -45,7 +45,10 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
   }) as NodeJS.WriteStream["write"];
 
   const { stream: stdin, calls: rawModeCalls } = makeRawTrackingStdin();
-  const App = defineComponent(() => () => null);
+  const App = defineComponent(() => {
+    useInput(() => {});
+    return () => null;
+  });
   const app = createApp(App);
 
   const exitListenersBefore = new Set(process.listeners("exit"));
@@ -55,7 +58,6 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
     stdin,
     mode: "fullscreen",
     liveUpdates: true,
-    rawMode: "always",
     kittyKeyboard: { mode: "enabled" },
     exitOnCtrlC: false,
     maxFps: 0,
@@ -121,7 +123,6 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
     stderr,
     stdin,
     liveUpdates: true,
-    rawMode: "auto",
     exitOnCtrlC: false,
     maxFps: 0,
     patchConsole: false,

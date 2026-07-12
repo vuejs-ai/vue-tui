@@ -9,7 +9,6 @@ const app = createApp(App);
 app.mount({
   mode: "fullscreen",
   liveUpdates: true,
-  rawMode: "auto",
   patchConsole: false,
   exitOnCtrlC: false,
   maxFps: 0,

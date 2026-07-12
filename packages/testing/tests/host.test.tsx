@@ -98,6 +98,49 @@ test("a selected route owns deterministic TTY input independently from final out
   expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
 });
 
+test("a modeled non-TTY excludes managed routing but keeps direct stdin bytes available", async () => {
+  const semanticCalls: string[] = [];
+  const directCalls: string[] = [];
+  let physicalStdin: NodeJS.ReadStream | undefined;
+  let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
+  let selectRoute!: () => () => void;
+  const App = defineComponent(() => {
+    physicalStdin = useStdin().stdin;
+    routing = useInternalInputRoutingForTest();
+    const boundary = routing.registerSemantic({
+      id: "deterministic-boundary",
+      handle: (fact) => {
+        semanticCalls.push(fact.sequence);
+        return {
+          performed: true,
+          continue: true,
+          preventDefault: false,
+          blockExternal: false,
+        };
+      },
+    });
+    selectRoute = () => routing!.select({ activeBoundary: boundary.lease });
+    return () => <Text>non-tty</Text>;
+  });
+  const result = await render(App, { host: { stdin: "non-tty" } });
+  const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
+  physicalStdin!.on("data", directListener);
+  try {
+    expect(selectRoute).toThrow(
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+    );
+    expect(routing!.resolve(routing!.capture()).kind).toBe("compatibility");
+    expect(result.terminal.rawMode.history).toEqual([]);
+
+    await result.stdin.write("x");
+    expect(directCalls).toEqual(["x"]);
+    expect(semanticCalls).toEqual([]);
+  } finally {
+    physicalStdin!.off("data", directListener);
+    result.dispose();
+  }
+});
+
 test("explicit live stream cannot manufacture a terminal mode", async () => {
   const result = await render(() => <Text>stream</Text>, {
     host: { stdout: "stream", updates: "live", mode: "fullscreen" },
@@ -212,6 +255,7 @@ test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
 test("modeled Inline suspension releases input and repaints at the continued size", async () => {
   const App = defineComponent(() => {
     const { columns, rows } = useLayoutSize();
+    useInput(() => {});
     return () => <Text>{`inline:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });

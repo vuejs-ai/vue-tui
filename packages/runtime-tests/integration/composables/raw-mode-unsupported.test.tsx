@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
-import { nextTick, defineComponent, onMounted, onUnmounted } from "vue";
+import { nextTick, defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
+import { createApp, Text, useFocus, useInput, usePaste, useStdin } from "@vue-tui/runtime";
 import { makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 // Builds a stdin that is NOT a TTY, so isRawModeSupported is false. This mirrors
@@ -60,19 +60,24 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   return { error, unmount: () => app.unmount() };
 }
 
-test("useStdin exposes the exact custom stream mounted into the application", () => {
+test("useStdin exposes only the exact custom stream mounted into the application", () => {
   const stdout = makeFakeWritable();
   const stdin = makeNonTtyStdin();
-  let observed: NodeJS.ReadStream | undefined;
+  let observed: ReturnType<typeof useStdin> | undefined;
   const App = defineComponent(() => {
-    observed = useStdin().stdin;
+    observed = useStdin();
     return () => <Text>stdin identity</Text>;
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, rawMode: "auto", maxFps: 0, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
   try {
-    expect(observed).toBe(stdin);
+    expect(observed?.stdin).toBe(stdin);
+    expect(Reflect.ownKeys(observed!)).toEqual(["stdin"]);
+    expect(observed).not.toHaveProperty("setRawMode");
+    expect(observed).not.toHaveProperty("isRawModeSupported");
+    expect(observed).not.toHaveProperty("acquireRawMode");
+    expect(observed).not.toHaveProperty("internal_routes");
   } finally {
     app.unmount();
     stdin.destroy();
@@ -80,8 +85,7 @@ test("useStdin exposes the exact custom stream mounted into the application", ()
   }
 });
 
-// Test A: useInput on an unsupported stdin must surface Ink's descriptive error.
-test("useInput on a non-TTY stdin throws a descriptive raw-mode error", async () => {
+test("useInput on a non-TTY stdin explains the managed-input boundary", async () => {
   const App = defineComponent(() => {
     useInput(() => {});
     return () => <Text>listening</Text>;
@@ -91,13 +95,45 @@ test("useInput on a non-TTY stdin throws a descriptive raw-mode error", async ()
   unmount();
 
   expect(error).toBeInstanceOf(Error);
-  // Assert the FULL custom-stdin message (a non-process.stdin PassThrough hits the
-  // "provided to Vue TUI" branch), so exact two-line parity with Ink's wording +
-  // docs URL can't silently regress (mirrors Ink App.tsx:323-325).
   expect(error?.message).toBe(
-    "Raw mode is not supported on the stdin provided to Vue TUI.\n" +
-      "Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+    "Managed input is unavailable because the mounted stdin is not a controllable TTY.\n" +
+      "Read raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
   );
+});
+
+test("usePaste on a non-TTY publishes no route, listener, ref, or terminal mode", async () => {
+  const setRawModeCalls: boolean[] = [];
+  const refCalls: string[] = [];
+  const stdin = makeNonTtyStdin(setRawModeCalls);
+  stdin.ref = () => {
+    refCalls.push("ref");
+    return stdin;
+  };
+  stdin.unref = () => {
+    refCalls.push("unref");
+    return stdin;
+  };
+  const stdout = makeFakeWritable();
+  const writes: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => writes.push(chunk.toString()));
+  const App = defineComponent(() => {
+    usePaste(() => {});
+    return () => <Text>paste</Text>;
+  });
+  const app = createApp(App);
+
+  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
+  await expect(app.waitUntilExit()).rejects.toThrow(
+    "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+  );
+
+  expect(setRawModeCalls).toEqual([]);
+  expect(refCalls).toEqual([]);
+  expect(stdin.listenerCount("data")).toBe(0);
+  expect(writes.join("")).not.toContain("\x1b[?2004h");
+  app.unmount();
+  stdin.destroy();
+  stdout.destroy();
 });
 
 // Test B (regression): useFocus must guard like Ink's use-focus.ts and NOT throw
@@ -112,67 +148,4 @@ test("useFocus on a non-TTY stdin does not throw (graceful no-op)", async () => 
   unmount();
 
   expect(error).toBeUndefined();
-});
-
-// Test C: the PUBLIC useStdin().setRawMode must be SYMMETRIC on a non-TTY stdin —
-// BOTH setRawMode(true) (enable) AND setRawMode(false) (disable) throw the same
-// descriptive error, and the underlying stdin.setRawMode ioctl is never issued.
-// Mirrors Ink's test/components.tsx "setRawMode() should throw if raw mode is not
-// supported" (asserts didCatchInMount === 1 AND didCatchInUnmount === 1 AND
-// !stdin.setRawMode.called) and Ink's handleSetRawMode (App.tsx:317-327), which
-// guards at the TOP, before the enable/disable split. Before the fix vue threw on
-// the enable branch (acquireRawMode) but silently no-opped the disable branch
-// (releaseRawMode's `if (!isRawModeSupported) return`) — an asymmetry Ink lacks.
-test("useStdin().setRawMode is symmetric on a non-TTY: both enable AND disable throw", async () => {
-  const setRawModeCalls: boolean[] = [];
-  const enableErrors: Error[] = [];
-  const disableErrors: Error[] = [];
-
-  const App = defineComponent(() => {
-    const { setRawMode } = useStdin();
-
-    onMounted(() => {
-      try {
-        setRawMode(true);
-      } catch (e) {
-        enableErrors.push(e as Error);
-      }
-    });
-
-    onUnmounted(() => {
-      try {
-        setRawMode(false);
-      } catch (e) {
-        disableErrors.push(e as Error);
-      }
-    });
-
-    return () => <Text>test</Text>;
-  });
-
-  const stdout = makeFakeWritable();
-  const stdin = makeNonTtyStdin(setRawModeCalls);
-
-  const app = createApp(App);
-  app.waitUntilExit().catch(() => {});
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
-  await nextTick();
-  app.unmount();
-  await nextTick();
-
-  const expectedMessage =
-    "Raw mode is not supported on the stdin provided to Vue TUI.\n" +
-    "Read about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported";
-
-  // Enable path throws (this already held before the fix).
-  expect(enableErrors).toHaveLength(1);
-  expect(enableErrors[0]?.message).toBe(expectedMessage);
-
-  // Disable path throws too (this is the fix: pre-fix it silently no-opped).
-  expect(disableErrors).toHaveLength(1);
-  expect(disableErrors[0]?.message).toBe(expectedMessage);
-
-  // The underlying terminal ioctl is never issued — both throws short-circuit
-  // before touching stdin.setRawMode (Ink: t.false(stdin.setRawMode.called)).
-  expect(setRawModeCalls).toEqual([]);
 });

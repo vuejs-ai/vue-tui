@@ -57,8 +57,9 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     // Ctrl+C exit (both the legacy \x03 byte and the Kitty CSI-u form) is a
     // delayed controller default. Compatibility handlers observe the fact
     // first; the controller then exits unless a future semantic route prevents
-    // defaults. Keeping exit in the always-on controller also covers apps whose
-    // only input consumer is useFocus/usePaste, or which have no hook at all.
+    // defaults. Any managed input demand keeps this controller route active, so
+    // useFocus/usePaste-only apps get the same default without a useInput hook.
+    // An input-free app stays cooked and leaves Ctrl+C signal handling to the OS.
     // The normalized fact and cached projection are shared, but the current
     // public Key type is mutable and historically supplied one object per
     // listener. Keep that edge isolation until F3 selects the public surface.

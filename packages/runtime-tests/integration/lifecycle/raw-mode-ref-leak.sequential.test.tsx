@@ -15,6 +15,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
+import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
 import { makeFakeWritable } from "./test-streams.ts";
 
 // A fake TTY stdin that COUNTS ref()/unref() calls so we can assert balance, and
@@ -46,19 +47,29 @@ function makeRefCountingThrowingStdin(): {
 }
 
 test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd (ref/unref balanced)", () => {
-  const App = defineComponent(() => () => h(Text, null, () => "x"));
+  let selectRoute!: () => () => void;
+  const App = defineComponent(() => {
+    const routing = useInternalInputRoutingForTest();
+    const boundary = routing.registerSemantic({
+      id: "boundary",
+      handle: () => ({
+        performed: false,
+        continue: true,
+        preventDefault: false,
+        blockExternal: false,
+      }),
+    });
+    selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+    return () => h(Text, null, () => "x");
+  });
 
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin, refs } = makeRefCountingThrowingStdin();
 
-  // rawMode "always" + interactive (TTY stdout) makes the App acquire a lifetime
-  // raw-mode hold during mount → holdRawModeForLifetime → acquireRawMode →
-  // setRawMode(true), which throws. mount() must rethrow (caller still sees it).
   const app = createApp(App);
-  expect(() => app.mount({ stdout, stdin, stderr, liveUpdates: true, rawMode: "always" })).toThrow(
-    "ERR_TTY_INIT_FAILED",
-  );
+  app.mount({ stdout, stdin, stderr, liveUpdates: true });
+  expect(selectRoute).toThrow("ERR_TTY_INIT_FAILED");
 
   // The leak guard: a throwing setRawMode must leave the stdin's ref count at 0.
   // Before the fix, ref() ran before the throwing setRawMode and dispose's unref
@@ -71,4 +82,5 @@ test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd
   // merely compensating for it afterwards.
   expect(refs.refCalls).toBe(0);
   expect(refs.unrefCalls).toBe(0);
+  app.unmount();
 });

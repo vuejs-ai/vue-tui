@@ -11,6 +11,9 @@ const frame = shallowRef(`OLD_REFLOW_FRAME_${"A".repeat(64)}\nOLD_TAIL`);
 
 const App = defineComponent(() => {
   const { exit, waitUntilRenderFlush } = useApp();
+  // This fixture waits for the parent PTY to resize it. Keep that external
+  // rendezvous alive explicitly instead of relying on terminal-input ownership.
+  const keepAlive = setInterval(() => {}, 1_000);
 
   const onResize = () => {
     void (async () => {
@@ -32,7 +35,10 @@ const App = defineComponent(() => {
       process.stdout.write(readyMarker);
     })();
   });
-  onScopeDispose(() => process.stdout.off("resize", onResize));
+  onScopeDispose(() => {
+    clearInterval(keepAlive);
+    process.stdout.off("resize", onResize);
+  });
 
   return () => <Text>{frame.value}</Text>;
 });

@@ -421,7 +421,6 @@ function createNoOpFocusContext(): FocusContext {
 function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
   return {
     stdin,
-    setRawMode: () => {},
     isRawModeSupported: false,
     internal_routes: createInternalInputRouteRegistry(),
     internal_inputRouting: createInternalInputRoutingRuntime(),

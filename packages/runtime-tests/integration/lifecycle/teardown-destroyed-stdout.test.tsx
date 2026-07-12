@@ -21,7 +21,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick } from "vue";
 import { describe, test, expect } from "vite-plus/test";
-import { createApp, Text, useCursor } from "@vue-tui/runtime";
+import { createApp, Text, useCursor, useInput } from "@vue-tui/runtime";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const DISABLE_KITTY = "\x1b[<u";
@@ -100,6 +100,10 @@ const CursorApp = defineComponent(() => {
 });
 
 const PlainApp = defineComponent(() => () => <Text>plain</Text>);
+const InputApp = defineComponent(() => {
+  useInput(() => {});
+  return () => <Text>plain</Text>;
+});
 
 describe("teardown stdout writes on destroyed stdout", () => {
   test("teardown skips the show-cursor write (frame writer done) when stdout was destroyed", async () => {
@@ -146,7 +150,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stderr = makeRecordingTtyStream();
     const stdin = makeFakeStdin();
 
-    const app = createApp(PlainApp);
+    const app = createApp(InputApp);
     app.mount({
       stdout,
       stdin,
@@ -191,7 +195,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stderr = makeRecordingTtyStream();
     const stdin = makeFakeStdin();
 
-    const app = createApp(PlainApp);
+    const app = createApp(InputApp);
     app.mount({
       stdout,
       stdin,

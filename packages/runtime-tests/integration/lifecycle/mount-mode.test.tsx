@@ -31,6 +31,21 @@ test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
   },
 );
 
+test.each([undefined, "auto", "always"])(
+  "removed rawMode option value %# fails before another mount option is read",
+  (rawMode) => {
+    const options = Object.defineProperty({ rawMode }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow('Mount option "rawMode" was removed');
+  },
+);
+
 test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode"), 1n])(
   "invalid mode %# fails before another mount option is read",
   (mode) => {

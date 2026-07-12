@@ -85,6 +85,8 @@ const removedAlternateScreenOption: MountOptions = { alternateScreen: true };
 const removedInteractiveOption: MountOptions = { interactive: true };
 // @ts-expect-error Deterministic observation belongs to @vue-tui/testing, not live mounts.
 const removedDebugOption: MountOptions = { debug: true };
+// @ts-expect-error Semantic input routes own raw mode; there is no mount policy.
+const removedRawModeOption: MountOptions = { rawMode: "auto" };
 // @ts-expect-error Only the two finite render-mode values are accepted.
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error liveUpdates is a boolean override.
@@ -93,6 +95,7 @@ void removedFullscreenOption;
 void removedAlternateScreenOption;
 void removedInteractiveOption;
 void removedDebugOption;
+void removedRawModeOption;
 void invalidModeOption;
 void invalidLiveUpdatesOption;
 
@@ -239,21 +242,19 @@ export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
 // Framework-neutral cursor data shape, mirrored from Ink exactly.
 expectTypeOf<CursorPosition>().toEqualTypeOf<{ x: number; y: number }>();
 
-// Composable return types: named per VueUse's `UseXReturn` convention, and shape-locked to
-// Ink's public hook returns. useStdin() in particular must expose ONLY Ink's `PublicProps`
-// (stdin/setRawMode/isRawModeSupported) — never the internal raw-mode/paste controller
-// (acquireRawMode/releaseRawMode/setBracketedPasteMode/acquireSgrMouseMode/
-// releaseSgrMouseMode/internal_*), which the framework's own composables reach via
-// inject(StdinContextKey).
+// Composable return types: named per VueUse's `UseXReturn` convention. useStdin() exposes
+// only the actual mounted stream; framework semantic routes own every raw-mode and protocol
+// operation through the private StdinContext.
 expectTypeOf<UseStdinReturn>().toEqualTypeOf<{
   readonly stdin: NodeJS.ReadStream;
-  readonly setRawMode: (mode: boolean) => void;
-  readonly isRawModeSupported: boolean;
 }>();
 expectTypeOf<ReturnType<typeof useStdin>>().toEqualTypeOf<UseStdinReturn>();
-expectTypeOf<keyof ReturnType<typeof useStdin>>().toEqualTypeOf<
-  "stdin" | "setRawMode" | "isRawModeSupported"
->();
+expectTypeOf<keyof ReturnType<typeof useStdin>>().toEqualTypeOf<"stdin">();
+declare const publicStdin: ReturnType<typeof useStdin>;
+// @ts-expect-error Public raw-mode control was removed; semantic routes own acquisition.
+publicStdin.setRawMode(false);
+// @ts-expect-error Raw-input availability belongs to the eventual semantic input API.
+void publicStdin.isRawModeSupported;
 
 expectTypeOf<UseStdoutReturn>().toEqualTypeOf<{
   readonly stdout: NodeJS.WriteStream;

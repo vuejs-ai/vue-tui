@@ -43,7 +43,6 @@ export interface FocusContext {
 
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
-  setRawMode: (mode: boolean) => void;
   isRawModeSupported: boolean;
   internal_routes: InternalInputRouteRegistry;
   internal_inputRouting: InternalInputRoutingRuntime;

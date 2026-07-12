@@ -123,23 +123,6 @@ export interface MountOptions {
   mode?: RenderMode;
   exitOnCtrlC?: boolean;
   /**
-   * Controls when the app holds the terminal's raw mode, which suppresses the
-   * terminal's own echo and line-editing.
-   *
-   * - `'always'` (default): raw mode is enabled at mount and held for the whole
-   *   run, even when no input composable is mounted, so typed keys never echo
-   *   into the rendered frame and Ctrl+C behaves the same on every screen.
-   * - `'auto'`: raw mode is enabled only while a `useInput`, `useFocus`, or
-   *   `usePaste` is mounted, and released when the last one unmounts — so a
-   *   screen with no input handler returns to the terminal's normal cooked mode
-   *   (native echo, line-editing, Ctrl+C/Ctrl+Z). This is Ink's original behavior.
-   *
-   * Has no effect when stdin is not a TTY (raw mode is unsupported there).
-   *
-   * @default 'always'
-   */
-  rawMode?: "always" | "auto";
-  /**
    * Override whether the dynamic output region updates while the app is
    * mounted. This is an output policy, not a statement about stdin or logical
    * interaction support.
@@ -515,15 +498,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const appContext = mountedAppContext;
 
     runBestEffort(() => mountedScheduler?.cancel());
-    if (mountedStdinController) {
-      const stdinController = mountedStdinController;
-      mountedStdinController = null;
-      runBestEffort(() => stdinController.dispose(true));
-    }
     if (mountedKittyController) {
       const kittyController = mountedKittyController;
       mountedKittyController = null;
       runBestEffort(() => kittyController.dispose(true));
+    }
+    if (mountedStdinController) {
+      const stdinController = mountedStdinController;
+      mountedStdinController = null;
+      runBestEffort(() => stdinController.dispose(true));
     }
 
     if (mountedWriter && mountedDynamicUpdatesLive && appContext) {
@@ -1056,11 +1039,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     renderObserver?.onSession?.(renderSession.session);
     const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
     const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
-    // F3 will replace this temporary input-lifecycle policy. It intentionally
-    // remains separate from the effective output surface now: a visual TTY can
-    // lose live output because its dimensions are unavailable without changing
-    // what the caller requested for input acquisition.
-    const inputLifecycleActive = surface.liveUpdatesRequested;
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
     const boundedInlineSurface =
       surface.kind === "inline-terminal" && surface.session.output.presentation === "visual";
@@ -1103,10 +1081,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
 
     const exitOnCtrlC = options.exitOnCtrlC ?? true;
-    // 'always' (default): own raw mode for the whole interactive run; 'auto':
-    // Ink's lazy model where input composables acquire it on demand. See the
-    // MountOptions.rawMode docs and .agents/docs/ink-divergences.md.
-    const rawMode = options.rawMode ?? "always";
     const onRender = options.onRender;
     const incrementalRendering = options.incrementalRendering;
     const patchConsole = options.patchConsole;
@@ -1604,19 +1578,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       process.once("beforeExit", mountedBeforeExitHandler);
 
       const focusContext: FocusContext = createFocusController();
+      let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
         exitOnCtrlC,
         appCtx: appContext,
         focusContext,
+        acquireKittyKeyboardDemand() {
+          return kittyController?.acquireDemand() ?? (() => {});
+        },
       });
       mountedStdinController = stdinController;
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
-      // terminal: holdRawModeForLifetime() → stdin.setRawMode(true) raises
-      // ERR_TTY_INIT_FAILED when the ioctl fails (real on some SSH/container PTYs
-      // that still report isTTY=true); kittyController.init() may stdout.write()
-      // to enable the protocol (throws on a broken stream); attachYoga() allocates
-      // a WASM yoga node. liveInstances.set(stdout, app) already ran above, so a
+      // terminal: attachYoga() allocates a WASM yoga node, and later Vue setup
+      // may acquire semantic input against a TTY whose raw-mode or protocol
+      // operations fail. liveInstances.set(stdout, app) already ran above, so a
       // throw HERE — before the originalMount try/catch — would leak the registry entry
       // (poisoning the stdout: every later mount() hits the reuse guard and
       // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
@@ -1624,33 +1600,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // (idempotent; safe at this early stage — it derives all cleanup from the
       // wired state set so far) restores everything and frees the registry entry,
       // while the caller still sees the original error.
-      let kittyController: ReturnType<typeof createKittyKeyboardController>;
       let tuiRoot: ReturnType<typeof createRoot>;
       try {
-        // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
-        // the refcount floor never drops to 0 while the app runs — raw mode is held
-        // continuously regardless of which input composables come and go, and there
-        // is no cooked-mode oscillation between input and no-input screens. Gated on
-        // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
-        // must not seize raw mode. The matching release happens in the controller's
-        // dispose() at teardown. (Diverges from Ink's lazy default — see
-        // .agents/docs/ink-divergences.md.)
-        if (rawMode === "always" && inputLifecycleActive && stdinController.isRawModeSupported) {
-          stdinController.holdRawModeForLifetime();
-        }
-
         kittyController = createKittyKeyboardController(
           stdin,
           stdout,
           stdinController.startKittyQueryResponseDetection,
+          kittyKeyboard,
         );
-        // Register BEFORE init(): in auto mode, init() asks StdinController's
-        // single ingress to detect the reply and only THEN writes the support
-        // query ("\x1b[?u") — which can throw on a broken stream. Assigning
-        // mountedKittyController first lets teardown's dispose() cancel that
-        // pending detector and its timer on such a throw.
+        // Register before Vue setup. Configuration is inert at mount; the first
+        // semantic input demand asks this controller to query or push Kitty only
+        // after raw mode, stdin ref ownership, and the shared listener exist.
         mountedKittyController = kittyController;
-        kittyController.init(kittyKeyboard, inputLifecycleActive);
 
         tuiRoot = createRoot(appContext);
         attachYoga(tuiRoot);
@@ -2285,10 +2246,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       vueMountStarted = true;
       try {
         proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
-        // Kitty auto-detection begins before Vue mounts so a synchronous terminal
-        // reply cannot race past the shared stdin ingress. Ordinary input beside
-        // that reply is retained until setup has installed the application's
-        // first input handlers, then delivered in its original order here.
+        // A semantic route created during Vue setup can begin Kitty detection,
+        // but its shared stdin ingress already exists. Ordinary input beside a
+        // synchronous reply is retained until setup has installed the complete
+        // initial route set, then delivered in its original order here.
         stdinController.activateInputDelivery();
       } catch (err) {
         try {
@@ -2737,10 +2698,6 @@ interface StdinController extends StdinContext {
   suspend: (sync?: boolean) => void;
   /** Reacquire the physical input modes still requested by logical consumers. */
   resume: () => void;
-  // rawMode 'always': take a lifetime raw-mode hold (raw on + keep-alive + input
-  // listener) that input composables stack on top of, with the per-consumer
-  // input-state cleanup re-based to this floor.
-  holdRawModeForLifetime: () => void;
   /** Own the Kitty support reply on this controller's single physical stdin ingress. */
   startKittyQueryResponseDetection: StartKittyQueryResponseDetection;
   /** Deliver input retained while Vue installed the application's first route. */
@@ -2795,6 +2752,7 @@ interface CreateStdinControllerOptions {
   exitOnCtrlC: boolean;
   appCtx: AppContext;
   focusContext: FocusContext;
+  acquireKittyKeyboardDemand: () => () => void;
 }
 
 function createStdinController(
@@ -2845,7 +2803,6 @@ function createStdinController(
   }
   let sharedSubscription: SharedStdinSubscription;
   let sharedSubscriptionActive = false;
-  let activeKittyQueryDetections = 0;
   let inputDeliveryActive = false;
   let drainingApplicationInput = false;
   const pendingApplicationInput: PendingApplicationInput[] = [];
@@ -2866,13 +2823,12 @@ function createStdinController(
   const ownedSgrMouseModes = new Set<SgrMouseMode>();
   let suspended = false;
   let disposed = false;
+  let releaseKittyKeyboardDemand: (() => void) | undefined;
+  let reconcilingKittyDemand = false;
+  let kittyDemandReconcileRequested = false;
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
-  // 0 normally; 1 once the App takes a lifetime raw-mode hold (rawMode 'always').
-  // The hold keeps raw mode + the shared data ingress alive for the whole run,
-  // so the per-consumer input-state cleanup is re-based to this floor.
-  let lifetimeFloor = 0;
 
   // True once bracketed paste has been enabled at least once on this controller
   // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
@@ -3129,11 +3085,83 @@ function createStdinController(
   }
 
   function reconcileSharedSubscription(): void {
-    const shouldBeActive =
-      !disposed && !suspended && (localRefs > 0 || activeKittyQueryDetections > 0);
+    const shouldBeActive = !disposed && !suspended && localRefs > 0;
     if (shouldBeActive === sharedSubscriptionActive) return;
     sharedSubscriptionActive = shouldBeActive;
     sharedSubscription.setActive(shouldBeActive);
+  }
+
+  function reconcileKittyDemand(): void {
+    if (reconcilingKittyDemand) {
+      kittyDemandReconcileRequested = true;
+      return;
+    }
+
+    reconcilingKittyDemand = true;
+    let firstError: unknown;
+    let hasError = false;
+    let retriedAfterReentry = false;
+    try {
+      while (true) {
+        kittyDemandReconcileRequested = false;
+        const shouldHoldDemand = !disposed && localRefs > 0;
+
+        if (shouldHoldDemand && !releaseKittyKeyboardDemand) {
+          let release: (() => void) | undefined;
+          try {
+            release = opts.acquireKittyKeyboardDemand();
+          } catch (error) {
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+            }
+            // A host callback can create a surviving nested stdin demand before
+            // the outer Kitty acquisition fails. Give that newly committed
+            // desired state one chance to acquire its own lease.
+            if (kittyDemandReconcileRequested && !retriedAfterReentry) {
+              retriedAfterReentry = true;
+              continue;
+            }
+            break;
+          }
+
+          if (!disposed && localRefs > 0) {
+            releaseKittyKeyboardDemand = release;
+          } else {
+            try {
+              release();
+            } catch (error) {
+              if (!hasError) {
+                firstError = error;
+                hasError = true;
+              }
+            }
+          }
+          continue;
+        }
+
+        if (!shouldHoldDemand && releaseKittyKeyboardDemand) {
+          const release = releaseKittyKeyboardDemand;
+          // Commit the desired state before calling the host-facing release so
+          // a reentrant acquisition can request a fresh lease.
+          releaseKittyKeyboardDemand = undefined;
+          try {
+            release();
+          } catch (error) {
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+            }
+          }
+          continue;
+        }
+
+        if (!kittyDemandReconcileRequested) break;
+      }
+    } finally {
+      reconcilingKittyDemand = false;
+    }
+    if (hasError) throw firstError;
   }
 
   function snapshotCurrentApplicationInput(): ApplicationInputSnapshot {
@@ -3334,33 +3362,18 @@ function createStdinController(
     dispatchInternalInput(event, plan);
   }
 
-  function finishKittyQueryDetection(): void {
-    activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
-    // Query detection temporarily subscribes the app before Vue has installed
-    // its routes. Once mount is ready and no real input consumer exists, end
-    // that temporary generation so an unfinished CSI/paste cannot keep stdin
-    // flowing forever after the detector settles.
-    if (activeKittyQueryDetections === 0 && localRefs === 0 && inputDeliveryActive) {
-      sharedSubscription.invalidate();
-      pendingApplicationInput.length = 0;
-    }
-    reconcileSharedSubscription();
-  }
-
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
-  // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
-  // throws a descriptive error rather than silently no-opping. Two messages —
-  // one for the default process.stdin, one for a custom stream — both pointing
-  // at the isRawModeSupported docs.
-  const throwRawModeUnsupported = (): never => {
+  // Managed routes fail transactionally on a host that cannot provide terminal
+  // input. The actual stream remains available through useStdin().stdin.
+  const throwManagedInputUnavailable = (): never => {
     if (stdin === process.stdin) {
       throw new Error(
-        "Raw mode is not supported on the current process.stdin, which Vue TUI uses as input stream by default.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+        "Managed input is unavailable because the current process.stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
       );
     }
     throw new Error(
-      "Raw mode is not supported on the stdin provided to Vue TUI.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
     );
   };
 
@@ -3517,27 +3530,6 @@ function createStdinController(
 
   controller = {
     stdin,
-    setRawMode(mode: boolean) {
-      if (disposed) {
-        throw new Error("Cannot change raw mode after the vue-tui application has unmounted");
-      }
-      // Guard at the TOP — BEFORE the enable/disable split — so the PUBLIC
-      // useStdin().setRawMode throws symmetrically on an unsupported stdin,
-      // matching Ink's handleSetRawMode (App.tsx:317-327): both setRawMode(true)
-      // and setRawMode(false) throw. The guard lives here (not in the internal
-      // releaseRawMode) because the framework's own composables — useInput /
-      // useFocus / usePaste — call acquireRawMode()/releaseRawMode() DIRECTLY at
-      // teardown, and that internal release MUST stay a no-op so an unsupported-
-      // stdin app can unmount cleanly. Only this public wrapper enforces the
-      // symmetric throw. (acquireRawMode also throws on its own, so the enable
-      // path is unchanged for the unguarded useInput consumer.)
-      if (!appCtx.isRawModeSupported) throwRawModeUnsupported();
-      if (mode) {
-        controller.acquireRawMode();
-      } else {
-        controller.releaseRawMode();
-      }
-    },
     isRawModeSupported: appCtx.isRawModeSupported,
     internal_routes: inputRoutes,
     internal_inputRouting: inputRouting,
@@ -3552,7 +3544,7 @@ function createStdinController(
         // a no-op like Ink. Rechecking the structural capability also prevents
         // a setterless host that was pre-raw at mount from silently attaching
         // after its external owner returns it to cooked mode.
-        throwRawModeUnsupported();
+        throwManagedInputUnavailable();
       }
       const state = getRawModeState(stdin);
       const firstSharedRef = state.refs === 0;
@@ -3570,15 +3562,13 @@ function createStdinController(
           state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
           state.changedRawMode = !state.baselineRaw;
         }
-        if (localRefs === lifetimeFloor && inputDeliveryActive) {
-          // A lifetime raw hold keeps protocol/default processing alive even
-          // while no composable consumes application input. Starting the next
-          // consumer invalidates framing units that began on that idle screen.
-          // Initial Vue setup is different: a terminal can synchronously send
-          // the prefix of an event beside the Kitty capability query before
-          // setup installs the first route. That prefix belongs to the initial
-          // bootstrap snapshot and must survive until activateInputDelivery()
-          // binds it to the complete initial route set.
+        if (localRefs === 0 && inputDeliveryActive) {
+          // A newly active semantic route starts a fresh application delivery
+          // generation. Initial Vue setup is different: a terminal can
+          // synchronously send the prefix of an event beside the Kitty capability
+          // query before setup installs the first route. That prefix belongs to
+          // the initial bootstrap snapshot and must survive until
+          // activateInputDelivery() binds it to the complete initial route set.
           sharedSubscription.invalidate();
         }
         const participatesPhysically = !suspended;
@@ -3589,6 +3579,7 @@ function createStdinController(
         if (participatesPhysically) state.pendingDisable = false;
         reconcilePhysicalRawMode(state);
         reconcileSharedSubscription();
+        reconcileKittyDemand();
       } catch (error) {
         // A re-entrant dispose/release may already have consumed this logical
         // acquisition. Roll it back only while its local count still exists.
@@ -3601,44 +3592,23 @@ function createStdinController(
         runTerminalCleanup(() => reconcilePhysicalRawMode(state));
         resetRawModeStateIfIdle(state);
         runTerminalCleanup(reconcileSharedSubscription);
+        runTerminalCleanup(reconcileKittyDemand);
         throw error;
       }
     },
     acquireSelectedInputDemand() {
       controller.acquireRawMode();
     },
-    holdRawModeForLifetime() {
-      // Same as acquireRawMode (raw on + ref + data listener), but marks the
-      // resulting ref as the App's lifetime floor: input composables stack above
-      // it, and releaseRawMode's input-state cleanup fires when the last consumer
-      // returns localRefs to this floor (1) rather than 0. So raw mode and the
-      // listener stay alive across no-input screens, but a buffered partial escape
-      // is still cleared when an input composable unmounts — no bleed into the next.
-      controller.acquireRawMode();
-      if (!disposed) lifetimeFloor = 1;
-    },
     startKittyQueryResponseDetection(onResult) {
       let settled = false;
       let cancelSharedDetection:
         | ReturnType<SharedStdinIngress["startKittyQueryResponseDetection"]>
         | undefined;
-      activeKittyQueryDetections++;
-      try {
-        reconcileSharedSubscription();
-        cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
-          if (settled) return;
-          settled = true;
-          try {
-            onResult(supported);
-          } finally {
-            finishKittyQueryDetection();
-          }
-        }, sharedSubscription);
-      } catch (error) {
-        activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
-        runTerminalCleanup(reconcileSharedSubscription);
-        throw error;
-      }
+      cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
+        if (settled) return;
+        settled = true;
+        onResult(supported);
+      }, sharedSubscription);
       return (options) => {
         if (settled) return;
         settled = true;
@@ -3647,12 +3617,6 @@ function createStdinController(
           cancelSharedDetection?.(options);
         } catch (error) {
           firstError = error;
-        } finally {
-          try {
-            finishKittyQueryDetection();
-          } catch (error) {
-            firstError ??= error;
-          }
         }
         if (firstError !== undefined) throw firstError;
       };
@@ -3671,7 +3635,7 @@ function createStdinController(
       pendingBootstrapInputSnapshot = undefined;
       inputDeliveryActive = true;
       flushPendingApplicationInput();
-      if (activeKittyQueryDetections === 0 && localRefs === 0) {
+      if (localRefs === 0) {
         sharedSubscription.invalidate();
         pendingApplicationInput.length = 0;
         reconcileSharedSubscription();
@@ -3735,7 +3699,12 @@ function createStdinController(
       if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
       localRefs = Math.max(0, localRefs - 1);
       let firstError: unknown;
-      if (localRefs === lifetimeFloor) {
+      try {
+        reconcileKittyDemand();
+      } catch (error) {
+        firstError = error;
+      }
+      if (localRefs === 0) {
         // End this app-level delivery generation. Handler-level route snapshots
         // belong to the later routing/lifetime checkpoint; once no app consumer remains, orphaned
         // framing is discarded and the physical listener may detach.
@@ -3852,6 +3821,7 @@ function createStdinController(
     dispose(sync = false) {
       if (disposed) return;
       disposed = true;
+      runTerminalCleanup(reconcileKittyDemand);
       pendingApplicationInput.length = 0;
       inputDeliveryActive = false;
       drainingApplicationInput = false;

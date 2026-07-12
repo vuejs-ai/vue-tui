@@ -9,6 +9,7 @@ import {
   hasCompleteKittyQueryResponse,
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
+  useInternalInputRoutingForTest,
   type StartKittyQueryResponseDetection,
 } from "@vue-tui/runtime/internal";
 import {
@@ -18,6 +19,7 @@ import {
   useMouseInput,
   usePaste,
   type Key,
+  type KittyKeyboardOptions,
   type TuiApp,
 } from "@vue-tui/runtime";
 import { defineComponent, h, nextTick, onErrorCaptured, shallowRef, type ShallowRef } from "vue";
@@ -48,12 +50,20 @@ function createFakeStdin() {
 
 const noQueryDetection: StartKittyQueryResponseDetection = () => () => {};
 
+const continueInputRoute = () => ({
+  performed: false,
+  continue: true,
+  preventDefault: false,
+  blockExternal: false,
+});
+
 function createKittyKeyboardController(
   stdin: NodeJS.ReadStream,
   stdout: NodeJS.WriteStream,
   startQueryResponseDetection: StartKittyQueryResponseDetection = noQueryDetection,
+  options?: KittyKeyboardOptions,
 ) {
-  return createInternalKittyKeyboardController(stdin, stdout, startQueryResponseDetection);
+  return createInternalKittyKeyboardController(stdin, stdout, startQueryResponseDetection, options);
 }
 
 function createQueryDetectionHarness() {
@@ -122,9 +132,11 @@ describe("kitty lifecycle - init/cleanup", () => {
   test("writes enable sequence when mode is enabled", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     expect(written).toContain("\x1b[>1u");
     expect(ctrl.isEnabled).toBe(true);
 
@@ -134,15 +146,17 @@ describe("kitty lifecycle - init/cleanup", () => {
   test("writes disable sequence on dispose", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     ctrl.dispose();
     expect(written).toContain("\x1b[<u");
     expect(ctrl.isEnabled).toBe(false);
   });
 
-  test("a failed suspend pop remains owned, avoids a duplicate push, and is retried", () => {
+  test("suspend retries a one-shot protocol pop rejection before returning", () => {
     const { stdout } = createFakeStdout();
     const { stdin } = createFakeStdin();
     const writes: string[] = [];
@@ -155,17 +169,20 @@ describe("kitty lifecycle - init/cleanup", () => {
       }
       return true;
     }) as typeof stdout.write;
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     ctrl.suspend();
-    expect(ctrl.isEnabled).toBe(true);
+    expect(writes).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
 
     ctrl.resume();
-    expect(writes.filter((data) => data === "\x1b[>1u")).toHaveLength(1);
+    expect(writes.filter((data) => data === "\x1b[>1u")).toHaveLength(2);
 
     ctrl.dispose();
-    expect(writes.filter((data) => data === "\x1b[<u")).toHaveLength(2);
+    expect(writes.filter((data) => data === "\x1b[<u")).toHaveLength(3);
     expect(ctrl.isEnabled).toBe(false);
   });
 
@@ -178,9 +195,9 @@ describe("kitty lifecycle - init/cleanup", () => {
       if (data === "\x1b[>1u") ctrl.dispose();
       return true;
     }) as typeof stdout.write;
-    ctrl = createKittyKeyboardController(stdin, stdout);
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
 
     expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
     expect(ctrl.isEnabled).toBe(false);
@@ -199,9 +216,9 @@ describe("kitty lifecycle - init/cleanup", () => {
       }
       return true;
     }) as typeof stdout.write;
-    ctrl = createKittyKeyboardController(stdin, stdout);
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
     expect(ctrl.isEnabled).toBe(false);
 
@@ -226,9 +243,9 @@ describe("kitty lifecycle - init/cleanup", () => {
       }
       return true;
     }) as typeof stdout.write;
-    ctrl = createKittyKeyboardController(stdin, stdout);
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     ctrl.suspend();
 
     expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[>1u"]);
@@ -236,7 +253,70 @@ describe("kitty lifecycle - init/cleanup", () => {
     ctrl.dispose();
   });
 
-  test("an enable write failure preserves the error after a best-effort pop", () => {
+  test("a rejected protocol pop with reentrant resume keeps exactly one owned level", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let depth = 0;
+    let rejectFirstPop = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") {
+        depth++;
+      } else if (rejectFirstPop && data === "\x1b[<u") {
+        rejectFirstPop = false;
+        ctrl.resume();
+        throw new Error("pop rejected before effect");
+      } else if (data === "\x1b[<u") {
+        depth--;
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
+
+    ctrl.acquireDemand();
+    ctrl.suspend();
+    expect({ depth, enabled: ctrl.isEnabled, written }).toEqual({
+      depth: 1,
+      enabled: true,
+      written: ["\x1b[>1u", "\x1b[<u"],
+    });
+
+    ctrl.dispose();
+    expect(depth).toBe(0);
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[<u"]);
+  });
+
+  test("a rejected protocol pop with reentrant disposal is retried", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let depth = 0;
+    let rejectFirstPop = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") {
+        depth++;
+      } else if (rejectFirstPop && data === "\x1b[<u") {
+        rejectFirstPop = false;
+        ctrl.dispose();
+        throw new Error("pop rejected before effect");
+      } else if (data === "\x1b[<u") {
+        depth--;
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
+
+    ctrl.acquireDemand();
+    ctrl.suspend();
+
+    expect(depth).toBe(0);
+    expect(ctrl.isEnabled).toBe(false);
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[<u"]);
+  });
+
+  test("a rejected enable write does not pop an external protocol level", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
     stdout.write = ((data: string) => {
@@ -244,20 +324,143 @@ describe("kitty lifecycle - init/cleanup", () => {
       if (data === "\x1b[>1u") throw new Error("kitty push failed");
       return true;
     }) as typeof stdout.write;
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    expect(() => ctrl.init({ mode: "enabled" }, true)).toThrow("kitty push failed");
-    expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    expect(() => ctrl.acquireDemand()).toThrow("kitty push failed");
+    expect(written).toEqual(["\x1b[>1u"]);
     expect(ctrl.isEnabled).toBe(false);
+  });
+
+  test("a rejected enable write after reentrant suspension does not pop", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") {
+        ctrl.suspend();
+        throw new Error("kitty push failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
+
+    expect(() => ctrl.acquireDemand()).toThrow("kitty push failed");
+    expect(written).toEqual(["\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(false);
+    ctrl.resume();
+    expect(written).toEqual(["\x1b[>1u"]);
+    ctrl.dispose();
+  });
+
+  test("a rejected enable write after reentrant disposal does not pop", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (data === "\x1b[>1u") {
+        ctrl.dispose();
+        throw new Error("kitty push failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
+
+    expect(() => ctrl.acquireDemand()).toThrow("kitty push failed");
+    expect(written).toEqual(["\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(false);
+    expect(() => ctrl.acquireDemand()).toThrow("after the application unmounted");
+  });
+
+  test("a surviving reentrant demand is restored after the outer push fails", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let releaseNested: (() => void) | undefined;
+    let failFirstPush = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (failFirstPush && data === "\x1b[>1u") {
+        failFirstPush = false;
+        releaseNested = ctrl.acquireDemand();
+        throw new Error("outer push failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, { mode: "enabled" });
+
+    expect(() => ctrl.acquireDemand()).toThrow("outer push failed");
+    expect(written).toEqual(["\x1b[>1u", "\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(true);
+
+    releaseNested!();
+    await Promise.resolve();
+    expect(written.at(-1)).toBe("\x1b[<u");
+    expect(ctrl.isEnabled).toBe(false);
+    ctrl.dispose();
+  });
+
+  test("dispose retries a one-shot protocol pop failure", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let failFirstPop = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (failFirstPop && data === "\x1b[<u") {
+        failFirstPop = false;
+        throw new Error("first pop failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
+
+    ctrl.acquireDemand();
+    ctrl.dispose();
+
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
+  });
+
+  test("the final demand release retries a one-shot protocol pop failure", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let failFirstPop = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (failFirstPop && data === "\x1b[<u") {
+        failFirstPop = false;
+        throw new Error("first pop failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
+
+    const release = ctrl.acquireDemand();
+    release();
+    await Promise.resolve();
+
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u", "\x1b[<u"]);
+    expect(ctrl.isEnabled).toBe(false);
+    ctrl.dispose();
+    expect(written).toHaveLength(3);
   });
 
   test("not enabled when stdin is not TTY", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
     (stdin as any).isTTY = false;
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     expect(written).not.toContain("\x1b[>1u");
     expect(ctrl.isEnabled).toBe(false);
 
@@ -268,9 +471,11 @@ describe("kitty lifecycle - init/cleanup", () => {
     const { stdout, written } = createFakeStdout();
     (stdout as any).isTTY = false;
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
 
-    ctrl.init({ mode: "enabled" }, true);
+    ctrl.acquireDemand();
     expect(written).not.toContain("\x1b[>1u");
 
     ctrl.dispose();
@@ -283,7 +488,7 @@ describe("kitty lifecycle - opt-in behavior", () => {
     const { stdin } = createFakeStdin();
     const ctrl = createKittyKeyboardController(stdin, stdout);
 
-    ctrl.init(undefined, true);
+    ctrl.acquireDemand();
     expect(written.filter((s) => s.includes("\x1b[>"))).toHaveLength(0);
     expect(ctrl.isEnabled).toBe(false);
 
@@ -293,9 +498,11 @@ describe("kitty lifecycle - opt-in behavior", () => {
   test("no-op when mode is disabled", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "disabled",
+    });
 
-    ctrl.init({ mode: "disabled" }, true);
+    ctrl.acquireDemand();
     expect(written.filter((s) => s.includes("\x1b[>"))).toHaveLength(0);
     expect(ctrl.isEnabled).toBe(false);
 
@@ -307,9 +514,12 @@ describe("kitty lifecycle - custom flags", () => {
   test("enabled mode with custom flags writes correct bitmask", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
-    const ctrl = createKittyKeyboardController(stdin, stdout);
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+      flags: ["disambiguateEscapeCodes", "reportEventTypes"],
+    });
 
-    ctrl.init({ mode: "enabled", flags: ["disambiguateEscapeCodes", "reportEventTypes"] }, true);
+    ctrl.acquireDemand();
     expect(written).toContain("\x1b[>3u");
 
     ctrl.dispose();
@@ -320,8 +530,11 @@ describe("kitty lifecycle - custom flags", () => {
     const { stdin } = createFakeStdin();
     const detection = createQueryDetectionHarness();
 
-    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
-    ctrl.init({ mode: "auto", flags: ["disambiguateEscapeCodes", "reportEventTypes"] }, true);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, {
+      mode: "auto",
+      flags: ["disambiguateEscapeCodes", "reportEventTypes"],
+    });
+    ctrl.acquireDemand();
     detection.settle(true);
 
     expect(written).toContain("\x1b[>3u");
@@ -334,9 +547,9 @@ describe("kitty lifecycle - auto-detection", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
     const detection = createQueryDetectionHarness();
-    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
 
-    ctrl.init({ mode: "auto" }, true);
+    ctrl.acquireDemand();
     detection.settle(true);
 
     expect(written).toContain("\x1b[>1u");
@@ -359,10 +572,41 @@ describe("kitty lifecycle - auto-detection", () => {
       return true;
     }) as typeof stdout.write;
 
-    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
-    ctrl.init({ mode: "auto" }, true);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
+    ctrl.acquireDemand();
 
     expect(writtenStrings).toContain("\x1b[>1u");
+    ctrl.dispose();
+  });
+
+  test("a committed auto demand retries a rejected enable after reentrant acquisition", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const detection = createQueryDetectionHarness();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let releaseNested: (() => void) | undefined;
+    let rejectFirstPush = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (rejectFirstPush && data === "\x1b[>1u") {
+        rejectFirstPush = false;
+        releaseNested = ctrl.acquireDemand();
+        throw new Error("push rejected before effect");
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
+
+    const releaseFirst = ctrl.acquireDemand();
+    expect(() => detection.settle(true)).toThrow("push rejected before effect");
+    expect(written).toEqual(["\x1b[?u", "\x1b[>1u", "\x1b[>1u"]);
+    expect(ctrl.isEnabled).toBe(true);
+
+    releaseFirst();
+    releaseNested!();
+    await Promise.resolve();
+    expect(written.at(-1)).toBe("\x1b[<u");
+    expect(ctrl.isEnabled).toBe(false);
     ctrl.dispose();
   });
 
@@ -370,9 +614,9 @@ describe("kitty lifecycle - auto-detection", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
     const detection = createQueryDetectionHarness();
-    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
 
-    ctrl.init({ mode: "auto" }, true);
+    ctrl.acquireDemand();
     ctrl.dispose();
     detection.settle(true);
 
@@ -389,9 +633,9 @@ describe("kitty lifecycle - auto-detection", () => {
       if (failQuery && data === "\x1b[?u") throw new Error("query failed");
       return originalWrite(data);
     }) as typeof stdout.write;
-    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start);
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
 
-    ctrl.init({ mode: "auto" }, true);
+    ctrl.acquireDemand();
     ctrl.suspend();
     failQuery = true;
     expect(() => ctrl.resume()).toThrow("query failed");
@@ -404,18 +648,257 @@ describe("kitty lifecycle - auto-detection", () => {
 
     ctrl.dispose();
   });
+
+  test("same-tick demand replacement retains an enabled protocol level", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const ctrl = createKittyKeyboardController(stdin, stdout, noQueryDetection, {
+      mode: "enabled",
+    });
+
+    const releaseFirst = ctrl.acquireDemand();
+    releaseFirst();
+    const releaseReplacement = ctrl.acquireDemand();
+    await Promise.resolve();
+
+    expect(written).toEqual(["\x1b[>1u"]);
+
+    releaseReplacement();
+    await Promise.resolve();
+    expect(written).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    ctrl.dispose();
+  });
+
+  test("same-tick demand replacement retains one pending auto query", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let starts = 0;
+    let cancels = 0;
+    const detection: StartKittyQueryResponseDetection = () => {
+      starts++;
+      return () => {
+        cancels++;
+      };
+    };
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection, { mode: "auto" });
+
+    const releaseFirst = ctrl.acquireDemand();
+    releaseFirst();
+    const releaseReplacement = ctrl.acquireDemand();
+    await Promise.resolve();
+
+    expect(starts).toBe(1);
+    expect(cancels).toBe(0);
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(1);
+
+    releaseReplacement();
+    await Promise.resolve();
+    expect(cancels).toBe(1);
+    ctrl.dispose();
+  });
+
+  test("a surviving reentrant demand restarts an auto query rejected by the outer acquire", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const detections: Array<(supported: boolean) => void> = [];
+    const detection: StartKittyQueryResponseDetection = (onResult) => {
+      detections.push(onResult);
+      return () => {};
+    };
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let releaseNested: (() => void) | undefined;
+    let failFirstQuery = true;
+    stdout.write = ((data: string) => {
+      written.push(data);
+      if (failFirstQuery && data === "\x1b[?u") {
+        failFirstQuery = false;
+        releaseNested = ctrl.acquireDemand();
+        throw new Error("outer query failed");
+      }
+      return true;
+    }) as typeof stdout.write;
+    ctrl = createKittyKeyboardController(stdin, stdout, detection, { mode: "auto" });
+
+    expect(() => ctrl.acquireDemand()).toThrow("outer query failed");
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(2);
+    expect(detections).toHaveLength(2);
+
+    detections[1]!(true);
+    expect(ctrl.isEnabled).toBe(true);
+    expect(written).toContain("\x1b[>1u");
+
+    releaseNested!();
+    await Promise.resolve();
+    expect(ctrl.isEnabled).toBe(false);
+    expect(written.at(-1)).toBe("\x1b[<u");
+    ctrl.dispose();
+  });
+
+  test("a demand acquired by detector cancellation retains its new protocol level", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let ctrl!: ReturnType<typeof createKittyKeyboardController>;
+    let releaseReplacement: (() => void) | undefined;
+    let starts = 0;
+    const detection: StartKittyQueryResponseDetection = (onResult) => {
+      const generation = ++starts;
+      if (generation === 2) onResult(true);
+      return () => {
+        if (generation === 1) releaseReplacement = ctrl.acquireDemand();
+      };
+    };
+    ctrl = createKittyKeyboardController(stdin, stdout, detection, { mode: "auto" });
+
+    const releaseFirst = ctrl.acquireDemand();
+    releaseFirst();
+    await Promise.resolve();
+
+    expect(starts).toBe(2);
+    expect(ctrl.isEnabled).toBe(true);
+    expect(written.filter((data) => data === "\x1b[>1u")).toHaveLength(1);
+    expect(written.filter((data) => data === "\x1b[<u")).toHaveLength(0);
+
+    releaseReplacement!();
+    await Promise.resolve();
+    expect(ctrl.isEnabled).toBe(false);
+    expect(written.filter((data) => data === "\x1b[<u")).toHaveLength(1);
+    ctrl.dispose();
+  });
+
+  test("positive auto support is cached across demand lifetimes", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const detection = createQueryDetectionHarness();
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
+
+    const releaseFirst = ctrl.acquireDemand();
+    detection.settle(true);
+    releaseFirst();
+    await Promise.resolve();
+
+    const releaseSecond = ctrl.acquireDemand();
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(1);
+    expect(written.filter((data) => data === "\x1b[>1u")).toHaveLength(2);
+    expect(written.filter((data) => data === "\x1b[<u")).toHaveLength(1);
+
+    releaseSecond();
+    await Promise.resolve();
+    ctrl.dispose();
+  });
+
+  test("negative auto support is cached across demand lifetimes", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const detection = createQueryDetectionHarness();
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
+
+    const releaseFirst = ctrl.acquireDemand();
+    detection.settle(false);
+    releaseFirst();
+    await Promise.resolve();
+
+    const releaseSecond = ctrl.acquireDemand();
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(1);
+    expect(written.filter((data) => data === "\x1b[>1u")).toHaveLength(0);
+
+    releaseSecond();
+    await Promise.resolve();
+    ctrl.dispose();
+  });
+
+  test.each([
+    ["non-TTY", { isTTY: false }],
+    ["destroyed", { destroyed: true }],
+    ["ended", { writableEnded: true }],
+    ["unwritable", { writable: false }],
+  ] as const)("auto mode does not query through %s control output", (_name, state) => {
+    const { stdout, written } = createFakeStdout();
+    Object.assign(stdout, state);
+    const { stdin } = createFakeStdin();
+    let detectionStarts = 0;
+    const detection: StartKittyQueryResponseDetection = () => {
+      detectionStarts++;
+      return () => {};
+    };
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection, { mode: "auto" });
+
+    ctrl.acquireDemand();
+
+    expect(detectionStarts).toBe(0);
+    expect(written).toEqual([]);
+    ctrl.dispose();
+  });
+
+  test("resume reuses confirmed auto support without querying again", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    const detection = createQueryDetectionHarness();
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection.start, { mode: "auto" });
+
+    ctrl.acquireDemand();
+    detection.settle(true);
+    ctrl.suspend();
+    ctrl.resume();
+
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(1);
+    expect(written.filter((data) => data === "\x1b[>1u")).toHaveLength(2);
+    expect(written.filter((data) => data === "\x1b[<u")).toHaveLength(1);
+    ctrl.dispose();
+  });
+
+  test("resume stays idle when the final demand ended while suspended", async () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+    let detectionStarts = 0;
+    const detection: StartKittyQueryResponseDetection = () => {
+      detectionStarts++;
+      return () => {};
+    };
+    const ctrl = createKittyKeyboardController(stdin, stdout, detection, { mode: "auto" });
+
+    const release = ctrl.acquireDemand();
+    ctrl.suspend();
+    release();
+    await Promise.resolve();
+    ctrl.resume();
+
+    expect(detectionStarts).toBe(1);
+    expect(written.filter((data) => data === "\x1b[?u")).toHaveLength(1);
+    expect(written.filter((data) => data === "\x1b[>1u")).toHaveLength(0);
+    ctrl.dispose();
+  });
 });
 
 // --- Render-level integration tests ---
 
 const Dummy = defineComponent(() => () => null);
+const InputDummy = defineComponent(() => {
+  useInput(() => {});
+  return () => null;
+});
 
 describe("kitty lifecycle - mount/unmount integration", () => {
-  test("mount with kittyKeyboard enabled writes enable sequence", () => {
+  test("input-free mount with kittyKeyboard enabled writes no protocol sequence", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
 
     const app = createApp(Dummy);
+    app.mount({
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      kittyKeyboard: { mode: "enabled" },
+    });
+
+    expect(written).not.toContain("\x1b[>1u");
+    expect(written).not.toContain("\x1b[?u");
+    app.unmount();
+  });
+
+  test("an active semantic route enables Kitty and unmount disables it", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+
+    const app = createApp(InputDummy);
     app.mount({
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
@@ -424,9 +907,58 @@ describe("kitty lifecycle - mount/unmount integration", () => {
 
     expect(written).toContain("\x1b[>1u");
     app.unmount();
+    expect(written).toContain("\x1b[<u");
   });
 
-  test("unmount writes disable sequence", () => {
+  test("auto Kitty follows semantic demand even when output updates only at teardown", () => {
+    const { stdout, written } = createFakeStdout();
+    const { stdin } = createFakeStdin();
+
+    const app = createApp(InputDummy);
+    app.mount({
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      liveUpdates: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+
+    expect(written).toContain("\x1b[?u");
+    app.unmount();
+  });
+
+  test("semantic input remains available when stdout cannot carry Kitty control output", async () => {
+    const { stdout, written } = createFakeStdout();
+    (stdout as { isTTY?: boolean }).isTTY = false;
+    const { stdin } = createFakeStdin();
+    (stdin as { ref?: () => NodeJS.ReadStream }).ref = () => stdin;
+    (stdin as { unref?: () => NodeJS.ReadStream }).unref = () => stdin;
+    const inputs: string[] = [];
+    const App = defineComponent(() => {
+      useInput((input) => inputs.push(input));
+      return () => null;
+    });
+
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      kittyKeyboard: { mode: "auto" },
+      exitOnCtrlC: false,
+    });
+    stdin.emit("data", "x");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(inputs).toEqual(["x"]);
+    expect(
+      (stdin as unknown as { setRawMode: ReturnType<typeof vi.fn> }).setRawMode,
+    ).toHaveBeenCalledWith(true);
+    expect(stdin.listenerCount("data")).toBe(1);
+    expect(written).not.toContain("\x1b[?u");
+    expect(written).not.toContain("\x1b[>1u");
+    app.unmount();
+  });
+
+  test("auto Kitty does not query for an input-free live-output app", () => {
     const { stdout, written } = createFakeStdout();
     const { stdin } = createFakeStdin();
 
@@ -434,11 +966,12 @@ describe("kitty lifecycle - mount/unmount integration", () => {
     app.mount({
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
-      kittyKeyboard: { mode: "enabled" },
+      liveUpdates: true,
+      kittyKeyboard: { mode: "auto" },
     });
 
+    expect(written).not.toContain("\x1b[?u");
     app.unmount();
-    expect(written).toContain("\x1b[<u");
   });
 
   test("mount without kittyKeyboard does not write sequences", () => {
@@ -623,7 +1156,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -667,7 +1199,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -715,7 +1246,6 @@ describe("kitty query-response - end-to-end filtering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -903,7 +1433,6 @@ function mountInputAppOnStreams({
     patchConsole: false,
     liveUpdates: true,
     maxFps: 0,
-    rawMode: "auto",
     exitOnCtrlC: false,
     ...(kittyMode ? { kittyKeyboard: { mode: kittyMode } } : {}),
     ...(suspensionHost ? { [INTERNAL_SUSPENSION_HOST]: suspensionHost } : {}),
@@ -943,13 +1472,23 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       }
       return result;
     }) as typeof stdin.on;
-    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    let selectRoute!: () => () => void;
+    const App = defineComponent(() => {
+      const routing = useInternalInputRoutingForTest();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: continueInputRoute,
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => h("tui-text", null, "x");
+    });
+    const app = createApp(App);
 
-    expect(() =>
-      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false }),
-    ).toThrow("on failed after attach");
+    app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, exitOnCtrlC: false });
+    expect(selectRoute).toThrow("on failed after attach");
     expect(stdin.listenerCount("data")).toBe(0);
 
+    app.unmount();
     stdin.destroy();
     stdout.destroy();
   });
@@ -1005,7 +1544,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -1111,6 +1649,66 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
+  test("the last route releases application ownership while its Kitty tombstone remains", async () => {
+    const stdin = makeRawByteStdin();
+    const input = stdin as WritableTestStdin;
+    let refs = 0;
+    stdin.ref = () => {
+      refs++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refs--;
+      return stdin;
+    };
+    const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    const visible = shallowRef(true);
+    const inputs: string[] = [];
+    const Child = defineComponent(() => {
+      useInput((value) => inputs.push(value));
+      return () => null;
+    });
+    const App = defineComponent(() => () => (visible.value ? h(Child) : null));
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      maxFps: 0,
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    try {
+      expect(stdin.isRaw).toBe(true);
+      expect(refs).toBe(1);
+      expect(writes).toContain("\x1b[?u");
+
+      visible.value = false;
+      await nextTick();
+      await flushInput();
+
+      // Only the finite reply tombstone may retain the physical listener. The
+      // ended application route no longer owns raw mode, a ref, or delivery.
+      expect(stdin.isRaw).toBe(false);
+      expect(refs).toBe(0);
+      expect(stdin.listenerCount("data")).toBe(1);
+
+      input.write("x");
+      input.write("\x1b[?1");
+      await new Promise<void>((resolve) => setTimeout(resolve, 35));
+      input.write("u");
+      await flushInput();
+
+      expect(inputs).toEqual([]);
+      expect(stdin.listenerCount("data")).toBe(0);
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
   test("an active query does not retain an orphaned paste from a released consumer", async () => {
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
@@ -1131,7 +1729,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
@@ -1143,7 +1740,8 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       await flushInput();
 
       expect(pastes).toEqual([]);
-      expect(writes).toContain("\x1b[>1u");
+      expect(writes).not.toContain("\x1b[>1u");
+      expect(stdin.listenerCount("data")).toBe(0);
     } finally {
       app.unmount();
       stdin.destroy();
@@ -1151,9 +1749,10 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
-  test("query-only delivery drops unfinished framing when detection times out", async () => {
+  test("an input-free app starts neither Kitty detection nor application delivery", () => {
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
     const app = createApp(defineComponent(() => () => h("tui-text", null, "idle")));
     app.mount({
       stdout,
@@ -1161,16 +1760,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });
     try {
       stdin.emit("data", "\x1b[200~unfinished");
-      expect(stdin.listenerCount("data")).toBe(1);
-      await new Promise<void>((resolve) => setTimeout(resolve, 230));
-
       expect(stdin.listenerCount("data")).toBe(0);
+      expect(writes).not.toContain("\x1b[?u");
     } finally {
       app.unmount();
       stdin.destroy();
@@ -1188,20 +1784,29 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       if (String(args[0]) === "\x1b[?u") throw new Error("query write rejected");
       return (originalWriteA as (...writeArgs: unknown[]) => boolean)(...args);
     }) as NodeJS.WriteStream["write"];
-    const appA = createApp(defineComponent(() => () => h("tui-text", null, "a")));
+    let selectRoute!: () => () => void;
+    const AppA = defineComponent(() => {
+      const routing = useInternalInputRoutingForTest();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: continueInputRoute,
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => h("tui-text", null, "a");
+    });
+    const appA = createApp(AppA);
 
-    expect(() =>
-      appA.mount({
-        stdout: stdoutA,
-        stdin,
-        patchConsole: false,
-        liveUpdates: true,
-        maxFps: 0,
-        rawMode: "always",
-        exitOnCtrlC: false,
-        kittyKeyboard: { mode: "auto" },
-      }),
-    ).toThrow("query write rejected");
+    appA.mount({
+      stdout: stdoutA,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    expect(selectRoute).toThrow("query write rejected");
+    appA.unmount();
 
     const b = mountInputAppOnStreams({ stdin, stdout: stdoutB, kittyMode: "auto" });
     try {
@@ -1363,7 +1968,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        rawMode: "auto",
         exitOnCtrlC: false,
         kittyKeyboard: { mode: "auto" },
       });
@@ -1415,7 +2019,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        rawMode: "auto",
         exitOnCtrlC: false,
         kittyKeyboard: { mode: "auto" },
       });
@@ -1506,14 +2109,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       refBalance--;
       return stdin;
     };
-    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    const app = createApp(InputDummy);
     app.mount({
       stdout,
       stdin,
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "always",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -1564,7 +2166,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "always",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
@@ -1579,7 +2180,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       refBalance--;
       return stdin;
     };
-    const Root = defineComponent(() => () => h("tui-text", null, "x"));
+    const Root = InputDummy;
     const appA = createApp(Root);
     const appB = createApp(Root);
     appA.mount({
@@ -1588,7 +2189,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "always",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -1645,7 +2245,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "always",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
@@ -1653,7 +2252,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       }
       return stdin;
     };
-    const Root = defineComponent(() => () => h("tui-text", null, "x"));
+    const Root = InputDummy;
     const appA = createApp(Root);
     const appB = createApp(Root);
     appA.mount({
@@ -1662,7 +2261,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "always",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -1763,7 +2361,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "auto",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
@@ -1847,7 +2444,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "auto",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
@@ -1933,7 +2529,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "auto",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
         });
@@ -2026,7 +2621,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        rawMode: "auto",
         exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
@@ -2100,7 +2694,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
-          rawMode: "auto",
           exitOnCtrlC: false,
           kittyKeyboard: { mode: "disabled" },
           [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -2143,14 +2736,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       input.isRaw = mode;
       return stdin;
     };
-    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    const app = createApp(InputDummy);
     app.mount({
       stdout,
       stdin,
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "always",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -2203,14 +2795,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       refBalance--;
       return stdin;
     };
-    const app = createApp(defineComponent(() => () => h("tui-text", null, "x")));
+    const app = createApp(InputDummy);
     app.mount({
       stdout,
       stdin,
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "always",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2267,7 +2858,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        rawMode: "always",
         exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
@@ -2310,7 +2900,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2320,7 +2909,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2394,7 +2982,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2404,7 +2991,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2494,7 +3080,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -2540,7 +3125,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
-        rawMode: "auto",
         exitOnCtrlC: false,
         kittyKeyboard: { mode: "disabled" },
       });
@@ -2580,7 +3164,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2639,7 +3222,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2649,7 +3231,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2703,7 +3284,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2747,7 +3327,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2793,7 +3372,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2835,7 +3413,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2880,7 +3457,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2926,7 +3502,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -2970,7 +3545,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3015,7 +3589,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3056,7 +3629,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3110,7 +3682,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3165,7 +3736,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3210,7 +3780,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -3255,7 +3824,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3292,7 +3860,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -3370,7 +3937,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -3381,7 +3947,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3432,7 +3997,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3441,7 +4005,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
     });
     try {
@@ -3482,7 +4045,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3491,7 +4053,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
     });
     try {
@@ -3533,7 +4094,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3575,7 +4135,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
@@ -3584,7 +4143,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
     });
     try {
@@ -3623,7 +4181,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "disabled" },
     });
@@ -3816,7 +4373,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       stdin,
       patchConsole: false,
       liveUpdates: true,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
@@ -3881,7 +4437,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      rawMode: "auto",
       exitOnCtrlC: false,
       kittyKeyboard: { mode: "auto" },
     });

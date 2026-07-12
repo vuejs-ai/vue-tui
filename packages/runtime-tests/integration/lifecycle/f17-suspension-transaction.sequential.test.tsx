@@ -63,7 +63,6 @@ test.sequential("registers suspension before the first terminal acquisition", ()
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      rawMode: "always",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,
@@ -89,7 +88,10 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     const stdin = makeRawTrackingStdin();
     const suspensionHost = createManualSuspensionHost();
     const content = shallowRef("before-suspend");
-    const App = defineComponent(() => () => <Text>{content.value}</Text>);
+    const App = defineComponent(() => {
+      useInput(() => {});
+      return () => <Text>{content.value}</Text>;
+    });
     const app = createApp(App);
     const forwardedWrites: string[] = [];
     const attemptedWrites: string[] = [];
@@ -120,7 +122,6 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
         stdin,
         mode: "fullscreen",
         liveUpdates: true,
-        rawMode: "always",
         maxFps: 0,
         patchConsole: false,
         exitOnCtrlC: false,
@@ -187,7 +188,6 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      rawMode: "always",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,
@@ -254,7 +254,6 @@ test.sequential("a resize reported by the continued frame is repainted before in
       stderr,
       stdin,
       liveUpdates: true,
-      rawMode: "always",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,
@@ -310,7 +309,6 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      rawMode: "always",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,
@@ -372,7 +370,6 @@ test.sequential("a reentrant unmount cannot forward the initial Fullscreen paint
       stdin,
       mode: "fullscreen",
       liveUpdates: true,
-      rawMode: "always",
       maxFps: 0,
       patchConsole: false,
       exitOnCtrlC: false,
@@ -422,7 +419,6 @@ test.sequential.each(["inline", "fullscreen"] as const)(
         stdin,
         mode,
         liveUpdates: true,
-        rawMode: "auto",
         maxFps: 0,
         patchConsole: false,
         exitOnCtrlC: false,

@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { Text, useFocus, useInput, useStdin } from "../index.ts";
-import { StdinContextKey } from "../context.ts";
+import { StdinContextKey, type StdinContext } from "../context.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import { createApp, type MountOptions } from "../render.ts";
 import type { RenderMode } from "../render-session.ts";
@@ -112,13 +112,143 @@ function requireRouting(): InternalInputRoutingRuntime {
 }
 
 describe.each(modes)("live selected input topology in %s mode", (mode) => {
+  test("a reentrant raw acquisition that survives an outer failure retains Kitty demand", async () => {
+    const { stdin, rawModeCalls, refBalance } = createTrackedStdin();
+    const tracked = stdin as NodeJS.ReadStream & { isRaw: boolean };
+    const stdout = createWritable();
+    const writes: string[] = [];
+    stdout.on("data", (chunk: Buffer) => writes.push(chunk.toString()));
+    let stdinContext!: StdinContext;
+    let reenter = true;
+    const App = defineComponent(() => {
+      const injected = inject(StdinContextKey);
+      if (!injected) throw new Error("missing stdin context");
+      stdinContext = injected;
+      return () => <Text>ready</Text>;
+    });
+    tracked.setRawMode = (raw: boolean) => {
+      rawModeCalls.push(raw);
+      if (raw && reenter) {
+        reenter = false;
+        stdinContext.acquireRawMode();
+        throw new Error("outer raw-on failed");
+      }
+      tracked.isRaw = raw;
+      return tracked;
+    };
+
+    const app = createApp(App);
+    app.mount({
+      ...mountOptions(mode, stdin),
+      stdout,
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "enabled" },
+    });
+    try {
+      expect(() => stdinContext.acquireRawMode()).toThrow("outer raw-on failed");
+      expect({
+        raw: tracked.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: true, refs: 1, listeners: 1 });
+      expect(writes).toContain("\x1b[>1u");
+
+      stdinContext.releaseRawMode();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect({
+        raw: tracked.isRaw,
+        refs: refBalance(),
+        listeners: stdin.listenerCount("data"),
+      }).toEqual({ raw: false, refs: 0, listeners: 0 });
+      expect(writes).toContain("\x1b[<u");
+    } finally {
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("excludes a custom non-TTY from managed routing while preserving raw stream identity", () => {
+    const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
+    const rawModeCalls: boolean[] = [];
+    let refs = 0;
+    Object.assign(stdin, {
+      isTTY: false,
+      isRaw: false,
+      setRawMode(raw: boolean) {
+        rawModeCalls.push(raw);
+        return stdin;
+      },
+      ref() {
+        refs++;
+        return stdin;
+      },
+      unref() {
+        refs--;
+        return stdin;
+      },
+    });
+    const stdout = createWritable();
+    const stdoutChunks: string[] = [];
+    stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk.toString()));
+    let observedStdin: NodeJS.ReadStream | undefined;
+    let routing!: InternalInputRoutingRuntime;
+    let selectRoute!: () => () => void;
+    const semanticCalls: string[] = [];
+    const App = defineComponent(() => {
+      observedStdin = useStdin().stdin;
+      routing = requireRouting();
+      const boundary = routing.registerSemantic({
+        id: "boundary",
+        handle: (fact) => (semanticCalls.push(fact.sequence), continueRoute()),
+      });
+      selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+      return () => <Text>ready</Text>;
+    });
+
+    const app = createApp(App);
+    app.mount({
+      ...mountOptions(mode, stdin),
+      stdout,
+      exitOnCtrlC: false,
+      kittyKeyboard: { mode: "auto" },
+    });
+    const directCalls: string[] = [];
+    const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
+    try {
+      expect(observedStdin).toBe(stdin);
+      expect(selectRoute).toThrow(
+        "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+      );
+      expect(routing.resolve(routing.capture()).kind).toBe("compatibility");
+      expect({ rawModeCalls, refs, listeners: stdin.listenerCount("data") }).toEqual({
+        rawModeCalls: [],
+        refs: 0,
+        listeners: 0,
+      });
+      expect(stdoutChunks.join("")).not.toContain("\x1b[?u");
+
+      stdin.on("data", directListener);
+      stdin.emit("data", "x");
+      expect(directCalls).toEqual(["x"]);
+      expect(semanticCalls).toEqual([]);
+      expect(stdin.listenerCount("data")).toBe(1);
+    } finally {
+      stdin.off("data", directListener);
+      app.unmount();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
   test("rejects a custom TTY that is neither pre-raw nor able to enter raw mode", () => {
     const { stdin, refBalance } = createSetterlessTty(false);
     let rawModeSupported = true;
     let selectRoute!: () => () => void;
     const calls: string[] = [];
     const App = defineComponent(() => {
-      rawModeSupported = useStdin().isRawModeSupported;
+      rawModeSupported = inject(StdinContextKey)?.isRawModeSupported ?? false;
       const routing = requireRouting();
       const boundary = routing.registerSemantic({
         id: "boundary",
@@ -129,10 +259,12 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       expect(rawModeSupported).toBe(false);
-      expect(selectRoute).toThrow("Raw mode is not supported on the stdin provided to Vue TUI");
+      expect(selectRoute).toThrow(
+        "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+      );
       stdin.emit("data", "x");
       expect(calls).toEqual([]);
       expect({
@@ -161,10 +293,12 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       stdin.isRaw = false;
-      expect(selectRoute).toThrow("Raw mode is not supported on the stdin provided to Vue TUI");
+      expect(selectRoute).toThrow(
+        "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+      );
       stdin.emit("data", "x");
       expect(calls).toEqual([]);
       expect({
@@ -184,7 +318,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     let endSelection!: () => void;
     const calls: string[] = [];
     const App = defineComponent(() => {
-      rawModeSupported = useStdin().isRawModeSupported;
+      rawModeSupported = inject(StdinContextKey)?.isRawModeSupported ?? false;
       const routing = requireRouting();
       const boundary = routing.registerSemantic({
         id: "boundary",
@@ -195,7 +329,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       expect(rawModeSupported).toBe(true);
       expect({
@@ -248,7 +382,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
         rawModeCalls: [true],
@@ -299,7 +433,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       const setRawMode = tracked.setRawMode.bind(tracked);
       let failEnable = true;
@@ -360,7 +494,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({ ...mountOptions(mode, stdin), rawMode: "auto", exitOnCtrlC: false });
+    app.mount({ ...mountOptions(mode, stdin), exitOnCtrlC: false });
     try {
       stdin.emit("data", "\x1b[");
       endBoundary();
@@ -820,13 +954,11 @@ test("selected topology composes across shared stdin suspension and teardown", a
   const second = createApp(SelectedApp("second", secondCalls));
   first.mount({
     ...mountOptions("inline", stdin),
-    rawMode: "auto",
     exitOnCtrlC: false,
     [INTERNAL_SUSPENSION_HOST]: suspensionHost,
   } as MountOptions);
   second.mount({
     ...mountOptions("fullscreen", stdin),
-    rawMode: "auto",
     exitOnCtrlC: false,
   });
   try {
@@ -906,7 +1038,6 @@ test.each([
       stdout,
       stderr: createWritable(false),
       stdin,
-      rawMode: "auto",
       exitOnCtrlC: false,
       maxFps: 0,
       patchConsole: false,

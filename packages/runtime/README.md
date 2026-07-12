@@ -98,11 +98,13 @@ useInput((input) => {
 | `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
 | `usePaste(handler, opts?)`      | Handle clipboard paste events                                                                |
-| `useStdin()`                    | Access the actual mounted stdin as a raw escape hatch, plus raw mode control                 |
+| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                            |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
 | `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
 
 Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()` or `usePaste()`.
+
+`useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while managed handlers fail before publishing a route or changing terminal state. Mount options containing the removed `rawMode` field are rejected before terminal mutation.
 
 ### Render-session facts
 

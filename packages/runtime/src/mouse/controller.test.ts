@@ -8,7 +8,6 @@ import { createMouseController } from "./controller.ts";
 function createStdinContext(overrides: Partial<StdinContext> = {}): StdinContext {
   return {
     stdin: {} as NodeJS.ReadStream,
-    setRawMode: vi.fn(),
     isRawModeSupported: true,
     internal_routes: createInternalInputRouteRegistry(),
     internal_inputRouting: createInternalInputRoutingRuntime(),

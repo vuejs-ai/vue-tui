@@ -168,11 +168,10 @@ it("useInput - kitty Ctrl+C exits app when exitOnCtrlC is true", async () => {
   expect(ps.output).toContain("exited");
 });
 
-// --- Ctrl+C exit without useInput (raw mode held by usePaste) ---
-// exitOnCtrlC must exit even when no useInput is mounted: the exit lives in the
-// always-on stdin controller, encoding-agnostically. The legacy case is the
-// control (it already exits via the \x03 byte); the kitty case is the gap Ink
-// has — it only checks \x03, so a CSI-u Ctrl+C never exits there.
+// --- Ctrl+C exit without useInput (managed demand held by usePaste) ---
+// usePaste keeps the shared controller active even though no useInput handler is
+// mounted, so the encoding-agnostic delayed default must still exit. The legacy
+// case is the control; the Kitty case is Ink's gap because it only checks \x03.
 
 it("usePaste-only app exits on legacy Ctrl+C (control)", async () => {
   const ps = term("use-paste-ctrl-c");

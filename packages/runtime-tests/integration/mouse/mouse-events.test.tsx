@@ -54,7 +54,6 @@ function mountMouseApp(
     stdin,
     maxFps: typeof options === "object" ? (options.maxFps ?? 0) : 0,
     exitOnCtrlC: false,
-    rawMode: "auto",
     mode: fullscreen ? "fullscreen" : "inline",
   });
   return { app, stdin, writes };

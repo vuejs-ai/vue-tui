@@ -55,7 +55,6 @@ test("one-row Inline leaves the first component error visible", async () => {
     stdin,
     mode: "inline",
     liveUpdates: true,
-    rawMode: "auto",
     patchConsole: false,
     maxFps: 0,
     exitOnCtrlC: false,
@@ -94,7 +93,6 @@ test.each([1, 4])(
       stdin,
       mode: "inline",
       liveUpdates: true,
-      rawMode: "auto",
       patchConsole: false,
       maxFps: 0,
       exitOnCtrlC: false,
@@ -133,7 +131,6 @@ test("a screen-reader Fullscreen request leaves its fatal transcript on the main
     mode: "fullscreen",
     isScreenReaderEnabled: true,
     liveUpdates: true,
-    rawMode: "auto",
     patchConsole: false,
     maxFps: 0,
     exitOnCtrlC: false,
@@ -172,7 +169,6 @@ test("a throttled Inline boundary error falls back to stderr when stdout is lost
     stdin,
     mode: "inline",
     liveUpdates: true,
-    rawMode: "auto",
     patchConsole: false,
     maxFps: 1,
     exitOnCtrlC: false,
@@ -229,7 +225,6 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     stdin,
     mode: "inline",
     liveUpdates: true,
-    rawMode: "auto",
     patchConsole: false,
     // Keep the normal error repaint pending so the resize render barrier below
     // owns the first physical attempt after Vue produces the overview.
@@ -284,7 +279,6 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     stderr,
     stdin,
     liveUpdates: false,
-    rawMode: "auto",
     patchConsole: false,
     // Keep a long throttle window active after the successful leading commit.
     // The error update is then pending when teardown cancels the scheduler, so
@@ -388,7 +382,6 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
     stdin,
     mode: "fullscreen",
     liveUpdates: true,
-    rawMode: "auto",
     patchConsole: false,
     maxFps: 0,
     exitOnCtrlC: false,
