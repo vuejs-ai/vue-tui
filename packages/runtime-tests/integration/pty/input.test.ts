@@ -329,6 +329,11 @@ it("useInput - no MaxListenersExceededWarning with many useInput hooks", async (
 it("useInput - discrete priority keeps states in sync during rapid input", async () => {
   const ps = term("use-input-discrete-priority");
 
+  // Start the timing below only after the fixture can receive input. Otherwise,
+  // a slow process startup lets every delayed write queue behind readiness and
+  // then sends Enter before Vue can flush the deferred watcher.
+  await ps.waitForOutput((output) => output.includes("__READY__"));
+
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // Simulate rapid delete key repeat at ~30ms intervals.
