@@ -70,7 +70,7 @@ function expectExactCleanup(output: string, mode: "inline" | "fullscreen"): void
   );
   expect(output.lastIndexOf(DISABLE_BRACKETED_PASTE)).toBeLessThan(completion);
 
-  expect(occurrences(output, QUERY_KITTY_KEYBOARD)).toBe(1);
+  expect(occurrences(output, QUERY_KITTY_KEYBOARD)).toBe(0);
   expect(occurrences(output, ENABLE_KITTY_KEYBOARD)).toBe(1);
   expect(occurrences(output, DISABLE_KITTY_KEYBOARD)).toBe(1);
   expect(output.lastIndexOf(DISABLE_KITTY_KEYBOARD)).toBeGreaterThan(
@@ -103,16 +103,10 @@ test.each(["inline", "fullscreen"] as const)(
   async (mode) => {
     const ps = term("focus-routing", [mode, "assert"], { name: "xterm-256color" });
     try {
-      // The lightweight PTY helper is not itself a terminal emulator, so answer
-      // the owned query as soon as it appears, exactly as xterm's emulator does
-      // in visual review. Waiting for a later focus render first can exceed the
-      // protocol's bounded reply window under a contended CI worker.
-      await ps.waitForOutput((output) => output.includes(QUERY_KITTY_KEYBOARD));
-      ps.write("\x1b[?1u");
-      await ps.waitForOutput((output) => output.includes(ENABLE_KITTY_KEYBOARD));
       await ps.waitForOutput(
         (output) =>
           output.includes("__READY__") &&
+          output.includes(ENABLE_KITTY_KEYBOARD) &&
           output.includes(`F4 focus lifecycle (${mode})`) &&
           output.includes("focus=first second=present modal=closed"),
       );

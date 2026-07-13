@@ -240,7 +240,10 @@ app.mount({
   mode: requestedMode,
   maxFps: 0,
   patchConsole: false,
-  kittyKeyboard: { mode: "auto" },
+  // Automatic capability detection has its own real-PTY coverage. This F4
+  // journey explicitly enables the protocol so a simulated query reply cannot
+  // race the bounded detection window while the full PTY suite runs in parallel.
+  kittyKeyboard: { mode: "enabled" },
 });
 await app.waitUntilExit();
 if (assertionRun) {
