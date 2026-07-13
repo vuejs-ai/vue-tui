@@ -32,7 +32,7 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
        Under a screen reader with an ariaLabel, render the label text instead of the slot.
        The root `v-if` makes this component a Vue Fragment, so its `$el` is the fragment's
        boundary anchor — NOT the `tui-box` host node; a Box ref is resolved to its host node
-       by drilling the component subTree (see useBoxMetrics). -->
+       by the shared rendered-target resolver. -->
   <tui-box v-if="!srHidden && (srEnabled || assertBoxValid(props))" v-bind="props">
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />

@@ -47,8 +47,7 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 - emit a new escape sequence, or flip a terminal mode;
 - hook the commit/animation scheduler _directly_ — note `useAnimation` already exposes
   frame-driven animation, so needing animation is _not_ runtime work;
-- read geometry the runtime primitives (incl. `useBoxMetrics` / `measureElement`) don't already
-  expose.
+- require geometry that the runtime's semantic `useElementGeometry()` snapshots do not already expose.
 
 Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
 input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime

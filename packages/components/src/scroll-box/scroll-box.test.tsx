@@ -99,3 +99,71 @@ test("ScrollBox drives scrolling through the exposed handle", async () => {
     result.unmount();
   }
 });
+
+test("ScrollBox preserves a non-sticky offset across ancestor hiding", async () => {
+  const visible = shallowRef(true);
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box display={visible.value ? "flex" : "none"} height={4} width={20}>
+        <ScrollBox ref={box}>
+          {messages(12).map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    box.value?.scrollToLine(4);
+    await result.waitUntilRenderFlush();
+    const before = result.lastFrame();
+    expect(before).toContain("message 4");
+    expect(before).not.toContain("message 0");
+
+    visible.value = false;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    visible.value = true;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+
+    expect(result.lastFrame()).toBe(before);
+  } finally {
+    result.unmount();
+  }
+});
+
+test("ScrollBox preserves a non-sticky offset across suspension, resize, and continuation", async () => {
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {messages(12).map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    box.value?.scrollToLine(4);
+    await result.waitUntilRenderFlush();
+    const before = result.lastFrame();
+    expect(before).toContain("message 4");
+    expect(before).not.toContain("message 0");
+
+    await result.terminal.suspend();
+    await result.terminal.resize(32, 6);
+    await result.terminal.resume();
+
+    expect(result.lastFrame()).toBe(before);
+  } finally {
+    result.unmount();
+  }
+});

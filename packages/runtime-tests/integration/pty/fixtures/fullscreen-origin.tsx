@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
+import { computed, defineComponent, nextTick, onMounted, shallowRef } from "vue";
 import {
   Box,
   Static,
@@ -7,7 +7,7 @@ import {
   createApp,
   useApp,
   useCursor,
-  useBoxMetrics,
+  useElementGeometry,
   useDraggable,
   useInput,
   useStderr,
@@ -76,7 +76,22 @@ const App = defineComponent(() => {
   const { write } = useStdout();
   const { write: writeError } = useStderr();
   const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
-  const targetMetrics = useBoxMetrics(target);
+  const { geometry: targetGeometry } = useElementGeometry(target);
+  const targetMetrics = computed(() => {
+    const geometry = targetGeometry.value;
+    if (
+      geometry.status === "zero-size" ||
+      geometry.status === "fully-clipped" ||
+      geometry.status === "visible"
+    ) {
+      return {
+        width: geometry.parent.width,
+        height: geometry.parent.height,
+        measured: true,
+      };
+    }
+    return { width: 0, height: 0, measured: false };
+  });
   let dragStarts = 0;
   const drag = useDraggable(target, {
     onStart() {
@@ -160,8 +175,8 @@ const App = defineComponent(() => {
           <Text>phase={targetPhase.value}</Text>
           <LifetimeTarget ref={target} />
           <Text>
-            target={targetMetrics.width.value}x{targetMetrics.height.value}:
-            {String(targetMetrics.hasMeasured.value)} dragging={String(drag.isDragging.value)}
+            target={targetMetrics.value.width}x{targetMetrics.value.height}:
+            {String(targetMetrics.value.measured)} dragging={String(drag.isDragging.value)}
           </Text>
         </Box>
       );

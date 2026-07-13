@@ -45,7 +45,7 @@ import {
   type KittyKeyboardOptions,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
-import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
+import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
@@ -1964,7 +1964,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               Yoga.DIRECTION_LTR,
             );
             try {
-              emitLayoutListeners(tuiRoot);
               geometryFrame = mountedGeometry?.beginFrame();
               const frame = renderFrame(w, undefined, undefined, geometryFrame);
               renderObserver?.onCommit?.({
@@ -2019,7 +2018,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 Yoga.DIRECTION_LTR,
               );
             }
-            emitLayoutListeners(tuiRoot);
             const hitMap = renderSession.session.capabilities.elementHitTesting ? [] : undefined;
             const computedRootHeight = Math.max(
               0,

@@ -197,23 +197,6 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   Ink's. Contrast with the terminal-bound composables in the outside-render-tree entry,
   which throw because they have no meaningful standalone mode.
 
-### `measureElement` / `useBoxMetrics` also accept a Vue component-instance ref
-
-- **Ink:** `measureElement(node: DOMElement)` and `useBoxMetrics(...)` read
-  `node.yogaNode` directly: a host `DOMElement` only.
-- **vue-tui:** the ref is resolved through `$el` as well: a `ref` bound to a **Vue
-  component** (whose root host node is on `$el`), not just a host-node ref, resolves to the
-  underlying yoga node.
-- **Why:** in Vue a template ref on a component yields the component instance, and its host
-  node is reached via `$el`. Because `<Box>` is a `defineComponent`, the `$el` path is in
-  fact the **primary** path a normal `ref` on `<Box>` takes — the bare host-node ref is the
-  rarer raw-host case. Supporting both is a strict superset that matches how Vue refs behave;
-  a bare host-node ref still works identically to Ink. KEEP
-  — a reasonable Vue-idiomatic adoption (the component-instance ref is the natural Vue path;
-  the bare host-node ref stays Ink-identical). [VOUCHED @hyf0]
-
-> **Unstamped F2 implementation note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer now reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useBoxMetrics()` and `useDraggable()` are the first two adapters. See [rendered-target-lifetime.md](./rendered-target-lifetime.md). This note records implementation evidence and does not extend the VOUCHED public API decision above.
-
 ### Two apps sharing one stdin both receive input
 
 - **Ink:** raw-mode count and the input listener are **per-`App`** (`useRef`), and Ink reads
@@ -336,6 +319,14 @@ current-props model, or API conventions.
 
 ### Vue-Idiomatic Choices
 
+#### Public element geometry follows a normal Vue component-instance ref
+
+- **Ink:** `measureElement(node: DOMElement)` and `useBoxMetrics(...)` receive Ink's public host `DOMElement` ref and read its Yoga node.
+- **vue-tui:** `useElementGeometry()` receives a normal Vue component-instance ref or getter. The private F2 resolver follows the current rendered host below `$el`, including stable-proxy root replacement, but the public type does not expose or accept vue-tui's internal host-node or Yoga types.
+- **Why:** a template ref on a Vue component naturally yields the component instance. That is the authoring source the API should support; accepting renderer nodes would make a private implementation type into a second public target model. This is a Vue-idiomatic replacement, not an additive Ink-compatible superset: raw Ink-style host-node input is deliberately unsupported. The [F5 naming review](./semantic-geometry-and-caret.md#naming-review) explains why the richer paint-derived replacement no longer uses Ink's measurement names.
+
+> **Unstamped lifetime note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useElementGeometry()` uses that mechanism; `useDraggable()` remains F6 evidence. See [rendered-target-lifetime.md](./rendered-target-lifetime.md).
+
 #### Entry point - `createApp()` instead of `render()`
 
 - **Ink:** `render(<App/>, options?)`: `options` is `RenderOptions`; returns an `Instance`.
@@ -434,7 +425,7 @@ current-props model, or API conventions.
 - **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...). Where a
   composable's return type is exported under a name, the name always follows VueUse's
   `UseXReturn` convention (`UseAppReturn`, `UseStdinReturn`, `UseStdoutReturn`,
-  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`, `UseLayoutSizeReturn`); the remaining composables
+  `UseStderrReturn`, `UseAnimationReturn`, `UseElementGeometryReturn`, `UseLayoutSizeReturn`); the remaining composables
   return `void` or small unexported inline shapes — never an `XProps` type. `useRenderSession()`
   returns the exported domain model `RenderSession` rather than adding a duplicate hook-specific
   alias. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
@@ -807,23 +798,14 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Why:** overflow is a containment boundary. Paint, semantic geometry, and later targeted pointer selection must agree on the same ancestor intersection; allowing paint to escape while hit testing remains clipped creates visible cells that no semantic target owns. This is an unstamped F5 implementation decision.
 - **Evidence:** `overflow.test.tsx` covers a width-eight nested clip inside a width-four ancestor, a transform at an empty intersected edge, post-transform containment, and the existing nested-overflow cases. `grapheme-clip.test.tsx` covers the same exclusive edge for constant and appending transforms.
 
-### `measureElement` coerces a non-finite (pre-layout) dimension to `0`, not `NaN`
+### Historical: `measureElement` coerced a non-finite pre-layout dimension to `0`
 
 - **Ink:** `measureElement` returns `{ width: node.yogaNode.getComputedWidth() ?? 0, height: ... ?? 0 }`.
   Before the first layout pass yoga's `getComputedWidth()`/`getComputedHeight()` return **`NaN`**, and
   `?? 0` does **not** catch `NaN` (`NaN ?? 0 === NaN`), so a pre-layout / mis-timed read returns
   `{ width: NaN, height: NaN }`.
-- **vue-tui:** coerces a non-finite computed dimension to `0` (`Number.isFinite(v) ? v : 0`), so the same
-  pre-layout read returns a finite `{ width: 0, height: 0 }`. (The detached-ref case already returns
-  `{0,0}`; this extends the same safe fallback to the attached-but-not-yet-laid-out case.)
-- **Why:** `0` is a **safe sentinel** meaning "not yet computed", not the box's true size — the genuinely
-  correct usage is to read _after_ layout (the JSDoc already steers callers to defer via `nextTick`). It is
-  chosen because it is Ink's clear intent (`?? 0`) and it matches the **DOM precedent**:
-  `getBoundingClientRect()` on a `display:none` element and `img.naturalWidth` before load both return `0`,
-  not `NaN`. Leaking `NaN` instead poisons user layout math (`terminalWidth - measured.width` → `NaN` → a
-  `NaN` width prop), so a mis-timed read degrades gracefully rather than corrupting the layout. A low-risk
-  robustness divergence from Ink's `NaN`-leaking `?? 0`. KEEP. [VOUCHED @hyf0] Tests: "returns finite
-  { width: 0, height: 0 } for a node not yet laid out (no NaN leak)" in `use-box-metrics.test.tsx`.
+- **Historical vue-tui behavior:** the former imperative API coerced a non-finite computed dimension to `0`, so a pre-layout read stayed finite. This was safer than leaking `NaN`, but `0` still overloaded a legitimate zero-size result, a detached target, and a not-yet-painted target.
+- **Current F5 disposition:** `measureElement()` is removed. `useElementGeometry()` publishes explicit `detached`, `pending`, `hidden`, and `zero-size` states and publishes rectangles only from an authoritative paint generation. The earlier sentinel behavior remains decision history rather than a current contract.
 
 ### Out-of-type style values are forwarded, not defensively coerced
 
@@ -849,15 +831,14 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
 - **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
   `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `useMouseInput`, and
-  `useCursor` **throw** when their required context is absent. `useBoxMetrics` and `useAnimation` do **not** throw:
-  they fall back. `useBoxMetrics` reports zero metrics, and `useAnimation` drives a
-  standalone scheduler. See the additive entry.
-- **Why:** a composable used in the wrong place is a bug, and a thrown error names it at
-  the call site instead of returning a context that quietly does nothing. The two
-  exceptions fall back because they have a meaningful standalone behavior (zero metrics / a
-  working animation), so throwing would remove a useful capability. Required app,
-  terminal, focus, and input context should fail fast when absent; no-op defaults hide bugs.
-  KEEP. [VOUCHED @hyf0]
+  `useCursor` **throw** when their required context is absent. `useElementGeometry` and `useAnimation` do **not** throw:
+  geometry reports `unavailable`, and animation drives a standalone scheduler. See the additive entry.
+- **Why:** a composable used in the wrong place is usually a bug, and a thrown error names it at
+  the call site instead of returning a context that quietly does nothing. Geometry is different:
+  availability is already part of its explicit state model, so `unavailable` truthfully represents
+  a standalone or non-visual host without manufacturing a rectangle. Animation has a useful
+  standalone scheduler. Required app, terminal, focus, and input context still fail fast; no-op
+  defaults would hide bugs. The F5 geometry exception is unstamped.
 
 ### Invalid input is validated at the component layer, not the paint layer
 
@@ -922,11 +903,10 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 These notes are neither divergence nor alignment entries. They document Vue-facing conventions
 or internal mechanics so they are not mistaken for parity gaps.
 
-- The exported host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
+- The internal host-node type is **`TuiNode`** (`TuiContainer | TuiTextLeaf | TuiComment`,
   from `@vue-tui/runtime/internal`), not Ink's DOM-emulation `DOMElement`
-  (`nodeName` / `attributes` / `childNodes`). vue-tui keeps a native host tree, so the
-  exported type names that tree; `measureElement` and template refs accept it. The type
-  rename itself does not imply a runtime behavior difference from Ink's DOM-emulation node.
+  (`nodeName` / `attributes` / `childNodes`). vue-tui keeps a native host tree, but
+  `useElementGeometry()` accepts a normal Vue component ref and does not expose or accept `TuiNode` on the supported public surface.
 - `null` / `false` / `undefined` / `v-if="false"` children are materialized by Vue as
   comment vnodes, which vue-tui's host renderer turns into an inert `TuiComment`: no yoga
   node, paints nothing, never shifts a sibling, and skipped when counting child positions

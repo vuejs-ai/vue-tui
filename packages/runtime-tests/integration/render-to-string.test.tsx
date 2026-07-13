@@ -31,7 +31,7 @@ import {
   useLayoutSize,
   useRenderSession,
   useAnimation,
-  useBoxMetrics,
+  useElementGeometry,
   type RenderSession,
 } from "@vue-tui/runtime";
 import {
@@ -856,7 +856,7 @@ describe("renderToString", () => {
   // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, semantic input, useAnimation, useBoxMetrics — so that
+  // useCursor, semantic input, useAnimation, and useElementGeometry — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -909,22 +909,18 @@ describe("renderToString", () => {
       expect(output).toBe("frame:0");
     });
 
-    test("useBoxMetrics does not throw in renderToString", () => {
+    test("useElementGeometry reports unavailable in renderToString", () => {
       const App = defineComponent(() => {
-        // useBoxMetrics tracks a Box ref via the root layout listener. In the
-        // synchronous renderToString teardown the post-flush measurement may not
-        // have run, so hasMeasured can still be false — the point is it must NOT
-        // throw and the frame must still render.
-        const boxRef = shallowRef(null);
-        const { hasMeasured } = useBoxMetrics(boxRef);
+        const boxRef = shallowRef<ComponentPublicInstance | null>(null);
+        const { geometry } = useElementGeometry(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{hasMeasured.value ? "measured" : "metrics"}</Text>
+            <Text>{geometry.value.status}</Text>
           </Box>
         );
       });
       const output = renderToString(App, { columns: 40 });
-      expect(output).toContain("metrics");
+      expect(output).toContain("unavailable");
     });
 
     test("all four terminal composables together render to a string without throwing", () => {
@@ -933,8 +929,8 @@ describe("renderToString", () => {
         setCursorPosition({ x: 1, y: 0 });
         useInput(() => "continue");
         const { frame } = useAnimation({ interval: 30 });
-        const boxRef = shallowRef(null);
-        useBoxMetrics(boxRef);
+        const boxRef = shallowRef<ComponentPublicInstance | null>(null);
+        useElementGeometry(boxRef);
         return () => (
           <Box ref={boxRef}>
             <Text>{`all:${frame.value}`}</Text>

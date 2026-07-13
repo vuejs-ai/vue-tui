@@ -77,8 +77,8 @@ lifetime.
 Add these when a real need shows up — shaped to _not_ leak internal state:
 
 - **Page scrolling.** A "page" needs the viewport height (how many lines fit). That is a _size_, so
-  a consumer can already measure it with the public `useBoxMetrics` on the box it wraps `ScrollBox`
-  in, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
+  a consumer can observe the resolved `geometry.parent.height` from public `useElementGeometry()`
+  on the box it wraps `ScrollBox` in, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
   (`scrollByPage(pages)`) — that is fine, it's sugar over a public capability, not a leak. Don't
   bake a fixed "page = half / full viewport" policy into the core; let the consumer (or a `pages`
   argument) decide the size.
@@ -94,10 +94,11 @@ Add these when a real need shows up — shaped to _not_ leak internal state:
 
 ## Implementation notes
 
-- The viewport and content boxes are measured with `useBoxMetrics`.
+- The viewport and content boxes use the full resolved `geometry.parent.height` from `useElementGeometry()`, never the clipped visible fragment. Their last resolved heights are retained while geometry is pending, hidden, detached, or unavailable so a temporary surface loss cannot reset a non-sticky scroll position.
 - Scrolling is `scrollTop` state applied as a negative `marginTop` on the inner content box, while
   the outer box clips with `overflowY: "hidden"`.
 - Sticky-bottom: while sticky, content growth follows the bottom; after the app scrolls up (via the
   handle) growth preserves the current viewport. Any scroll that lands at `maxScroll` (incl.
   `scrollToBottom`) re-arms sticky.
-- Built only from the runtime public barrel (`Box`, `useBoxMetrics`); no `@vue-tui/runtime/internal`.
+- Geometry generations for the two boxes are reconciled in one batched watcher, so ScrollBox never clamps against one old and one new height during the same paint commit.
+- Built only from the runtime public barrel (`Box`, `useElementGeometry`); no `@vue-tui/runtime/internal`.

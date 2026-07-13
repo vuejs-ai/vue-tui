@@ -146,7 +146,7 @@ describe("private paint-derived geometry service", () => {
           local: { x: 0, y: 0, width: 4, height: 2 },
           parent: { x: 1, y: 0, width: 4, height: 2 },
           surface: { x: 3, y: 0, width: 4, height: 2 },
-          visible: { x: 3, y: 0, width: 4, height: 2 },
+          visibleSurface: { x: 3, y: 0, width: 4, height: 2 },
         },
       ],
     });
@@ -436,14 +436,14 @@ describe("private paint-derived geometry service", () => {
     let value = resolved(binding.geometry.value);
     expect(value.status).toBe("visible");
     expect(value.surface).toEqual({ x: 3, y: 0, width: 3, height: 1 });
-    expect(value.fragments[0]!.visible).toEqual({ x: 3, y: 0, width: 1, height: 1 });
+    expect(value.fragments[0]!.visibleSurface).toEqual({ x: 3, y: 0, width: 1, height: 1 });
 
     f.prop(target, "marginLeft", 4);
     layoutAndPaint(f.root, service, { width: 8, height: 2 });
     value = resolved(binding.geometry.value);
-    expect(value.status).toBe("clipped");
+    expect(value.status).toBe("fully-clipped");
     expect(value.surface).toEqual({ x: 4, y: 0, width: 3, height: 1 });
-    expect(value.fragments[0]!.visible).toBeNull();
+    expect(value.fragments[0]!.visibleSurface).toBeNull();
 
     f.prop(target, "display", "none");
     layoutAndPaint(f.root, service, { width: 8, height: 2 });
@@ -463,7 +463,7 @@ describe("private paint-derived geometry service", () => {
       status: "visible",
       parent: rect,
       surface: rect,
-      fragments: [{ local: rect, parent: rect, surface: rect, visible: rect }],
+      fragments: [{ local: rect, parent: rect, surface: rect, visibleSurface: rect }],
       caretSlots: [],
     });
     draft.discard();
@@ -475,7 +475,7 @@ describe("private paint-derived geometry service", () => {
       status: "visible",
       parent: rect,
       surface: rect,
-      fragments: [{ local: rect, parent: rect, surface: rect, visible: rect }],
+      fragments: [{ local: rect, parent: rect, surface: rect, visibleSurface: rect }],
       caretSlots: [],
     });
     committed.commit();

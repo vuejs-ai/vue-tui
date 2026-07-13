@@ -17,7 +17,7 @@ interface ElementGeometryFragment {
   readonly local: CellRect;
   readonly parent: CellRect;
   readonly surface: CellRect;
-  readonly visible: CellRect | null;
+  readonly visibleSurface: CellRect | null;
 }
 
 /** Exact private insertion slot; deliberately absent from public geometry. */
@@ -40,7 +40,7 @@ type ElementGeometry =
   | { readonly status: "pending" }
   | { readonly status: "hidden" }
   | (ResolvedElementGeometry & {
-      readonly status: "zero-size" | "clipped" | "visible";
+      readonly status: "zero-size" | "fully-clipped" | "visible";
     });
 
 type TargetRelation = "pending" | "related" | "unrelated";
@@ -274,13 +274,13 @@ const editorGeometry: ElementGeometry = {
       local: { x: 0, y: 0, width: 6, height: 1 },
       parent: { x: 1, y: 1, width: 6, height: 1 },
       surface: { x: 4, y: 3, width: 6, height: 1 },
-      visible: { x: 4, y: 3, width: 6, height: 1 },
+      visibleSurface: { x: 4, y: 3, width: 6, height: 1 },
     },
     {
       local: { x: 0, y: 1, width: 4, height: 1 },
       parent: { x: 1, y: 2, width: 4, height: 1 },
       surface: { x: 4, y: 4, width: 4, height: 1 },
-      visible: { x: 4, y: 4, width: 4, height: 1 },
+      visibleSurface: { x: 4, y: 4, width: 4, height: 1 },
     },
   ],
   caretSlots: [
@@ -498,8 +498,11 @@ describe("F5 semantic geometry and caret proposal", () => {
   test("clipping and resize hide instead of clamping", () => {
     const clipped: ElementGeometry = {
       ...editorGeometry,
-      status: "clipped",
-      fragments: editorGeometry.fragments.map((fragment) => ({ ...fragment, visible: null })),
+      status: "fully-clipped",
+      fragments: editorGeometry.fragments.map((fragment) => ({
+        ...fragment,
+        visibleSurface: null,
+      })),
       caretSlots: editorGeometry.caretSlots.map((slot) => ({ ...slot, visible: false })),
     };
     expect(
@@ -625,13 +628,13 @@ describe("F5 semantic geometry and caret proposal", () => {
           local: { x: 0, y: 0, width: 4, height: 1 },
           parent: { x: 2, y: 0, width: 4, height: 1 },
           surface: { x: 2, y: 0, width: 4, height: 1 },
-          visible: { x: 2, y: 0, width: 4, height: 1 },
+          visibleSurface: { x: 2, y: 0, width: 4, height: 1 },
         },
         {
           local: { x: 0, y: 1, width: 3, height: 1 },
           parent: { x: 0, y: 1, width: 3, height: 1 },
           surface: { x: 0, y: 1, width: 3, height: 1 },
-          visible: { x: 0, y: 1, width: 3, height: 1 },
+          visibleSurface: { x: 0, y: 1, width: 3, height: 1 },
         },
       ],
       caretSlots: [
@@ -681,7 +684,7 @@ describe("F5 semantic geometry and caret proposal", () => {
           local: { x: 0, y: 0, width: 3, height: 1 },
           parent: { x: 0, y: 0, width: 3, height: 1 },
           surface: { x: 5, y: 2, width: 3, height: 1 },
-          visible: { x: 5, y: 2, width: 3, height: 1 },
+          visibleSurface: { x: 5, y: 2, width: 3, height: 1 },
         },
       ],
       // `中A` has boundaries at 0, 2, and 3. Local x=1 is the CJK

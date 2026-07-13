@@ -1,6 +1,6 @@
 # Rendered-target lifetime
 
-> **Status:** unstamped completed F2 implementation contract. The internal mechanism, two adapters, focused regressions, HMR, Vue 3.4 consumer, package declarations, full repository gates, fresh CI, real-PTY and visual-controller journeys, exact terminal restoration, and independent reviews are complete. This record does not publish a generic target API or settle input, focus, geometry, caret, or pointer semantics.
+> **Status:** unstamped completed F2 implementation contract. The internal mechanism, two original adapters, focused regressions, HMR, Vue 3.4 consumer, package declarations, full repository gates, fresh CI, real-PTY and visual-controller journeys, exact terminal restoration, and independent reviews are complete. F5 later replaced the measurement adapter with public paint-derived semantic geometry while retaining this lifetime mechanism. This record does not publish a generic target API or settle input, focus, caret, or pointer semantics.
 
 ## The problem
 
@@ -32,27 +32,29 @@ The controller now also accepts one private owner transaction host for F4 integr
 
 ## First adapters
 
-`useDraggable()` and `useBoxMetrics()` now use the same internal registration seam.
+At the F2 checkpoint, `useDraggable()` and the then-public `useBoxMetrics()` used the same internal registration seam.
 
 `useDraggable()` registers with the mouse controller only while its resolved host exists. Losing or replacing the target unregisters the old host, clears active capture, resets `isDragging`, and releases raw/SGR mouse ownership when no other consumer remains. Mouse acquisition and release are transactions: a failed first acquisition cannot leave an ownerless registration or SGR token, and a failing SGR release cannot skip raw-mode release.
 
-`useBoxMetrics()` subscribes to layout for the current resolved host and resets `width`, `height`, `left`, `top`, and `hasMeasured` synchronously when that host disappears. It still preserves the vouched standalone behavior: outside a vue-tui render tree it returns inert zero metrics without throwing. A direct ref reassignment to an already-laid-out host can occur without a renderer commit, so the adapter also performs a guarded deferred measurement for that case.
+The original measurement adapter subscribed to layout for the current resolved host and reset its scalar Yoga metrics synchronously when that host disappeared. F5 removed that API and the imperative Yoga read, then published `useElementGeometry()` on the same F2 attachment identity. Its atomic snapshot comes only from authoritative paint, reports a standalone `unavailable` state, and never exposes renderer nodes or private caret slots.
 
-These migrations do not freeze either public API. `useBoxMetrics()` and `measureElement()` receive their final geometry disposition in F5. `useDraggable()`, current element listeners, and terminal-wide raw mouse receive their target disposition in F6. F2 proves only the shared lifetime mechanism they can consume.
+The private resolver recognizes direct renderer-owned host refs by nominal identity recorded when the runtime constructs each node, not by checking for a string `type` field. Public component resolution still walks the Vue instance's rendered subtree. This distinction lets internal adapters accept their real host refs without mistaking an ordinary Vue component with a `type` prop for a renderer node.
+
+The F2 migrations did not freeze either public API. F5 directly replaced `useBoxMetrics()` with `useElementGeometry()` and removed `measureElement()` without aliases. `useDraggable()`, current element listeners, and terminal-wide raw mouse receive their target disposition in F6. F2 proves only the shared lifetime mechanism they can consume.
 
 ## Environment behavior
 
-| Environment or transition                                               | F2 behavior                                                                                                                                    |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Template or TSX ref to a host component                                 | Resolve the current real host below the public component instance; never expose that host to the author.                                       |
-| Stable component proxy, inner root insertion or replacement             | Reconcile on the renderer commit and detach-before-attach by host identity.                                                                    |
-| `v-if`, keyed removal, component unmount, or Vue 3.4 stale non-null ref | Invalidate during host removal; the detached host is unavailable even if the author ref still points to its component.                         |
-| HMR template rerender                                                   | Preserve the component instance and follow its replacement host.                                                                               |
-| HMR script/component reload                                             | Release the old instance's host and attach the replacement instance's host.                                                                    |
-| Deterministic testing                                                   | Use the same live renderer controller and modeled session; lifecycle behavior is not a testing-only simulation.                                |
-| Visual or screen-reader string rendering                                | Reconcile the fixed mounted tree and dispose before returning; no terminal capability is acquired.                                             |
-| Outside a render tree                                                   | `useBoxMetrics()` returns zero metrics; terminal-bound composables such as `useDraggable()` keep their existing fail-fast context requirement. |
-| `v-show` or another mounted-but-hidden policy                           | Still a mounted target. F2 defines attachment and removal, not visibility, enabled state, clipping eligibility, or focusability.               |
+| Environment or transition                                               | F2 behavior                                                                                                                                          |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Template or TSX ref to a host component                                 | Resolve the current real host below the public component instance; never expose that host to the author.                                             |
+| Stable component proxy, inner root insertion or replacement             | Reconcile on the renderer commit and detach-before-attach by host identity.                                                                          |
+| `v-if`, keyed removal, component unmount, or Vue 3.4 stale non-null ref | Invalidate during host removal; the detached host is unavailable even if the author ref still points to its component.                               |
+| HMR template rerender                                                   | Preserve the component instance and follow its replacement host.                                                                                     |
+| HMR script/component reload                                             | Release the old instance's host and attach the replacement instance's host.                                                                          |
+| Deterministic testing                                                   | Use the same live renderer controller and modeled session; lifecycle behavior is not a testing-only simulation.                                      |
+| Visual or screen-reader string rendering                                | Reconcile the fixed mounted tree and dispose before returning; no terminal capability is acquired.                                                   |
+| Outside a render tree                                                   | `useElementGeometry()` reports `unavailable`; terminal-bound composables such as `useDraggable()` keep their existing fail-fast context requirement. |
+| `v-show` or another mounted-but-hidden policy                           | Still a mounted target. F2 defines attachment and removal, not visibility, enabled state, clipping eligibility, or focusability.                     |
 
 ## Evidence
 

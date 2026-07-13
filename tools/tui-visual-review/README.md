@@ -16,6 +16,14 @@ For the fullscreen fixed-origin regression fixture, use:
 vp run visual:fullscreen-origin
 ```
 
+For the public ScrollBox example and its imperative scrolling behavior, use:
+
+```sh
+vp run visual:scroll-box
+```
+
+Wait for several streamed lines, observe the sticky-bottom state, then use Up or Home to leave the bottom. Let more lines arrive and confirm the viewport keeps its chosen offset; use End to restore sticky-bottom following before quitting with `q` and checking terminal restoration.
+
 Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
 
 For input routing across multiple facts in one PTY write, use:

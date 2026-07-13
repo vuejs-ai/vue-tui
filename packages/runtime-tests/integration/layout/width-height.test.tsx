@@ -1,7 +1,7 @@
 import { defineComponent, ref, shallowRef, nextTick, watchEffect } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
+import { Box, Text, useElementGeometry } from "@vue-tui/runtime";
 
 test("set width", async () => {
   const { lastFrame } = await render(
@@ -55,7 +55,7 @@ test("set width with bare numeric string is a percent (Ink parity)", async () =>
 
 // Ink uses parseInt(width, 10) which TRUNCATES the fraction: "55.9%" → 55%, NOT
 // parseFloat which would give 55.9% → 56 cells (yoga rounds 55.9% of 100 to 56).
-// Assert the COMPUTED width directly via useBoxMetrics so the test discriminates
+// Assert the computed parent-relative width through semantic geometry so the test discriminates
 // parseInt(55) from parseFloat(55.9→56): a paint-frame assertion can't, because
 // trimLines collapses both a 55- and 56-cell box to the same column once the
 // child text is left-aligned. RED on the pre-fix parseFloat path (width 56),
@@ -64,9 +64,16 @@ test("set width with fractional percent string truncates to 55 like Ink parseInt
   const computedWidth = shallowRef(-1);
   const App = defineComponent(() => {
     const boxRef = ref(null);
-    const metrics = useBoxMetrics(boxRef);
+    const { geometry } = useElementGeometry(boxRef);
     watchEffect(() => {
-      computedWidth.value = metrics.width.value;
+      const current = geometry.value;
+      if (
+        current.status === "zero-size" ||
+        current.status === "fully-clipped" ||
+        current.status === "visible"
+      ) {
+        computedWidth.value = current.parent.width;
+      }
     });
     return () => (
       <Box flexDirection="row" width={100}>
@@ -78,7 +85,7 @@ test("set width with fractional percent string truncates to 55 like Ink parseInt
     );
   });
   await render(App, { columns: 200 });
-  // useBoxMetrics defers measurement to nextTick after the commit.
+  // Geometry publishes after the authoritative paint commit.
   await nextTick();
   // parseInt("55.9", 10) → 55 → 55% of 100 = 55 cells (NOT parseFloat → 55.9 → 56).
   expect(computedWidth.value).toBe(55);

@@ -150,31 +150,33 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 ## Composables (Hooks)
 
-| Composable                      | Description                                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result                                         |
-| `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                                                        |
-| `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                                               |
-| `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                                               |
-| `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`                                  |
-| `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                                                   |
-| `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                                              |
-| `useFocusScopeInput(scope, fn)` | Attach normalized input to an active boundary or focused target's logical ancestor scope                                                                     |
-| `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                                               |
-| `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                                                   |
-| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                                                   |
-| `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities                                       |
-| `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                                               |
-| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                                            |
-| `useStdout()`                   | Write directly to stdout                                                                                                                                     |
-| `useStderr()`                   | Write directly to stderr                                                                                                                                     |
-| `useBoxMetrics(ref)`            | Measure a `<Box>` via a template ref — reactive `{ width, height, left, top, hasMeasured }` (or `measureElement(el)` for a one-off `{ width, height }` read) |
-| `useCursor()`                   | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates                                                                                 |
-| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                                                 |
+| Composable                      | Description                                                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result             |
+| `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                            |
+| `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                   |
+| `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                   |
+| `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`      |
+| `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                       |
+| `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                  |
+| `useFocusScopeInput(scope, fn)` | Attach normalized input to an active boundary or focused target's logical ancestor scope                                         |
+| `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                   |
+| `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                       |
+| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                       |
+| `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities           |
+| `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                   |
+| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                |
+| `useStdout()`                   | Write directly to stdout                                                                                                         |
+| `useStderr()`                   | Write directly to stderr                                                                                                         |
+| `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts |
+| `useCursor()`                   | Control the terminal cursor — `setCursorPosition(pos)` in output coordinates                                                     |
+| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                     |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
 
 `useRenderSession()` is the authoritative way for a component to inspect what rendering surface actually became effective. The session object keeps one identity for the render tree; mode, output, host, and capabilities are immutable for that session, while a live-update surface refreshes `dimensions` reactively on accepted resize and continuation events. A final-output surface retains the dimensions resolved at mount because it has no runtime resize lifecycle. Use `session.output.presentation === "screen-reader"` to adapt to the active linear presentation. `useLayoutSize()` derives from that same session and keeps destructured dimensions reactive; its `rows` ref is `null` for a row-unbounded stream, transcript, or string document.
+
+`useElementGeometry(ref)` follows the rendered host under a normal Vue component ref and replaces its readonly `geometry` ref only with a complete paint generation. Resolved states expose full `parent` and dynamic-render-surface bounds plus exact local/parent/surface/`visibleSurface` fragment mappings; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` remain distinct. Inline surface coordinates are relative to vue-tui's current managed region, not a stable physical terminal row. Screen-reader and string presentations report `unavailable`.
 
 `useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` returns only the stream mounted into the application. Direct reads are raw: they may include terminal protocol replies and paste framing, and they have no vue-tui event semantics or safe-composition guarantee with managed input handlers. Managed input is available only on a controllable TTY; the first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and any configured Kitty keyboard negotiation, and the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. A non-TTY stream remains available through `useStdin().stdin` for applications that intentionally consume pipe bytes. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected instead of being ignored.
 

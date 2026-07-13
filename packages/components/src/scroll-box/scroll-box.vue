@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
-import { Box, useBoxMetrics } from "@vue-tui/runtime";
+import { computed, shallowRef, watch, type ComponentPublicInstance } from "vue";
+import { Box, useElementGeometry, type ElementGeometry } from "@vue-tui/runtime";
 import { scrollBoxProps, type ScrollBoxExpose } from "./scroll-box-props.ts";
 
 defineOptions({ name: "ScrollBox" });
 defineProps(scrollBoxProps);
 defineSlots<{ default?: () => unknown }>();
 
-const viewportRef = shallowRef<unknown>();
-const contentRef = shallowRef<unknown>();
-const viewport = useBoxMetrics(viewportRef);
-const content = useBoxMetrics(contentRef);
+const viewportRef = shallowRef<ComponentPublicInstance | null>(null);
+const contentRef = shallowRef<ComponentPublicInstance | null>(null);
+const viewport = useElementGeometry(viewportRef);
+const content = useElementGeometry(contentRef);
+const viewportHeight = shallowRef(0);
+const contentHeight = shallowRef(0);
 const scrollTop = shallowRef(0);
 const sticky = shallowRef(true);
 
@@ -30,8 +32,16 @@ const contentStyle = computed(() => ({
   width: "100%",
 }));
 const maxScroll = computed(() =>
-  Math.max(0, Math.ceil(content.height.value - viewport.height.value)),
+  Math.max(0, Math.ceil(contentHeight.value - viewportHeight.value)),
 );
+
+function resolvedHeight(geometry: ElementGeometry): number | null {
+  return geometry.status === "zero-size" ||
+    geometry.status === "fully-clipped" ||
+    geometry.status === "visible"
+    ? geometry.parent.height
+    : null;
+}
 
 function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
@@ -59,12 +69,17 @@ const exposed: ScrollBoxExpose = { scrollToLine, scrollByLines, scrollToTop, scr
 defineExpose(exposed);
 
 watch(
-  () => [content.height.value, viewport.height.value, maxScroll.value] as const,
-  () => {
+  () => [content.geometry.value, viewport.geometry.value] as const,
+  ([nextContent, nextViewport]) => {
+    const nextContentHeight = resolvedHeight(nextContent);
+    const nextViewportHeight = resolvedHeight(nextViewport);
+    if (nextContentHeight !== null) contentHeight.value = nextContentHeight;
+    if (nextViewportHeight !== null) viewportHeight.value = nextViewportHeight;
+
     if (sticky.value) scrollTop.value = maxScroll.value;
     else scrollTop.value = clampScrollTop(scrollTop.value);
   },
-  { flush: "sync" },
+  { flush: "post", immediate: true },
 );
 </script>
 

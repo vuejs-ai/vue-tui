@@ -293,11 +293,10 @@ export function useRenderedTargetRegistration(
   resolve: () => TuiNode | null,
   attach: RenderedTargetAttach,
 ): () => void {
-  // Some composables, notably useBoxMetrics(), intentionally have a useful
-  // standalone fallback. Avoid both Vue's inject-outside-setup warning and a
-  // new hard dependency on renderer context for those callers. Composables
-  // that require a render tree validate their own context before reaching this
-  // internal helper.
+  // Some ref-bound composables intentionally report an unavailable standalone
+  // state. Avoid both Vue's inject-outside-setup warning and a hard dependency
+  // on renderer context for those callers. Composables that require a render
+  // tree validate their own context before reaching this internal helper.
   const app = hasInjectionContext() ? inject(AppContextKey, null) : null;
   const controller = app ? getRenderedTargetController(app) : undefined;
   if (!controller) return () => {};

@@ -21,9 +21,9 @@ const PUBLIC_VALUE_EXPORTS = [
   // Composables
   "useAnimation",
   "useApp",
-  "useBoxMetrics",
   "useCursor",
   "useDraggable",
+  "useElementGeometry",
   "useExternalInput",
   "useFocus",
   "useFocusedInput",
@@ -38,7 +38,6 @@ const PUBLIC_VALUE_EXPORTS = [
   "useStderr",
   "useStdin",
   "useStdout",
-  "measureElement",
   // Rendering
   "renderToString",
   // Kitty keyboard
@@ -57,6 +56,12 @@ test("does not retain the superseded render-fact hooks", () => {
 
 test("does not retain the superseded split input API", () => {
   expect(api).not.toHaveProperty("usePaste");
+});
+
+test("replaces the superseded Yoga measurement APIs with semantic geometry", () => {
+  expect(api).toHaveProperty("useElementGeometry");
+  expect(api).not.toHaveProperty("useBoxMetrics");
+  expect(api).not.toHaveProperty("measureElement");
 });
 
 // Ink keeps its `measure-text` module internal and does not re-export it. vue-tui

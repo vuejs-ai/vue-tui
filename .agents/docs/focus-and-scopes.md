@@ -299,7 +299,7 @@ A directive has convenient host lifetime but provides a weaker typed return path
 
 ### Visual-coordinate traversal
 
-Textual sorts by visual `y,x`, while prompt_toolkit uses rendered-tree preorder. Visual order depends on the semantic geometry F5 has not selected and may change on resize. F4 therefore recommends rendered preorder and leaves geometry-based traversal as a later evidence-backed extension rather than an implicit dependency.
+Textual sorts by visual `y,x`, while prompt_toolkit uses rendered-tree preorder. When F4 selected its policy, public semantic geometry did not yet exist, and visual order could also change on resize. F4 therefore selected rendered preorder. F5 now exposes geometry, but changing traversal remains a later evidence-backed extension rather than an implicit consequence of that API.
 
 ### Traversal-only traps or queued outside focus
 
@@ -320,7 +320,7 @@ All eight steps are implemented and verified:
 7. cover template, TSX, JavaScript/`any`, duplicate-target, unavailable-host, string, deterministic, screen-reader, final-output, HMR, suspension, teardown, and clean tarball consumption;
 8. run semantic fixtures under both modes, then a real PTY and visual-controller journey proving route order, modal isolation, removal, restoration, exact terminal cleanup, and identical focus traces.
 
-F4 is Done because implementation, public surface, declarations, package consumption, repository migration, full gates, real-terminal evidence, records, and independent review agree. F5 semantic geometry and caret is Active and begins with audit and research before any API choice.
+F4 is Done because implementation, public surface, declarations, package consumption, repository migration, full gates, real-terminal evidence, records, and independent review agree. F5 semantic geometry and caret remains Active; its audit, public proposal, private geometry authority, and public geometry cutover are complete, while caret ownership and transport remain.
 
 ## Maintainer decision
 

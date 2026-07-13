@@ -40,8 +40,8 @@ export function createRectGeometry(input: {
 }): InternalElementGeometry {
   const { parent, surface, clip } = input;
   const local = { x: 0, y: 0, width: surface.width, height: surface.height };
-  const visible = intersectGeometryRect(surface, clip);
-  const fragment: InternalGeometryFragment = { local, parent, surface, visible };
+  const visibleSurface = intersectGeometryRect(surface, clip);
+  const fragment: InternalGeometryFragment = { local, parent, surface, visibleSurface };
   const resolved = {
     parent,
     surface,
@@ -51,7 +51,9 @@ export function createRectGeometry(input: {
   if (surface.width === 0 || surface.height === 0) {
     return { status: "zero-size", ...resolved };
   }
-  return visible ? { status: "visible", ...resolved } : { status: "clipped", ...resolved };
+  return visibleSurface
+    ? { status: "visible", ...resolved }
+    : { status: "fully-clipped", ...resolved };
 }
 
 interface TextSegment {
@@ -511,7 +513,7 @@ export function deriveTextGeometry(input: {
             height: 1,
           },
           surface,
-          visible: first.visible ? surface : null,
+          visibleSurface: first.visible ? surface : null,
         });
         run = [];
       };
@@ -567,7 +569,7 @@ export function deriveTextGeometry(input: {
     const surface = bounds(fragments.map((fragment) => fragment.surface));
     const parent = bounds(fragments.map((fragment) => fragment.parent));
     geometryByOwner.set(trace.meta.node, {
-      status: fragments.some((fragment) => fragment.visible) ? "visible" : "clipped",
+      status: fragments.some((fragment) => fragment.visibleSurface) ? "visible" : "fully-clipped",
       parent,
       surface,
       fragments,

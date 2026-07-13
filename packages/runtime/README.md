@@ -107,8 +107,7 @@ useInput((event) => {
 | `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities         |
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |
 | `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
-| `useBoxMetrics(ref)`            | Reactive layout metrics — `{ width, height, left, top, hasMeasured }`                        |
-| `measureElement(node)`          | Imperative read of computed `{ width, height }` from a yoga node                             |
+| `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref  |
 | `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                            |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
@@ -119,6 +118,8 @@ useInput((event) => {
 Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()`.
 
 `useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed handler fails before publishing a route or changing terminal state. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected before terminal mutation.
+
+`useElementGeometry(ref)` reports one frozen, readonly geometry generation derived from what paint actually mapped. Resolved states expose full parent-relative and dynamic-render-surface bounds plus exact fragments whose `visibleSurface` is the clipped surface-coordinate rectangle or `null`; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` are separate states. It supports both rendering modes without exposing Inline's unstable physical terminal row, and reports `unavailable` when a visual 2D target surface does not exist.
 
 ### Render-session facts
 

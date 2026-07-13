@@ -17,7 +17,7 @@ export interface InternalGeometryFragment {
   readonly local: InternalCellRect;
   readonly parent: InternalCellRect;
   readonly surface: InternalCellRect;
-  readonly visible: InternalCellRect | null;
+  readonly visibleSurface: InternalCellRect | null;
 }
 
 /** Exact legal insertion boundary. Wide-glyph continuation cells have no slot. */
@@ -41,11 +41,12 @@ export type InternalElementGeometry =
   | { readonly status: "pending" }
   | { readonly status: "hidden" }
   | (InternalResolvedGeometry & {
-      readonly status: "zero-size" | "clipped" | "visible";
+      readonly status: "zero-size" | "fully-clipped" | "visible";
     });
 
 export interface InternalGeometryBinding {
   readonly geometry: Readonly<ShallowRef<InternalElementGeometry>>;
+  observe(observer: (geometry: InternalElementGeometry) => void): () => void;
   attach(target: TuiNode): () => void;
   dispose(): void;
 }
@@ -94,7 +95,7 @@ export function freezeInternalGeometry(geometry: InternalElementGeometry): Inter
       local: freezeRect(fragment.local),
       parent: freezeRect(fragment.parent),
       surface: freezeRect(fragment.surface),
-      visible: fragment.visible ? freezeRect(fragment.visible) : null,
+      visibleSurface: fragment.visibleSurface ? freezeRect(fragment.visibleSurface) : null,
     }),
   );
   const caretSlots = geometry.caretSlots?.map((slot) =>
@@ -115,6 +116,7 @@ export function freezeInternalGeometry(geometry: InternalElementGeometry): Inter
 
 interface MutableBinding {
   readonly value: ShallowRef<InternalElementGeometry>;
+  readonly observers: Set<(geometry: InternalElementGeometry) => void>;
   target: TuiNode | null;
   active: boolean;
 }
@@ -154,17 +156,25 @@ export function createInternalGeometryService(
   let surfaceAvailable = true;
   let disposed = false;
 
+  const detachedState = (): InternalElementGeometry => (surfaceAvailable ? DETACHED : UNAVAILABLE);
+
+  const assign = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
+    if (binding.value.value === geometry) return;
+    binding.value.value = geometry;
+    for (const observer of binding.observers) observer(geometry);
+  };
+
   const publish = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
     if (!binding.active) return;
     const frozen = freezeInternalGeometry(geometry);
     if (transactionDepth > 0) queued.set(binding, frozen);
-    else binding.value.value = frozen;
+    else assign(binding, frozen);
   };
 
   const flush = (): void => {
     if (transactionDepth > 0 || queued.size === 0) return;
     for (const [binding, geometry] of queued) {
-      if (binding.active) binding.value.value = geometry;
+      if (binding.active) assign(binding, geometry);
     }
     queued.clear();
   };
@@ -182,13 +192,30 @@ export function createInternalGeometryService(
     createBinding() {
       if (disposed) throw new Error("geometry service is disposed");
       const binding: MutableBinding = {
-        value: shallowRef<InternalElementGeometry>(DETACHED),
+        value: shallowRef<InternalElementGeometry>(detachedState()),
+        observers: new Set(),
         target: null,
         active: true,
       };
       bindings.add(binding);
       return {
         geometry: binding.value,
+        observe(observer) {
+          if (!binding.active) throw new Error("geometry binding is disposed");
+          binding.observers.add(observer);
+          try {
+            observer(binding.value.value);
+          } catch (error) {
+            binding.observers.delete(observer);
+            throw error;
+          }
+          let observing = true;
+          return () => {
+            if (!observing) return;
+            observing = false;
+            binding.observers.delete(observer);
+          };
+        },
         attach(target) {
           if (!binding.active) throw new Error("geometry binding is disposed");
           if (binding.target && binding.target !== target) unlink(binding, binding.target);
@@ -205,17 +232,18 @@ export function createInternalGeometryService(
             if (binding.target !== target) return;
             unlink(binding, target);
             binding.target = null;
-            publish(binding, DETACHED);
+            publish(binding, detachedState());
           };
         },
         dispose() {
           if (!binding.active) return;
           if (binding.target) unlink(binding, binding.target);
           binding.target = null;
+          assign(binding, DETACHED);
           binding.active = false;
           bindings.delete(binding);
           queued.delete(binding);
-          binding.value.value = DETACHED;
+          binding.observers.clear();
         },
       };
     },
@@ -285,7 +313,10 @@ export function createInternalGeometryService(
       transactionDepth++;
       try {
         for (const binding of bindings) {
-          if (binding.target) publish(binding, available ? PENDING : UNAVAILABLE);
+          publish(
+            binding,
+            binding.target && available ? PENDING : available ? DETACHED : UNAVAILABLE,
+          );
         }
       } finally {
         transactionDepth--;
@@ -320,7 +351,7 @@ export function createInternalGeometryService(
         if (binding.target && belongsToSubtree(binding.target, target)) {
           unlink(binding, binding.target);
           binding.target = null;
-          publish(binding, DETACHED);
+          publish(binding, detachedState());
         }
       }
     },
@@ -329,8 +360,9 @@ export function createInternalGeometryService(
       disposed = true;
       for (const binding of bindings) {
         binding.target = null;
+        assign(binding, DETACHED);
         binding.active = false;
-        binding.value.value = DETACHED;
+        binding.observers.clear();
       }
       bindings.clear();
       bindingsByTarget.clear();

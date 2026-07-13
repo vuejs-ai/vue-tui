@@ -32,8 +32,6 @@ export interface TuiRoot extends NodeBase {
   appContext: AppContext;
   /** Currently mounted <Static> node (if any). Updated on insert/remove. */
   staticNode?: TuiStatic;
-  /** Listeners invoked after every layout calculation (yoga.calculateLayout). */
-  layoutListeners: Set<() => void>;
 }
 
 export interface TuiBox extends NodeBase {
@@ -119,67 +117,63 @@ export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment | TuiTrans
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiTransform | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 
+// Host identity is nominal inside one runtime instance. Structural checks such
+// as `typeof value.type === "string"` can mistake an ordinary Vue component's
+// public prop for a renderer node, while this registry also recognizes direct
+// host refs used by renderer-internal adapters without exposing a public brand.
+const tuiNodes = new WeakSet<object>();
+
+function trackTuiNode<T extends TuiNode>(node: T): T {
+  tuiNodes.add(node);
+  return node;
+}
+
+export function isTuiNode(value: unknown): value is TuiNode {
+  return typeof value === "object" && value !== null && tuiNodes.has(value);
+}
+
 // Constructors take the bare minimum and leave yoga binding to yoga.ts.
 // The `yoga` field is set to a sentinel and replaced by `attachYoga(node)`.
 const UNATTACHED_YOGA = Symbol("vue-tui:yoga-unattached") as unknown as YogaNodeRef;
 
 export function createRoot(appContext: AppContext): TuiRoot {
-  return {
+  return trackTuiNode({
     type: "root",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     appContext,
-    layoutListeners: new Set(),
-  };
-}
-
-/**
- * Register a callback to be invoked after every layout calculation.
- * Returns an unsubscribe function.
- */
-export function addLayoutListener(root: TuiRoot, listener: () => void): () => void {
-  root.layoutListeners.add(listener);
-  return () => {
-    root.layoutListeners.delete(listener);
-  };
-}
-
-/** Invoke all registered layout listeners. Called after `yoga.calculateLayout`. */
-export function emitLayoutListeners(root: TuiRoot): void {
-  for (const listener of root.layoutListeners) {
-    listener();
-  }
+  });
 }
 
 export function createBox(): TuiBox {
-  return {
+  return trackTuiNode({
     type: "tui-box",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
     paintDirty: true,
-  };
+  });
 }
 
 export function createText(): TuiText {
-  return {
+  return trackTuiNode({
     type: "tui-text",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
-  };
+  });
 }
 
 export function createVirtualText(): TuiVirtualText {
-  return {
+  return trackTuiNode({
     type: "tui-virtual-text",
     parent: null,
     children: [],
     props: {},
-  };
+  });
 }
 
 export function createTextLeaf(value: string): TuiTextLeaf {
@@ -188,36 +182,36 @@ export function createTextLeaf(value: string): TuiTextLeaf {
   // createTextNode also routes through. Vue's runtime-core already stringifies
   // text/number children, so this is a defensive safety-net for direct host-op
   // calls. Guard on typeof so normal string values are untouched (no double-work).
-  return {
+  return trackTuiNode({
     type: "text-leaf",
     parent: null,
     value: typeof value === "string" ? value : String(value),
-  };
+  });
 }
 
 export function createStatic(): TuiStatic {
-  return {
+  return trackTuiNode({
     type: "tui-static",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
     writtenNodes: new Set(),
-  };
+  });
 }
 
 export function createTransform(fn: (line: string, lineIndex: number) => string): TuiTransform {
-  return {
+  return trackTuiNode({
     type: "tui-transform",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     transform: fn,
-  };
+  });
 }
 
 export function createComment(value: string): TuiComment {
-  return { type: "comment", parent: null, value };
+  return trackTuiNode({ type: "comment", parent: null, value });
 }
 
 export function isContainer(node: TuiNode): node is TuiContainer {

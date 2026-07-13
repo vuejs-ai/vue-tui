@@ -15,8 +15,9 @@
     "visual:fullscreen-origin": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#fullscreen-origin",
     "visual:input-routing": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#input-routing",
     "visual:focus-routing": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#focus-routing",
+    "visual:scroll-box": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/example-scroll-box#build && vp run @vue-tui/tui-visual-review#scroll-box",
     "visual:basic-template:smoke": "vp run @vue-tui/runtime#build && vp run @vue-tui/example-basic-template#build && vp run @vue-tui/tui-visual-review#smoke",
-    "ready": "vp run check:fmt && vp run build && vp run check:lint && vp run check:type && vp run test",
+    "ready": "vp run check:fmt && vp run build && vp run check:lint && vp run check:type && vp run verify:package-consumer && vp run test",
     "prepare": "vp config"
   },
   "devDependencies": {

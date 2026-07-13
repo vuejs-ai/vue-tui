@@ -55,8 +55,10 @@ function collectVueVersions(value, versions = new Set()) {
 try {
   run("vp", ["run", "@vue-tui/runtime#build"]);
   run("vp", ["run", "@vue-tui/testing#build"]);
+  run("vp", ["run", "@vue-tui/components#build"]);
   const runtimeTarball = pack(join(repositoryRoot, "packages/runtime"));
   const testingTarball = pack(join(repositoryRoot, "packages/testing"));
+  const componentsTarball = pack(join(repositoryRoot, "packages/components"));
 
   writeFileSync(
     join(consumerDirectory, "package.json"),
@@ -67,6 +69,7 @@ try {
         dependencies: {
           "@vue-tui/runtime": `file:${runtimeTarball}`,
           "@vue-tui/testing": `file:${testingTarball}`,
+          "@vue-tui/components": `file:${componentsTarball}`,
           vue: "3.4.38",
         },
         devDependencies: {
@@ -123,6 +126,7 @@ try {
     `import { shallowRef } from "vue";
 import {
   useExternalInput,
+  useElementGeometry,
   useFocus,
   useFocusedInput,
   useFocusManager,
@@ -137,6 +141,8 @@ import {
   type InputHandler,
   type InputHandlerResult,
   type InputRouteDecision,
+  type ElementGeometry,
+  type ElementTarget,
   type MountOptions,
   type TuiInputEvent,
   type UseFocusManagerReturn,
@@ -146,6 +152,7 @@ import {
   type UseFocusScopeReturn,
   type UseInputAvailabilityReturn,
   type UseInputOptions,
+  type UseElementGeometryReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
 import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
@@ -244,6 +251,15 @@ type _ExactExternalSource = Expect<
 type _ExactExternalHandler = Expect<
   Equal<ExternalInputHandler, (source: ExternalInputSource) => void>
 >;
+type _ExactElementTarget = Expect<
+  Equal<ElementTarget, MaybeRefOrGetter<ComponentPublicInstance | null | undefined>>
+>;
+type _ExactElementGeometryReturn = Expect<
+  Equal<
+    UseElementGeometryReturn,
+    { readonly geometry: Readonly<ShallowRef<ElementGeometry>> }
+  >
+>;
 
 const active = shallowRef(true);
 const handler = shallowRef<InputHandler>((event) => {
@@ -263,6 +279,11 @@ const handler = shallowRef<InputHandler>((event) => {
 useInput(handler, { isActive: () => active.value });
 
 declare const focusHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
+const geometryResult = useElementGeometry(focusHost);
+// @ts-expect-error Semantic geometry generations are readonly.
+geometryResult.geometry.value = { status: "detached" };
+// @ts-expect-error Sparse caret slots are private renderer data.
+geometryResult.geometry.value.caretSlots;
 const focusScope = useFocusScope({ trapped: true });
 const focusTarget = useFocus(focusHost, { scope: focusScope, autoFocus: true });
 const focusManager = useFocusManager();
@@ -314,19 +335,34 @@ type _RemovedKey = import("@vue-tui/runtime").Key;
 type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
 // @ts-expect-error The separate paste options were removed with usePaste().
 type _RemovedUsePasteOptions = import("@vue-tui/runtime").UsePasteOptions;
+// @ts-expect-error Parent-only scalar metrics were replaced by semantic geometry.
+type _RemovedUseBoxMetrics = typeof import("@vue-tui/runtime").useBoxMetrics;
+// @ts-expect-error Imperative Yoga reads were removed.
+type _RemovedMeasureElement = typeof import("@vue-tui/runtime").measureElement;
+// @ts-expect-error The old scalar snapshot type was removed.
+type _RemovedBoxMetrics = import("@vue-tui/runtime").BoxMetrics;
+// @ts-expect-error The old composable return type was removed.
+type _RemovedUseBoxMetricsReturn = import("@vue-tui/runtime").UseBoxMetricsReturn;
 void removedRawMode;
 void removedExitOnCtrlC;
 `,
   );
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
-    `import { Box, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
+    `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
+import { Box, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
+
+// @ts-expect-error Spinner is a leaf component and ignores child content.
+const unsupportedSpinnerChildren = <Spinner children="ignored" />;
+void unsupportedSpinnerChildren;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<ComponentPublicInstance | null>(null);
+  const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const scope = useFocusScope({ trapped: true });
   const target = useFocus(host, { scope, autoFocus: true });
+  const { geometry } = useElementGeometry(host);
   const manager = useFocusManager();
   const { availability } = useInputAvailability();
   useInput(
@@ -341,7 +377,11 @@ export const InputProbe = defineComponent(() => {
   useFocusedInput(target, () => "continue");
   useFocusScopeInput(scope, () => "continue");
   useExternalInput(target, () => {});
-  return () => <Box ref={host}><Text>{String(manager.focusedTarget.value === target)}</Text></Box>;
+  scrollBox.value?.scrollByLines(1);
+  scrollBox.value?.scrollToLine(2);
+  scrollBox.value?.scrollToTop();
+  scrollBox.value?.scrollToBottom();
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{geometry.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
 });
 `,
   );
@@ -349,11 +389,14 @@ export const InputProbe = defineComponent(() => {
     join(consumerDirectory, "App.vue"),
     `<script setup lang="ts">
 import { shallowRef, type ComponentPublicInstance } from "vue";
-import { Box, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
+import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
+import { Box, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
 
 const host = shallowRef<ComponentPublicInstance | null>(null);
+const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const scope = useFocusScope({ trapped: true });
 const target = useFocus(host, { scope, autoFocus: true });
+const { geometry } = useElementGeometry(host);
 const manager = useFocusManager();
 const mountedStdin = useStdin();
 const { availability } = useInputAvailability();
@@ -368,12 +411,16 @@ useFocusedInput(target, () => "continue");
 useFocusScopeInput(scope, () => "continue");
 useExternalInput(target, () => {});
 mountedStdin.stdin;
+scrollBox.value?.scrollByLines(1);
+scrollBox.value?.scrollToLine(2);
+scrollBox.value?.scrollToTop();
+scrollBox.value?.scrollToBottom();
 // @ts-expect-error Raw-mode control is not exposed by useStdin().
 mountedStdin.setRawMode(false);
 </script>
 
 <template>
-  <Box ref="host"><Text>{{ manager.focusedTarget.value === target }}</Text></Box>
+  <Box ref="host" :height="2"><ScrollBox ref="scrollBox"><Text>{{ geometry.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox></Box>
 </template>
 `,
   );
@@ -382,11 +429,15 @@ mountedStdin.setRawMode(false);
     `import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
+import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, shallowRef } from "vue";
 
-const { Box, createApp, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
+const { Box, createApp, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
 assert.equal("usePaste" in runtime, false);
+assert.equal("useBoxMetrics" in runtime, false);
+assert.equal("measureElement" in runtime, false);
+assert.equal(typeof useElementGeometry, "function");
 assert.equal(typeof useFocusScope, "function");
 assert.equal(typeof useFocusedInput, "function");
 assert.equal(typeof useFocusScopeInput, "function");
@@ -438,6 +489,36 @@ const idle = await render(NoInput);
 assert.equal(idle.terminal.rawMode.current, false);
 assert.deepEqual(idle.terminal.rawMode.history, []);
 idle.dispose();
+
+let geometryProjection;
+let scrollBoxHandle;
+const GeometryProbe = defineComponent(() => {
+  const host = shallowRef(null);
+  scrollBoxHandle = shallowRef(null);
+  geometryProjection = useElementGeometry(host);
+  return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
+    h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed geometry") }),
+  );
+});
+const geometryApp = await render(GeometryProbe, { columns: 20, rows: 5 });
+assert.equal(geometryProjection.geometry.value.status, "visible");
+assert.deepEqual(Reflect.ownKeys(geometryProjection.geometry.value), [
+  "status",
+  "parent",
+  "surface",
+  "fragments",
+]);
+assert.equal("caretSlots" in geometryProjection.geometry.value, false);
+assert.equal(Object.isFrozen(geometryProjection), true);
+assert.equal(Object.isFrozen(geometryProjection.geometry.value), true);
+assert.equal(typeof scrollBoxHandle.value.scrollByLines, "function");
+assert.equal(typeof scrollBoxHandle.value.scrollToLine, "function");
+assert.equal(typeof scrollBoxHandle.value.scrollToTop, "function");
+assert.equal(typeof scrollBoxHandle.value.scrollToBottom, "function");
+assert.equal(geometryApp.lastFrame().includes("packed"), true);
+assert.equal(geometryApp.lastFrame().includes("geometry"), true);
+geometryApp.dispose();
+assert.deepEqual(geometryProjection.geometry.value, { status: "detached" });
 
 const events = [];
 let activeAvailability;
@@ -543,7 +624,9 @@ assert.equal(focusApp.terminal.rawMode.current, false);
     "3.4.38",
   );
 
-  process.stdout.write("clean tarball consumer passed with Vue 3.4.38 and TypeScript 6.0.3\n");
+  process.stdout.write(
+    "clean runtime, testing, and components tarball consumer passed with Vue 3.4.38 and TypeScript 6.0.3\n",
+  );
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

@@ -9,9 +9,15 @@ import {
 } from "./fullscreen-origin.ts";
 import { parseFocusRoutingScenario, startFocusRoutingSession } from "./focus-routing.ts";
 import { parseInputRoutingScenario, startInputRoutingSession } from "./input-routing.ts";
+import { startScrollBoxSession } from "./scroll-box.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
 
-type ReviewTarget = "basic-template" | "fullscreen-origin" | "input-routing" | "focus-routing";
+type ReviewTarget =
+  | "basic-template"
+  | "fullscreen-origin"
+  | "input-routing"
+  | "focus-routing"
+  | "scroll-box";
 
 interface Request {
   id?: string | number | null;
@@ -44,12 +50,13 @@ function reviewTarget(args: string[]): ReviewTarget {
     value === "basic-template" ||
     value === "fullscreen-origin" ||
     value === "input-routing" ||
-    value === "focus-routing"
+    value === "focus-routing" ||
+    value === "scroll-box"
   ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, input-routing, or focus-routing, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, or scroll-box, received ${value}`,
   );
 }
 
@@ -170,7 +177,9 @@ async function main(): Promise<void> {
         ? await startInputRoutingSession(outputDir, parseInputRoutingScenario(scenario))
         : target === "focus-routing"
           ? await startFocusRoutingSession(outputDir, parseFocusRoutingScenario(scenario))
-          : await startBasicTemplateSession(outputDir);
+          : target === "scroll-box"
+            ? await startScrollBoxSession(outputDir)
+            : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

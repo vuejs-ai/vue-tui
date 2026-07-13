@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
-import { Box, Text, useBoxMetrics, useRenderSession } from "@vue-tui/runtime";
+import { computed, shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
+import { Box, Text, useElementGeometry, useRenderSession } from "@vue-tui/runtime";
 import Target from "./target.vue";
 
 const session = useRenderSession();
@@ -14,11 +14,15 @@ testGlobal.__VT_RENDER_SESSION__ = session;
 const label = "LABEL-A";
 const count = shallowRef(0);
 const target = shallowRef<InstanceType<typeof Target> | null>(null);
-const {
-  width: targetWidth,
-  height: targetHeight,
-  hasMeasured: targetMeasured,
-} = useBoxMetrics(target);
+const { geometry: targetGeometry } = useElementGeometry(target);
+const targetSize = computed(() => {
+  const geometry = targetGeometry.value;
+  return geometry.status === "zero-size" ||
+    geometry.status === "fully-clipped" ||
+    geometry.status === "visible"
+    ? `${geometry.parent.width}x${geometry.parent.height}:true`
+    : "0x0:false";
+});
 const targetGlobal = globalThis as {
   __VT_TARGET_INSTANCE__?: object;
   __VT_TARGET_CURRENT__?: object | null;
@@ -41,6 +45,6 @@ onUnmounted(() => clearInterval(t));
     <Text>count={{ count }}</Text>
     <Text>session={{ sessionIdentity }}</Text>
     <Target ref="target" />
-    <Text>target={{ targetWidth }}x{{ targetHeight }}:{{ targetMeasured }}</Text>
+    <Text>target={{ targetSize }}</Text>
   </Box>
 </template>

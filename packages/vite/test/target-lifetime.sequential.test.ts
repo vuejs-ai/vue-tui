@@ -50,7 +50,7 @@ test("HMR follows a component's rendered target across rerender and reload", asy
       "<Text>TARGET-B-HOT</Text>",
     ),
   );
-  // Text participates in the parent's stretch layout, so its measured width is
+  // Text participates in the parent's stretch layout, so its parent-relative width is
   // the 16-column content width rather than the 12 glyphs in its label.
   await waitFor(read, "target=16x1:true");
 

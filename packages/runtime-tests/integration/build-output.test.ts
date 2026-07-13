@@ -52,6 +52,7 @@ type PackageCase = {
 
 const cases: PackageCase[] = [
   { dir: "runtime", typed: true },
+  { dir: "components", typed: true },
   { dir: "vite", typed: false },
   { dir: "testing", typed: true },
 ];

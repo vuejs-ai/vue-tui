@@ -133,11 +133,14 @@ export {
   type UseAnimationReturn,
 } from "./composables/useAnimation.ts";
 export {
-  useBoxMetrics,
-  measureElement,
-  type BoxMetrics,
-  type UseBoxMetricsReturn,
-} from "./composables/useBoxMetrics.ts";
+  useElementGeometry,
+  type CellPoint,
+  type CellRect,
+  type ElementGeometry,
+  type ElementGeometryFragment,
+  type ElementTarget,
+  type UseElementGeometryReturn,
+} from "./composables/useElementGeometry.ts";
 export {
   kittyFlags,
   kittyModifiers,

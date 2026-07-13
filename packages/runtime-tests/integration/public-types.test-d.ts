@@ -21,6 +21,7 @@ import {
   Box,
   useApp,
   useDraggable,
+  useElementGeometry,
   useExternalInput,
   useFocus,
   useFocusedInput,
@@ -39,6 +40,11 @@ import {
 import type {
   BoxProps,
   BoxLayoutStyle,
+  CellPoint,
+  CellRect,
+  ElementGeometry,
+  ElementGeometryFragment,
+  ElementTarget,
   ExternalInputHandler,
   ExternalInputSource,
   InputAvailability,
@@ -72,6 +78,7 @@ import type {
   UseDraggablePosition,
   UseDraggableReturn,
   UseDraggableTarget,
+  UseElementGeometryReturn,
   UseFocusManagerReturn,
   UseFocusOptions,
   UseFocusReturn,
@@ -264,6 +271,61 @@ layoutProjection.rows.value = 24;
 
 // @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
 export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
+
+// Semantic element geometry is one atomic, readonly paint generation. It uses
+// ordinary Vue component refs and never exposes renderer or Yoga nodes.
+expectTypeOf<ElementTarget>().toEqualTypeOf<
+  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
+>();
+expectTypeOf<CellPoint>().toEqualTypeOf<{
+  readonly x: number;
+  readonly y: number;
+}>();
+expectTypeOf<CellRect>().toEqualTypeOf<{
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}>();
+expectTypeOf<ElementGeometryFragment>().toEqualTypeOf<{
+  readonly local: CellRect;
+  readonly parent: CellRect;
+  readonly surface: CellRect;
+  readonly visibleSurface: CellRect | null;
+}>();
+expectTypeOf<ElementGeometry>().toEqualTypeOf<
+  | { readonly status: "unavailable" }
+  | { readonly status: "detached" }
+  | { readonly status: "pending" }
+  | { readonly status: "hidden" }
+  | ({
+      readonly parent: CellRect;
+      readonly surface: CellRect;
+      readonly fragments: readonly ElementGeometryFragment[];
+    } & {
+      readonly status: "zero-size" | "fully-clipped" | "visible";
+    })
+>();
+expectTypeOf<Parameters<typeof useElementGeometry>>().toEqualTypeOf<[target: ElementTarget]>();
+expectTypeOf<ReturnType<typeof useElementGeometry>>().toEqualTypeOf<UseElementGeometryReturn>();
+expectTypeOf<UseElementGeometryReturn>().toEqualTypeOf<{
+  readonly geometry: Readonly<ShallowRef<ElementGeometry>>;
+}>();
+
+const geometryHost = shallowRef<ComponentPublicInstance | null>(null);
+const geometryProjection = useElementGeometry(geometryHost);
+// @ts-expect-error The public geometry ref is readonly.
+geometryProjection.geometry.value = { status: "detached" };
+// @ts-expect-error Renderer-owned caret slots are not part of public geometry.
+void geometryProjection.geometry.value.caretSlots;
+// @ts-expect-error useBoxMetrics was replaced, not retained as an alias.
+export type _UseBoxMetricsWasRemoved = typeof import("@vue-tui/runtime").useBoxMetrics;
+// @ts-expect-error Its named return type was removed with the composable.
+export type _UseBoxMetricsReturnWasRemoved = import("@vue-tui/runtime").UseBoxMetricsReturn;
+// @ts-expect-error Its parent-relative scalar snapshot type was removed too.
+export type _BoxMetricsWasRemoved = import("@vue-tui/runtime").BoxMetrics;
+// @ts-expect-error Imperative Yoga measurement has no semantic geometry contract.
+export type _MeasureElementWasRemoved = typeof import("@vue-tui/runtime").measureElement;
 
 // Framework-neutral cursor data shape, mirrored from Ink exactly.
 expectTypeOf<CursorPosition>().toEqualTypeOf<{ x: number; y: number }>();

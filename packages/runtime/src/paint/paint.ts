@@ -766,7 +766,7 @@ function createTopTextGeometry(input: {
       local: { x: 0, y: 0, width: input.surface.width, height: input.surface.height },
       parent: input.parent,
       surface: input.surface,
-      visible: intersectHitRect(input.surface, input.clip) ?? null,
+      visibleSurface: intersectHitRect(input.surface, input.clip) ?? null,
     });
   }
   for (const fragment of paintedFragments) {
@@ -787,11 +787,12 @@ function createTopTextGeometry(input: {
           height: piece.height,
         },
         surface: piece,
-        visible: fragment.visible === null ? null : (intersectHitRect(piece, input.clip) ?? null),
+        visibleSurface:
+          fragment.visibleSurface === null ? null : (intersectHitRect(piece, input.clip) ?? null),
       });
     }
   }
-  const visible = fragments.some((fragment) => fragment.visible !== null);
+  const visible = fragments.some((fragment) => fragment.visibleSurface !== null);
   const resolved = {
     parent,
     surface,
@@ -803,7 +804,7 @@ function createTopTextGeometry(input: {
   }
   return visible
     ? { status: "visible" as const, ...resolved }
-    : { status: "clipped" as const, ...resolved };
+    : { status: "fully-clipped" as const, ...resolved };
 }
 
 export interface PaintOptions {
