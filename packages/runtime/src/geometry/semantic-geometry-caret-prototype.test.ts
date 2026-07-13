@@ -20,21 +20,18 @@ interface ElementGeometryFragment {
   readonly visible: CellRect | null;
 }
 
-/** Private insertion-slot mapping; deliberately absent from public geometry. */
-interface CaretRow {
-  readonly localY: number;
-  readonly minX: number;
-  readonly maxX: number;
-  /** Surface coordinate corresponding to local x=0 on this row. */
-  readonly surfaceAtLocalZero: CellPoint;
-  readonly visible: CellRect | null;
+/** Exact private insertion slot; deliberately absent from public geometry. */
+interface CaretSlot {
+  readonly local: CellPoint;
+  readonly surface: CellPoint;
+  readonly visible: boolean;
 }
 
 interface ResolvedElementGeometry {
   readonly parent: CellRect;
   readonly surface: CellRect;
   readonly fragments: readonly ElementGeometryFragment[];
-  readonly caretRows: readonly CaretRow[];
+  readonly caretSlots: readonly CaretSlot[];
 }
 
 type ElementGeometry =
@@ -126,25 +123,16 @@ function resolveCaret(input: {
   if (input.relation === "pending") return { status: "hidden", reason: "pending" };
   if (input.relation === "unrelated") return { status: "hidden", reason: "unrelated" };
 
-  // Public bounds/fragments describe painted geometry. The private row map is
-  // the translation authority because nested inline Text can start at a
-  // different surface x on each local row, and an insertion slot may be at a
-  // painted line's trailing edge or at an empty target's origin.
-  const row = geometry.caretRows.find(
+  // Public bounds/fragments describe painted geometry. Exact private slots are
+  // the translation authority because wrapping and wide glyphs make a row
+  // range insufficient: a continuation cell is not a legal insertion point.
+  const slot = geometry.caretSlots.find(
     (candidate) =>
-      candidate.localY === input.position!.y &&
-      input.position!.x >= candidate.minX &&
-      input.position!.x <= candidate.maxX,
+      candidate.local.x === input.position!.x && candidate.local.y === input.position!.y,
   );
-  if (!row) return { status: "hidden", reason: "outside" };
-  const surface = {
-    x: row.surfaceAtLocalZero.x + input.position.x,
-    y: row.surfaceAtLocalZero.y,
-  };
-  if (!row.visible || !contains(row.visible, surface)) {
-    return { status: "hidden", reason: "clipped" };
-  }
-  return { status: "visible", surface };
+  if (!slot) return { status: "hidden", reason: "outside" };
+  if (!slot.visible) return { status: "hidden", reason: "clipped" };
+  return { status: "visible", surface: slot.surface };
 }
 
 class CaretRegistry {
@@ -257,6 +245,26 @@ function boundingRect(fragments: readonly CellRect[]): CellRect {
   return { x, y, width: right - x, height: bottom - y };
 }
 
+/** Fixture helper: callers still enumerate every legal local insertion cell. */
+function slotsForRenderedRow(input: {
+  readonly localY: number;
+  readonly legalXs: readonly number[];
+  readonly surfaceAtLocalZero: CellPoint;
+  readonly visible: CellRect | null;
+}): readonly CaretSlot[] {
+  return input.legalXs.map((x) => {
+    const surface = {
+      x: input.surfaceAtLocalZero.x + x,
+      y: input.surfaceAtLocalZero.y,
+    };
+    return {
+      local: { x, y: input.localY },
+      surface,
+      visible: input.visible !== null && contains(input.visible, surface),
+    };
+  });
+}
+
 const editorGeometry: ElementGeometry = {
   status: "visible",
   parent: { x: 1, y: 1, width: 6, height: 2 },
@@ -275,21 +283,19 @@ const editorGeometry: ElementGeometry = {
       visible: { x: 4, y: 4, width: 4, height: 1 },
     },
   ],
-  caretRows: [
-    {
+  caretSlots: [
+    ...slotsForRenderedRow({
       localY: 0,
-      minX: 0,
-      maxX: 6,
+      legalXs: [0, 1, 2, 3, 4, 5, 6],
       surfaceAtLocalZero: { x: 4, y: 3 },
       visible: { x: 4, y: 3, width: 6, height: 1 },
-    },
-    {
+    }),
+    ...slotsForRenderedRow({
       localY: 1,
-      minX: 0,
-      maxX: 4,
+      legalXs: [0, 1, 2, 3, 4],
       surfaceAtLocalZero: { x: 4, y: 4 },
       visible: { x: 4, y: 4, width: 4, height: 1 },
-    },
+    }),
   ],
 };
 
@@ -494,7 +500,7 @@ describe("F5 semantic geometry and caret proposal", () => {
       ...editorGeometry,
       status: "clipped",
       fragments: editorGeometry.fragments.map((fragment) => ({ ...fragment, visible: null })),
-      caretRows: editorGeometry.caretRows.map((row) => ({ ...row, visible: null })),
+      caretSlots: editorGeometry.caretSlots.map((slot) => ({ ...slot, visible: false })),
     };
     expect(
       resolveCaret({
@@ -573,13 +579,11 @@ describe("F5 semantic geometry and caret proposal", () => {
       parent: { x: 1, y: 1, width: 0, height: 0 },
       surface: { x: 5, y: 2, width: 0, height: 0 },
       fragments: [],
-      caretRows: [
+      caretSlots: [
         {
-          localY: 0,
-          minX: 0,
-          maxX: 0,
-          surfaceAtLocalZero: { x: 5, y: 2 },
-          visible: { x: 0, y: 0, width: 10, height: 4 },
+          local: { x: 0, y: 0 },
+          surface: { x: 5, y: 2 },
+          visible: true,
         },
       ],
     };
@@ -597,13 +601,13 @@ describe("F5 semantic geometry and caret proposal", () => {
         outputAvailable: true,
         focused: true,
         position: { x: 0, y: 0 },
-        geometry: { ...geometry, caretRows: [] },
+        geometry: { ...geometry, caretSlots: [] },
         relation: "related",
       }),
     ).toEqual({ status: "hidden", reason: "outside" });
   });
 
-  test("mapped fragments and private rows cover wrapped nested Text and trailing slots", () => {
+  test("mapped fragments and exact private slots cover wrapped nested Text and trailing slots", () => {
     const fragments = [
       { x: 2, y: 0, width: 4, height: 1 },
       { x: 0, y: 1, width: 3, height: 1 },
@@ -630,21 +634,19 @@ describe("F5 semantic geometry and caret proposal", () => {
           visible: { x: 0, y: 1, width: 3, height: 1 },
         },
       ],
-      caretRows: [
-        {
+      caretSlots: [
+        ...slotsForRenderedRow({
           localY: 0,
-          minX: 0,
-          maxX: 4,
+          legalXs: [0, 1, 2, 3, 4],
           surfaceAtLocalZero: { x: 2, y: 0 },
           visible: { x: 0, y: 0, width: 8, height: 2 },
-        },
-        {
+        }),
+        ...slotsForRenderedRow({
           localY: 1,
-          minX: 0,
-          maxX: 3,
+          legalXs: [0, 1, 2, 3],
           surfaceAtLocalZero: { x: 0, y: 1 },
           visible: { x: 0, y: 0, width: 8, height: 2 },
-        },
+        }),
       ],
     };
     expect(geometry.fragments[0]?.local).toEqual({ x: 0, y: 0, width: 4, height: 1 });
@@ -667,5 +669,70 @@ describe("F5 semantic geometry and caret proposal", () => {
         relation: "related",
       }),
     ).toEqual({ status: "visible", surface: { x: 6, y: 0 } });
+  });
+
+  test("wide glyph continuation cells are not legal caret slots", () => {
+    const geometry: ElementGeometry = {
+      status: "visible",
+      parent: { x: 0, y: 0, width: 3, height: 1 },
+      surface: { x: 5, y: 2, width: 3, height: 1 },
+      fragments: [
+        {
+          local: { x: 0, y: 0, width: 3, height: 1 },
+          parent: { x: 0, y: 0, width: 3, height: 1 },
+          surface: { x: 5, y: 2, width: 3, height: 1 },
+          visible: { x: 5, y: 2, width: 3, height: 1 },
+        },
+      ],
+      // `中A` has boundaries at 0, 2, and 3. Local x=1 is the CJK
+      // continuation cell and must never be accepted or rounded.
+      caretSlots: slotsForRenderedRow({
+        localY: 0,
+        legalXs: [0, 2, 3],
+        surfaceAtLocalZero: { x: 5, y: 2 },
+        visible: { x: 5, y: 2, width: 3, height: 1 },
+      }),
+    };
+
+    expect(
+      resolveCaret({
+        outputAvailable: true,
+        focused: true,
+        position: { x: 1, y: 0 },
+        geometry,
+        relation: "related",
+      }),
+    ).toEqual({ status: "hidden", reason: "outside" });
+    expect(
+      resolveCaret({
+        outputAvailable: true,
+        focused: true,
+        position: { x: 2, y: 0 },
+        geometry,
+        relation: "related",
+      }),
+    ).toEqual({ status: "visible", surface: { x: 7, y: 2 } });
+    expect(
+      resolveCaret({
+        outputAvailable: true,
+        focused: true,
+        position: { x: 3, y: 0 },
+        geometry,
+        relation: "related",
+      }),
+    ).toEqual({ status: "hidden", reason: "clipped" });
+  });
+
+  test("descendant Text geometry across an arbitrary Transform is unavailable", () => {
+    const transformedDescendant: ElementGeometry = { status: "unavailable" };
+    expect(
+      resolveCaret({
+        outputAvailable: true,
+        focused: true,
+        position: { x: 0, y: 0 },
+        geometry: transformedDescendant,
+        relation: "related",
+      }),
+    ).toEqual({ status: "hidden", reason: "unavailable" });
   });
 });

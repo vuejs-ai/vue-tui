@@ -27,7 +27,7 @@ describe("grapheme-aware clipping (issue #21)", () => {
     expect(frame).not.toContain("👨");
   });
 
-  test("left-edge wide grapheme straddle starts following text at clip origin (Ink parity)", async () => {
+  test("left-edge wide grapheme straddle preserves following text's surface column", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -39,13 +39,10 @@ describe("grapheme-aware clipping (issue #21)", () => {
       { columns: 100 },
     );
     const frame = stripAnsi(lastFrame({ trimLines: true })!);
-    // "中" (width 2) straddles the left clip edge → dropped whole. Ink output.ts:210-212
-    // sets the write origin to the clipped left edge, so the kept "x" starts AT that
-    // origin with NO leading space. Verified against the built Ink reference
-    // (/tmp/ink-40b3a75 renderToString of this exact tree → "x"). Previously this
-    // locked vue-tui's leading-space padding (" x"); rewritten to Ink per the G63
-    // decisions-log entry in .agents/docs/parity-ledger.md.
-    expect(frame).toBe("x");
+    // "中" occupies source columns -1..0 and is dropped whole because it
+    // straddles the left clip edge. The following "x" belongs at column 1, so
+    // clipping must leave column 0 blank instead of reflowing "x" to the edge.
+    expect(frame).toBe(" x");
   });
 
   // absolute-non-edge class (R2-000045): an absolutely-positioned ZWJ emoji is
@@ -68,15 +65,7 @@ describe("grapheme-aware clipping (issue #21)", () => {
     expect(lines[1]).toBe("ct👨‍👩‍👧‍👦");
   });
 
-  // A write op that starts EXACTLY at the right clip edge (x === clip.x2) must NOT
-  // be short-circuited as a whole — it has to take the per-line clip path so its
-  // transformers still run on the (now empty) clipped slice. A transformer that
-  // produces output from EMPTY input (e.g. `() => '中'`) emits its output AT the
-  // clip edge. Matches Ink output.ts:188 (strict `x > clip.x2`), then the
-  // `lines.entries()` loop running `transformer('')`. Captured against the built
-  // Ink reference (/tmp/ink @40b3a75, columns=100, renderToString):
-  // transform `() => '中'` at x=4 of a width=4 overflow=hidden Box → "    中".
-  test("transformer that emits from empty input still runs at the right clip edge (Ink parity)", async () => {
+  test("transformer output at the exclusive right clip edge remains hidden", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -89,13 +78,10 @@ describe("grapheme-aware clipping (issue #21)", () => {
       )),
       { columns: 100 },
     );
-    // Ink reference: "    中" — 4 leading spaces then 中 painted at the clip edge.
-    expect(stripAnsi(lastFrame()!)).toBe("    中");
+    expect(stripAnsi(lastFrame()!)).toBe("");
   });
 
-  // A transformer that APPENDS to its (empty, clipped) input also runs at the edge:
-  // Ink calls it with "" → "" + "X" = "X", painted at the clip edge.
-  test("transformer that appends to empty input runs at the right clip edge (Ink parity)", async () => {
+  test("transformer append at the exclusive right clip edge remains hidden", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (
         <Box width={4} height={1} overflow="hidden">
@@ -108,14 +94,13 @@ describe("grapheme-aware clipping (issue #21)", () => {
       )),
       { columns: 100 },
     );
-    // Ink reference: "    X" — the clipped slice is "", the transform appends "X".
-    expect(stripAnsi(lastFrame()!)).toBe("    X");
+    expect(stripAnsi(lastFrame()!)).toBe("");
   });
 
   // Control: an IDENTITY transform at the same clip edge must emit NOTHING — the
   // clipped slice is empty, identity returns "", characters.length === 0 → skip.
-  // Proves the fix only resurrects ops whose transformer produces output from
-  // empty input; ops with no net output at the edge stay clipped away.
+  // Together with the two expanding-transform cases above, this proves the
+  // exclusive overflow edge contains every callback result.
   test("identity transform at the right clip edge emits nothing (control)", async () => {
     const { lastFrame } = await render(
       defineComponent(() => () => (

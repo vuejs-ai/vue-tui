@@ -2,9 +2,8 @@ import { expect, test } from "vite-plus/test";
 import term from "./helpers/term.ts";
 
 const modes = ["inline", "fullscreen"] as const;
-const inputPrefix = Buffer.from("A\x1b[?");
-const inputSuffix = Buffer.concat([
-  Buffer.from("1u\x03\x1b[200~paste\x03\x1b[?1u\nbody\x1b[201~\x1b[?25h"),
+const input = Buffer.concat([
+  Buffer.from("A\x1b[?1u\x03\x1b[200~paste\x03\x1b[?1u\nbody\x1b[201~\x1b[?25h"),
   Buffer.from([0x80]),
 ]);
 const expectedChildHex = Buffer.concat([
@@ -27,9 +26,10 @@ test.each(modes)(
       await ps.waitForOutput(
         (output) => output.includes("__READY__") && output.includes("\x1b[?u"),
       );
-      ps.write(inputPrefix);
-      await new Promise((resolve) => setTimeout(resolve, 35));
-      ps.write(inputSuffix);
+      // Keep the real outer/child-PTY test free of cross-process timer ordering.
+      // Slow split-reply retention is covered deterministically in
+      // integration/kitty-lifecycle.test.ts, where both timers share one event loop.
+      ps.write(input);
       await ps.waitForOutput(
         (output) =>
           output.includes("__FALLTHROUGH_OK__") &&

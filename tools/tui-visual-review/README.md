@@ -16,7 +16,7 @@ For the fullscreen fixed-origin regression fixture, use:
 vp run visual:fullscreen-origin
 ```
 
-Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
+Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
 
 For input routing across multiple facts in one PTY write, use:
 

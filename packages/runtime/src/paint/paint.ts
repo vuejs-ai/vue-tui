@@ -33,6 +33,16 @@ import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
 import type { MouseHitMapEntry } from "../mouse/controller.ts";
 import { clearMouseTargetRect, setMouseTargetRect } from "../mouse/target.ts";
+import { isContentLayoutGuarded } from "../host/layout-guards.ts";
+import type {
+  InternalGeometryFragment,
+  InternalGeometryPaintFrame,
+} from "../geometry/geometry-service.ts";
+import {
+  createRectGeometry,
+  deriveTextGeometry,
+  virtualTextDescendants,
+} from "../geometry/paint-geometry.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -107,6 +117,17 @@ class OutputCaches {
     }
     return cached;
   }
+
+  getSliceStart(text: string, requestedStart: number): number {
+    let column = 0;
+
+    for (const character of this.getStyledChars(text)) {
+      if (column >= requestedStart) return column;
+      column += Math.max(1, this.getStringWidth(character.value));
+    }
+
+    return column;
+  }
 }
 
 class Output {
@@ -162,10 +183,14 @@ class Output {
       let { x, y } = op;
       let lines = op.lines;
 
-      // Only the most recent component clip applies (top-only, matching Ink
-      // behavior). A fullscreen viewport is a separate hard boundary and must
-      // intersect even that top clip so nested overflow cannot escape it.
-      const stackedClip = clips.at(-1);
+      // Every overflow boundary remains authoritative. Intersect the complete
+      // ancestor stack so a larger nested overflow box cannot reopen cells that
+      // its narrower ancestor already excluded. The viewport is one additional
+      // hard boundary over the same accumulated clip.
+      const stackedClip = clips.reduce<ClipRect | undefined>(
+        (current, next) => intersectClipRects(current, next),
+        undefined,
+      );
       const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
 
       if (clip) {
@@ -234,14 +259,13 @@ class Output {
           }
           const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
           const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
-          // After a LEFT clip the write origin is the clipped left edge — matching
-          // Ink output.ts:210-212 `if (x < clip.x1) x = clip.x1`. slice-ansi@9 is
-          // grapheme-aware, so a wide glyph straddling the clip edge is dropped
-          // whole and the kept content begins at this origin with NO leading
-          // offset. (We deliberately do NOT advance the origin by the dropped
-          // glyph's extra column — that produced a vue-tui-specific leading space
-          // that Ink never emits.)
-          if (lineX < clipH.x1) lineX = clipH.x1;
+          // slice-ansi drops a grapheme whole when the requested left edge lands
+          // inside it. Keep the first retained grapheme at its original surface
+          // column instead of reflowing it left over the dropped cells. For
+          // example, "中x" written at x=-1 drops "中" but keeps "x" at x=1,
+          // leaving x=0 blank. This deliberately differs from Ink, which resets
+          // the write origin to clip.x1 and shifts the retained text left.
+          if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
           const maxWidth = clipH.x2 - lineX;
           line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);
         }
@@ -254,6 +278,15 @@ class Output {
           // transform cannot re-introduce cursor/erase controls after Text was
           // sanitized or add physical rows that bypass layout and viewport bounds.
           line = sanitizeAnsi(transformer(line, index), { singleLine: true });
+        }
+
+        // A Transform receives the already-clipped source span, but it cannot
+        // reopen cells outside the same overflow boundary. Re-clip only the
+        // transformed result to the remaining right-hand capacity; lineX has
+        // already preserved the retained source span's real surface origin.
+        if (clipH) {
+          const maxWidth = Math.max(0, clipH.x2 - lineX);
+          line = safeSliceEnd(sliceAnsi(line, 0, maxWidth), maxWidth);
         }
 
         const characters = this.caches.getStyledChars(line);
@@ -645,8 +678,138 @@ interface HitRect {
   readonly height: number;
 }
 
+function boundsOfRects(rects: readonly HitRect[]): HitRect {
+  const x = Math.min(...rects.map((rect) => rect.x));
+  const y = Math.min(...rects.map((rect) => rect.y));
+  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+function subtractRect(rect: HitRect, cut: HitRect): HitRect[] {
+  const overlap = intersectHitRect(rect, cut);
+  if (!overlap) return [rect];
+  const pieces: HitRect[] = [];
+  const rectRight = rect.x + rect.width;
+  const rectBottom = rect.y + rect.height;
+  const overlapRight = overlap.x + overlap.width;
+  const overlapBottom = overlap.y + overlap.height;
+  if (overlap.y > rect.y) {
+    pieces.push({ x: rect.x, y: rect.y, width: rect.width, height: overlap.y - rect.y });
+  }
+  if (overlapBottom < rectBottom) {
+    pieces.push({
+      x: rect.x,
+      y: overlapBottom,
+      width: rect.width,
+      height: rectBottom - overlapBottom,
+    });
+  }
+  if (overlap.x > rect.x) {
+    pieces.push({
+      x: rect.x,
+      y: overlap.y,
+      width: overlap.x - rect.x,
+      height: overlap.height,
+    });
+  }
+  if (overlapRight < rectRight) {
+    pieces.push({
+      x: overlapRight,
+      y: overlap.y,
+      width: rectRight - overlapRight,
+      height: overlap.height,
+    });
+  }
+  return pieces;
+}
+
+function createTopTextGeometry(input: {
+  readonly parent: HitRect;
+  readonly surface: HitRect;
+  readonly clip?: HitRect;
+  readonly caretSlots: ReturnType<typeof deriveTextGeometry>["topCaretSlots"];
+  readonly fragments: ReturnType<typeof deriveTextGeometry>["topFragments"];
+}) {
+  if (input.fragments === null) {
+    return createRectGeometry({
+      parent: input.parent,
+      surface: input.surface,
+      clip: input.clip,
+      caretSlots: input.caretSlots,
+    });
+  }
+  const paintedFragments = input.fragments.map((fragment) => ({
+    ...fragment,
+    parent: {
+      ...fragment.parent,
+      x: input.parent.x + fragment.parent.x,
+      y: input.parent.y + fragment.parent.y,
+    },
+  }));
+  const extentBounds = [
+    input.surface,
+    ...paintedFragments
+      .map((fragment) => fragment.surface)
+      .filter((rect) => rect.width > 0 && rect.height > 0),
+  ];
+  const surface = boundsOfRects(extentBounds);
+  const parent = boundsOfRects([
+    input.parent,
+    ...paintedFragments
+      .map((fragment) => fragment.parent)
+      .filter((rect) => rect.width > 0 && rect.height > 0),
+  ]);
+  const fragments: InternalGeometryFragment[] = [];
+  if (input.surface.width > 0 && input.surface.height > 0) {
+    fragments.push({
+      local: { x: 0, y: 0, width: input.surface.width, height: input.surface.height },
+      parent: input.parent,
+      surface: input.surface,
+      visible: intersectHitRect(input.surface, input.clip) ?? null,
+    });
+  }
+  for (const fragment of paintedFragments) {
+    for (const piece of subtractRect(fragment.surface, input.surface)) {
+      const dx = piece.x - fragment.surface.x;
+      const dy = piece.y - fragment.surface.y;
+      fragments.push({
+        local: {
+          x: fragment.local.x + dx,
+          y: fragment.local.y + dy,
+          width: piece.width,
+          height: piece.height,
+        },
+        parent: {
+          x: fragment.parent.x + dx,
+          y: fragment.parent.y + dy,
+          width: piece.width,
+          height: piece.height,
+        },
+        surface: piece,
+        visible: fragment.visible === null ? null : (intersectHitRect(piece, input.clip) ?? null),
+      });
+    }
+  }
+  const visible = fragments.some((fragment) => fragment.visible !== null);
+  const resolved = {
+    parent,
+    surface,
+    fragments,
+    caretSlots: input.caretSlots,
+  };
+  if (surface.width === 0 || surface.height === 0) {
+    return { status: "zero-size" as const, ...resolved };
+  }
+  return visible
+    ? { status: "visible" as const, ...resolved }
+    : { status: "clipped" as const, ...resolved };
+}
+
 export interface PaintOptions {
   readonly hitMap?: MouseHitMapEntry[];
+  /** Private frame-local geometry collector. Publication happens after paint succeeds. */
+  readonly geometry?: InternalGeometryPaintFrame;
   /**
    * Clip paint and hit testing to an app-owned viewport. Fullscreen rendering
    * uses this to keep off-screen layout from wrapping or scrolling the
@@ -686,6 +849,44 @@ function clearSubtreeHitRects(node: TuiNode): void {
   clearMouseTargetRect(node);
   if (!isContainer(node)) return;
   for (const child of node.children) clearSubtreeHitRects(child);
+}
+
+function recordZeroContentGeometry(
+  node: TuiNode,
+  x0: number,
+  y0: number,
+  geometry: InternalGeometryPaintFrame | undefined,
+): void {
+  if (!geometry) return;
+  if (node.type === "tui-static") {
+    geometry.recordSubtree(node, "unavailable");
+    return;
+  }
+  const yoga = (node as { yoga?: { getDisplay?: () => number } }).yoga;
+  if (yoga?.getDisplay?.() === Yoga.DISPLAY_NONE && !isContentLayoutGuarded(node)) {
+    geometry.recordSubtree(node, "hidden");
+    return;
+  }
+  let x = x0;
+  let y = y0;
+  let parent = { x: 0, y: 0, width: 0, height: 0 };
+  if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-transform") {
+    const layout = node.yoga.getComputedLayout();
+    x += layout.left;
+    y += layout.top;
+    parent = { x: layout.left, y: layout.top, width: 0, height: 0 };
+  }
+  if (node.type !== "root" && node.type !== "text-leaf" && node.type !== "comment") {
+    geometry.record(node, {
+      status: "zero-size",
+      parent,
+      surface: { x, y, width: 0, height: 0 },
+      fragments: [],
+      caretSlots: [],
+    });
+  }
+  if (!isContainer(node)) return;
+  for (const child of node.children) recordZeroContentGeometry(child, x, y, geometry);
 }
 
 interface InlineHitSpan {
@@ -783,7 +984,7 @@ export function paint(root: TuiNode, options: PaintOptions = {}): string {
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
   const out = new Output(width, height, options.viewport !== undefined);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, 0, 0, [], undefined, options.hitMap, viewportClip);
+  paintNode(root, out, 0, 0, [], undefined, options.hitMap, viewportClip, options.geometry);
   return out.get().output;
 }
 
@@ -796,6 +997,7 @@ function paintNode(
   inheritedBg?: string,
   hitMap?: MouseHitMapEntry[],
   clip?: HitRect,
+  geometry?: InternalGeometryPaintFrame,
 ): void {
   // display:none — yoga collapses the node to zero size but still reports a
   // layout; skip painting the subtree entirely (matches Ink's renderNodeToOutput
@@ -803,13 +1005,16 @@ function paintNode(
   const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
     if (hitMap) clearSubtreeHitRects(node);
+    if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
+    else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, x0, y0, geometry);
+    else geometry?.recordSubtree(node, "hidden");
     return;
   }
 
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, x0, y0, transformers, undefined, hitMap, clip);
+        paintNode(child, output, x0, y0, transformers, undefined, hitMap, clip, geometry);
       }
       return;
     }
@@ -819,6 +1024,14 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
+      geometry?.record(
+        node,
+        createRectGeometry({
+          parent: { x: layout.left, y: layout.top, width: w, height: h },
+          surface: { x, y, width: w, height: h },
+          clip,
+        }),
+      );
       recordHit(hitMap, node, { x, y, width: w, height: h }, clip);
       // Split the Box's own bg from the value threaded to children — they use
       // different fallback rules, mirroring Ink's two separate guards:
@@ -896,7 +1109,9 @@ function paintNode(
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
           if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, x, y, transformers, childBg, hitMap, childClip);
+            paintNode(child, output, x, y, transformers, childBg, hitMap, childClip, geometry);
+          } else {
+            recordZeroContentGeometry(child, x, y, geometry);
           }
         }
         if (clipped) output.unclip();
@@ -904,7 +1119,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, x, y, transformers, childBg, hitMap, childClip);
+        paintNode(child, output, x, y, transformers, childBg, hitMap, childClip, geometry);
       }
 
       if (clipped) output.unclip();
@@ -912,14 +1127,18 @@ function paintNode(
     }
     case "tui-text": {
       const layout = node.yoga.getComputedLayout();
+      const x = x0 + layout.left;
+      const y = y0 + layout.top;
+      const w = Math.max(0, Math.floor(layout.width));
+      const h = Math.max(0, Math.floor(layout.height));
       recordHit(
         hitMap,
         node,
         {
-          x: x0 + layout.left,
-          y: y0 + layout.top,
-          width: Math.max(0, Math.floor(layout.width)),
-          height: Math.max(0, Math.floor(layout.height)),
+          x,
+          y,
+          width: w,
+          height: h,
         },
         clip,
       );
@@ -929,9 +1148,6 @@ function paintNode(
       // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
       // the node's whole children concatenation alongside its boolean styles.
       const text = renderTextWithInlineStyles(node, inheritedBg);
-      // Skip writing empty text — avoids applying line transformers to empty
-      // content, which matches Ink's behavior of not writing empty text nodes.
-      if (text === "") return;
       // Wrap at the TRUE cell width (unclamped), matching Ink's paint, which wraps at
       // getMaxWidth(yogaNode) — a value that can legitimately be 0 (flexBasis=0, width=0,
       // width="0%"). At width 0, wrapText returns the leading-newline wrap "\nA" → ["", "A"],
@@ -941,6 +1157,36 @@ function paintNode(
       // fast-path returns it verbatim.
       const wrapWidth = Math.floor(layout.width);
       const wrapped = wrapText(text, wrapWidth, node.props.wrap ?? "wrap");
+      if (geometry) {
+        const traced = deriveTextGeometry({
+          node,
+          renderedText: text,
+          wrapped,
+          wrapWidth,
+          wrapMode: node.props.wrap,
+          surfaceOrigin: { x, y },
+          clip,
+          provenanceAvailable: transformers.length === 0,
+        });
+        geometry.record(
+          node,
+          transformers.length > 0
+            ? { status: "unavailable" }
+            : createTopTextGeometry({
+                parent: { x: layout.left, y: layout.top, width: w, height: h },
+                surface: { x, y, width: w, height: h },
+                clip,
+                caretSlots: traced.topCaretSlots,
+                fragments: traced.topFragments,
+              }),
+        );
+        for (const [target, targetGeometry] of traced.virtual) {
+          geometry.record(target, targetGeometry);
+        }
+      }
+      // Skip writing empty text — avoids applying line transformers to empty
+      // content, which matches Ink's behavior of not writing empty text nodes.
+      if (text === "") return;
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
       // it via fillBackground), and is the reason a Box bg pads to full width while
@@ -978,6 +1224,7 @@ function paintNode(
     case "tui-static": {
       // Static is rendered through the static channel (written before frame), so
       // it does not contribute to the dynamic frame paint.
+      geometry?.recordSubtree(node, "unavailable");
       return;
     }
     case "tui-transform": {
@@ -995,6 +1242,28 @@ function paintNode(
         },
         clip,
       );
+      geometry?.record(
+        node,
+        createRectGeometry({
+          parent: {
+            x: layout.left,
+            y: layout.top,
+            width: Math.max(0, Math.floor(layout.width)),
+            height: Math.max(0, Math.floor(layout.height)),
+          },
+          surface: {
+            x,
+            y,
+            width: Math.max(0, Math.floor(layout.width)),
+            height: Math.max(0, Math.floor(layout.height)),
+          },
+          clip,
+          caretSlots: null,
+        }),
+      );
+      for (const target of virtualTextDescendants(node)) {
+        geometry?.record(target, { status: "unavailable" });
+      }
       const next = [node.transform, ...transformers];
       // Standalone <Transform> with DIRECT inline children (bare strings,
       // <Newline>, and no yoga-carrying <Text>/<Box> child): Ink models
@@ -1018,7 +1287,7 @@ function paintNode(
       // — recurse so the child <Text>/<Box> lays out and paints normally, with
       // the transform pushed onto the line-transformers.
       for (const child of node.children) {
-        paintNode(child, output, x, y, next, inheritedBg, hitMap, clip);
+        paintNode(child, output, x, y, next, inheritedBg, hitMap, clip, geometry);
       }
       return;
     }

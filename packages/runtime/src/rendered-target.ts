@@ -80,8 +80,13 @@ function throwFirst(errors: unknown[]): void {
  */
 export function createRenderedTargetController(
   root: TuiRoot,
-  transactionHost?: RenderedTargetTransactionHost,
+  transactionHost?: RenderedTargetTransactionHost | readonly RenderedTargetTransactionHost[],
 ): RenderedTargetController {
+  const transactionHosts = transactionHost
+    ? Array.isArray(transactionHost)
+      ? transactionHost
+      : [transactionHost]
+    : [];
   const registrations = new Set<MutableRegistration>();
   const invalidatedTargets = new WeakSet<TuiNode>();
   let disposed = false;
@@ -90,13 +95,19 @@ export function createRenderedTargetController(
   let transactionDepth = 0;
 
   const transaction = (kind: "reconcile" | "cleanup", change: () => void): void => {
-    if (!transactionHost || transactionDepth > 0) {
+    if (transactionHosts.length === 0 || transactionDepth > 0) {
       change();
       return;
     }
     transactionDepth++;
     try {
-      transactionHost.transaction(kind, change);
+      let index = 0;
+      const enterNext = (): void => {
+        const host = transactionHosts[index++];
+        if (host) host.transaction(kind, enterNext);
+        else change();
+      };
+      enterNext();
     } finally {
       transactionDepth--;
     }
@@ -235,10 +246,12 @@ export function createRenderedTargetController(
           if (cleanup) cleanups.push(cleanup);
         }
         const errors: unknown[] = [];
-        try {
-          transactionHost?.beforeInvalidateSubtree(target);
-        } catch (error) {
-          errors.push(error);
+        for (const host of transactionHosts) {
+          try {
+            host.beforeInvalidateSubtree(target);
+          } catch (error) {
+            errors.push(error);
+          }
         }
         for (const cleanup of cleanups) {
           try {

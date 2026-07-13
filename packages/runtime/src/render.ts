@@ -99,6 +99,11 @@ import {
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import {
+  createInternalGeometryService,
+  setInternalGeometryService,
+  type InternalGeometryPaintFrame,
+} from "./geometry/geometry-service.ts";
+import {
   createInternalFocusController,
   type InternalFocusController,
 } from "./focus/focus-controller.ts";
@@ -302,6 +307,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
+  let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
   let mountedFocusController: InternalFocusController | null = null;
   let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
@@ -728,6 +734,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
+      if (mountedGeometry) {
+        const geometry = mountedGeometry;
+        mountedGeometry = null;
+        setInternalGeometryService(appContext, null);
+        runBestEffort(() => geometry.dispose());
+      }
       if (mountedFocusController) {
         const focusController = mountedFocusController;
         mountedFocusController = null;
@@ -1138,6 +1150,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
         const writer = mountedWriter;
         if (fixedFullscreenSurface) {
+          mountedGeometry?.setSurfaceAvailable(false);
           if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
           if (mountedAlternateScreen) {
             if (writeBestEffort(stdout, ansiEscapes.exitAlternativeScreen, true)) {
@@ -1159,6 +1172,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
 
         if (!inlineTerminalSurface || !dynamicUpdatesLive || !writer) return;
+        mountedGeometry?.setSurfaceAvailable(false);
         if (rememberSurface) suspendedInlineSurface = true;
         const returnToBottom = writer.getCursorReturnToBottom();
         if (returnToBottom !== "") writeBestEffort(stdout, returnToBottom, true);
@@ -1271,6 +1285,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               }
               terminalResumePainting = true;
               try {
+                mountedGeometry?.setSurfaceAvailable(!isScreenReaderEnabled);
                 applyPreparedSurface?.();
               } finally {
                 terminalResumePainting = false;
@@ -1622,7 +1637,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           inputRouting: stdinController.internal_inputRouting,
         });
         mountedFocusController = focusController;
-        const renderedTargets = createRenderedTargetController(tuiRoot, focusController);
+        const geometry = createInternalGeometryService(tuiRoot, () => scheduledCommit());
+        mountedGeometry = geometry;
+        if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
+        setInternalGeometryService(appContext, geometry);
+        const renderedTargets = createRenderedTargetController(tuiRoot, [
+          focusController,
+          geometry,
+        ]);
         mountedRenderedTargets = renderedTargets;
         setRenderedTargetController(appContext, renderedTargets);
       } catch (err) {
@@ -1648,6 +1670,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
               writer.sync("", { cursor: false });
             });
+            mountedGeometry?.invalidateSurface();
             return;
           }
           if (isScreenReaderEnabled) {
@@ -1659,6 +1682,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               frameState.lastOutputToRender = "";
               frameState.outputHeight = 0;
             });
+            mountedGeometry?.invalidateSurface();
             return;
           }
           writer.clear();
@@ -1668,6 +1692,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // frameState remains available for a coordinated write to restore later,
           // while a real commit can paint it again from this owned origin.
           writer.reset({ cursorDirty: false });
+          mountedGeometry?.invalidateSurface();
         });
       };
       const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
@@ -1891,11 +1916,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         width: number,
         hitMap?: MouseHitMapEntry[],
         viewportRows?: number,
+        geometry?: InternalGeometryPaintFrame,
       ): string {
         if (!isScreenReaderEnabled) {
           const output = paint(tuiRoot, {
             hitMap,
             viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+            geometry,
           });
           // The hard paint viewport is the primary guard. Keep a final physical
           // row bound as defense-in-depth for future paint extensions: Inline
@@ -1911,6 +1938,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function commit() {
         if (terminalSuspended && !terminalResumePainting) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
+        let geometryFrame: InternalGeometryPaintFrame | undefined;
         try {
           const start = onRender ? performance.now() : 0;
           mountedRenderedTargets?.reconcile();
@@ -1937,7 +1965,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             );
             try {
               emitLayoutListeners(tuiRoot);
-              const frame = renderFrame(w);
+              geometryFrame = mountedGeometry?.beginFrame();
+              const frame = renderFrame(w, undefined, undefined, geometryFrame);
               renderObserver?.onCommit?.({
                 dynamic: frame,
                 staticOutput: hasStaticOutput ? staticOutput : "",
@@ -1950,6 +1979,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               if (hasStaticOutput) {
                 stdout.write(staticOutput);
               }
+              geometryFrame?.commit();
             } finally {
               restoreLayoutGuards();
             }
@@ -2002,7 +2032,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 )
               : undefined;
             const paintViewportRows = exactViewportRows ?? inlineViewportRows;
-            const frame = renderFrame(w, hitMap, paintViewportRows);
+            geometryFrame = isScreenReaderEnabled ? undefined : mountedGeometry?.beginFrame();
+            const frame = renderFrame(w, hitMap, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2014,6 +2045,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             if (fixedFullscreenSurface) {
               if (onRender) onRender({ renderTime: performance.now() - start });
               renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+              geometryFrame?.commit();
               return;
             }
 
@@ -2072,6 +2104,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             if (onRender) onRender({ renderTime: performance.now() - start });
             renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
             markBoundaryErrorFrameRendered(frame);
+            geometryFrame?.commit();
           } finally {
             restoreLayoutGuards();
           }
@@ -2090,6 +2123,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           }
           throw error;
         } finally {
+          geometryFrame?.discard();
           leaveLifecycleTransaction();
         }
       }

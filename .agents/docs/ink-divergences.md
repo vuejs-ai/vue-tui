@@ -792,6 +792,21 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   width and height. The default remains border-box-like, matching Ink's current public
   sizing model.
 
+### Left clipping preserves source columns after a straddling wide grapheme
+
+- **Ink:** when a wide grapheme straddles the left edge of an `overflow:hidden` clip, `slice-ansi` drops that grapheme whole and Ink resets the write origin to the clip edge. Any following text is therefore shifted left over the dropped source cells. For `"中x"` written at `x=-1`, Ink v7.0.4 renders `"x"` at column 0.
+- **vue-tui:** drops the same straddling grapheme whole but advances the write origin to the first retained grapheme's original source column. The same example renders `" x"`: column 0 stays blank and `x` remains at column 1.
+- **Why:** clipping decides which source cells are visible; it must not change the layout coordinates of cells that remain visible. Reflowing retained text makes paint coordinates disagree with layout, geometry, hit testing, and caret placement. Preserving the gap keeps one stable surface coordinate for each painted source cell.
+- **Boundary:** horizontal clipping still runs before `<Transform>`. A transform receives the clipped substring, but its output begins at that retained substring's original column. Ordinary narrow-character clipping is unchanged, and a wide grapheme that straddles the right edge is still omitted whole.
+- **Evidence:** `grapheme-clip.test.tsx` and the left-edge cases in `overflow.test.tsx` cover plain and transformed text. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in `fullscreen-origin.test.ts` and is available to the visual review controller. The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
+
+### Nested overflow keeps every ancestor clip active
+
+- **Ink:** Output replay uses only the most recently pushed component clip, then applies `Transform` without clipping the callback result again. A larger inner `overflow:hidden` region or an expanding transform can therefore reopen cells already excluded by a narrower outer overflow ancestor.
+- **vue-tui:** Output replay intersects the complete active overflow stack, then intersects the terminal viewport boundary. `Transform` still receives the pre-clipped source span, but its result is contained by that same intersection. A descendant can narrow its visible region but cannot expand an ancestor-owned region.
+- **Why:** overflow is a containment boundary. Paint, semantic geometry, and later targeted pointer selection must agree on the same ancestor intersection; allowing paint to escape while hit testing remains clipped creates visible cells that no semantic target owns. This is an unstamped F5 implementation decision.
+- **Evidence:** `overflow.test.tsx` covers a width-eight nested clip inside a width-four ancestor, a transform at an empty intersected edge, post-transform containment, and the existing nested-overflow cases. `grapheme-clip.test.tsx` covers the same exclusive edge for constant and appending transforms.
+
 ### `measureElement` coerces a non-finite (pre-layout) dimension to `0`, not `NaN`
 
 - **Ink:** `measureElement` returns `{ width: node.yogaNode.getComputedWidth() ?? 0, height: ... ?? 0 }`.

@@ -3,7 +3,10 @@ import { expect, test } from "vite-plus/test";
 // matching the convention in unit/yoga-prop-reset.test.ts. yoga-layout is a
 // dependency of @vue-tui/runtime (not of runtime-tests), so we reference the
 // stable yoga enum value numerically rather than importing it here.
-import { calculateLayoutWithContentGuards } from "../../runtime/src/host/layout-guards.ts";
+import {
+  calculateLayoutWithContentGuards,
+  isContentLayoutGuarded,
+} from "../../runtime/src/host/layout-guards.ts";
 import { attachYoga } from "../../runtime/src/host/yoga.ts";
 import { createBox, createRoot, createText } from "../../runtime/src/host/nodes.ts";
 import type { AppContext } from "../../runtime/src/context.ts";
@@ -117,4 +120,33 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
   // live yoga tree. Before the fix this fails (it stays hidden forever); after
   // the fix the catch restores it before re-throwing.
   expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
+  expect(isContentLayoutGuarded(hiddenChild)).toBe(false);
+});
+
+test("temporary content guards are observable only until the layout restore", () => {
+  const root = createRoot({} as AppContext);
+  attachYoga(root);
+  const zeroBox = createBox();
+  attachYoga(zeroBox);
+  zeroBox.parent = root;
+  zeroBox.yoga.setWidth(0);
+  zeroBox.yoga.setHeight(1);
+  root.children.push(zeroBox);
+  root.yoga.insertChild(zeroBox.yoga, 0);
+
+  const child = createBox();
+  attachYoga(child);
+  child.parent = zeroBox;
+  child.yoga.setWidth(2);
+  child.yoga.setHeight(1);
+  zeroBox.children.push(child);
+  zeroBox.yoga.insertChild(child.yoga, 0);
+
+  const restore = calculateLayoutWithContentGuards(root, 10, 2, DIRECTION_LTR as never);
+  expect(child.yoga.getDisplay()).toBe(DISPLAY_NONE);
+  expect(isContentLayoutGuarded(child)).toBe(true);
+
+  restore();
+  expect(child.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
+  expect(isContentLayoutGuarded(child)).toBe(false);
 });

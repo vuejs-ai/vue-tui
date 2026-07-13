@@ -12,6 +12,7 @@ type SurfaceScenario =
   | "rerender"
   | "overflow"
   | "horizontal-overflow"
+  | "horizontal-left-wide"
   | "horizontal-wide"
   | "horizontal-transform";
 
@@ -51,11 +52,13 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
           ? "LINE0"
           : scenario === "horizontal-overflow"
             ? "X".repeat(100)
-            : scenario === "horizontal-wide"
-              ? "X".repeat(99)
-              : scenario === "horizontal-transform"
-                ? "Y".repeat(100)
-                : "BUTTON";
+            : scenario === "horizontal-left-wide"
+              ? " x"
+              : scenario === "horizontal-wide"
+                ? "X".repeat(99)
+                : scenario === "horizontal-transform"
+                  ? "Y".repeat(100)
+                  : "BUTTON";
 
     expect(lines[0]).toBe(expected);
     if (scenario === "overflow") {
@@ -64,6 +67,7 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
       expect(lines).not.toContain("LINE9");
     } else if (
       scenario === "horizontal-overflow" ||
+      scenario === "horizontal-left-wide" ||
       scenario === "horizontal-wide" ||
       scenario === "horizontal-transform"
     ) {
@@ -131,6 +135,10 @@ test("fullscreen clips wide paint before the terminal can wrap it onto another r
 
 test("fullscreen drops a wide glyph that crosses the viewport's right edge", async () => {
   await assertStableFullscreenSurface("horizontal-wide");
+});
+
+test("fullscreen left clipping preserves the column after a straddling wide glyph", async () => {
+  await assertStableFullscreenSurface("horizontal-left-wide");
 });
 
 test("fullscreen hard-clips text expanded by a paint transform", async () => {

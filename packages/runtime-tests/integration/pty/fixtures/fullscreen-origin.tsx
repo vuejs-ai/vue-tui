@@ -23,6 +23,7 @@ type Scenario =
   | "rerender"
   | "overflow"
   | "horizontal-overflow"
+  | "horizontal-left-wide"
   | "horizontal-wide"
   | "horizontal-transform"
   | "target-lifetime"
@@ -184,6 +185,16 @@ const App = defineComponent(() => {
       return (
         <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
           {{ default: () => <Text>{{ default: () => `${"X".repeat(99)}你` }}</Text> }}
+        </Box>
+      );
+    }
+
+    if (scenario === "horizontal-left-wide") {
+      return (
+        <Box width={4} height={1} overflow="hidden" onClick={() => exit("clicked")}>
+          <Box marginLeft={-1} flexShrink={0}>
+            <Text>中x</Text>
+          </Box>
         </Box>
       );
     }

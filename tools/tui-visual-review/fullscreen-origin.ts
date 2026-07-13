@@ -10,6 +10,7 @@ export const fullscreenOriginScenarios = [
   "rerender",
   "overflow",
   "horizontal-overflow",
+  "horizontal-left-wide",
   "horizontal-wide",
   "horizontal-transform",
   "target-lifetime",
