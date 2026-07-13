@@ -51,6 +51,22 @@ function createStdout(): FakeStdout {
   return stdout;
 }
 
+function failNextWrite(stdout: FakeStdout, predicate: (chunk: string) => boolean): Error {
+  const failure = new Error("injected stdout.write failure");
+  const originalWrite = stdout.write;
+  let pending = true;
+
+  stdout.write = ((...args: unknown[]) => {
+    if (pending && predicate(String(args[0]))) {
+      pending = false;
+      throw failure;
+    }
+    return originalWrite(...args);
+  }) as WriteSpy;
+
+  return failure;
+}
+
 test("sync() updates the dedup baseline so a later changed frame is not dropped", () => {
   // Regression: sync() previously updated log-update's previousOutput but not
   // the frame-writer's own lastFrame. After a sync() (e.g. a direct-output
@@ -937,5 +953,76 @@ describe("createFrameWriter - clear/done behavior", () => {
     expect(writer.willRender("Hello\n")).toBe(false);
     // Different content returns true
     expect(writer.willRender("World\n")).toBe(true);
+  });
+});
+
+describe.each(modes)("createFrameWriter - $name write transactions", ({ incremental }) => {
+  test("retries failed content while the visible caret stays unchanged", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental });
+
+    writer.setCursorPosition({ x: 1, y: 0 });
+    writer.write("OLD\n");
+
+    const failure = failNextWrite(stdout, (chunk) => chunk.includes("NEXT"));
+    expect(() => writer.write("NEXT\n")).toThrow(failure);
+
+    expect(writer.isCursorDirty()).toBe(false);
+    expect(writer.willRender("NEXT\n")).toBe(true);
+
+    writer.write("NEXT\n");
+
+    const retried = stdout.get();
+    expect(retried).toContain("NEXT");
+    expect(retried).toContain(ansiEscapes.cursorTo(1));
+    expect(retried).toContain(showCursorEscape);
+    expect(writer.willRender("NEXT\n")).toBe(false);
+  });
+
+  test("retries a failed visible-to-visible frame from the last successful baseline", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental });
+
+    writer.setCursorPosition({ x: 1, y: 0 });
+    writer.write("OLD\n");
+
+    writer.setCursorPosition({ x: 3, y: 0 });
+    const failure = failNextWrite(stdout, (chunk) => chunk.includes("NEXT"));
+    expect(() => writer.write("NEXT\n")).toThrow(failure);
+
+    expect(writer.isCursorDirty()).toBe(true);
+    expect(writer.willRender("NEXT\n")).toBe(true);
+
+    writer.write("NEXT\n");
+
+    const retried = stdout.get();
+    expect(retried).toContain("NEXT");
+    expect(retried).toContain(ansiEscapes.cursorTo(3));
+    expect(retried).toContain(showCursorEscape);
+    expect(writer.isCursorDirty()).toBe(false);
+    expect(writer.willRender("NEXT\n")).toBe(false);
+  });
+
+  test("retries a failed visible-to-hidden cursor-only frame", () => {
+    const stdout = createStdout();
+    const writer = createFrameWriter(stdout, { incremental });
+
+    writer.setCursorPosition({ x: 2, y: 0 });
+    writer.write("SAME\n");
+
+    writer.setCursorPosition(undefined);
+    const failure = failNextWrite(stdout, (chunk) => chunk.includes(hideCursorEscape));
+    expect(() => writer.write("SAME\n")).toThrow(failure);
+
+    expect(writer.isCursorDirty()).toBe(true);
+    expect(writer.willRender("SAME\n")).toBe(true);
+
+    writer.write("SAME\n");
+
+    const retried = stdout.get();
+    expect(retried).toContain(hideCursorEscape);
+    expect(retried).not.toContain(showCursorEscape);
+    expect(writer.isCursorDirty()).toBe(false);
+    expect(writer.willRender("SAME\n")).toBe(false);
   });
 });

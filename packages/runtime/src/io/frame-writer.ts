@@ -34,8 +34,10 @@ export function createFrameWriter(
       // hasChanges() then decides whether to actually write. Mirrors Ink,
       // which has no FrameWriter dedup layer and lets log-update own this.
       if (frame === lastFrame && !log.isCursorDirty()) return;
-      lastFrame = frame;
       log(frame);
+      // A throwing stream did not accept this frame. Keep the prior baseline so
+      // an identical retry still reaches log-update.
+      lastFrame = frame;
     },
     done() {
       log.done();
@@ -60,8 +62,8 @@ export function createFrameWriter(
       // `options` (for example { cursor: false } after a fixed-viewport clear)
       // is forwarded so the
       // caller can suppress the cursor emit on this sync — see log-update.sync.
-      lastFrame = frame;
       log.sync(frame, options);
+      lastFrame = frame;
     },
     setCursorPosition(pos) {
       log.setCursorPosition(pos);

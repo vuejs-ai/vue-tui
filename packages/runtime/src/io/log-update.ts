@@ -105,7 +105,7 @@ const createStandard = (
   // dropped the caret on any commit that did not re-declare, zombieing it to the
   // bottom-left corner (a deliberate divergence from Ink — see
   // .agents/docs/ink-divergences.md). A CLEARED declaration (setCursorPosition
-  // undefined, e.g. useCursor's onScopeDispose on unmount) sets cursorPosition
+  // undefined after the caller selects no visible caret) sets cursorPosition
   // to undefined, so the next re-emit places no caret — the clear is not
   // resurrected. cursorDirty still tracks "was re-declared this commit" purely
   // to gate the commit/dedup paths (render.ts outer gate + frame-writer skip).
@@ -126,10 +126,10 @@ const createStandard = (
     }
 
     const activeCursor = getActiveCursor();
-    cursorDirty = false;
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
 
     if (!hasChanges(str, activeCursor)) {
+      cursorDirty = false;
       return false;
     }
 
@@ -156,18 +156,19 @@ const createStandard = (
         }),
       );
     } else {
-      previousOutput = str;
       const returnPrefix = buildReturnToBottomPrefix(
         cursorWasShown,
         previousLineCount,
         previousCursorPosition,
       );
       stream.write(returnPrefix + ansiEscapes.eraseLines(previousLineCount) + str + cursorSuffix);
+      previousOutput = str;
       previousLineCount = lines.length;
     }
 
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
     cursorWasShown = activeCursor !== undefined;
+    cursorDirty = false;
     return true;
   };
 
@@ -222,11 +223,8 @@ const createStandard = (
     // the active cursor as undefined here also drives previousCursorPosition/
     // cursorWasShown to the true post-clear blank state.
     const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
-    cursorDirty = false;
 
     const lines = str.split("\n");
-    previousOutput = str;
-    previousLineCount = lines.length;
 
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
@@ -248,8 +246,11 @@ const createStandard = (
       );
     }
 
+    previousOutput = str;
+    previousLineCount = lines.length;
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
     cursorWasShown = activeCursor !== undefined;
+    cursorDirty = false;
   };
 
   render.setCursorPosition = (position: CursorPosition | undefined) => {
@@ -296,10 +297,10 @@ const createIncremental = (
     }
 
     const activeCursor = getActiveCursor();
-    cursorDirty = false;
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
 
     if (!hasChanges(str, activeCursor)) {
+      cursorDirty = false;
       return false;
     }
 
@@ -321,6 +322,7 @@ const createIncremental = (
       );
       previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
       cursorWasShown = activeCursor !== undefined;
+      cursorDirty = false;
       return true;
     }
 
@@ -344,6 +346,7 @@ const createIncremental = (
       previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
       previousOutput = str;
       previousLines = nextLines;
+      cursorDirty = false;
       return true;
     }
 
@@ -405,6 +408,7 @@ const createIncremental = (
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
     previousOutput = str;
     previousLines = nextLines;
+    cursorDirty = false;
     return true;
   };
 
@@ -459,11 +463,8 @@ const createIncremental = (
     // the active cursor as undefined here also drives previousCursorPosition/
     // cursorWasShown to the true post-clear blank state.
     const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
-    cursorDirty = false;
 
     const lines = str.split("\n");
-    previousOutput = str;
-    previousLines = lines;
 
     // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
     // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
@@ -485,8 +486,11 @@ const createIncremental = (
       );
     }
 
+    previousOutput = str;
+    previousLines = lines;
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
     cursorWasShown = activeCursor !== undefined;
+    cursorDirty = false;
   };
 
   render.setCursorPosition = (position: CursorPosition | undefined) => {
