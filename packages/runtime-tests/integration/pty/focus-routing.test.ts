@@ -103,17 +103,19 @@ test.each(["inline", "fullscreen"] as const)(
   async (mode) => {
     const ps = term("focus-routing", [mode, "assert"], { name: "xterm-256color" });
     try {
+      // The lightweight PTY helper is not itself a terminal emulator, so answer
+      // the owned query as soon as it appears, exactly as xterm's emulator does
+      // in visual review. Waiting for a later focus render first can exceed the
+      // protocol's bounded reply window under a contended CI worker.
+      await ps.waitForOutput((output) => output.includes(QUERY_KITTY_KEYBOARD));
+      ps.write("\x1b[?1u");
+      await ps.waitForOutput((output) => output.includes(ENABLE_KITTY_KEYBOARD));
       await ps.waitForOutput(
         (output) =>
           output.includes("__READY__") &&
-          output.includes(QUERY_KITTY_KEYBOARD) &&
           output.includes(`F4 focus lifecycle (${mode})`) &&
           output.includes("focus=first second=present modal=closed"),
       );
-      // The lightweight PTY helper is not itself a terminal emulator, so answer
-      // the owned query exactly as xterm's emulator does in visual review.
-      ps.write("\x1b[?1u");
-      await ps.waitForOutput((output) => output.includes(ENABLE_KITTY_KEYBOARD));
 
       let before = ps.output.length;
       ps.write("x");
