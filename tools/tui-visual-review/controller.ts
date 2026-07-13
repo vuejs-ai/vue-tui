@@ -7,10 +7,11 @@ import {
   parseFullscreenOriginScenario,
   startFullscreenOriginSession,
 } from "./fullscreen-origin.ts";
+import { parseFocusRoutingScenario, startFocusRoutingSession } from "./focus-routing.ts";
 import { parseInputRoutingScenario, startInputRoutingSession } from "./input-routing.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
 
-type ReviewTarget = "basic-template" | "fullscreen-origin" | "input-routing";
+type ReviewTarget = "basic-template" | "fullscreen-origin" | "input-routing" | "focus-routing";
 
 interface Request {
   id?: string | number | null;
@@ -39,11 +40,16 @@ function reviewTarget(args: string[]): ReviewTarget {
   const index = args.indexOf("--target");
   if (index === -1) return "basic-template";
   const value = args[index + 1];
-  if (value === "basic-template" || value === "fullscreen-origin" || value === "input-routing") {
+  if (
+    value === "basic-template" ||
+    value === "fullscreen-origin" ||
+    value === "input-routing" ||
+    value === "focus-routing"
+  ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, or input-routing, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, input-routing, or focus-routing, received ${value}`,
   );
 }
 
@@ -154,13 +160,17 @@ async function main(): Promise<void> {
       ? parseFullscreenOriginScenario(option(args, "--scenario"))
       : target === "input-routing"
         ? parseInputRoutingScenario(option(args, "--scenario"))
-        : undefined;
+        : target === "focus-routing"
+          ? parseFocusRoutingScenario(option(args, "--scenario"))
+          : undefined;
   const { session, mode } =
     target === "fullscreen-origin"
       ? await startFullscreenOriginSession(outputDir, parseFullscreenOriginScenario(scenario))
       : target === "input-routing"
         ? await startInputRoutingSession(outputDir, parseInputRoutingScenario(scenario))
-        : await startBasicTemplateSession(outputDir);
+        : target === "focus-routing"
+          ? await startFocusRoutingSession(outputDir, parseFocusRoutingScenario(scenario))
+          : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

@@ -27,6 +27,15 @@ vp run visual:input-routing -- --scenario fullscreen
 
 The fixture starts with route B and focus `first` active. Send `x` and Backspace in one `input` request; the visible trace must finish with `A:x | B:x | A:Backspace | C:Backspace`. Then send Tab: the handler observation must say it saw focus `first` while the resulting screen says focus is now `second`. Send Escape next: its handler must say it saw `second`, and focus must remain `second` because Escape has no framework focus default. This exercises both the end-to-end route transition, the application-global-handler-before-default contract, and the public focus default before quitting and checking terminal restoration. The deterministic fake-stream matrix proves exact same-chunk grouping because one PTY write does not require Node to emit one `data` chunk.
 
+For the complete public focus lifecycle in a real Inline or Fullscreen terminal, use:
+
+```sh
+vp run visual:focus-routing -- --scenario inline
+vp run visual:focus-routing -- --scenario fullscreen
+```
+
+Operate the same fixture used by the real-PTY acceptance test. Observe between every action, then send `x`, the `Tab` key, `r`, `o`, `m`, and `c` in that order. The visible route must show the first target's complete route, traversal to the second target, fallback to the first after the focused second host is removed, a trapped modal route containing no background recipient, and restoration to the first target after the modal component and scope are unmounted. Next send a `paste` request whose text is `terminal-paste`; confirm the controller reports `bracketed: true` and the restored first-target route receives the normalized paste. Send `q` only after observing that result, wait for `__VT_APP_EXIT__:0`, and observe the post-exit terminal. From that observation's revision, send an `input` request whose data is `printf '__FOCUS_SHELL_OK__\n'\r`, wait for `__FOCUS_SHELL_OK__`, observe the restored shell, and only then close the controller. The post-exit status and `process.json` must show the normal buffer, visible cursor, disabled bracketed-paste/Kitty/mouse modes, restored termios, and successful shell input after application exit.
+
 The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 
 When an agent's command tool distinguishes one-shot commands from interactive sessions, use a persistent session or allocate a parent TTY so stdin remains open for later commands.

@@ -12,81 +12,238 @@ import {
   useFocusScope,
   useFocusScopeInput,
   useInput,
+  type TuiInputEvent,
 } from "@vue-tui/runtime";
-import { defineComponent, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
+import { defineComponent, h, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
 
 const requestedMode = process.argv[2] === "fullscreen" ? "fullscreen" : "inline";
+const assertionRun = process.argv[3] === "assert";
+const pastePayload = "terminal-paste";
+const pasteSequence = `\x1b[200~${pastePayload}\x1b[201~`;
+let completedCalls: readonly string[] = [];
+
+const expectedCalls = [
+  "global:x",
+  "target:first:x",
+  "scope:background:x",
+  "external:first:x",
+  "global:Tab",
+  "target:first:Tab",
+  "scope:background:Tab",
+  "global:r",
+  "target:second:r",
+  "scope:background:r",
+  "external:second:r",
+  "global:o",
+  "target:first:o",
+  "scope:background:o",
+  "external:first:o",
+  "global:m",
+  "scope:modal:m",
+  "target:modal:m",
+  "external:modal:m",
+  "global:c",
+  "scope:modal:c",
+  "global:Paste:terminal-paste",
+  "target:first:Paste:terminal-paste",
+  "scope:background:Paste:terminal-paste",
+  "external:first:Paste:terminal-paste",
+  "global:q",
+] as const;
+
+function eventLabel(event: TuiInputEvent): string {
+  if (event.kind === "paste") return `Paste:${event.text}`;
+  if (event.kind === "key" && event.key.name === "tab") return "Tab";
+  if (event.kind === "text") return event.text;
+  return event.sequence;
+}
+
+function sequenceLabel(sequence: string): string {
+  if (sequence === pasteSequence) return `Paste:${pastePayload}`;
+  if (sequence === "\t") return "Tab";
+  return sequence;
+}
 
 const App = defineComponent(() => {
   const { exit } = useApp();
   const firstHost = shallowRef<ComponentPublicInstance | null>(null);
   const secondHost = shallowRef<ComponentPublicInstance | null>(null);
-  const status = shallowRef("ready");
+  const showSecond = shallowRef(true);
+  const showModal = shallowRef(false);
+  const latestFact = shallowRef("none");
+  const latestRoute = shallowRef<readonly string[]>([]);
   const calls: string[] = [];
-  const scope = useFocusScope();
-  const first = useFocus(firstHost, { scope, autoFocus: true });
-  const second = useFocus(secondHost, { scope });
+  const backgroundScope = useFocusScope();
+  const first = useFocus(firstHost, { scope: backgroundScope, autoFocus: true });
+  const second = useFocus(secondHost, { scope: backgroundScope });
   const manager = useFocusManager();
+  const visibleRecipient: Readonly<Record<string, string>> = {
+    global: "global",
+    "target:first": "first",
+    "target:second": "second",
+    "scope:background": "background",
+    "external:first": "ext:first",
+    "external:second": "ext:second",
+    "scope:modal": "trap",
+    "target:modal": "modal",
+    "external:modal": "ext:modal",
+  };
+
+  const record = (recipient: string, label: string) => {
+    if (recipient === "global") {
+      latestFact.value = label.startsWith("Paste:") ? "Paste" : label;
+      latestRoute.value = [];
+    }
+    latestRoute.value = [...latestRoute.value, visibleRecipient[recipient] ?? recipient];
+    calls.push(`${recipient}:${label}`);
+  };
+
+  const ApprovalModal = defineComponent(() => {
+    const modalHost = shallowRef<ComponentPublicInstance | null>(null);
+    const modalScope = useFocusScope({ trapped: true });
+    const modal = useFocus(modalHost, { scope: modalScope, autoFocus: true });
+
+    useFocusScopeInput(modalScope, (event) => {
+      const label = eventLabel(event);
+      record("scope:modal", label);
+      if (event.kind === "text" && event.text === "c") {
+        // Returning consume keeps the closing fact inside the captured modal
+        // boundary. The following Vue commit unmounts this component, disposes
+        // its scope, and restores the outer focus owner.
+        showModal.value = false;
+        return "consume";
+      }
+      return "continue";
+    });
+    useFocusedInput(modal, (event) => {
+      record("target:modal", eventLabel(event));
+      return "continue";
+    });
+    // The modal may explicitly own external fallthrough, but the background
+    // external owners remain isolated behind the active trapped boundary.
+    useExternalInput(modal, ({ sequence }) => {
+      record("external:modal", sequenceLabel(sequence));
+    });
+
+    return () =>
+      h(
+        Box,
+        { ref: modalHost, borderStyle: "double", flexDirection: "column", paddingX: 1 },
+        {
+          default: () => [
+            h(Text, { bold: true }, { default: () => "Approval modal (trapped)" }),
+            h(Text, null, { default: () => "m isolates; c closes and unmounts" }),
+          ],
+        },
+      );
+  });
 
   useInput((event) => {
-    calls.push(`global:${event.sequence}`);
-    if (event.sequence !== "q") return "continue";
-    assert.equal(manager.focusedTarget.value, second);
-    assert.deepEqual(calls, [
-      "global:x",
-      "target:first:x",
-      "scope:x",
-      "external:first:x",
-      "global:\t",
-      "target:first:\t",
-      "scope:\t",
-      "global:y",
-      "target:second:y",
-      "scope:y",
-      "external:second:y",
-      "global:q",
-    ]);
+    const label = eventLabel(event);
+    record("global", label);
+    if (event.kind === "text" && event.text === "r") showSecond.value = false;
+    if (event.kind === "text" && event.text === "o") showModal.value = true;
+    if (event.kind !== "text" || event.text !== "q") return "continue";
+
+    if (assertionRun) {
+      assert.equal(manager.focusedTarget.value, first);
+      assert.equal(first.isFocused.value, true);
+      assert.equal(second.isFocused.value, false);
+      assert.equal(showSecond.value, false);
+      assert.equal(showModal.value, false);
+      assert.deepEqual(calls, expectedCalls);
+    }
+    completedCalls = [...calls];
     exit();
     return "consume";
   });
   useFocusedInput(first, (event) => {
-    calls.push(`target:first:${event.sequence}`);
+    record("target:first", eventLabel(event));
     return "continue";
   });
   useFocusedInput(second, (event) => {
-    calls.push(`target:second:${event.sequence}`);
+    record("target:second", eventLabel(event));
     return "continue";
   });
-  useFocusScopeInput(scope, (event) => {
-    calls.push(`scope:${event.sequence}`);
+  useFocusScopeInput(backgroundScope, (event) => {
+    record("scope:background", eventLabel(event));
     return "continue";
   });
   useExternalInput(first, ({ sequence }) => {
-    calls.push(`external:first:${sequence}`);
-    status.value = `external:first:${sequence}`;
+    record("external:first", sequenceLabel(sequence));
   });
   useExternalInput(second, ({ sequence }) => {
-    calls.push(`external:second:${sequence}`);
-    status.value = `external:second:${sequence}`;
+    record("external:second", sequenceLabel(sequence));
   });
 
-  onMounted(() => process.stdout.write("__READY__"));
+  onMounted(() => {
+    if (assertionRun) process.stdout.write("__READY__");
+  });
 
-  return () => (
-    <Box flexDirection="column">
-      <Text>{manager.focusedTarget.value === first ? "focus:first" : "focus:second"}</Text>
-      <Text>{status.value}</Text>
-      <Box ref={firstHost}>
-        <Text>first</Text>
-      </Box>
-      <Box ref={secondHost}>
-        <Text>second</Text>
-      </Box>
-    </Box>
-  );
+  const focusedName = () =>
+    manager.focusedTarget.value === first
+      ? "first"
+      : manager.focusedTarget.value === second
+        ? "second"
+        : showModal.value
+          ? "modal"
+          : "none";
+
+  return () =>
+    h(
+      Box,
+      { flexDirection: "column", borderStyle: "round", width: 62, paddingX: 1 },
+      {
+        default: () => [
+          h(Text, { bold: true }, { default: () => `F4 focus lifecycle (${requestedMode})` }),
+          h(Text, null, {
+            default: () =>
+              `focus=${focusedName()} second=${showSecond.value ? "present" : "removed"} modal=${showModal.value ? "open" : "closed"}`,
+          }),
+          h(Text, null, {
+            default: () =>
+              `latest=${latestFact.value} route=${latestRoute.value.join(" > ") || "none"}`,
+          }),
+          h(Text, null, {
+            default: () => "Keys: x, Tab, r, o, m, c, paste, q",
+          }),
+          h(
+            Box,
+            { ref: firstHost },
+            {
+              default: () =>
+                h(Text, null, {
+                  default: () => `${first.isFocused.value ? "> " : "  "}first target`,
+                }),
+            },
+          ),
+          showSecond.value
+            ? h(
+                Box,
+                { ref: secondHost },
+                {
+                  default: () =>
+                    h(Text, null, {
+                      default: () => `${second.isFocused.value ? "> " : "  "}second target`,
+                    }),
+                },
+              )
+            : null,
+          showModal.value ? h(ApprovalModal) : null,
+        ],
+      },
+    );
 });
 
 const app = createApp(App);
-app.mount({ mode: requestedMode, maxFps: 0, patchConsole: false });
+app.mount({
+  mode: requestedMode,
+  maxFps: 0,
+  patchConsole: false,
+  kittyKeyboard: { mode: "auto" },
+});
 await app.waitUntilExit();
-process.stdout.write("__FOCUS_ROUTING_OK__");
+if (assertionRun) {
+  process.stdout.write(`__TRACE__${JSON.stringify(completedCalls)}__`);
+  process.stdout.write("__FOCUS_ROUTING_OK__");
+}
