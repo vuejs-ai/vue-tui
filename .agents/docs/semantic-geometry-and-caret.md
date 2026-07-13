@@ -1,6 +1,6 @@
 # Semantic geometry and caret
 
-> **Status:** unstamped completed F5.1 audit and active F5 design input. The current source, repository consumers, host behavior, executable failures, and pinned peers were reverified on 2026-07-13. One independent output-safety defect is fixed: a forced-live non-TTY stream no longer receives cursor-control bytes from an active `useCursor()` declaration. The semantic element, geometry, and caret public API is not selected yet.
+> **Status:** unstamped completed F5.1 audit and F5.2 public proposal. The current source, repository consumers, host behavior, executable failures, pinned peers, exact Vue signatures, and nested-editor policy prototype were reverified on 2026-07-13. One independent output-safety defect is fixed: a forced-live non-TTY stream no longer receives targeted-caret controls from an active `useCursor()` declaration. The selected proposal uses a normal Vue target, one atomic snapshot with mapped paint fragments, an element-local cell request, an explicit F4 focus handle, and private insertion-slot mappings; implementation and public cutover remain active.
 
 ## User capability
 
@@ -73,10 +73,10 @@ Two real Ink consumers independently demonstrate the missing abstraction. [Lingh
 The evidence supports the following mechanism independently of public naming:
 
 1. A normal Vue-authored ref resolves through F2's current-host identity. The same author reference must be usable by focus, geometry, caret, and later pointer composition without exposing `TuiNode`, Yoga, paint cells, or the component proxy as semantic state.
-2. A per-root geometry service publishes one immutable snapshot after authoritative layout and paint. It contains an unclipped parent-relative rectangle, an unclipped render-root-relative rectangle, and a clipped visible rectangle or explicit absence. Nested Text spans must use their painted span rather than require Yoga.
+2. A per-root geometry service publishes one immutable snapshot after authoritative layout and paint. It contains parent-relative and render-surface-relative bounds plus exact fragments that map element-local, parent, surface, and clipped visible rectangles. Nested Text spans use their rendered spans rather than require Yoga.
 3. Geometry attachment follows F2 exactly: removal clears the old snapshot synchronously; retargeting detaches before attach; a replacement publishes only after its own layout/paint; resize publishes one new coherent generation.
 4. Caret requests have individual owner lifetimes. One runtime arbiter selects at most one request, using logical focus as eligibility while keeping the editor insertion point separate. Removing or hiding one owner cannot clear another live eligible owner.
-5. The selected request supplies an element identity plus a local rendered insertion point. After each paint the runtime translates it through that element's current render-root geometry and visible clip. The writer receives either one validated physical cell for this frame or no targeted caret.
+5. The selected request supplies an element identity plus a local rendered insertion point. After each paint the runtime translates it through a private row-and-slot mapping derived beside public paint geometry. That mapping represents wrapped nested Text, a trailing insertion slot after the last painted cell, and an empty target's origin without making logical text offsets public. The writer receives either one validated physical cell for this frame or no targeted caret.
 6. A hidden, removed, not-yet-laid-out, fully clipped, Static, or otherwise non-addressable insertion point produces no targeted caret. The runtime does not clamp it to the nearest unrelated visible cell. Resume and resize recompute from the new rendered generation before showing it again.
 7. Inline and Fullscreen share steps one through five. Their existing writers differ only in the final render-root-to-terminal movement. Neither mode is reduced to the other's fallback.
 8. Geometry observations can remain deterministic on a visual modeled or final-output host even when physical caret transport is unavailable. Screen-reader output exposes no 2D visual element geometry or targeted caret; string rendering has no reactive post-commit caret; Static content ceases to be addressable after transfer to history.
@@ -115,7 +115,7 @@ The public proposal and implementation must close these journeys in order:
 
 Most semantic assertions belong in `@vue-tui/testing`, but its current `ScreenSnapshot` exposes cursor row and column without visibility. F5 should add modeled cursor visibility before relying on it. One shared real-PTY fixture and visual-controller target then cover both modes, Unicode, resize, modal restoration, side channels, suspend/resume, and exact terminal cleanup.
 
-## Current dispositions and remaining public decision
+## Current dispositions
 
 The audit narrows the old surfaces without freezing new names:
 
@@ -125,4 +125,178 @@ The audit narrows the old surfaces without freezing new names:
 - Keep focus handles logical and opaque. Do not add rectangles, insertion state, or terminal cursor setters to them.
 - Defer the public disposition of `useDraggable`, `MouseTarget`, listener props, and raw mouse to F6. F5 may make their later coordinate implementation possible but may not publish pointer behavior early.
 
-Four honest Vue-facing choices still need one public proposal and adversarial comparison: whether the semantic reference is a normal Vue ref directly or an explicit opaque handle derived from it; the exact atomic geometry return shape; whether a caret author supplies a local cell point, a rendered marker, or a text position mapped by the renderer; and whether focus eligibility is an explicit focus handle or a reactive active condition. The next F5 unit must write exact signatures and run the nested-editor journey against these choices before selecting one. Names alone are not a maintainer decision; differences in author responsibility, clipping behavior, and arbitration are.
+No low-level output-origin escape hatch survived the proposal: repository and external search found no non-editor consumer, while retaining it would preserve a second owner model whose cleanup can invalidate the semantic arbiter. `useCursor()`, `CursorPosition`, `useBoxMetrics()`, `BoxMetrics`, `UseBoxMetricsReturn`, and `measureElement()` are therefore direct removals when the replacement is implemented. `ScrollBox` migrates to the new atomic geometry. No alias, warning period, or compatibility branch is added.
+
+## Selected public authoring surface
+
+The proposal keeps the target source Vue-native and gives each state one owner. A normal Vue ref remains the rendered-element source. `UseFocusReturn` remains only logical focus identity and eligibility. The editor owns logical text, insertion, selection, and logical-to-local visual layout. Geometry and caret remain separate composables over the same rendered lifetime.
+
+```ts
+import type { ComponentPublicInstance, MaybeRefOrGetter, ShallowRef } from "vue";
+
+export type ElementTarget = MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
+
+export interface CellPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface CellRect extends CellPoint {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface ElementGeometryFragment {
+  /** Exact rendered extent in the target's local cells. */
+  readonly local: CellRect;
+  /** The same region relative to the nearest rendered parent. */
+  readonly parent: CellRect;
+  /** The same region relative to the current dynamic render surface. */
+  readonly surface: CellRect;
+  /** Clipped surface region, or null when this fragment is not visible. */
+  readonly visible: CellRect | null;
+}
+
+interface ResolvedElementGeometry {
+  /** Bounding box relative to the nearest rendered parent. */
+  readonly parent: CellRect;
+  /** Full bounding box relative to the current dynamic render surface. */
+  readonly surface: CellRect;
+  /** Exact local-to-parent-to-surface rendered mapping; one entry for a box. */
+  readonly fragments: readonly ElementGeometryFragment[];
+}
+
+export type ElementGeometry =
+  | { readonly status: "unavailable" }
+  | { readonly status: "detached" }
+  | { readonly status: "pending" }
+  | { readonly status: "hidden" }
+  | (ResolvedElementGeometry & {
+      readonly status: "zero-size" | "clipped" | "visible";
+    });
+
+export interface UseElementGeometryReturn {
+  readonly geometry: Readonly<ShallowRef<ElementGeometry>>;
+}
+
+export function useElementGeometry(target: ElementTarget): UseElementGeometryReturn;
+
+export type CaretState =
+  | { readonly status: "unavailable" }
+  | { readonly status: "inactive" }
+  | {
+      readonly status: "hidden";
+      readonly reason:
+        | "unavailable"
+        | "detached"
+        | "pending"
+        | "hidden"
+        | "clipped"
+        | "outside"
+        | "invalid-position"
+        | "unrelated";
+    }
+  | {
+      readonly status: "visible";
+      /** Render-surface-relative; never Inline's private physical row. */
+      readonly surface: CellPoint;
+    };
+
+export interface UseCaretOptions {
+  /** The request is eligible only while this exact F4 target is focused. */
+  readonly focus: UseFocusReturn;
+  /** Zero-based rendered cell local to `target`; null/undefined is inactive. */
+  readonly position: MaybeRefOrGetter<CellPoint | null | undefined>;
+}
+
+export interface UseCaretReturn {
+  readonly state: Readonly<ShallowRef<CaretState>>;
+}
+
+export function useCaret(target: ElementTarget, options: UseCaretOptions): UseCaretReturn;
+```
+
+Every published snapshot, rectangle, fragment array, point, state, and return object is frozen. One `geometry` or `state` ref is replaced only with a complete accepted generation; consumers never combine independently updated coordinates. Coordinates are finite integer cells. `parent` and `surface` are full bounding boxes and may contain holes for wrapped inline text. Each fragment maps one exact rendered extent across local, parent, and surface coordinates; its `visible` field is the clipped surface intersection or `null`. A transparent box may therefore have a rendered extent even where no glyph is emitted. Inline `surface.y` is relative to the current managed render region, never the terminal's physical row.
+
+Rendered fragments are not insertion slots. A caret may sit after the final rendered cell or at an empty editor's origin, and each row of a wrapped nested Text can have a different surface origin. The private geometry service therefore also derives row mappings with an inclusive local insertion range, the surface coordinate corresponding to local `x=0`, and the ancestor/viewport clip. `useElementGeometry()` does not expose these private rows: public geometry answers where the element rendered, while `useCaret()` consumes the extra mapping needed to address a valid empty or trailing slot. The renderer creates an origin slot for an empty rendered Text row; an arbitrary zero-size Box has no slot. A trailing slot at the surface's right edge is clipped unless the editor supplies a next-row point backed by a rendered row; it is never passed to the writer for clamping.
+
+Geometry status has one fixed precedence:
+
+1. `unavailable` — the current host, presentation, suspended surface, or Static target has no observable live 2D geometry;
+2. `detached` — no current F2 host resolves from the target;
+3. `pending` — a new host resolves but has no authoritative post-layout paint generation yet;
+4. `hidden` — `display:none` on the target or an ancestor excluded it from paint, so no resolved rectangles are published;
+5. `zero-size` — layout is valid but its full bounds contain no cell;
+6. `clipped` — positive full geometry exists but every fragment's `visible` field is `null`;
+7. `visible` — at least one fragment has a non-null `visible` field.
+
+Visual live and at-teardown streams may still expose deterministic geometry while mounted; targeted caret transport remains unavailable on every non-TTY output. A modeled visual TTY exposes the matching production geometry and caret state. Screen-reader and string presentation expose `unavailable`. Static content never becomes a durable target. Suspension publishes `unavailable`, continuation repaints a new generation before geometry or caret becomes visible again.
+
+`useCaret()` accepts one local rendered cell, not a string index and not a physical terminal coordinate. The target may be the focus host or one of its rendered descendants, allowing a bordered editor to focus its outer box and anchor its caret to an inner Text. A cross-application or already disposed focus handle and a second live caret registration for the same handle fail synchronously before registry mutation. Target-to-focus ancestry is knowable only after both refs attach: a pending relation stays hidden; an unrelated host generation publishes hidden reason `unrelated` without entering the application's fatal error path, and the registration remains so a later valid retarget can recover. If the focus handle is disposed after successful registration, its F4 disposal notification atomically unregisters that owner, releases the registry entry, and publishes `inactive` through the retained `UseCaretReturn`; another focus handle and its caret remain untouched. Different editors retain independent registrations, while the single F4 effective target makes at most one eligible. Removing any other owner cannot clear it.
+
+Initial cell validation precedes registration, then an accepted owner's state precedence is reactive-position validity → output capability → focus/position activity → current geometry/visibility → target relationship → insertion-slot translation. Resolving geometry before the relationship makes a removed target `detached`, while a resolved target whose host is outside the focus subtree becomes `unrelated`. `unavailable` means the output cannot transport a targeted terminal caret. A geometry status of `unavailable` on an otherwise capable visual TTY, such as a Static target, produces hidden reason `unavailable`. `inactive` means the focus is not effective or the position is nullish. A valid active request whose target is detached, pending, hidden, clipped, unrelated, or locally outside becomes `hidden` and emits no caret. A renderer-established empty Text row can expose its origin as a valid insertion slot; another zero-size target is `outside`. The runtime never clamps. Negative, fractional, non-finite, or unsafe-integer initial cells fail synchronously before registry mutation. A later invalid reactive value first clears the accepted point, publishes hidden reason `invalid-position`, and remains recoverable without entering the fatal app error path; a later valid value restores the same owner.
+
+A representative composition is:
+
+```ts
+const editorBox = shallowRef<ComponentPublicInstance | null>(null);
+const editorText = shallowRef<ComponentPublicInstance | null>(null);
+
+const focus = useFocus(editorBox, { autoFocus: true });
+const { geometry } = useElementGeometry(editorBox);
+const { state: caret } = useCaret(editorText, {
+  focus,
+  position: () => insertionCell.value,
+});
+```
+
+The editor converts its own logical insertion point to `insertionCell` using the same text-layout implementation as its rendered content. The renderer adds the inner target's current ancestor, surface, and clipping translation. Neither component code nor the geometry API discovers Inline's physical terminal row.
+
+## Why the alternatives are rejected
+
+### A generic semantic element handle
+
+`useElement(target) -> handle`, followed by `useFocus(handle)`, `useElementGeometry(handle)`, and `useCaret(handle)`, would centralize an internal F2 registration. It would also reopen the completed F4 signature, make every template ref acquire a second public identity, and add author ceremony without a new capability. The existing vouched Vue-component-ref direction, completed F2 lifetime, and F4 direct-ref API support a normal target source. Internal geometry may deduplicate work without making that mechanism public.
+
+### An arbitrary reactive active condition
+
+`useCaret(target, { active, position })` would make every editor reconnect `focus.isFocused`, reintroduce a second selection model, and require priority or conflict rules for simultaneous `true` values. The required `UseFocusReturn` instead reuses modal isolation, restoration, removal, and one effective owner while leaving insertion state separate. Reopen an arbitrary active condition only if a real non-focus terminal-caret consumer appears.
+
+### A rendered marker
+
+A marker is convenient for a text editor because paint can derive Unicode width and wrapping. It is not a general runtime foundation here. Text is flattened to an ANSI string before wrap, transform, and clipping; an escape-string marker is sanitized or measured as visible width, while a structured marker would need a new host node carried through every text, style, wrap, transform, and output path. An arbitrary string `Transform` can delete, duplicate, or move it. A first-party editor may later use a private structured marker or helper on top of `useCaret`; F5 does not make every geometry or grid consumer depend on that representation.
+
+### A logical text offset
+
+`useTextCaret(target, { offset, affinity })` would require runtime ownership of UTF-16 or grapheme boundaries, nested Text concatenation, style and sanitization, soft-wrap affinity, truncation, transforms, masking, ghost text, and editor-specific presentation. It would still not serve grid or canvas-like editors. Logical-to-local conversion therefore belongs to an editor/text-layout layer, while F5 owns local-to-surface-to-terminal conversion.
+
+### One visible rectangle
+
+A wrapped nested Text can start after a prefix, fill the first line, and continue at column zero. A rectangle rooted at the first fragment misses the continuation; its bounding rectangle includes unrelated cells. Surface-only fragments also cannot translate an element-local point because each wrapped row can start at a different surface column. `fragments` is therefore an array of exact local/parent/surface/visible mappings even though boxes normally contain one entry. This is the same richer paint geometry F6 will later consume without changing F5's public target or publishing pointer behavior early.
+
+## Executable proposal prototype
+
+[`semantic-geometry-caret-prototype.test.ts`](../../packages/runtime/src/geometry/semantic-geometry-caret-prototype.test.ts) is an API-shaped private policy prototype, not the production controller. Sixteen tests demonstrate that the selected types and rules can represent:
+
+- one nested bordered/padded editor with prompt prefix, CJK, a ZWJ emoji, combining text, and wrap;
+- identical element-local declarations and render-surface results under Inline and Fullscreen labels, with final physical mapping left to their writers;
+- focus and null insertion as independent inactive states;
+- two independent owners, focus switching, exact disposal, and transactional rejection of duplicate, cross-app, and disposed focus handles;
+- pending, unrelated, and recovered target-to-focus ancestry without a fatal reactive error, while detached geometry retains its own result;
+- later focus-handle disposal unregistering its owner, publishing inactive, releasing the entry, and preserving another owner;
+- clipping and resize hiding rather than clamping, plus explicit unavailable, detached, pending, hidden, and outside results;
+- validation before output/focus state, initial invalid rollback, and visible invalid-position state through valid-to-invalid-to-valid recovery;
+- an addressable empty-Text origin, no arbitrary zero-size Box slot, and both visible and right-edge-clipped trailing insertion slots;
+- exact wrapped nested-Text fragments whose bounding box contains unrelated cells and whose local rows map to different surface origins.
+
+The prototype intentionally does not claim renderer integration or real-terminal behavior. It settles representational sufficiency and removes the public-shape ambiguity. Production work still must derive the fragments from authoritative paint, join F2 and F4 lifetimes, update the writer after every relevant generation, and pass the complete acceptance journeys above.
+
+## Implementation order after the proposal
+
+1. Build one private per-root geometry service that receives exact mapped full/clipped fragments and caret row/slot mappings from paint, publishes atomic frozen generations, follows F2 transactions, and remains unavailable in non-visual or non-live target contexts.
+2. Implement `useElementGeometry()`, migrate `ScrollBox`, then directly remove `useBoxMetrics()` and `measureElement()` plus their exports, types, docs, examples, and package guards.
+3. Build one per-app caret registry joined to F4 target identity and the geometry generation. Resolve one focused owner after paint and feed its surface point or `undefined` into the existing mode writer; directly remove targetless `useCursor()`.
+4. Add terminal cursor visibility to `@vue-tui/testing` snapshots, exact public/type/JavaScript guards, template and TSX journeys, HMR, string, screen-reader, stream, Static, suspension, resize, retarget, error, package, and clean-consumer evidence.
+5. Run the shared nested-editor journey with two owners, modal restoration, unrelated repaint, Unicode, wrap, clipping, resize, side-channel output, suspend/resume, normal/fatal cleanup, both real terminal modes, and visual inspection before marking F5 Done or activating F6.
+
+The proposal uniquely supports the audited ownership and host requirements, so no unresolved public-shape alternative requires a maintainer stop. It remains unstamped and does not imply a VOUCHED decision.
