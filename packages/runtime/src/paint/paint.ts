@@ -857,7 +857,7 @@ function recordZeroContentGeometry(
   y0: number,
   geometry: InternalGeometryPaintFrame | undefined,
 ): void {
-  if (!geometry) return;
+  if (!geometry?.hasObservedSubtree(node)) return;
   if (node.type === "tui-static") {
     geometry.recordSubtree(node, "unavailable");
     return;
@@ -876,7 +876,12 @@ function recordZeroContentGeometry(
     y += layout.top;
     parent = { x: layout.left, y: layout.top, width: 0, height: 0 };
   }
-  if (node.type !== "root" && node.type !== "text-leaf" && node.type !== "comment") {
+  if (
+    geometry.isObserved(node) &&
+    node.type !== "root" &&
+    node.type !== "text-leaf" &&
+    node.type !== "comment"
+  ) {
     geometry.record(node, {
       status: "zero-size",
       parent,
@@ -999,6 +1004,12 @@ function paintNode(
   clip?: HitRect,
   geometry?: InternalGeometryPaintFrame,
 ): void {
+  // Geometry is demand-driven. Once no observed target exists in this subtree,
+  // keep ordinary paint on its pre-geometry path: in particular, a large Text
+  // with no geometry consumer must not pay for grapheme provenance and fragment
+  // construction merely because every live root owns the private service.
+  if (geometry && !geometry.hasObservedSubtree(node)) geometry = undefined;
+
   // display:none — yoga collapses the node to zero size but still reports a
   // layout; skip painting the subtree entirely (matches Ink's renderNodeToOutput
   // early-return) so hidden content never leaks onto visible siblings.
@@ -1024,14 +1035,16 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
-      geometry?.record(
-        node,
-        createRectGeometry({
-          parent: { x: layout.left, y: layout.top, width: w, height: h },
-          surface: { x, y, width: w, height: h },
-          clip,
-        }),
-      );
+      if (geometry?.isObserved(node)) {
+        geometry.record(
+          node,
+          createRectGeometry({
+            parent: { x: layout.left, y: layout.top, width: w, height: h },
+            surface: { x, y, width: w, height: h },
+            clip,
+          }),
+        );
+      }
       recordHit(hitMap, node, { x, y, width: w, height: h }, clip);
       // Split the Box's own bg from the value threaded to children — they use
       // different fallback rules, mirroring Ink's two separate guards:
@@ -1242,25 +1255,27 @@ function paintNode(
         },
         clip,
       );
-      geometry?.record(
-        node,
-        createRectGeometry({
-          parent: {
-            x: layout.left,
-            y: layout.top,
-            width: Math.max(0, Math.floor(layout.width)),
-            height: Math.max(0, Math.floor(layout.height)),
-          },
-          surface: {
-            x,
-            y,
-            width: Math.max(0, Math.floor(layout.width)),
-            height: Math.max(0, Math.floor(layout.height)),
-          },
-          clip,
-          caretSlots: null,
-        }),
-      );
+      if (geometry?.isObserved(node)) {
+        geometry.record(
+          node,
+          createRectGeometry({
+            parent: {
+              x: layout.left,
+              y: layout.top,
+              width: Math.max(0, Math.floor(layout.width)),
+              height: Math.max(0, Math.floor(layout.height)),
+            },
+            surface: {
+              x,
+              y,
+              width: Math.max(0, Math.floor(layout.width)),
+              height: Math.max(0, Math.floor(layout.height)),
+            },
+            clip,
+            caretSlots: null,
+          }),
+        );
+      }
       for (const target of virtualTextDescendants(node)) {
         geometry?.record(target, { status: "unavailable" });
       }

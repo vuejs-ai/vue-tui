@@ -1,6 +1,6 @@
 import { shallowRef, type ShallowRef } from "vue";
 import type { AppContext } from "../context.ts";
-import { isContainer, type TuiNode, type TuiRoot } from "../host/nodes.ts";
+import type { TuiNode, TuiRoot } from "../host/nodes.ts";
 import type { RenderedTargetTransactionHost } from "../rendered-target.ts";
 
 export interface InternalCellPoint {
@@ -52,6 +52,10 @@ export interface InternalGeometryBinding {
 
 export interface InternalGeometryPaintFrame {
   readonly generation: number;
+  /** True only for a target that had a live geometry binding when this frame began. */
+  isObserved(target: TuiNode): boolean;
+  /** True when this target or one of its descendants was observed at frame start. */
+  hasObservedSubtree(target: TuiNode): boolean;
   record(target: TuiNode, geometry: InternalElementGeometry): void;
   recordSubtree(target: TuiNode, status: "hidden" | "unavailable"): void;
   commit(): void;
@@ -219,18 +223,35 @@ export function createInternalGeometryService(
       if (disposed) throw new Error("geometry service is disposed");
       const generation = currentGeneration + 1;
       const records = new Map<TuiNode, InternalElementGeometry>();
+      const observedTargets = new Set<TuiNode>();
+      const observedSubtrees = new Set<TuiNode>();
+      for (const binding of bindings) {
+        if (!binding.target) continue;
+        observedTargets.add(binding.target);
+        let current: TuiNode | null = binding.target;
+        while (current) {
+          observedSubtrees.add(current);
+          current = current.parent;
+        }
+      }
       let settled = false;
       const recordSubtree = (target: TuiNode, status: "hidden" | "unavailable"): void => {
-        records.set(target, status === "hidden" ? HIDDEN : UNAVAILABLE);
-        if (isContainer(target)) {
-          for (const child of target.children) recordSubtree(child, status);
+        const geometry = status === "hidden" ? HIDDEN : UNAVAILABLE;
+        for (const observed of observedTargets) {
+          if (belongsToSubtree(observed, target)) records.set(observed, geometry);
         }
       };
       return {
         generation,
+        isObserved(target) {
+          return observedTargets.has(target);
+        },
+        hasObservedSubtree(target) {
+          return observedSubtrees.has(target);
+        },
         record(target, geometry) {
           if (settled) throw new Error("geometry paint frame is already settled");
-          records.set(target, freezeInternalGeometry(geometry));
+          if (observedTargets.has(target)) records.set(target, freezeInternalGeometry(geometry));
         },
         recordSubtree(target, status) {
           if (settled) throw new Error("geometry paint frame is already settled");

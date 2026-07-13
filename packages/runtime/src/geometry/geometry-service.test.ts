@@ -85,6 +85,38 @@ function resolved(geometry: InternalElementGeometry) {
 }
 
 describe("private paint-derived geometry service", () => {
+  test("captures only observed targets and the ancestor paths needed to reach them", () => {
+    const f = fixture();
+    const parent = f.box();
+    const sibling = f.text();
+    const top = f.text();
+    const target = f.virtualText();
+    f.leaf(sibling, "unobserved");
+    f.leaf(target, "observed");
+    f.insert(top, target);
+    f.insert(parent, sibling);
+    f.insert(parent, top);
+    f.insert(f.root, parent);
+    const service = createInternalGeometryService(f.root);
+
+    const emptyFrame = service.beginFrame();
+    expect(emptyFrame.hasObservedSubtree(f.root)).toBe(false);
+    expect(emptyFrame.isObserved(target)).toBe(false);
+    emptyFrame.discard();
+
+    const binding = service.createBinding();
+    binding.attach(target);
+    const frame = service.beginFrame();
+    expect(frame.isObserved(target)).toBe(true);
+    expect(frame.isObserved(top)).toBe(false);
+    expect(frame.hasObservedSubtree(f.root)).toBe(true);
+    expect(frame.hasObservedSubtree(parent)).toBe(true);
+    expect(frame.hasObservedSubtree(top)).toBe(true);
+    expect(frame.hasObservedSubtree(target)).toBe(true);
+    expect(frame.hasObservedSubtree(sibling)).toBe(false);
+    frame.discard();
+  });
+
   test("publishes one frozen Box snapshot with parent, surface, and visible mapping", () => {
     const f = fixture();
     const parent = f.box();
