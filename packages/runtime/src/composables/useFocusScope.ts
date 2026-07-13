@@ -61,9 +61,18 @@ export function useFocusScope(options: UseFocusScopeOptions = {}): UseFocusScope
 
   let stopOptions: (() => void) | undefined;
   try {
-    stopOptions = watch(readOptions, (update) => controller.updateScope(handle, update), {
-      flush: "sync",
-    });
+    stopOptions = watch(
+      readOptions,
+      (update) => {
+        // Vue may still invoke a watch callback with `undefined` after the
+        // source getter rejects an invalid reactive option. The validation
+        // error is the public failure; keep the last accepted controller
+        // state and wait for the next valid value.
+        if (!update) return;
+        controller.updateScope(handle, update);
+      },
+      { flush: "sync" },
+    );
     registerInternalFocusScopeDependent(provided, () => stopOptions?.());
   } catch (error) {
     markInternalFocusScopeDisposed(provided);

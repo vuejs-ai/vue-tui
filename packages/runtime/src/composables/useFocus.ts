@@ -97,9 +97,18 @@ export function useFocus(
     if (removeTarget) controller.removeTarget(handle);
   };
   try {
-    stopOptions = watch(readOptions, (update) => controller.updateTarget(handle, update), {
-      flush: "sync",
-    });
+    stopOptions = watch(
+      readOptions,
+      (update) => {
+        // Vue may still invoke a watch callback with `undefined` after the
+        // source getter rejects an invalid reactive option. The validation
+        // error is the public failure; keep the last accepted controller
+        // state and wait for the next valid value.
+        if (!update) return;
+        controller.updateTarget(handle, update);
+      },
+      { flush: "sync" },
+    );
     disposeRenderedTarget = useRenderedTargetRegistration(
       () => resolveTuiNode(toValue(target)),
       (host) => controller.attachTarget(handle, host),
