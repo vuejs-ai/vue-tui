@@ -363,6 +363,47 @@ describe("useCursor", () => {
     };
   }
 
+  test.fails("F5 gap: disposing one cursor owner preserves a surviving owner's declaration", async () => {
+    const showFirst = shallowRef(true);
+    const First = defineComponent(() => {
+      const { setCursorPosition } = useCursor();
+      setCursorPosition({ x: 1, y: 0 });
+      return () => <Text>A</Text>;
+    });
+    const Second = defineComponent(() => {
+      const { setCursorPosition } = useCursor();
+      setCursorPosition({ x: 5, y: 0 });
+      return () => <Text>B</Text>;
+    });
+    const App = defineComponent(() => () => (
+      <Box>
+        {showFirst.value ? <First /> : null}
+        <Second />
+      </Box>
+    ));
+
+    const { stdoutWrites, unmount } = mountUnthrottled(App);
+    try {
+      await nextTick();
+      await nextTick();
+      const beforeRemoval = stdoutWrites.length;
+
+      showFirst.value = false;
+      await nextTick();
+      await nextTick();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const removalWrites = stdoutWrites.slice(beforeRemoval).join("");
+      // The terminal has one physical caret, but each component declaration
+      // needs its own owner lifetime. Today First's cleanup writes global
+      // `undefined`, so it hides Second's still-live declaration instead of
+      // restoring it at x=5 (CSI 6 G in one-based terminal coordinates).
+      expect(removalWrites).toContain("\x1b[6G\x1b[?25h");
+    } finally {
+      unmount();
+    }
+  });
+
   test("unthrottled mode: useStdout().write() does not leak into stderr", async () => {
     const App = defineComponent(() => {
       const { write } = useStdout();
