@@ -510,6 +510,20 @@ function createRenderForMode(incremental: boolean) {
 }
 
 describe.each(modes)("$name mode - cursor positioning", ({ incremental }) => {
+  test("non-TTY sync does not emit targeted-caret controls", () => {
+    const stdout = createStdout();
+    stdout.isTTY = false;
+    const render = logUpdate.create(stdout, { showCursor: true, incremental });
+
+    render.setCursorPosition({ x: 5, y: 1 });
+    render.sync("Line 1\nLine 2\nLine 3\n");
+
+    // sync() only re-seats writer bookkeeping and a declared terminal caret;
+    // the caller has already written the replacement content. A non-TTY
+    // destination therefore receives no write from this targeted-caret path.
+    expect(stdout.write.callCount).toBe(0);
+  });
+
   test("clear() returns cursor to bottom before erasing", () => {
     const { stdout, render } = createRenderForMode(incremental);
 

@@ -7,7 +7,7 @@
 // writes are a TTY concern, and forcing interactive must not leak them to a pipe.
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp, Text, useCursor } from "@vue-tui/runtime";
 import { PassThrough } from "node:stream";
 
 const hideCursorEscape = "\x1b[?25l";
@@ -51,31 +51,42 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return stdin;
 }
 
-test("forced interactive + non-TTY stdout emits NO cursor hide/show escapes", async () => {
-  const stdout = makeNonTtyStdout();
-  const stdin = makeFakeStdin();
+test.each([false, true])(
+  "forced live non-TTY stdout emits no targeted-caret controls with incrementalRendering=%s",
+  async (incrementalRendering) => {
+    const stdout = makeNonTtyStdout();
+    const stdin = makeFakeStdin();
 
-  const App = defineComponent(() => () => <Text>hello</Text>);
+    const App = defineComponent(() => {
+      const { setCursorPosition } = useCursor();
+      setCursorPosition({ x: 2, y: 0 });
+      return () => <Text>hello</Text>;
+    });
 
-  const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    liveUpdates: true,
-  });
-  await nextTick();
+    const app = createApp(App);
+    app.mount({
+      stdout,
+      stdin,
+      stderr: makeTtyStream(),
+      liveUpdates: true,
+      incrementalRendering,
+    });
+    await nextTick();
 
-  const afterMount = stdout.chunks.join("");
-  // Ink emits no hide on mount for a non-TTY stdout (cli-cursor short-circuit).
-  expect(afterMount).not.toContain(hideCursorEscape);
+    const afterMount = stdout.chunks.join("");
+    expect(afterMount).toContain("hello");
+    // Ink emits no hide on mount for a non-TTY stdout (cli-cursor short-circuit).
+    expect(afterMount).not.toContain(hideCursorEscape);
 
-  const exited = app.waitUntilExit();
-  app.unmount();
-  await exited;
+    const exited = app.waitUntilExit();
+    app.unmount();
+    await exited;
 
-  const afterUnmount = stdout.chunks.join("");
-  // ...and no show on teardown either.
-  expect(afterUnmount).not.toContain(hideCursorEscape);
-  expect(afterUnmount).not.toContain(showCursorEscape);
-});
+    const afterUnmount = stdout.chunks.join("");
+    // ...and no show on teardown either.
+    expect(afterUnmount).not.toContain(hideCursorEscape);
+    expect(afterUnmount).not.toContain(showCursorEscape);
+    // Targeted-caret positioning itself is part of this contract, not just hide/show.
+    expect(afterUnmount).not.toMatch(/\x1b\[[0-9;]*[ABCDEFGH]/);
+  },
+);

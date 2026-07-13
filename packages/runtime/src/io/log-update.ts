@@ -109,7 +109,11 @@ const createStandard = (
   // to undefined, so the next re-emit places no caret — the clear is not
   // resurrected. cursorDirty still tracks "was re-declared this commit" purely
   // to gate the commit/dedup paths (render.ts outer gate + frame-writer skip).
-  const getActiveCursor = () => cursorPosition;
+  // A forced-live stream still has renderer commits, but it is not a targeted-
+  // caret transport. Treat the declaration as physically unavailable so the
+  // frame path cannot append movement/show bytes or later emit a return/hide
+  // sequence for a caret that was never valid on this destination.
+  const getActiveCursor = () => (isTtyStream(stream) ? cursorPosition : undefined);
   const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
     return str !== previousOutput || cursorChanged;
@@ -276,7 +280,10 @@ const createIncremental = (
   // active cursor is the last-declared position, re-emitted at the end of every
   // commit so it survives unrelated repaints; a cleared declaration emits no
   // caret. cursorDirty only gates the commit/dedup paths now.
-  const getActiveCursor = () => cursorPosition;
+  // Keep incremental and standard writers identical: a non-TTY destination
+  // may receive live frame bytes only by explicit request, never terminal
+  // cursor controls.
+  const getActiveCursor = () => (isTtyStream(stream) ? cursorPosition : undefined);
   const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
     const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
     return str !== previousOutput || cursorChanged;

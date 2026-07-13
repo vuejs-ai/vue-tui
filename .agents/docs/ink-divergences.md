@@ -137,6 +137,7 @@ stream runs the relative or screen-reader writer and may emit live frames plus A
 movement bytes. Commit throttling can coalesce intermediate states, so the contract is not that
 every reactive state is observable. Alternate-screen entry still independently requires a TTY
 stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a hit map on a pipe.
+An active `useCursor()` declaration is not part of that stream-update permission: standard and incremental writers both suppress caret movement, show, hide, and restoration controls on non-TTY destinations. The regression invokes the declaration directly so this claim does not rest on the input-free case.
 
 This alignment is about output policy, not a broad claim that the application has no input. A TTY
 stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
