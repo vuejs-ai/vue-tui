@@ -180,6 +180,14 @@ The peers agree more strongly on mechanism than policy. Except for Ink, focus ow
 
 For F4, these facts support F2-bound opaque handles, one app-owned scope/restoration service, and F3 route selection from the effective target path. The vue-tui journey still had to choose the remaining policies. The [accepted choices](./focus-and-scopes.md#accepted-product-contract) use rendered preorder because F5 geometry is not ready, prior-order surviving successor then predecessor fallback, explicit root initial focus, and a hard modal boundary because the approval and PTY journeys require input and external isolation rather than Tab trapping alone.
 
+## Geometry and caret observations
+
+The F5.1 check reverified the pinned implementations and their focused suites, then ran narrow probes where built-in tests did not settle clipping behavior. Ink keeps parent-relative Yoga metrics and output-origin cursor coordinates disconnected. OpenTUI converts an editor's visual cursor through its cached screen origin and a renderer surface offset. Textual's mapped geometry separately retains full, clipped, virtual, and visible regions. prompt_toolkit builds logical text-position to absolute-cell maps that account for wrapping, scrolling, margins, and wide glyphs. pi-tui inserts a zero-width rendered marker and lets its Unicode-aware viewport scan derive the physical cell. Ratatui accepts one optional physical frame cursor and leaves widget-relative translation to the application.
+
+These systems agree that text editing state and terminal placement require an explicit conversion through rendered cell geometry; none establishes one universal public API or clipped-caret policy. Narrow pinned probes found that an OpenTUI Textarea and a Textual TextArea can retain a hardware caret after ancestor clipping removes the editor from the visible region, while prompt_toolkit separates coordinate copying from cursor-show policy. vue-tui therefore cannot infer its hidden or clipped behavior from a peer default. The complete sources, probe limits, real Ink consumer workarounds, derived mechanism, and cross-mode acceptance journeys are recorded in [semantic geometry and caret](./semantic-geometry-and-caret.md#peer-evidence).
+
+Two real Ink consumers show the cost of its disconnected surface: Linghun walks parent Yoga nodes before calling `useCursor`, and deepcode-cli repeats that walk plus its own text-cell and wrapping logic. This supports a renderer-owned element-local-to-render-root conversion. It does not justify exposing Yoga, combining focus with text insertion, or selecting local-cell, rendered-marker, or logical-text-position input before the public F5 proposal.
+
 ## Application observations
 
 ### fzf
