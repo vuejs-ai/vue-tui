@@ -26,7 +26,7 @@ export default defineConfig({
     }),
   ],
   pack: {
-    entry: ["src/index.ts", "src/internal.ts"],
+    entry: ["src/index.ts", "src/fullscreen.ts", "src/internal.ts"],
     // Runtime and declaration output must use the consumer's one Vue instance.
     // Inlining Vue's internal types creates duplicate global declarations when
     // the consumer installs another supported Vue patch release.

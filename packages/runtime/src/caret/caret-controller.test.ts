@@ -107,6 +107,7 @@ function paintFrame(
       if (!geometry) throw new Error("unobserved");
       return geometry;
     },
+    paintOrderFor: () => 0,
     record: () => {},
     recordSubtree: () => {},
     commit: () => {},

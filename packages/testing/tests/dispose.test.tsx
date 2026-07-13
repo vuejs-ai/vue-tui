@@ -22,6 +22,12 @@ test("host operations fail clearly after disposal without changing dimensions", 
 
   await expect(result.screen()).rejects.toThrow("Test host has been disposed.");
   await expect(result.stdin.write("x")).rejects.toThrow("Test host has been disposed.");
+  await expect(result.mouse.down({ x: 0, y: 0 })).rejects.toThrow("Test host has been disposed.");
+  await expect(result.mouse.move({ x: 0, y: 0 })).rejects.toThrow("Test host has been disposed.");
+  await expect(result.mouse.up({ x: 0, y: 0 })).rejects.toThrow("Test host has been disposed.");
+  await expect(result.mouse.wheel({ x: 0, y: 0 }, "down")).rejects.toThrow(
+    "Test host has been disposed.",
+  );
   await expect(result.terminal.resize(80, 24)).rejects.toThrow("Test host has been disposed.");
   await expect(result.terminal.suspend()).rejects.toThrow("Test host has been disposed.");
   await expect(result.terminal.resume()).rejects.toThrow("Test host has been disposed.");
@@ -29,6 +35,8 @@ test("host operations fail clearly after disposal without changing dimensions", 
   await expect(result.waitUntilExit()).rejects.toThrow("Test host has been disposed.");
   expect(result.terminal.columns).toBe(40);
   expect(result.terminal.rows).toBe(10);
+  expect(result.mouse.reporting.current).toBe("none");
+  expect(result.mouse.reporting.history).toEqual([]);
 });
 
 test("disposal wins races with screen and resize before either touches disposed xterm state", async () => {

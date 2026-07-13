@@ -234,6 +234,11 @@ interface ScreenSnapshot {
 | Property or method                   | Behavior                                                                                                                                                            |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stdin.write(data)`                  | Emits input, waits for the input parser, and waits for the resulting render and emulator writes                                                                     |
+| `mouse.reporting`                    | Runtime-readonly live view of modeled SGR button or button-motion ownership and its committed transition history                                                    |
+| `mouse.down(point, options?)`        | Injects one parsed physical button-down fact; the default button is left                                                                                            |
+| `mouse.move(point, modifiers?)`      | Injects one left-button motion fact while button-motion reporting and an unmatched left down are active                                                             |
+| `mouse.up(point, options?)`          | Injects one parsed physical button-up fact                                                                                                                          |
+| `mouse.wheel(point, direction, ...)` | Injects one parsed four-direction wheel fact                                                                                                                        |
 | `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
 | `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering                                               |
 | `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
@@ -241,6 +246,14 @@ interface ScreenSnapshot {
 | `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                     |
 
 The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes the public session dimensions before repainting every live-update surface, including row-unbounded live streams, and then reacquires requested input modes. Final-output streams have no live frame to repaint.
+
+Mouse points are zero-based cells inside the current modeled terminal dimensions. The driver is available only while the Fullscreen application has acquired the reporting level needed for that physical fact. It injects `down`, `move`, `up`, and `wheel` after protocol parsing, then waits for the same application and emulator flush as `stdin.write()`. It deliberately has no `click()` helper: a down/up pair must pass through the production hit testing, click synthesis, propagation, and drag state machines.
+
+```tsx
+await result.mouse.down({ x: 2, y: 1 });
+await result.mouse.up({ x: 2, y: 1 });
+expect(clicks).toHaveLength(1);
+```
 
 ### Lifecycle methods
 

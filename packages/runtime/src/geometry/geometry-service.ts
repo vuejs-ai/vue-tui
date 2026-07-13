@@ -61,6 +61,8 @@ export interface InternalGeometryPaintFrame {
   hasObservedSubtree(target: TuiNode): boolean;
   /** Read this frame's frozen paint result without publishing the generation. */
   geometryFor(target: TuiNode): InternalElementGeometry;
+  /** Paint traversal order for an observed target recorded in this frame. */
+  paintOrderFor(target: TuiNode): number | undefined;
   record(target: TuiNode, geometry: InternalElementGeometry): void;
   recordSubtree(target: TuiNode, status: "hidden" | "unavailable"): void;
   commit(): void;
@@ -258,6 +260,8 @@ export function createInternalGeometryService(
       if (disposed) throw new Error("geometry service is disposed");
       const generation = currentGeneration + 1;
       const records = new Map<TuiNode, InternalElementGeometry>();
+      const paintOrders = new Map<TuiNode, number>();
+      let nextPaintOrder = 0;
       const observedTargets = new Set<TuiNode>();
       const observedSubtrees = new Set<TuiNode>();
       for (const binding of bindings) {
@@ -291,9 +295,16 @@ export function createInternalGeometryService(
           }
           return records.get(target) ?? PENDING;
         },
+        paintOrderFor(target) {
+          if (settled) throw new Error("geometry paint frame is already settled");
+          return paintOrders.get(target);
+        },
         record(target, geometry) {
           if (settled) throw new Error("geometry paint frame is already settled");
-          if (observedTargets.has(target)) records.set(target, freezeInternalGeometry(geometry));
+          if (observedTargets.has(target)) {
+            records.set(target, freezeInternalGeometry(geometry));
+            if (!paintOrders.has(target)) paintOrders.set(target, nextPaintOrder++);
+          }
         },
         recordSubtree(target, status) {
           if (settled) throw new Error("geometry paint frame is already settled");

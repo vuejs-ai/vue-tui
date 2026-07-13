@@ -1,4 +1,6 @@
-import type { ExtractPublicPropTypes } from "vue";
+import type { ExtractPublicPropTypes, PropType } from "vue";
+
+const rejectedMouseListenerNames = ["onMousedown", "onMouseup", "onClick", "onWheel"] as const;
 
 /**
  * `ScrollBox` takes no props: it is a bounded viewport that follows the bottom
@@ -6,7 +8,24 @@ import type { ExtractPublicPropTypes } from "vue";
  * and wire your own mouse / keyboard to it on the consumer side — the component
  * deliberately ships no built-in input handling (see the decision record).
  */
-export const scrollBoxProps = {};
+export const scrollBoxProps = {
+  onMousedown: null as unknown as PropType<never>,
+  onMouseup: null as unknown as PropType<never>,
+  onClick: null as unknown as PropType<never>,
+  onWheel: null as unknown as PropType<never>,
+};
+
+export function assertNoRejectedMouseListeners(rawProps: Record<string, unknown> | null): true {
+  for (const name of rejectedMouseListenerNames) {
+    if (rawProps && Object.prototype.hasOwnProperty.call(rawProps, name)) {
+      throw new Error(
+        `<ScrollBox> does not accept the removed mouse listener "${name}". ` +
+          `Use the mouse composables from "@vue-tui/runtime/fullscreen".`,
+      );
+    }
+  }
+  return true;
+}
 
 /** Props accepted by `<ScrollBox>`. */
 export type ScrollBoxProps = ExtractPublicPropTypes<typeof scrollBoxProps>;

@@ -95,8 +95,8 @@ useInput((event) => {
 | ------------------------------- | -------------------------------------------------------------------------------------------- |
 | `useInput(handler, opts?)`      | Normalized key, text, paste, and uninterpreted input with an explicit routing result         |
 | `useInputAvailability()`        | Readonly managed-input availability for the current host                                     |
-| `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
-| `useDraggable(ref, opts?)`      | Full-screen element dragging — reactive position and drag state from a normal template ref   |
+| `useMouseEvent(ref, event, fn)` | Targeted Fullscreen `"click"` or `"wheel"`; import from `@vue-tui/runtime/fullscreen`        |
+| `useMouseDrag(ref, fn, opts?)`  | One captured Fullscreen drag lifecycle; import from `@vue-tui/runtime/fullscreen`            |
 | `useFocus(ref, opts?)`          | Opaque ref-bound focus target with rendered-order traversal and boolean `focus()` / `blur()` |
 | `useFocusScope(opts?)`          | Nested active region or hard trapped boundary provided to descendants                        |
 | `useFocusedInput(target, fn)`   | Normalized input attached to one exact focused target                                        |
@@ -164,7 +164,11 @@ await app.waitUntilExit();
 createApp(App).mount({ stdout, stdin, stderr });
 ```
 
-Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. Full-screen mode enables targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers on `<Box>` and `<Text>` when the app registers them; inline apps can still use the low-level `useMouseInput()` stream.
+Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. `Box` and `Text` remain passive in both modes; attach targeted click, wheel, or captured-drag behavior to an ordinary component ref through `useMouseEvent()` or `useMouseDrag()` from `@vue-tui/runtime/fullscreen`. Active hooks reject an effective visual Inline surface instead of silently doing nothing. Expected non-targetable presentations such as screen-reader transcripts, final-output streams, and string rendering remain inert.
+
+Mouse reporting is demand-driven: only a visible target from an accepted Fullscreen frame acquires the minimum required SGR level, and removing the last target restores it. While reporting is active, the terminal normally gives mouse selection and wheel input to the application instead of its native selection or scrolling. Application-owned selection and copy are separate features; do not attach a mouse hook when terminal-native behavior should remain in control.
+
+The live host requires controllable TTY input and an xterm-compatible SGR mouse profile; `TERM=dumb` is rejected when a visible target first demands reporting. SGR has no capability handshake, so a terminal that accepts the control bytes but silently ignores mouse reporting is indistinguishable from a user who sends no mouse input. In that case the hook receives no events and vue-tui does not guess or fall back to a different protocol.
 
 Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use `<Static>` for completed history, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
 

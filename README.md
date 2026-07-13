@@ -137,7 +137,7 @@ createApp(App).mount();
 | [`<Static>`](./packages/runtime)    | Renders inline items once above the redrawn region; fullscreen does not retain them            |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
 
-`<Box>` and `<Text>` also support targeted `@mousedown`, `@mouseup`, `@click`, and `@wheel` handlers in full-screen mode.
+`<Box>`, `<Text>`, and `<ScrollBox>` are passive visual components. Fullscreen mouse behavior is attached to an ordinary component ref with the dedicated composables below; listener props such as `@click` and `@wheel` are rejected so mode-dependent behavior cannot look universally available.
 
 ## High-level Components
 
@@ -154,8 +154,8 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result             |
 | `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                            |
-| `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                   |
-| `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                   |
+| `useMouseEvent(ref, event, fn)` | Handle a targeted Fullscreen `"click"` or `"wheel"` event; imported from `@vue-tui/runtime/fullscreen`                           |
+| `useMouseDrag(ref, fn, opts?)`  | Handle one captured Fullscreen drag lifecycle; imported from `@vue-tui/runtime/fullscreen`                                       |
 | `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`      |
 | `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                       |
 | `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                  |
@@ -173,6 +173,23 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                     |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
+
+Fullscreen mouse hooks are intentionally separate from the root API:
+
+```ts
+import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
+
+useMouseEvent(buttonRef, "click", () => "consume");
+useMouseEvent(listRef, "wheel", (event) => {
+  list.value?.scrollByLines(event.delta.y);
+  return "consume";
+});
+useMouseDrag(dividerRef, (event) => {
+  if (event.phase === "start" || event.phase === "move") resizeBy(event.movement.x);
+});
+```
+
+An active hook requires an effective visual Fullscreen surface. It acquires only the SGR mouse reporting level needed by a visible accepted target and releases that level when the last target disappears. While reporting is active, the terminal normally sends selection and wheel input to the application instead of performing its native selection or scrolling; vue-tui keeps that interval demand-driven, while application-owned selection and copy remain separate features.
 
 `useRenderSession()` is the authoritative way for a component to inspect what rendering surface actually became effective. The session object keeps one identity for the render tree; mode, output, host, and capabilities are immutable for that session, while a live-update surface refreshes `dimensions` reactively on accepted resize and continuation events. A final-output surface retains the dimensions resolved at mount because it has no runtime resize lifecycle. Use `session.output.presentation === "screen-reader"` to adapt to the active linear presentation. `useLayoutSize()` derives from that same session and keeps destructured dimensions reactive; its `rows` ref is `null` for a row-unbounded stream, transcript, or string document.
 

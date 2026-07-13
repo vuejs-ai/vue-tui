@@ -1,4 +1,4 @@
-import { defineComponent, nextTick, shallowRef } from "vue";
+import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -7,6 +7,31 @@ import { ScrollBox, type ScrollBoxExpose } from "../index.ts";
 function messages(count: number): string[] {
   return Array.from({ length: count }, (_, index) => `message ${index}`);
 }
+
+const removedListeners = ["onMousedown", "onMouseup", "onClick", "onWheel"] as const;
+
+test.each(removedListeners)(
+  "ScrollBox rejects the removed %s prop at runtime",
+  async (listener) => {
+    const App = defineComponent(
+      () => () =>
+        h(ScrollBox, { [listener]: () => {} } as Record<string, unknown>, () =>
+          h(Text, null, () => "content"),
+        ),
+    );
+
+    await expect(render(App)).rejects.toThrow(
+      new RegExp(
+        `^<ScrollBox> does not accept the removed mouse listener "${listener}"\\. ` +
+          `Use the mouse composables from "@vue-tui/runtime/fullscreen"\\.$`,
+      ),
+    );
+  },
+);
+
+test("ScrollBox disables attribute fallthrough to its internal viewport Box", () => {
+  expect((ScrollBox as unknown as { inheritAttrs?: boolean }).inheritAttrs).toBe(false);
+});
 
 test("ScrollBox follows the bottom while sticky", async () => {
   const items = shallowRef(messages(8));

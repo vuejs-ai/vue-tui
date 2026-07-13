@@ -106,7 +106,18 @@ describe("input-parser", () => {
     expect(parser.push("\x1b[")).toEqual([]);
     expect(parser.hasPendingEscape()).toBe(true);
     expect(parser.push("1;5")).toEqual([]);
+    expect(parser.hasPendingEscape()).toBe(false);
     expect(parser.push("A")).toEqual(["\x1b[1;5A"]);
+  });
+
+  test("holds an unfinished SGR mouse report without starting the finite Escape timer", () => {
+    const parser = createInputParser();
+    expect(parser.push("\x1b[<64;1;")).toEqual([]);
+    expect(parser.peekPending()).toBe("\x1b[<64;1;");
+    expect(parser.hasPendingEscape()).toBe(false);
+
+    expect(parser.push("1M")).toEqual(["\x1b[<64;1;1M"]);
+    expect(parser.peekPending()).toBe("");
   });
 
   test("holds incomplete legacy ESC[[... sequence until final byte arrives", () => {

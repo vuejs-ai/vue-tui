@@ -17,7 +17,6 @@ import {
   type StdinContext,
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
-import { createInternalInputRouteRegistry } from "./io/input-routes.ts";
 import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
 import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-availability.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
@@ -411,7 +410,6 @@ function createStringContexts(columns: number): {
     appContext,
     stdinContext,
     dispose() {
-      stdinContext.internal_routes.clear();
       stdinContext.internal_inputRouting.clear();
       stdin.destroy();
       stdout.destroy();
@@ -425,7 +423,6 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
     stdin,
     isRawModeSupported: false,
     inputAvailability: createInputAvailabilityRef(stringInputUnavailable),
-    internal_routes: createInternalInputRouteRegistry(),
     internal_inputRouting: createInternalInputRoutingRuntime(),
     acquireRawMode: () => {},
     releaseRawMode: () => {},

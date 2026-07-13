@@ -31,8 +31,6 @@ import {
 import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
 import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
-import type { MouseHitMapEntry } from "../mouse/controller.ts";
-import { clearMouseTargetRect, setMouseTargetRect } from "../mouse/target.ts";
 import { isContentLayoutGuarded } from "../host/layout-guards.ts";
 import type {
   InternalGeometryFragment,
@@ -808,13 +806,12 @@ function createTopTextGeometry(input: {
 }
 
 export interface PaintOptions {
-  readonly hitMap?: MouseHitMapEntry[];
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: InternalGeometryPaintFrame;
   /**
-   * Clip paint and hit testing to an app-owned viewport. Fullscreen rendering
-   * uses this to keep off-screen layout from wrapping or scrolling the
-   * alternate screen, and to exclude mouse targets outside addressable cells.
+   * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
+   * rendering uses this to keep off-screen layout from wrapping or scrolling
+   * the alternate screen and to exclude cells outside the addressable surface.
    */
   readonly viewport?: { readonly width: number; readonly height: number };
 }
@@ -828,28 +825,6 @@ function intersectHitRect(rect: HitRect, clip: HitRect | undefined): HitRect | u
   const width = Math.max(0, x2 - x1);
   const height = Math.max(0, y2 - y1);
   return width > 0 && height > 0 ? { x: x1, y: y1, width, height } : undefined;
-}
-
-function recordHit(
-  hitMap: MouseHitMapEntry[] | undefined,
-  node: TuiNode,
-  rect: HitRect,
-  clip: HitRect | undefined,
-) {
-  if (!hitMap) return;
-  const visible = intersectHitRect(rect, clip);
-  if (!visible) {
-    clearMouseTargetRect(node);
-    return;
-  }
-  setMouseTargetRect(node, visible);
-  hitMap?.push({ node, rect: visible });
-}
-
-function clearSubtreeHitRects(node: TuiNode): void {
-  clearMouseTargetRect(node);
-  if (!isContainer(node)) return;
-  for (const child of node.children) clearSubtreeHitRects(child);
 }
 
 function recordZeroContentGeometry(
@@ -895,94 +870,6 @@ function recordZeroContentGeometry(
   for (const child of node.children) recordZeroContentGeometry(child, x, y, geometry);
 }
 
-interface InlineHitSpan {
-  readonly node: TuiVirtualText;
-  readonly prefix: string;
-  readonly text: string;
-}
-
-function collectVirtualTextSpans(
-  node: TuiText | TuiVirtualText,
-  inheritedBg: unknown,
-  prefix: string,
-  spans: InlineHitSpan[],
-): string {
-  let out = "";
-  for (const child of node.children) {
-    if (child.type === "text-leaf") {
-      out += child.value;
-      continue;
-    }
-    if (child.type === "comment") continue;
-    if (child.type === "tui-virtual-text") {
-      const before = prefix + out;
-      const text = renderTextWithInlineStyles(child, inheritedBg);
-      spans.push({ node: child, prefix: before, text });
-      collectVirtualTextSpans(child, inheritedBg, before, spans);
-      out += text;
-      continue;
-    }
-    if (child.type === "tui-transform") {
-      const text = renderTransformAsText(child, inheritedBg);
-      out += text.length > 0 ? sanitizeAnsiMultiline(child.transform(text, 0)) : text;
-    }
-  }
-  return out;
-}
-
-function lineColumnForTextOffset(
-  text: string,
-  wrapWidth: number,
-  wrapMode: TextProps["wrap"],
-): { line: number; column: number } {
-  if (text.length === 0) return { line: 0, column: 0 };
-  const lines = wrapText(text, wrapWidth, wrapMode ?? "wrap");
-  const line = Math.max(0, lines.length - 1);
-  return { line, column: stringWidth(lines[line] ?? "") };
-}
-
-function recordVirtualTextHits(
-  hitMap: MouseHitMapEntry[] | undefined,
-  node: TuiText,
-  x: number,
-  y: number,
-  wrapWidth: number,
-  wrapMode: TextProps["wrap"],
-  inheritedBg: unknown,
-  clip: HitRect | undefined,
-) {
-  if (!hitMap) return;
-  const spans: InlineHitSpan[] = [];
-  collectVirtualTextSpans(node, inheritedBg, "", spans);
-  if (wrapWidth <= 0) {
-    for (const span of spans) clearMouseTargetRect(span.node);
-    return;
-  }
-  for (const span of spans) {
-    const width = stringWidth(span.text);
-    if (width <= 0) {
-      clearMouseTargetRect(span.node);
-      continue;
-    }
-    const start = lineColumnForTextOffset(span.prefix, wrapWidth, wrapMode);
-    const end = lineColumnForTextOffset(span.prefix + span.text, wrapWidth, wrapMode);
-    const height = Math.max(1, end.line - start.line + 1);
-    const rectWidth =
-      height === 1 ? Math.max(1, end.column - start.column) : Math.max(1, wrapWidth);
-    recordHit(
-      hitMap,
-      span.node,
-      {
-        x: x + start.column,
-        y: y + start.line,
-        width: rectWidth,
-        height,
-      },
-      clip,
-    );
-  }
-}
-
 export function paint(root: TuiNode, options: PaintOptions = {}): string {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
   const layout = root.yoga.getComputedLayout();
@@ -990,7 +877,7 @@ export function paint(root: TuiNode, options: PaintOptions = {}): string {
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
   const out = new Output(width, height, options.viewport !== undefined);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, 0, 0, [], undefined, options.hitMap, viewportClip, options.geometry);
+  paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry);
   return out.get().output;
 }
 
@@ -1001,7 +888,6 @@ function paintNode(
   y0: number,
   transformers: Transformer[],
   inheritedBg?: string,
-  hitMap?: MouseHitMapEntry[],
   clip?: HitRect,
   geometry?: InternalGeometryPaintFrame,
 ): void {
@@ -1016,7 +902,6 @@ function paintNode(
   // early-return) so hidden content never leaks onto visible siblings.
   const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
-    if (hitMap) clearSubtreeHitRects(node);
     if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
     else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, x0, y0, geometry);
     else geometry?.recordSubtree(node, "hidden");
@@ -1026,7 +911,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, x0, y0, transformers, undefined, hitMap, clip, geometry);
+        paintNode(child, output, x0, y0, transformers, undefined, clip, geometry);
       }
       return;
     }
@@ -1046,7 +931,6 @@ function paintNode(
           }),
         );
       }
-      recordHit(hitMap, node, { x, y, width: w, height: h }, clip);
       // Split the Box's own bg from the value threaded to children — they use
       // different fallback rules, mirroring Ink's two separate guards:
       //   - FILL uses the Box's OWN bg with a FALSY guard (Ink render-background.ts:11
@@ -1123,7 +1007,7 @@ function paintNode(
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
           if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, x, y, transformers, childBg, hitMap, childClip, geometry);
+            paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
           } else {
             recordZeroContentGeometry(child, x, y, geometry);
           }
@@ -1133,7 +1017,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, x, y, transformers, childBg, hitMap, childClip, geometry);
+        paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
       }
 
       if (clipped) output.unclip();
@@ -1145,17 +1029,6 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
-      recordHit(
-        hitMap,
-        node,
-        {
-          x,
-          y,
-          width: w,
-          height: h,
-        },
-        clip,
-      );
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
       // squash. The Text's own backgroundColor — including an explicit "" opt-out —
       // is resolved against this inherited bg inside applyOwnStyle
@@ -1222,16 +1095,6 @@ function paintNode(
           }
         }
       }
-      recordVirtualTextHits(
-        hitMap,
-        node,
-        x0 + layout.left,
-        y0 + layout.top,
-        wrapWidth,
-        node.props.wrap,
-        inheritedBg,
-        clip,
-      );
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
       return;
     }
@@ -1245,17 +1108,6 @@ function paintNode(
       const layout = node.yoga.getComputedLayout();
       const x = x0 + layout.left;
       const y = y0 + layout.top;
-      recordHit(
-        hitMap,
-        node,
-        {
-          x,
-          y,
-          width: Math.max(0, Math.floor(layout.width)),
-          height: Math.max(0, Math.floor(layout.height)),
-        },
-        clip,
-      );
       if (geometry?.isObserved(node)) {
         geometry.record(
           node,
@@ -1303,7 +1155,7 @@ function paintNode(
       // — recurse so the child <Text>/<Box> lays out and paints normally, with
       // the transform pushed onto the line-transformers.
       for (const child of node.children) {
-        paintNode(child, output, x, y, next, inheritedBg, hitMap, clip, geometry);
+        paintNode(child, output, x, y, next, inheritedBg, clip, geometry);
       }
       return;
     }

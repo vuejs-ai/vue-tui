@@ -45,6 +45,12 @@ export {
   type ManualSuspensionHost,
   type SuspensionHost,
 } from "./process-suspension.ts";
+export {
+  INTERNAL_TEST_INPUT_HOST,
+  type InternalTestInputHost,
+  type InternalTestMouseEvent,
+  type InternalTestMouseModifiers,
+} from "./io/test-input-host.ts";
 // Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.

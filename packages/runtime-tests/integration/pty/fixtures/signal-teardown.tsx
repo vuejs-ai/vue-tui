@@ -1,6 +1,7 @@
 import process from "node:process";
-import { createApp, Text } from "@vue-tui/runtime";
-import { defineComponent, onMounted } from "vue";
+import { Box, createApp, Text } from "@vue-tui/runtime";
+import { useMouseDrag } from "@vue-tui/runtime/fullscreen";
+import { defineComponent, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
 
 // Mounts a live interactive app in the alternate screen (cursor hidden), then
 // signals readiness on stderr. It deliberately NEVER unmounts/exits on its own
@@ -12,6 +13,9 @@ import { defineComponent, onMounted } from "vue";
 // normal unmount that would emit the same bytes. Mirrors Ink's
 // signalExit(this.unmount) wiring.
 const App = defineComponent(() => {
+  const mouseTarget = shallowRef<ComponentPublicInstance | null>(null);
+  useMouseDrag(mouseTarget, () => {});
+
   onMounted(() => {
     // Emit readiness on stderr so the marker is not swallowed by alt-screen
     // restore / final-frame writes on stdout, which the test asserts against.
@@ -22,7 +26,11 @@ const App = defineComponent(() => {
     }, 50);
   });
 
-  return () => <Text>signal teardown fixture</Text>;
+  return () => (
+    <Box ref={mouseTarget}>
+      <Text>signal teardown fixture</Text>
+    </Box>
+  );
 });
 
 // The unthrottled variant proves signal restoration is independent of commit

@@ -23,10 +23,6 @@ import {
 } from "./io/stdin-ingress.ts";
 import type { NormalizedInputFact } from "./io/normalized-input.ts";
 import {
-  createInternalInputRouteRegistry,
-  type InternalInputRouteSnapshot,
-} from "./io/input-routes.ts";
-import {
   captureInternalInputRoutePlan,
   dispatchInternalInput,
   type InternalInputRouteCandidate,
@@ -35,7 +31,6 @@ import {
   createInternalInputRoutingRuntime,
   type InternalInputTopologySnapshot,
 } from "./io/input-route-runtime.ts";
-import { toMouseInputEvent } from "./io/parse-mouse.ts";
 import {
   classifyLiveInputAvailability,
   createInputAvailabilityRef,
@@ -59,7 +54,19 @@ import { createFrameWriter } from "./io/frame-writer.ts";
 import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
-import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
+import {
+  createFullscreenMouseController,
+  type FullscreenMouseController,
+  type FullscreenMouseInputSnapshot,
+  type PreparedMouseFrame,
+} from "./mouse/controller.ts";
+import { setFullscreenMouseController } from "./mouse/context.ts";
+import {
+  INTERNAL_TEST_INPUT_HOST,
+  createInternalTestMouseFact,
+  type InternalTestInputHost,
+  type InternalTestMouseEvent,
+} from "./io/test-input-host.ts";
 import {
   AppContextKey,
   StdinContextKey,
@@ -313,6 +320,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
+  let mountedMouseController: FullscreenMouseController | null = null;
+  let mountedTestInputHostDetach: (() => void) | null = null;
   let mountedFocusController: InternalFocusController | null = null;
   let mountedCaretController: InternalCaretController | null = null;
   let mountedBoundaryErrorsAreDurable = false;
@@ -506,6 +515,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const appContext = mountedAppContext;
 
     runBestEffort(() => mountedScheduler?.cancel());
+    if (mountedMouseController) {
+      const mouseController = mountedMouseController;
+      mountedMouseController = null;
+      setFullscreenMouseController(appContext!, null);
+      runBestEffort(() => mouseController.beginSilentTeardown());
+      runBestEffort(() => mouseController.dispose());
+    }
+    if (mountedTestInputHostDetach) {
+      const detachTestInputHost = mountedTestInputHostDetach;
+      mountedTestInputHostDetach = null;
+      runBestEffort(detachTestInputHost);
+    }
     if (mountedKittyController) {
       const kittyController = mountedKittyController;
       mountedKittyController = null;
@@ -726,6 +747,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedRestoreConsole = null;
         runBestEffort(restoreConsole);
       }
+      if (mountedMouseController) {
+        runBestEffort(() => mountedMouseController?.beginSilentTeardown());
+      }
+      if (mountedTestInputHostDetach) {
+        const detachTestInputHost = mountedTestInputHostDetach;
+        mountedTestInputHostDetach = null;
+        runBestEffort(detachTestInputHost);
+      }
       if (vueMountStarted) {
         vueMountStarted = false;
         // A non-returning process/signal exit must not invoke application
@@ -744,6 +773,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const caretController = mountedCaretController;
         mountedCaretController = null;
         runBestEffort(() => caretController.dispose());
+      }
+      if (mountedMouseController) {
+        const mouseController = mountedMouseController;
+        mountedMouseController = null;
+        setFullscreenMouseController(appContext, null);
+        runBestEffort(() => mouseController.dispose());
       }
       if (mountedGeometry) {
         const geometry = mountedGeometry;
@@ -990,6 +1025,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const renderObserver = (options as { [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver })[
       INTERNAL_RENDER_OBSERVER
     ];
+    const testInputHost = (options as { [INTERNAL_TEST_INPUT_HOST]?: InternalTestInputHost })[
+      INTERNAL_TEST_INPUT_HOST
+    ];
     const configuredTerminalSizeProbe = (
       options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
     )[INTERNAL_TERMINAL_SIZE_PROBE];
@@ -1067,10 +1105,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const boundedInlineSurface =
       surface.kind === "inline-terminal" && surface.session.output.presentation === "visual";
     const inlineTerminalSurface = surface.kind === "inline-terminal";
-    const targetedMouseInputAvailable =
-      fixedFullscreenSurface &&
-      supportsTerminalMouse() &&
-      Boolean((stdin as { isTTY?: boolean }).isTTY);
+    const mouseProtocolAvailable = supportsTerminalMouse() || testInputHost?.supportsMouse === true;
     const targetedCaretOutputAvailable =
       dynamicUpdatesLive &&
       surface.session.output.destination === "terminal" &&
@@ -1228,6 +1263,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           terminalResumeInProgress = false;
           runSuspensionStep(() => mountedScheduler?.cancel());
           runSuspensionStep(() => mountedKittyController?.suspend(true));
+          runSuspensionStep(() => mountedMouseController?.suspend());
           runSuspensionStep(() => mountedStdinController?.suspend(true));
           releaseOutputSurfaceForSuspension(true);
         });
@@ -1306,6 +1342,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               }
               terminalResumePainting = true;
               try {
+                mountedMouseController?.resume();
                 mountedGeometry?.setSurfaceAvailable(!isScreenReaderEnabled);
                 applyPreparedSurface?.();
               } finally {
@@ -1374,6 +1411,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (!teardownStarted) {
             runLifecycleTransaction(() => {
               runSuspensionStep(() => mountedKittyController?.suspend(true));
+              runSuspensionStep(() => mountedMouseController?.suspend());
               runSuspensionStep(() => mountedStdinController?.suspend(true));
               releaseOutputSurfaceForSuspension(false);
             });
@@ -1604,11 +1642,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
         appCtx: appContext,
+        getMouseController: () => mountedMouseController,
+        mouseProtocolAvailable,
+        onSgrMouseModeChange: testInputHost
+          ? (level) => testInputHost.onMouseReportingChange(level === "hover" ? "drag" : level)
+          : undefined,
         acquireKittyKeyboardDemand() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
       });
       mountedStdinController = stdinController;
+      if (testInputHost) {
+        mountedTestInputHostDetach = testInputHost.bind((event) => {
+          stdinController.injectTestMouse(event);
+        });
+      }
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
       // terminal: attachYoga() allocates a WASM yoga node, and later Vue setup
@@ -1656,9 +1704,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedGeometry = geometry;
         if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
         setInternalGeometryService(appContext, geometry);
+        const mouseController = fixedFullscreenSurface
+          ? createFullscreenMouseController({
+              stdin: stdinController,
+              geometry,
+              protocolAvailable: mouseProtocolAvailable,
+              requestPaint: () => scheduledCommit(),
+              reportError(error) {
+                appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
+              },
+            })
+          : null;
+        mountedMouseController = mouseController;
+        setFullscreenMouseController(appContext, mouseController);
         const renderedTargets = createRenderedTargetController(tuiRoot, [
           focusController,
           geometry,
+          ...(mouseController ? [mouseController] : []),
         ]);
         mountedRenderedTargets = renderedTargets;
         setRenderedTargetController(appContext, renderedTargets);
@@ -1992,13 +2054,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // render-to-string.ts; static output is handled separately by commit().
       function renderFrame(
         width: number,
-        hitMap?: MouseHitMapEntry[],
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
       ): string {
         if (!isScreenReaderEnabled) {
           const output = paint(tuiRoot, {
-            hitMap,
             viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
             geometry,
           });
@@ -2018,6 +2078,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         let geometryFrame: InternalGeometryPaintFrame | undefined;
         let caretFrame: InternalPreparedCaretFrame | undefined;
+        let mouseFrame: PreparedMouseFrame | undefined;
         try {
           const start = onRender ? performance.now() : 0;
           mountedRenderedTargets?.reconcile();
@@ -2044,7 +2105,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             );
             try {
               geometryFrame = mountedGeometry?.beginFrame();
-              const frame = renderFrame(w, undefined, undefined, geometryFrame);
+              const frame = renderFrame(w, undefined, geometryFrame);
               renderObserver?.onCommit?.({
                 dynamic: frame,
                 staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2097,7 +2158,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 Yoga.DIRECTION_LTR,
               );
             }
-            const hitMap = renderSession.session.capabilities.elementHitTesting ? [] : undefined;
             const computedRootHeight = Math.max(
               0,
               Math.floor(tuiRoot.yoga.getComputedLayout().height),
@@ -2110,7 +2170,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               : undefined;
             const paintViewportRows = exactViewportRows ?? inlineViewportRows;
             geometryFrame = isScreenReaderEnabled ? undefined : mountedGeometry?.beginFrame();
-            const frame = renderFrame(w, hitMap, paintViewportRows, geometryFrame);
+            const frame = renderFrame(w, paintViewportRows, geometryFrame);
+            if (geometryFrame && mountedMouseController) {
+              mouseFrame = mountedMouseController.prepareFrame(geometryFrame);
+            }
             if (geometryFrame && mountedCaretController) {
               caretFrame = mountedCaretController.prepareFrame(
                 geometryFrame,
@@ -2124,7 +2187,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               staticOutput: hasStaticOutput ? staticOutput : "",
               phase: teardownStarted ? "teardown" : "update",
             });
-            mouseController.updateHitMap(hitMap ?? []);
             const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
             if (fixedFullscreenSurface) {
@@ -2136,6 +2198,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 caretFrame!,
               );
               geometryFrame?.commit();
+              mouseFrame?.accept();
               caretFrame?.accept();
               return;
             }
@@ -2213,6 +2276,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             setWriterCaretPosition(caretFrame.previousPosition);
             caretFrame.discard();
           }
+          mouseFrame?.discard();
           if (
             pendingBoundaryError !== undefined &&
             pendingBoundaryFrameReady === pendingBoundaryError &&
@@ -2226,6 +2290,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           throw error;
         } finally {
           caretFrame?.discard();
+          mouseFrame?.discard();
           geometryFrame?.discard();
           leaveLifecycleTransaction();
         }
@@ -2248,12 +2313,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         immediate: unthrottled,
         throttleMs: renderThrottleMs,
       });
-      const mouseController = createMouseController({
-        stdin: stdinController,
-        fullscreen: targetedMouseInputAvailable,
-        now: scheduler.now,
-      });
-      appContext.internal_mouse = mouseController;
       mountedScheduler = scheduler;
       mountedCommit = commit;
       prepareResumeSurface = () => commit;
@@ -2667,6 +2726,8 @@ interface StdinController extends StdinContext {
   deactivateSemanticInput: () => void;
   /** Adjust the private bracketed-paste reference count transactionally. */
   setBracketedPasteMode: (enabled: boolean) => void;
+  /** Deterministic host handoff after parser normalization, scoped to this app. */
+  injectTestMouse: (event: InternalTestMouseEvent) => void;
 }
 
 interface RawModeState {
@@ -2712,6 +2773,10 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
 interface CreateStdinControllerOptions {
   appCtx: AppContext;
   acquireKittyKeyboardDemand: () => () => void;
+  getMouseController: () => FullscreenMouseController | null;
+  /** The mount's selected real or deterministic xterm-compatible SGR profile. */
+  mouseProtocolAvailable: boolean;
+  onSgrMouseModeChange?: (level: SgrMouseMode | undefined) => void;
 }
 
 function createStdinController(
@@ -2720,7 +2785,6 @@ function createStdinController(
 ): StdinController {
   const { appCtx } = opts;
   const inputAvailability = createInputAvailabilityRef(classifyLiveInputAvailability(stdin));
-  const inputRoutes = createInternalInputRouteRegistry();
   let controller!: StdinController;
   const inputRouting = createInternalInputRoutingRuntime(
     [{ id: "framework:ctrl-c", handle: runCtrlCDefault }],
@@ -2753,9 +2817,14 @@ function createStdinController(
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
     readonly kind: "routes";
-    readonly routes: InternalInputRouteSnapshot;
     readonly topology: InternalInputTopologySnapshot;
     readonly sgrMouseMode: SgrMouseMode | undefined;
+    readonly mouse:
+      | {
+          readonly controller: FullscreenMouseController;
+          readonly input: FullscreenMouseInputSnapshot;
+        }
+      | undefined;
     /** Whether this app had a logical managed-input owner when the fact began. */
     readonly managedInputActive: boolean;
   }
@@ -2785,6 +2854,7 @@ function createStdinController(
   let bracketedPasteSyncRequested = false;
   const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
   let activeSgrMouseMode: SgrMouseMode | undefined;
+  let lastReportedSgrMouseMode: SgrMouseMode | undefined;
   let sgrMousePhysicalUncertain = false;
   let reconcilingSgrMouse = false;
   let sgrMouseReconcileRequested = false;
@@ -2823,7 +2893,7 @@ function createStdinController(
   }
 
   function canUseSgrMouseMode(): boolean {
-    return !disposed && !suspended && canWriteTerminalMode() && supportsTerminalMouse();
+    return !disposed && !suspended && canWriteTerminalMode() && opts.mouseProtocolAvailable;
   }
 
   function writeTerminalMode(data: string, sync = false): boolean {
@@ -3055,6 +3125,14 @@ function createStdinController(
     } finally {
       reconcilingSgrMouse = false;
     }
+    if (
+      !hasError &&
+      !sgrMousePhysicalUncertain &&
+      activeSgrMouseMode !== lastReportedSgrMouseMode
+    ) {
+      lastReportedSgrMouseMode = activeSgrMouseMode;
+      opts.onSgrMouseModeChange?.(activeSgrMouseMode);
+    }
     if (hasError) throw firstError;
   }
 
@@ -3139,11 +3217,17 @@ function createStdinController(
   }
 
   function snapshotCurrentApplicationInput(): ApplicationInputSnapshot {
+    const mouseController = opts.getMouseController();
     return Object.freeze({
       kind: "routes",
-      routes: inputRoutes.snapshot(),
       topology: inputRouting.capture(),
       sgrMouseMode: activeSgrMouseMode,
+      mouse: mouseController
+        ? Object.freeze({
+            controller: mouseController,
+            input: mouseController.captureInputSnapshot(),
+          })
+        : undefined,
       managedInputActive: publishedSemanticRefs > 0 || localRefs > semanticPhysicalRefs,
     });
   }
@@ -3217,17 +3301,15 @@ function createStdinController(
   function deliverCapturedMouse(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
     if (snapshot.sgrMouseMode && fact.kind === "pointer") {
       const rawMouse = fact.pointer.event;
-      const mouse = rawMouse ? toMouseInputEvent(rawMouse) : undefined;
-      // Freeze both pointer recipient groups before either callback runs. An
-      // internal handler may reconfigure routes, but that affects only the next
-      // physical event, not the public half of this one.
-      const internalMouseRecipients = inputRoutes.resolve(snapshot.routes, "internal_mouse");
-      const mouseRecipients = inputRoutes.resolve(snapshot.routes, "mouse");
-      if (rawMouse) {
-        for (const listener of internalMouseRecipients) listener(rawMouse);
-      }
-      if (mouse) {
-        for (const listener of mouseRecipients) listener(mouse);
+      const mouse = snapshot.mouse;
+      if (
+        rawMouse &&
+        mouse &&
+        (rawMouse.type !== "drag" ||
+          snapshot.sgrMouseMode === "drag" ||
+          snapshot.sgrMouseMode === "hover")
+      ) {
+        mouse.controller.handleInput(rawMouse, mouse.input);
       }
       return true;
     }
@@ -3418,8 +3500,10 @@ function createStdinController(
     stdin,
     isRawModeSupported: appCtx.isRawModeSupported,
     inputAvailability,
-    internal_routes: inputRoutes,
     internal_inputRouting: inputRouting,
+    injectTestMouse(event) {
+      acceptSharedInput(createInternalTestMouseFact(event), captureApplicationInputSnapshot());
+    },
     acquireRawMode() {
       if (disposed) {
         throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
@@ -3747,7 +3831,6 @@ function createStdinController(
       // A hostile stream may throw while removing the final data listener.
       // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
       runTerminalCleanup(() => sharedSubscription.dispose());
-      inputRoutes.clear();
       inputRouting.clear();
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       runTerminalCleanup(() => reconcileSgrMouseMode(sync));

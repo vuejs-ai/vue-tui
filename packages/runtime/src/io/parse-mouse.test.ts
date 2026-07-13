@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { parseMouseInput, parseSgrMouseInput } from "./parse-mouse.ts";
+import { parseSgrMouseInput } from "./parse-mouse.ts";
 
 describe("parseSgrMouseInput", () => {
   test("decodes button press, release, and drag events", () => {
@@ -58,19 +58,5 @@ describe("parseSgrMouseInput", () => {
     expect(parseSgrMouseInput("\x1b[<3;1;2M")).toBeUndefined();
     expect(parseSgrMouseInput("\x1b[<35;1;2M")).toBeUndefined();
     expect(parseSgrMouseInput("\x1b[<3;1;2m")).toBeUndefined();
-  });
-
-  test("keeps the public useMouseInput parser wheel-only and vertical-only", () => {
-    expect(parseMouseInput("\x1b[<64;1;2M")).toEqual({
-      type: "wheel",
-      direction: "up",
-      x: 1,
-      y: 2,
-      shift: false,
-      meta: false,
-      ctrl: false,
-    });
-    expect(parseMouseInput("\x1b[<0;1;2M")).toBeUndefined();
-    expect(parseMouseInput("\x1b[<66;1;2M")).toBeUndefined();
   });
 });

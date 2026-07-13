@@ -17,11 +17,12 @@ import {
   useCaret,
   useElementGeometry,
   useFocus,
-  useDraggable,
   useInput,
   useStderr,
   useStdout,
 } from "@vue-tui/runtime";
+import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
+import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { inputText } from "./input-event.js";
 
 type Scenario =
@@ -36,12 +37,16 @@ type Scenario =
   | "horizontal-wide"
   | "horizontal-transform"
   | "target-lifetime"
+  | "targeted-mouse"
   | "screen-reader";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
 const autoExitTargetLifetime = process.argv[4] === "auto-exit";
 const label = shallowRef("BUTTON");
 const targetPhase = shallowRef<"none" | "first" | "second">("none");
+const targetedTargetsVisible = shallowRef(false);
+const targetedDragActive = shallowRef(false);
+const targetedConsumeClick = shallowRef(false);
 
 const LifetimeTarget = defineComponent(() => {
   return () => {
@@ -79,6 +84,18 @@ function markTargetPhase(): Promise<void> {
     });
 }
 
+function markTargetedState(state: string): Promise<void> {
+  return nextTick()
+    .then(() => nextTick())
+    .then(() => {
+      process.stdout.write(`\x1b]0;__TARGETED__:${state}\x07`);
+    });
+}
+
+function markTargetedEvent(event: string): void {
+  process.stdout.write(`\x1b]0;__MOUSE__:${event}\x07`);
+}
+
 const App = defineComponent(() => {
   const { exit } = useApp();
   const caretTarget = shallowRef<ComponentPublicInstance | null>(null);
@@ -86,6 +103,14 @@ const App = defineComponent(() => {
   useCaret(caretTarget, { focus: caretFocus, position: { x: 3, y: 0 } });
   const { write } = useStdout();
   const { write: writeError } = useStderr();
+  const clickTarget = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedParent = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedChild = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedWheelTarget = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedDivider = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedClippedTarget = shallowRef<ComponentPublicInstance | null>(null);
+  const targetedScrollBox = shallowRef<ScrollBoxExpose | null>(null);
+  const targetedChildFocus = useFocus(targetedChild);
   const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
   const { geometry: targetGeometry } = useElementGeometry(target);
   const targetMetrics = computed(() => {
@@ -104,11 +129,45 @@ const App = defineComponent(() => {
     return { width: 0, height: 0, measured: false };
   });
   let dragStarts = 0;
-  const drag = useDraggable(target, {
-    onStart() {
-      dragStarts += 1;
-    },
+  const drag = useMouseDrag(target, (event) => {
+    if (event.phase === "start") dragStarts += 1;
   });
+  useMouseEvent(clickTarget, "click", () => {
+    exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked");
+    return "consume";
+  });
+  useMouseEvent(targetedChild, "click", (event) => {
+    targetedChildFocus.focus();
+    markTargetedEvent(
+      `click:child:${event.delivery}:focused=${String(targetedChildFocus.isFocused.value)}:consume=${String(targetedConsumeClick.value)}`,
+    );
+    return targetedConsumeClick.value ? "consume" : "continue";
+  });
+  useMouseEvent(targetedParent, "click", (event) => {
+    markTargetedEvent(`click:parent:${event.delivery}`);
+    return "continue";
+  });
+  useMouseEvent(targetedWheelTarget, "wheel", (event) => {
+    targetedScrollBox.value?.scrollByLines(event.delta.y);
+    void markTargetedState(`wheel:${event.delivery}:${event.delta.x},${event.delta.y}`);
+    return "consume";
+  });
+  useMouseEvent(targetedClippedTarget, "click", (event) => {
+    markTargetedEvent(`click:clipped:${event.delivery}:${event.local.x},${event.local.y}`);
+    return "consume";
+  });
+
+  const registerDividerDrag = (name: "a" | "b") =>
+    useMouseDrag(
+      targetedDivider,
+      (event) => {
+        const local = event.local === null ? "outside" : `${event.local.x},${event.local.y}`;
+        markTargetedEvent(`drag:${name}:${event.phase}:${local}`);
+      },
+      { isActive: () => targetedDragActive.value },
+    );
+  registerDividerDrag("a");
+  registerDividerDrag("b");
 
   const renderSurface = (content: VNodeChild) => (
     <Box ref={caretTarget} flexDirection="column">
@@ -118,6 +177,31 @@ const App = defineComponent(() => {
 
   useInput((event) => {
     const input = inputText(event);
+    if (scenario === "targeted-mouse") {
+      if (input === "a") {
+        targetedTargetsVisible.value = true;
+        void markTargetedState("button");
+      } else if (input === "c") {
+        targetedConsumeClick.value = true;
+        void markTargetedState("consume");
+      } else if (input === "d") {
+        targetedDragActive.value = true;
+        void markTargetedState("drag");
+      } else if (input === "g") {
+        targetedDragActive.value = false;
+        void markTargetedState("button-after-drag");
+      } else if (input === "x") {
+        targetedTargetsVisible.value = false;
+        void markTargetedState("none");
+      } else if (input === "p") {
+        markTargetedEvent("probe");
+      } else if (input === "q") {
+        exit("targeted-mouse");
+      } else {
+        return "continue";
+      }
+      return "consume";
+    }
     if (scenario === "target-lifetime") {
       let exitAfterTransition = false;
       if (input === "1") targetPhase.value = "first";
@@ -182,6 +266,43 @@ const App = defineComponent(() => {
   });
 
   return () => {
+    if (scenario === "targeted-mouse") {
+      return renderSurface(
+        <Box flexDirection="column">
+          <Text>
+            targets={targetedTargetsVisible.value ? "visible" : "hidden"} focused=
+            {String(targetedChildFocus.isFocused.value)}
+          </Text>
+          {targetedTargetsVisible.value ? (
+            <>
+              <Box ref={targetedParent} width={12} height={1} flexShrink={0}>
+                <Box ref={targetedChild} width={5} height={1} flexShrink={0}>
+                  <Text>CLICK</Text>
+                </Box>
+              </Box>
+              <Box ref={targetedWheelTarget} width={8} height={2} flexShrink={0} overflow="hidden">
+                <ScrollBox ref={targetedScrollBox}>
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <Box key={index} height={1} flexShrink={0}>
+                      <Text>ITEM{index}</Text>
+                    </Box>
+                  ))}
+                </ScrollBox>
+              </Box>
+              <Box ref={targetedDivider} width={5} height={1} flexShrink={0}>
+                <Text>-----</Text>
+              </Box>
+              <Box width={3} height={1} flexShrink={0} overflow="hidden">
+                <Box ref={targetedClippedTarget} width={8} height={1} flexShrink={0}>
+                  <Text>CLIPPED</Text>
+                </Box>
+              </Box>
+            </>
+          ) : null}
+        </Box>,
+      );
+    }
+
     if (scenario === "target-lifetime") {
       return renderSurface(
         <Box flexDirection="column">
@@ -197,7 +318,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-transform") {
       return renderSurface(
-        <Box width={1} height={1} flexShrink={0} onClick={() => exit("clicked")}>
+        <Box ref={clickTarget} width={1} height={1} flexShrink={0}>
           {{
             default: () => (
               <Transform transform={() => "Y".repeat(101)}>
@@ -211,7 +332,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-wide") {
       return renderSurface(
-        <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
+        <Box ref={clickTarget} width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => `${"X".repeat(99)}你` }}</Text> }}
         </Box>,
       );
@@ -219,7 +340,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-left-wide") {
       return renderSurface(
-        <Box width={4} height={1} overflow="hidden" onClick={() => exit("clicked")}>
+        <Box ref={clickTarget} width={4} height={1} overflow="hidden">
           <Box marginLeft={-1} flexShrink={0}>
             <Text>中x</Text>
           </Box>
@@ -229,7 +350,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-overflow") {
       return renderSurface(
-        <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
+        <Box ref={clickTarget} width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => "X".repeat(101) }}</Text> }}
         </Box>,
       );
@@ -243,9 +364,9 @@ const App = defineComponent(() => {
               Array.from({ length: 10 }, (_, index) => (
                 <Box
                   key={index}
+                  ref={index === 0 ? clickTarget : undefined}
                   height={1}
                   flexShrink={0}
-                  onClick={index === 0 ? () => exit("clicked") : undefined}
                 >
                   {{ default: () => <Text>{{ default: () => `LINE${index}` }}</Text> }}
                 </Box>
@@ -262,11 +383,7 @@ const App = defineComponent(() => {
             {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
           </Static>
         ) : null}
-        <Box
-          width={7}
-          height={1}
-          onClick={() => exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked")}
-        >
+        <Box ref={clickTarget} width={7} height={1}>
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
       </>,

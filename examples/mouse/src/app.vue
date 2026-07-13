@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { shallowRef } from "vue";
+import { shallowRef, type ComponentPublicInstance } from "vue";
+import { Box, Text, useInput } from "@vue-tui/runtime";
 import {
-  Box,
-  Text,
-  useDraggable,
-  useInput,
-  type TuiMouseEvent,
-  type TuiWheelEvent,
-} from "@vue-tui/runtime";
+  useMouseDrag,
+  useMouseEvent,
+  type TuiMouseClickEvent,
+  type TuiMouseDragEvent,
+  type TuiMouseWheelEvent,
+} from "@vue-tui/runtime/fullscreen";
 
 const clicks = shallowRef(0);
 const lastClick = shallowRef("none");
 const lastWheel = shallowRef("none");
-const dragRef = shallowRef<InstanceType<typeof Box> | null>(null);
+const panelRef = shallowRef<ComponentPublicInstance | null>(null);
+const dragRef = shallowRef<ComponentPublicInstance | null>(null);
+const dragLeft = shallowRef(2);
+const dragTop = shallowRef(7);
 
 useInput((event) => {
   if (event.kind === "text" && event.text === "q") {
@@ -22,18 +25,26 @@ useInput((event) => {
   return "continue";
 });
 
-const { x: dragLeft, y: dragTop } = useDraggable(dragRef, {
-  initialValue: { x: 2, y: 7 },
-});
-
-function onPanelClick(event: TuiMouseEvent) {
+function onPanelClick(event: TuiMouseClickEvent) {
   clicks.value += 1;
-  lastClick.value = `${event.button} @ ${event.offsetX},${event.offsetY} (${event.detail})`;
+  lastClick.value = `${event.button} @ ${event.local.x},${event.local.y}`;
+  return "consume" as const;
 }
 
-function onPanelWheel(event: TuiWheelEvent) {
-  lastWheel.value = `${event.deltaX},${event.deltaY} @ ${event.offsetX},${event.offsetY}`;
+function onPanelWheel(event: TuiMouseWheelEvent) {
+  lastWheel.value = `${event.delta.x},${event.delta.y} @ ${event.local.x},${event.local.y}`;
+  return "consume" as const;
 }
+
+function onDrag(event: TuiMouseDragEvent) {
+  if (event.phase === "cancel") return;
+  dragLeft.value += event.movement.x;
+  dragTop.value += event.movement.y;
+}
+
+useMouseEvent(panelRef, "click", onPanelClick);
+useMouseEvent(panelRef, "wheel", onPanelWheel);
+useMouseDrag(dragRef, onDrag);
 </script>
 
 <template>
@@ -48,13 +59,12 @@ function onPanelWheel(event: TuiWheelEvent) {
     </Box>
 
     <Box
+      ref="panelRef"
       :marginTop="1"
       :width="50"
       :height="10"
       borderStyle="single"
       borderColor="gray"
-      @click="onPanelClick"
-      @wheel="onPanelWheel"
     >
       <Box
         ref="dragRef"

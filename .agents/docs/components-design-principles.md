@@ -51,7 +51,7 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 
 Otherwise it is a component. The clean illustration: **targeted mouse input is runtime work** —
 input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime. The selected
-F6 proposal supplies `useMouseEvent()` and `useMouseDrag()` from the Fullscreen semantic subpath;
+implemented F6 contract supplies `useMouseEvent()` and `useMouseDrag()` from the Fullscreen semantic subpath;
 see [targeted-pointer.md](./targeted-pointer.md). Anything driven by existing keyboard input plus
 measured layout is a pure composition.
 (`overflow:"hidden"`

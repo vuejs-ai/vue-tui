@@ -13,15 +13,25 @@ import {
   type StartKittyQueryResponseDetection,
 } from "@vue-tui/runtime/internal";
 import {
+  Box,
+  Text,
   createApp,
   useInput,
-  useMouseInput,
   type InputHandler,
   type KittyKeyboardOptions,
   type TuiApp,
   type TuiInputEvent,
 } from "@vue-tui/runtime";
-import { defineComponent, h, nextTick, onErrorCaptured, shallowRef, type ShallowRef } from "vue";
+import { useMouseEvent, type TuiMouseWheelEvent } from "@vue-tui/runtime/fullscreen";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onErrorCaptured,
+  shallowRef,
+  type ComponentPublicInstance,
+  type ShallowRef,
+} from "vue";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./lifecycle/test-streams.ts";
 
 const textEncoder = new TextEncoder();
@@ -71,6 +81,12 @@ function collectInput(values: string[]): InputHandler {
     values.push(inputLabel(event));
     return "continue";
   };
+}
+
+function wheelDirection(event: TuiMouseWheelEvent): "up" | "down" | "left" | "right" {
+  if (event.delta.y < 0) return "up";
+  if (event.delta.y > 0) return "down";
+  return event.delta.x < 0 ? "left" : "right";
 }
 
 function collectNonPasteInput(values: string[]): InputHandler {
@@ -1435,6 +1451,42 @@ type WritableTestStdin = NodeJS.ReadStream & {
 
 const flushInput = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+async function flushRenderedTarget(): Promise<void> {
+  await nextTick();
+  await nextTick();
+  await flushInput();
+  await nextTick();
+  await flushInput();
+}
+
+async function waitForWrite(writes: readonly string[], expected: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (writes.join("").includes(expected)) return;
+    await nextTick();
+    await flushInput();
+  }
+  throw new Error(`Timed out waiting for terminal write ${JSON.stringify(expected)}`);
+}
+
+function terminalWriteCount(writes: readonly string[], expected: string): number {
+  return writes.join("").split(expected).length - 1;
+}
+
+async function waitForWriteCount(
+  writes: readonly string[],
+  expected: string,
+  count: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (terminalWriteCount(writes, expected) >= count) return;
+    await nextTick();
+    await flushInput();
+  }
+  throw new Error(
+    `Timed out waiting for terminal write ${JSON.stringify(expected)} to occur ${count} times`,
+  );
+}
+
 function mountInputAppOnStreams({
   stdin,
   stdout,
@@ -2314,30 +2366,134 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
-  const terminalModeCases = [
+  interface TerminalModeCase {
+    readonly label: string;
+    readonly enable: string;
+    readonly disable: string;
+    readonly capturesDisableError: boolean;
+    readonly mode: "inline" | "fullscreen";
+    readonly install: (
+      active: ShallowRef<boolean>,
+      target: ShallowRef<ComponentPublicInstance | null>,
+    ) => void;
+  }
+
+  const bracketedPasteModeCase: TerminalModeCase = {
+    label: "bracketed paste",
+    enable: "\x1b[?2004h",
+    disable: "\x1b[?2004l",
+    capturesDisableError: false,
+    mode: "inline",
+    install: (active: ShallowRef<boolean>) => {
+      useInput(observeInput, { isActive: active });
+    },
+  };
+  const sgrMouseModeCase: TerminalModeCase = {
+    label: "SGR mouse",
+    enable: "\x1b[?1000h\x1b[?1006h",
+    disable: "\x1b[?1000l\x1b[?1006l",
+    capturesDisableError: true,
+    mode: "fullscreen",
+    install: (active, target) => {
+      useMouseEvent(target, "wheel", () => "continue", { isActive: active });
+    },
+  };
+  const terminalModeCases: readonly TerminalModeCase[] = [bracketedPasteModeCase, sgrMouseModeCase];
+  const enableTerminalModeCases: readonly TerminalModeCase[] = [bracketedPasteModeCase];
+  const suspensionModeCases: readonly TerminalModeCase[] = [
+    bracketedPasteModeCase,
+    sgrMouseModeCase,
+  ];
+
+  interface TargetedMouseLifecycleContext {
+    readonly active: ShallowRef<boolean>;
+    readonly visible: ShallowRef<boolean>;
+    readonly writes: readonly string[];
+    readonly input: WritableTestStdin;
+    readonly stdin: NodeJS.ReadStream;
+    readonly refBalance: () => number;
+  }
+
+  const targetedMouseLifecycleCases: readonly {
+    readonly label: string;
+    readonly run: (context: TargetedMouseLifecycleContext) => Promise<void>;
+  }[] = [
     {
-      label: "bracketed paste",
-      enable: "\x1b[?2004h",
-      disable: "\x1b[?2004l",
-      capturesDisableError: false,
-      install: (active: ShallowRef<boolean>) => {
-        useInput(observeInput, { isActive: active });
+      label: "targeted SGR mouse demand follows accepted activation and deactivation",
+      async run({ active, writes, input, stdin, refBalance }) {
+        expect(writes.join("")).not.toContain(sgrMouseModeCase.enable);
+        expect({ isRaw: input.isRaw, refBalance: refBalance() }).toEqual({
+          isRaw: false,
+          refBalance: 0,
+        });
+
+        active.value = true;
+        await waitForWriteCount(writes, sgrMouseModeCase.enable, 1);
+        expect({
+          isRaw: input.isRaw,
+          refBalance: refBalance(),
+          data: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: true, refBalance: 1, data: 1 });
+
+        active.value = false;
+        await waitForWriteCount(writes, sgrMouseModeCase.disable, 1);
+        expect({
+          isRaw: input.isRaw,
+          refBalance: refBalance(),
+          data: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: false, refBalance: 0, data: 0 });
       },
     },
     {
-      label: "SGR mouse",
-      enable: "\x1b[?1000h\x1b[?1006h",
-      disable: "\x1b[?1000l\x1b[?1006l",
-      capturesDisableError: true,
-      install: (active: ShallowRef<boolean>) => {
-        useMouseInput(() => {}, { isActive: active });
+      label: "targeted SGR mouse demand reacquires after an accepted deactivation",
+      async run({ active, writes, input, stdin, refBalance }) {
+        active.value = true;
+        await waitForWriteCount(writes, sgrMouseModeCase.enable, 1);
+        active.value = false;
+        await waitForWriteCount(writes, sgrMouseModeCase.disable, 1);
+        active.value = true;
+        await waitForWriteCount(writes, sgrMouseModeCase.enable, 2);
+
+        expect(
+          writes.filter(
+            (value) => value === sgrMouseModeCase.enable || value === sgrMouseModeCase.disable,
+          ),
+        ).toEqual([sgrMouseModeCase.enable, sgrMouseModeCase.disable, sgrMouseModeCase.enable]);
+        expect({
+          isRaw: input.isRaw,
+          refBalance: refBalance(),
+          data: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: true, refBalance: 1, data: 1 });
+      },
+    },
+    {
+      label: "targeted SGR mouse demand releases and reacquires with its visible target",
+      async run({ active, visible, writes, input, stdin, refBalance }) {
+        active.value = true;
+        await waitForWriteCount(writes, sgrMouseModeCase.enable, 1);
+
+        visible.value = false;
+        await waitForWriteCount(writes, sgrMouseModeCase.disable, 1);
+        expect({
+          isRaw: input.isRaw,
+          refBalance: refBalance(),
+          data: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: false, refBalance: 0, data: 0 });
+
+        visible.value = true;
+        await waitForWriteCount(writes, sgrMouseModeCase.enable, 2);
+        expect({
+          isRaw: input.isRaw,
+          refBalance: refBalance(),
+          data: stdin.listenerCount("data"),
+        }).toEqual({ isRaw: true, refBalance: 1, data: 1 });
       },
     },
   ];
 
-  test.each(terminalModeCases)(
+  test.each(enableTerminalModeCases)(
     "$label enable restores the terminal when stdout throws after the write",
-    async ({ enable, disable, install }) => {
+    async ({ enable, disable, install, mode }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
@@ -2372,8 +2528,9 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         return result;
       }) as NodeJS.WriteStream["write"];
       const Child = defineComponent(() => {
-        install(active);
-        return () => h("tui-text", null, "x");
+        const target = shallowRef<ComponentPublicInstance | null>(null);
+        install(active, target);
+        return () => h(Text, { ref: target }, () => "x");
       });
       const App = defineComponent(() => {
         onErrorCaptured((error) => {
@@ -2390,12 +2547,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
+          mode,
           kittyKeyboard: { mode: "disabled" },
         });
+        await waitForWrite(writes, "x");
         failEnable = true;
         active.value = true;
-        await nextTick();
-        await flushInput();
+        await flushRenderedTarget();
 
         expect(errors).toHaveLength(1);
         expect(writes.filter((value) => value === enable || value === disable)).toEqual([
@@ -2419,14 +2577,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
   test.each(terminalModeCases)(
     "$label disable releases raw input even when stdout throws after the write",
-    async ({ enable, disable, capturesDisableError, install }) => {
+    async ({ enable, disable, capturesDisableError, install, mode }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
       const input = stdin as WritableTestStdin;
       const stdout = makeFakeWritable();
       const writes = captureWrites(stdout);
-      const active = shallowRef(true);
+      const active = shallowRef(false);
       const errors: unknown[] = [];
       let refBalance = 0;
       let failDisable = false;
@@ -2454,8 +2612,9 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         return result;
       }) as NodeJS.WriteStream["write"];
       const Child = defineComponent(() => {
-        install(active);
-        return () => h("tui-text", null, "x");
+        const target = shallowRef<ComponentPublicInstance | null>(null);
+        install(active, target);
+        return () => h(Text, { ref: target }, () => "x");
       });
       const App = defineComponent(() => {
         onErrorCaptured((error) => {
@@ -2472,12 +2631,15 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
+          mode,
           kittyKeyboard: { mode: "disabled" },
         });
+        await waitForWrite(writes, "x");
+        active.value = true;
+        await waitForWrite(writes, enable);
         failDisable = true;
         active.value = false;
-        await nextTick();
-        await flushInput();
+        await flushRenderedTarget();
 
         expect(errors).toHaveLength(capturesDisableError ? 1 : 0);
         expect(writes.filter((value) => value === enable || value === disable)).toEqual([
@@ -2502,14 +2664,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
   test.each(terminalModeCases)(
     "$label reconciles a re-entrant final active state before surfacing a disable error",
-    async ({ enable, disable, capturesDisableError, install }) => {
+    async ({ enable, disable, capturesDisableError, install, mode }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
       const input = stdin as WritableTestStdin;
       const stdout = makeFakeWritable();
       const writes = captureWrites(stdout);
-      const active = shallowRef(true);
+      const active = shallowRef(false);
       const errors: unknown[] = [];
       let refBalance = 0;
       let reactivateAndFail = false;
@@ -2538,8 +2700,9 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         return result;
       }) as NodeJS.WriteStream["write"];
       const Child = defineComponent(() => {
-        install(active);
-        return () => h("tui-text", null, "x");
+        const target = shallowRef<ComponentPublicInstance | null>(null);
+        install(active, target);
+        return () => h(Text, { ref: target }, () => "x");
       });
       const App = defineComponent(() => {
         onErrorCaptured((error) => {
@@ -2556,12 +2719,15 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
+          mode,
           kittyKeyboard: { mode: "disabled" },
         });
+        await waitForWrite(writes, "x");
+        active.value = true;
+        await waitForWrite(writes, enable);
         reactivateAndFail = true;
         active.value = false;
-        await nextTick();
-        await flushInput();
+        await flushRenderedTarget();
 
         expect(errors).toHaveLength(capturesDisableError ? 1 : 0);
         expect(active.value).toBe(true);
@@ -2582,6 +2748,66 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       }
     },
   );
+
+  test.each(targetedMouseLifecycleCases)("$label", async ({ run }) => {
+    const previousTerm = process.env["TERM"];
+    process.env["TERM"] = "xterm-256color";
+    const { stream: stdin } = makeFakeStdin();
+    const input = stdin as WritableTestStdin;
+    const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    const active = shallowRef(false);
+    const visible = shallowRef(true);
+    let refBalance = 0;
+    input.isRaw = false;
+    input.setRawMode = (mode: boolean) => {
+      input.isRaw = mode;
+      return stdin;
+    };
+    stdin.ref = () => {
+      refBalance++;
+      return stdin;
+    };
+    stdin.unref = () => {
+      refBalance--;
+      return stdin;
+    };
+    const Target = defineComponent(() => {
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      useMouseEvent(target, "wheel", () => "continue", { isActive: active });
+      return () => h(Text, { ref: target }, () => "target");
+    });
+    const App = defineComponent(
+      () => () => (visible.value ? h(Target) : h(Text, null, () => "idle")),
+    );
+    const app = createApp(App);
+    try {
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+        mode: "fullscreen",
+        kittyKeyboard: { mode: "disabled" },
+      });
+      await waitForWrite(writes, "target");
+      await run({
+        active,
+        visible,
+        writes,
+        input,
+        stdin,
+        refBalance: () => refBalance,
+      });
+    } finally {
+      app.unmount();
+      if (previousTerm === undefined) delete process.env["TERM"];
+      else process.env["TERM"] = previousTerm;
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });
 
   test.each([
     {
@@ -2660,16 +2886,17 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     }
   });
 
-  test.each(terminalModeCases)(
+  test.each(suspensionModeCases)(
     "$label suspension retries a one-shot restore failure before returning",
-    async ({ disable, install }) => {
+    async ({ enable, disable, install, mode }) => {
       const previousTerm = process.env["TERM"];
       process.env["TERM"] = "xterm-256color";
       const { stream: stdin } = makeFakeStdin();
       const input = stdin as WritableTestStdin;
       const stdout = makeFakeWritable();
-      const active = shallowRef(true);
+      const active = shallowRef(false);
       const suspensionHost = createManualSuspensionHost();
+      const writes = captureWrites(stdout);
       let refBalance = 0;
       let failDisable = false;
       let disableAttempts = 0;
@@ -2699,8 +2926,9 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
       }) as NodeJS.WriteStream["write"];
       const App = defineComponent(() => {
-        install(active);
-        return () => h("tui-text", null, "x");
+        const target = shallowRef<ComponentPublicInstance | null>(null);
+        install(active, target);
+        return () => h(Text, { ref: target }, () => "x");
       });
       const app = createApp(App);
       try {
@@ -2710,9 +2938,13 @@ describe("kitty query-response - adversarial ingress ordering", () => {
           patchConsole: false,
           liveUpdates: true,
           maxFps: 0,
+          mode,
           kittyKeyboard: { mode: "disabled" },
           [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         } as Parameters<TuiApp["mount"]>[0]);
+        await waitForWrite(writes, "x");
+        active.value = true;
+        await waitForWrite(writes, enable);
         failDisable = true;
         await suspensionHost.suspend();
 
@@ -2829,13 +3061,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     stdout.destroy();
   });
 
-  test("listener detach failure cannot skip paste, mouse, or raw cleanup", () => {
+  test("listener detach failure cannot skip paste, mouse, or raw cleanup", async () => {
     const previousTerm = process.env["TERM"];
     process.env["TERM"] = "xterm-256color";
     const { stream: stdin } = makeFakeStdin();
     const input = stdin as WritableTestStdin;
     const stdout = makeFakeWritable();
     const writes = captureWrites(stdout);
+    const mouseActive = shallowRef(false);
     let refBalance = 0;
     input.isRaw = false;
     input.setRawMode = (mode: boolean) => {
@@ -2851,9 +3084,10 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       return stdin;
     };
     const App = defineComponent(() => {
+      const target = shallowRef<ComponentPublicInstance | null>(null);
       useInput(observeInput);
-      useMouseInput(() => {});
-      return () => h("tui-text", null, "x");
+      useMouseEvent(target, "wheel", () => "continue", { isActive: mouseActive });
+      return () => h(Text, { ref: target }, () => "x");
     });
     const app = createApp(App);
     const originalOff = stdin.off.bind(stdin) as typeof stdin.off;
@@ -2871,8 +3105,12 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         patchConsole: false,
         liveUpdates: true,
         maxFps: 0,
+        mode: "fullscreen",
         kittyKeyboard: { mode: "disabled" },
       });
+      await waitForWrite(writes, "x");
+      mouseActive.value = true;
+      await waitForWrite(writes, "\x1b[?1000h\x1b[?1006h");
 
       expect(() => app.unmount()).not.toThrow();
       expect({ isRaw: input.isRaw, refBalance }).toEqual({ isRaw: false, refBalance: 0 });
@@ -3063,13 +3301,24 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     process.env["TERM"] = "xterm-256color";
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
+    const mouseActive = shallowRef(false);
     const suspensionHost = createManualSuspensionHost();
     const inputs: string[] = [];
     const mice: unknown[] = [];
     const App = defineComponent(() => {
+      const target = shallowRef<ComponentPublicInstance | null>(null);
       useInput(collectInput(inputs));
-      useMouseInput((event) => mice.push(event));
-      return () => h("tui-text", null, "x");
+      useMouseEvent(
+        target,
+        "wheel",
+        (event) => {
+          mice.push(event);
+          return "continue";
+        },
+        { isActive: mouseActive },
+      );
+      return () => h(Text, { ref: target }, () => "x");
     });
     const originalResume = stdin.resume.bind(stdin);
     let emitMouseOnResume = false;
@@ -3088,10 +3337,14 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
+      mode: "fullscreen",
       kittyKeyboard: { mode: "disabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
     } as Parameters<TuiApp["mount"]>[0]);
     try {
+      await waitForWrite(writes, "x");
+      mouseActive.value = true;
+      await waitForWrite(writes, "\x1b[?1000h\x1b[?1006h");
       await suspensionHost.suspend();
       emitMouseOnResume = true;
       await suspensionHost.resume();
@@ -3731,23 +3984,52 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     process.env["TERM"] = "xterm-256color";
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
     const showFirst = shallowRef(true);
+    const mouseActive = shallowRef(false);
     const inputs: string[] = [];
     const persistent: string[] = [];
     const first: string[] = [];
     const second: string[] = [];
     const First = defineComponent(() => {
-      useMouseInput((event) => first.push(event.direction));
-      return () => h("tui-text", null, "first");
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      useMouseEvent(
+        target,
+        "wheel",
+        (event) => {
+          first.push(wheelDirection(event));
+          return "continue";
+        },
+        { isActive: mouseActive },
+      );
+      return () => h(Text, { ref: target }, () => "first");
     });
     const Second = defineComponent(() => {
-      useMouseInput((event) => second.push(event.direction));
-      return () => h("tui-text", null, "second");
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      useMouseEvent(
+        target,
+        "wheel",
+        (event) => {
+          second.push(wheelDirection(event));
+          return "continue";
+        },
+        { isActive: mouseActive },
+      );
+      return () => h(Text, { ref: target }, () => "second");
     });
     const App = defineComponent(() => {
+      const target = shallowRef<ComponentPublicInstance | null>(null);
       useInput(collectInput(inputs));
-      useMouseInput((event) => persistent.push(event.direction));
-      return () => h(showFirst.value ? First : Second);
+      useMouseEvent(
+        target,
+        "wheel",
+        (event) => {
+          persistent.push(wheelDirection(event));
+          return "continue";
+        },
+        { isActive: mouseActive },
+      );
+      return () => h(Box, { ref: target }, () => h(showFirst.value ? First : Second));
     });
     const app = createApp(App);
     app.mount({
@@ -3756,13 +4038,17 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
+      mode: "fullscreen",
       kittyKeyboard: { mode: "disabled" },
     });
     try {
-      stdin.emit("data", "\x1b[<64;3;");
+      await waitForWrite(writes, "first");
+      mouseActive.value = true;
+      await waitForWrite(writes, "\x1b[?1000h\x1b[?1006h");
+      stdin.emit("data", "\x1b[<64;1;");
       showFirst.value = false;
-      await nextTick();
-      stdin.emit("data", "4M");
+      await waitForWrite(writes, "second");
+      stdin.emit("data", "1M");
       await flushInput();
 
       expect({ inputs, persistent, first, second }).toEqual({
@@ -3772,7 +4058,7 @@ describe("kitty query-response - adversarial ingress ordering", () => {
         second: [],
       });
 
-      stdin.emit("data", "\x1b[<65;5;6M");
+      stdin.emit("data", "\x1b[<65;1;1M");
       await flushInput();
       expect({ inputs, persistent, first, second }).toEqual({
         inputs: [],
@@ -3794,13 +4080,23 @@ describe("kitty query-response - adversarial ingress ordering", () => {
     process.env["TERM"] = "xterm-256color";
     const { stream: stdin } = makeFakeStdin();
     const stdout = makeFakeWritable();
+    const writes = captureWrites(stdout);
     const mouseActive = shallowRef(false);
     const inputs: string[] = [];
     const mice: string[] = [];
     const App = defineComponent(() => {
+      const target = shallowRef<ComponentPublicInstance | null>(null);
       useInput(collectInput(inputs));
-      useMouseInput((event) => mice.push(event.direction), { isActive: mouseActive });
-      return () => h("tui-text", null, "x");
+      useMouseEvent(
+        target,
+        "wheel",
+        (event) => {
+          mice.push(wheelDirection(event));
+          return "continue";
+        },
+        { isActive: mouseActive },
+      );
+      return () => h(Text, { ref: target }, () => "x");
     });
     const app = createApp(App);
     app.mount({
@@ -3809,18 +4105,21 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
+      mode: "fullscreen",
       kittyKeyboard: { mode: "disabled" },
     });
     try {
-      stdin.emit("data", "\x1b[<64;3;");
+      await waitForWrite(writes, "x");
+      stdin.emit("data", "\x1b[<64;1;");
       mouseActive.value = true;
-      stdin.emit("data", "4M");
+      await waitForWrite(writes, "\x1b[?1000h\x1b[?1006h");
+      stdin.emit("data", "1M");
       await flushInput();
 
       expect(inputs).toEqual([]);
       expect(mice).toEqual([]);
 
-      stdin.emit("data", "\x1b[<65;5;6M");
+      stdin.emit("data", "\x1b[<65;1;1M");
       await flushInput();
       expect(inputs).toEqual([]);
       expect(mice).toEqual(["down"]);

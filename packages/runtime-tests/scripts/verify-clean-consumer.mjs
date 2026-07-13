@@ -115,7 +115,7 @@ try {
           noEmit: true,
           types: ["node"],
         },
-        include: ["App.vue"],
+        include: ["App.vue", "RejectedMouseListeners.vue"],
       },
       null,
       2,
@@ -143,6 +143,7 @@ import {
   type InputHandlerResult,
   type InputRouteDecision,
   type CaretState,
+  type CellPoint,
   type ElementGeometry,
   type ElementTarget,
   type MountOptions,
@@ -159,6 +160,24 @@ import {
   type UseElementGeometryReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
+import {
+  useMouseDrag,
+  useMouseEvent,
+  type CellDelta,
+  type MouseButton,
+  type MouseDragHandler,
+  type MouseEventHandler,
+  type MouseHandlerResult,
+  type MouseModifiers,
+  type TuiMouseClickEvent,
+  type TuiMouseDragEvent,
+  type TuiMouseEventMap,
+  type TuiMouseWheelEvent,
+  type UseMouseDragOptions,
+  type UseMouseDragReturn,
+  type UseMouseEventOptions,
+} from "@vue-tui/runtime/fullscreen";
+import type { RenderResult, TestMouse } from "@vue-tui/testing";
 import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -278,6 +297,70 @@ type _ExactCaretOptions = Expect<
 type _ExactCaretReturn = Expect<
   Equal<UseCaretReturn, { readonly state: Readonly<ShallowRef<CaretState>> }>
 >;
+type _ExactMouseButton = Expect<Equal<MouseButton, "left" | "middle" | "right">>;
+type _ExactMouseHandlerResult = Expect<Equal<MouseHandlerResult, "continue" | "consume">>;
+type _ExactCellDelta = Expect<Equal<CellDelta, { readonly x: number; readonly y: number }>>;
+type _ExactMouseModifiers = Expect<
+  Equal<
+    MouseModifiers,
+    { readonly shift: boolean; readonly alt: boolean; readonly ctrl: boolean }
+  >
+>;
+type _ExactClickEvent = Expect<
+  Equal<
+    Pick<TuiMouseClickEvent, "type" | "delivery" | "surface" | "local" | "button">,
+    {
+      readonly type: "click";
+      readonly delivery: "target" | "bubble";
+      readonly surface: CellPoint;
+      readonly local: CellPoint;
+      readonly button: MouseButton;
+    }
+  >
+>;
+type _ExactWheelEvent = Expect<
+  Equal<
+    Pick<TuiMouseWheelEvent, "type" | "delivery" | "surface" | "local" | "delta">,
+    {
+      readonly type: "wheel";
+      readonly delivery: "target" | "bubble";
+      readonly surface: CellPoint;
+      readonly local: CellPoint;
+      readonly delta: CellDelta;
+    }
+  >
+>;
+type _ExactMouseEventMap = Expect<
+  Equal<
+    TuiMouseEventMap,
+    { readonly click: TuiMouseClickEvent; readonly wheel: TuiMouseWheelEvent }
+  >
+>;
+type _ExactMouseEventHandler = Expect<
+  Equal<MouseEventHandler<"click">, (event: TuiMouseClickEvent) => MouseHandlerResult>
+>;
+type _ExactMouseDragHandler = Expect<
+  Equal<MouseDragHandler, (event: TuiMouseDragEvent) => void>
+>;
+type _ExactMouseDragMovement = Expect<
+  Equal<Exclude<TuiMouseDragEvent, { phase: "cancel" }>["movement"], CellDelta>
+>;
+type _ExactMouseDragCancelReason = Expect<
+  Equal<
+    Extract<TuiMouseDragEvent, { phase: "cancel" }>["reason"],
+    "deactivated" | "target-lost" | "suspended"
+  >
+>;
+type _ExactMouseEventOptions = Expect<
+  Equal<UseMouseEventOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
+>;
+type _ExactMouseDragOptions = Expect<
+  Equal<UseMouseDragOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
+>;
+type _ExactMouseDragReturn = Expect<
+  Equal<UseMouseDragReturn, { readonly isDragging: Readonly<ShallowRef<boolean>> }>
+>;
+type _ExactPackagedTestMouse = Expect<Equal<RenderResult["mouse"], TestMouse>>;
 
 const active = shallowRef(true);
 const handler = shallowRef<InputHandler>((event) => {
@@ -313,6 +396,11 @@ const focusManager = useFocusManager();
 useFocusedInput(focusTarget, handler);
 useFocusScopeInput(focusScope, handler);
 useExternalInput(focusTarget, (_source) => {});
+const clickHandler = shallowRef<MouseEventHandler<"click">>(() => "continue");
+useMouseEvent(focusHost, "click", clickHandler);
+useMouseEvent(focusHost, "wheel", (_event: TuiMouseWheelEvent) => "consume");
+const drag = useMouseDrag(focusHost, (_event: TuiMouseDragEvent) => {});
+drag.isDragging.value;
 const focusResult: boolean = focusTarget.focus();
 const blurResult: boolean = focusTarget.blur();
 const nextResult: boolean = focusManager.focusNext();
@@ -370,6 +458,22 @@ type _RemovedUseBoxMetricsReturn = import("@vue-tui/runtime").UseBoxMetricsRetur
 type _RemovedUseCursor = typeof import("@vue-tui/runtime").useCursor;
 // @ts-expect-error Output-origin cursor coordinates were removed with useCursor().
 type _RemovedCursorPosition = import("@vue-tui/runtime").CursorPosition;
+// @ts-expect-error The terminal-wide v1 mouse hook was removed from the root.
+type _RemovedUseMouseInput = typeof import("@vue-tui/runtime").useMouseInput;
+// @ts-expect-error The v1 drag helper was removed from the root.
+type _RemovedUseDraggable = typeof import("@vue-tui/runtime").useDraggable;
+// @ts-expect-error Fullscreen mouse values are available only from the subpath.
+type _RootUseMouseEvent = typeof import("@vue-tui/runtime").useMouseEvent;
+// @ts-expect-error Fullscreen mouse values are available only from the subpath.
+type _RootUseMouseDrag = typeof import("@vue-tui/runtime").useMouseDrag;
+// @ts-expect-error MouseButton moved to the Fullscreen subpath.
+type _RemovedRootMouseButton = import("@vue-tui/runtime").MouseButton;
+// @ts-expect-error The terminal-wide v1 mouse event was removed.
+type _RemovedMouseInputEvent = import("@vue-tui/runtime").MouseInputEvent;
+// @ts-expect-error The mutable v1 mouse target was removed.
+type _RemovedMouseTarget = import("@vue-tui/runtime").MouseTarget;
+// @ts-expect-error The mutable v1 event was removed.
+type _RemovedTuiMouseEvent = import("@vue-tui/runtime").TuiMouseEvent;
 void removedRawMode;
 void removedExitOnCtrlC;
 `,
@@ -454,19 +558,66 @@ mountedStdin.setRawMode(false);
 `,
   );
   writeFileSync(
+    join(consumerDirectory, "RejectedMouseListeners.vue"),
+    `<script setup lang="ts">
+import { ScrollBox } from "@vue-tui/components";
+import { Box, Text } from "@vue-tui/runtime";
+
+const listener = () => {};
+</script>
+
+<template>
+  <!-- Each directive is load-bearing: vue-tsc fails if the following listener becomes accepted. -->
+  <!-- @vue-expect-error Box rejects the removed mousedown listener. -->
+  <Box @mousedown="listener"><Text>box</Text></Box>
+  <!-- @vue-expect-error Box rejects the removed mouseup listener. -->
+  <Box @mouseup="listener"><Text>box</Text></Box>
+  <!-- @vue-expect-error Box rejects the removed click listener. -->
+  <Box @click="listener"><Text>box</Text></Box>
+  <!-- @vue-expect-error Box rejects the removed wheel listener. -->
+  <Box @wheel="listener"><Text>box</Text></Box>
+
+  <!-- @vue-expect-error Text rejects the removed mousedown listener. -->
+  <Text @mousedown="listener">text</Text>
+  <!-- @vue-expect-error Text rejects the removed mouseup listener. -->
+  <Text @mouseup="listener">text</Text>
+  <!-- @vue-expect-error Text rejects the removed click listener. -->
+  <Text @click="listener">text</Text>
+  <!-- @vue-expect-error Text rejects the removed wheel listener. -->
+  <Text @wheel="listener">text</Text>
+
+  <!-- @vue-expect-error ScrollBox rejects the removed mousedown listener. -->
+  <ScrollBox @mousedown="listener"><Text>scroll</Text></ScrollBox>
+  <!-- @vue-expect-error ScrollBox rejects the removed mouseup listener. -->
+  <ScrollBox @mouseup="listener"><Text>scroll</Text></ScrollBox>
+  <!-- @vue-expect-error ScrollBox rejects the removed click listener. -->
+  <ScrollBox @click="listener"><Text>scroll</Text></ScrollBox>
+  <!-- @vue-expect-error ScrollBox rejects the removed wheel listener. -->
+  <ScrollBox @wheel="listener"><Text>scroll</Text></ScrollBox>
+</template>
+`,
+  );
+  writeFileSync(
     join(consumerDirectory, "runtime.mjs"),
     `import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
+import * as fullscreen from "@vue-tui/runtime/fullscreen";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, shallowRef } from "vue";
 
 const { Box, createApp, Text, useCaret, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
+const { useMouseDrag, useMouseEvent } = fullscreen;
+assert.deepEqual(Object.keys(fullscreen).sort(), ["useMouseDrag", "useMouseEvent"]);
 assert.equal("usePaste" in runtime, false);
 assert.equal("useCursor" in runtime, false);
 assert.equal("useBoxMetrics" in runtime, false);
 assert.equal("measureElement" in runtime, false);
+assert.equal("useMouseInput" in runtime, false);
+assert.equal("useDraggable" in runtime, false);
+assert.equal("useMouseEvent" in runtime, false);
+assert.equal("useMouseDrag" in runtime, false);
 assert.equal(typeof useElementGeometry, "function");
 assert.equal(typeof useCaret, "function");
 assert.equal(typeof useFocusScope, "function");
@@ -555,6 +706,64 @@ assert.equal(geometryApp.lastFrame().includes("geometry"), true);
 geometryApp.dispose();
 assert.deepEqual(geometryProjection.geometry.value, { status: "detached" });
 assert.deepEqual(caretProjection.state.value, { status: "inactive" });
+
+const clickEvents = [];
+const wheelEvents = [];
+const dragEvents = [];
+let mouseDrag;
+const MouseProbe = defineComponent(() => {
+  const host = shallowRef(null);
+  useMouseEvent(host, "click", (event) => {
+    clickEvents.push(event);
+    return "consume";
+  });
+  useMouseEvent(host, "wheel", (event) => {
+    wheelEvents.push(event);
+    return "consume";
+  });
+  mouseDrag = useMouseDrag(host, (event) => dragEvents.push(event));
+  return () => h(Box, { ref: host, width: 8, height: 2, flexShrink: 0 }, () =>
+    h(Text, null, () => "mouse target"),
+  );
+});
+const mouseApp = await render(MouseProbe, {
+  columns: 20,
+  rows: 6,
+  host: { mode: "fullscreen" },
+});
+assert.equal(mouseApp.mouse.reporting.current, "button-motion");
+assert.deepEqual([...mouseApp.mouse.reporting.history], ["button-motion"]);
+await mouseApp.mouse.down({ x: 1, y: 0 }, { button: "right", alt: true });
+await mouseApp.mouse.up({ x: 1, y: 0 }, { button: "right", alt: true });
+assert.equal(clickEvents.length, 1);
+assert.deepEqual(clickEvents[0], {
+  type: "click",
+  delivery: "target",
+  surface: { x: 1, y: 0 },
+  local: { x: 1, y: 0 },
+  modifiers: { shift: false, alt: true, ctrl: false },
+  button: "right",
+});
+await mouseApp.mouse.wheel({ x: 1, y: 0 }, "left", { ctrl: true });
+assert.equal(wheelEvents.length, 1);
+assert.deepEqual(wheelEvents[0], {
+  type: "wheel",
+  delivery: "target",
+  surface: { x: 1, y: 0 },
+  local: { x: 1, y: 0 },
+  modifiers: { shift: false, alt: false, ctrl: true },
+  delta: { x: -1, y: 0 },
+});
+await mouseApp.mouse.down({ x: 1, y: 0 });
+assert.equal(mouseDrag.isDragging.value, false);
+await mouseApp.mouse.move({ x: 3, y: 1 }, { shift: true });
+assert.equal(mouseDrag.isDragging.value, true);
+await mouseApp.mouse.up({ x: 3, y: 1 });
+assert.equal(mouseDrag.isDragging.value, false);
+assert.deepEqual(dragEvents.map((event) => event.phase), ["start", "end"]);
+mouseApp.dispose();
+assert.equal(mouseApp.mouse.reporting.current, "none");
+assert.deepEqual([...mouseApp.mouse.reporting.history], ["button-motion", "none"]);
 
 const events = [];
 let activeAvailability;

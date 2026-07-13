@@ -24,7 +24,15 @@ vp run visual:scroll-box
 
 Wait for several streamed lines, observe the sticky-bottom state, then use Up or Home to leave the bottom. Let more lines arrive and confirm the viewport keeps its chosen offset; use End to restore sticky-bottom following before quitting with `q` and checking terminal restoration.
 
-Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
+Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|target-lifetime|targeted-mouse|screen-reader>` after `--` to choose a focused state; `static` is the default.
+
+For the Fullscreen targeted-mouse composition journey, use:
+
+```sh
+vp run visual:fullscreen-origin -- --scenario targeted-mouse
+```
+
+Observe the initial `targets=hidden` frame and confirm the structured screen reports no mouse tracking. Send `a`, wait for `targets=visible`, and observe the click, ScrollBox, divider, and clipped-target regions; the screen must now report button tracking. Send an SGR down/up pair at the `CLICK` row and observe `focused=true`; send wheel-up over the ScrollBox and observe its content move. Send `d` to attach both divider drag registrations and confirm button-motion tracking, then send a down, movement outside the divider, and release. Send `g` to return to button tracking and `x` to remove the remaining targets and return to no mouse tracking. Quit with `q`, observe the restored shell, and verify `process.json` records normal-buffer, termios, and shell-input restoration. The real-PTY tests assert the exact dispatch markers and control-sequence order; the visual loop is for inspecting the user-visible regions and emulator modes.
 
 For input routing across multiple facts in one PTY write, use:
 

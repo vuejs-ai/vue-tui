@@ -5,10 +5,12 @@ import {
   INTERNAL_RENDER_OBSERVER,
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
+  INTERNAL_TEST_INPUT_HOST,
   createManualSuspensionHost,
   type InternalRenderObserver,
 } from "@vue-tui/runtime/internal";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
+import { createTestMouse, type TestMouse } from "./mouse.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";
 
@@ -76,6 +78,7 @@ export interface RenderResult {
   readonly stdin: {
     write(data: string): Promise<void>;
   };
+  readonly mouse: TestMouse;
   readonly terminal: Terminal;
   /** Tear down the app while retaining the emulator for restoration assertions. */
   unmount(this: void): void;
@@ -267,9 +270,12 @@ export async function render(
     }
   };
   let unmounted = false;
+  let terminalSuspended = false;
+  let clearPressedMouseButtons = (): void => undefined;
   const unmount = () => {
     if (unmounted) return;
     unmounted = true;
+    clearPressedMouseButtons();
     app.unmount();
   };
   let disposed = false;
@@ -295,6 +301,11 @@ export async function render(
   const assertActive = () => {
     if (disposed) throw new Error("Test host has been disposed.");
   };
+  const assertMouseCanEmit = () => {
+    assertActive();
+    if (unmounted) throw new Error("The test application has been unmounted.");
+    if (terminalSuspended) throw new Error("The modeled terminal is suspended.");
+  };
   const failAfterDispose = (error: unknown): never => {
     try {
       dispose();
@@ -306,6 +317,21 @@ export async function render(
     }
     throw error;
   };
+
+  async function flushInput(): Promise<void> {
+    await nextTick();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await nextTick();
+    await waitUntilRenderFlush();
+  }
+
+  const mouseController = createTestMouse({
+    columns: () => emulatorColumns,
+    rows: () => emulatorRows,
+    assertCanEmit: assertMouseCanEmit,
+    flush: flushInput,
+  });
+  clearPressedMouseButtons = () => mouseController.clearPressedButtons();
 
   try {
     app.mount({
@@ -320,6 +346,7 @@ export async function render(
       [INTERNAL_RENDER_OBSERVER]: observer,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
     } as Parameters<TuiApp["mount"]>[0]);
   } catch (error) {
     failAfterDispose(error);
@@ -381,6 +408,8 @@ export async function render(
     },
     async suspend() {
       assertActive();
+      terminalSuspended = true;
+      mouseController.clearPressedButtons();
       await suspensionHost.suspend();
       await emulator.flush();
     },
@@ -390,6 +419,8 @@ export async function render(
       await nextTick();
       await app.waitUntilRenderFlush();
       await emulator.flush();
+      assertActive();
+      terminalSuspended = false;
     },
     rawMode: publicRawMode,
   };
@@ -423,12 +454,10 @@ export async function render(
       async write(data: string): Promise<void> {
         assertActive();
         stdin.emit("data", data);
-        await nextTick();
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        await nextTick();
-        await waitUntilRenderFlush();
+        await flushInput();
       },
     },
+    mouse: mouseController.mouse,
     terminal,
     unmount,
     dispose,

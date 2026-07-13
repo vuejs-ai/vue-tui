@@ -55,7 +55,7 @@ copy after mouse capture would additionally require a selection and clipboard mo
 are out of scope for this input-free component; see
 [terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
 
-The selected unstamped F6 proposal composes Fullscreen wheel behavior through a ref-bound runtime
+The implemented unstamped F6 contract composes Fullscreen wheel behavior through a ref-bound runtime
 composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
 
 ```ts

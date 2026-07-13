@@ -1,704 +1,450 @@
-import { defineComponent, effectScope, nextTick, shallowRef, type Ref } from "vue";
-import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import {
-  Box,
-  Static,
-  Text,
-  createApp,
-  useDraggable,
-  type MouseTarget,
-  type TuiMouseEvent,
-  type TuiWheelEvent,
-} from "@vue-tui/runtime";
-import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
+  defineComponent,
+  effectScope,
+  nextTick,
+  shallowRef,
+  type ComponentPublicInstance,
+  type Ref,
+} from "vue";
+import { expect, test } from "vite-plus/test";
+import { Box, Static, Text } from "@vue-tui/runtime";
+import {
+  useMouseDrag,
+  useMouseEvent,
+  type TuiMouseClickEvent,
+  type TuiMouseDragEvent,
+  type TuiMouseWheelEvent,
+} from "@vue-tui/runtime/fullscreen";
+import { render, type RenderResult } from "@vue-tui/testing";
 
-const ENABLE_SGR_DRAG_MOUSE = "\x1b[?1002h\x1b[?1006h";
-const DISABLE_SGR_DRAG_MOUSE = "\x1b[?1002l\x1b[?1006l";
-const DISABLE_SGR_BUTTON_TRACKING = "\x1b[?1000l";
-const DISABLE_SGR_HOVER_TRACKING = "\x1b[?1003l";
-type BoxInstance = InstanceType<typeof Box>;
-let previousTerm: string | undefined;
+type Target = ComponentPublicInstance | null;
 
-beforeEach(() => {
-  previousTerm = process.env["TERM"];
-  process.env["TERM"] = "xterm-256color";
-});
-
-afterEach(() => {
-  if (previousTerm === undefined) delete process.env["TERM"];
-  else process.env["TERM"] = previousTerm;
-});
-
-async function settle() {
-  await nextTick();
-  await nextTick();
-  await Promise.resolve();
-}
-
-function mountMouseApp(
-  component: ReturnType<typeof defineComponent>,
-  options: boolean | { fullscreen?: boolean; stdinIsTTY?: boolean; maxFps?: number } = true,
-) {
-  const fullscreen = typeof options === "boolean" ? options : (options.fullscreen ?? true);
-  const app = createApp(component);
-  const stdout = makeFakeWritable({ columns: 20, rows: 8 });
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  if (typeof options === "object" && options.stdinIsTTY === false) {
-    (stdin as { isTTY?: boolean }).isTTY = false;
-  }
-  const writes = captureWrites(stdout);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    maxFps: typeof options === "object" ? (options.maxFps ?? 0) : 0,
-    mode: fullscreen ? "fullscreen" : "inline",
+function renderFullscreen(component: Parameters<typeof render>[0]) {
+  return render(component, {
+    columns: 20,
+    rows: 8,
+    host: { mode: "fullscreen" },
   });
-  return { app, stdin, writes };
 }
 
-test("fullscreen element handlers enable 1002 mode and receive hit-tested click events", async () => {
-  const clicks: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={10} height={4}>
-      <Box width={4} height={2} onClick={(event) => clicks.push(event)}>
-        <Text>hit</Text>
-      </Box>
-    </Box>
-  ));
-  const { app, stdin, writes } = mountMouseApp(App);
-  await settle();
-
-  expect(writes.join("")).toContain(ENABLE_SGR_DRAG_MOUSE);
-
-  stdin.emit("data", "\x1b[<0;4;2M\x1b[<0;4;2m");
-  await settle();
-
-  expect(clicks).toHaveLength(1);
-  expect(clicks[0]!.type).toBe("click");
-  expect(clicks[0]!.button).toBe("left");
-  expect(clicks[0]!.screenX).toBe(3);
-  expect(clicks[0]!.screenY).toBe(1);
-  expect(clicks[0]!.offsetX).toBe(3);
-  expect(clicks[0]!.offsetY).toBe(1);
-  expect(clicks[0]!.detail).toBe(1);
-  expect(clicks[0]!.target).toBe(clicks[0]!.currentTarget);
-  expect(clicks[0]!.target?.rect).toEqual({ x: 0, y: 0, width: 4, height: 2 });
-
-  app.unmount();
-  await settle();
-  expect(writes.join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
-  expect(writes.join("")).not.toContain(DISABLE_SGR_BUTTON_TRACKING);
-  expect(writes.join("")).not.toContain(DISABLE_SGR_HOVER_TRACKING);
-});
-
-test("mouse events bubble and stopPropagation stops ancestor handlers", async () => {
-  const calls: string[] = [];
-  const stop = shallowRef(false);
-  const App = defineComponent(() => () => (
-    <Box width={10} height={4} onClick={() => calls.push("parent")}>
-      <Box
-        width={4}
-        height={2}
-        onClick={(event) => {
-          calls.push("child");
-          if (stop.value) event.stopPropagation();
-        }}
-      >
-        <Text>hit</Text>
-      </Box>
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-  expect(calls).toEqual(["child", "parent"]);
-
-  calls.length = 0;
-  stop.value = true;
-  await settle();
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-  expect(calls).toEqual(["child"]);
-
-  app.unmount();
-});
-
-test("mouse events rebase offsets while bubbling", async () => {
-  const calls: Array<[string, number, number]> = [];
-  const App = defineComponent(() => () => (
-    <Box
-      marginLeft={2}
-      width={5}
-      height={1}
-      onClick={(event) => calls.push(["parent", event.offsetX, event.offsetY])}
-    >
-      <Box
-        marginLeft={1}
-        width={2}
-        height={1}
-        onClick={(event) => calls.push(["child", event.offsetX, event.offsetY])}
-      />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m");
-  await settle();
-
-  expect(calls).toEqual([
-    ["child", 0, 0],
-    ["parent", 1, 0],
-  ]);
-  app.unmount();
-});
-
-test("mouse events keep per-handler rebased event objects stable after bubbling", async () => {
-  let childEvent: TuiMouseEvent | undefined;
-  let parentEvent: TuiMouseEvent | undefined;
-  const App = defineComponent(() => () => (
-    <Box
-      marginLeft={2}
-      width={5}
-      height={1}
-      onClick={(event) => {
-        parentEvent = event;
-      }}
-    >
-      <Box
-        marginLeft={1}
-        width={2}
-        height={1}
-        onClick={(event) => {
-          childEvent = event;
-        }}
-      />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m");
-  await settle();
-
-  if (!childEvent || !parentEvent) throw new Error("expected bubbling click events");
-  expect(childEvent).not.toBe(parentEvent);
-  expect(childEvent.currentTarget).not.toBe(parentEvent.currentTarget);
-  expect(childEvent.offsetX).toBe(0);
-  expect(childEvent.offsetY).toBe(0);
-  expect(parentEvent.offsetX).toBe(1);
-  expect(parentEvent.offsetY).toBe(0);
-  app.unmount();
-});
-
-test("click detail increments for repeated clicks at the same target and cell", async () => {
-  const details: number[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={(event) => details.push(event.detail)}>
-      <Text>hit</Text>
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-
-  expect(details).toEqual([1, 2]);
-  app.unmount();
-});
-
-test("click synthesis only requires down and up on the same target", async () => {
-  const clicks: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={(event) => clicks.push(event)} />
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;4;2m");
-  await settle();
-
-  expect(clicks).toHaveLength(1);
-  expect(clicks[0]!.screenX).toBe(3);
-  expect(clicks[0]!.screenY).toBe(1);
-  expect(clicks[0]!.offsetX).toBe(3);
-  expect(clicks[0]!.offsetY).toBe(1);
-  app.unmount();
-});
-
-test("click detail does not increment across cells on the same target", async () => {
-  const details: number[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={(event) => details.push(event.detail)} />
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m\x1b[<0;4;2M\x1b[<0;4;2m");
-  await settle();
-
-  expect(details).toEqual([1, 1]);
-  app.unmount();
-});
-
-test("click is not synthesized when down and up hit different targets", async () => {
-  const clicks: string[] = [];
-  const App = defineComponent(() => () => (
-    <Box height={1}>
-      <Box width={2} height={1} onClick={() => clicks.push("left")} />
-      <Box width={2} height={1} onClick={() => clicks.push("right")} />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;4;1m");
-  await settle();
-
-  expect(clicks).toEqual([]);
-  app.unmount();
-});
-
-test("wheel events use DOM-shaped delta fields and no button", async () => {
-  const wheels: TuiWheelEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onWheel={(event) => wheels.push(event)}>
-      <Text>hit</Text>
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<65;1;1M");
-  await settle();
-
-  expect(wheels).toHaveLength(1);
-  expect(wheels[0]!.type).toBe("wheel");
-  expect(wheels[0]!.button).toBe(null);
-  expect(wheels[0]!.deltaX).toBe(0);
-  expect(wheels[0]!.deltaY).toBe(1);
-  app.unmount();
-});
-
-test("inline element mouse handlers warn once and do not arm SGR mouse", async () => {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={() => {}}>
-      <Text>inline</Text>
-    </Box>
-  ));
-  const { app, writes } = mountMouseApp(App, false);
-  await settle();
-
-  expect(warn).toHaveBeenCalledTimes(1);
-  expect(warn.mock.calls[0]![0]).toContain('app.mount({ mode: "fullscreen" })');
-  expect(warn.mock.calls[0]![0]).toContain("useMouseInput()");
-  expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
-
-  warn.mockRestore();
-  app.unmount();
-});
-
-test("inline element mouse handlers warn in production too", async () => {
-  const previousNodeEnv = process.env["NODE_ENV"];
-  process.env["NODE_ENV"] = "production";
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={() => {}}>
-      <Text>inline</Text>
-    </Box>
-  ));
-
-  try {
-    const { app } = mountMouseApp(App, false);
-    await settle();
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    app.unmount();
-  } finally {
-    if (previousNodeEnv === undefined) delete process.env["NODE_ENV"];
-    else process.env["NODE_ENV"] = previousNodeEnv;
-    warn.mockRestore();
-  }
-});
-
-test("TERM=dumb does not arm SGR mouse or deliver element handlers", async () => {
-  process.env["TERM"] = "dumb";
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const clicks: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={(event) => clicks.push(event)}>
-      <Text>dumb</Text>
-    </Box>
-  ));
-
-  try {
-    const { app, stdin, writes } = mountMouseApp(App);
-    await settle();
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
-
-    stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-    await settle();
-
-    expect(clicks).toEqual([]);
-    app.unmount();
-  } finally {
-    process.env["TERM"] = "xterm-256color";
-    warn.mockRestore();
-  }
-});
-
-test("non-TTY stdin does not arm SGR mouse or throw for fullscreen handlers", async () => {
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const clicks: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2} onClick={(event) => clicks.push(event)}>
-      <Text>pipe</Text>
-    </Box>
-  ));
-
-  const { app, stdin, writes } = mountMouseApp(App, { stdinIsTTY: false });
-  await settle();
-
-  expect(warn).toHaveBeenCalledTimes(1);
-  expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-
-  expect(clicks).toEqual([]);
-  warn.mockRestore();
-  app.unmount();
-});
-
-test("nested Text handlers receive virtual-text hit-test events", async () => {
-  const calls: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Text>
-      outer <Text onClick={(event) => calls.push(event)}>inner</Text>
-    </Text>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;8;1M\x1b[<0;8;1m");
-  await settle();
-
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.target).toBe(calls[0]!.currentTarget);
-  expect(calls[0]!.offsetX).toBe(1);
-  expect(calls[0]!.offsetY).toBe(0);
-  expect(calls[0]!.target?.rect).toEqual({ x: 6, y: 0, width: 5, height: 1 });
-  app.unmount();
-});
-
-test("hit-testing honors overflow hidden clipping", async () => {
-  const calls: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={1} overflow="hidden">
-      <Box marginLeft={3} width={3} height={1} onClick={(event) => calls.push(event)} />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;4;1M\x1b[<0;4;1m\x1b[<0;5;1M\x1b[<0;5;1m");
-  await settle();
-
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.screenX).toBe(3);
-  expect(calls[0]!.target?.rect).toEqual({ x: 3, y: 0, width: 1, height: 1 });
-  app.unmount();
-});
-
-test("hit-testing honors absolute positioning", async () => {
-  const calls: TuiMouseEvent[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={6} height={3}>
-      <Box
-        position="absolute"
-        left={2}
-        top={1}
-        width={2}
-        height={1}
-        onClick={(event) => calls.push(event)}
-      />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;3;2M\x1b[<0;3;2m\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-
-  expect(calls).toHaveLength(1);
-  expect(calls[0]!.offsetX).toBe(0);
-  expect(calls[0]!.offsetY).toBe(0);
-  expect(calls[0]!.target?.rect).toEqual({ x: 2, y: 1, width: 2, height: 1 });
-  app.unmount();
-});
-
-test("hit-testing excludes Static content", async () => {
-  const staticClicks: string[] = [];
-  const dynamicClicks: string[] = [];
-  const App = defineComponent(() => () => (
-    <Box>
-      <Box width={6} height={1} onClick={() => dynamicClicks.push("dynamic")}>
-        <Text>dyn</Text>
-      </Box>
-      <Static items={["history"]}>
-        {{
-          default: ({ index }: { index: number }) => (
-            <Box key={index} width={6} height={1} onClick={() => staticClicks.push("static")}>
-              <Text>static</Text>
-            </Box>
-          ),
-        }}
-      </Static>
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
+async function flushUpdate(result: RenderResult): Promise<void> {
   await nextTick();
+  await result.waitUntilRenderFlush();
+}
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-
-  expect(staticClicks).toEqual([]);
-  expect(dynamicClicks).toEqual(["dynamic"]);
-  app.unmount();
-});
-
-test("hit-testing prefers the last-painted overlapping node", async () => {
-  const calls: string[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={4} height={2}>
-      <Box
-        position="absolute"
-        left={0}
-        top={0}
-        width={2}
-        height={1}
-        onClick={() => calls.push("first")}
-      />
-      <Box
-        position="absolute"
-        left={0}
-        top={0}
-        width={2}
-        height={1}
-        onClick={() => calls.push("second")}
-      />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-
-  expect(calls).toEqual(["second"]);
-  app.unmount();
-});
-
-test("a removed target cannot receive input before the throttled replacement frame paints", async () => {
-  const visible = shallowRef(true);
-  const calls: string[] = [];
-  const App = defineComponent(() => () => (
-    <Box width={10} height={2}>
-      {visible.value ? (
-        <Box
-          key="removed"
-          position="absolute"
-          width={2}
-          height={1}
-          onClick={() => calls.push("removed")}
-        />
-      ) : undefined}
-      <Box
-        position="absolute"
-        left={5}
-        width={2}
-        height={1}
-        onClick={() => calls.push("survivor")}
-      />
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App, { maxFps: 1 });
-  await settle();
-
-  visible.value = false;
-  // Vue has removed the host node, but the one-second renderer throttle keeps
-  // the previous physical frame and hit map observable for this exact gap.
-  await nextTick();
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await Promise.resolve();
-
-  expect(calls).toEqual([]);
-  app.unmount();
-});
-
-test("MouseTarget rect is cleared when a mounted node stops painting", async () => {
-  const target = shallowRef<MouseTarget | null>(null);
-  const hidden = shallowRef(false);
-  const App = defineComponent(() => () => (
-    <Box
-      width={4}
-      height={2}
-      display={hidden.value ? "none" : "flex"}
-      onClick={(event) => {
-        target.value = event.currentTarget;
-      }}
-    >
-      <Text>box</Text>
-    </Box>
-  ));
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-  expect(target.value?.rect).toEqual({ x: 0, y: 0, width: 4, height: 2 });
-
-  hidden.value = true;
-  await settle();
-
-  expect(target.value?.rect).toEqual({ x: 0, y: 0, width: 0, height: 0 });
-  app.unmount();
-});
-
-test("useDraggable tracks element position until release", async () => {
-  const dragTarget = shallowRef<BoxInstance | null>(null);
-  const moves: Array<[string, number, number, number, number, number, number]> = [];
+test("click targets the deepest matching registration and rebases bubbling coordinates", async () => {
+  const events: TuiMouseClickEvent[] = [];
   const App = defineComponent(() => {
-    useDraggable(dragTarget, {
-      initialValue: { x: 2, y: 1 },
-      onStart: (position, event) =>
-        moves.push([
-          event.type,
-          position.x,
-          position.y,
-          event.screenX,
-          event.screenY,
-          event.movementX,
-          event.movementY,
-        ]),
-      onMove: (position, event) =>
-        moves.push([
-          event.type,
-          position.x,
-          position.y,
-          event.screenX,
-          event.screenY,
-          event.movementX,
-          event.movementY,
-        ]),
-      onEnd: (position, event) =>
-        moves.push([
-          event.type,
-          position.x,
-          position.y,
-          event.screenX,
-          event.screenY,
-          event.movementX,
-          event.movementY,
-        ]),
+    const parent = shallowRef<Target>(null);
+    const child = shallowRef<Target>(null);
+
+    useMouseEvent(child, "click", (event) => {
+      events.push(event);
+      return "continue";
     });
+    useMouseEvent(parent, "click", (event) => {
+      events.push(event);
+      return "consume";
+    });
+
     return () => (
-      <Box width={4} height={2} ref={dragTarget}>
-        <Text>drag</Text>
+      <Box width={10} height={2}>
+        <Box ref={parent} marginLeft={2} width={5} height={1}>
+          <Box ref={child} marginLeft={1} width={2} height={1} />
+        </Box>
       </Box>
     );
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<65;20;1M\x1b[<32;8;4M\x1b[<0;8;4m");
-  await settle();
+  try {
+    expect(result.mouse.reporting.current).toBe("button");
+    await result.mouse.down({ x: 3, y: 0 });
+    await result.mouse.up({ x: 3, y: 0 });
 
-  expect(moves).toEqual([
-    ["dragstart", 2, 1, 0, 0, 0, 0],
-    ["drag", 9, 4, 7, 3, 7, 3],
-    ["dragend", 9, 4, 7, 3, 0, 0],
-  ]);
-  app.unmount();
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "click",
+      delivery: "target",
+      surface: { x: 3, y: 0 },
+      local: { x: 0, y: 0 },
+    });
+    expect(events[1]).toMatchObject({
+      type: "click",
+      delivery: "bubble",
+      surface: { x: 3, y: 0 },
+      local: { x: 1, y: 0 },
+    });
+    expect(events[0]).not.toBe(events[1]);
+    expect(Object.isFrozen(events[0])).toBe(true);
+    expect(Object.isFrozen(events[1])).toBe(true);
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable follows inner host insertion and removal while the component ref stays stable", async () => {
+test("consume runs the remaining handlers on one receiver but stops before its ancestor", async () => {
+  const calls: string[] = [];
+  const App = defineComponent(() => {
+    const parent = shallowRef<Target>(null);
+    const child = shallowRef<Target>(null);
+
+    useMouseEvent(child, "click", () => {
+      calls.push("child-first");
+      return "consume";
+    });
+    useMouseEvent(child, "click", () => {
+      calls.push("child-second");
+      return "continue";
+    });
+    useMouseEvent(parent, "click", () => {
+      calls.push("parent");
+      return "consume";
+    });
+
+    return () => (
+      <Box ref={parent} width={5} height={1}>
+        <Box ref={child} width={2} height={1} />
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.up({ x: 0, y: 0 });
+    expect(calls).toEqual(["child-first", "child-second"]);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("click uses release coordinates on the same host and cancels across hosts", async () => {
+  const leftClicks: TuiMouseClickEvent[] = [];
+  const rightClicks: TuiMouseClickEvent[] = [];
+  const App = defineComponent(() => {
+    const left = shallowRef<Target>(null);
+    const right = shallowRef<Target>(null);
+
+    useMouseEvent(left, "click", (event) => {
+      leftClicks.push(event);
+      return "consume";
+    });
+    useMouseEvent(right, "click", (event) => {
+      rightClicks.push(event);
+      return "consume";
+    });
+
+    return () => (
+      <Box width={4} height={1}>
+        <Box ref={left} width={2} height={1} />
+        <Box ref={right} width={2} height={1} />
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 0, y: 0 }, { button: "right", alt: true });
+    await result.mouse.up({ x: 1, y: 0 }, { button: "right", ctrl: true });
+    expect(leftClicks).toHaveLength(1);
+    expect(leftClicks[0]).toMatchObject({
+      button: "right",
+      surface: { x: 1, y: 0 },
+      local: { x: 1, y: 0 },
+      modifiers: { shift: false, alt: false, ctrl: true },
+    });
+
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.up({ x: 3, y: 0 });
+    expect(leftClicks).toHaveLength(1);
+    expect(rightClicks).toEqual([]);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("click and wheel independently select matching registrations", async () => {
+  const calls: Array<{
+    readonly name: string;
+    readonly event: TuiMouseClickEvent | TuiMouseWheelEvent;
+  }> = [];
+  const App = defineComponent(() => {
+    const parent = shallowRef<Target>(null);
+    const child = shallowRef<Target>(null);
+
+    useMouseEvent(parent, "click", (event) => {
+      calls.push({ name: "parent-click", event });
+      return "consume";
+    });
+    useMouseEvent(child, "wheel", (event) => {
+      calls.push({ name: "child-wheel", event });
+      return "continue";
+    });
+    useMouseEvent(parent, "wheel", (event) => {
+      calls.push({ name: "parent-wheel", event });
+      return "consume";
+    });
+
+    return () => (
+      <Box ref={parent} width={5} height={1}>
+        <Box ref={child} width={2} height={1} />
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 1, y: 0 });
+    await result.mouse.up({ x: 1, y: 0 });
+    await result.mouse.wheel({ x: 1, y: 0 }, "down", { shift: true });
+
+    expect(calls.map(({ name }) => name)).toEqual(["parent-click", "child-wheel", "parent-wheel"]);
+    expect(calls[0]!.event).toMatchObject({ delivery: "target", local: { x: 1, y: 0 } });
+    expect(calls[1]!.event).toMatchObject({
+      delivery: "target",
+      delta: { x: 0, y: 1 },
+      local: { x: 1, y: 0 },
+      modifiers: { shift: true, alt: false, ctrl: false },
+    });
+    expect(calls[2]!.event).toMatchObject({
+      delivery: "bubble",
+      delta: { x: 0, y: 1 },
+      local: { x: 1, y: 0 },
+    });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("a nested Text registration uses its exact painted fragment", async () => {
+  const events: TuiMouseClickEvent[] = [];
+  const App = defineComponent(() => {
+    const inner = shallowRef<Target>(null);
+    useMouseEvent(inner, "click", (event) => {
+      events.push(event);
+      return "consume";
+    });
+    return () => (
+      <Text>
+        outer <Text ref={inner}>inner</Text>
+      </Text>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 7, y: 0 });
+    await result.mouse.up({ x: 7, y: 0 });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      surface: { x: 7, y: 0 },
+      local: { x: 1, y: 0 },
+    });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("hit testing excludes clipped cells", async () => {
+  const events: TuiMouseClickEvent[] = [];
+  const App = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    useMouseEvent(target, "click", (event) => {
+      events.push(event);
+      return "consume";
+    });
+    return () => (
+      <Box width={4} height={1} overflow="hidden">
+        <Box ref={target} marginLeft={3} width={3} height={1} />
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 3, y: 0 });
+    await result.mouse.up({ x: 3, y: 0 });
+    await result.mouse.down({ x: 4, y: 0 });
+    await result.mouse.up({ x: 4, y: 0 });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ surface: { x: 3, y: 0 }, local: { x: 0, y: 0 } });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("hit testing honors absolute position and last-painted overlap", async () => {
+  const calls: Array<[string, TuiMouseClickEvent]> = [];
+  const App = defineComponent(() => {
+    const first = shallowRef<Target>(null);
+    const second = shallowRef<Target>(null);
+    useMouseEvent(first, "click", (event) => {
+      calls.push(["first", event]);
+      return "consume";
+    });
+    useMouseEvent(second, "click", (event) => {
+      calls.push(["second", event]);
+      return "consume";
+    });
+    return () => (
+      <Box width={6} height={3}>
+        <Box ref={first} position="absolute" left={2} top={1} width={2} height={1} />
+        <Box ref={second} position="absolute" left={2} top={1} width={1} height={1} />
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    await result.mouse.down({ x: 2, y: 1 });
+    await result.mouse.up({ x: 2, y: 1 });
+    await result.mouse.down({ x: 3, y: 1 });
+    await result.mouse.up({ x: 3, y: 1 });
+
+    expect(calls.map(([name]) => name)).toEqual(["second", "first"]);
+    expect(calls[0]![1].local).toEqual({ x: 0, y: 0 });
+    expect(calls[1]![1].local).toEqual({ x: 1, y: 0 });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("Static registrations stay non-targetable", async () => {
+  const staticClicks: TuiMouseClickEvent[] = [];
+  const dynamicClicks: TuiMouseClickEvent[] = [];
+  const StaticTarget = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    useMouseEvent(target, "click", (event) => {
+      staticClicks.push(event);
+      return "consume";
+    });
+    return () => (
+      <Box ref={target} width={6} height={1}>
+        <Text>static</Text>
+      </Box>
+    );
+  });
+  const App = defineComponent(() => {
+    const dynamic = shallowRef<Target>(null);
+    useMouseEvent(dynamic, "click", (event) => {
+      dynamicClicks.push(event);
+      return "consume";
+    });
+    return () => (
+      <Box>
+        <Box ref={dynamic} width={6} height={1}>
+          <Text>dynamic</Text>
+        </Box>
+        <Static items={["history"]}>{{ default: () => <StaticTarget /> }}</Static>
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    expect(result.mouse.reporting.current).toBe("button");
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.up({ x: 0, y: 0 });
+    expect(dynamicClicks).toHaveLength(1);
+    expect(staticClicks).toEqual([]);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("hidden targets release reporting and restore one registration when shown again", async () => {
+  const visible = shallowRef(true);
+  const clicks: TuiMouseClickEvent[] = [];
+  const App = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    useMouseEvent(target, "click", (event) => {
+      clicks.push(event);
+      return "consume";
+    });
+    return () => (
+      <Box ref={target} display={visible.value ? "flex" : "none"} width={4} height={1} />
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    expect(result.mouse.reporting.history).toEqual(["button"]);
+    visible.value = false;
+    await flushUpdate(result);
+    expect(result.mouse.reporting.current).toBe("none");
+    await expect(result.mouse.down({ x: 0, y: 0 })).rejects.toThrow("without button reporting");
+
+    visible.value = true;
+    await flushUpdate(result);
+    expect(result.mouse.reporting.history).toEqual(["button", "none", "button"]);
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.up({ x: 0, y: 0 });
+    expect(clicks).toHaveLength(1);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("a stable component ref follows insertion, loss, and restoration of its rendered host", async () => {
   const phase = shallowRef<"empty" | "visible">("empty");
-  const starts: number[] = [];
-  const StableTarget = defineComponent(() => {
-    return () =>
+  const events: TuiMouseDragEvent[] = [];
+  let dragging: Readonly<Ref<boolean>> | undefined;
+  const StableTarget = defineComponent(
+    () => () =>
       phase.value === "visible" ? (
         <Box key="visible" width={4} height={1}>
           <Text>drag</Text>
         </Box>
-      ) : null;
-  });
-  const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
-  let isDragging: Readonly<Ref<boolean>> | undefined;
+      ) : null,
+  );
   const App = defineComponent(() => {
-    isDragging = useDraggable(target, {
-      onStart: (_position, event) => starts.push(event.screenX),
-    }).isDragging;
+    const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+    dragging = useMouseDrag(target, (event) => events.push(event)).isDragging;
     return () => <StableTarget ref={target} />;
   });
-  const { app, stdin, writes } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  const stableInstance = target.value;
-  expect(stableInstance).not.toBeNull();
-  // A component whose current root is `null` has no rendered target. Its Vue
-  // comment anchor must not acquire terminal mouse reporting.
-  expect(writes.join("")).not.toContain(ENABLE_SGR_DRAG_MOUSE);
+  try {
+    expect(result.mouse.reporting.current).toBe("none");
 
-  const beforeInsert = writes.length;
-  phase.value = "visible";
-  await settle();
-  expect(target.value).toBe(stableInstance);
-  expect(writes.slice(beforeInsert).join("")).toContain(ENABLE_SGR_DRAG_MOUSE);
+    phase.value = "visible";
+    await flushUpdate(result);
+    expect(result.mouse.reporting.current).toBe("button-motion");
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    expect(events.map(({ phase: eventPhase }) => eventPhase)).toEqual(["start"]);
+    expect(dragging?.value).toBe(true);
 
-  stdin.emit("data", "\x1b[<0;1;1M");
-  await settle();
-  expect(starts).toEqual([0]);
-  expect(isDragging?.value).toBe(true);
+    phase.value = "empty";
+    await flushUpdate(result);
+    expect(events.map(({ phase: eventPhase }) => eventPhase)).toEqual(["start", "cancel"]);
+    expect(events[1]).toMatchObject({ phase: "cancel", reason: "target-lost" });
+    expect(dragging?.value).toBe(false);
+    expect(result.mouse.reporting.current).toBe("none");
 
-  const beforeRemove = writes.length;
-  phase.value = "empty";
-  await settle();
-  expect(target.value).toBe(stableInstance);
-  expect(writes.slice(beforeRemove).join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
-  expect(isDragging?.value).toBe(false);
-
-  stdin.emit("data", "\x1b[<32;2;1M\x1b[<0;2;1m");
-  await settle();
-  expect(starts).toEqual([0]);
-
-  const beforeRestore = writes.length;
-  phase.value = "visible";
-  await settle();
-  expect(target.value).toBe(stableInstance);
-  expect(writes.slice(beforeRestore).join("")).toContain(ENABLE_SGR_DRAG_MOUSE);
-
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-  // One physical press produces one registration callback after restoration;
-  // a stale or duplicate registration must not survive either transition.
-  expect(starts).toEqual([0, 0]);
-  app.unmount();
+    phase.value = "visible";
+    await flushUpdate(result);
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.mouse.up({ x: 1, y: 0 });
+    expect(events.map(({ phase: eventPhase }) => eventPhase)).toEqual([
+      "start",
+      "cancel",
+      "start",
+      "end",
+    ]);
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable follows a keyed inner-root replacement without changing the component ref", async () => {
+test("a stable component ref retargets to a keyed replacement without inheriting a click", async () => {
   const phase = shallowRef<"a" | "b">("a");
-  const targetRects: number[] = [];
-  const StableTarget = defineComponent(() => {
-    return () =>
+  const clicks: TuiMouseClickEvent[] = [];
+  const StableTarget = defineComponent(
+    () => () =>
       phase.value === "a" ? (
         <Box key="a" width={4} height={1}>
           <Text>AAAA</Text>
@@ -707,52 +453,100 @@ test("useDraggable follows a keyed inner-root replacement without changing the c
         <Box key="b" marginLeft={5} width={4} height={1}>
           <Text>BBBB</Text>
         </Box>
-      );
-  });
-  const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+      ),
+  );
   const App = defineComponent(() => {
-    useDraggable(target, {
-      onStart: (_position, event) => targetRects.push(event.currentTarget?.rect.x ?? -1),
+    const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
+    useMouseEvent(target, "click", (event) => {
+      clicks.push(event);
+      return "consume";
     });
     return () => <StableTarget ref={target} />;
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  const stableInstance = target.value;
-  expect(stableInstance).not.toBeNull();
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  await settle();
-  expect(targetRects).toEqual([0]);
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    phase.value = "b";
+    await flushUpdate(result);
+    await result.mouse.up({ x: 5, y: 0 });
+    expect(clicks).toEqual([]);
 
-  phase.value = "b";
-  await settle();
-  expect(target.value).toBe(stableInstance);
-
-  // The old cell is no longer a target, while one press on the replacement
-  // must reach exactly one freshly attached registration.
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<0;1;1m");
-  stdin.emit("data", "\x1b[<0;6;1M\x1b[<0;6;1m");
-  await settle();
-  expect(targetRects).toEqual([0, 5]);
-  app.unmount();
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.up({ x: 0, y: 0 });
+    await result.mouse.down({ x: 5, y: 0 });
+    await result.mouse.up({ x: 5, y: 0 });
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0]).toMatchObject({ surface: { x: 5, y: 0 }, local: { x: 0, y: 0 } });
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable detaches and clears active capture when its owning effect scope stops", async () => {
-  const target = shallowRef<BoxInstance | null>(null);
-  const events: string[] = [];
-  let isDragging: Readonly<Ref<boolean>> | undefined;
+test("drag captures outside the target, composes registrations, and suppresses click", async () => {
+  const clicks: TuiMouseClickEvent[] = [];
+  const first: TuiMouseDragEvent[] = [];
+  const second: TuiMouseDragEvent[] = [];
+  let firstDragging: Readonly<Ref<boolean>> | undefined;
+  let secondDragging: Readonly<Ref<boolean>> | undefined;
+  const App = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    useMouseEvent(target, "click", (event) => {
+      clicks.push(event);
+      return "consume";
+    });
+    firstDragging = useMouseDrag(target, (event) => first.push(event)).isDragging;
+    secondDragging = useMouseDrag(target, (event) => second.push(event)).isDragging;
+    return () => (
+      <Box ref={target} width={4} height={2}>
+        <Text>drag</Text>
+      </Box>
+    );
+  });
+  const result = await renderFullscreen(App);
+
+  try {
+    expect(result.mouse.reporting.current).toBe("button-motion");
+    await result.mouse.down({ x: 1, y: 0 });
+    expect(first).toEqual([]);
+    expect(firstDragging?.value).toBe(false);
+
+    await result.mouse.move({ x: 6, y: 3 }, { shift: true });
+    expect(first[0]).toMatchObject({
+      phase: "start",
+      surface: { x: 6, y: 3 },
+      local: null,
+      movement: { x: 5, y: 3 },
+      modifiers: { shift: true, alt: false, ctrl: false },
+    });
+    expect(second[0]).toMatchObject(first[0]!);
+    expect(firstDragging?.value).toBe(true);
+    expect(secondDragging?.value).toBe(true);
+
+    await result.mouse.move({ x: 7, y: 4 });
+    await result.mouse.up({ x: 8, y: 4 });
+    expect(first.map(({ phase }) => phase)).toEqual(["start", "move", "end"]);
+    expect(second.map(({ phase }) => phase)).toEqual(["start", "move", "end"]);
+    expect(first[1]).toMatchObject({ movement: { x: 1, y: 1 }, local: null });
+    expect(first[2]).toMatchObject({ movement: { x: 1, y: 0 }, local: null });
+    expect(firstDragging?.value).toBe(false);
+    expect(secondDragging?.value).toBe(false);
+    expect(clicks).toEqual([]);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("stopping one drag registration scope cancels it as deactivated", async () => {
+  const events: TuiMouseDragEvent[] = [];
+  let dragging: Readonly<Ref<boolean>> | undefined;
   let stopScope = () => {};
   const App = defineComponent(() => {
+    const target = shallowRef<Target>(null);
     const scope = effectScope();
     stopScope = () => scope.stop();
     scope.run(() => {
-      const drag = useDraggable(target, {
-        onStart: () => events.push("start"),
-        onMove: () => events.push("move"),
-        onEnd: () => events.push("end"),
-      });
-      isDragging = drag.isDragging;
+      dragging = useMouseDrag(target, (event) => events.push(event)).isDragging;
     });
     return () => (
       <Box ref={target} width={4} height={1}>
@@ -760,185 +554,206 @@ test("useDraggable detaches and clears active capture when its owning effect sco
       </Box>
     );
   });
-  const { app, stdin, writes } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M");
-  await settle();
-  expect(events).toEqual(["start"]);
-  expect(isDragging?.value).toBe(true);
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    expect(dragging?.value).toBe(true);
 
-  const beforeStop = writes.length;
-  stopScope();
-  await settle();
-  expect(isDragging?.value).toBe(false);
-  expect(writes.slice(beforeStop).join("")).toContain(DISABLE_SGR_DRAG_MOUSE);
-
-  stdin.emit("data", "\x1b[<32;2;1M\x1b[<0;2;1m");
-  await settle();
-  expect(events).toEqual(["start"]);
-  app.unmount();
+    stopScope();
+    await flushUpdate(result);
+    expect(events.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+    expect(events[1]).toMatchObject({ phase: "cancel", reason: "deactivated" });
+    expect(dragging?.value).toBe(false);
+    expect(result.mouse.reporting.current).toBe("none");
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable honors axis", async () => {
-  const dragTarget = shallowRef<BoxInstance | null>(null);
-  const positions: Array<[number, number]> = [];
+test("suspension cancels a drag and resume requires a fresh gesture", async () => {
+  const events: TuiMouseDragEvent[] = [];
+  let dragging: Readonly<Ref<boolean>> | undefined;
   const App = defineComponent(() => {
-    useDraggable(dragTarget, {
-      initialValue: { x: 10, y: 20 },
-      axis: "x",
-      onMove: (position) => positions.push([position.x, position.y]),
-      onEnd: (position) => positions.push([position.x, position.y]),
-    });
-    return () => (
-      <Box width={4} height={2} ref={dragTarget}>
-        <Text>drag</Text>
-      </Box>
-    );
+    const target = shallowRef<Target>(null);
+    dragging = useMouseDrag(target, (event) => events.push(event)).isDragging;
+    return () => <Box ref={target} width={4} height={1} />;
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;6;4M\x1b[<0;6;4m");
-  await settle();
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.terminal.suspend();
 
-  expect(positions).toEqual([
-    [15, 20],
-    [15, 20],
-  ]);
-  app.unmount();
+    expect(events.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+    expect(events[1]).toMatchObject({ phase: "cancel", reason: "suspended" });
+    expect(dragging?.value).toBe(false);
+
+    await result.terminal.resume();
+    expect(result.mouse.reporting.current).toBe("button-motion");
+    await expect(result.mouse.move({ x: 2, y: 0 })).rejects.toThrow(
+      "requires an unmatched left-button down",
+    );
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.mouse.up({ x: 1, y: 0 });
+    expect(events.map(({ phase }) => phase)).toEqual(["start", "cancel", "start", "end"]);
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable lets onStart cancel capture", async () => {
-  const dragTarget = shallowRef<BoxInstance | null>(null);
-  const moves: string[] = [];
+test("deactivation during start finishes the frozen phase before one cancel", async () => {
+  const first: TuiMouseDragEvent[] = [];
+  const second: TuiMouseDragEvent[] = [];
+  let secondDragging: Readonly<Ref<boolean>> | undefined;
+  let stopSecond = () => {};
   const App = defineComponent(() => {
-    useDraggable(dragTarget, {
-      onStart: () => {
-        moves.push("start");
-        return false;
-      },
-      onMove: () => moves.push("move"),
-      onEnd: () => moves.push("end"),
+    const target = shallowRef<Target>(null);
+    useMouseDrag(target, (event) => {
+      first.push(event);
+      if (event.phase === "start") stopSecond();
     });
-    return () => (
-      <Box width={4} height={2} ref={dragTarget}>
-        <Text>drag</Text>
-      </Box>
-    );
+    const secondScope = effectScope();
+    stopSecond = () => secondScope.stop();
+    secondScope.run(() => {
+      secondDragging = useMouseDrag(target, (event) => second.push(event)).isDragging;
+    });
+    return () => <Box ref={target} width={4} height={1} />;
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;8;4M\x1b[<0;8;4m");
-  await settle();
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    expect(second.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+    expect(second[1]).toMatchObject({ phase: "cancel", reason: "deactivated" });
+    expect(secondDragging?.value).toBe(false);
 
-  expect(moves).toEqual(["start"]);
-  app.unmount();
+    await result.mouse.up({ x: 1, y: 0 });
+    expect(first.map(({ phase }) => phase)).toEqual(["start", "end"]);
+    expect(second.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable suppresses click after a drag movement", async () => {
-  const dragTarget = shallowRef<BoxInstance | null>(null);
-  const clicks: string[] = [];
-  const drags: string[] = [];
+test("self-deactivation during move emits one move followed by one cancel", async () => {
+  const events: TuiMouseDragEvent[] = [];
+  let dragging: Readonly<Ref<boolean>> | undefined;
+  let stopScope = () => {};
   const App = defineComponent(() => {
-    useDraggable(dragTarget, {
-      onStart: () => drags.push("start"),
-      onMove: () => drags.push("move"),
-      onEnd: () => drags.push("end"),
+    const target = shallowRef<Target>(null);
+    const scope = effectScope();
+    stopScope = () => scope.stop();
+    scope.run(() => {
+      dragging = useMouseDrag(target, (event) => {
+        events.push(event);
+        if (event.phase === "move") stopScope();
+      }).isDragging;
     });
-    return () => (
-      <Box width={4} height={2} ref={dragTarget} onClick={() => clicks.push("click")}>
-        <Text>drag</Text>
-      </Box>
-    );
+    return () => <Box ref={target} width={4} height={1} />;
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;8;4M\x1b[<0;8;4m");
-  await settle();
-
-  expect(drags).toEqual(["start", "move", "end"]);
-  expect(clicks).toEqual([]);
-  app.unmount();
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.mouse.move({ x: 2, y: 0 });
+    expect(events.map(({ phase }) => phase)).toEqual(["start", "move", "cancel"]);
+    expect(events[2]).toMatchObject({ phase: "cancel", reason: "deactivated" });
+    expect(dragging?.value).toBe(false);
+    expect(result.mouse.reporting.current).toBe("none");
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable releases pointer capture when the target unmounts", async () => {
-  const dragTarget = shallowRef<BoxInstance | null>(null);
-  const mounted = shallowRef(true);
-  const moves: string[] = [];
+test("cohort deactivation during end cannot append a cancel", async () => {
+  const first: TuiMouseDragEvent[] = [];
+  const second: TuiMouseDragEvent[] = [];
+  let firstDragging: Readonly<Ref<boolean>> | undefined;
+  let secondDragging: Readonly<Ref<boolean>> | undefined;
+  let stopFirst = () => {};
+  let stopSecond = () => {};
   const App = defineComponent(() => {
-    useDraggable(dragTarget, {
-      onStart: () => moves.push("start"),
-      onMove: () => {
-        moves.push("move");
-        mounted.value = false;
-      },
-      onEnd: () => moves.push("end"),
+    const target = shallowRef<Target>(null);
+    const firstScope = effectScope();
+    stopFirst = () => firstScope.stop();
+    firstScope.run(() => {
+      firstDragging = useMouseDrag(target, (event) => {
+        first.push(event);
+        if (event.phase === "end") {
+          stopFirst();
+          stopSecond();
+        }
+      }).isDragging;
     });
-    return () => (
-      <Box width={8} height={2}>
-        {mounted.value ? (
-          <Box width={4} height={1} ref={dragTarget}>
-            <Text>drag</Text>
-          </Box>
-        ) : (
-          <Box width={4} height={1}>
-            <Text>gone</Text>
-          </Box>
-        )}
-      </Box>
-    );
+    const secondScope = effectScope();
+    stopSecond = () => secondScope.stop();
+    secondScope.run(() => {
+      secondDragging = useMouseDrag(target, (event) => second.push(event)).isDragging;
+    });
+    return () => <Box ref={target} width={4} height={1} />;
   });
-  const { app, stdin } = mountMouseApp(App);
-  await settle();
+  const result = await renderFullscreen(App);
 
-  stdin.emit("data", "\x1b[<0;1;1M\x1b[<32;6;1M");
-  await settle();
-  stdin.emit("data", "\x1b[<32;7;1M\x1b[<0;7;1m");
-  await settle();
-
-  expect(moves).toEqual(["start", "move"]);
-  app.unmount();
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.mouse.up({ x: 1, y: 0 });
+    expect(first.map(({ phase }) => phase)).toEqual(["start", "end"]);
+    expect(second.map(({ phase }) => phase)).toEqual(["start", "end"]);
+    expect(firstDragging?.value).toBe(false);
+    expect(secondDragging?.value).toBe(false);
+    expect(result.mouse.reporting.current).toBe("none");
+  } finally {
+    result.dispose();
+  }
 });
 
-test("useDraggable captures middle and right button drags", async () => {
-  const cases = [
-    { button: "middle", sequence: "\x1b[<1;1;1M\x1b[<33;6;2M\x1b[<1;6;2m" },
-    { button: "right", sequence: "\x1b[<2;1;1M\x1b[<34;6;2M\x1b[<2;6;2m" },
-  ] as const;
-
-  for (const item of cases) {
-    const dragTarget = shallowRef<BoxInstance | null>(null);
-    const moves: Array<[string, TuiMouseEvent["button"], number, number]> = [];
-    const App = defineComponent(() => {
-      useDraggable(dragTarget, {
-        onStart: (_position, event) =>
-          moves.push([event.type, event.button, event.screenX, event.screenY]),
-        onMove: (_position, event) =>
-          moves.push([event.type, event.button, event.screenX, event.screenY]),
-        onEnd: (_position, event) =>
-          moves.push([event.type, event.button, event.screenX, event.screenY]),
-      });
-      return () => (
-        <Box width={4} height={2} ref={dragTarget}>
-          <Text>drag</Text>
-        </Box>
-      );
+test("cohort deactivation during cancel cannot recurse or duplicate cancel", async () => {
+  const first: TuiMouseDragEvent[] = [];
+  const second: TuiMouseDragEvent[] = [];
+  let firstDragging: Readonly<Ref<boolean>> | undefined;
+  let secondDragging: Readonly<Ref<boolean>> | undefined;
+  let stopFirst = () => {};
+  let stopSecond = () => {};
+  const App = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    const firstScope = effectScope();
+    stopFirst = () => firstScope.stop();
+    firstScope.run(() => {
+      firstDragging = useMouseDrag(target, (event) => {
+        first.push(event);
+        if (event.phase === "cancel") {
+          stopFirst();
+          stopSecond();
+        }
+      }).isDragging;
     });
-    const { app, stdin } = mountMouseApp(App);
-    await settle();
+    const secondScope = effectScope();
+    stopSecond = () => secondScope.stop();
+    secondScope.run(() => {
+      secondDragging = useMouseDrag(target, (event) => second.push(event)).isDragging;
+    });
+    return () => <Box ref={target} width={4} height={1} />;
+  });
+  const result = await renderFullscreen(App);
 
-    stdin.emit("data", item.sequence);
-    await settle();
-
-    expect(moves).toEqual([
-      ["dragstart", item.button, 0, 0],
-      ["drag", item.button, 5, 1],
-      ["dragend", item.button, 5, 1],
-    ]);
-    app.unmount();
-    await settle();
+  try {
+    await result.mouse.down({ x: 0, y: 0 });
+    await result.mouse.move({ x: 1, y: 0 });
+    await result.terminal.suspend();
+    expect(first.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+    expect(second.map(({ phase }) => phase)).toEqual(["start", "cancel"]);
+    expect(first[1]).toMatchObject({ phase: "cancel", reason: "suspended" });
+    expect(second[1]).toMatchObject({ phase: "cancel", reason: "suspended" });
+    expect(firstDragging?.value).toBe(false);
+    expect(secondDragging?.value).toBe(false);
+  } finally {
+    result.dispose();
   }
 });

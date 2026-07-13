@@ -35,6 +35,7 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
+    "./fullscreen": "./dist/fullscreen.mjs",
     "./internal": "./dist/internal.mjs",
     "./package.json": "./package.json"
   },

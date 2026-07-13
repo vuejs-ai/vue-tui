@@ -1,5 +1,5 @@
 import { type ExtractPublicPropTypes, type PropType } from "vue";
-import type { MouseHandlerProps } from "../mouse/events.ts";
+import { rejectedMouseListenerProps } from "./rejected-mouse-listeners.ts";
 
 type WrapMode =
   | "wrap"
@@ -21,11 +21,8 @@ export const textProps = {
   wrap: { type: String as PropType<WrapMode>, default: "wrap" },
   ariaLabel: String,
   ariaHidden: Boolean,
-  onMousedown: Function as PropType<MouseHandlerProps["onMousedown"]>,
-  onMouseup: Function as PropType<MouseHandlerProps["onMouseup"]>,
-  onClick: Function as PropType<MouseHandlerProps["onClick"]>,
-  onWheel: Function as PropType<MouseHandlerProps["onWheel"]>,
+  ...rejectedMouseListenerProps,
 };
 
 /** Props accepted by `<Text>` — the vue-tui analogue of Ink's `TextProps`. */
-export type TextProps = ExtractPublicPropTypes<typeof textProps> & MouseHandlerProps;
+export type TextProps = ExtractPublicPropTypes<typeof textProps>;

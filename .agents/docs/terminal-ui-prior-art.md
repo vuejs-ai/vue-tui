@@ -215,7 +215,7 @@ The mechanism constraints carried into F6 are therefore local conclusions:
 4. Derive terminal reporting from active visible behavior: button-level events need `1000`, drag needs `1002`, and bare hover alone would justify `1003` later. Stronger demand must downgrade when it disappears.
 5. Treat click synthesis and drag capture as separate state machines. Removal, retargeting, hiding, suspension, HMR, and teardown must not leave a stale click candidate, captured owner, pressed-button state, or terminal mode.
 6. Keep click-to-focus on the existing F4 focus handle and scrolling on the existing input-free ScrollBox handle; targeted pointer must not create another focus or scroll owner.
-7. Keep current terminal-wide `useMouseInput` as historical evidence only. The real terminal-workspace need is target-bound pane-local forwarding and protocol re-encoding, which the current 1-based vertical-wheel-only hook cannot express.
+7. Treat the former terminal-wide `useMouseInput` as historical evidence only. The real terminal-workspace need is target-bound pane-local forwarding and protocol re-encoding, which the former 1-based vertical-wheel-only hook could not express.
 
 ## Application observations
 

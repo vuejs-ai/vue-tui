@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch, type ComponentPublicInstance } from "vue";
+import { computed, getCurrentInstance, shallowRef, watch, type ComponentPublicInstance } from "vue";
 import { Box, useElementGeometry, type ElementGeometry } from "@vue-tui/runtime";
-import { scrollBoxProps, type ScrollBoxExpose } from "./scroll-box-props.ts";
+import {
+  assertNoRejectedMouseListeners,
+  scrollBoxProps,
+  type ScrollBoxExpose,
+} from "./scroll-box-props.ts";
 
-defineOptions({ name: "ScrollBox" });
+defineOptions({ name: "ScrollBox", inheritAttrs: false });
 defineProps(scrollBoxProps);
 defineSlots<{ default?: () => unknown }>();
+const instance = getCurrentInstance();
+if (!instance) throw new Error("<ScrollBox> must be created inside a Vue component instance");
+const componentInstance = instance;
 
 const viewportRef = shallowRef<ComponentPublicInstance | null>(null);
 const contentRef = shallowRef<ComponentPublicInstance | null>(null);
@@ -84,9 +91,11 @@ watch(
 </script>
 
 <template>
-  <Box ref="viewportRef" v-bind="viewportStyle">
-    <Box ref="contentRef" v-bind="contentStyle">
-      <slot />
+  <template v-if="assertNoRejectedMouseListeners(componentInstance.vnode.props)">
+    <Box ref="viewportRef" v-bind="viewportStyle">
+      <Box ref="contentRef" v-bind="contentStyle">
+        <slot />
+      </Box>
     </Box>
-  </Box>
+  </template>
 </template>

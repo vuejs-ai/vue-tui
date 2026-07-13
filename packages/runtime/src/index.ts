@@ -77,28 +77,6 @@ export {
   type UseInputAvailabilityReturn,
 } from "./composables/useInputAvailability.ts";
 export type { InputAvailability } from "./io/input-availability.ts";
-export {
-  useMouseInput,
-  type MouseInputEvent,
-  type UseMouseInputOptions,
-} from "./composables/useMouseInput.ts";
-export {
-  useDraggable,
-  type UseDraggableAxis,
-  type UseDraggableOptions,
-  type UseDraggablePosition,
-  type UseDraggableReturn,
-  type UseDraggableTarget,
-} from "./composables/useDraggable.ts";
-export type {
-  MouseButton,
-  MouseHandlerProps,
-  MouseTarget,
-  MouseTargetRect,
-  TuiMouseEvent,
-  TuiMouseEventType,
-  TuiWheelEvent,
-} from "./mouse/events.ts";
 export { useFocus, type UseFocusOptions, type UseFocusReturn } from "./composables/useFocus.ts";
 export {
   useFocusScope,

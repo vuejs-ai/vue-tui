@@ -1,8 +1,6 @@
 import type { InjectionKey, Ref } from "vue";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
-import type { InternalInputRouteRegistry } from "./io/input-routes.ts";
 import type { InternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
-import type { MouseController } from "./mouse/controller.ts";
 import type { InputAvailability } from "./io/input-availability.ts";
 
 export interface AppContext {
@@ -15,14 +13,12 @@ export interface AppContext {
   setRawMode: (mode: boolean) => void;
   writeToStdout: (data: string) => void;
   writeToStderr: (data: string) => void;
-  internal_mouse?: MouseController;
 }
 
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
   readonly inputAvailability: Readonly<Ref<InputAvailability>>;
-  internal_routes: InternalInputRouteRegistry;
   internal_inputRouting: InternalInputRoutingRuntime;
   acquireRawMode: () => void;
   releaseRawMode: () => void;

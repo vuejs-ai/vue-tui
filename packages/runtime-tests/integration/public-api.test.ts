@@ -1,5 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import * as api from "@vue-tui/runtime";
+import * as fullscreenApi from "@vue-tui/runtime/fullscreen";
 import * as internalApi from "@vue-tui/runtime/internal";
 
 // The EXACT public runtime (value) export surface of `@vue-tui/runtime`. The test below snapshots
@@ -22,7 +23,6 @@ const PUBLIC_VALUE_EXPORTS = [
   "useAnimation",
   "useApp",
   "useCaret",
-  "useDraggable",
   "useElementGeometry",
   "useExternalInput",
   "useFocus",
@@ -33,7 +33,6 @@ const PUBLIC_VALUE_EXPORTS = [
   "useInput",
   "useInputAvailability",
   "useLayoutSize",
-  "useMouseInput",
   "useRenderSession",
   "useStderr",
   "useStdin",
@@ -45,8 +44,21 @@ const PUBLIC_VALUE_EXPORTS = [
   "kittyModifiers",
 ];
 
+const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent"];
+
 test("public API surface is exactly the documented value-export set", () => {
   expect(Object.keys(api).sort()).toEqual([...PUBLIC_VALUE_EXPORTS].sort());
+});
+
+test("Fullscreen API surface is exactly the targeted-mouse value-export set", () => {
+  expect(Object.keys(fullscreenApi).sort()).toEqual(FULLSCREEN_VALUE_EXPORTS);
+});
+
+test("removes the superseded root mouse APIs without compatibility shims", () => {
+  expect(api).not.toHaveProperty("useMouseInput");
+  expect(api).not.toHaveProperty("useDraggable");
+  expect(api).not.toHaveProperty("useMouseEvent");
+  expect(api).not.toHaveProperty("useMouseDrag");
 });
 
 test("does not retain the superseded render-fact hooks", () => {

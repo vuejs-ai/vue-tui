@@ -197,7 +197,7 @@ This distinction follows Ratatui's useful separation between backend terminal si
 Capabilities describe semantic guarantees, not internal data structures or raw environment guesses:
 
 - `stableOrigin` is a known structural fact. It is true only for a fixed Fullscreen viewport. It does not mean mouse input is available.
-- `elementHitTesting` is the known structural fact that the renderer currently maintains element rectangles in the same coordinate space as its output. It does not imply raw input, terminal mouse protocol support, capture, or a public pointer operation; F6 combines those independent facts later.
+- `elementHitTesting` is the known structural fact that the renderer maintains element rectangles in the same coordinate space as its output. It does not itself imply raw input, terminal mouse protocol support, capture, or a public mouse operation. F6 consumes it together with managed input, an accepted visible `/fullscreen` target, and acquired xterm-compatible SGR reporting; the session capability alone is not mouse availability.
 - `suspension` is the known structural fact that the host supports vue-tui's coordinated restore-before-stop and re-establish-after-continue lifecycle. It does not report whether the process happens to be stopped at the instant of a read. F1.7 completed this behavior before the field is exported, so no speculative `unknown` state is needed.
 
 `dimensions` is the only public session field that changes during the current F1 lifecycle. `host`, `mode`, `output`, and the complete `capabilities` object are immutable for one render session. In particular, `elementHitTesting` describes whether this resolved render path maintains a hit map; it is not a live report of whether a particular element is currently measurable.

@@ -2,7 +2,8 @@
 // `*.test-d.ts` name keeps the file out of the runtime Vitest suite.
 import { expectTypeOf } from "vite-plus/test";
 import { defineComponent } from "vue";
-import type { RenderSession } from "@vue-tui/runtime";
+import type { CellPoint, RenderSession } from "@vue-tui/runtime";
+import type { MouseButton } from "@vue-tui/runtime/fullscreen";
 import {
   render,
   type ContentFrame,
@@ -10,6 +11,11 @@ import {
   type RenderResult,
   type ScreenSnapshot,
   type TestHost,
+  type TestMouse,
+  type TestMouseButtonOptions,
+  type TestMouseModifiers,
+  type TestMouseReportingLevel,
+  type TestMouseReportingState,
   type TestRenderSession,
 } from "../src/index.ts";
 
@@ -83,6 +89,26 @@ expectTypeOf<TestRenderSession>().toEqualTypeOf<
 >();
 expectTypeOf(result.lastFrame()).toEqualTypeOf<string>();
 expectTypeOf(result.screen()).toEqualTypeOf<Promise<ScreenSnapshot>>();
+expectTypeOf(result.mouse).toEqualTypeOf<TestMouse>();
+expectTypeOf(result.mouse.reporting).toEqualTypeOf<TestMouseReportingState>();
+expectTypeOf(result.mouse.reporting.current).toEqualTypeOf<TestMouseReportingLevel>();
+expectTypeOf(result.mouse.reporting.history).toEqualTypeOf<readonly TestMouseReportingLevel[]>();
+expectTypeOf<TestMouse["down"]>().toEqualTypeOf<
+  (point: CellPoint, options?: TestMouseButtonOptions) => Promise<void>
+>();
+expectTypeOf<TestMouse["move"]>().toEqualTypeOf<
+  (point: CellPoint, modifiers?: TestMouseModifiers) => Promise<void>
+>();
+expectTypeOf<TestMouse["up"]>().toEqualTypeOf<
+  (point: CellPoint, options?: TestMouseButtonOptions) => Promise<void>
+>();
+expectTypeOf<TestMouse["wheel"]>().toEqualTypeOf<
+  (
+    point: CellPoint,
+    direction: "up" | "down" | "left" | "right",
+    modifiers?: TestMouseModifiers,
+  ) => Promise<void>
+>();
 expectTypeOf(result.terminal.suspend()).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.terminal.resume()).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.dispose()).toEqualTypeOf<void>();
@@ -105,3 +131,21 @@ screen.cursor.column = 1;
 screen.cursor.visible = false;
 // @ts-expect-error Raw-mode state is a readonly live observation.
 result.terminal.rawMode.current = false;
+// @ts-expect-error Mouse-reporting state is a readonly live observation.
+result.mouse.reporting.current = "none";
+// @ts-expect-error Mouse-reporting history is a readonly live observation.
+result.mouse.reporting.history.push("button");
+// @ts-expect-error TestMouse deliberately does not manufacture production clicks.
+result.mouse.click({ x: 0, y: 0 });
+// @ts-expect-error Physical test input uses the runtime's public mouse-button vocabulary.
+void result.mouse.down({ x: 0, y: 0 }, { button: "primary" });
+// @ts-expect-error Modifier flags are booleans.
+void result.mouse.move({ x: 0, y: 0 }, { shift: 1 });
+// @ts-expect-error Wheel input supports exactly four terminal directions.
+void result.mouse.wheel({ x: 0, y: 0 }, "forward");
+
+const leftButton: MouseButton = "left";
+const buttonOptions: TestMouseButtonOptions = { button: leftButton, alt: true };
+const modifiers: TestMouseModifiers = { shift: true, ctrl: false };
+void buttonOptions;
+void modifiers;

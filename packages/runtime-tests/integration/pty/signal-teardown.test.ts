@@ -7,6 +7,10 @@ import term from "./helpers/term.ts";
 // active). Mirrors Ink's `signalExit(this.unmount, {alwaysLast:false})`.
 const SHOW_CURSOR = "\x1b[?25h";
 const EXIT_ALT_SCREEN = "\x1b[?1049l";
+const ENABLE_DRAG_MOUSE = "\x1b[?1002h";
+const DISABLE_DRAG_MOUSE = "\x1b[?1002l";
+const ENABLE_SGR_MOUSE = "\x1b[?1006h";
+const DISABLE_SGR_MOUSE = "\x1b[?1006l";
 
 // Robustness (Finding 2): the fixture has NO self-unmount path — `await
 // app.waitUntilExit()` only resolves once teardown runs, and nothing in the
@@ -32,13 +36,24 @@ const EXIT_ALT_SCREEN = "\x1b[?1049l";
 // starved vitest worker may not process onData callbacks for seconds — the
 // bytes are buffered in node-pty, not lost, so waiting for exit is reliable.
 const restored = (output: string) =>
-  output.includes(SHOW_CURSOR) && output.includes(EXIT_ALT_SCREEN);
+  output.includes(SHOW_CURSOR) &&
+  output.includes(EXIT_ALT_SCREEN) &&
+  output.includes(DISABLE_DRAG_MOUSE) &&
+  output.includes(DISABLE_SGR_MOUSE);
 const assertRestored = async (ps: ReturnType<typeof term>) => {
   await ps.waitForExitInfo();
   // Drain the final post-exit chunk if it hasn't arrived yet. If the signal-exit
   // registration is broken the child dies uncaught with NO restore bytes, so
   // this drain times out (red).
   await ps.waitForOutput(restored, 5000);
+  expect(ps.output).toContain(ENABLE_DRAG_MOUSE);
+  expect(ps.output).toContain(ENABLE_SGR_MOUSE);
+  expect(ps.output.lastIndexOf(DISABLE_DRAG_MOUSE)).toBeGreaterThan(
+    ps.output.lastIndexOf(ENABLE_DRAG_MOUSE),
+  );
+  expect(ps.output.lastIndexOf(DISABLE_SGR_MOUSE)).toBeGreaterThan(
+    ps.output.lastIndexOf(ENABLE_SGR_MOUSE),
+  );
   expect(ps.output).toContain(SHOW_CURSOR);
   expect(ps.output).toContain(EXIT_ALT_SCREEN);
 };

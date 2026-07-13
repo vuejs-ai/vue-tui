@@ -18,16 +18,6 @@ interface SgrMouseSequence {
   readonly final: "M" | "m";
 }
 
-export interface MouseInputEvent {
-  readonly type: "wheel";
-  readonly direction: "up" | "down";
-  readonly x: number;
-  readonly y: number;
-  readonly shift: boolean;
-  readonly meta: boolean;
-  readonly ctrl: boolean;
-}
-
 export interface SgrMouseButtonEvent {
   readonly type: "down" | "up" | "drag";
   readonly button: SgrMouseButton;
@@ -196,24 +186,4 @@ export function parseSgrMouseReport(input: string): SgrMouseReport | undefined {
 
 export function parseSgrMouseInput(input: string): SgrMouseEvent | undefined {
   return parseSgrMouseReport(input)?.event;
-}
-
-export function toMouseInputEvent(event: SgrMouseEvent): MouseInputEvent | undefined {
-  if (event.type !== "wheel") return undefined;
-  if (event.direction !== "up" && event.direction !== "down") return undefined;
-
-  return {
-    type: "wheel",
-    direction: event.direction,
-    x: event.x,
-    y: event.y,
-    shift: event.shift,
-    meta: event.meta,
-    ctrl: event.ctrl,
-  };
-}
-
-export function parseMouseInput(input: string): MouseInputEvent | undefined {
-  const event = parseSgrMouseInput(input);
-  return event ? toMouseInputEvent(event) : undefined;
 }

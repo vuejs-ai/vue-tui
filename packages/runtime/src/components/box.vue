@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, getCurrentInstance } from "vue";
 import { useInternalRenderSession } from "../render-session.ts";
 import { boxProps } from "./box-props.ts";
 import { assertBoxValid } from "./box-validate.ts";
+import { assertNoRejectedMouseListeners } from "./rejected-mouse-listeners.ts";
 
 // Renders the `<tui-box>` host primitive. The host tag's `tui-` prefix keeps it out
 // of the component namespace, so the component can take its real name "Box" with no
@@ -10,9 +11,16 @@ import { assertBoxValid } from "./box-validate.ts";
 defineOptions({ name: "Box" });
 const props = defineProps(boxProps);
 defineSlots<{ default?: () => unknown }>();
+const instance = getCurrentInstance();
+if (!instance) throw new Error("<Box> must be created inside a Vue component instance");
+const componentInstance = instance;
 const renderSession = useInternalRenderSession();
 const srEnabled = computed(() => renderSession.session.output.presentation === "screen-reader");
 const srHidden = computed(() => srEnabled.value && props.ariaHidden);
+
+function validateRejectedListeners(): true {
+  return assertNoRejectedMouseListeners("Box", componentInstance.vnode.props);
+}
 </script>
 
 <template>
@@ -33,7 +41,10 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
        The root `v-if` makes this component a Vue Fragment, so its `$el` is the fragment's
        boundary anchor — NOT the `tui-box` host node; a Box ref is resolved to its host node
        by the shared rendered-target resolver. -->
-  <tui-box v-if="!srHidden && (srEnabled || assertBoxValid(props))" v-bind="props">
+  <tui-box
+    v-if="validateRejectedListeners() && !srHidden && (srEnabled || assertBoxValid(props))"
+    v-bind="props"
+  >
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />
   </tui-box>

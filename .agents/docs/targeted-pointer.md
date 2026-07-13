@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** selected unstamped F6 public-contract proposal; implementation is pending. This record selects observable behavior and the smallest supported public surface after the source, consumer, journey, peer, and adversarial reviews. It does not claim that the current listener props, `useMouseInput()`, `useDraggable()`, clipped-rectangle hit map, or root exports already satisfy the contract. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
+> **Status:** selected unstamped F6 public contract, implemented on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, and full local repository gates agree with this record. F6 remains Active until an unlocked GUI terminal directly demonstrates that terminal-native selection and wheel behavior are captured only while reporting is active and restored afterward. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
 
 ## Product boundary
 
@@ -22,9 +22,11 @@ The representative consumers do not protect the shipped API:
 - the coding-agent example and the pinned mo Inline finder are keyboard-driven;
 - the pinned machud Fullscreen monitor is intentionally pointer-free and must acquire no mouse mode merely because it is Fullscreen;
 - Herdr supplies real click-to-focus, regional wheel, divider drag, right-click, selection, and terminal-pane forwarding needs, but it uses an application geometry router and cannot choose a Vue API shape;
-- no repository production consumer uses the current terminal-wide `useMouseInput()` hook.
+- at the F6 audit boundary, no repository production consumer used the then-current terminal-wide `useMouseInput()` hook.
 
 The peer review found targeted retained-tree dispatch in OpenTUI and Textual, a paint-cell callback grid in prompt_toolkit, global application routing in Bubble Tea, application-owned input in Ratatui, raw focused sequences in pi-tui, and no mouse API in Ink. Their target, coordinate, default, capture, click, Inline, and reporting policies differ. The resulting contract below is therefore a vue-tui decision, not claimed industry parity.
+
+The implementation now exposes exactly the selected runtime and testing surfaces. Public/type/template/TSX/JavaScript guards, a clean Vue 3.4.38 and TypeScript 6.0.3 packed consumer, successful-frame targeting, click/wheel/focus/ScrollBox composition, same-host drag cohorts, re-entrant phase cleanup, failed-start click suppression, profile and acquisition failures, signals, suspension, teardown faults, HMR replacement, and a real nested-PTY workbench journey pass. A clean headless visual-review run observed `none -> 1000+1006 -> 1002+1006 -> 1000+1006 -> none`, alternate-screen restoration, exact termios restoration, and post-exit shell input. These checks establish implementation and terminal-state behavior; they do not substitute for the GUI selection observation required below.
 
 ## Selected authoring shape
 
@@ -138,7 +140,7 @@ The `/fullscreen` entry point has exactly two value exports, `useMouseEvent` and
 
 The remaining names follow existing vue-tui and Vue conventions rather than Ink compatibility. `TuiMouseClickEvent`, `TuiMouseWheelEvent`, and `TuiMouseEventMap` remain distinct from browser event families; composable options and return shapes use `UseXOptions` and `UseXReturn`; `ElementTarget` and `CellPoint` are reused from F5. `CellDelta` is intentionally separate from `CellPoint`: a point is a location in rendered geometry, while wheel and drag displacement is signed and may be negative. `MouseButton`, `MouseModifiers`, and `MouseHandlerResult` need no brand prefix because they neither collide with platform globals nor expose renderer internals. SGR's modifier bit historically named Meta maps to `alt`; unlike Kitty keyboard input, SGR does not report independent Alt, Meta, Super, or Hyper mouse modifiers.
 
-One keyed hook is preferable to a handler bag because independent features can attach one event without replacing each other, the event type determines its payload exactly, and reporting demand is static. It is preferable to separate `useClick()` and `useWheel()` hooks because those events share one stateless target route and a later evidence-backed event would not require another public composable. Drag is the exception because down, capture, movement, release, and cancellation form one lifecycle with one rendered-host owner. The current `useDraggable()` additionally owns application x/y state, which the renderer should not assume.
+One keyed hook is preferable to a handler bag because independent features can attach one event without replacing each other, the event type determines its payload exactly, and reporting demand is static. It is preferable to separate `useClick()` and `useWheel()` hooks because those events share one stateless target route and a later evidence-backed event would not require another public composable. Drag is the exception because down, capture, movement, release, and cancellation form one lifecycle with one rendered-host owner. The former `useDraggable()` additionally owned application x/y state, which the renderer should not assume.
 
 `ElementTarget` is the existing F5 normal Vue component-ref type. The functions return no renderer node, target handle, imperative capture control, or duplicate geometry state. `isActive` defaults to true and follows the same reactive option pattern as `useInput()`; false creates no demand and does not fail on Inline. Each `useMouseDrag()` call returns only the state of that registration in the current gesture, not position or layout state. A reactive target getter may still return `null` to detach from the current host.
 
@@ -291,23 +293,23 @@ Each method injects one parser-normalized physical mouse fact at the shared appl
 - **Mutable DOM-like events, `target`/`currentTarget` identities, or F3's complete route result:** F6 has no renderer-node authoring model, default recipient, or external pointer receiver. `delivery`, the bound ref, exact coordinates, and the two truthful propagation results cover the selected journeys without fake methods or no-op axes.
 - **A combined mouse-availability query:** no current journey branches on terminal mouse support alone, and F6 has no truthful cross-terminal handshake that could distinguish a silently ignored mode from no user activity. Existing render-session and input-availability facts cover planned presentation choices; known input and local acquisition failures remain exact.
 - **Blanket Fullscreen capture or a mount-level mouse switch:** a pointer-free monitor must emit no mouse mode. Visible live behavior selects the minimum level and its removal restores terminal-native behavior.
-- **Retaining the current terminal-wide stream:** the v1 hook exposes only vertical wheel with one-based coordinates. The real pane-forwarding scenario needs target-bound protocol translation, not that incomplete global surface.
+- **Retaining the former terminal-wide stream:** the v1 hook exposed only vertical wheel with one-based coordinates. The real pane-forwarding scenario needs target-bound protocol translation, not that incomplete global surface.
 
-## Current API dispositions
+## Implemented API dispositions
 
-- Remove `onMousedown`, `onMouseup`, `onClick`, and `onWheel` from common `Box` and `Text` props. Declare recognizable listener names as rejected types and throw for JavaScript/`any` values rather than allowing Vue fallthrough.
-- Make `ScrollBox` reject the same listener names and prevent unknown listeners from falling through to its internal viewport `Box`.
-- Remove root `useDraggable()` and its option/result types. `useMouseDrag()` supplies a captured gesture; the application owns position, clamping, axis, and layout state.
-- Remove root `useMouseInput()` and its current vertical-wheel, one-based event type without replacement. No representative F6 journey needs a terminal-wide stream, and Herdr-like terminal-pane forwarding requires a different target-bound, pane-local, complete button/motion/four-direction-wheel adapter.
-- Remove the v1 root `MouseTarget`, clipped rectangle, handler-prop, mutable event, and wheel types. Publish only the selected Fullscreen types from the new subpath.
-- Keep `useStdin().stdin` as the vouched actual-stream escape hatch. Direct bytes have no framework event semantics, do not safely compose with managed routing, and do not acquire a terminal mouse mode.
-- Add only `TestMouseReportingLevel`, `TestMouseReportingState`, `TestMouseModifiers`, `TestMouseButtonOptions`, and `TestMouse` to the `@vue-tui/testing` root, plus `RenderResult.mouse`; do not expose the internal injection seam from runtime.
+- `onMousedown`, `onMouseup`, `onClick`, and `onWheel` are removed from common `Box` and `Text` props. Recognizable listener names are rejected types and throw for JavaScript/`any` values rather than using Vue fallthrough.
+- `ScrollBox` rejects the same listener names and prevents them from falling through to its internal viewport `Box`.
+- Root `useDraggable()` and its option/result types are removed. `useMouseDrag()` supplies a captured gesture; the application owns position, clamping, axis, and layout state.
+- Root `useMouseInput()` and its vertical-wheel, one-based event type are removed without replacement. No representative F6 journey needs a terminal-wide stream, and Herdr-like terminal-pane forwarding requires a different target-bound, pane-local, complete button/motion/four-direction-wheel adapter.
+- The v1 root `MouseTarget`, clipped rectangle, handler-prop, mutable event, and wheel types are removed. Only the selected Fullscreen types are published from the new subpath.
+- `useStdin().stdin` remains the vouched actual-stream escape hatch. Direct bytes have no framework event semantics, do not safely compose with managed routing, and do not acquire a terminal mouse mode.
+- Only `TestMouseReportingLevel`, `TestMouseReportingState`, `TestMouseModifiers`, `TestMouseButtonOptions`, and `TestMouse` are added to the `@vue-tui/testing` root, plus `RenderResult.mouse`; the runtime's internal injection seam remains private.
 
 The project is experimental, so none of these removals receives an alias, deprecation period, warning shim, or compatibility precedence rule.
 
 ## Validation journeys and closure gates
 
-F6 implementation must prove three vertical journeys in addition to focused mechanics.
+F6 closure must prove three vertical journeys in addition to focused mechanics.
 
 ### Fullscreen coding-agent journey
 
@@ -335,6 +337,8 @@ F6 implementation must prove three vertical journeys in addition to focused mech
 - A real terminal observation records that native selection/wheel is captured while reporting is active and restored afterward; a PTY proves control-sequence and termios balance but does not pretend to observe GUI selection pixels.
 
 Closure also requires exact root and `/fullscreen` export guards, declaration inspection, Vue 3.4 SFC/TSX consumption under TypeScript 6 with `skipLibCheck: false`, focused unit/integration tests, relevant real PTYs, the repository visual-review loop, `vp run ready`, fresh `CI=true vp run ci`, updated PCR/vault trackers, and independent review.
+
+All automated, package, PTY, and headless visual gates above currently pass locally. The remaining closure observation is deliberately narrow: run the journey in an unlocked GUI terminal, confirm native drag-selection and terminal wheel behavior are unavailable during active reporting, remove the final target, and confirm both return. The current macOS session is owned by `loginwindow`, so no visible terminal window or display pixels are available to observe honestly; F6 must remain Active rather than treating PTY state as GUI evidence.
 
 ## Deliberately deferred
 

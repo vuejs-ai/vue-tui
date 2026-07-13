@@ -1,6 +1,6 @@
 import { type ExtractPublicPropTypes, type PropType } from "vue";
 import cliBoxes from "cli-boxes";
-import type { MouseHandlerProps } from "../mouse/events.ts";
+import { rejectedMouseListenerProps } from "./rejected-mouse-listeners.ts";
 
 type Spacing = number;
 type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse";
@@ -203,11 +203,8 @@ export const boxProps = {
   ariaHidden: Boolean,
   ariaRole: String as PropType<AriaRole>,
   ariaState: Object as PropType<AriaState>,
-  onMousedown: Function as PropType<MouseHandlerProps["onMousedown"]>,
-  onMouseup: Function as PropType<MouseHandlerProps["onMouseup"]>,
-  onClick: Function as PropType<MouseHandlerProps["onClick"]>,
-  onWheel: Function as PropType<MouseHandlerProps["onWheel"]>,
+  ...rejectedMouseListenerProps,
 };
 
 /** Props accepted by `<Box>` — the vue-tui analogue of Ink's `BoxProps`. */
-export type BoxProps = ExtractPublicPropTypes<typeof boxProps> & MouseHandlerProps;
+export type BoxProps = ExtractPublicPropTypes<typeof boxProps>;

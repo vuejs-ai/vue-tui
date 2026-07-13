@@ -325,7 +325,7 @@ current-props model, or API conventions.
 - **vue-tui:** `useElementGeometry()` receives a normal Vue component-instance ref or getter. The private F2 resolver follows the current rendered host below `$el`, including stable-proxy root replacement, but the public type does not expose or accept vue-tui's internal host-node or Yoga types.
 - **Why:** a template ref on a Vue component naturally yields the component instance. That is the authoring source the API should support; accepting renderer nodes would make a private implementation type into a second public target model. This is a Vue-idiomatic replacement, not an additive Ink-compatible superset: raw Ink-style host-node input is deliberately unsupported. The [F5 naming review](./semantic-geometry-and-caret.md#naming-review) explains why the richer paint-derived replacement no longer uses Ink's measurement names.
 
-> **Unstamped lifetime note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useElementGeometry()` uses that mechanism; `useDraggable()` remains F6 evidence. See [rendered-target-lifetime.md](./rendered-target-lifetime.md).
+> **Unstamped lifetime note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useElementGeometry()`, `useMouseEvent()`, and `useMouseDrag()` use that mechanism; the former `useDraggable()` supplied earlier evidence. See [rendered-target-lifetime.md](./rendered-target-lifetime.md).
 
 #### Entry point - `createApp()` instead of `render()`
 
@@ -833,7 +833,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
 - **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
-  `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `useMouseInput`, and
+  `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `/fullscreen`'s `useMouseEvent` and `useMouseDrag`, and
   `useCaret` **throw** when their required context is absent. `useElementGeometry` and `useAnimation` do **not** throw:
   geometry reports `unavailable`, and animation drives a standalone scheduler. See the additive entry.
 - **Why:** a composable used in the wrong place is usually a bug, and a thrown error names it at

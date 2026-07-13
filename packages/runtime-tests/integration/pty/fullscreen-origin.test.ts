@@ -16,8 +16,8 @@ type SurfaceScenario =
   | "horizontal-wide"
   | "horizontal-transform";
 
-async function emulate(output: string): Promise<InstanceType<typeof Terminal>> {
-  const terminal = new Terminal({ cols: 100, rows: 8, allowProposedApi: true });
+async function emulate(output: string, rows = 8): Promise<InstanceType<typeof Terminal>> {
+  const terminal = new Terminal({ cols: 100, rows, allowProposedApi: true });
   await new Promise<void>((resolve) => terminal.write(output, resolve));
   return terminal;
 }
@@ -189,7 +189,7 @@ test("fullscreen target behavior follows a stable component ref's rendered host 
     // x=5 has exactly one live registration by observing one start callback.
     ps.write("\x1b[<0;1;2m");
     before = ps.output.length;
-    ps.write("\x1b[<0;6;2M");
+    ps.write("\x1b[<0;6;2M\x1b[<32;7;2M");
     await ps.waitForOutput((output) => output.slice(before).includes("dragging=true"));
     before = ps.output.length;
     ps.write("p");
@@ -204,7 +204,7 @@ test("fullscreen target behavior follows a stable component ref's rendered host 
     // the test transport for another key after the app has disabled reporting;
     // the visual-controller scenario remains manual.
     before = ps.output.length;
-    ps.write("\x1b[<0;6;2M");
+    ps.write("\x1b[<0;6;2M\x1b[<32;7;2M");
     await ps.waitForOutput((output) => output.slice(before).includes("dragging=true"));
     before = ps.output.length;
     ps.write("x");
@@ -220,6 +220,124 @@ test("fullscreen target behavior follows a stable component ref's rendered host 
     await ps.waitForExit();
     exited = true;
     expect(ps.output).toContain("\x1b[?1002l\x1b[?1006l");
+  } finally {
+    if (!exited) ps.kill("SIGTERM");
+  }
+});
+
+test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping, and drag demand", async () => {
+  const rows = 12;
+  const ps = term("fullscreen-origin", [String(rows), "targeted-mouse"]);
+  let exited = false;
+
+  try {
+    await ps.waitForOutput((output) => output.includes("__SETTLED__:targeted-mouse"));
+    expect(ps.output).not.toContain("\x1b[?1000h");
+    expect(ps.output).not.toContain("\x1b[?1002h");
+    expect(ps.output).not.toContain("\x1b[?1006h");
+    let terminal = await emulate(ps.output, rows);
+    expect(visibleLines(terminal)).toContain("targets=hidden focused=false");
+
+    let before = ps.output.length;
+    ps.write("a");
+    await ps.waitForOutput((output) => output.slice(before).includes("__TARGETED__:button"));
+    const buttonEnable = ps.output.slice(before);
+    expect(buttonEnable).toContain("\x1b[?1000h\x1b[?1006h");
+    expect(buttonEnable).not.toContain("\x1b[?1002h");
+    terminal = await emulate(ps.output, rows);
+    expect(visibleLines(terminal)[0]).toBe("targets=visible focused=false");
+    expect(visibleLines(terminal)).toContain("CLICK");
+    expect(visibleLines(terminal)).toContain("-----");
+    expect(visibleLines(terminal)).toContain("CLI");
+
+    // The child first continues, so the parent receives a bubble delivery. The
+    // child also focuses itself through the F4 ref-bound focus handle.
+    before = ps.output.length;
+    ps.write("\x1b[<0;1;2M\x1b[<0;1;2mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
+    const bubblingClick = ps.output.slice(before);
+    const childMarker = "__MOUSE__:click:child:target:focused=true:consume=false";
+    const parentMarker = "__MOUSE__:click:parent:bubble";
+    expect(bubblingClick).toContain(childMarker);
+    expect(bubblingClick).toContain(parentMarker);
+    expect(bubblingClick.indexOf(childMarker)).toBeLessThan(bubblingClick.indexOf(parentMarker));
+
+    before = ps.output.length;
+    ps.write("c");
+    await ps.waitForOutput((output) => output.slice(before).includes("__TARGETED__:consume"));
+    before = ps.output.length;
+    ps.write("\x1b[<0;1;2M\x1b[<0;1;2mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
+    const consumedClick = ps.output.slice(before);
+    expect(consumedClick).toContain("__MOUSE__:click:child:target:focused=true:consume=true");
+    expect(consumedClick).not.toContain(parentMarker);
+
+    // ScrollBox itself remains passive. A wheel hook on its wrapper drives the
+    // exposed imperative method while button reporting is the active minimum.
+    before = ps.output.length;
+    ps.write("\x1b[<64;1;3M");
+    await ps.waitForOutput((output) =>
+      output.slice(before).includes("__TARGETED__:wheel:target:0,-1"),
+    );
+    const wheelOutput = ps.output.slice(before);
+    expect(wheelOutput).not.toContain("\x1b[?1002h");
+    terminal = await emulate(ps.output, rows);
+    expect(visibleLines(terminal)).toContain("ITEM2");
+
+    // The target is eight cells wide but only its first three cells are painted
+    // through the clipping parent. A hit in that fragment dispatches; a hit in
+    // the clipped-away part does not.
+    before = ps.output.length;
+    ps.write("\x1b[<0;2;6M\x1b[<0;2;6mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
+    expect(ps.output.slice(before)).toContain("__MOUSE__:click:clipped:target:1,0");
+    before = ps.output.length;
+    ps.write("\x1b[<0;7;6M\x1b[<0;7;6mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
+    expect(ps.output.slice(before)).not.toContain("__MOUSE__:click:clipped");
+
+    before = ps.output.length;
+    ps.write("d");
+    await ps.waitForOutput((output) => output.slice(before).includes("__TARGETED__:drag"));
+    const dragEnable = ps.output.slice(before);
+    expect(dragEnable).toContain("\x1b[?1000l\x1b[?1006l");
+    expect(dragEnable).toContain("\x1b[?1002h\x1b[?1006h");
+    expect(dragEnable.indexOf("\x1b[?1000l")).toBeLessThan(dragEnable.indexOf("\x1b[?1002h"));
+
+    // Both registrations on the divider join one capture cohort. Motion and
+    // release outside its bounds continue to reach both registrations.
+    before = ps.output.length;
+    ps.write("\x1b[<0;1;5M\x1b[<32;3;5M\x1b[<32;21;10M\x1b[<0;21;10mp");
+    await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
+    const dragOutput = ps.output.slice(before);
+    for (const registration of ["a", "b"]) {
+      expect(dragOutput).toContain(`__MOUSE__:drag:${registration}:start:2,0`);
+      expect(dragOutput).toContain(`__MOUSE__:drag:${registration}:move:outside`);
+      expect(dragOutput).toContain(`__MOUSE__:drag:${registration}:end:outside`);
+    }
+
+    before = ps.output.length;
+    ps.write("g");
+    await ps.waitForOutput((output) =>
+      output.slice(before).includes("__TARGETED__:button-after-drag"),
+    );
+    const dragDowngrade = ps.output.slice(before);
+    expect(dragDowngrade).toContain("\x1b[?1002l\x1b[?1006l");
+    expect(dragDowngrade).toContain("\x1b[?1000h\x1b[?1006h");
+    expect(dragDowngrade.indexOf("\x1b[?1002l")).toBeLessThan(dragDowngrade.indexOf("\x1b[?1000h"));
+
+    before = ps.output.length;
+    ps.write("x");
+    await ps.waitForOutput((output) => output.slice(before).includes("__TARGETED__:none"));
+    const finalRemoval = ps.output.slice(before);
+    expect(finalRemoval).toContain("\x1b[?1000l\x1b[?1006l");
+    expect(finalRemoval).not.toContain("\x1b[?1000h");
+    expect(finalRemoval).not.toContain("\x1b[?1002h");
+
+    ps.write("q");
+    await ps.waitForOutput((output) => output.includes("__CLICKED__:targeted-mouse"));
+    await ps.waitForExit();
+    exited = true;
   } finally {
     if (!exited) ps.kill("SIGTERM");
   }

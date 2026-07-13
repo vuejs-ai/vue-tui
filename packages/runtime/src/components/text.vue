@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, inject, provide } from "vue";
+import { computed, getCurrentInstance, inject, provide } from "vue";
 import { TextContextKey } from "../context.ts";
 import { useInternalRenderSession } from "../render-session.ts";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
+import { assertNoRejectedMouseListeners } from "./rejected-mouse-listeners.ts";
 
 // Renders the `<tui-text>` / `<tui-virtual-text>` host primitives. The `tui-` prefix
 // keeps the host tags out of the component namespace, so the component can take its
@@ -11,6 +12,9 @@ import { textProps } from "./text-props.ts";
 defineOptions({ name: "Text" });
 const props = defineProps(textProps);
 const slots = defineSlots<{ default?: () => unknown }>();
+const instance = getCurrentInstance();
+if (!instance) throw new Error("<Text> must be created inside a Vue component instance");
+const componentInstance = instance;
 
 // Read whether an ANCESTOR established a text context BEFORE we provide our own —
 // inject resolves up the parent chain, not our own provide, so a top-level <Text>
@@ -47,7 +51,14 @@ function validate(): true {
 </script>
 
 <template>
-  <template v-if="!srHidden && (srEnabled || validate()) && hasContent">
+  <template
+    v-if="
+      assertNoRejectedMouseListeners('Text', componentInstance.vnode.props) &&
+      !srHidden &&
+      (srEnabled || validate()) &&
+      hasContent
+    "
+  >
     <tui-virtual-text v-if="insideText" v-bind="props">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />

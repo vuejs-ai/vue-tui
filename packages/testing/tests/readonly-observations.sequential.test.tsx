@@ -1,13 +1,15 @@
 // Vue readonly mutation warnings use the process-global console, so keep this test sequential.
 import { expect, test, vi } from "vite-plus/test";
 import { Text } from "@vue-tui/runtime";
-import { render, type ContentFrame } from "../src/index.ts";
+import { render, type ContentFrame, type TestMouseReportingLevel } from "../src/index.ts";
 
 test.sequential("frames and session reject runtime mutation", async () => {
   const result = await render(() => <Text>original</Text>);
   const frameCount = result.frames.length;
   const layoutColumns = result.session.dimensions.layout.columns;
   const rawMode = result.terminal.rawMode.current;
+  const reporting = result.mouse.reporting.current;
+  const reportingHistoryLength = result.mouse.reporting.history.length;
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const attemptMutation = (mutation: () => void) => {
     try {
@@ -28,11 +30,19 @@ test.sequential("frames and session reject runtime mutation", async () => {
     attemptMutation(() => {
       (result.terminal.rawMode as { current: boolean }).current = !rawMode;
     });
+    attemptMutation(() => {
+      (result.mouse.reporting as { current: TestMouseReportingLevel }).current = "button";
+    });
+    attemptMutation(() => {
+      (result.mouse.reporting.history as TestMouseReportingLevel[]).push("button");
+    });
 
     expect(result.frames).toHaveLength(frameCount);
     expect(result.lastFrame()).toBe("original");
     expect(result.session.dimensions.layout.columns).toBe(layoutColumns);
     expect(result.terminal.rawMode.current).toBe(rawMode);
+    expect(result.mouse.reporting.current).toBe(reporting);
+    expect(result.mouse.reporting.history).toHaveLength(reportingHistoryLength);
     expect(warn).toHaveBeenCalled();
   } finally {
     warn.mockRestore();

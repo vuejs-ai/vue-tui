@@ -21,9 +21,10 @@ import { PassThrough } from "node:stream";
 import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { defineComponent } from "vue";
+import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 import { afterEach, beforeEach, describe, test, expect, vi } from "vite-plus/test";
-import { createApp, Text, useMouseInput } from "@vue-tui/runtime";
+import { createApp, Text } from "@vue-tui/runtime";
+import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
 const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
 const MOUSE_OFF = "\x1b[?1000l\x1b[?1006l";
@@ -100,8 +101,9 @@ function makeFdBackedStdout(): {
 }
 
 const MouseApp = defineComponent(() => {
-  useMouseInput(() => "continue");
-  return () => <Text>mouse</Text>;
+  const target = shallowRef<ComponentPublicInstance | null>(null);
+  useMouseEvent(target, "wheel", () => "continue");
+  return () => <Text ref={target}>mouse</Text>;
 });
 
 describe("SGR mouse disable on signal exit", () => {
@@ -112,9 +114,9 @@ describe("SGR mouse disable on signal exit", () => {
     const app = createApp(MouseApp);
     // Keep the live TTY path explicit; lifecycle cleanup now registers for every
     // real mount regardless of output cadence.
-    app.mount({ stdout, stdin, liveUpdates: true });
+    app.mount({ stdout, stdin, liveUpdates: true, mode: "fullscreen" });
 
-    // Let useMouseInput's attach enable SGR mouse tracking (writes
+    // Let the accepted targeted Fullscreen registration enable SGR mouse tracking (writes
     // \x1b[?1000h\x1b[?1006h, async).
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(MOUSE_ON);
@@ -149,7 +151,7 @@ describe("SGR mouse disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(MouseApp);
-    app.mount({ stdout, stdin, liveUpdates: true });
+    app.mount({ stdout, stdin, liveUpdates: true, mode: "fullscreen" });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(MOUSE_ON);

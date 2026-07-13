@@ -18,10 +18,8 @@ import {
   type ShallowRef,
 } from "vue";
 import {
-  Box,
   useApp,
   useCaret,
-  useDraggable,
   useElementGeometry,
   useExternalInput,
   useFocus,
@@ -32,7 +30,6 @@ import {
   useInput,
   useInputAvailability,
   useLayoutSize,
-  useMouseInput,
   useRenderSession,
   useStdin,
   useStdout,
@@ -62,24 +59,11 @@ import type {
   TransformProps,
   NewlineProps,
   SpacerProps,
-  MouseButton,
-  MouseHandlerProps,
-  MouseInputEvent,
-  MouseTarget,
-  MouseTargetRect,
   MountOptions,
   TuiInputEvent,
   TuiInputModifiers,
   TuiInputPhase,
   TuiInputSource,
-  TuiMouseEvent,
-  TuiMouseEventType,
-  TuiWheelEvent,
-  UseDraggableAxis,
-  UseDraggableOptions,
-  UseDraggablePosition,
-  UseDraggableReturn,
-  UseDraggableTarget,
   UseCaretOptions,
   UseCaretReturn,
   UseElementGeometryReturn,
@@ -102,6 +86,22 @@ import type {
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
+import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
+import type {
+  CellDelta,
+  MouseButton,
+  MouseDragHandler,
+  MouseEventHandler,
+  MouseHandlerResult,
+  MouseModifiers,
+  TuiMouseClickEvent,
+  TuiMouseDragEvent,
+  TuiMouseEventMap,
+  TuiMouseWheelEvent,
+  UseMouseDragOptions,
+  UseMouseDragReturn,
+  UseMouseEventOptions,
+} from "@vue-tui/runtime/fullscreen";
 
 const defaultMountOptions: MountOptions = {};
 const inlineMountOptions: MountOptions = { mode: "inline", liveUpdates: false };
@@ -146,12 +146,14 @@ expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<string | undefined>()
 expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
 expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<BoxProps["onMousedown"]>().toEqualTypeOf<MouseHandlerProps["onMousedown"]>();
-expectTypeOf<BoxProps["onMouseup"]>().toEqualTypeOf<MouseHandlerProps["onMouseup"]>();
-expectTypeOf<BoxProps["onClick"]>().toEqualTypeOf<MouseHandlerProps["onClick"]>();
-expectTypeOf<BoxProps["onWheel"]>().toEqualTypeOf<MouseHandlerProps["onWheel"]>();
-expectTypeOf<TextProps["onClick"]>().toEqualTypeOf<MouseHandlerProps["onClick"]>();
-expectTypeOf<TextProps["onWheel"]>().toEqualTypeOf<MouseHandlerProps["onWheel"]>();
+expectTypeOf<BoxProps["onMousedown"]>().toEqualTypeOf<undefined>();
+expectTypeOf<BoxProps["onMouseup"]>().toEqualTypeOf<undefined>();
+expectTypeOf<BoxProps["onClick"]>().toEqualTypeOf<undefined>();
+expectTypeOf<BoxProps["onWheel"]>().toEqualTypeOf<undefined>();
+expectTypeOf<TextProps["onMousedown"]>().toEqualTypeOf<undefined>();
+expectTypeOf<TextProps["onMouseup"]>().toEqualTypeOf<undefined>();
+expectTypeOf<TextProps["onClick"]>().toEqualTypeOf<undefined>();
+expectTypeOf<TextProps["onWheel"]>().toEqualTypeOf<undefined>();
 expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
 expectTypeOf<StaticProps<string>["items"]>().toEqualTypeOf<string[]>();
 expectTypeOf<StaticProps["style"]>().toEqualTypeOf<StaticStyle | undefined>();
@@ -597,61 +599,111 @@ export type _UsePasteOptionsWereRemoved = import("@vue-tui/runtime").UsePasteOpt
 // @ts-expect-error Paste is observed through useInput(), not a separate public composable.
 export type _UsePasteWasRemoved = typeof import("@vue-tui/runtime").usePaste;
 
-expectTypeOf<MouseInputEvent>().toEqualTypeOf<{
-  readonly type: "wheel";
-  readonly direction: "up" | "down";
+// The old root mouse surface is removed directly; Fullscreen targeting is available only
+// through @vue-tui/runtime/fullscreen.
+// @ts-expect-error The terminal-wide v1 mouse hook was removed.
+export type _UseMouseInputWasRemoved = typeof import("@vue-tui/runtime").useMouseInput;
+// @ts-expect-error The v1 drag helper was removed.
+export type _UseDraggableWasRemoved = typeof import("@vue-tui/runtime").useDraggable;
+// @ts-expect-error Fullscreen mouse values are not duplicated at the root.
+export type _UseMouseEventIsFullscreenOnly = typeof import("@vue-tui/runtime").useMouseEvent;
+// @ts-expect-error Fullscreen mouse values are not duplicated at the root.
+export type _UseMouseDragIsFullscreenOnly = typeof import("@vue-tui/runtime").useMouseDrag;
+// @ts-expect-error MouseButton moved to the Fullscreen subpath.
+export type _RootMouseButtonWasRemoved = import("@vue-tui/runtime").MouseButton;
+// @ts-expect-error The terminal-wide v1 mouse event was removed.
+export type _MouseInputEventWasRemoved = import("@vue-tui/runtime").MouseInputEvent;
+// @ts-expect-error The terminal-wide v1 options were removed.
+export type _UseMouseInputOptionsWereRemoved = import("@vue-tui/runtime").UseMouseInputOptions;
+// @ts-expect-error Common mouse-listener handler props were removed.
+export type _MouseHandlerPropsWereRemoved = import("@vue-tui/runtime").MouseHandlerProps;
+// @ts-expect-error The mutable v1 target wrapper was removed.
+export type _MouseTargetWasRemoved = import("@vue-tui/runtime").MouseTarget;
+// @ts-expect-error The clipped v1 target rectangle was removed.
+export type _MouseTargetRectWasRemoved = import("@vue-tui/runtime").MouseTargetRect;
+// @ts-expect-error The mutable v1 event was removed.
+export type _TuiMouseEventWasRemoved = import("@vue-tui/runtime").TuiMouseEvent;
+// @ts-expect-error The open-ended v1 event-name type was removed.
+export type _TuiMouseEventTypeWasRemoved = import("@vue-tui/runtime").TuiMouseEventType;
+// @ts-expect-error The mutable v1 wheel event was removed.
+export type _TuiWheelEventWasRemoved = import("@vue-tui/runtime").TuiWheelEvent;
+// @ts-expect-error The v1 drag axis policy was removed.
+export type _UseDraggableAxisWasRemoved = import("@vue-tui/runtime").UseDraggableAxis;
+// @ts-expect-error The v1 drag options were removed.
+export type _UseDraggableOptionsWereRemoved = import("@vue-tui/runtime").UseDraggableOptions;
+// @ts-expect-error The v1 application-owned position type was removed.
+export type _UseDraggablePositionWasRemoved = import("@vue-tui/runtime").UseDraggablePosition;
+// @ts-expect-error The v1 drag return was removed.
+export type _UseDraggableReturnWasRemoved = import("@vue-tui/runtime").UseDraggableReturn;
+// @ts-expect-error The v1 duplicate target type was removed.
+export type _UseDraggableTargetWasRemoved = import("@vue-tui/runtime").UseDraggableTarget;
+
+// The Fullscreen subpath references common geometry types without re-exporting them.
+// @ts-expect-error CellPoint remains a root type.
+export type _CellPointIsNotDuplicated = import("@vue-tui/runtime/fullscreen").CellPoint;
+// @ts-expect-error ElementTarget remains a root type.
+export type _ElementTargetIsNotDuplicated = import("@vue-tui/runtime/fullscreen").ElementTarget;
+// @ts-expect-error Root application values are not duplicated in the Fullscreen entry point.
+export type _CreateAppIsNotDuplicated = typeof import("@vue-tui/runtime/fullscreen").createApp;
+
+expectTypeOf<MouseButton>().toEqualTypeOf<"left" | "middle" | "right">();
+expectTypeOf<MouseHandlerResult>().toEqualTypeOf<"continue" | "consume">();
+expectTypeOf<CellDelta>().toEqualTypeOf<{
   readonly x: number;
   readonly y: number;
+}>();
+expectTypeOf<MouseModifiers>().toEqualTypeOf<{
   readonly shift: boolean;
-  readonly meta: boolean;
+  readonly alt: boolean;
   readonly ctrl: boolean;
 }>();
-const mouseHandler = shallowRef((_event: MouseInputEvent) => {});
-expectTypeOf(mouseHandler).toMatchTypeOf<Parameters<typeof useMouseInput>[0]>();
-
-expectTypeOf<string>().toMatchTypeOf<MouseButton>();
-expectTypeOf<MouseButton>().toMatchTypeOf<string>();
-expectTypeOf<"back" | "forward">().toMatchTypeOf<MouseButton>();
-expectTypeOf<string>().toMatchTypeOf<TuiMouseEventType>();
-expectTypeOf<TuiMouseEventType>().toMatchTypeOf<string>();
-expectTypeOf<MouseTargetRect>().toEqualTypeOf<{
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
-  readonly height: number;
+expectTypeOf<TuiMouseClickEvent["type"]>().toEqualTypeOf<"click">();
+expectTypeOf<TuiMouseClickEvent["delivery"]>().toEqualTypeOf<"target" | "bubble">();
+expectTypeOf<TuiMouseClickEvent["surface"]>().toEqualTypeOf<CellPoint>();
+expectTypeOf<TuiMouseClickEvent["local"]>().toEqualTypeOf<CellPoint>();
+expectTypeOf<TuiMouseClickEvent["button"]>().toEqualTypeOf<MouseButton>();
+expectTypeOf<TuiMouseWheelEvent["type"]>().toEqualTypeOf<"wheel">();
+expectTypeOf<TuiMouseWheelEvent["delta"]>().toEqualTypeOf<CellDelta>();
+expectTypeOf<TuiMouseEventMap>().toEqualTypeOf<{
+  readonly click: TuiMouseClickEvent;
+  readonly wheel: TuiMouseWheelEvent;
 }>();
-expectTypeOf<MouseTarget["rect"]>().toEqualTypeOf<MouseTargetRect>();
-expectTypeOf<TuiMouseEvent["type"]>().toEqualTypeOf<TuiMouseEventType>();
-expectTypeOf<TuiMouseEvent["button"]>().toEqualTypeOf<MouseButton | null>();
-expectTypeOf<TuiMouseEvent["buttons"]>().toEqualTypeOf<ReadonlySet<MouseButton>>();
-expectTypeOf<TuiMouseEvent["target"]>().toEqualTypeOf<MouseTarget | null>();
-expectTypeOf<TuiMouseEvent["currentTarget"]>().toEqualTypeOf<MouseTarget | null>();
-expectTypeOf<TuiMouseEvent["movementX"]>().toEqualTypeOf<number>();
-expectTypeOf<TuiMouseEvent["movementY"]>().toEqualTypeOf<number>();
-expectTypeOf<TuiWheelEvent["type"]>().toEqualTypeOf<"wheel">();
-expectTypeOf<TuiWheelEvent["button"]>().toEqualTypeOf<null>();
-expectTypeOf<TuiWheelEvent["deltaX"]>().toEqualTypeOf<number>();
-expectTypeOf<TuiWheelEvent["deltaY"]>().toEqualTypeOf<number>();
+expectTypeOf<MouseEventHandler<"click">>().toEqualTypeOf<
+  (event: TuiMouseClickEvent) => MouseHandlerResult
+>();
+expectTypeOf<MouseDragHandler>().toEqualTypeOf<(event: TuiMouseDragEvent) => void>();
+expectTypeOf<
+  Exclude<TuiMouseDragEvent, { phase: "cancel" }>["movement"]
+>().toEqualTypeOf<CellDelta>();
+expectTypeOf<Extract<TuiMouseDragEvent, { phase: "cancel" }>["reason"]>().toEqualTypeOf<
+  "deactivated" | "target-lost" | "suspended"
+>();
+expectTypeOf<Extract<TuiMouseDragEvent, { phase: "cancel" }>["movement"]>().toEqualTypeOf<null>();
+expectTypeOf<UseMouseEventOptions>().toEqualTypeOf<{
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+}>();
+expectTypeOf<UseMouseDragOptions>().toEqualTypeOf<{
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+}>();
+expectTypeOf<UseMouseDragReturn>().toEqualTypeOf<{
+  readonly isDragging: Readonly<ShallowRef<boolean>>;
+}>();
 
-expectTypeOf<Parameters<typeof useMouseInput>[0]>().toEqualTypeOf<
-  MaybeRef<(event: MouseInputEvent) => void>
->();
+const mouseTarget = shallowRef<ComponentPublicInstance | null>(null);
+const clickHandler = shallowRef<MouseEventHandler<"click">>(() => "continue");
+useMouseEvent(mouseTarget, "click", clickHandler);
+useMouseEvent(mouseTarget, "wheel", (event) => {
+  expectTypeOf(event).toEqualTypeOf<TuiMouseWheelEvent>();
+  return "consume";
+});
+// @ts-expect-error The event key determines the handler payload.
+useMouseEvent(mouseTarget, "click", (_event: TuiMouseWheelEvent) => "continue");
+// @ts-expect-error A targeted mouse handler must return an explicit propagation result.
+useMouseEvent(mouseTarget, "click", () => undefined);
 
-const dragTarget = shallowRef<InstanceType<typeof Box> | null>(null);
-expectTypeOf(dragTarget).toMatchTypeOf<Parameters<typeof useDraggable>[0]>();
-expectTypeOf<Parameters<typeof useDraggable>[0]>().toEqualTypeOf<UseDraggableTarget>();
-expectTypeOf<UseDraggableTarget>().toEqualTypeOf<
-  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
->();
-expectTypeOf<ReturnType<typeof useDraggable>>().toEqualTypeOf<UseDraggableReturn>();
-expectTypeOf<UseDraggableAxis>().toEqualTypeOf<"x" | "y" | "both">();
-expectTypeOf<UseDraggableOptions["initialValue"]>().toEqualTypeOf<
-  UseDraggablePosition | undefined
->();
-expectTypeOf<UseDraggableOptions["axis"]>().toEqualTypeOf<UseDraggableAxis | undefined>();
-expectTypeOf<UseDraggableOptions["onStart"]>().toEqualTypeOf<
-  ((position: UseDraggablePosition, event: TuiMouseEvent) => void) | undefined
->();
-expectTypeOf<UseDraggableReturn["x"]>().toEqualTypeOf<Ref<number>>();
-expectTypeOf<UseDraggableReturn["y"]>().toEqualTypeOf<Ref<number>>();
-expectTypeOf<UseDraggableReturn["position"]>().toMatchTypeOf<Readonly<Ref<UseDraggablePosition>>>();
+const dragHandler = shallowRef<MouseDragHandler>(() => {});
+const drag = useMouseDrag(mouseTarget, dragHandler, { isActive: shallowRef(true) });
+expectTypeOf(drag).toEqualTypeOf<UseMouseDragReturn>();
+useMouseDrag(mouseTarget, (event) => {
+  expectTypeOf(event).toEqualTypeOf<TuiMouseDragEvent>();
+});

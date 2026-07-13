@@ -14,6 +14,7 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/components": "workspace:*",
     "@vue-tui/runtime": "workspace:*",
     "@vue-tui/testing": "workspace:*",
     "@xterm/headless": "catalog:",
