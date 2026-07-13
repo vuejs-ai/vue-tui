@@ -55,21 +55,21 @@ copy after mouse capture would additionally require a selection and clipboard mo
 are out of scope for this input-free component; see
 [terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
 
-The current unstamped API direction composes full-screen wheel behavior through a ref-bound runtime
+The selected unstamped F6 proposal composes Fullscreen wheel behavior through a ref-bound runtime
 composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
 
 ```ts
-import { usePointerEvent } from "@vue-tui/runtime/fullscreen";
+import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
-usePointerEvent(wheelTarget, "wheel", (event) => {
-  const moved = scrollBox.value?.scrollByLines(event.deltaY);
-  if (moved) event.stopPropagation();
+useMouseEvent(wheelTarget, "wheel", (event) => {
+  scrollBox.value?.scrollByLines(event.delta.y);
+  return "consume";
 });
 ```
 
-That example requires the proposed scroll methods to report whether the position actually changed;
-the return-type change and exact pointer-composable signature are not yet accepted. The durable
-boundary is that pointer input composes outside this component and follows the rendered target's
+That example intentionally consumes every delivered wheel. F7 will decide whether scroll methods
+report actual movement so a nested handler can return `"continue"` at an edge. The durable boundary
+is that targeted mouse input composes outside this component and follows the rendered target's
 lifetime.
 
 ## Future direction (not in scope now)

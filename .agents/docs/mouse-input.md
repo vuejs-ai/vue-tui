@@ -12,22 +12,11 @@
 > visible surface and hit map at the same origin is recorded in
 > [fullscreen-output.md](./fullscreen-output.md). §5 records the shipped v1 event shape as historical
 > evidence; the experimental API-stability policy does not require the target API to preserve it.
-> Target-ref, dispatch, bubbling, low-level raw-mouse shape, hover, selection/clipboard, side
-> buttons, and pixel mode remain open or deferred as described below.
+> At that checkpoint, target refs, dispatch, bubbling, low-level raw-mouse shape, hover,
+> selection/clipboard, side buttons, and pixel mode remained open or deferred. The current
+> correction below supersedes those future-facing v1 conclusions.
 >
-> **Current API-design correction (2026-07-11):** this file records the shipped v1 implementation
-> and its historical rationale; it no longer settles the future public placement or authoring shape
-> of targeted pointer APIs. Under the [experimental API-stability policy](./goal.md#api-stability-during-experimentation), shipped v1 APIs may be replaced or removed directly once their target contracts are accepted. The working direction removes targeted listeners from common `Box` and
-> `Text`, does not add a `PointerBox`, and validates a ref-bound composable such as
-> `usePointerEvent(target, type, handler)` from `@vue-tui/runtime/fullscreen`. Under the proposed
-> contract, full-screen targeted composables acquire mouse reporting only while a rendered target
-> needs it, while interactive inline use is rejected because it has no reliable element hit-test
-> origin. Terminal-wide raw mouse remains conceptually separate from targeted pointer delivery, but
-> the current root `useMouseInput` name, export path, coordinate base, and vertical-wheel-only shape
-> are reopened rather than preserved for compatibility. The accepted mount target is one
-> `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default. F1.4
-> now implements that mount contract and removes `fullscreen`, `alternateScreen`, and `interactive`
-> directly. The targeted-pointer replacement itself remains F6 work.
+> **Current API-design correction (2026-07-13):** this file records the shipped v1 implementation and its historical rationale; it no longer settles the future public placement or authoring shape. The selected unstamped F6 proposal is [Fullscreen targeted pointer](./targeted-pointer.md): common components reject listener fallthrough; `@vue-tui/runtime/fullscreen` supplies a keyed `useMouseEvent()` for click and wheel plus one rendered-host-owned `useMouseDrag()` lifecycle; accepted paint geometry drives targeting; active visible demand selects `1000` or `1002`; effective visual Inline fails while expected non-targetable presentations remain inert. It adds no separate mouse authorization or availability API. It directly removes v1 listener props, root `useDraggable()`, root `useMouseInput()`, and their historical mutable/clipped event types without compatibility shims. The one-`createApp`, optional-`mode`, default-Inline mount contract remains unchanged. Implementation is still F6 work, not a claim about current source.
 >
 > **F2 implementation update (2026-07-12, unstamped):** current `useDraggable()` now consumes the shared internal [rendered-target lifetime](./rendered-target-lifetime.md). It follows insertion, keyed inner-root replacement, removal, scope disposal, HMR, and stale Vue 3.4 component refs by resolved host identity; active capture and raw/SGR ownership end when that host disappears. This fixes the lifecycle mechanism without accepting the current root export, public signature, event model, or common-component listeners as the F6 target API.
 >

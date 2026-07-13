@@ -1,6 +1,6 @@
 # Application API design
 
-> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, and the completed F1 render-session, F2 rendered-target lifetime, F3 normalized input and routing, F4 logical focus and scopes, and F5 semantic geometry and focus-bound caret foundations. F6 Fullscreen targeted pointer is Active. The completed implementations and accepted contracts are not VOUCHED stamps; pointer names and signatures, target disposition of current pointer APIs, component catalog, and the 1.0 surface remain unselected.
+> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, and the completed F1 render-session, F2 rendered-target lifetime, F3 normalized input and routing, F4 logical focus and scopes, and F5 semantic geometry and focus-bound caret foundations. F6 Fullscreen targeted pointer is Active; its exact current public-contract proposal is [Fullscreen targeted pointer](./targeted-pointer.md). The completed implementations and accepted contracts are not VOUCHED stamps; F6 implementation, the component catalog, and the 1.0 surface remain incomplete.
 
 ## Current conclusion
 
@@ -12,7 +12,7 @@ The first concrete design topic is the **rendering-mode contract**: which termin
 
 F1.3 selected [`useRenderSession()`](./render-session.md) as the readonly reactive projection of that contract and `useLayoutSize()` as its focused responsive-layout projection. The session preserves requested and effective mode in one finite resolution value, describes output destination, dynamic updates, and presentation separately, distinguishes terminal size from the effective layout bound, and exposes semantic availability without leaking a mutable renderer. F1.4 completed the internal live source, F1.5 completed the same authority for finite deterministic hosts and both fixed string presentations, F1.6 made the accepted Inline row bound and history ownership true, F1.7 completed exact lifecycle ownership, suspension/continuation, and clean/fatal exit behavior, and F1.8 published the two verified public composables while removing their superseded hooks.
 
-F2 now has one internal [rendered-target lifetime](./rendered-target-lifetime.md): a registration follows the resolved host below a Vue ref, reconciles stable component proxies on renderer commits, invalidates synchronously on host removal, and releases on scope, app, string-host, and HMR teardown. `useDraggable()` and the former measurement adapter supplied the original evidence; F5 now uses the same mechanism for public semantic geometry without publishing a generic target composable or renderer node. F6 will decide the pointer adapter's final disposition.
+F2 now has one internal [rendered-target lifetime](./rendered-target-lifetime.md): a registration follows the resolved host below a Vue ref, reconciles stable component proxies on renderer commits, invalidates synchronously on host removal, and releases on scope, app, string-host, and HMR teardown. `useDraggable()` and the former measurement adapter supplied the original evidence; F5 now uses the same mechanism for public semantic geometry without publishing a generic target composable or renderer node. F6 has selected direct replacement of the former drag and listener adapters with the Fullscreen mouse composables in [targeted-pointer.md](./targeted-pointer.md); implementation is pending.
 
 The completed [semantic geometry and caret proposal](./semantic-geometry-and-caret.md#selected-public-authoring-surface) selects the exact Vue contract: a direct `ElementTarget`, one frozen discriminated `ElementGeometry` snapshot with local-to-parent-to-surface rendered fragments, `useElementGeometry()`, and a focus-eligible `useCaret()` request at an element-local `CellPoint`. Renderer paint is the authority for public geometry and private insertion-slot mappings, one arbiter selects an eligible owner, and the mode writer performs the final render-surface-to-terminal translation. Inline and Fullscreen therefore share semantic geometry and caret ownership; they differ only in the final physical output mapping. Parent-relative Yoga reads, targetless output-origin coordinates, focus state, text insertion state, selection, and pointer targeting remain separate concepts.
 
@@ -42,13 +42,13 @@ Requested mode and effective surface must remain separate. A non-TTY or string r
 
 The accepted non-TTY default follows pinned Ink v7.0.4: newly committed `Static` output is written immediately, the current dynamic frame is retained, and teardown writes only the latest dynamic frame plus a newline. An explicit live-update override may instead run the relative or linear stream updater and emit ANSI update bytes, but a non-TTY stream never acquires an alternate screen, stable viewport, or hit map. Deterministic observation is orthogonal to output through an internal render observer; the former `debug` output branch is removed. Stdin/raw-input availability remains independent from this stdout policy.
 
-The common authoring surface contains Vue components and composables whose semantics do not depend on whole-screen ownership: passive layout and text primitives, shared logical input and focus foundations, and a bounded, input-free `ScrollBox`. A component should not inspect global mode and quietly change meaning. An operation that requires stable physical coordinates, a hit map, alternate-screen ownership, or terminal-wide capture belongs behind an explicit terminal-integration boundary and may reject an unavailable surface immediately. The current candidate is a ref-bound full-screen composable, not a parallel catalog of `PointerBox`, `PointerScrollBox`, and other visual variants. An inline-specific subpath remains possible if a future capability genuinely depends on main-screen history.
+The common authoring surface contains Vue components and composables whose semantics do not depend on whole-screen ownership: passive layout and text primitives, shared logical input and focus foundations, and a bounded, input-free `ScrollBox`. A component should not inspect global mode and quietly change meaning. An operation that requires stable physical coordinates, a hit map, alternate-screen ownership, or terminal-wide capture belongs behind an explicit terminal-integration boundary and may reject an unavailable surface immediately. F6 selects ref-bound Fullscreen mouse composables, not a parallel catalog of `PointerBox`, `PointerScrollBox`, and other visual variants. An inline-specific subpath remains possible if a future capability genuinely depends on main-screen history.
 
 Two current APIs are deliberately not promoted into the final picture merely because they shipped. `<Static>` has honest terminal-history semantics inline but cannot provide the same persistence full-screen, so its eventual common or inline-specific placement remains open. Terminal-wide raw mouse input remains conceptually different from element-targeted pointer delivery, but the current `useMouseInput` name, event subset, and root export have no backward-compatibility protection during experimentation.
 
 ## Current mode, pointer, and scrolling boundary
 
-This section records the design boundaries that are stable enough to carry forward after the source audit, concrete examples, and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It remains unstamped: the mount shape is accepted, while example pointer names, signatures, target-ref type, event map, and target disposition of current pointer APIs are not yet accepted.
+This section records the design boundaries that are stable enough to carry forward after the source audit, concrete examples, and the cross-framework evidence in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). It remains unstamped. The mount shape is accepted, and the exact F6 proposal now lives in [targeted-pointer.md](./targeted-pointer.md); implementation evidence is still pending.
 
 ### One app, two rendering modes
 
@@ -70,17 +70,20 @@ After validation and defaulting, every live mount records one normalized request
 
 The common `Box`, `Text`, and `ScrollBox` APIs must not advertise targeted pointer listeners. Their template and TSX types should explicitly reject `onClick`, `onWheel`, `onMousedown`, and `onMouseup`; simply omitting these props does not defeat Vue listener fallthrough. JavaScript and `any` must not be able to turn a common node into a target merely by passing one of those listeners at runtime.
 
-Do not add `PointerBox`, `PointerScrollBox`, or a component variant for every visual-component and interaction combination. Targeted pointer is behavior attached to an existing rendered element, so the current API shape to validate is a ref-bound composable from a proposed full-screen entry point:
+Do not add `PointerBox`, `PointerScrollBox`, or a component variant for every visual-component and interaction combination. Targeted mouse input is behavior attached to an existing rendered element, so the selected API shape is a ref-bound composable from the Fullscreen entry point:
 
 ```vue
 <script setup lang="ts">
 import { useTemplateRef } from "vue";
 import { Box, Text } from "@vue-tui/runtime";
-import { usePointerEvent } from "@vue-tui/runtime/fullscreen";
+import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
 const target = useTemplateRef("target");
 
-usePointerEvent(target, "click", open);
+useMouseEvent(target, "click", () => {
+  open();
+  return "consume";
+});
 </script>
 
 <template>
@@ -90,19 +93,19 @@ usePointerEvent(target, "click", open);
 </template>
 ```
 
-`usePointerEvent` is a working name, not an accepted export. One keyed primitive avoids separate `useClick` and `useWheel` APIs while still allowing event-specific type inference. Dragging is a higher-level gesture/composable concern built on the same target-registration, capture, parser, and teardown mechanism; whether the existing `useDraggable` name, signature, and export survive remains open.
+The F6 proposal uses `useMouseEvent(target, type, handler, options?)` for click and wheel, plus one `useMouseDrag(target, handler, options?)` lifecycle for captured primary-button dragging. `Mouse` is honest terminal vocabulary; `Pointer` would imply browser identity, device type, pressure, and multi-device semantics that SGR does not provide. One keyed primitive avoids separate `useClick` and `useWheel` APIs while preserving exact event inference, while a dedicated drag hook prevents independently registered callbacks from disagreeing about one capture owner. Root `useDraggable()` is removed because its application x/y state is not renderer-owned.
 
 The composable marks the current referenced host element as a hit-test target for exactly the ref's rendered lifetime. It registers when the ref becomes non-null, unregisters when `v-if` removes the node, moves when the ref points elsewhere, and releases everything on scope disposal. Setup lifetime alone is insufficient: a handler must not survive after its rendered target disappears.
 
-Only elements explicitly enrolled by a full-screen pointer composable participate as public event targets; ordinary `Box` and `Text` nodes remain passive. The exact target-selection, bubbling, `currentTarget`, offset-rebasing, and propagation contract remains candidate mechanics to validate rather than a settled conclusion from this discussion.
+Only elements explicitly enrolled by a full-screen mouse composable participate in its semantic route; ordinary `Box` and `Text` nodes remain passive. Click and wheel select the topmost visible matching registration from the last successfully displayed F5 geometry generation, freeze matching registered ancestors at fact start, and expose zero-based surface plus receiver-local cells. The bound ref is the current receiver and `delivery` states target versus bubble, so the proposal does not publish renderer-node, component-proxy, or mutable DOM target identities. Required `"continue"` or `"consume"` results control only truthful ancestor propagation. Drag has one exclusive captured owner and an explicit start/move/end/cancel lifecycle.
 
 ### Full-screen targeted input is an explicit capability boundary
 
-Targeted delivery requires both decoded terminal mouse input and a reliable physical origin plus hit map. The fixed normal full-screen viewport can provide both. Current Inline can receive terminal coordinates but cannot reliably map them to elements, so a live Inline use of a full-screen targeted composable must fail immediately with the missing mode/capability instead of leaving a dead handler.
+Targeted delivery requires both decoded terminal mouse input and a reliable physical origin plus hit map. The fixed normal full-screen viewport can provide both. Current visual Inline can receive terminal coordinates but cannot reliably map them to elements, so an active full-screen mouse hook on that effective surface fails immediately instead of leaving a dead handler. `isActive: false` remains inert.
 
-The target entry point to validate is therefore `@vue-tui/runtime/fullscreen`, not a speculative `/pointer` path. That subpath does not exist yet and requires an export, build wiring, API guards, type tests, and lifecycle tests before it can become public. If a future bounded Inline renderer proves reliable targeted input, vue-tui can add a broader re-export while retaining the honest full-screen path. Final-stream, non-TTY, and static hosts must not emit targeted mouse control sequences, and the screen-reader path must not claim a hit map it does not build; whether the composable is an observable no-op or reports an unavailable capability there remains open.
+The target entry point is therefore `@vue-tui/runtime/fullscreen`, not a speculative `/pointer` path. That subpath does not exist yet and requires export/build wiring, API guards, type tests, and lifecycle tests before it can become public. F6 adds no combined mouse-availability query: `useRenderSession()` already reports whether a targetable Fullscreen surface exists, `useInputAvailability()` reports managed input, and no journey currently branches on mouse protocol support alone. Final-output, string, screen-reader, and other non-targetable presentations remain inert; a visible target under an effective visual Fullscreen surface fails exactly when managed input is unavailable or local mouse-mode acquisition fails. F6 supports xterm-compatible SGR mouse without a speculative handshake, so a terminal that silently ignores the mode cannot be distinguished from the absence of user mouse input. Effective visual Inline plus an active hook is the programming error. If a future bounded Inline renderer proves reliable targeted input, vue-tui can add a broader re-export while retaining the honest Fullscreen path.
 
-Do not expose a separate public concept called mouse authorization or require ordinary full-screen applications to repeat `mouse: true`. When at least one full-screen targeted composable has a live target, the runtime acquires the minimum required reporting level; it downgrades as stronger consumers disappear and restores terminal modes after the last target. Common components never acquire mouse reporting in either mode. If vue-tui retains a terminal-wide raw-mouse API, calling that API is itself the explicit capture request; its exact name, event shape, and export path remain open.
+Do not expose a separate public concept called mouse authorization or require ordinary full-screen applications to repeat `mouse: true`. When at least one full-screen targeted composable has a live target, the runtime acquires the minimum required reporting level; it downgrades as stronger consumers disappear and restores terminal modes after the last target. Common components never acquire mouse reporting in either mode. F6 removes the current terminal-wide hook; a future target-bound child-terminal protocol adapter requires its own consumer evidence and contract rather than retaining that incomplete stream speculatively.
 
 Mouse reporting still changes terminal-native selection even on the alternate screen. Full-screen makes application-owned scrolling and selection a reasonable product responsibility; it does not erase the mechanism's side effect. Do not add a mount-level mouse override until a real application needs one, and treat application-owned selection and copy as a separate future capability rather than hiding it inside pointer registration.
 
@@ -110,7 +113,7 @@ Mouse reporting still changes terminal-native selection even on the alternate sc
 
 `ScrollBox` owns clipping, sticky-bottom state, and semantic scrolling operations without inspecting mode or acquiring terminal input. It works whenever its parent gives it a bounded height, including a bounded region inside an inline application. A terminal-owned transcript is a different history model and currently uses `Static` rather than an unbounded `ScrollBox`; the target history API remains open.
 
-Its public type should reject targeted pointer listeners, and its SFC must not let unknown listeners fall through accidentally to the internal viewport `Box`. Full-screen wheel behavior composes by binding the candidate pointer composable to an existing target and calling the `ScrollBox` handle; no pointer-specific `ScrollBox` component is needed.
+Its public type should reject targeted mouse listeners, and its SFC must not let unknown listeners fall through accidentally to the internal viewport `Box`. Fullscreen wheel behavior composes by binding `useMouseEvent()` to an existing target and calling the `ScrollBox` handle; no mouse-specific `ScrollBox` component is needed.
 
 A candidate refinement is for `scrollByLines`, `scrollToLine`, `scrollToTop`, and `scrollToBottom` to report whether the position changed. A nested wheel handler can then stop propagation only when the inner viewport actually moved; at an edge, the event can continue to an outer scroll owner. This return-type change is a proposal, not an accepted API. Keyboard policy remains outside `ScrollBox` until focused input routing exists.
 
@@ -118,19 +121,21 @@ A candidate refinement is for `scrollByLines`, `scrollToLine`, `scrollToTop`, an
 
 The current public `useMouseInput` handler receives only vertical wheel events with 1-based absolute coordinates. The shared internal parser decodes button down, button up, drag, and all four wheel directions, while targeted dispatch synthesizes `click` from a matching down/up pair. The hook has no target ref, hit test, bubbling, or relationship to `ScrollBox`.
 
-Keep terminal-wide raw mouse conceptually distinct from element-targeted pointer delivery: raw coordinates do not become inline component clicks, and acquiring raw mouse still takes native terminal selection and wheel behavior away from the user. The experimental policy does not protect the current root export, vertical-wheel-only event subset, 1-based coordinates, or `useMouseInput` name. A representative journey must decide whether to retain, replace, or remove that API and must validate any complete terminal-level stream as its own contract.
+Keep terminal-wide raw mouse conceptually distinct from element-targeted delivery: raw coordinates do not become Inline component clicks, and acquiring raw mouse still takes native terminal selection and wheel behavior away from the user. The F6 journeys do not need a terminal-wide stream, while Herdr-like pane forwarding requires a target-bound pane-local protocol adapter that the current vertical-wheel-only, one-based hook cannot express. The proposal therefore removes root `useMouseInput()` without replacement; the vouched physical `useStdin().stdin` escape hatch remains outside managed semantics and does not acquire mouse reporting.
 
 ### Mouse reporting rules
 
 The target terminal controller must keep reference-counted ownership and request only the strongest currently needed protocol:
 
-- click, down, up, and wheel require button reporting (`1000 + 1006`);
+- click and wheel require button reporting (`1000 + 1006`);
 - drag requires button-motion reporting (`1002 + 1006`);
 - future hover requires all-motion reporting (`1003 + 1006`);
 - simultaneous consumers select the highest active level and downgrade when the stronger consumer unmounts;
 - the final release and every normal, error, signal, suspend, and HMR teardown release exactly the level and SGR coordinates this controller acquired, including acquired levels no longer represented by a live request.
 
 The current targeted controller already shares reference-counted ownership but requests drag reporting for every handler. F1.7 made its suspension and every teardown path exact-ownership and failure-tolerant: it temporarily releases the acquired level, reacquires the strongest still-live request after continuation, and does not disable modes it never owned. Minimum-level acquisition and downgrade remain requirements for the future composable implementation rather than claims about the current event-registration policy.
+
+The selected F6 testing surface is part of the same contract. `@vue-tui/testing` gains a typed down/move/up/wheel driver at the parser-normalized physical-fact boundary plus observable button/button-motion reporting state. It does not inject final click or drag events, so deterministic application tests still exercise successful-frame hit testing, synthesis, propagation, capture, cancellation, and demand; real PTYs separately cover SGR bytes and terminal restoration. The exact types and failure behavior live in [targeted-pointer.md](./targeted-pointer.md#deterministic-testing-surface).
 
 ## What counts as application API
 

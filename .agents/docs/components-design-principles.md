@@ -49,11 +49,11 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
   frame-driven animation, so needing animation is _not_ runtime work;
 - require geometry that the runtime's semantic `useElementGeometry()` snapshots do not already expose.
 
-Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
-input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime
-(`useMouseInput` and candidate full-screen target-ref composables such as `usePointerEvent` and
-`useDraggable`; see [mouse-input.md](./mouse-input.md)) — whereas anything driven by existing
-keyboard input plus measured layout is a pure composition.
+Otherwise it is a component. The clean illustration: **targeted mouse input is runtime work** —
+input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime. The selected
+F6 proposal supplies `useMouseEvent()` and `useMouseDrag()` from the Fullscreen semantic subpath;
+see [targeted-pointer.md](./targeted-pointer.md). Anything driven by existing keyboard input plus
+measured layout is a pure composition.
 (`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)

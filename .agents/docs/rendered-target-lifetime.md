@@ -40,7 +40,7 @@ The original measurement adapter subscribed to layout for the current resolved h
 
 The private resolver recognizes direct renderer-owned host refs by nominal identity recorded when the runtime constructs each node, not by checking for a string `type` field. Public component resolution still walks the Vue instance's rendered subtree. This distinction lets internal adapters accept their real host refs without mistaking an ordinary Vue component with a `type` prop for a renderer node.
 
-The F2 migrations did not freeze either public API. F5 directly replaced `useBoxMetrics()` with `useElementGeometry()` and removed `measureElement()` without aliases. `useDraggable()`, current element listeners, and terminal-wide raw mouse receive their target disposition in F6. F2 proves only the shared lifetime mechanism they can consume.
+The F2 migrations did not freeze either public API. F5 directly replaced `useBoxMetrics()` with `useElementGeometry()` and removed `measureElement()` without aliases. F6 has selected direct removal of `useDraggable()`, current element listeners, and terminal-wide raw mouse in favor of the Fullscreen contract in [targeted-pointer.md](./targeted-pointer.md); implementation is pending. F2 proves only the shared lifetime mechanism the replacement can consume.
 
 ## Environment behavior
 

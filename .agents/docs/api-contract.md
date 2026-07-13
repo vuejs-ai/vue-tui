@@ -17,18 +17,18 @@ F3 applied the same process to input. `useInput()` now receives a frozen `TuiInp
 
 F5 applied the process to element geometry and caret placement. `useElementGeometry()` follows a normal Vue component ref through rendered-host replacement and publishes one readonly ref whose frozen value always comes from one accepted paint generation. `useCaret(target, { focus, position })` binds one element-local rendered cell to one exact F4 focus handle and publishes one frozen `CaretState`; at most the effective focus owner can drive the mode writer. The application still owns its logical insertion state and conversion to that rendered cell. The guarded public types are `ElementTarget`, `CellPoint`, `CellRect`, `ElementGeometryFragment`, `ElementGeometry`, `UseElementGeometryReturn`, `CaretState`, `UseCaretOptions`, and `UseCaretReturn`. `useBoxMetrics()`, `measureElement()`, `BoxMetrics`, `UseBoxMetricsReturn`, `useCursor()`, and `CursorPosition` were removed directly. Runtime, public/type, template, TSX, JavaScript, HMR, ScrollBox, testing cursor-visibility, relevant PTY, package-output, clean Vue 3.4/TypeScript 6 runtime/testing/components consumption, both-mode visual behavior, full repository gates, and independent review agree with that surface, so F5 is complete.
 
-## The contract = public exports **and their user-consumable types**
+F6 has selected an unstamped public proposal that adds `@vue-tui/runtime/fullscreen` as the first supported public subpath. It contains only Fullscreen-targeted mouse composables and their named types; it does not duplicate `createApp()`, common components, focus, geometry, or render-session facts. The proposal also extends the existing `@vue-tui/testing` root with a parsed-physical-mouse driver and modeled reporting state so public tests exercise production click and drag state machines without hand-authoring SGR bytes. Neither surface is public until implementation, package exports, declarations, exact value/type guards, template/TSX consumption, clean testing consumption, and the remaining F6 gates agree. The exact runtime and testing export sets, behavior, and direct v1 removals are recorded in [targeted-pointer.md](./targeted-pointer.md).
 
-The public API is everything exported from the main barrel (`@vue-tui/runtime`): components,
-composables, entry points — **and their TYPES** (component prop types, composable return/options
-types, and named types such as `AriaRole`, `RenderSession`, `BoxProps`, `UseXReturn` / `UseXOptions`).
+## The contract = exports from supported package entry points **and their user-consumable types**
+
+The public API is everything exported from the common root (`@vue-tui/runtime`) and every explicitly documented supported public subpath, together with **their types**: component prop types, composable return/options types, and named types such as `AriaRole`, `RenderSession`, `BoxProps`, `UseXReturn`, and `UseXOptions`. A package `exports` entry is not sufficient by itself; the path becomes supported only when the project documents and guards it as an authoring surface.
 
 A type is **as much a part of the current contract as runtime behavior**. If user code can name a type and annotate with it, changing or removing it changes the supported authoring surface at compile time. That is allowed during experimentation when deliberate, but the type surface must be designed, updated, and tested with the same care as runtime behavior.
 
 Because it is contract, it is **tested, not merely shipped**:
 
-- `public-api.test.ts` snapshots the **exact** public value-export set — adding, removing, or
-  renaming any runtime export fails it, so every surface change must be a deliberate edit there.
+- `public-api.test.ts` snapshots the **exact** common-root value-export set — adding, removing, or
+  renaming any runtime export fails it, so every surface change must be a deliberate edit there. Each supported public subpath needs its own exact value-export guard, named-type checks, declaration inspection, and clean package consumer.
   Specific internal-only members (`measureText`, the screen-reader linearizer) are additionally
   tripwired, and internal-only _types_ (e.g. `ScreenReaderOptions`) are guarded with a compile-time
   `@ts-expect-error`. Type-only exports are erased at runtime, so the _type_ surface is guarded
@@ -43,7 +43,8 @@ Because it is contract, it is **tested, not merely shipped**:
 
 Placement rule for any export:
 
-- A user-facing contract → the **main barrel** (and it is tested).
+- A user-facing contract whose semantics are common across supported rendering surfaces → the **main barrel**.
+- A user-facing contract that intentionally requires one explicit terminal surface or integration boundary → a documented **public subpath**, when that boundary is part of the selected design rather than a directory-organizing convenience.
 - Needed only by tests or advanced integrators → **`/internal`**, never the main barrel.
 
 Packaging/build internals (the `exports` field shape, `.mjs` paths, `dist` layout) are likewise
