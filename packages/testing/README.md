@@ -60,11 +60,11 @@ test("the counter responds to input", async () => {
 
 The test host exposes three intentionally different views of one run:
 
-| Observation              | Meaning                                                                      | Use it for                                                                                        |
-| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `session`                | Readonly production-like facts visible to the component                      | Requested and effective mode, fallback, output policy, dimensions, and capabilities               |
-| `frames` / `lastFrame()` | Renderer commits before the output writer adds screen and lifecycle controls | Exact component output, renderer styling, and `<Static>` deltas                                   |
-| `screen()`               | Cell surface after stdout and stderr bytes pass through a terminal emulator  | Alternate-screen behavior, cursor position, scrollback, external writes, and teardown restoration |
+| Observation              | Meaning                                                                      | Use it for                                                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `session`                | Readonly production-like facts visible to the component                      | Requested and effective mode, fallback, output policy, dimensions, and capabilities                              |
+| `frames` / `lastFrame()` | Renderer commits before the output writer adds screen and lifecycle controls | Exact component output, renderer styling, and `<Static>` deltas                                                  |
+| `screen()`               | Cell surface after stdout and stderr bytes pass through a terminal emulator  | Alternate-screen behavior, cursor position and visibility, scrollback, external writes, and teardown restoration |
 
 Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, direct `useStdout()` writes, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
 
@@ -219,11 +219,15 @@ interface ScreenSnapshot {
   readonly dimensions: { readonly columns: number; readonly rows: number };
   readonly lines: readonly string[];
   readonly scrollback: readonly string[];
-  readonly cursor: { readonly column: number; readonly row: number };
+  readonly cursor: {
+    readonly column: number;
+    readonly row: number;
+    readonly visible: boolean;
+  };
 }
 ```
 
-`lines` contains every visible row, including trailing cell spaces. `scrollback` contains rows above the normal buffer viewport. Trim lines in the assertion when padding is irrelevant. A TTY host models the output line discipline that moves a line feed to column zero; a stream host preserves raw line-feed cursor movement because no TTY performs that conversion.
+`lines` contains every visible row, including trailing cell spaces. `scrollback` contains rows above the normal buffer viewport. `cursor.visible` reports the terminal's current DECTCEM visibility mode after all pending output has been parsed; it does not model cursor blinking or whether a graphical terminal window has focus. Trim lines in the assertion when padding is irrelevant. A TTY host models the output line discipline that moves a line feed to column zero; a stream host preserves raw line-feed cursor movement because no TTY performs that conversion.
 
 ### Input and terminal controls
 

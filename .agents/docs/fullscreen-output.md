@@ -6,9 +6,9 @@ The runtime selects this behavior with optional `mode: "inline" | "fullscreen"`;
 
 For normal visual rendering, fullscreen owns one fixed viewport with the terminal's current `columns × rows` dimensions. Yoga receives both dimensions, paint starts at viewport coordinate `(0, 0)`, and paint plus mouse hit testing are clipped to those bounds. Content outside the viewport cannot make the alternate screen scroll and cannot create an off-screen mouse target.
 
-Every fullscreen commit hides the caret, clears and homes the viewport, writes the complete frame, and then restores a declared `useCursor()` position. This is intentionally a correctness-first full repaint, including when `incrementalRendering: true`; a future optimization may replace it with absolute cell diffs, but it must preserve the same visible result and coordinate contract.
+Every fullscreen commit hides the physical terminal cursor, clears and homes the viewport, writes the complete frame, and then places the cursor for the one visible focus-bound `useCaret()` request. The public request is an element-local rendered cell; the renderer maps it to the fixed surface before the writer emits terminal control bytes. This is intentionally a correctness-first full repaint, including when `incrementalRendering: true`; a future optimization may replace it with absolute cell diffs, but it must preserve the same visible result and coordinate contract.
 
-This fixed origin is what makes targeted mouse events reliable: Yoga layout coordinates, the visible cell coordinates, `useCursor()` coordinates, and SGR mouse coordinates all refer to the same viewport.
+This fixed origin keeps Yoga layout coordinates, visible paint cells, the resolved caret surface point, and SGR mouse coordinates in the same viewport. The application owns its insertion state and converts it to the element-local cell passed to `useCaret()`; the terminal cursor is the physical device state used to display the selected caret after the frame succeeds.
 
 ## Output outside the component tree
 

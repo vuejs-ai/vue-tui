@@ -39,8 +39,6 @@ function createTestAppContext(): AppContext {
     setRawMode: () => {},
     writeToStdout: () => {},
     writeToStderr: () => {},
-    cursorPosition: undefined,
-    setCursorPosition: () => {},
   };
 }
 

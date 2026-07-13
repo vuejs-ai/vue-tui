@@ -1,17 +1,19 @@
-// Stream-level cursor parity (Ink test/cursor.tsx:89-193). The existing
-// use-cursor.test.tsx tests observe semantic frames rather than terminal bytes.
+// Stream-level targeted-caret transport. These tests mount a real interactive
+// TTY (isTTY:true), capture raw stdout write chunks, and assert that semantic
+// element-local caret requests reach the physical frame writer in the same
+// committed frame.
 // These tests mount a REAL interactive TTY (isTTY:true) so log-update
 // actually composes the cursor escapes, then capture the raw stdout write
 // chunks (like Ink's getWriteCalls) and assert the real ANSI cursor sequence.
 //
 // ansiEscapes.cursorTo(x) === `\x1b[${x+1}G`, so:
-//   useCursor x=2 -> cursorTo(2) -> "\x1b[3G"
+//   element-local x=2 -> cursorTo(2) -> "\x1b[3G"
 //   after typing 'a' x=3 -> cursorTo(3) -> "\x1b[4G"
 //   after a space  x=4 -> cursorTo(4) -> "\x1b[5G"
 import { PassThrough } from "node:stream";
-import { defineComponent, h, nextTick, shallowRef } from "vue";
+import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useCursor, useInput, useStdout } from "@vue-tui/runtime";
+import { Box, Text, createApp, useCaret, useFocus, useInput, useStdout } from "@vue-tui/runtime";
 
 const showCursorEscape = "\x1b[?25h";
 const hideCursorEscape = "\x1b[?25l";
@@ -57,7 +59,12 @@ function makeTtyStdin(): NodeJS.ReadStream {
 // Mirrors Ink's InputApp (test/cursor.tsx:65-87): cursor at x = 2 + text.length.
 const InputApp = defineComponent(() => {
   const text = shallowRef("");
-  const { setCursorPosition } = useCursor();
+  const target = shallowRef<ComponentPublicInstance | null>(null);
+  const focus = useFocus(target, { autoFocus: true });
+  useCaret(target, {
+    focus,
+    position: () => ({ x: 2 + text.value.length, y: 0 }),
+  });
 
   useInput((event) => {
     if (event.kind === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
@@ -71,18 +78,15 @@ const InputApp = defineComponent(() => {
     return "continue";
   });
 
-  return () => {
-    setCursorPosition({ x: 2 + text.value.length, y: 0 });
-    return (
-      <Box>
-        <Text>{`> ${text.value}`}</Text>
-      </Box>
-    );
-  };
+  return () => (
+    <Box>
+      <Text ref={target}>{`> ${text.value}`}</Text>
+    </Box>
+  );
 });
 
 describe("cursor commit-path wiring (interactive stream level)", () => {
-  test("cursor is shown at the useCursor position after first render", async () => {
+  test("caret is shown at the element-local position in the first committed frame", async () => {
     const { stream: stdout, writes } = makeTtyStdout();
     const stdin = makeTtyStdin();
 
@@ -96,6 +100,16 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     expect(output).toContain(showCursorEscape);
     // x=2 -> cursorTo(2) -> "\x1b[3G"
     expect(output).toContain(cursorTo(2));
+
+    const caretWrite = writes.findIndex((chunk) => chunk.includes(cursorTo(2)));
+    const transactionStart = writes.lastIndexOf(bsu, caretWrite);
+    const transactionEnd = writes.indexOf(esu, caretWrite);
+    expect(transactionStart).toBeGreaterThanOrEqual(0);
+    expect(transactionEnd).toBeGreaterThan(caretWrite);
+    const firstCaretTransaction = writes.slice(transactionStart + 1, transactionEnd).join("");
+    expect(firstCaretTransaction).toContain(">\n");
+    expect(firstCaretTransaction).toContain(cursorTo(2));
+    expect(firstCaretTransaction).toContain(showCursorEscape);
 
     app.unmount();
   });
@@ -171,15 +185,13 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     // after the LAST hide index (Ink's invariant for an active cursor).
     let writeFromHook: ((data: string) => void) | undefined;
     const StdoutWriteApp = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      const focus = useFocus(target, { autoFocus: true });
+      useCaret(target, { focus, position: { x: 2, y: 0 } });
       const { write } = useStdout();
       writeFromHook = write;
 
-      return () => {
-        // Set the cursor every render so it stays active across commits.
-        setCursorPosition({ x: 2, y: 0 });
-        return <Text>Hello</Text>;
-      };
+      return () => <Text ref={target}>Hello</Text>;
     });
 
     const { stream: stdout, writes } = makeTtyStdout();
@@ -203,14 +215,80 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     app.unmount();
   });
 
-  test("an idle cursor-dirty re-render emits NO empty BSU/ESU pair", async () => {
-    // DEFECT 1 (Ink fidelity, ink.tsx:372-382 + 1094). When a render marks the
-    // cursor dirty (a fresh position object each render) but BOTH the position
-    // value AND the output are unchanged, willRender() is false. Ink's inner
-    // BSU/ESU gate is `willRender()` ALONE, so it emits ZERO bytes — it does not
-    // wrap a no-op log-update write in a synchronized-update pair. The gate must
-    // therefore NOT emit `\x1b[?2026h` immediately followed by `\x1b[?2026l`
-    // with nothing between (an empty sync-update pair).
+  test.each(["inline", "fullscreen"] as const)(
+    "a re-entrant stdout write cannot replace the %s frame's staged caret",
+    async (mode) => {
+      const text = shallowRef("abc");
+      const position = shallowRef({ x: 1, y: 0 });
+      let writeFromHook: ((data: string) => void) | undefined;
+      const ReentrantWriteApp = defineComponent(() => {
+        const focusTarget = shallowRef<ComponentPublicInstance | null>(null);
+        const caretTarget = shallowRef<ComponentPublicInstance | null>(null);
+        const focus = useFocus(focusTarget, { autoFocus: true });
+        useCaret(caretTarget, { focus, position });
+        writeFromHook = useStdout().write;
+        return () => (
+          <Box ref={focusTarget} height={1}>
+            <Text ref={caretTarget}>{text.value}</Text>
+          </Box>
+        );
+      });
+
+      const { stream: stdout, writes } = makeTtyStdout();
+      const stdin = makeTtyStdin();
+      const originalWrite = stdout.write.bind(stdout);
+      let triggerReentry = false;
+      let insideReentry = false;
+      stdout.write = ((...args: unknown[]) => {
+        const data = String(args[0]);
+        if (triggerReentry && !insideReentry && data.includes("abd")) {
+          triggerReentry = false;
+          insideReentry = true;
+          try {
+            writeFromHook?.("side output\n");
+          } finally {
+            insideReentry = false;
+          }
+        }
+        return (originalWrite as (...values: unknown[]) => boolean)(...args);
+      }) as NodeJS.WriteStream["write"];
+
+      const app = createApp(ReentrantWriteApp);
+      app.mount({ stdout, stdin, mode, maxFps: 0, patchConsole: false });
+      try {
+        await app.waitUntilRenderFlush();
+
+        const beforeCandidate = writes.length;
+        triggerReentry = true;
+        position.value = { x: 2, y: 0 };
+        text.value = "abd";
+        await nextTick();
+        await app.waitUntilRenderFlush();
+
+        const candidateOutput = writes.slice(beforeCandidate).join("");
+        expect(candidateOutput.lastIndexOf(cursorTo(2))).toBeGreaterThan(
+          candidateOutput.lastIndexOf(cursorTo(1)),
+        );
+
+        const beforeFollowingFrame = writes.length;
+        text.value = "abe";
+        await nextTick();
+        await app.waitUntilRenderFlush();
+
+        const followingOutput = writes.slice(beforeFollowingFrame).join("");
+        expect(followingOutput.lastIndexOf(cursorTo(2))).toBeGreaterThan(
+          followingOutput.lastIndexOf(cursorTo(1)),
+        );
+      } finally {
+        app.unmount();
+      }
+    },
+  );
+
+  test("an idle semantic-caret re-render emits no empty BSU/ESU pair", async () => {
+    // If both the resolved caret and output are unchanged, the writer emits no
+    // transaction. In particular, it must not wrap a no-op in synchronized
+    // update markers.
     //
     // Repro note: Vue's static-VNode optimization suppresses a second commit
     // when nothing in the tree changes, so we force one with a `key` bump that
@@ -221,19 +299,14 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
 
     let bumpKey: (() => void) | undefined;
     const KeyBumpApp = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      const focus = useFocus(target, { autoFocus: true });
+      useCaret(target, { focus, position: { x: 2, y: 0 } });
       const tick = shallowRef(0);
       bumpKey = () => {
         tick.value++;
       };
-      return () => {
-        // Fresh position object every render at the SAME x/y: marks cursorDirty
-        // but the position VALUE is unchanged from the previous render.
-        setCursorPosition({ x: 2, y: 0 });
-        // Bumping `key` remounts this Text (forces a commit) but the text is
-        // byte-identical, so the rendered frame does not change.
-        return <Box>{h(Text, { key: tick.value }, () => "Hello")}</Box>;
-      };
+      return () => <Box>{h(Text, { key: tick.value, ref: target }, () => "Hello")}</Box>;
     });
 
     const app = createApp(KeyBumpApp);
@@ -309,27 +382,13 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     }
   });
 
-  test("a child useCursor unmount emits the cursor-HIDE escape (show -> hide ordering)", async () => {
-    // B19 (Ink parity, use-cursor.ts:29-31): when a `useCursor` child unmounts,
-    // its onScopeDispose runs ctx.setCursorPosition(undefined) — exactly Ink's
-    // useInsertionEffect cleanup `context.setCursorPosition(undefined)`. That
-    // marks log-update cursorDirty with an undefined position. On the NEXT
-    // commit, the frame changed (child swapped to a no-cursor branch) so render()
-    // takes the `else` branch and writes buildReturnToBottomPrefix(cursorWasShown:
-    // true, ...) — which begins with hideCursorEscape (`\x1b[?25l`). So the cursor
-    // that was SHOWN at the child's position must be HIDDEN when the owner unmounts.
-    //
-    // This is observable only at the interactive stream level: semantic frame
-    // helper has FrameWriter.log === null, so log-update (and its cursor escapes)
-    // never runs. We capture raw stdout write chunks (Ink's getWriteCalls pattern).
+  test("unmounting the focused caret owner emits HIDE after SHOW", async () => {
     const showChild = shallowRef(true);
     const CursorChild = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        // Distinct cursor column so the SHOW is unambiguous: x=5 -> cursorTo(5).
-        setCursorPosition({ x: 5, y: 0 });
-        return <Text>child</Text>;
-      };
+      const target = shallowRef<ComponentPublicInstance | null>(null);
+      const focus = useFocus(target, { autoFocus: true });
+      useCaret(target, { focus, position: { x: 5, y: 0 } });
+      return () => <Text ref={target}>child</Text>;
     });
     const HostApp = defineComponent(() => {
       return () => <Box>{showChild.value ? <CursorChild /> : <Text>no cursor here</Text>}</Box>;
@@ -351,8 +410,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
       beforeUnmount.lastIndexOf(hideCursorEscape),
     );
 
-    // Unmount the cursor owner. onScopeDispose -> setCursorPosition(undefined);
-    // the next commit must HIDE the previously-shown cursor.
+    // Disposing the focus-bound owner makes the next commit hide the caret.
     const writesBeforeUnmount = writes.length;
     showChild.value = false;
     await nextTick();

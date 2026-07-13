@@ -136,6 +136,105 @@ describe("app-owned focus controller", () => {
     expect(focus.focusedTarget.value).toBe(second);
   });
 
+  test("publishes accepted target hosts to private dependents after reconcile", () => {
+    const { focus, root } = createHarness();
+    const host = connect(root, createBox());
+    makeLayoutNode(host);
+    const target = focus.createTarget({ autoFocus: true });
+    const hosts: Array<TuiNode | null> = [];
+    const dispose = focus.registerTargetDependent(target, {
+      hostChanged: (value) => hosts.push(value),
+      disposed: () => hosts.push(null),
+    });
+
+    expect(hosts).toEqual([null]);
+    let detach = () => {};
+    focus.transaction("reconcile", () => {
+      detach = focus.attachTarget(target, host);
+      expect(hosts).toEqual([null]);
+    });
+    expect(hosts).toEqual([null, host]);
+
+    focus.reconcileRenderedTree();
+    expect(hosts).toEqual([null, host]);
+
+    focus.transaction("reconcile", () => {
+      detach();
+      expect(hosts).toEqual([null, host]);
+    });
+    expect(hosts).toEqual([null, host, null]);
+
+    dispose();
+    dispose();
+    focus.attachTarget(target, host);
+    expect(hosts).toEqual([null, host, null]);
+  });
+
+  test("validates target dependents before mutation", () => {
+    const first = createHarness();
+    const second = createHarness();
+    const target = first.focus.createTarget();
+    const calls: string[] = [];
+    const dependent = {
+      hostChanged: () => calls.push("host"),
+      disposed: () => calls.push("disposed"),
+    };
+
+    expect(() => second.focus.registerTargetDependent(target, dependent)).toThrow(
+      "belongs to another application or has been disposed",
+    );
+    expect(calls).toEqual([]);
+
+    first.focus.removeTarget(target);
+    expect(() => first.focus.registerTargetDependent(target, dependent)).toThrow(
+      "belongs to another application or has been disposed",
+    );
+    expect(calls).toEqual([]);
+
+    first.focus.dispose();
+    second.focus.dispose();
+  });
+
+  test("disposes target dependents exactly once with their owning lifetime", () => {
+    const direct = createHarness();
+    const directTarget = direct.focus.createTarget();
+    const directCalls: string[] = [];
+    const stopDirect = direct.focus.registerTargetDependent(directTarget, {
+      hostChanged: () => {},
+      disposed: () => directCalls.push("disposed"),
+    });
+    direct.focus.removeTarget(directTarget);
+    stopDirect();
+    direct.focus.dispose();
+    expect(directCalls).toEqual(["disposed"]);
+
+    const recursive = createHarness();
+    const parent = recursive.focus.createScope();
+    const child = recursive.focus.createScope({ parent });
+    const scopedTarget = recursive.focus.createTarget({ scope: child });
+    const recursiveCalls: string[] = [];
+    const stopRecursive = recursive.focus.registerTargetDependent(scopedTarget, {
+      hostChanged: () => {},
+      disposed: () => recursiveCalls.push("disposed"),
+    });
+    recursive.focus.removeScope(parent);
+    stopRecursive();
+    recursive.focus.dispose();
+    expect(recursiveCalls).toEqual(["disposed"]);
+
+    const wholeController = createHarness();
+    const controllerTarget = wholeController.focus.createTarget();
+    const controllerCalls: string[] = [];
+    const stopController = wholeController.focus.registerTargetDependent(controllerTarget, {
+      hostChanged: () => {},
+      disposed: () => controllerCalls.push("disposed"),
+    });
+    wholeController.focus.dispose();
+    wholeController.focus.dispose();
+    stopController();
+    expect(controllerCalls).toEqual(["disposed"]);
+  });
+
   test("publishes manager and target refs from one atomic snapshot", () => {
     const { focus, root } = createHarness();
     const firstHost = connect(root, createBox());
@@ -254,9 +353,16 @@ describe("app-owned focus controller", () => {
     expect(focus.focusedTarget.value).toBe(first);
 
     const duplicate = focus.createTarget();
+    const duplicateHosts: Array<TuiNode | null> = [];
+    focus.registerTargetDependent(duplicate, {
+      hostChanged: (host) => duplicateHosts.push(host),
+      disposed: () => {},
+    });
     expect(() => focus.attachTarget(duplicate, firstHost)).toThrow("more than one focus target");
+    expect(duplicateHosts).toEqual([null]);
     expect(focus.focusedTarget.value).toBe(first);
     expect(() => focus.attachTarget(duplicate, thirdHost)).not.toThrow();
+    expect(duplicateHosts).toEqual([null, thirdHost]);
   });
 
   test("freezes same-node handler membership for the current fact", () => {
@@ -371,11 +477,13 @@ describe("app-owned focus controller", () => {
     focus.attachTarget(target, host);
     const accepted = routing.resolve(routing.capture()).candidate;
     expect(focus.focusedTarget.value).toBe(target);
+    expect(focus.effectiveTarget.value).toBe(target);
 
     failDemand = true;
     expect(() => focus.updateTarget(target, { tabIndex: 0 })).toThrow("input unavailable");
 
     expect(focus.focusedTarget.value).toBe(target);
+    expect(focus.effectiveTarget.value).toBe(target);
     expect(routing.resolve(routing.capture()).candidate).toEqual(accepted);
     expect(focus.focusNext()).toBe(false);
     expect(demand.filter((event) => event.startsWith("release:"))).toEqual([]);
@@ -524,11 +632,13 @@ describe("app-owned focus controller", () => {
     });
     focus.registerTargetInput(removed, continueRoute);
     expect(focus.focusedTarget.value).toBe(removed);
+    expect(focus.effectiveTarget.value).toBe(removed);
 
     focus.transaction("cleanup", () => focus.beforeInvalidateSubtree(removedParent));
 
     expect(routing.resolve(routing.capture()).kind).toBe("unselected");
     expect(focus.focusedTarget.value).toBe(removed);
+    expect(focus.effectiveTarget.value).toBeNull();
     expect(removed.isFocused.value).toBe(true);
     expect(removed.focus()).toBe(false);
     expect(focus.focusNext()).toBe(true);
@@ -539,6 +649,7 @@ describe("app-owned focus controller", () => {
     focus.reconcileRenderedTree();
 
     expect(focus.focusedTarget.value).toBe(fallback);
+    expect(focus.effectiveTarget.value).toBe(fallback);
     expect(routing.resolve(routing.capture()).kind).toBe("selected");
   });
 

@@ -21,7 +21,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick } from "vue";
 import { describe, test, expect } from "vite-plus/test";
-import { createApp, Text, useCursor, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const DISABLE_KITTY = "\x1b[<u";
@@ -91,14 +91,6 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-const CursorApp = defineComponent(() => {
-  // useCursor makes the frame writer carry a live cursor, but the show-cursor
-  // restore at done() fires for ANY interactive app — the cursor was hidden at
-  // mount and the frame writer's done() shows it again on teardown.
-  useCursor();
-  return () => <Text>cursor</Text>;
-});
-
 const PlainApp = defineComponent(() => () => <Text>plain</Text>);
 const InputApp = defineComponent(() => {
   useInput(() => "continue");
@@ -128,21 +120,6 @@ describe("teardown stdout writes on destroyed stdout", () => {
       stdout.showCursorWhileDead,
       "no show-cursor (\\x1b[?25h) write may be attempted on a destroyed stdout",
     ).toBe(0);
-  });
-
-  test("teardown skips the show-cursor write for a useCursor app when stdout was destroyed", async () => {
-    const stdout = makeRecordingTtyStream();
-    const stderr = makeRecordingTtyStream();
-    const stdin = makeFakeStdin();
-
-    const app = createApp(CursorApp);
-    app.mount({ stdout, stdin, stderr });
-
-    await new Promise<void>((r) => setTimeout(r, 60));
-    stdout.hardDestroy();
-
-    expect(() => app.unmount()).not.toThrow();
-    expect(stdout.showCursorWhileDead).toBe(0);
   });
 
   test("teardown skips the disable-kitty write when stdout was destroyed", async () => {

@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 test("HMR follows a component's rendered target across rerender and reload", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -40,6 +40,7 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   });
   await server.listen();
   await waitFor(read, "target=7x2:true");
+  await waitFor(read, "caret=visible");
   const targetInstance = (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   expect(targetInstance).toBeDefined();
 
@@ -53,6 +54,7 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   // Text participates in the parent's stretch layout, so its parent-relative width is
   // the 16-column content width rather than the 12 glyphs in its label.
   await waitFor(read, "target=16x1:true");
+  await waitFor(read, "caret=visible");
 
   expect((globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__).toBe(targetInstance);
   expect((globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__).toBe(targetInstance);
@@ -71,4 +73,5 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   expect(reloadedTarget).not.toBe(targetInstance);
   const reloadedOutput = read().slice(read().lastIndexOf("TARGET-C-RELOAD"));
   expect(reloadedOutput).toMatch(/target=\d+x1:true/);
+  expect(reloadedOutput).toContain("caret=visible");
 });

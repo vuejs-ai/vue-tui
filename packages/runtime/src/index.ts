@@ -126,7 +126,12 @@ export type {
   RenderSession,
   RenderSize,
 } from "./render-session.ts";
-export { useCursor, type CursorPosition } from "./composables/useCursor.ts";
+export {
+  useCaret,
+  type CaretState,
+  type UseCaretOptions,
+  type UseCaretReturn,
+} from "./composables/useCaret.ts";
 export {
   useAnimation,
   type UseAnimationOptions,

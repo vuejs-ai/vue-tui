@@ -14,7 +14,7 @@ vue-tui is layered by responsibility; each layer may depend **only downward**.
 
 - **`@vue-tui/runtime`** — the engine: the Yoga-flexbox renderer, the primitive components
   (e.g. `Box`/`Text`/`Spacer`/`Static`), and the terminal-I/O composables (e.g. `useInput`,
-  `useFocus`, `useMouseInput`, `useStdout`, `useCursor`, `useRenderSession`, `useLayoutSize`). The lean core
+  `useFocus`, `useCaret`, `useMouseInput`, `useStdout`, `useRenderSession`, `useLayoutSize`). The lean core
   every app depends on; depends on nothing else in the family. What counts as runtime work
   is the [runtime ↔ component boundary](./components-design-principles.md).
 - **`@vue-tui/use`** — independent, reusable hooks that are **not tied to any single

@@ -1,4 +1,12 @@
-import { computed, defineComponent, nextTick, onMounted, shallowRef } from "vue";
+import {
+  computed,
+  defineComponent,
+  nextTick,
+  onMounted,
+  shallowRef,
+  type ComponentPublicInstance,
+  type VNodeChild,
+} from "vue";
 import {
   Box,
   Static,
@@ -6,8 +14,9 @@ import {
   Transform,
   createApp,
   useApp,
-  useCursor,
+  useCaret,
   useElementGeometry,
+  useFocus,
   useDraggable,
   useInput,
   useStderr,
@@ -72,7 +81,9 @@ function markTargetPhase(): Promise<void> {
 
 const App = defineComponent(() => {
   const { exit } = useApp();
-  const { setCursorPosition } = useCursor();
+  const caretTarget = shallowRef<ComponentPublicInstance | null>(null);
+  const caretFocus = useFocus(caretTarget, { autoFocus: true, tabIndex: -1 });
+  useCaret(caretTarget, { focus: caretFocus, position: { x: 3, y: 0 } });
   const { write } = useStdout();
   const { write: writeError } = useStderr();
   const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
@@ -99,9 +110,11 @@ const App = defineComponent(() => {
     },
   });
 
-  if (scenario !== "screen-reader") {
-    setCursorPosition({ x: 3, y: 0 });
-  }
+  const renderSurface = (content: VNodeChild) => (
+    <Box ref={caretTarget} flexDirection="column">
+      {content}
+    </Box>
+  );
 
   useInput((event) => {
     const input = inputText(event);
@@ -170,7 +183,7 @@ const App = defineComponent(() => {
 
   return () => {
     if (scenario === "target-lifetime") {
-      return (
+      return renderSurface(
         <Box flexDirection="column">
           <Text>phase={targetPhase.value}</Text>
           <LifetimeTarget ref={target} />
@@ -178,12 +191,12 @@ const App = defineComponent(() => {
             target={targetMetrics.value.width}x{targetMetrics.value.height}:
             {String(targetMetrics.value.measured)} dragging={String(drag.isDragging.value)}
           </Text>
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "horizontal-transform") {
-      return (
+      return renderSurface(
         <Box width={1} height={1} flexShrink={0} onClick={() => exit("clicked")}>
           {{
             default: () => (
@@ -192,38 +205,38 @@ const App = defineComponent(() => {
               </Transform>
             ),
           }}
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "horizontal-wide") {
-      return (
+      return renderSurface(
         <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
           {{ default: () => <Text>{{ default: () => `${"X".repeat(99)}你` }}</Text> }}
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "horizontal-left-wide") {
-      return (
+      return renderSurface(
         <Box width={4} height={1} overflow="hidden" onClick={() => exit("clicked")}>
           <Box marginLeft={-1} flexShrink={0}>
             <Text>中x</Text>
           </Box>
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "horizontal-overflow") {
-      return (
+      return renderSurface(
         <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
           {{ default: () => <Text>{{ default: () => "X".repeat(101) }}</Text> }}
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "overflow") {
-      return (
+      return renderSurface(
         <Box flexDirection="column" height={10} flexShrink={0}>
           {{
             default: () =>
@@ -238,11 +251,11 @@ const App = defineComponent(() => {
                 </Box>
               )),
           }}
-        </Box>
+        </Box>,
       );
     }
 
-    return (
+    return renderSurface(
       <>
         {scenario === "static" ? (
           <Static items={["HISTORY"]}>
@@ -256,7 +269,7 @@ const App = defineComponent(() => {
         >
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
-      </>
+      </>,
     );
   };
 });

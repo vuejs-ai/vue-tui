@@ -46,7 +46,9 @@ export type InternalElementGeometry =
 
 export interface InternalGeometryBinding {
   readonly geometry: Readonly<ShallowRef<InternalElementGeometry>>;
-  observe(observer: (geometry: InternalElementGeometry) => void): () => void;
+  observe(
+    observer: (geometry: InternalElementGeometry, target: TuiNode | null) => void,
+  ): () => void;
   attach(target: TuiNode): () => void;
   dispose(): void;
 }
@@ -57,6 +59,8 @@ export interface InternalGeometryPaintFrame {
   isObserved(target: TuiNode): boolean;
   /** True when this target or one of its descendants was observed at frame start. */
   hasObservedSubtree(target: TuiNode): boolean;
+  /** Read this frame's frozen paint result without publishing the generation. */
+  geometryFor(target: TuiNode): InternalElementGeometry;
   record(target: TuiNode, geometry: InternalElementGeometry): void;
   recordSubtree(target: TuiNode, status: "hidden" | "unavailable"): void;
   commit(): void;
@@ -116,7 +120,7 @@ export function freezeInternalGeometry(geometry: InternalElementGeometry): Inter
 
 interface MutableBinding {
   readonly value: ShallowRef<InternalElementGeometry>;
-  readonly observers: Set<(geometry: InternalElementGeometry) => void>;
+  readonly observers: Set<(geometry: InternalElementGeometry, target: TuiNode | null) => void>;
   target: TuiNode | null;
   active: boolean;
 }
@@ -161,14 +165,17 @@ export function createInternalGeometryService(
   const assign = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
     if (binding.value.value === geometry) return;
     binding.value.value = geometry;
-    for (const observer of binding.observers) observer(geometry);
+    for (const observer of binding.observers) observer(geometry, binding.target);
+  };
+
+  const publishFrozen = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
+    if (!binding.active) return;
+    if (transactionDepth > 0) queued.set(binding, geometry);
+    else assign(binding, geometry);
   };
 
   const publish = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
-    if (!binding.active) return;
-    const frozen = freezeInternalGeometry(geometry);
-    if (transactionDepth > 0) queued.set(binding, frozen);
-    else assign(binding, frozen);
+    publishFrozen(binding, freezeInternalGeometry(geometry));
   };
 
   const flush = (): void => {
@@ -204,7 +211,7 @@ export function createInternalGeometryService(
           if (!binding.active) throw new Error("geometry binding is disposed");
           binding.observers.add(observer);
           try {
-            observer(binding.value.value);
+            observer(binding.value.value, binding.target);
           } catch (error) {
             binding.observers.delete(observer);
             throw error;
@@ -277,6 +284,13 @@ export function createInternalGeometryService(
         hasObservedSubtree(target) {
           return observedSubtrees.has(target);
         },
+        geometryFor(target) {
+          if (settled) throw new Error("geometry paint frame is already settled");
+          if (!observedTargets.has(target)) {
+            throw new Error("geometry target was not observed when this paint frame began");
+          }
+          return records.get(target) ?? PENDING;
+        },
         record(target, geometry) {
           if (settled) throw new Error("geometry paint frame is already settled");
           if (observedTargets.has(target)) records.set(target, freezeInternalGeometry(geometry));
@@ -294,7 +308,7 @@ export function createInternalGeometryService(
           try {
             for (const binding of bindings) {
               if (!binding.target) continue;
-              publish(binding, records.get(binding.target) ?? PENDING);
+              publishFrozen(binding, records.get(binding.target) ?? PENDING);
             }
           } finally {
             transactionDepth--;

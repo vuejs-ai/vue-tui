@@ -16,9 +16,9 @@
 // so repeated clear cannot reach pre-app history. ansiEscapes.cursorTo(x) is a
 // 1-based column move `\x1b[${x+1}G`, and cursorTo(0) is the bare `\x1b[G`.
 import { PassThrough } from "node:stream";
-import { defineComponent, h, nextTick, shallowRef } from "vue";
+import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useCursor, useStdout } from "@vue-tui/runtime";
+import { Box, Text, createApp, useCaret, useFocus, useStdout } from "@vue-tui/runtime";
 
 const SHOW = "\x1b[?25h";
 const HIDE = "\x1b[?25l";
@@ -71,6 +71,13 @@ function mountOpts(stdout: NodeJS.WriteStream) {
   };
 }
 
+function useFocusedCaret(position: { readonly x: number; readonly y: number }) {
+  const target = shallowRef<ComponentPublicInstance | null>(null);
+  const focus = useFocus(target, { autoFocus: true, tabIndex: -1 });
+  useCaret(target, { focus, position });
+  return target;
+}
+
 describe("app.clear() cursor parity (interactive stream level)", () => {
   test("S1: clear() with an active cursor leaves the caret HIDDEN (no show, no reposition)", async () => {
     // Ink v7.0.4 CLEAR_BYTES:
@@ -78,11 +85,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // -> hide + return-to-bottom + erase the 2 lines, NO show, NO reposition.
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 5, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      const target = useFocusedCaret({ x: 5, y: 0 });
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);
@@ -135,11 +139,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     const { stream: stdout, writes } = makeTtyStdout();
     const text = shallowRef("Hello");
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 3, y: 0 });
-        return h(Text, null, () => text.value);
-      };
+      const target = useFocusedCaret({ x: 3, y: 0 });
+      return () => h(Text, { ref: target }, () => text.value);
     });
 
     const app = createApp(App);
@@ -174,15 +175,13 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // -> hide + return-to-bottom (down 2) + erase 4 lines, NO show, NO reposition.
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 2, y: 1 });
-        return h(Box, { flexDirection: "column" }, () => [
+      const target = useFocusedCaret({ x: 2, y: 0 });
+      return () =>
+        h(Box, { flexDirection: "column" }, () => [
           h(Text, null, () => "Line1"),
-          h(Text, null, () => "Line2"),
+          h(Text, { ref: target }, () => "Line2"),
           h(Text, null, () => "Line3"),
         ]);
-      };
     });
 
     const app = createApp(App);
@@ -211,11 +210,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // suppressed here). The buggy code added "\x1b[1A\x1b[1G\x1b[?25h".
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 0, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      const target = useFocusedCaret({ x: 0, y: 0 });
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);
@@ -238,11 +234,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // now-blank region and erase terminal history that predates the app.
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 5, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      const target = useFocusedCaret({ x: 5, y: 0 });
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);
@@ -272,11 +265,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     const { stream: stdout, writes } = makeTtyStdout();
     const showChild = shallowRef(true);
     const Child = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 5, y: 0 });
-        return h(Text, null, () => "child");
-      };
+      const target = useFocusedCaret({ x: 5, y: 0 });
+      return () => h(Text, { ref: target }, () => "child");
     });
     const App = defineComponent(
       () => () => (showChild.value ? h(Child) : h(Text, null, () => "no cursor")),
@@ -305,11 +295,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // Ink no-ops a non-interactive clear() (ink.js:619 `if (this.interactive ...`).
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 5, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      const target = useFocusedCaret({ x: 5, y: 0 });
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);
@@ -338,13 +325,10 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     const { stream: stdout, writes } = makeTtyStdout();
     let writeFn: ((data: string) => void) | undefined;
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
+      const target = useFocusedCaret({ x: 2, y: 0 });
       const { write } = useStdout();
       writeFn = write;
-      return () => {
-        setCursorPosition({ x: 2, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);
@@ -373,11 +357,8 @@ describe("app.clear() cursor parity (interactive stream level)", () => {
     // the persistent caret. clear() did not lose the declared position.
     const { stream: stdout, writes } = makeTtyStdout();
     const App = defineComponent(() => {
-      const { setCursorPosition } = useCursor();
-      return () => {
-        setCursorPosition({ x: 4, y: 0 });
-        return h(Text, null, () => "Hello");
-      };
+      const target = useFocusedCaret({ x: 4, y: 0 });
+      return () => h(Text, { ref: target }, () => "Hello");
     });
 
     const app = createApp(App);

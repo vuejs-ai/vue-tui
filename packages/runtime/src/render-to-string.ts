@@ -23,6 +23,8 @@ import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-a
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { createInternalFocusController } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
+import { createInternalCaretController } from "./caret/caret-controller.ts";
+import { InternalCaretControllerKey } from "./caret/caret-context.ts";
 import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
 import {
   InternalRenderSessionKey,
@@ -111,6 +113,11 @@ function renderStringDocument(
     inputRouting: stdinContext.internal_inputRouting,
     inert: true,
   });
+  const caretController = createInternalCaretController({
+    focus: focusController,
+    outputAvailable: false,
+    requestPaint: () => {},
+  });
   const renderedTargets = createRenderedTargetController(root, focusController);
   setRenderedTargetController(appContext, renderedTargets);
   let yogaAttached = false;
@@ -162,6 +169,7 @@ function renderStringDocument(
     app.provide(InternalRenderSessionKey, renderSession);
     app.provide(AppContextKey, appContext);
     app.provide(InternalFocusControllerKey, focusController);
+    app.provide(InternalCaretControllerKey, caretController);
     app.provide(StdinContextKey, stdinContext);
     app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
 
@@ -265,6 +273,11 @@ function renderStringDocument(
     } catch {
       // Best-effort: an adapter cleanup must not mask the render result or the
       // original render failure after the remaining host resources are freed.
+    }
+    try {
+      caretController.dispose();
+    } catch {
+      // Best-effort: F4/string-host cleanup below must still run.
     }
     try {
       focusController.dispose();
@@ -391,8 +404,6 @@ function createStringContexts(columns: number): {
     setRawMode: () => {},
     writeToStdout: () => {},
     writeToStderr: () => {},
-    cursorPosition: undefined,
-    setCursorPosition: () => {},
   };
 
   const stdinContext = createNoOpStdinContext(stdin);

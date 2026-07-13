@@ -5,6 +5,7 @@ import {
   Text,
   createApp,
   useApp,
+  useCaret,
   useExternalInput,
   useFocus,
   useFocusedInput,
@@ -76,6 +77,8 @@ const App = defineComponent(() => {
   const backgroundScope = useFocusScope();
   const first = useFocus(firstHost, { scope: backgroundScope, autoFocus: true });
   const second = useFocus(secondHost, { scope: backgroundScope });
+  const firstCaret = useCaret(firstHost, { focus: first, position: { x: 2, y: 0 } });
+  const secondCaret = useCaret(secondHost, { focus: second, position: { x: 2, y: 0 } });
   const manager = useFocusManager();
   const visibleRecipient: Readonly<Record<string, string>> = {
     global: "global",
@@ -189,16 +192,27 @@ const App = defineComponent(() => {
           ? "modal"
           : "none";
 
+  const caretLabel = (state: typeof firstCaret.state.value) =>
+    state.status === "hidden" ? `hidden:${state.reason}` : state.status;
+
   return () =>
     h(
       Box,
       { flexDirection: "column", borderStyle: "round", width: 62, paddingX: 1 },
       {
         default: () => [
-          h(Text, { bold: true }, { default: () => `F4 focus lifecycle (${requestedMode})` }),
+          h(
+            Text,
+            { bold: true },
+            { default: () => `Focus and caret lifecycle (${requestedMode})` },
+          ),
           h(Text, null, {
             default: () =>
               `focus=${focusedName()} second=${showSecond.value ? "present" : "removed"} modal=${showModal.value ? "open" : "closed"}`,
+          }),
+          h(Text, null, {
+            default: () =>
+              `carets=first:${caretLabel(firstCaret.state.value)} second:${caretLabel(secondCaret.state.value)}`,
           }),
           h(Text, null, {
             default: () =>

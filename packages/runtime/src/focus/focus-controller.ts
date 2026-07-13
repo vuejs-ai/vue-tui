@@ -29,6 +29,11 @@ export interface InternalFocusTargetHandle {
   blur(): boolean;
 }
 
+export interface InternalFocusTargetDependent {
+  hostChanged(host: TuiNode | null): void;
+  disposed(): void;
+}
+
 export interface InternalFocusScopeHandle {
   readonly containsFocus: Readonly<ShallowRef<boolean>>;
 }
@@ -62,6 +67,7 @@ export type InternalFocusExternalHandler = (source: InternalNormalizedInputSourc
 
 export interface InternalFocusController extends RenderedTargetTransactionHost {
   readonly focusedTarget: Readonly<ShallowRef<InternalFocusTargetHandle | null>>;
+  readonly effectiveTarget: Readonly<ShallowRef<InternalFocusTargetHandle | null>>;
   createTarget(options?: InternalFocusTargetOptions): InternalFocusTargetHandle;
   updateTarget(target: InternalFocusTargetHandle, update: InternalFocusTargetUpdate): void;
   removeTarget(target: InternalFocusTargetHandle): void;
@@ -69,6 +75,10 @@ export interface InternalFocusController extends RenderedTargetTransactionHost {
   updateScope(scope: InternalFocusScopeHandle, update: InternalFocusScopeUpdate): void;
   removeScope(scope: InternalFocusScopeHandle): void;
   attachTarget(target: InternalFocusTargetHandle, host: TuiNode): () => void;
+  registerTargetDependent(
+    target: InternalFocusTargetHandle,
+    dependent: InternalFocusTargetDependent,
+  ): () => void;
   registerTargetInput(
     target: InternalFocusTargetHandle,
     handler: InternalFocusInputHandler,
@@ -98,6 +108,11 @@ interface ExternalRegistration {
   active: boolean;
 }
 
+interface TargetDependentRegistration {
+  readonly dependent: InternalFocusTargetDependent;
+  active: boolean;
+}
+
 interface ScopeRecord {
   readonly handle: InternalFocusScopeHandle;
   policy: InternalFocusScope;
@@ -115,6 +130,7 @@ interface TargetRecord {
   readonly scope: ScopeRecord | null;
   readonly isFocusedRef: Readonly<ShallowRef<boolean>>;
   readonly input: Set<InputRegistration>;
+  readonly dependents: Set<TargetDependentRegistration>;
   disabled: boolean;
   tabIndex: 0 | -1;
   autoFocus: boolean;
@@ -208,6 +224,7 @@ export function createInternalFocusController(
   const focusedTargetRef = computed(
     () => publicSnapshotRef.value.owner?.handle ?? null,
   ) as unknown as Readonly<ShallowRef<InternalFocusTargetHandle | null>>;
+  const effectiveTargetRef = shallowRef<InternalFocusTargetHandle | null>(null);
 
   let disposed = false;
   let currentGeneration: FocusGeneration | null = null;
@@ -235,6 +252,20 @@ export function createInternalFocusController(
       throw new Error("Focus scope belongs to another application or has been disposed");
     }
     return record;
+  };
+
+  const notifyAcceptedHost = (record: TargetRecord, host: TuiNode | null): void => {
+    const registrations = Array.from(record.dependents);
+    for (const registration of registrations) {
+      if (registration.active) registration.dependent.hostChanged(host);
+    }
+  };
+
+  const disposeTargetDependents = (record: TargetRecord): void => {
+    const registrations = [...record.dependents];
+    record.dependents.clear();
+    for (const registration of registrations) registration.active = false;
+    for (const registration of registrations) registration.dependent.disposed();
   };
 
   const stageLogical = <Value>(change: () => Value, rollback: () => void): Value => {
@@ -428,8 +459,13 @@ export function createInternalFocusController(
     });
   };
 
+  const commitEffectiveTarget = (generation: FocusGeneration | null): void => {
+    effectiveTargetRef.value = inert ? null : (generation?.owner?.handle ?? null);
+  };
+
   const publishStableGeneration = (): void => {
     if (inert) {
+      commitEffectiveTarget(null);
       commitRefs(null);
       return;
     }
@@ -442,6 +478,7 @@ export function createInternalFocusController(
     if (targetRecords.size === 0 && scopeRecords.size === 0) {
       const previous = currentGeneration;
       currentGeneration = null;
+      commitEffectiveTarget(null);
       commitRefs(null);
       endGeneration(previous);
       return;
@@ -469,6 +506,7 @@ export function createInternalFocusController(
 
       const previous = currentGeneration;
       currentGeneration = generation;
+      commitEffectiveTarget(generation);
       commitRefs(generation);
       endGeneration(previous);
       for (const transient of superseded) endGeneration(transient);
@@ -489,7 +527,12 @@ export function createInternalFocusController(
         routeInvalidated = wasInvalidated;
         throw error;
       }
-      for (const target of targetRecords) target.acceptedHost = target.observedHost;
+      for (const target of targetRecords) {
+        const acceptedHost = target.observedHost;
+        if (target.acceptedHost === acceptedHost) continue;
+        target.acceptedHost = acceptedHost;
+        notifyAcceptedHost(target, acceptedHost);
+      }
       hostDirty = false;
       logicalDirty = false;
       return;
@@ -523,7 +566,10 @@ export function createInternalFocusController(
       }
     }
     selectionWasDisplaced = false;
-    if (!routeInvalidated) commitRefs(currentGeneration);
+    if (!routeInvalidated) {
+      commitEffectiveTarget(currentGeneration);
+      commitRefs(currentGeneration);
+    }
   };
 
   const runTransaction = (kind: "reconcile" | "cleanup" | "logical", change: () => void): void => {
@@ -572,6 +618,7 @@ export function createInternalFocusController(
   const invalidateSelectedRoute = (): void => {
     endGeneration(currentGeneration);
     currentGeneration = null;
+    commitEffectiveTarget(null);
     routeInvalidated = true;
   };
 
@@ -594,6 +641,7 @@ export function createInternalFocusController(
       // the disposal, end the old route, and expose no focus until a later
       // authoritative generation can be selected.
       invalidateSelectedRoute();
+      commitEffectiveTarget(null);
       commitRefs(null);
       throw error;
     } finally {
@@ -623,6 +671,7 @@ export function createInternalFocusController(
 
   const api: InternalFocusController = {
     focusedTarget: focusedTargetRef,
+    effectiveTarget: effectiveTargetRef,
     createTarget(targetOptions = {}) {
       const scope = targetOptions.scope ? stateForScope(targetOptions.scope) : null;
       let record!: TargetRecord;
@@ -640,6 +689,7 @@ export function createInternalFocusController(
         scope,
         isFocusedRef,
         input: new Set(),
+        dependents: new Set(),
         disabled: targetOptions.disabled ?? false,
         tabIndex: targetOptions.tabIndex ?? 0,
         autoFocus: targetOptions.autoFocus ?? false,
@@ -698,6 +748,7 @@ export function createInternalFocusController(
         record.acceptedHost = null;
         targetRecords.delete(record);
         targetByPolicy.delete(record.policy);
+        disposeTargetDependents(record);
       });
     },
     createScope(scopeOptions = {}) {
@@ -775,6 +826,7 @@ export function createInternalFocusController(
           scopeRecords.delete(scope);
           scopeByPolicy.delete(scope.policy);
         }
+        for (const target of removedTargets) disposeTargetDependents(target);
       });
     },
     attachTarget(handle, host) {
@@ -804,6 +856,23 @@ export function createInternalFocusController(
             invalidateSelectedRoute();
           }
         });
+      };
+    },
+    registerTargetDependent(handle, dependent) {
+      const target = stateForTarget(handle);
+      const registration: TargetDependentRegistration = { dependent, active: true };
+      target.dependents.add(registration);
+      try {
+        dependent.hostChanged(target.acceptedHost);
+      } catch (error) {
+        registration.active = false;
+        target.dependents.delete(registration);
+        throw error;
+      }
+      return () => {
+        if (!registration.active) return;
+        registration.active = false;
+        target.dependents.delete(registration);
       };
     },
     registerTargetInput(handle, handler) {
@@ -957,6 +1026,8 @@ export function createInternalFocusController(
         owner: null,
         containingScopes: Object.freeze(new Set<ScopeRecord>()),
       });
+      effectiveTargetRef.value = null;
+      for (const target of targetRecords) disposeTargetDependents(target);
       targetByPolicy.clear();
       scopeByPolicy.clear();
       targetRecords.clear();

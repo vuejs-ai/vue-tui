@@ -125,6 +125,7 @@ try {
     join(consumerDirectory, "consumer.ts"),
     `import { shallowRef } from "vue";
 import {
+  useCaret,
   useExternalInput,
   useElementGeometry,
   useFocus,
@@ -141,6 +142,7 @@ import {
   type InputHandler,
   type InputHandlerResult,
   type InputRouteDecision,
+  type CaretState,
   type ElementGeometry,
   type ElementTarget,
   type MountOptions,
@@ -150,6 +152,8 @@ import {
   type UseFocusReturn,
   type UseFocusScopeOptions,
   type UseFocusScopeReturn,
+  type UseCaretOptions,
+  type UseCaretReturn,
   type UseInputAvailabilityReturn,
   type UseInputOptions,
   type UseElementGeometryReturn,
@@ -260,6 +264,20 @@ type _ExactElementGeometryReturn = Expect<
     { readonly geometry: Readonly<ShallowRef<ElementGeometry>> }
   >
 >;
+type _ExactCaretOptions = Expect<
+  Equal<
+    UseCaretOptions,
+    {
+      readonly focus: UseFocusReturn;
+      readonly position: MaybeRefOrGetter<
+        { readonly x: number; readonly y: number } | null | undefined
+      >;
+    }
+  >
+>;
+type _ExactCaretReturn = Expect<
+  Equal<UseCaretReturn, { readonly state: Readonly<ShallowRef<CaretState>> }>
+>;
 
 const active = shallowRef(true);
 const handler = shallowRef<InputHandler>((event) => {
@@ -286,6 +304,11 @@ geometryResult.geometry.value = { status: "detached" };
 geometryResult.geometry.value.caretSlots;
 const focusScope = useFocusScope({ trapped: true });
 const focusTarget = useFocus(focusHost, { scope: focusScope, autoFocus: true });
+const caret = useCaret(focusHost, {
+  focus: focusTarget,
+  position: { x: 0, y: 0 },
+});
+caret.state.value.status;
 const focusManager = useFocusManager();
 useFocusedInput(focusTarget, handler);
 useFocusScopeInput(focusScope, handler);
@@ -343,6 +366,10 @@ type _RemovedMeasureElement = typeof import("@vue-tui/runtime").measureElement;
 type _RemovedBoxMetrics = import("@vue-tui/runtime").BoxMetrics;
 // @ts-expect-error The old composable return type was removed.
 type _RemovedUseBoxMetricsReturn = import("@vue-tui/runtime").UseBoxMetricsReturn;
+// @ts-expect-error Targetless terminal cursor ownership was removed.
+type _RemovedUseCursor = typeof import("@vue-tui/runtime").useCursor;
+// @ts-expect-error Output-origin cursor coordinates were removed with useCursor().
+type _RemovedCursorPosition = import("@vue-tui/runtime").CursorPosition;
 void removedRawMode;
 void removedExitOnCtrlC;
 `,
@@ -350,7 +377,7 @@ void removedExitOnCtrlC;
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
     `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
+import { Box, Text, useCaret, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 
 // @ts-expect-error Spinner is a leaf component and ignores child content.
@@ -362,6 +389,7 @@ export const InputProbe = defineComponent(() => {
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const scope = useFocusScope({ trapped: true });
   const target = useFocus(host, { scope, autoFocus: true });
+  const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
   const { geometry } = useElementGeometry(host);
   const manager = useFocusManager();
   const { availability } = useInputAvailability();
@@ -381,7 +409,7 @@ export const InputProbe = defineComponent(() => {
   scrollBox.value?.scrollToLine(2);
   scrollBox.value?.scrollToTop();
   scrollBox.value?.scrollToBottom();
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{geometry.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{geometry.value.status}:{caret.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
 });
 `,
   );
@@ -390,12 +418,13 @@ export const InputProbe = defineComponent(() => {
     `<script setup lang="ts">
 import { shallowRef, type ComponentPublicInstance } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
+import { Box, Text, useCaret, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
 
 const host = shallowRef<ComponentPublicInstance | null>(null);
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const scope = useFocusScope({ trapped: true });
 const target = useFocus(host, { scope, autoFocus: true });
+const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
 const { geometry } = useElementGeometry(host);
 const manager = useFocusManager();
 const mountedStdin = useStdin();
@@ -420,7 +449,7 @@ mountedStdin.setRawMode(false);
 </script>
 
 <template>
-  <Box ref="host" :height="2"><ScrollBox ref="scrollBox"><Text>{{ geometry.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox></Box>
+  <Box ref="host" :height="2"><ScrollBox ref="scrollBox"><Text>{{ geometry.status }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox></Box>
 </template>
 `,
   );
@@ -433,11 +462,13 @@ import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, shallowRef } from "vue";
 
-const { Box, createApp, Text, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
+const { Box, createApp, Text, useCaret, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
 assert.equal("usePaste" in runtime, false);
+assert.equal("useCursor" in runtime, false);
 assert.equal("useBoxMetrics" in runtime, false);
 assert.equal("measureElement" in runtime, false);
 assert.equal(typeof useElementGeometry, "function");
+assert.equal(typeof useCaret, "function");
 assert.equal(typeof useFocusScope, "function");
 assert.equal(typeof useFocusedInput, "function");
 assert.equal(typeof useFocusScopeInput, "function");
@@ -491,17 +522,21 @@ assert.deepEqual(idle.terminal.rawMode.history, []);
 idle.dispose();
 
 let geometryProjection;
+let caretProjection;
 let scrollBoxHandle;
 const GeometryProbe = defineComponent(() => {
   const host = shallowRef(null);
   scrollBoxHandle = shallowRef(null);
   geometryProjection = useElementGeometry(host);
+  const focus = useFocus(host, { autoFocus: true });
+  caretProjection = useCaret(host, { focus, position: { x: 0, y: 0 } });
   return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
     h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed geometry") }),
   );
 });
 const geometryApp = await render(GeometryProbe, { columns: 20, rows: 5 });
 assert.equal(geometryProjection.geometry.value.status, "visible");
+assert.deepEqual(caretProjection.state.value, { status: "visible", surface: { x: 0, y: 0 } });
 assert.deepEqual(Reflect.ownKeys(geometryProjection.geometry.value), [
   "status",
   "parent",
@@ -519,6 +554,7 @@ assert.equal(geometryApp.lastFrame().includes("packed"), true);
 assert.equal(geometryApp.lastFrame().includes("geometry"), true);
 geometryApp.dispose();
 assert.deepEqual(geometryProjection.geometry.value, { status: "detached" });
+assert.deepEqual(caretProjection.state.value, { status: "inactive" });
 
 const events = [];
 let activeAvailability;

@@ -21,7 +21,7 @@ const PUBLIC_VALUE_EXPORTS = [
   // Composables
   "useAnimation",
   "useApp",
-  "useCursor",
+  "useCaret",
   "useDraggable",
   "useElementGeometry",
   "useExternalInput",
@@ -62,6 +62,11 @@ test("replaces the superseded Yoga measurement APIs with semantic geometry", () 
   expect(api).toHaveProperty("useElementGeometry");
   expect(api).not.toHaveProperty("useBoxMetrics");
   expect(api).not.toHaveProperty("measureElement");
+});
+
+test("replaces targetless cursor ownership with focus-bound caret composition", () => {
+  expect(api).toHaveProperty("useCaret");
+  expect(api).not.toHaveProperty("useCursor");
 });
 
 // Ink keeps its `measure-text` module internal and does not re-export it. vue-tui

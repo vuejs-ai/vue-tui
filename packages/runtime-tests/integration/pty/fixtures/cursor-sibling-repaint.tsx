@@ -1,18 +1,18 @@
 import process from "node:process";
-import { Box, Text, createApp, useCursor, useInput } from "@vue-tui/runtime";
-import { defineComponent, h, onMounted, shallowRef } from "vue";
+import { Box, Text, createApp, useCaret, useFocus, useInput } from "@vue-tui/runtime";
+import { defineComponent, h, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
 import { inputText } from "./input-event.js";
 
 // Sibling-topology storyboard for the persistent-cursor-re-assertion divergence.
 //
-// The spinner state (`spin`) lives in a SIBLING of the `useCursor` input
+// The spinner state (`spin`) lives in a sibling of the focused editor
 // component, so a spinner tick re-renders only the sibling — the input child's
 // own deps do not change. Under the old value/reference gate the input never
 // re-declared its caret on that commit, so the caret zombied to the bottom-left
 // corner. The fix re-emits the last-declared caret at the end of EVERY commit,
 // so the caret survives the unrelated spinner repaint.
 //
-// Flow: type "hi" (caret declared at x = 2 + 2 = 4, y = 1), then a spinner-only
+// Flow: type "hi" (element-local caret x = 2 + 2 = 4; paint maps it to row 1), then a spinner-only
 // repaint fires with NO further keystroke. The final frame must still end at the
 // declared column, not the corner.
 
@@ -26,9 +26,14 @@ const Spinner = defineComponent(
   () => () => h(Text, null, () => `${SPIN[spin.value % 4]} working...`),
 );
 
-// The input owns the caret via useCursor; it re-declares on each keystroke.
+// The input owns one focus-bound semantic caret.
 const Input = defineComponent(() => {
-  const { setCursorPosition } = useCursor();
+  const target = shallowRef<ComponentPublicInstance | null>(null);
+  const focus = useFocus(target, { autoFocus: true, tabIndex: -1 });
+  useCaret(target, {
+    focus,
+    position: () => ({ x: 2 + typed.value.length, y: 0 }),
+  });
   useInput((event) => {
     if (event.kind !== "text") return "continue";
     const text = inputText(event);
@@ -36,11 +41,7 @@ const Input = defineComponent(() => {
     typed.value += text;
     return "consume";
   });
-  return () => {
-    // Caret sits just after the typed text on row 1 (the input is line 2).
-    setCursorPosition({ x: 2 + typed.value.length, y: 1 });
-    return h(Text, null, () => `> ${typed.value}`);
-  };
+  return () => h(Text, { ref: target }, () => `> ${typed.value}`);
 });
 
 const App = defineComponent(() => {

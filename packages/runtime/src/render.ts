@@ -65,7 +65,6 @@ import {
   StdinContextKey,
   AnimationSchedulerKey,
   type AppContext,
-  type CursorPosition,
   type SgrMouseMode,
   type StdinContext,
 } from "./context.ts";
@@ -108,6 +107,12 @@ import {
   type InternalFocusController,
 } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
+import {
+  createInternalCaretController,
+  type InternalCaretController,
+  type InternalPreparedCaretFrame,
+} from "./caret/caret-controller.ts";
+import { InternalCaretControllerKey } from "./caret/caret-context.ts";
 import {
   ErrorOverview,
   formatErrorForStderr,
@@ -309,6 +314,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
   let mountedFocusController: InternalFocusController | null = null;
+  let mountedCaretController: InternalCaretController | null = null;
   let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
@@ -734,6 +740,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
+      if (mountedCaretController) {
+        const caretController = mountedCaretController;
+        mountedCaretController = null;
+        runBestEffort(() => caretController.dispose());
+      }
       if (mountedGeometry) {
         const geometry = mountedGeometry;
         mountedGeometry = null;
@@ -1060,6 +1071,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       fixedFullscreenSurface &&
       supportsTerminalMouse() &&
       Boolean((stdin as { isTTY?: boolean }).isTTY);
+    const targetedCaretOutputAvailable =
+      dynamicUpdatesLive &&
+      surface.session.output.destination === "terminal" &&
+      surface.session.output.presentation === "visual";
 
     function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
       const currentStdout = {
@@ -1130,7 +1145,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let suspendedFullscreenSurface = false;
       let suspendedInlineSurface = false;
       let warnedFullscreenStatic = false;
-      let cursorPosition: CursorPosition | undefined;
+      type WriterCaretPosition = InternalPreparedCaretFrame["position"];
+      interface WriterCaretOwner {
+        readonly position: WriterCaretPosition;
+      }
+      let activeWriterCaretOwner: WriterCaretOwner | null = null;
+      let writerCaretDeclaration: WriterCaretPosition;
       mountedGetLastOutput = () => frameState.lastOutput;
       mountedNeedsTerminalLineAdvance = () =>
         inlineTerminalSurface &&
@@ -1149,6 +1169,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
         const writer = mountedWriter;
+        mountedCaretController?.setOutputAvailable(false, { surfaceReleased: true });
         if (fixedFullscreenSurface) {
           mountedGeometry?.setSurfaceAvailable(false);
           if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
@@ -1377,14 +1398,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (!dynamicUpdatesLive) return;
         // Clear() resets log-update's cursor state, so replay the latest cursor
         // intent before restoring output after external stdout/stderr writes.
-        writer.setCursorPosition(cursorPosition);
+        const caretPosition = activeWriterCaretOwner
+          ? activeWriterCaretOwner.position
+          : mountedCaretController?.writerPosition;
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
         // the first content commit, the value the resize-boundary path assigns,
         // and what an empty screen-reader frame leaves — must fall
         // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
         // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
         // empty string would pass through and restore nothing after an external write.
-        writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+        withWriterCaretOwnership(caretPosition, () => {
+          writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
+        });
       }
 
       function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
@@ -1528,22 +1553,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         },
         writeToStdout,
         writeToStderr,
-        cursorPosition: undefined,
-        setCursorPosition(pos: CursorPosition | undefined) {
-          cursorPosition = pos;
-          appContext.cursorPosition = pos;
-          // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
-          // BOTH the instance field AND this.log.setCursorPosition(position) on
-          // every render. Forwarding to the frame writer updates log-update's
-          // last-declared position (persistently re-emitted at every commit) and
-          // marks cursorDirty so the commit gate (output !== lastOutput ||
-          // isCursorDirty) fires even on a cursor-only move (same output, new pos).
-          // Without this the cursor is never shown/moved on the interactive path.
-          // `writer` is created below in mount() but is always initialized before
-          // any render/setup can call this (originalMount runs after writer creation),
-          // so the optional-chain guards only the pre-mount appContext shape.
-          mountedWriter?.setCursorPosition(pos);
-        },
       };
       mountedAppContext = appContext;
       // Reserve the stream only after every mount option and session fact needed
@@ -1637,6 +1646,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           inputRouting: stdinController.internal_inputRouting,
         });
         mountedFocusController = focusController;
+        const caretController = createInternalCaretController({
+          focus: focusController,
+          outputAvailable: targetedCaretOutputAvailable,
+          requestPaint: () => scheduledCommit(),
+        });
+        mountedCaretController = caretController;
         const geometry = createInternalGeometryService(tuiRoot, () => scheduledCommit());
         mountedGeometry = geometry;
         if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
@@ -1662,6 +1677,38 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         incremental: incrementalRendering,
       });
       mountedWriter = writer;
+
+      function writerCaretPositionsEqual(
+        left: WriterCaretPosition,
+        right: WriterCaretPosition,
+      ): boolean {
+        return left?.x === right?.x && left?.y === right?.y;
+      }
+
+      function setWriterCaretPosition(position: WriterCaretPosition): void {
+        if (writerCaretPositionsEqual(writerCaretDeclaration, position)) return;
+        writer.setCursorPosition(position);
+        writerCaretDeclaration = position;
+      }
+
+      function withWriterCaretOwnership<Value>(
+        position: WriterCaretPosition,
+        operation: () => Value,
+      ): Value {
+        const previousOwner = activeWriterCaretOwner;
+        const owner: WriterCaretOwner = { position };
+        activeWriterCaretOwner = owner;
+        setWriterCaretPosition(position);
+        try {
+          return operation();
+        } finally {
+          activeWriterCaretOwner = previousOwner;
+          // A nested coordinated write may have declared another caret. Restore
+          // the enclosing frame's candidate before its physical write resumes.
+          setWriterCaretPosition(previousOwner ? previousOwner.position : position);
+        }
+      }
+
       mountedClear = () => {
         runLifecycleTransaction(() => {
           if (!dynamicUpdatesLive || terminalSuspended) return;
@@ -1768,35 +1815,65 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         );
       }
 
-      function repaintFullscreen(output: string, options: { writeBefore?: () => void } = {}) {
-        runLifecycleTransaction(() => {
-          // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
-          // clear that surface after every coordinated side-channel write instead
-          // of restoring relative to the cursor position that the write left
-          // behind. This keeps paint geometry, cursor coordinates, and the mouse
-          // hit map in the same viewport coordinate system.
-          runCoordinatedWrite(
-            () => {
-              // Hide first even on terminals without synchronized updates. A declared
-              // caret may be visible after the previous sync; leaving it visible while
-              // a full repaint streams produces a corner-to-caret flash.
-              stdout.write(hideCursorEscape);
-              options.writeBefore?.();
-            },
-            () => {
-              writer.setCursorPosition(cursorPosition);
-              stdout.write(ansiEscapes.clearViewport + output);
-              writer.sync(output);
-            },
-          );
+      function repaintFullscreen(
+        output: string,
+        options: {
+          readonly writeBefore?: () => void;
+          /** Present for a new render frame, including an explicit hidden caret. */
+          readonly frameCaret?: { readonly position: InternalPreparedCaretFrame["position"] };
+        } = {},
+      ) {
+        const caretPosition = options.frameCaret
+          ? options.frameCaret.position
+          : activeWriterCaretOwner
+            ? activeWriterCaretOwner.position
+            : mountedCaretController?.writerPosition;
+        withWriterCaretOwnership(caretPosition, () =>
+          runLifecycleTransaction(() => {
+            // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
+            // clear that surface after every coordinated side-channel write instead
+            // of restoring relative to the cursor position that the write left
+            // behind. This keeps paint geometry, cursor coordinates, and the mouse
+            // hit map in the same viewport coordinate system.
+            runCoordinatedWrite(
+              () => {
+                // Hide first even on terminals without synchronized updates. A declared
+                // caret may be visible after the previous sync; leaving it visible while
+                // a full repaint streams produces a corner-to-caret flash.
+                stdout.write(hideCursorEscape);
+                options.writeBefore?.();
+              },
+              () => {
+                setWriterCaretPosition(caretPosition);
+                stdout.write(ansiEscapes.clearViewport + output);
+                writer.sync(output);
+              },
+            );
 
-          frameState.lastOutput = output;
-          frameState.lastOutputToRender = output;
-          frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
-        });
+            frameState.lastOutput = output;
+            frameState.lastOutputToRender = output;
+            frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+          }),
+        );
       }
 
-      function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
+      function renderInteractiveFrame(
+        output: string,
+        outputHeight: number,
+        staticOutput: string,
+        caretFrame: InternalPreparedCaretFrame,
+      ) {
+        return withWriterCaretOwnership(caretFrame.position, () =>
+          renderInteractiveFrameWithOwnedCaret(output, outputHeight, staticOutput, caretFrame),
+        );
+      }
+
+      function renderInteractiveFrameWithOwnedCaret(
+        output: string,
+        outputHeight: number,
+        staticOutput: string,
+        caretFrame: InternalPreparedCaretFrame,
+      ) {
         const hasStaticOutput = staticOutput !== "";
         const isTty = !!stdout.isTTY;
         const viewportRows = renderSession.session.dimensions.layout.rows;
@@ -1817,6 +1894,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                     if (hasStaticOutput) stdout.write(staticOutput);
                   }
                 : undefined,
+            frameCaret: { position: caretFrame.position },
           });
           return;
         }
@@ -1939,6 +2017,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (terminalSuspended && !terminalResumePainting) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         let geometryFrame: InternalGeometryPaintFrame | undefined;
+        let caretFrame: InternalPreparedCaretFrame | undefined;
         try {
           const start = onRender ? performance.now() : 0;
           mountedRenderedTargets?.reconcile();
@@ -2032,6 +2111,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             const paintViewportRows = exactViewportRows ?? inlineViewportRows;
             geometryFrame = isScreenReaderEnabled ? undefined : mountedGeometry?.beginFrame();
             const frame = renderFrame(w, hitMap, paintViewportRows, geometryFrame);
+            if (geometryFrame && mountedCaretController) {
+              caretFrame = mountedCaretController.prepareFrame(
+                geometryFrame,
+                terminalResumePainting
+                  ? { outputAvailable: targetedCaretOutputAvailable }
+                  : undefined,
+              );
+            }
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2042,8 +2129,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             if (fixedFullscreenSurface) {
               if (onRender) onRender({ renderTime: performance.now() - start });
-              renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+              renderInteractiveFrame(
+                frame,
+                outputHeight,
+                hasStaticOutput ? staticOutput : "",
+                caretFrame!,
+              );
               geometryFrame?.commit();
+              caretFrame?.accept();
               return;
             }
 
@@ -2100,27 +2193,39 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             // Interactive path
             if (onRender) onRender({ renderTime: performance.now() - start });
-            renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
+            renderInteractiveFrame(
+              frame,
+              outputHeight,
+              hasStaticOutput ? staticOutput : "",
+              caretFrame!,
+            );
             markBoundaryErrorFrameRendered(frame);
             geometryFrame?.commit();
+            caretFrame?.accept();
           } finally {
             restoreLayoutGuards();
           }
         } catch (error) {
+          if (caretFrame) {
+            // A candidate declaration is writer-local until both output and
+            // geometry succeed. Restore the last accepted semantic point so a
+            // later coordinated write or teardown cannot replay a failed frame.
+            setWriterCaretPosition(caretFrame.previousPosition);
+            caretFrame.discard();
+          }
           if (
             pendingBoundaryError !== undefined &&
             pendingBoundaryFrameReady === pendingBoundaryError &&
             pendingExitError === pendingBoundaryError
           ) {
-            // Writer implementations update their dedup baseline before calling
-            // the host stream. If that stream throws, teardown's final commit may
-            // be deduplicated even though no durable frame reached the terminal.
-            // Preserve the failed attempt so a later no-op commit cannot suppress
-            // the plain-text stderr fallback.
+            // A host write failure means the rich boundary frame did not durably
+            // reach its destination. Preserve that fact even though the writer can
+            // retry, so teardown cannot suppress the plain-text stderr fallback.
             pendingBoundaryFrameWriteFailed = true;
           }
           throw error;
         } finally {
+          caretFrame?.discard();
           geometryFrame?.discard();
           leaveLifecycleTransaction();
         }
@@ -2162,6 +2267,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(InternalRenderSessionKey, renderSession);
       baseApp.provide(AppContextKey, appContext);
       baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
+      baseApp.provide(InternalCaretControllerKey, mountedCaretController!);
       baseApp.provide(StdinContextKey, stdinController);
       // useAnimation coalesces ticks within this same window so committed deltas
       // accumulate to the real wall-clock elapsed time (the value committed to
@@ -2257,12 +2363,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // 55-59), and the onRender outer gate skips log-update entirely for an empty
       // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
       // commit). So an interactive app whose root renders nothing emits ZERO
-      // cursor escapes — the cursor stays visible — while a non-empty / useCursor
+      // cursor escapes — the cursor stays visible — while a non-empty semantic-caret
       // app hides on its first render via the same lazy path. The renderInteractive
       // commit gate below mirrors that `output !== frameState.lastOutput` outer
       // condition so the empty-frame skip (and thus the no-hide behavior) holds.
       //
-      // Ordering for a useCursor app is preserved without an eager hide: log-update
+      // Ordering for a semantic-caret app is preserved without an eager hide: log-update
       // hides-then-shows WITHIN a single render() (it hides at the top, then emits
       // the showCursor + cursorTo suffix for the active position), so the last
       // visibility change on the first frame is the SHOW — exactly Ink's ordering.

@@ -27,7 +27,7 @@ import {
   useStdin,
   useStdout,
   useStderr,
-  useCursor,
+  useCaret,
   useLayoutSize,
   useRenderSession,
   useAnimation,
@@ -856,19 +856,22 @@ describe("renderToString", () => {
   // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, semantic input, useAnimation, and useElementGeometry — so that
+  // useCaret, semantic input, useAnimation, and useElementGeometry — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
-    test("useCursor does not throw in renderToString", () => {
+    test("useCaret reports unavailable in renderToString", () => {
+      let caretStatus = "unset";
       const App = defineComponent(() => {
-        // setCursorPosition forwards to the no-op AppContext.setCursorPosition.
-        const { setCursorPosition } = useCursor();
-        setCursorPosition({ x: 2, y: 0 });
-        return () => <Text>with cursor</Text>;
+        const target = shallowRef<ComponentPublicInstance | null>(null);
+        const focus = useFocus(target, { autoFocus: true });
+        const { state } = useCaret(target, { focus, position: { x: 2, y: 0 } });
+        caretStatus = state.value.status;
+        return () => <Text ref={target}>with caret</Text>;
       });
       const output = renderToString(App);
-      expect(output).toBe("with cursor");
+      expect(output).toBe("with caret");
+      expect(caretStatus).toBe("unavailable");
     });
 
     test("paste handling through useInput stays inert in renderToString", () => {
@@ -923,13 +926,15 @@ describe("renderToString", () => {
       expect(output).toContain("unavailable");
     });
 
-    test("all four terminal composables together render to a string without throwing", () => {
+    test("caret, input, animation, and geometry render together without throwing", () => {
+      let caretStatus = "unset";
       const App = defineComponent(() => {
-        const { setCursorPosition } = useCursor();
-        setCursorPosition({ x: 1, y: 0 });
         useInput(() => "continue");
         const { frame } = useAnimation({ interval: 30 });
         const boxRef = shallowRef<ComponentPublicInstance | null>(null);
+        const focus = useFocus(boxRef, { autoFocus: true });
+        const { state } = useCaret(boxRef, { focus, position: { x: 1, y: 0 } });
+        caretStatus = state.value.status;
         useElementGeometry(boxRef);
         return () => (
           <Box ref={boxRef}>
@@ -939,6 +944,7 @@ describe("renderToString", () => {
       });
       const output = renderToString(App, { columns: 40 });
       expect(output).toContain("all:0");
+      expect(caretStatus).toBe("unavailable");
     });
   });
 });

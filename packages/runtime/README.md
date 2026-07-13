@@ -108,7 +108,7 @@ useInput((event) => {
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |
 | `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
 | `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref  |
-| `useCursor()`                   | Position the terminal cursor — returns `setCursorPosition(pos)`; pass `undefined` to hide it |
+| `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state             |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                            |
 | `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
 | `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
@@ -120,6 +120,8 @@ Raw stdin runs in parallel with vue-tui's managed input route. It may include te
 `useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed handler fails before publishing a route or changing terminal state. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected before terminal mutation.
 
 `useElementGeometry(ref)` reports one frozen, readonly geometry generation derived from what paint actually mapped. Resolved states expose full parent-relative and dynamic-render-surface bounds plus exact fragments whose `visibleSurface` is the clipped surface-coordinate rectangle or `null`; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` are separate states. It supports both rendering modes without exposing Inline's unstable physical terminal row, and reports `unavailable` when a visual 2D target surface does not exist.
+
+`useCaret(ref, { focus, position })` connects one rendered element to one exact `useFocus()` result. `position` is a zero-based rendered cell local to `ref`; the editor remains responsible for converting its logical insertion point to that cell. The runtime publishes a frozen readonly `state` and maps a visible request through paint into the current mode writer. It emits no targeted terminal-cursor controls for inactive, clipped, detached, invalid, non-TTY, screen-reader, or string-host requests. The public caret describes an editor's insertion marker; the private terminal cursor is only the physical transport used to display it.
 
 ### Render-session facts
 

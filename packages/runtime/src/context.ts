@@ -5,11 +5,6 @@ import type { InternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
 import type { MouseController } from "./mouse/controller.ts";
 import type { InputAvailability } from "./io/input-availability.ts";
 
-export interface CursorPosition {
-  x: number;
-  y: number;
-}
-
 export interface AppContext {
   exit: (errorOrResult?: unknown) => void;
   waitUntilRenderFlush: () => Promise<void>;
@@ -20,8 +15,6 @@ export interface AppContext {
   setRawMode: (mode: boolean) => void;
   writeToStdout: (data: string) => void;
   writeToStderr: (data: string) => void;
-  cursorPosition: CursorPosition | undefined;
-  setCursorPosition: (pos: CursorPosition | undefined) => void;
   internal_mouse?: MouseController;
 }
 

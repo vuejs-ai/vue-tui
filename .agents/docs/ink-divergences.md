@@ -137,7 +137,7 @@ stream runs the relative or screen-reader writer and may emit live frames plus A
 movement bytes. Commit throttling can coalesce intermediate states, so the contract is not that
 every reactive state is observable. Alternate-screen entry still independently requires a TTY
 stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a hit map on a pipe.
-An active `useCursor()` declaration is not part of that stream-update permission: standard and incremental writers both suppress caret movement, show, hide, and restoration controls on non-TTY destinations. The regression invokes the declaration directly so this claim does not rest on the input-free case.
+An active `useCaret()` request is not part of that stream-update permission: its state remains `unavailable`, and standard and incremental writers both suppress targeted movement, show, hide, and restoration controls on non-TTY destinations. The regression exercises mount, suspension, continuation, and teardown with a real focus-bound request so this claim does not rest on the input-free case.
 
 This alignment is about output policy, not a broad claim that the application has no input. A TTY
 stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
@@ -425,7 +425,7 @@ current-props model, or API conventions.
 - **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...). Where a
   composable's return type is exported under a name, the name always follows VueUse's
   `UseXReturn` convention (`UseAppReturn`, `UseStdinReturn`, `UseStdoutReturn`,
-  `UseStderrReturn`, `UseAnimationReturn`, `UseElementGeometryReturn`, `UseLayoutSizeReturn`); the remaining composables
+  `UseStderrReturn`, `UseAnimationReturn`, `UseElementGeometryReturn`, `UseCaretReturn`, `UseLayoutSizeReturn`); the remaining composables
   return `void` or small unexported inline shapes — never an `XProps` type. `useRenderSession()`
   returns the exported domain model `RenderSession` rather than adding a duplicate hook-specific
   alias. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
@@ -434,7 +434,7 @@ current-props model, or API conventions.
   `Options` / `Props` and usually does **not** export it (e.g. `useAnimation`'s `Options` is
   internal — only the return `AnimationResult` is exported, `use-animation.ts:14,30`). vue-tui
   exports each composable's options type under VueUse's `UseXOptions` name: `UseInputOptions`,
-  `UseFocusOptions`, `UseAnimationOptions`. `useAnimation`'s options type
+  `UseFocusOptions`, `UseCaretOptions`, `UseAnimationOptions`. `useAnimation`'s options type
   originally shipped as `AnimationOptions` — the lone holdout — and was renamed to
   `UseAnimationOptions` (a hard rename, no alias) while the package is pre-1.0 (`0.0.x`, no
   stability promise yet). **Export composable options types
@@ -645,6 +645,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   real terminal apps showed Ink itself zombies the caret there, so matching Ink was matching
   a defect, not parity.
 
+**Unstamped F5 supersession:** the vouched section above records why the writer must reassert the selected caret after every repaint; that mechanism remains. F5 has now removed the public targetless `useCursor()` setter and `CursorPosition` type rather than preserving the historical `{x,y}` authoring conclusion. `useCaret(target, { focus, position })` accepts an element-local rendered cell, one per-app arbiter selects the effective F4 owner after paint, and the private mode writer reasserts only that validated surface result. Hidden, clipped, detached, unavailable, invalid, and outside requests produce no physical terminal-cursor placement instead of being clamped. This supersession is unstamped and does not alter the historical VOUCHED text.
+
 ### Resize unconditionally cancels the pending trailing commit
 
 - **Ink:** `resized()` paints synchronously via `onRender()` but does **not** cancel a
@@ -713,11 +715,12 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   alternate-screen surface.
 - **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport.
   Yoga receives both dimensions; paint and hit testing clip to them; every commit clears, homes, and
-  repaints the complete frame from `(0,0)`, hiding the caret until a declared position is restored.
+  repaints the complete frame from `(0,0)`, hiding the physical terminal cursor until the selected
+  focus-bound semantic caret is restored.
   Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
   repaint. `<Static>` bytes are emitted to stream observers but warned once and not retained
   visually. Ordinary reactive rerenders replace the same surface, and deterministic observation does not change those bytes.
-- **Why:** targeted mouse events, `useCursor()`, and Yoga layout all use viewport coordinates. If
+- **Why:** targeted mouse events, the resolved caret surface point, and Yoga layout all use viewport coordinates. If
   output outside the tree can move the visible frame while the hit map remains at row 0, clicking
   the visible element misses and clicking the log line can trigger it. Treating fullscreen as an
   owned fixed surface keeps all four coordinate systems identical and prevents tall content from
@@ -831,7 +834,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
 - **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
   `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `useMouseInput`, and
-  `useCursor` **throw** when their required context is absent. `useElementGeometry` and `useAnimation` do **not** throw:
+  `useCaret` **throw** when their required context is absent. `useElementGeometry` and `useAnimation` do **not** throw:
   geometry reports `unavailable`, and animation drives a standalone scheduler. See the additive entry.
 - **Why:** a composable used in the wrong place is usually a bug, and a thrown error names it at
   the call site instead of returning a context that quietly does nothing. Geometry is different:

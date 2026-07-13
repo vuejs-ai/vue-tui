@@ -16,6 +16,8 @@ export interface ScreenSnapshot {
   readonly cursor: {
     readonly column: number;
     readonly row: number;
+    /** Whether the terminal's DECTCEM cursor mode is visible. */
+    readonly visible: boolean;
   };
 }
 
@@ -36,6 +38,26 @@ function readLine(
   buffer: ReturnType<InstanceType<typeof HeadlessTerminal>["buffer"]["active"]["getLine"]>,
 ): string {
   return buffer?.translateToString(false) ?? "";
+}
+
+interface HeadlessCursorState {
+  readonly _core?: {
+    readonly coreService?: {
+      readonly isCursorHidden?: unknown;
+    };
+  };
+}
+
+function isCursorVisible(terminal: InstanceType<typeof HeadlessTerminal>): boolean {
+  // @xterm/headless 6.0.0 does not expose DECTCEM through its public `modes`
+  // API. Its parser-owned core service is the authoritative state for CSI
+  // ?25h/?25l and the reset semantics xterm actually applies. Duplicating that
+  // state in this host would allow the snapshot to disagree with the emulator.
+  const hidden = (terminal as unknown as HeadlessCursorState)._core?.coreService?.isCursorHidden;
+  if (typeof hidden !== "boolean") {
+    throw new Error("The terminal emulator does not expose its cursor visibility state.");
+  }
+  return !hidden;
 }
 
 export function createTerminalEmulator(
@@ -116,7 +138,11 @@ export function createTerminalEmulator(
         scrollback: Object.freeze(
           Array.from({ length: normal.viewportY }, (_, row) => readLine(normal.getLine(row))),
         ),
-        cursor: Object.freeze({ column: active.cursorX, row: active.cursorY }),
+        cursor: Object.freeze({
+          column: active.cursorX,
+          row: active.cursorY,
+          visible: isCursorVisible(terminal),
+        }),
       });
     },
     dispose() {

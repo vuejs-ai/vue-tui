@@ -85,6 +85,67 @@ function resolved(geometry: InternalElementGeometry) {
 }
 
 describe("private paint-derived geometry service", () => {
+  test("exposes the staged paint result without publishing or advancing the generation", () => {
+    const f = fixture();
+    const target = f.box();
+    f.prop(target, "width", 3);
+    f.prop(target, "height", 1);
+    f.insert(f.root, target);
+    const service = createInternalGeometryService(f.root);
+    const binding = service.createBinding();
+    binding.attach(target);
+
+    const restore = calculateLayoutWithContentGuards(f.root, 12, undefined, Yoga.DIRECTION_LTR);
+    const frame = service.beginFrame();
+    try {
+      paint(f.root, { geometry: frame, viewport: { width: 12, height: 8 } });
+      expect(frame.geometryFor(target)).toMatchObject({
+        status: "visible",
+        surface: { x: 0, y: 0, width: 3, height: 1 },
+      });
+      expect(binding.geometry.value).toEqual({ status: "pending" });
+      expect(service.generation).toBe(0);
+      frame.discard();
+      expect(binding.geometry.value).toEqual({ status: "pending" });
+      expect(service.generation).toBe(0);
+    } finally {
+      restore();
+    }
+
+    const committedRestore = calculateLayoutWithContentGuards(
+      f.root,
+      12,
+      undefined,
+      Yoga.DIRECTION_LTR,
+    );
+    const committedFrame = service.beginFrame();
+    try {
+      paint(f.root, { geometry: committedFrame, viewport: { width: 12, height: 8 } });
+      const staged = committedFrame.geometryFor(target);
+      committedFrame.commit();
+      expect(binding.geometry.value).toBe(staged);
+      expect(service.generation).toBe(1);
+    } finally {
+      committedRestore();
+    }
+  });
+
+  test("rejects staged geometry reads for targets outside the frame demand snapshot", () => {
+    const f = fixture();
+    const observed = f.box();
+    const unobserved = f.box();
+    f.insert(f.root, observed);
+    f.insert(f.root, unobserved);
+    const service = createInternalGeometryService(f.root);
+    service.createBinding().attach(observed);
+    const frame = service.beginFrame();
+
+    expect(() => frame.geometryFor(unobserved)).toThrow(
+      "geometry target was not observed when this paint frame began",
+    );
+    frame.discard();
+  });
+
   test("captures only observed targets and the ancestor paths needed to reach them", () => {
     const f = fixture();
     const parent = f.box();
@@ -398,6 +459,33 @@ describe("private paint-derived geometry service", () => {
     expect(value.status).toBe("zero-size");
     expect(value.fragments).toEqual([]);
     expect(value.caretSlots).toEqual([]);
+  });
+
+  test("does not expose a visible slot at the start of a wide glyph dropped by clipping", () => {
+    const f = fixture(8);
+    const clip = f.box();
+    const target = f.text();
+    f.prop(clip, "width", 4);
+    f.prop(clip, "height", 1);
+    f.prop(clip, "overflow", "hidden");
+    f.prop(target, "width", 2);
+    f.prop(target, "flexShrink", 0);
+    f.prop(target, "marginLeft", 3);
+    f.leaf(target, "中");
+    f.insert(clip, target);
+    f.insert(f.root, clip);
+    const service = createInternalGeometryService(f.root);
+    const binding = service.createBinding();
+    binding.attach(target);
+
+    layoutAndPaint(f.root, service, { width: 8, height: 2 });
+    const value = resolved(binding.geometry.value);
+    expect(value.caretSlots).toContainEqual({
+      local: { x: 0, y: 0 },
+      surface: { x: 3, y: 0 },
+      visible: false,
+    });
+    expect(value.caretSlots?.map((slot) => slot.local)).not.toContainEqual({ x: 1, y: 0 });
   });
 
   test("does not invent an empty Text insertion origin inside a grapheme", () => {

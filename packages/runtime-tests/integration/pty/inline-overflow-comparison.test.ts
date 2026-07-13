@@ -124,11 +124,12 @@ test("screen-reader Inline also preserves a partially occupied pre-mount row", a
   expect(lines).toContain("TOP 2");
 });
 
-test("an empty cursor-only app establishes an owned row after pre-mount content", async () => {
-  const { lines, output } = await runScenario("partial-row-empty-cursor");
+test("an empty focused caret establishes an owned row after pre-mount content", async () => {
+  const { lines, output } = await runScenario("partial-row-empty-caret");
 
   expectNoMainScreenReset(output);
   expect(output).toContain("\x1bE");
+  expect(output).toContain("EMPTY_CARET:visible");
   expect(lines).toContain("PRE_APP_PARTIAL");
 });
 
@@ -158,16 +159,15 @@ test("full-height Inline teardown leaves the next process output on a fresh row"
   expect(lines).not.toContain("BOTTOM 2POST_APP");
 });
 
-test.each([
-  "post-teardown-cursor",
-  "post-teardown-cursor-incremental",
-  "post-teardown-short-cursor",
-])("Inline teardown returns an application caret to the bottom: %s", async (scenario) => {
-  const { lines, output } = await runScenario(scenario);
+test.each(["post-teardown-caret", "post-teardown-caret-incremental", "post-teardown-short-caret"])(
+  "Inline teardown returns an application caret to the bottom: %s",
+  async (scenario) => {
+    const { lines, output } = await runScenario(scenario);
 
-  expectNoMainScreenReset(output);
-  expect(lines).toContain("TOP 2");
-  expect(lines).toContain("BOTTOM 2");
-  expect(lines).toContain("POST_APP");
-  expect(lines.indexOf("POST_APP")).toBeGreaterThan(lines.indexOf("BOTTOM 2"));
-});
+    expectNoMainScreenReset(output);
+    expect(lines).toContain("TOP 2");
+    expect(lines).toContain("BOTTOM 2");
+    expect(lines).toContain("POST_APP");
+    expect(lines.indexOf("POST_APP")).toBeGreaterThan(lines.indexOf("BOTTOM 2"));
+  },
+);

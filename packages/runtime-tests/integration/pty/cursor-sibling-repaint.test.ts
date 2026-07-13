@@ -4,8 +4,8 @@
 // content-frame tests), so this divergence is invisible to byte-exact non-TTY tests
 // — per CLAUDE.md that is a testing gap, not a non-issue, hence a PTY repro.
 //
-// Storyboard (sibling topology): an input declares its caret via useCursor after
-// typing "hi" (x = 2 + 2 = 4, y = 1). A spinner whose state lives in a SIBLING
+// Storyboard (sibling topology): an input requests an element-local caret after
+// typing "hi" (x = 2 + 2 = 4); paint maps the editor to surface row 1. A spinner whose state lives in a sibling
 // component then repaints WITHOUT any further keystroke. The input child's own
 // deps did not change, so the old value/reference gate dropped the caret and it
 // zombied to the bottom-left corner. The fix re-emits the last-declared caret at

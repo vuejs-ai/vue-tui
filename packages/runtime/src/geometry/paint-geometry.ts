@@ -219,16 +219,17 @@ function directCaretSlots(
       if (width <= 0) continue;
       const start = { x: origin.x + x, y: origin.y + localY };
       const end = { x: start.x + width, y: start.y };
+      const retained = glyphVisible({ surfaceX: start.x, surfaceY: start.y, width }, clip);
       slots.set(`${x}:${localY}`, {
         local: { x, y: localY },
         surface: start,
-        visible: pointVisible(start, clip),
+        visible: retained && pointVisible(start, clip),
       });
       x += width;
       slots.set(`${x}:${localY}`, {
         local: { x, y: localY },
         surface: end,
-        visible: pointVisible(end, clip),
+        visible: retained && pointVisible(end, clip),
       });
     }
     if (row === "" && rows.length === 1) {
@@ -533,12 +534,12 @@ export function deriveTextGeometry(input: {
         slots.set(`${cell.localX}:${localY}`, {
           local: { x: cell.localX, y: localY },
           surface: startSurface,
-          visible: pointVisible(startSurface, input.clip),
+          visible: cell.visible && pointVisible(startSurface, input.clip),
         });
         slots.set(`${cell.localX + cell.width}:${localY}`, {
           local: { x: cell.localX + cell.width, y: localY },
           surface: endSurface,
-          visible: pointVisible(endSurface, input.clip),
+          visible: cell.visible && pointVisible(endSurface, input.clip),
         });
       }
       finishRun();

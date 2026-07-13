@@ -20,6 +20,7 @@ import {
 import {
   Box,
   useApp,
+  useCaret,
   useDraggable,
   useElementGeometry,
   useExternalInput,
@@ -40,6 +41,7 @@ import {
 import type {
   BoxProps,
   BoxLayoutStyle,
+  CaretState,
   CellPoint,
   CellRect,
   ElementGeometry,
@@ -78,6 +80,8 @@ import type {
   UseDraggablePosition,
   UseDraggableReturn,
   UseDraggableTarget,
+  UseCaretOptions,
+  UseCaretReturn,
   UseElementGeometryReturn,
   UseFocusManagerReturn,
   UseFocusOptions,
@@ -93,7 +97,6 @@ import type {
   UseLayoutSizeReturn,
   UseInputAvailabilityReturn,
   UseInputOptions,
-  CursorPosition,
   UseAppReturn,
   UseStdinReturn,
   UseStdoutReturn,
@@ -327,8 +330,38 @@ export type _BoxMetricsWasRemoved = import("@vue-tui/runtime").BoxMetrics;
 // @ts-expect-error Imperative Yoga measurement has no semantic geometry contract.
 export type _MeasureElementWasRemoved = typeof import("@vue-tui/runtime").measureElement;
 
-// Framework-neutral cursor data shape, mirrored from Ink exactly.
-expectTypeOf<CursorPosition>().toEqualTypeOf<{ x: number; y: number }>();
+expectTypeOf<CaretState>().toEqualTypeOf<
+  | { readonly status: "unavailable" }
+  | { readonly status: "inactive" }
+  | {
+      readonly status: "hidden";
+      readonly reason:
+        | "unavailable"
+        | "detached"
+        | "pending"
+        | "hidden"
+        | "clipped"
+        | "outside"
+        | "invalid-position"
+        | "unrelated";
+    }
+  | { readonly status: "visible"; readonly surface: CellPoint }
+>();
+expectTypeOf<UseCaretOptions>().toEqualTypeOf<{
+  readonly focus: UseFocusReturn;
+  readonly position: MaybeRefOrGetter<CellPoint | null | undefined>;
+}>();
+expectTypeOf<Parameters<typeof useCaret>>().toEqualTypeOf<
+  [target: ElementTarget, options: UseCaretOptions]
+>();
+expectTypeOf<ReturnType<typeof useCaret>>().toEqualTypeOf<UseCaretReturn>();
+expectTypeOf<UseCaretReturn>().toEqualTypeOf<{
+  readonly state: Readonly<ShallowRef<CaretState>>;
+}>();
+// @ts-expect-error Targetless cursor ownership was removed rather than aliased.
+export type _UseCursorWasRemoved = typeof import("@vue-tui/runtime").useCursor;
+// @ts-expect-error Output-origin CursorPosition was removed with useCursor.
+export type _CursorPositionWasRemoved = import("@vue-tui/runtime").CursorPosition;
 
 // Composable return types: named per VueUse's `UseXReturn` convention. useStdin() exposes
 // only the actual mounted stream; framework semantic routes own every raw-mode and protocol

@@ -99,7 +99,7 @@ function expectExactCleanup(output: string, mode: "inline" | "fullscreen"): void
 }
 
 test.each(["inline", "fullscreen"] as const)(
-  "public focus lifecycle restores a real %s terminal exactly",
+  "public focus and caret lifecycle restores a real %s terminal exactly",
   async (mode) => {
     const ps = term("focus-routing", [mode, "assert"], { name: "xterm-256color" });
     try {
@@ -107,8 +107,9 @@ test.each(["inline", "fullscreen"] as const)(
         (output) =>
           output.includes("__READY__") &&
           output.includes(ENABLE_KITTY_KEYBOARD) &&
-          output.includes(`F4 focus lifecycle (${mode})`) &&
-          output.includes("focus=first second=present modal=closed"),
+          output.includes(`Focus and caret lifecycle (${mode})`) &&
+          output.includes("focus=first second=present modal=closed") &&
+          output.includes("carets=first:visible second:inactive"),
       );
 
       let before = ps.output.length;
@@ -122,6 +123,7 @@ test.each(["inline", "fullscreen"] as const)(
       await ps.waitForOutput(
         (output) =>
           output.slice(before).includes("focus=second second=present modal=closed") &&
+          output.slice(before).includes("carets=first:inactive second:visible") &&
           output.slice(before).includes("latest=Tab route=global > first > background"),
       );
 
@@ -141,7 +143,12 @@ test.each(["inline", "fullscreen"] as const)(
       await ps.waitForOutput(
         (output) =>
           output.slice(before).includes("focus=modal second=removed modal=open") &&
+          output.slice(before).includes("carets=first:inactive second:inactive") &&
           output.slice(before).includes("Approval modal (trapped)"),
+      );
+      const modalTransition = ps.output.slice(before);
+      expect(modalTransition.lastIndexOf(HIDE_CURSOR)).toBeGreaterThan(
+        modalTransition.lastIndexOf(SHOW_CURSOR),
       );
 
       // The open trap captures the route. Its own explicit external owner may
@@ -157,10 +164,18 @@ test.each(["inline", "fullscreen"] as const)(
       // restoration of the surviving first target.
       before = ps.output.length;
       ps.write("c");
-      await ps.waitForOutput(
-        (output) =>
-          output.slice(before).includes("focus=first second=removed modal=closed") &&
-          output.slice(before).includes("latest=c route=global > trap"),
+      await ps.waitForOutput((output) => {
+        const transition = output.slice(before);
+        return (
+          transition.includes("focus=first second=removed modal=closed") &&
+          transition.includes("carets=first:visible second:inactive") &&
+          transition.includes("latest=c route=global > trap") &&
+          transition.lastIndexOf(SHOW_CURSOR) > transition.lastIndexOf(HIDE_CURSOR)
+        );
+      });
+      const restoredTransition = ps.output.slice(before);
+      expect(restoredTransition.lastIndexOf(SHOW_CURSOR)).toBeGreaterThan(
+        restoredTransition.lastIndexOf(HIDE_CURSOR),
       );
 
       before = ps.output.length;
@@ -185,10 +200,10 @@ test.each(["inline", "fullscreen"] as const)(
       const restoredText = allBufferLines(terminal).join("\n");
       expect(restoredText).toContain("__FOCUS_ROUTING_OK__");
       if (mode === "fullscreen") {
-        expect(restoredText).not.toContain("F4 focus lifecycle");
+        expect(restoredText).not.toContain("Focus and caret lifecycle");
         expect(restoredText).not.toContain("Approval modal (trapped)");
       } else {
-        expect(restoredText).toContain("F4 focus lifecycle (inline)");
+        expect(restoredText).toContain("Focus and caret lifecycle (inline)");
         expect(restoredText).toContain("latest=q route=global");
       }
     } finally {

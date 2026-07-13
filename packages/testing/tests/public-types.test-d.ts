@@ -101,5 +101,7 @@ result.session.dimensions.layout.columns = 120;
 screen.lines.push("replacement");
 // @ts-expect-error Emulated cursor facts are readonly observations.
 screen.cursor.column = 1;
+// @ts-expect-error Emulated cursor visibility is a readonly observation.
+screen.cursor.visible = false;
 // @ts-expect-error Raw-mode state is a readonly live observation.
 result.terminal.rawMode.current = false;

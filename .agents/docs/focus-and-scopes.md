@@ -1,12 +1,12 @@
 # Logical focus and focus scopes
 
-> **Status:** completed, unstamped F4 contract and implementation. The maintainer accepted all recommendations on 2026-07-13. Opaque ref-bound targets, scopes, focused and scope input, normalized external fallthrough, exact manager handles, renderer ownership, and direct removal of the prior registry/default/raw path agree across source, public workflow/finder/independent-region journeys, boundary failures and recovery, declarations, package consumption, HMR, every supported host, both rendering modes, real PTYs, visual inspection, exact terminal cleanup, full repository and fresh-CI gates, and independent review. F5 semantic geometry and caret is now Active; no VOUCHED stamp is implied.
+> **Status:** completed, unstamped F4 contract and implementation. The maintainer accepted all recommendations on 2026-07-13. Opaque ref-bound targets, scopes, focused and scope input, normalized external fallthrough, exact manager handles, renderer ownership, and direct removal of the prior registry/default/raw path agree across source, public workflow/finder/independent-region journeys, boundary failures and recovery, declarations, package consumption, HMR, every supported host, both rendering modes, real PTYs, visual inspection, exact terminal cleanup, full repository and fresh-CI gates, and independent review. Completed F5 consumes the exact effective target and accepted host lifetime through a private dependent seam without changing F4's public focus contract; no VOUCHED stamp is implied.
 
 ## Product problem
 
 A terminal application needs one answer to “which logical control owns local input now?” Before F4, the answer was a flat string-ID registry created during component setup, while local input remained a separate application-global subscription. That made every application manually connect visible state, focus state, and `useInput({ isActive })`. Issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250) demonstrates the result: two `v-if` branches in one component keep both setup-time input hooks alive, so the author maintains an increasingly fragile set of booleans. The reported workaround wraps each input hook in a child component solely to borrow that child's mount lifetime.
 
-F4 now lets the runtime own one effective focus target, derive its route from the current rendered and logical scope trees, and restore or advance focus without asking each target to rebuild those mechanics. Application-global commands remain global. Collection active items, text insertion points, selections, terminal carets, and pointer targets remain separate state even when a component coordinates them.
+F4 now lets the runtime own one effective focus target, derive its route from the current rendered and logical scope trees, and restore or advance focus without asking each target to rebuild those mechanics. Application-global commands remain global. Collection active items, text insertion points, selections, focus-bound caret requests, physical terminal cursors, and pointer targets remain separate state even when a component coordinates them.
 
 ## Audited baseline
 
@@ -28,7 +28,7 @@ The correctly configured pre-cutover focus suite passed 48 tests. Those tests pr
 
 ### Coding-agent workflow
 
-The first-party coding-agent example uses one application-global handler and switches manually among `idle`, `streaming`, and `approving`. The approval `v-if` is not an input owner, the composer is not a focus target, and the painted block is not a terminal caret. The target journey is:
+The first-party coding-agent example uses one application-global handler and switches manually among `idle`, `streaming`, and `approving`. The approval `v-if` is not an input owner, the composer is not a focus target, and the painted block is not a caret declaration. The target journey is:
 
 ```text
 composer focused
@@ -320,7 +320,7 @@ All eight steps are implemented and verified:
 7. cover template, TSX, JavaScript/`any`, duplicate-target, unavailable-host, string, deterministic, screen-reader, final-output, HMR, suspension, teardown, and clean tarball consumption;
 8. run semantic fixtures under both modes, then a real PTY and visual-controller journey proving route order, modal isolation, removal, restoration, exact terminal cleanup, and identical focus traces.
 
-F4 is Done because implementation, public surface, declarations, package consumption, repository migration, full gates, real-terminal evidence, records, and independent review agree. F5 semantic geometry and caret remains Active; its audit, public proposal, private geometry authority, and public geometry cutover are complete, while caret ownership and transport remain.
+F4 is Done because implementation, public surface, declarations, package consumption, repository migration, full gates, real-terminal evidence, records, and independent review agree. F5 semantic geometry and focus-bound caret ownership is also Done on top of F4 without adding geometry or insertion state to the focus handle.
 
 ## Maintainer decision
 

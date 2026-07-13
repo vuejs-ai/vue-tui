@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
-import { Box, Text, useElementGeometry, useRenderSession } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  useCaret,
+  useElementGeometry,
+  useFocus,
+  useRenderSession,
+} from "@vue-tui/runtime";
 import Target from "./target.vue";
 
 const session = useRenderSession();
@@ -14,6 +21,8 @@ testGlobal.__VT_RENDER_SESSION__ = session;
 const label = "LABEL-A";
 const count = shallowRef(0);
 const target = shallowRef<InstanceType<typeof Target> | null>(null);
+const focus = useFocus(target, { autoFocus: true });
+const { state: caretState } = useCaret(target, { focus, position: { x: 0, y: 0 } });
 const { geometry: targetGeometry } = useElementGeometry(target);
 const targetSize = computed(() => {
   const geometry = targetGeometry.value;
@@ -46,5 +55,6 @@ onUnmounted(() => clearInterval(t));
     <Text>session={{ sessionIdentity }}</Text>
     <Target ref="target" />
     <Text>target={{ targetSize }}</Text>
+    <Text>caret={{ caretState.status }}</Text>
   </Box>
 </template>
