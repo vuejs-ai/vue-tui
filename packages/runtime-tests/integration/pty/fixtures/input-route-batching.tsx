@@ -8,7 +8,7 @@ import {
   useInput,
   type TuiInputEvent,
 } from "@vue-tui/runtime";
-import { defineComponent, h, onMounted, shallowRef } from "vue";
+import { defineComponent, h, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
 import { inputText, isKey } from "./input-event.js";
 
 const requestedMode = process.argv[2] === "fullscreen" ? "fullscreen" : "inline";
@@ -20,8 +20,10 @@ const App = defineComponent(() => {
   const activeC = shallowRef(false);
   const calls = shallowRef<readonly string[]>([]);
   const defaultObservation = shallowRef("No default-order input yet");
-  const first = useFocus({ id: "first", autoFocus: true });
-  const second = useFocus({ id: "second" });
+  const firstHost = shallowRef<ComponentPublicInstance | null>(null);
+  const secondHost = shallowRef<ComponentPublicInstance | null>(null);
+  const first = useFocus(firstHost, { autoFocus: true });
+  const second = useFocus(secondHost);
   const currentFocus = () =>
     first.isFocused.value ? "first" : second.isFocused.value ? "second" : "none";
   const record = (value: string) => {
@@ -76,7 +78,7 @@ const App = defineComponent(() => {
   return () =>
     h(
       Box,
-      { flexDirection: "column", borderStyle: "round", width: 62 },
+      { ref: firstHost, flexDirection: "column", borderStyle: "round", width: 62 },
       {
         default: () => [
           h(Text, { bold: true }, { default: () => "Input route batching" }),
@@ -89,6 +91,7 @@ const App = defineComponent(() => {
           h(Text, null, {
             default: () => (calls.value.length === 0 ? "No input yet" : calls.value.join(" | ")),
           }),
+          h(Box, { ref: secondHost, height: 0 }),
         ],
       },
     );

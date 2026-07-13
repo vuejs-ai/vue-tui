@@ -62,12 +62,10 @@ import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
   AppContextKey,
-  FocusContextKey,
   StdinContextKey,
   AnimationSchedulerKey,
   type AppContext,
   type CursorPosition,
-  type FocusContext,
   type SgrMouseMode,
   type StdinContext,
 } from "./context.ts";
@@ -1579,11 +1577,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedBeforeExitHandler = () => app.unmount();
       process.once("beforeExit", mountedBeforeExitHandler);
 
-      const focusContext: FocusContext = createFocusController();
       let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
         appCtx: appContext,
-        focusContext,
         acquireKittyKeyboardDemand() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
@@ -2133,7 +2129,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // our keys are Symbols so there's no collision risk.
       baseApp.provide(InternalRenderSessionKey, renderSession);
       baseApp.provide(AppContextKey, appContext);
-      baseApp.provide(FocusContextKey, focusContext);
       baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
       baseApp.provide(StdinContextKey, stdinController);
       // useAnimation coalesces ticks within this same window so committed deltas
@@ -2512,187 +2507,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   return app;
 }
 
-// --- Focus controller ----------------------------------------------------
-
-interface Focusable {
-  readonly id: string;
-  isActive: boolean;
-}
-
-// Test-only probe: lets a unit test observe the internal `subs` Map size to prove
-// auto-id focusables don't leak empty Sets (see focus-subs-leak test). The double
-// underscore + this comment mark it internal; nothing in production reads it.
-export interface FocusControllerForTest extends FocusContext {
-  __subscriberMapSize: () => number;
-}
-
-export function createFocusController(): FocusControllerForTest {
-  const focusables: Focusable[] = [];
-  const subs = new Map<string, Set<(focused: boolean) => void>>();
-  let activeFocusable: Focusable | null = null;
-  let activeId: string | null = null;
-  const activeIdRef = shallowRef<string | null>(null);
-
-  function notify(id: string, focused: boolean) {
-    subs.get(id)?.forEach((fn) => fn(focused));
-  }
-
-  function setActiveFocusable(next: Focusable | null) {
-    if (next !== null && !focusables.includes(next)) {
-      next = null;
-    }
-    if (activeFocusable === next) return;
-
-    const prev = activeId;
-    activeFocusable = next;
-    const nextId = next?.id ?? null;
-
-    if (prev === nextId) return;
-
-    activeId = nextId;
-    ctx.activeId = activeId;
-    activeIdRef.value = activeId;
-    if (prev) notify(prev, false);
-    if (nextId) notify(nextId, true);
-  }
-
-  function findNextActive(startIdx: number, direction: 1 | -1): Focusable | null {
-    const len = focusables.length;
-    for (let i = 0; i < len; i++) {
-      const idx = (startIdx + direction * (i + 1) + len * len) % len;
-      if (focusables[idx]!.isActive) return focusables[idx]!;
-    }
-    return null;
-  }
-
-  // The start index a directional search begins FROM (it scans from the next slot
-  // in `direction`). With duplicate ids, public `activeId` is not enough to know
-  // which registry entry the user is leaving, so we track the active entry object
-  // internally and only expose its id. With no current focus we begin just outside
-  // the end we're moving away from, so the first candidate is the first focusable
-  // (forward) or the last (backward) — symmetric for both directions.
-  function startSearchIndex(direction: 1 | -1): number {
-    if (activeFocusable) {
-      const i = focusables.indexOf(activeFocusable);
-      if (i >= 0) return i;
-    }
-    if (activeId) {
-      const i = focusables.findIndex((f) => f.id === activeId);
-      if (i >= 0) return i;
-    }
-    return direction === 1 ? -1 : focusables.length;
-  }
-
-  const ctx: FocusContext = {
-    activeId: null,
-    activeIdRef,
-    enabled: true,
-    enableFocus() {
-      ctx.enabled = true;
-    },
-    disableFocus() {
-      ctx.enabled = false;
-    },
-    // Ink parity (App.tsx focusNext/focusPrevious): NO isFocusEnabled guard here —
-    // a programmatic focusNext()/focusPrevious() moves focus even while focus is
-    // disabled. The isFocusEnabled check lives only in the delayed Tab default.
-    // The focusables.length === 0 short-circuit stays so
-    // focusing on an empty tree is a harmless no-op; with 0 focusables activeId is
-    // already null (remove() clears it), matching Ink (findNextFocusable and
-    // firstFocusableId both undefined → activeFocusId undefined), and it also avoids
-    // the `% 0` NaN in findNextActive.
-    //
-    // Ink (App.tsx:455-470 / 472-487): focusNext = `findNextFocusable(...) ??
-    // firstFocusableId` and ALWAYS reassigns activeFocusId. findNextActive already
-    // wraps to the first active (or null if none), so it's equivalent to Ink's
-    // `next ?? first` — including the clear-to-null case when NO focusable is active.
-    // We must call setActiveFocusable UNCONDITIONALLY: a null result clears a stale activeId
-    // (e.g. left by focus(id) pinning an isActive=false item), matching Ink.
-    focusNext() {
-      if (focusables.length === 0) return;
-      setActiveFocusable(findNextActive(startSearchIndex(1), 1));
-    },
-    focusPrevious() {
-      if (focusables.length === 0) return;
-      setActiveFocusable(findNextActive(startSearchIndex(-1), -1));
-    },
-    focus(id) {
-      const entry = focusables.find((f) => f.id === id);
-      if (entry) setActiveFocusable(entry);
-    },
-    blur() {
-      setActiveFocusable(null);
-    },
-    // Ink treats focus ids as registration entries, not unique keys: duplicate
-    // explicit ids are user-created ambiguity, but they still participate in
-    // focus order. Matching that means add pushes every registration, while
-    // remove/activate/deactivate affect every entry with the same id.
-    add(id, options) {
-      const entry: Focusable = { id, isActive: true };
-      focusables.push(entry);
-      if (options.autoFocus && activeFocusable == null) {
-        setActiveFocusable(entry);
-      }
-    },
-    // remove() intentionally does NOT touch `subs`: a consumer's unsubscribe
-    // (see subscribe()) is what frees its Set entry, and useFocus unsubscribes
-    // before calling remove(). Deleting the Set here would also break duplicate
-    // ids — two components sharing one id share one Set, and removing one entry
-    // must not silence the survivor's focus notifications.
-    remove(id) {
-      const removingActive = activeFocusable?.id === id;
-      for (let i = focusables.length - 1; i >= 0; i--) {
-        if (focusables[i]!.id === id) focusables.splice(i, 1);
-      }
-      if (removingActive) setActiveFocusable(null);
-    },
-    activate(id) {
-      for (const entry of focusables) {
-        if (entry.id === id) entry.isActive = true;
-      }
-    },
-    deactivate(id) {
-      let changed = false;
-      for (const entry of focusables) {
-        if (entry.id === id) {
-          entry.isActive = false;
-          changed = true;
-        }
-      }
-      if (changed && activeFocusable?.id === id) {
-        setActiveFocusable(null);
-      }
-    },
-    subscribe(id, fn) {
-      let set = subs.get(id);
-      if (!set) {
-        set = new Set();
-        subs.set(id, set);
-      }
-      set.add(fn);
-      return () => {
-        set!.delete(fn);
-        // Drop the now-empty Set so the Map doesn't accumulate dead entries.
-        // useFocus() with no explicit id mints a fresh `__auto-N` id per mount,
-        // so without this every mount/unmount cycle would leak one empty Set —
-        // unbounded growth over a long session. A later subscribe() for the same
-        // id re-creates the Set (the `if (!set)` branch above), so re-subscription
-        // still works.
-        //
-        // `subs.get(id) === set` keeps this idempotent across a re-subscribe: a
-        // stale call to THIS closure (e.g. unsubscribe invoked twice) must not
-        // delete a fresh Set created by a later subscribe(id) for the same id —
-        // only the Set this closure actually owns is eligible for removal.
-        if (set!.size === 0 && subs.get(id) === set) subs.delete(id);
-      };
-    },
-  };
-
-  return Object.assign(ctx, {
-    __subscriberMapSize: () => subs.size,
-  });
-}
-
 // --- Stdin controller ----------------------------------------------------
 
 interface StdinController extends StdinContext {
@@ -2759,7 +2573,6 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
 
 interface CreateStdinControllerOptions {
   appCtx: AppContext;
-  focusContext: FocusContext;
   acquireKittyKeyboardDemand: () => () => void;
 }
 
@@ -2767,16 +2580,12 @@ function createStdinController(
   stdin: NodeJS.ReadStream,
   opts: CreateStdinControllerOptions,
 ): StdinController {
-  const { appCtx, focusContext } = opts;
+  const { appCtx } = opts;
   const inputAvailability = createInputAvailabilityRef(classifyLiveInputAvailability(stdin));
   const inputRoutes = createInternalInputRouteRegistry();
   let controller!: StdinController;
   const inputRouting = createInternalInputRoutingRuntime(
-    [
-      { id: "framework:escape", handle: runEscapeDefault },
-      { id: "framework:tab", handle: runTabDefault },
-      { id: "framework:ctrl-c", handle: runCtrlCDefault },
-    ],
+    [{ id: "framework:ctrl-c", handle: runCtrlCDefault }],
     {
       acquire() {
         controller.acquireSemanticInput();
@@ -2852,8 +2661,8 @@ function createStdinController(
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
   // Physical semantic leases cover acquisition through deferred release. Their
-  // published subset alone grants public/selected route eligibility. Other raw
-  // consumers (focus and mouse) remain logical demand through localRefs.
+  // published subset alone grants public/selected route eligibility. Low-level
+  // mouse consumers remain separate logical raw demand through localRefs.
   let semanticPhysicalRefs = 0;
   let publishedSemanticRefs = 0;
 
@@ -3243,46 +3052,8 @@ function createStdinController(
     }
   }
 
-  function isUnmodifiedExceptShift(fact: NormalizedInputFact): boolean {
-    if (fact.kind !== "key") return false;
-    const { modifiers } = fact.key;
-    return (
-      !modifiers.alt && !modifiers.ctrl && !modifiers.super && !modifiers.hyper && !modifiers.meta
-    );
-  }
-
   function noDefaultAction() {
     return Object.freeze({ performed: false, continue: true, blockExternal: false });
-  }
-
-  function runEscapeDefault(fact: NormalizedInputFact) {
-    if (
-      fact.kind !== "key" ||
-      fact.key.name !== "escape" ||
-      fact.key.phase === "release" ||
-      fact.key.modifiers.shift ||
-      !isUnmodifiedExceptShift(fact) ||
-      !focusContext.enabled
-    ) {
-      return noDefaultAction();
-    }
-    focusContext.blur();
-    return Object.freeze({ performed: true, continue: true, blockExternal: true });
-  }
-
-  function runTabDefault(fact: NormalizedInputFact) {
-    if (
-      fact.kind !== "key" ||
-      fact.key.name !== "tab" ||
-      fact.key.phase === "release" ||
-      !isUnmodifiedExceptShift(fact) ||
-      !focusContext.enabled
-    ) {
-      return noDefaultAction();
-    }
-    if (fact.key.modifiers.shift) focusContext.focusPrevious();
-    else focusContext.focusNext();
-    return Object.freeze({ performed: true, continue: true, blockExternal: true });
   }
 
   function runCtrlCDefault(fact: NormalizedInputFact) {
@@ -3516,11 +3287,10 @@ function createStdinController(
         throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
       }
       if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin)) {
-        // The unguarded useInput path surfaces this throw directly; useFocus
-        // guards before calling (see composables/useFocus.ts), so it degrades to
-        // a no-op like Ink. Rechecking the structural capability also prevents
-        // a setterless host that was pre-raw at mount from silently attaching
-        // after its external owner returns it to cooked mode.
+        // Managed semantic routes surface this failure transactionally before
+        // publishing their replacement. Rechecking the structural capability
+        // also prevents a setterless host that was pre-raw at mount from
+        // silently attaching after its external owner returns it to cooked mode.
         throwManagedInputUnavailable();
       }
       const state = getRawModeState(stdin);

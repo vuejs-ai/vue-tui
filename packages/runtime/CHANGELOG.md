@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 ### Changed
 
 - Replaced the legacy string-plus-`Key` `useInput()` contract with frozen normalized key, text, paste, and uninterpreted events plus a required synchronous route result. Added `useInputAvailability()`, made active semantic input own its terminal resources, retained `useStdin().stdin` as the raw mounted-stream escape hatch, and removed `usePaste`, public `Key`, public raw-mode controls, mount `rawMode`, and `exitOnCtrlC`.
+- Replaced flat string-ID focus with opaque ref-bound targets, rendered-order traversal, nested active and trapped scopes, target and scope input attachments, normalized external fallthrough, and exact focused-target observation. Added `useFocusScope()`, `useFocusedInput()`, `useFocusScopeInput()`, and `useExternalInput()`; replaced the `useFocus()` and `useFocusManager()` signatures; and removed global focus enable/disable, string lookup, automatic Escape blur, setup-order traversal, and per-focus raw-mode ownership.
 
 ## 0.1.0 - 2026-06-19
 

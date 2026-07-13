@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Text, useFocus, useInput, useStdin } from "../index.ts";
+import { Text, useInput, useStdin } from "../index.ts";
 import { StdinContextKey, type StdinContext } from "../context.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import { createApp, type MountOptions } from "../render.ts";
@@ -781,14 +781,9 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
   test("isolates a modal and lets semantic routes prevent delayed defaults", async () => {
     const calls: string[] = [];
     const external: string[] = [];
-    let currentFocus = () => "unmounted";
     let preventCtrlC = true;
     const App = defineComponent(() => {
       const routing = requireRouting();
-      const first = useFocus({ id: "first", autoFocus: true });
-      const second = useFocus({ id: "second" });
-      currentFocus = () =>
-        first.isFocused.value ? "first" : second.isFocused.value ? "second" : "none";
       useInput((event) => {
         calls.push(`application-global:${event.sequence}`);
         return "continue";
@@ -803,7 +798,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
         id: "pane",
         handle: (fact) => {
           if (fact.kind === "key" && fact.key.name === "tab") {
-            calls.push(`pane:tab:${currentFocus()}`);
+            calls.push("pane:tab");
             return {
               performed: true,
               continue: true,
@@ -824,8 +819,19 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
           return continueRoute();
         },
       });
+      const paneDefault = routing.registerDefault({
+        id: "pane-default",
+        handle: (fact) => {
+          calls.push(`pane-default:${fact.sequence}`);
+          return { performed: false, continue: true, blockExternal: false };
+        },
+      });
       const selectPane = () =>
-        routing.select({ activeBoundary: pane.lease, external: paneExternal.lease });
+        routing.select({
+          activeBoundary: pane.lease,
+          applicationDefaults: [paneDefault.lease],
+          external: paneExternal.lease,
+        });
       const modal = routing.registerSemantic({
         id: "modal",
         handle: (fact) => {
@@ -854,9 +860,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     options.stdin!.emit("data", "\x1b[15~");
     options.stdin!.emit("data", "\x1b");
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(currentFocus()).toBe("first");
     options.stdin!.emit("data", "\t");
-    expect(currentFocus()).toBe("first");
     options.stdin!.emit("data", "\x03");
     options.stdin!.emit("data", "z");
     preventCtrlC = false;
@@ -869,13 +873,15 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       "application-global:\x1b",
       "modal:\x1b",
       "application-global:\t",
-      "pane:tab:first",
+      "pane:tab",
       "application-global:\x03",
       "pane:ctrl-c:prevent",
       "application-global:z",
       "pane:z",
+      "pane-default:z",
       "application-global:\x03",
       "pane:ctrl-c:allow",
+      "pane-default:\x03",
       "unmounted",
     ]);
     expect(external).toEqual(["\t", "\x03", "z"]);

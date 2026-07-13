@@ -156,8 +156,12 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                                                        |
 | `useMouseInput(handler, opts?)` | Handle terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership                                                               |
 | `useDraggable(ref, opts?)`      | Track a full-screen element drag from a template ref; returns reactive position and drag state                                                               |
-| `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                                                                                       |
-| `useFocusManager()`             | App-level focus control — `focusNext()`, `focusPrevious()`, `focus(id)`                                                                                      |
+| `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`                                  |
+| `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                                                   |
+| `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                                              |
+| `useFocusScopeInput(scope, fn)` | Attach normalized input to an active boundary or focused target's logical ancestor scope                                                                     |
+| `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                                               |
+| `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                                                   |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                                                   |
 | `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities                                       |
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                                               |

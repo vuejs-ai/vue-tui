@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onScopeDispose, shallowRef } from "vue";
-import { Text, useInput } from "@vue-tui/runtime";
+import { onScopeDispose, shallowRef, type ComponentPublicInstance } from "vue";
+import { Box, Text, useFocus, useFocusedInput, useInput } from "@vue-tui/runtime";
 
 const generation = "A";
 const testGlobal = globalThis as {
@@ -13,17 +13,28 @@ const testGlobal = globalThis as {
 const mountGeneration = testGlobal.__VT_INPUT_ACTIVE_MOUNT__;
 if (mountGeneration === undefined) throw new Error("missing input HMR mount generation");
 const active = shallowRef(true);
+const focusDisabled = shallowRef(false);
+const host = shallowRef<ComponentPublicInstance | null>(null);
+const target = useFocus(host, { autoFocus: true, disabled: focusDisabled });
 useInput(
   (event) => {
-    testGlobal.__VT_INPUT_CALLS__?.push(`${mountGeneration}:${generation}:${event.sequence}`);
+    testGlobal.__VT_INPUT_CALLS__?.push(
+      `${mountGeneration}:${generation}:global:${event.sequence}`,
+    );
     return "continue";
   },
   { isActive: active },
 );
+useFocusedInput(target, (event) => {
+  testGlobal.__VT_INPUT_CALLS__?.push(`${mountGeneration}:${generation}:focus:${event.sequence}`);
+  return "continue";
+});
 const stopRoute = () => {
   active.value = false;
+  focusDisabled.value = true;
 };
 const startRoute = () => {
+  focusDisabled.value = false;
   active.value = true;
 };
 testGlobal.__VT_INPUT_START__ = startRoute;
@@ -38,5 +49,7 @@ onScopeDispose(() => {
 </script>
 
 <template>
-  <Text>INPUT-LABEL-A generation={{ mountGeneration }}:{{ generation }}</Text>
+  <Box ref="host">
+    <Text>INPUT-LABEL-A generation={{ mountGeneration }}:{{ generation }}</Text>
+  </Box>
 </template>

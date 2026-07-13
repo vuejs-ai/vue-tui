@@ -1,148 +1,120 @@
 import {
   inject,
   onScopeDispose,
-  shallowRef,
   toValue,
   watch,
+  type ComponentPublicInstance,
   type MaybeRefOrGetter,
   type ShallowRef,
 } from "vue";
-import { FocusContextKey, StdinContextKey } from "../context.ts";
+import {
+  InternalFocusControllerKey,
+  InternalFocusScopeKey,
+  getInternalProvidedFocusScope,
+  registerInternalFocusScopeDependent,
+  type InternalProvidedFocusScope,
+} from "../focus/focus-context.ts";
+import type {
+  InternalFocusScopeHandle,
+  InternalFocusTargetUpdate,
+} from "../focus/focus-controller.ts";
+import { resolveTuiNode } from "../host/resolve-node.ts";
+import { useRenderedTargetRegistration } from "../rendered-target.ts";
+import type { UseFocusScopeReturn } from "./useFocusScope.ts";
 
-let nextAutoId = 0;
+declare const focusHandleBrand: unique symbol;
 
 export interface UseFocusOptions {
-  autoFocus?: MaybeRefOrGetter<boolean>;
-  isActive?: MaybeRefOrGetter<boolean>;
-  id?: MaybeRefOrGetter<string>;
+  readonly scope?: UseFocusScopeReturn;
+  readonly disabled?: MaybeRefOrGetter<boolean>;
+  readonly tabIndex?: MaybeRefOrGetter<0 | -1>;
+  readonly autoFocus?: MaybeRefOrGetter<boolean>;
 }
 
-export function useFocus(options: UseFocusOptions = {}): {
-  isFocused: ShallowRef<boolean>;
-  focus: (id: string) => void;
-} {
-  const ctx = inject(FocusContextKey);
-  const stdin = inject(StdinContextKey);
-  if (!ctx) throw new Error("useFocus() must be called inside a vue-tui render tree");
+export interface UseFocusReturn {
+  readonly [focusHandleBrand]: true;
+  readonly isFocused: Readonly<ShallowRef<boolean>>;
+  focus(): boolean;
+  blur(): boolean;
+}
 
-  // Stable fallback id used whenever no explicit id is given (mirrors Ink's
-  // useMemo(() => customId ?? random, [customId]) — the random part is stable for
-  // the component's life).
-  const fallbackId = `__auto-${nextAutoId++}`;
-  const isFocused = shallowRef(false);
-
-  const isActive = options.isActive ?? true;
-  let rawModeDesired = false;
-  let rawModeAcquired = false;
-  let reconcilingRawMode = false;
-  let rawModeReconcileRequested = false;
-
-  function reconcileRawMode() {
-    if (reconcilingRawMode) {
-      rawModeReconcileRequested = true;
-      return;
-    }
-    reconcilingRawMode = true;
-    let firstError: unknown;
-    let hasError = false;
-    try {
-      while (true) {
-        rawModeReconcileRequested = false;
-        try {
-          if (rawModeDesired && !rawModeAcquired) {
-            stdin!.acquireRawMode();
-            rawModeAcquired = true;
-          } else if (!rawModeDesired && rawModeAcquired) {
-            rawModeAcquired = false;
-            stdin!.releaseRawMode();
-          }
-        } catch (error) {
-          if (hasError) break;
-          firstError = error;
-          hasError = true;
-          if (!rawModeReconcileRequested) break;
-        }
-        if (!rawModeReconcileRequested && rawModeDesired === rawModeAcquired) break;
-      }
-    } finally {
-      reconcilingRawMode = false;
-    }
-    if (hasError) throw firstError;
+function readBoolean(
+  source: MaybeRefOrGetter<boolean> | undefined,
+  fallback: boolean,
+  option: string,
+): boolean {
+  const value = source === undefined ? fallback : toValue(source);
+  if (typeof value !== "boolean") {
+    throw new TypeError(`useFocus() ${option} must resolve to a boolean`);
   }
+  return value;
+}
 
-  function setRawModeDesired(desired: boolean) {
-    // Guard on isRawModeSupported before acquiring — mirrors Ink's use-focus.ts
-    // (`if (!isRawModeSupported || !isActive) return;`). acquireRawMode() throws
-    // on an unsupported stdin (see render.ts), so without this guard useFocus
-    // would throw on a non-TTY. Focus should degrade to a no-op there instead.
-    rawModeDesired = desired && Boolean(stdin?.isRawModeSupported);
-    reconcileRawMode();
+function readTabIndex(source: MaybeRefOrGetter<0 | -1> | undefined): 0 | -1 {
+  const value = source === undefined ? 0 : toValue(source);
+  if (value !== 0 && value !== -1) {
+    throw new TypeError("useFocus() tabIndex must resolve to 0 or -1");
   }
+  return value;
+}
 
-  // Track the current registration so an id change can unregister the old id and
-  // re-register under the new one — Ink keys its add/remove effect on [id].
-  let currentId: string | undefined;
-  let unsubscribe: (() => void) | undefined;
+export function useFocus(
+  target: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>,
+  options: UseFocusOptions = {},
+): UseFocusReturn {
+  const controller = inject(InternalFocusControllerKey, null);
+  if (!controller) throw new Error("useFocus() must be called inside a vue-tui render tree");
 
-  // Arrow functions (not hoisted declarations) so TS keeps the `ctx` non-null
-  // narrowing from the guard above inside these closures.
-  const unregister = () => {
-    if (currentId === undefined) return;
-    unsubscribe?.();
-    unsubscribe = undefined;
-    ctx.remove(currentId);
-    currentId = undefined;
-  };
+  const inheritedScope = inject(InternalFocusScopeKey, null);
+  const hasExplicitScope = options.scope !== undefined;
+  const scopeHandle = options.scope as InternalFocusScopeHandle | undefined;
+  const scopeLifetime: InternalProvidedFocusScope | undefined = hasExplicitScope
+    ? getInternalProvidedFocusScope(scopeHandle!)
+    : (inheritedScope ?? undefined);
+  if (hasExplicitScope && !scopeLifetime) {
+    throw new Error("Focus scope belongs to another application or has been disposed");
+  }
+  const assignedScope = scopeLifetime?.handle;
 
-  const register = (id: string, autoFocus: boolean) => {
-    unsubscribe = ctx.subscribe(id, (v) => {
-      isFocused.value = v;
-    });
-    ctx.add(id, { autoFocus });
-    currentId = id;
-    isFocused.value = ctx.activeId === id;
-    // Apply the current active state to the freshly-registered id.
-    if (toValue(isActive)) {
-      ctx.activate(id);
-      setRawModeDesired(true);
-    } else {
-      ctx.deactivate(id);
-      setRawModeDesired(false);
-    }
-  };
-
-  // Install this watcher before the immediate registration watcher below. Raw
-  // acquisition can call a hostile stream synchronously; an isActive change
-  // during that call must already be observable and reconciled.
-  watch(
-    () => toValue(isActive),
-    (active) => {
-      if (currentId === undefined) return;
-      if (active) {
-        ctx.activate(currentId);
-        setRawModeDesired(true);
-      } else {
-        ctx.deactivate(currentId);
-        setRawModeDesired(false);
-      }
-    },
-    { flush: "sync" },
-  );
-
-  watch(
-    () => [toValue(options.id) ?? fallbackId, toValue(options.autoFocus ?? false)] as const,
-    ([id, autoFocus]) => {
-      unregister();
-      isFocused.value = false;
-      register(id, autoFocus);
-    },
-    { immediate: true, flush: "sync" },
-  );
-
-  onScopeDispose(() => {
-    unregister();
-    setRawModeDesired(false);
+  const readOptions = (): Required<InternalFocusTargetUpdate> => ({
+    disabled: readBoolean(options.disabled, false, "disabled"),
+    tabIndex: readTabIndex(options.tabIndex),
+    autoFocus: readBoolean(options.autoFocus, false, "autoFocus"),
   });
 
-  return { isFocused, focus: ctx.focus };
+  const initial = readOptions();
+  const handle = controller.createTarget({ scope: assignedScope, ...initial });
+  let stopOptions: (() => void) | undefined;
+  let disposeRenderedTarget: (() => void) | undefined;
+  let unregisterScopeDependent: (() => void) | undefined;
+  let disposed = false;
+  const dispose = (removeTarget: boolean): void => {
+    if (disposed) return;
+    disposed = true;
+    stopOptions?.();
+    unregisterScopeDependent?.();
+    disposeRenderedTarget?.();
+    if (removeTarget) controller.removeTarget(handle);
+  };
+  try {
+    stopOptions = watch(readOptions, (update) => controller.updateTarget(handle, update), {
+      flush: "sync",
+    });
+    disposeRenderedTarget = useRenderedTargetRegistration(
+      () => resolveTuiNode(toValue(target)),
+      (host) => controller.attachTarget(handle, host),
+    );
+    if (scopeLifetime) {
+      unregisterScopeDependent = registerInternalFocusScopeDependent(scopeLifetime, () =>
+        dispose(false),
+      );
+    }
+  } catch (error) {
+    dispose(true);
+    throw error;
+  }
+
+  onScopeDispose(() => dispose(true));
+
+  return handle as UseFocusReturn;
 }

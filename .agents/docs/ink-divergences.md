@@ -255,7 +255,7 @@ current-props model, or API conventions.
 - **vue-tui:** a composable's `setup()` runs **once**, so reactive state cannot be a plain
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
-  follows this — `useFocusManager().activeId` is a single ref read as `.value`, while a
+  follows this — `useFocusManager().focusedTarget` is a readonly ref to the exact opaque target, while a
   composable may instead return an **object of refs** (`useLayoutSize()` returns
   `{ columns, rows }`, read as `.columns.value` / `.rows.value`, with `rows.value === null`
   for an unbounded layout). An empty single-ref state
@@ -263,9 +263,8 @@ current-props model, or API conventions.
   where Ink's plain value is `undefined`.
 - **Why:** the two frameworks track a changing value differently. React reads the newest
   value by re-running the hook; Vue wraps it in a ref the template subscribes to. This is
-  the general rule, not a per-API choice. `useFocusManager().activeId` is just one
-  instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
-  not as a one-time snapshot. KEEP. [VOUCHED @hyf0]
+  the general rule, not a per-API choice. The focused-target ref is one instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
+  not as a one-time snapshot. KEEP.
 
 #### A `setup()`-throwing component emits a dev-only `[Vue warn]` on stderr
 

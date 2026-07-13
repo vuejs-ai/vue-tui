@@ -279,7 +279,7 @@ export function createRenderedTargetController(
 export function useRenderedTargetRegistration(
   resolve: () => TuiNode | null,
   attach: RenderedTargetAttach,
-): void {
+): () => void {
   // Some composables, notably useBoxMetrics(), intentionally have a useful
   // standalone fallback. Avoid both Vue's inject-outside-setup warning and a
   // new hard dependency on renderer context for those callers. Composables
@@ -287,7 +287,7 @@ export function useRenderedTargetRegistration(
   // internal helper.
   const app = hasInjectionContext() ? inject(AppContextKey, null) : null;
   const controller = app ? getRenderedTargetController(app) : undefined;
-  if (!controller) return;
+  if (!controller) return () => {};
 
   const registration = controller.register(resolve, attach);
   let stop: WatchStopHandle | undefined;
@@ -297,8 +297,13 @@ export function useRenderedTargetRegistration(
     registration.dispose();
     throw error;
   }
-  tryOnScopeDispose(() => {
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
     stop?.();
     registration.dispose();
-  });
+  };
+  tryOnScopeDispose(dispose);
+  return dispose;
 }

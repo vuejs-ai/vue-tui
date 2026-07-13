@@ -15,11 +15,18 @@ import {
   type MaybeRef,
   type MaybeRefOrGetter,
   type Ref,
+  type ShallowRef,
 } from "vue";
 import {
   Box,
   useApp,
   useDraggable,
+  useExternalInput,
+  useFocus,
+  useFocusedInput,
+  useFocusManager,
+  useFocusScope,
+  useFocusScopeInput,
   useInput,
   useInputAvailability,
   useLayoutSize,
@@ -32,6 +39,8 @@ import {
 import type {
   BoxProps,
   BoxLayoutStyle,
+  ExternalInputHandler,
+  ExternalInputSource,
   InputAvailability,
   InputHandler,
   InputHandlerResult,
@@ -63,6 +72,11 @@ import type {
   UseDraggablePosition,
   UseDraggableReturn,
   UseDraggableTarget,
+  UseFocusManagerReturn,
+  UseFocusOptions,
+  UseFocusReturn,
+  UseFocusScopeOptions,
+  UseFocusScopeReturn,
   RenderLayoutSize,
   RenderMode,
   RenderModeResolution,
@@ -285,6 +299,73 @@ expectTypeOf<UseAppReturn>().toEqualTypeOf<{
   readonly waitUntilRenderFlush: () => Promise<void>;
 }>();
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
+
+// Logical focus is ref-bound and opaque. Targets and scopes compose input
+// without exposing renderer nodes, string IDs, or a second event model.
+expectTypeOf<Parameters<typeof useFocus>[0]>().toEqualTypeOf<
+  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
+>();
+expectTypeOf<ReturnType<typeof useFocus>>().toEqualTypeOf<UseFocusReturn>();
+expectTypeOf<UseFocusReturn["isFocused"]>().toEqualTypeOf<Readonly<ShallowRef<boolean>>>();
+expectTypeOf<UseFocusOptions["scope"]>().toEqualTypeOf<UseFocusScopeReturn | undefined>();
+expectTypeOf<UseFocusOptions["disabled"]>().toEqualTypeOf<MaybeRefOrGetter<boolean> | undefined>();
+expectTypeOf<UseFocusOptions["tabIndex"]>().toEqualTypeOf<MaybeRefOrGetter<0 | -1> | undefined>();
+expectTypeOf<UseFocusOptions["autoFocus"]>().toEqualTypeOf<MaybeRefOrGetter<boolean> | undefined>();
+expectTypeOf<ReturnType<typeof useFocusScope>>().toEqualTypeOf<UseFocusScopeReturn>();
+expectTypeOf<UseFocusScopeReturn["containsFocus"]>().toEqualTypeOf<Readonly<ShallowRef<boolean>>>();
+expectTypeOf<UseFocusScopeOptions>().toEqualTypeOf<{
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+  readonly trapped?: MaybeRefOrGetter<boolean>;
+}>();
+expectTypeOf<ReturnType<typeof useFocusManager>>().toEqualTypeOf<UseFocusManagerReturn>();
+expectTypeOf<UseFocusManagerReturn["focusedTarget"]>().toEqualTypeOf<
+  Readonly<ShallowRef<UseFocusReturn | null>>
+>();
+expectTypeOf<Parameters<typeof useFocusedInput>>().toEqualTypeOf<
+  [target: UseFocusReturn, handler: MaybeRef<InputHandler>]
+>();
+expectTypeOf<Parameters<typeof useFocusScopeInput>>().toEqualTypeOf<
+  [scope: UseFocusScopeReturn, handler: MaybeRef<InputHandler>]
+>();
+expectTypeOf<ExternalInputSource>().toEqualTypeOf<{
+  readonly event: TuiInputEvent;
+  readonly sequence: string;
+  readonly fidelity: "normalized-utf8-sequence";
+}>();
+expectTypeOf<ExternalInputHandler>().toEqualTypeOf<(source: ExternalInputSource) => void>();
+expectTypeOf<Parameters<typeof useExternalInput>>().toEqualTypeOf<
+  [target: UseFocusReturn, handler: MaybeRef<ExternalInputHandler>]
+>();
+
+const focusHost = shallowRef<ComponentPublicInstance | null>(null);
+const focusScope = useFocusScope({ isActive: true, trapped: false });
+const focusTarget = useFocus(focusHost, {
+  scope: focusScope,
+  disabled: shallowRef(false),
+  tabIndex: () => 0,
+  autoFocus: true,
+});
+const focusedInputHandler = shallowRef<InputHandler>(() => "continue");
+const externalInputHandler = shallowRef<ExternalInputHandler>(() => {});
+useFocusedInput(focusTarget, focusedInputHandler);
+useFocusScopeInput(focusScope, focusedInputHandler);
+useExternalInput(focusTarget, externalInputHandler);
+
+// @ts-expect-error A rendered target ref is required; setup identity is not focus identity.
+useFocus();
+// @ts-expect-error String IDs were removed in favor of opaque target handles.
+useFocus(focusHost, { id: "legacy" });
+// @ts-expect-error Target activity is disabled; region activity belongs to useFocusScope().
+useFocus(focusHost, { isActive: true });
+// @ts-expect-error Only sequential and programmatic-only traversal values exist.
+useFocus(focusHost, { tabIndex: 1 });
+// @ts-expect-error Public focus refs are readonly.
+focusTarget.isFocused.value = false;
+declare const focusManager: UseFocusManagerReturn;
+// @ts-expect-error String lookup was removed from the boundary-level manager.
+focusManager.focus("legacy");
+// @ts-expect-error The manager exposes the exact handle rather than a string ID.
+void focusManager.activeId;
 
 // Semantic input is one normalized, readonly event union. Public handlers must make an explicit
 // synchronous routing decision; paste is a union member rather than a separate composable.

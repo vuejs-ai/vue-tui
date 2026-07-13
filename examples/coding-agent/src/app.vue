@@ -1,6 +1,16 @@
 <script setup lang="ts">
-import { shallowRef } from "vue";
-import { Box, Text, Static, useInput, useApp } from "@vue-tui/runtime";
+import { computed, shallowRef, type ComponentPublicInstance } from "vue";
+import {
+  Box,
+  Static,
+  Text,
+  useApp,
+  useFocus,
+  useFocusedInput,
+  useFocusScope,
+  useFocusScopeInput,
+  useInput,
+} from "@vue-tui/runtime";
 import { runAgentLoop, type Message, type ToolCall } from "./agent";
 import MessageList from "./components/message-list.vue";
 
@@ -11,12 +21,26 @@ const inputText = shallowRef("");
 const completedMessages = shallowRef<Message[]>([]);
 const streamingText = shallowRef("");
 const pendingCommand = shallowRef("");
+const composerHost = shallowRef<ComponentPublicInstance | null>(null);
+const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
 const messages: Message[] = [];
 
 let approvalResolve: ((approved: boolean) => void) | null = null;
 const { exit } = useApp();
 
 const autoApprove = process.argv.includes("--yolo");
+const composer = useFocus(composerHost, {
+  autoFocus: true,
+  disabled: computed(() => state.value !== "idle"),
+});
+const approvalScope = useFocusScope({
+  isActive: computed(() => state.value === "approving"),
+  trapped: true,
+});
+const approval = useFocus(approvalHost, {
+  scope: approvalScope,
+  autoFocus: true,
+});
 
 async function submit() {
   const text = inputText.value.trim();
@@ -84,6 +108,7 @@ async function submit() {
   streamingText.value = "";
   pendingCommand.value = "";
   state.value = "idle";
+  composer.focus();
 }
 
 useInput((event) => {
@@ -97,36 +122,10 @@ useInput((event) => {
     return "consume";
   }
 
-  if (state.value === "approving") {
-    if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
-      state.value = "streaming";
-      approvalResolve?.(true);
-      approvalResolve = null;
-      return "consume";
-    }
-    if (event.kind === "key" && event.key.name === "escape" && event.key.phase !== "release") {
-      state.value = "streaming";
-      approvalResolve?.(false);
-      approvalResolve = null;
-      return "consume";
-    }
-    return {
-      action: "none",
-      routing: "stop",
-      defaultAction: "prevent",
-      external: "block",
-    };
-  }
+  return "continue";
+});
 
-  if (state.value !== "idle") {
-    return {
-      action: "none",
-      routing: "stop",
-      defaultAction: "prevent",
-      external: "block",
-    };
-  }
-
+useFocusedInput(composer, (event) => {
   if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
     void submit();
     return "consume";
@@ -162,6 +161,38 @@ useInput((event) => {
   }
   return "continue";
 });
+
+useFocusedInput(approval, (event) => {
+  if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
+    state.value = "streaming";
+    approvalResolve?.(true);
+    approvalResolve = null;
+    return "consume";
+  }
+  if (event.kind === "key" && event.key.name === "escape" && event.key.phase !== "release") {
+    state.value = "streaming";
+    approvalResolve?.(false);
+    approvalResolve = null;
+    return "consume";
+  }
+  return "continue";
+});
+
+useFocusScopeInput(approvalScope, (event) => {
+  if (
+    event.kind === "key" &&
+    (event.key.name === "return" || event.key.name === "escape") &&
+    event.key.phase !== "release"
+  ) {
+    return "continue";
+  }
+  return {
+    action: "none",
+    routing: "stop",
+    defaultAction: "prevent",
+    external: "block",
+  };
+});
 </script>
 
 <template>
@@ -176,12 +207,18 @@ useInput((event) => {
       <Text>{{ streamingText }}</Text>
     </Box>
 
-    <Box v-if="state === 'approving'" borderStyle="round" borderColor="yellow" :paddingX="1">
+    <Box
+      v-if="state === 'approving'"
+      ref="approvalHost"
+      borderStyle="round"
+      borderColor="yellow"
+      :paddingX="1"
+    >
       <Text color="yellow">{{ pendingCommand }}</Text>
       <Text dimColor>{{ "  [Enter] run / [Esc] skip" }}</Text>
     </Box>
 
-    <Box>
+    <Box ref="composerHost">
       <Text v-if="state === 'idle'">
         <Text color="cyan">&gt; </Text>{{ inputText }}<Text dimColor>█</Text>
       </Text>

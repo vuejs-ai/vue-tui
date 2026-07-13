@@ -1,4 +1,11 @@
-import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
+import {
+  defineComponent,
+  onMounted,
+  onScopeDispose,
+  shallowRef,
+  watchSyncEffect,
+  type ComponentPublicInstance,
+} from "vue";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
 import {
@@ -13,6 +20,10 @@ import {
   useApp,
   useFocus,
   useFocusManager,
+  useFocusedInput,
+  useFocusScope,
+  useFocusScopeInput,
+  useExternalInput,
   useStdin,
   useStdout,
   useStderr,
@@ -205,23 +216,36 @@ describe("renderToString", () => {
     );
   });
 
-  test("useFocus does not throw in renderToString", () => {
+  test("focus targets, scopes, handlers, and manager stay inert in renderToString", () => {
+    let target!: ReturnType<typeof useFocus>;
+    let scope!: ReturnType<typeof useFocusScope>;
+    let manager!: ReturnType<typeof useFocusManager>;
+    const calls: string[] = [];
     const App = defineComponent(() => {
-      const { isFocused } = useFocus();
-      return () => <Text>focused: {String(isFocused.value)}</Text>;
+      const host = shallowRef<ComponentPublicInstance | null>(null);
+      scope = useFocusScope({ trapped: true });
+      target = useFocus(host, { scope, autoFocus: true });
+      manager = useFocusManager();
+      useFocusedInput(target, () => (calls.push("target"), "continue"));
+      useFocusScopeInput(scope, () => (calls.push("scope"), "continue"));
+      useExternalInput(target, () => calls.push("external"));
+      return () => (
+        <Box ref={host}>
+          <Text>
+            focused:{String(target.isFocused.value)} scope:{String(scope.containsFocus.value)}
+          </Text>
+        </Box>
+      );
     });
     const output = renderToString(App);
-    expect(output).toContain("focused:");
-  });
-
-  test("useFocusManager does not throw in renderToString", () => {
-    const App = defineComponent(() => {
-      const fm = useFocusManager();
-      void fm;
-      return () => <Text>with focus manager</Text>;
-    });
-    const output = renderToString(App);
-    expect(output).toContain("with focus manager");
+    expect(output).toContain("focused:false scope:false");
+    expect(manager.focusedTarget.value).toBeNull();
+    expect(manager.focusNext()).toBe(false);
+    expect(manager.focusPrevious()).toBe(false);
+    expect(manager.blur()).toBe(false);
+    expect(target.focus()).toBe(false);
+    expect(target.blur()).toBe(false);
+    expect(calls).toEqual([]);
   });
 
   test("useStdin does not throw in renderToString", () => {

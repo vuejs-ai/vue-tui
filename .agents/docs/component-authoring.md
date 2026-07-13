@@ -29,9 +29,9 @@ The deciding distinction — get this right and the split falls out:
 - **"What context am I in?"** (is this `<Text>` / `<Newline>` nested inside a text context?)
   → **provide/inject**, never parent-walking or `.name` matching. `Text` and `Transform`
   `provide(TextContextKey, true)`; `Text` and `Newline` `inject` it. Template-friendly,
-  matches vue-tui's existing `AppContextKey` / `FocusContext` style, and is the
+  matches vue-tui's `AppContextKey` and private focus-controller context style, and is the
   well-established Vue idiom (provide/inject outnumbers slot inspection 4–20× in the
-  libraries surveyed). It replaced the old, duplicated `getCurrentInstance()` parent walk. [VOUCHED @hyf0]
+  libraries surveyed). It replaced the old, duplicated `getCurrentInstance()` parent walk.
 - **"What are my children's actual contents?"** (filter inert/`Comment` vnodes, detect
   emptiness) → **render function** + `slots.default()`. A `<template>` can't reach the vnode
   array; forcing it means calling the slot twice per render — an accepted-but-unsanctioned

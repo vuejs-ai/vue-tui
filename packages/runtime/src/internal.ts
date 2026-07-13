@@ -49,12 +49,8 @@ export {
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.
 export { messageForNonError } from "./components/error-overview.ts";
-// Exposed for unit testing the focus-subscriber leak fix: the returned controller
-// carries a `__subscriberMapSize()` probe so a test can assert empty subscriber
-// Sets are dropped on unsubscribe. See render.ts createFocusController.
-export { createFocusController, type FocusControllerForTest } from "./render.ts";
 // Private integration-test access for exercising F3's selected topology and
 // external fallthrough through a real outer terminal and a real child PTY.
-// Ordinary applications use the public application-global useInput() contract;
-// F4 owns the future target/local/external attachment instead of this test seam.
+// Ordinary applications compose public focus targets, scopes, and external
+// receivers instead; fixtures must not mix this selector with F4 ownership.
 export { useInternalInputRoutingForTest } from "./io/input-route-test.ts";

@@ -1,5 +1,4 @@
 import type { Component } from "vue";
-import { shallowRef } from "vue";
 import { createRenderer } from "vue";
 import { Readable, Writable } from "node:stream";
 import Yoga from "yoga-layout";
@@ -12,11 +11,9 @@ import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
 import {
   AppContextKey,
-  FocusContextKey,
   StdinContextKey,
   AnimationSchedulerKey,
   type AppContext,
-  type FocusContext,
   type StdinContext,
 } from "./context.ts";
 import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
@@ -164,7 +161,6 @@ function renderStringDocument(
     // their normal services without acquiring a terminal.
     app.provide(InternalRenderSessionKey, renderSession);
     app.provide(AppContextKey, appContext);
-    app.provide(FocusContextKey, createNoOpFocusContext());
     app.provide(InternalFocusControllerKey, focusController);
     app.provide(StdinContextKey, stdinContext);
     app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
@@ -410,25 +406,6 @@ function createStringContexts(columns: number): {
       stdout.destroy();
       stderr.destroy();
     },
-  };
-}
-
-function createNoOpFocusContext(): FocusContext {
-  return {
-    activeId: null,
-    activeIdRef: shallowRef(null),
-    enabled: false,
-    enableFocus: () => {},
-    disableFocus: () => {},
-    focusNext: () => {},
-    focusPrevious: () => {},
-    focus: () => {},
-    blur: () => {},
-    add: () => {},
-    remove: () => {},
-    activate: () => {},
-    deactivate: () => {},
-    subscribe: () => () => {},
   };
 }
 

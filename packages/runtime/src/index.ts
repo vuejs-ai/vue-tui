@@ -99,8 +99,20 @@ export type {
   TuiMouseEventType,
   TuiWheelEvent,
 } from "./mouse/events.ts";
-export { useFocus, type UseFocusOptions } from "./composables/useFocus.ts";
-export { useFocusManager } from "./composables/useFocusManager.ts";
+export { useFocus, type UseFocusOptions, type UseFocusReturn } from "./composables/useFocus.ts";
+export {
+  useFocusScope,
+  type UseFocusScopeOptions,
+  type UseFocusScopeReturn,
+} from "./composables/useFocusScope.ts";
+export { useFocusedInput } from "./composables/useFocusedInput.ts";
+export { useFocusScopeInput } from "./composables/useFocusScopeInput.ts";
+export {
+  useExternalInput,
+  type ExternalInputHandler,
+  type ExternalInputSource,
+} from "./composables/useExternalInput.ts";
+export { useFocusManager, type UseFocusManagerReturn } from "./composables/useFocusManager.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";

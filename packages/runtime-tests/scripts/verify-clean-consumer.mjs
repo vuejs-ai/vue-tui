@@ -122,20 +122,33 @@ try {
     join(consumerDirectory, "consumer.ts"),
     `import { shallowRef } from "vue";
 import {
+  useExternalInput,
+  useFocus,
+  useFocusedInput,
+  useFocusManager,
+  useFocusScope,
+  useFocusScopeInput,
   useInput,
   useInputAvailability,
   useStdin,
+  type ExternalInputHandler,
+  type ExternalInputSource,
   type InputAvailability,
   type InputHandler,
   type InputHandlerResult,
   type InputRouteDecision,
   type MountOptions,
   type TuiInputEvent,
+  type UseFocusManagerReturn,
+  type UseFocusOptions,
+  type UseFocusReturn,
+  type UseFocusScopeOptions,
+  type UseFocusScopeReturn,
   type UseInputAvailabilityReturn,
   type UseInputOptions,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
-import type { MaybeRef, MaybeRefOrGetter, Ref } from "vue";
+import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -183,6 +196,54 @@ type _ExactAvailabilityReturn = Expect<
     { readonly availability: Readonly<Ref<InputAvailability>> }
   >
 >;
+type _ExactFocusTarget = Expect<
+  Equal<
+    Parameters<typeof useFocus>[0],
+    MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
+  >
+>;
+type _ExactFocusOptions = Expect<
+  Equal<
+    UseFocusOptions,
+    {
+      readonly scope?: UseFocusScopeReturn;
+      readonly disabled?: MaybeRefOrGetter<boolean>;
+      readonly tabIndex?: MaybeRefOrGetter<0 | -1>;
+      readonly autoFocus?: MaybeRefOrGetter<boolean>;
+    }
+  >
+>;
+type _ExactFocusState = Expect<
+  Equal<UseFocusReturn["isFocused"], Readonly<ShallowRef<boolean>>>
+>;
+type _ExactScopeOptions = Expect<
+  Equal<
+    UseFocusScopeOptions,
+    {
+      readonly isActive?: MaybeRefOrGetter<boolean>;
+      readonly trapped?: MaybeRefOrGetter<boolean>;
+    }
+  >
+>;
+type _ExactFocusManager = Expect<
+  Equal<
+    UseFocusManagerReturn["focusedTarget"],
+    Readonly<ShallowRef<UseFocusReturn | null>>
+  >
+>;
+type _ExactExternalSource = Expect<
+  Equal<
+    ExternalInputSource,
+    {
+      readonly event: TuiInputEvent;
+      readonly sequence: string;
+      readonly fidelity: "normalized-utf8-sequence";
+    }
+  >
+>;
+type _ExactExternalHandler = Expect<
+  Equal<ExternalInputHandler, (source: ExternalInputSource) => void>
+>;
 
 const active = shallowRef(true);
 const handler = shallowRef<InputHandler>((event) => {
@@ -200,6 +261,30 @@ const handler = shallowRef<InputHandler>((event) => {
   return "continue";
 });
 useInput(handler, { isActive: () => active.value });
+
+declare const focusHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
+const focusScope = useFocusScope({ trapped: true });
+const focusTarget = useFocus(focusHost, { scope: focusScope, autoFocus: true });
+const focusManager = useFocusManager();
+useFocusedInput(focusTarget, handler);
+useFocusScopeInput(focusScope, handler);
+useExternalInput(focusTarget, (_source) => {});
+const focusResult: boolean = focusTarget.focus();
+const blurResult: boolean = focusTarget.blur();
+const nextResult: boolean = focusManager.focusNext();
+const previousResult: boolean = focusManager.focusPrevious();
+const managerBlurResult: boolean = focusManager.blur();
+void focusResult;
+void blurResult;
+void nextResult;
+void previousResult;
+void managerBlurResult;
+// @ts-expect-error Focus IDs were replaced by opaque ref-bound handles.
+useFocus(focusHost, { id: "legacy" });
+// @ts-expect-error The manager exposes the exact focused handle, not an ID.
+focusManager.focus("legacy");
+// @ts-expect-error Global focus enable/disable was removed with the flat registry.
+focusManager.disableFocus();
 
 const inputAvailability = useInputAvailability();
 if (inputAvailability.availability.value.status === "unavailable") {
@@ -235,10 +320,14 @@ void removedExitOnCtrlC;
   );
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
-    `import { Text, useInput, useInputAvailability } from "@vue-tui/runtime";
-import { defineComponent } from "vue";
+    `import { Box, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
+import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 
 export const InputProbe = defineComponent(() => {
+  const host = shallowRef<ComponentPublicInstance | null>(null);
+  const scope = useFocusScope({ trapped: true });
+  const target = useFocus(host, { scope, autoFocus: true });
+  const manager = useFocusManager();
   const { availability } = useInputAvailability();
   useInput(
     (event) => {
@@ -249,15 +338,23 @@ export const InputProbe = defineComponent(() => {
     },
     { isActive: () => availability.value.status === "available" },
   );
-  return () => <Text>normalized input</Text>;
+  useFocusedInput(target, () => "continue");
+  useFocusScopeInput(scope, () => "continue");
+  useExternalInput(target, () => {});
+  return () => <Box ref={host}><Text>{String(manager.focusedTarget.value === target)}</Text></Box>;
 });
 `,
   );
   writeFileSync(
     join(consumerDirectory, "App.vue"),
     `<script setup lang="ts">
-import { Text, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
+import { shallowRef, type ComponentPublicInstance } from "vue";
+import { Box, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
 
+const host = shallowRef<ComponentPublicInstance | null>(null);
+const scope = useFocusScope({ trapped: true });
+const target = useFocus(host, { scope, autoFocus: true });
+const manager = useFocusManager();
 const mountedStdin = useStdin();
 const { availability } = useInputAvailability();
 useInput(
@@ -267,13 +364,16 @@ useInput(
   },
   { isActive: () => availability.value.status === "available" },
 );
+useFocusedInput(target, () => "continue");
+useFocusScopeInput(scope, () => "continue");
+useExternalInput(target, () => {});
 mountedStdin.stdin;
 // @ts-expect-error Raw-mode control is not exposed by useStdin().
 mountedStdin.setRawMode(false);
 </script>
 
 <template>
-  <Text>clean consumer</Text>
+  <Box ref="host"><Text>{{ manager.focusedTarget.value === target }}</Text></Box>
 </template>
 `,
   );
@@ -283,10 +383,14 @@ mountedStdin.setRawMode(false);
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, shallowRef } from "vue";
 
-const { createApp, Text, useInput, useInputAvailability, useStdin } = runtime;
+const { Box, createApp, Text, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
 assert.equal("usePaste" in runtime, false);
+assert.equal(typeof useFocusScope, "function");
+assert.equal(typeof useFocusedInput, "function");
+assert.equal(typeof useFocusScopeInput, "function");
+assert.equal(typeof useExternalInput, "function");
 
 const stdin = new PassThrough();
 const stdout = new PassThrough();
@@ -379,6 +483,48 @@ await assert.rejects(
   /handlers must synchronously return "continue", "consume", or a complete InputRouteDecision/,
 );
 invalidResult.dispose();
+
+const focusCalls = [];
+let firstTarget;
+let secondTarget;
+let focusScope;
+let focusManager;
+const FocusProbe = defineComponent(() => {
+  const firstHost = shallowRef(null);
+  const secondHost = shallowRef(null);
+  focusScope = useFocusScope();
+  firstTarget = useFocus(firstHost, { scope: focusScope, autoFocus: true });
+  secondTarget = useFocus(secondHost, { scope: focusScope });
+  focusManager = useFocusManager();
+  useFocusedInput(firstTarget, (event) => {
+    focusCalls.push("target:" + event.sequence);
+    return "continue";
+  });
+  useFocusScopeInput(focusScope, (event) => {
+    focusCalls.push("scope:" + event.sequence);
+    return "continue";
+  });
+  useExternalInput(firstTarget, ({ sequence }) => focusCalls.push("external:" + sequence));
+  return () => h(Box, null, () => [
+    h(Box, { ref: firstHost }, () => h(Text, null, () => "first")),
+    h(Box, { ref: secondHost }, () => h(Text, null, () => "second")),
+  ]);
+});
+const focusApp = await render(FocusProbe);
+assert.equal(firstTarget.isFocused.value, true);
+assert.equal(focusScope.containsFocus.value, true);
+assert.equal(focusManager.focusedTarget.value, firstTarget);
+await focusApp.stdin.write("x");
+assert.deepEqual(focusCalls, ["target:x", "scope:x", "external:x"]);
+await focusApp.stdin.write("\t");
+assert.equal(focusManager.focusedTarget.value, secondTarget);
+await focusApp.stdin.write("\x1b");
+assert.equal(focusManager.focusedTarget.value, secondTarget);
+focusApp.dispose();
+assert.equal(firstTarget.isFocused.value, false);
+assert.equal(firstTarget.focus(), false);
+assert.equal(firstTarget.blur(), false);
+assert.equal(focusApp.terminal.rawMode.current, false);
 `,
   );
 

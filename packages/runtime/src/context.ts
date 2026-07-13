@@ -1,4 +1,4 @@
-import type { InjectionKey, Ref, ShallowRef } from "vue";
+import type { InjectionKey, Ref } from "vue";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
 import type { InternalInputRouteRegistry } from "./io/input-routes.ts";
 import type { InternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
@@ -25,23 +25,6 @@ export interface AppContext {
   internal_mouse?: MouseController;
 }
 
-export interface FocusContext {
-  activeId: string | null;
-  activeIdRef: ShallowRef<string | null>;
-  enabled: boolean;
-  enableFocus: () => void;
-  disableFocus: () => void;
-  focusNext: () => void;
-  focusPrevious: () => void;
-  focus: (id: string) => void;
-  blur: () => void;
-  add: (id: string, options: { autoFocus?: boolean }) => void;
-  remove: (id: string) => void;
-  activate: (id: string) => void;
-  deactivate: (id: string) => void;
-  subscribe: (id: string, fn: (focused: boolean) => void) => () => void;
-}
-
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
@@ -59,7 +42,6 @@ export interface StdinContext {
 export type SgrMouseMode = "button" | "drag" | "hover";
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
-export const FocusContextKey: InjectionKey<FocusContext> = Symbol("vue-tui:focus");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");
 export const AnimationSchedulerKey: InjectionKey<AnimationScheduler> = Symbol("vue-tui:animation");
 // Provided by <Text> and <Transform>; injected by <Text> and <Newline> to decide

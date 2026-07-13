@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
-import { nextTick, defineComponent } from "vue";
+import { nextTick, defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
+import { Box, createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
 import { makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 // Builds a stdin that is NOT a TTY, so isRawModeSupported is false. This mirrors
@@ -136,16 +136,22 @@ test("active semantic input on a non-TTY publishes no route, listener, ref, or t
   stdout.destroy();
 });
 
-// Test B (regression): useFocus must guard like Ink's use-focus.ts and NOT throw
-// on a non-TTY stdin. This guards against over-throwing in the acquire chokepoint.
-test("useFocus on a non-TTY stdin does not throw (graceful no-op)", async () => {
+test("a rendered sequential focus target fails fast on a non-TTY stdin", async () => {
   const App = defineComponent(() => {
-    useFocus();
-    return () => <Text>focusable</Text>;
+    const host = shallowRef<ComponentPublicInstance | null>(null);
+    useFocus(host);
+    return () => (
+      <Box ref={host}>
+        <Text>focusable</Text>
+      </Box>
+    );
   });
 
   const { error, unmount } = await mountNonTtyAndCaptureError(App);
   unmount();
 
-  expect(error).toBeUndefined();
+  expect(error).toBeInstanceOf(Error);
+  expect(error?.message).toContain(
+    "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+  );
 });

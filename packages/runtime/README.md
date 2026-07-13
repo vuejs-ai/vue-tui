@@ -97,8 +97,12 @@ useInput((event) => {
 | `useInputAvailability()`        | Readonly managed-input availability for the current host                                     |
 | `useMouseInput(handler, opts?)` | Terminal mouse input — currently SGR wheel events with ref-counted mouse-mode ownership      |
 | `useDraggable(ref, opts?)`      | Full-screen element dragging — reactive position and drag state from a normal template ref   |
-| `useFocus(opts?)`               | Component-level focus — returns `{ isFocused, focus }`                                       |
-| `useFocusManager()`             | App-level focus — `focusNext()`, `focusPrevious()`, `focus(id)`                              |
+| `useFocus(ref, opts?)`          | Opaque ref-bound focus target with rendered-order traversal and boolean `focus()` / `blur()` |
+| `useFocusScope(opts?)`          | Nested active region or hard trapped boundary provided to descendants                        |
+| `useFocusedInput(target, fn)`   | Normalized input attached to one exact focused target                                        |
+| `useFocusScopeInput(scope, fn)` | Normalized input attached to a boundary or ancestor scope                                    |
+| `useExternalInput(target, fn)`  | One normalized external fallthrough receiver for an exact focused target                     |
+| `useFocusManager()`             | Exact focused-target observation plus boundary traversal and blur                            |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
 | `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities         |
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |

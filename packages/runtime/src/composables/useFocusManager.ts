@@ -1,22 +1,23 @@
 import { inject, type ShallowRef } from "vue";
-import { FocusContextKey } from "../context.ts";
+import { InternalFocusControllerKey } from "../focus/focus-context.ts";
+import type { UseFocusReturn } from "./useFocus.ts";
 
-export function useFocusManager(): {
-  enableFocus: () => void;
-  disableFocus: () => void;
-  focusNext: () => void;
-  focusPrevious: () => void;
-  focus: (id: string) => void;
-  activeId: ShallowRef<string | null>;
-} {
-  const ctx = inject(FocusContextKey);
-  if (!ctx) throw new Error("useFocusManager() must be called inside a vue-tui render tree");
+export interface UseFocusManagerReturn {
+  readonly focusedTarget: Readonly<ShallowRef<UseFocusReturn | null>>;
+  focusNext(): boolean;
+  focusPrevious(): boolean;
+  blur(): boolean;
+}
+
+export function useFocusManager(): UseFocusManagerReturn {
+  const controller = inject(InternalFocusControllerKey, null);
+  if (!controller) {
+    throw new Error("useFocusManager() must be called inside a vue-tui render tree");
+  }
   return {
-    enableFocus: ctx.enableFocus.bind(ctx),
-    disableFocus: ctx.disableFocus.bind(ctx),
-    focusNext: ctx.focusNext.bind(ctx),
-    focusPrevious: ctx.focusPrevious.bind(ctx),
-    focus: ctx.focus.bind(ctx),
-    activeId: ctx.activeIdRef,
+    focusedTarget: controller.focusedTarget as Readonly<ShallowRef<UseFocusReturn | null>>,
+    focusNext: () => controller.focusNext(),
+    focusPrevious: () => controller.focusPrevious(),
+    blur: () => controller.blur(),
   };
 }

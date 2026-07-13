@@ -14,7 +14,6 @@ import {
 } from "@vue-tui/runtime/internal";
 import {
   createApp,
-  useFocus,
   useInput,
   useMouseInput,
   type InputHandler,
@@ -2589,12 +2588,6 @@ describe("kitty query-response - adversarial ingress ordering", () => {
       label: "useInput",
       install: (active: ShallowRef<boolean>) => {
         useInput(observeInput, { isActive: active });
-      },
-    },
-    {
-      label: "useFocus",
-      install: (active: ShallowRef<boolean>) => {
-        useFocus({ isActive: active });
       },
     },
   ])("$label reconciles re-entrant activation after a raw-mode error", async ({ install }) => {

@@ -1,6 +1,6 @@
-import { defineComponent, shallowRef } from "vue";
+import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { createApp, Text, useFocus, useInput, type RenderMode } from "@vue-tui/runtime";
+import { Box, createApp, Text, useFocus, useInput, type RenderMode } from "@vue-tui/runtime";
 import { makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 const modes = ["inline", "fullscreen"] as const satisfies readonly RenderMode[];
@@ -27,12 +27,14 @@ function mountOptions(mode: RenderMode) {
 }
 
 describe.each(modes)("live input routing in %s mode", (mode) => {
-  test("delays Tab and Escape defaults until after application-global input delivery", async () => {
+  test("runs application globals before Tab traversal and leaves Escape without a focus default", async () => {
     const observed: string[] = [];
     let currentFocus = () => "unmounted";
     const App = defineComponent(() => {
-      const first = useFocus({ id: "first", autoFocus: true });
-      const second = useFocus({ id: "second" });
+      const firstHost = shallowRef<ComponentPublicInstance | null>(null);
+      const secondHost = shallowRef<ComponentPublicInstance | null>(null);
+      const first = useFocus(firstHost, { autoFocus: true });
+      const second = useFocus(secondHost);
       currentFocus = () =>
         first.isFocused.value ? "first" : second.isFocused.value ? "second" : "none";
       useInput((event) => {
@@ -44,7 +46,16 @@ describe.each(modes)("live input routing in %s mode", (mode) => {
         }
         return "continue";
       });
-      return () => <Text>ready</Text>;
+      return () => (
+        <Box>
+          <Box ref={firstHost}>
+            <Text>first</Text>
+          </Box>
+          <Box ref={secondHost}>
+            <Text>second</Text>
+          </Box>
+        </Box>
+      );
     });
 
     const streams = mountOptions(mode);
@@ -58,7 +69,7 @@ describe.each(modes)("live input routing in %s mode", (mode) => {
       streams.stdin.push("\x1b");
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(observed).toEqual(["tab:first", "escape:second"]);
-      expect(currentFocus()).toBe("none");
+      expect(currentFocus()).toBe("second");
     } finally {
       app.unmount();
     }

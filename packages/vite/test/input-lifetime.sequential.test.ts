@@ -134,7 +134,7 @@ afterEach(async () => {
   delete testGlobal().__VT_TEST_STDOUT__;
 });
 
-test("public input ownership survives template, script, and full HMR lifetimes", async () => {
+test("public global and focused input survive template, script, and full HMR lifetimes", async () => {
   const { stdin, rawModeCalls, refBalance, trace } = createTrackedStdin();
   const { stdout, read } = createTrackedStdout(trace);
   Object.assign(testGlobal(), {
@@ -162,7 +162,7 @@ test("public input ownership survives template, script, and full HMR lifetimes",
   });
   expect(testGlobal().__VT_INPUT_MOUNTS__).toBe(1);
   expect(testGlobal().__VT_INPUT_SETUPS__).toEqual(["1:A"]);
-  await emitAndWait(stdin, "x", ["1:A:x"]);
+  await emitAndWait(stdin, "x", ["1:A:global:x", "1:A:focus:x"]);
 
   const templateTraceStart = trace.length;
   const templateHot = origAppVue.replace("INPUT-LABEL-A", "INPUT-LABEL-B-HOT");
@@ -175,7 +175,7 @@ test("public input ownership survives template, script, and full HMR lifetimes",
     refs: 1,
     listeners: 1,
   });
-  await emitAndWait(stdin, "y", ["1:A:x", "1:A:y"]);
+  await emitAndWait(stdin, "y", ["1:A:global:x", "1:A:focus:x", "1:A:global:y", "1:A:focus:y"]);
 
   const scriptTraceStart = trace.length;
   const scriptHot = templateHot.replace('const generation = "A";', 'const generation = "B";');
@@ -189,7 +189,14 @@ test("public input ownership survives template, script, and full HMR lifetimes",
     refs: 1,
     listeners: 1,
   });
-  await emitAndWait(stdin, "z", ["1:A:x", "1:A:y", "1:B:z"]);
+  await emitAndWait(stdin, "z", [
+    "1:A:global:x",
+    "1:A:focus:x",
+    "1:A:global:y",
+    "1:A:focus:y",
+    "1:B:global:z",
+    "1:B:focus:z",
+  ]);
 
   // Stable physical state alone cannot reveal an old logical-demand leak. End
   // only the replacement route: every physical owner must disappear. Starting
@@ -226,7 +233,16 @@ test("public input ownership survives template, script, and full HMR lifetimes",
   expect(Math.max(...releases.map((event) => reloadTrace.indexOf(event)))).toBeLessThan(
     Math.min(...acquisitions.map((event) => reloadTrace.indexOf(event))),
   );
-  await emitAndWait(stdin, "q", ["1:A:x", "1:A:y", "1:B:z", "2:B:q"]);
+  await emitAndWait(stdin, "q", [
+    "1:A:global:x",
+    "1:A:focus:x",
+    "1:A:global:y",
+    "1:A:focus:y",
+    "1:B:global:z",
+    "1:B:focus:z",
+    "2:B:global:q",
+    "2:B:focus:q",
+  ]);
 
   testGlobal().__VT_TEST_APP__!.unmount();
   await waitUntil(() => stdin.listenerCount("data") === 0 && refBalance() === 0);
