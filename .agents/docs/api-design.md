@@ -1,6 +1,6 @@
 # Application API design
 
-> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, the completed F1 readonly render-session foundation, the completed private F2 rendered-target lifetime, the completed F3 normalized public input and routing contract, and the accepted F4 target contract. F4 logical focus and focus scopes is Active in public implementation. The completed implementations and accepted contracts are not VOUCHED stamps; pointer names and signatures, F5 geometry details, target disposition of current pointer APIs, component catalog, and the 1.0 surface remain unselected.
+> **Status:** unstamped proposed design program. This record identifies the next product-design layer, the evidence it must satisfy, and the order of work. It records the accepted one-`createApp`, optional-`mode`, default-Inline mount model, the component/composable boundary, the completed F1 readonly render-session foundation, the completed private F2 rendered-target lifetime, the completed F3 normalized public input and routing contract, and the completed F4 logical-focus and focus-scope contract. F5 semantic geometry and caret is Active in audit and research before an API choice. The completed implementations and accepted contracts are not VOUCHED stamps; pointer names and signatures, F5 geometry details, target disposition of current pointer APIs, component catalog, and the 1.0 surface remain unselected.
 
 ## Current conclusion
 
@@ -214,7 +214,7 @@ These are responsibility layers, not a requirement to split the renderer into fr
 
 Application-global shortcuts remain independent, while local ownership now follows the target or scope lifetime instead of requiring a manual `useInput({ isActive })` bridge. [Issue #250](https://github.com/vuejs-ai/vue-tui/issues/250) remains the direct consumer evidence that selected local behavior must follow rendered and logical ownership rather than setup-time global registrations.
 
-The normalized `TuiInputEvent` now exposes function-key identity, Insert, modifiers, reported text, and repeat or release phase without the removed boolean `Key` projection. F4 can reuse that event model directly instead of defining a focus-specific key shape.
+The normalized `TuiInputEvent` now exposes function-key identity, Insert, modifiers, reported text, and repeat or release phase without the removed boolean `Key` projection. Completed F4 reuses that event model directly instead of defining a focus-specific key shape.
 
 ### Focus, element geometry, and the terminal cursor are disconnected
 
@@ -315,7 +315,7 @@ Do not publish a mode-dependent editor, overlay, viewport, pointer, geometry, or
 
 ## Second design packet: focus and input inside the rendering-mode contract
 
-The complete F4 target contract is [logical focus and focus scopes](./focus-and-scopes.md). The maintainer accepted it on 2026-07-13 without adding a VOUCHED stamp. Its public runtime now implements opaque ref-bound handles, rendered-preorder traversal, active and hard-trapped scopes, centralized restoration, focused-target and scope handlers with a trapped scope occupying the active-boundary layer once, focus-bound external fallthrough, direct replacement of the prior focus surfaces, and removal of the generic Escape blur. Package, host, scenario, and terminal closure remain active; this section remains the broader dependency rationale.
+The complete F4 target contract is [logical focus and focus scopes](./focus-and-scopes.md). The maintainer accepted it on 2026-07-13 without adding a VOUCHED stamp. Its public runtime implements opaque ref-bound handles, rendered-preorder traversal, active and hard-trapped scopes, centralized restoration, focused-target and scope handlers with a trapped scope occupying the active-boundary layer once, focus-bound external fallthrough, direct replacement of the prior focus surfaces, and removal of the generic Escape blur. Public workflow, finder, independent-region, boundary, package, host, both-mode real-terminal, visual, exact-cleanup, full-gate, and independent-review evidence pass; this section remains the broader dependency rationale.
 
 The completed F3 mechanism and accepted [public input contract](./input-routing.md#accepted-public-input-contract) exposed a dependency boundary that the earlier questions did not resolve. Normalized readonly facts, synchronous handler outcomes, one all-run application-global layer, delayed defaults, input availability, and current-hook dispositions could be selected before focus. A complete public `global → boundary → focused owner → ancestors → defaults → external` attachment could not be selected until F4: publishing it earlier would have exposed the private atomic topology or required applications to compute the focused owner and ancestor path manually. That would recreate issue #250 and make F4 a second state owner.
 
@@ -341,7 +341,7 @@ terminal bytes
   -> optionally hand an unhandled event to an external owner such as a PTY pane
 ```
 
-The non-pointer portion of this flow is now the proved private F3 order. The accepted F3 public contract answers the first question, the application-global half of the second and sixth questions, and the input-availability half of the eighth question; the accepted F4 target contract answers the target/local parts, while implementation evidence must still make them ordinary authoring API:
+The non-pointer portion of this flow is now the proved F3 route with completed F4 public attachment. The F3 public contract answers the first question, the application-global half of the second and sixth questions, and the input-availability half of the eighth question; the F4 public contract answers the target/local parts. The following questions remain useful dependency boundaries even where F3 and F4 have already answered them:
 
 1. How does a handler distinguish handled, continue routing, prevent a component default, and return input to an external owner?
 2. Which registrations follow setup-scope lifetime, and which must follow the actual rendered node or `v-if` branch lifetime required by #250?
@@ -352,7 +352,7 @@ The non-pointer portion of this flow is now the proved private F3 order. The acc
 7. What semantic element or rectangle type lets focus, mouse, measurement, scrolling and a real terminal caret refer to the same rendered object without exposing a host node?
 8. Which shared focus and input operations remain meaningful in static, non-interactive and screen-reader environments, and how does each ineffective operation report itself?
 
-Do not call the accepted target-bound/local input or focus API complete until one implementation handles #250, a modal approval, a global app shortcut, two focusable regions, unmount restoration, both rendering modes, and optional PTY fallthrough without manual boolean coordination. This restriction does not require the application-global normalized fact and handler-result contract to expose the private selection graph before F4.
+F4 satisfied its completion gate with one implementation covering #250, a modal approval, a global app shortcut, two independently activated regions, unmount restoration, both rendering modes, and optional PTY fallthrough without manual boolean coordination. The application-global normalized fact and handler-result contract still does not expose the private selection graph.
 
 ## Vertical validation journeys
 
@@ -364,7 +364,7 @@ Use the smallest set of applications that forces the shared contract:
 4. **Workbench:** two independently active regions plus an overlay prove scoped shortcuts, focus restoration and unhandled-event routing.
 5. **Terminal workspace stress:** a focused pane can pass unhandled keys to an external terminal session without making PTY or VT emulation a framework responsibility.
 
-The first implementation prototype should combine the workflow composer and finder selector. Together they test text editing, controlled state, focus, commands, collection movement, scrolling and completion. The prototype may remain internal until its behavior and TypeScript/template shape survive both journeys.
+F4's public validation combines the workflow composer and finder selector, then adds the independent-region workbench. Together they test text and paste delivery, controlled state, focus, commands, collection movement, modal isolation, removal, restoration, and completion without turning collection state into logical focus.
 
 ## Work order
 
@@ -390,7 +390,7 @@ Every proposal should state:
 
 - The cross-framework evidence ledger, comparison vocabulary, and required decision check live in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md). A peer establishes a mechanism or tradeoff in its own constraints; it does not choose vue-tui's Vue API, package path, product default, or component catalog.
 - Vue's [custom renderer contract](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/renderer.ts#L96-L155) keeps host operations narrow, while [hierarchical provide/inject](https://github.com/vuejs/core/blob/c0606e91798c8dca4f33d101e1dd836d672592c1/packages/runtime-core/src/apiInject.ts#L8-L74) is a natural mechanism for app and subtree services.
-- Ink v7.0.4's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) explain vue-tui's current baseline and also its limit for nested applications. Its run-verified non-TTY default and explicit live-update override are recorded as a deliberate alignment in [ink-divergences.md](./ink-divergences.md#non-tty-output-defaults-to-a-final-stream-while-explicit-live-updates-remain-possible). This matches the repository's canonical Ink snapshot; Ink parity is not the API objective.
+- Ink v7.0.4's [`useInput` subscription](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-input.ts#L126-L174) and [flat focus hook](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-focus.ts#L5-L82) explain vue-tui's pre-F4 baseline and also its limit for nested applications. Its run-verified non-TTY default and explicit live-update override are recorded as a deliberate alignment in [ink-divergences.md](./ink-divergences.md#non-tty-output-defaults-to-a-final-stream-while-explicit-live-updates-remain-possible). This matches the repository's canonical Ink snapshot; Ink parity is not the API objective.
 - OpenTUI's [key event contract](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/lib/KeyHandler.ts#L5-L62) demonstrates handled and propagation semantics. Its framework-neutral core and broad exports are not a reason to migrate or copy its public structure.
 - Textual's [focused-widget and app binding route](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/docs/guide/input.md#L118-L185) demonstrates why focus, app shortcuts and inspectable bindings belong in one model. Its Python inheritance, string actions and full message system are not proposed for vue-tui.
 

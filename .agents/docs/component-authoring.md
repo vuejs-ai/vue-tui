@@ -90,7 +90,7 @@ and fixed at the root:
   `useBoxMetrics` (which read `ref.$el.yoga`) collapsed to 0. Fix: those resolvers drill the
   component `subTree` to the first real host node, skipping comment/empty-`text-leaf` anchors
   (verified to resolve each ref'd Box to its **own** node, never a sibling's).
-- **A component ref is not a rendered-lifetime signal.** A public component instance may remain identical while a root `v-if`, keyed root, or HMR rerender replaces its `$el`. Internal behaviors bound to that ref must use the per-render-root contract in [rendered-target-lifetime.md](./rendered-target-lifetime.md), not add another watcher of the component proxy. Visibility and focus eligibility remain separate later contracts.
+- **A component ref is not a rendered-lifetime signal.** A public component instance may remain identical while a root `v-if`, keyed root, or HMR rerender replaces its `$el`. Internal behaviors bound to that ref must use the per-render-root contract in [rendered-target-lifetime.md](./rendered-target-lifetime.md), not add another watcher of the component proxy. Rendered lifetime and focus eligibility remain separate contracts: F2 owns attachment identity and cleanup, while completed F4 derives hidden, disabled, scope, and traversal eligibility from the current rendered tree.
 
 ## Pitfalls (for adding or editing component SFCs)
 
