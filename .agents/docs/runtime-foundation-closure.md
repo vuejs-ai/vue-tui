@@ -1,6 +1,6 @@
 # Runtime foundation closure
 
-> **Status:** Stage 1 evidence freeze on PR #265. This finite matrix is frozen against `3d7e197dda71d02a1b8926982a35b1604fcf17e1` and the dated external snapshot below. F1 through F8 are accepted inputs. After this record is committed, only a reproducible generic Runtime failure from one of the fixed journeys may add a closure row. This record is unstamped and adds no VOUCHED decision.
+> **Status:** Stage 2 is complete locally on PR #265 at `b762be9`; Stage 3 is active at the terminal-history and `Static` public-contract decision boundary. This finite matrix remains frozen against `3d7e197dda71d02a1b8926982a35b1604fcf17e1` and the dated external snapshot below. F1 through F8 are accepted inputs. Only a reproducible generic Runtime failure from one of the fixed journeys may add a closure row. This record is unstamped and adds no VOUCHED decision.
 
 ## Outcome and boundary
 
@@ -111,7 +111,7 @@ vp run @vue-tui/example-coding-agent#build
 - Script: type `alp你🙂`, verify exact visible input, drive deterministic streaming and approval through the committed local agent stub, accept and reject one tool action, then send Ctrl+C.
 - Assertions: ordered once-only completed history, live streaming tail, composer-to-approval focus isolation and restoration, Unicode input, no `/internal` or source import, exit, cursor/raw/paste state restoration, and working shell input.
 
-The initial inventory build and basic PTY input/exit passed. A deterministic agent stub and final history contract remain required for the complete journey.
+The committed Stage 2 verifier now passes the complete packed journey. The targetless trapped approval boundary handles Enter and Escape even before its `v-if` target attaches; printable input cannot leak to the composer; accepted and rejected tool calls, streaming, Unicode input, ordered once-only history, Ctrl+C, terminal restoration, and post-exit shell input all pass. The remaining terminal-history contract is Stage 3 work rather than a missing consumer migration.
 
 ### mo finder
 
@@ -132,7 +132,7 @@ vp run test
 - Exact installed launch: `HOME="$CONSUMER_HOME" PATH="$CONSUMER_PREFIX/bin:$PATH" "$CONSUMER_PREFIX/bin/mo" cd`, with the committed fixture config pointing at the committed three-repository directory shape.
 - Assertions: only the public Runtime root is imported, no timeout is needed for flush correctness, filtered navigation and acceptance are correct, Ctrl+C cancellation remains application-owned, and the shell is restored.
 
-The initial inventory build, test, and real Inline PTY journey passed. The pin has 39 pre-existing `node(no-sync)` warnings; they are recorded baseline noise rather than a Runtime failure.
+The committed Stage 2 verifier passes build, tests, installed-package accept and cancel journeys, exact flush-before-unmount behavior, and terminal restoration. The pin's 39 pre-existing `node(no-sync)` warnings remain recorded baseline noise rather than a Runtime failure.
 
 ### machud monitor
 
@@ -154,7 +154,7 @@ CI=false FORCE_COLOR=3 node dist/machud.mjs
 - PTY script: launch at 120x40, verify fixed Fullscreen layout and responsive graph geometry, drive one live theme change, press `q`, and inspect restoration.
 - Assertions: 30 component tests and 108 canonical verification assertions pass; only public root Runtime imports appear in product code; alternate screen, cursor, paste, termios, and shell input restore exactly.
 
-The initial inventory passed those gates. The pin's 31 formatter failures are pre-existing and `vp check` is not a usable pin-level gate. Old registry `@vue-tui/cli` and `@vue-tui/testing` packages are dev-only and do not supply runtime-owned product behavior; final proof packs Runtime and any repository integration package actually used by the journey.
+The committed Stage 2 verifier passes all 30 component tests, the 108-assertion canonical verification floor, the 120-column snapshot, a live 120x40 to 100x40 geometry transition, a visible theme change, quit, alternate-screen restoration, terminal state restoration, and post-exit shell input. The pin's 31 formatter failures are pre-existing and `vp check` is not a usable pin-level gate. Old registry `@vue-tui/cli` and `@vue-tui/testing` packages are dev-only and do not supply runtime-owned product behavior; final proof packs Runtime and any repository integration package actually used by the journey.
 
 ## Fixed journeys and workloads
 
@@ -243,3 +243,15 @@ Stop before changing Runtime ownership, package direction, the Inline/Fullscreen
 ## Stage 1 exit
 
 Stage 1 exits when this record, the records map, roadmap, autonomous plan, and vault trackers agree and are committed. The work list is finite: R1 through R17. Later discovery alone does not expand it; only a reproducible generic Runtime failure from J1 through J10 may add a row.
+
+## Stage 2 exit
+
+Stage 2 is complete locally in `9dec733`, `2d0a407`, and `b762be9`. The committed verifier applies checksum-pinned patches to the first-party coding agent at `3e44c9a`, `mo` at `6bea467a`, and `machud` at `a51a6853`, installs freshly packed public packages, rejects ordinary `/internal` and source-tree product imports, and passes each declared build and real-PTY journey. The final Runtime tarball used by all four verifiers has SHA-256 `7a7c38f64fff43223d5fbadf662504482f8bd2268026c3c103c185acad166456`; the coding-agent, `mo`, and `machud` patch checksums are respectively `472a0704d3fef2c2d0847452b0baab7fb501a4473d7a312074029b0557108ba6`, `fa624015de1de3c563d9c95f55332f1c618b2ad238692e9e687bb2b997628751`, and `196c404c697712c5c8898a8426cc1a977c7a974d6a881141461c476277b336ce`.
+
+J8-A and J8-B pass all ignored and piped stdin combinations for input-free and active-input children, with three repetitions per combination. Input-free children emit their final document exactly once and exit; active semantic input reports `stdin-not-tty` before raw, listener, cursor, alternate-screen, paste, Kitty, mouse, synchronized-output, or child-output mutation. No fake TTY, byte forwarder, or nested-PTY policy was added, so R9 is closed by packed evidence.
+
+The fixed consumer journeys exposed two generic implementation gaps and one consumer routing error. Runtime now registers `useInput` cleanup before immediate activation can throw, treats the preflight-known unavailable-input exit as an expected silent application failure, and acquires a Fullscreen surface only after input capability preflight while still ordering the surface before any input mode or accepted paint. Reactivating a trapped scope now retains its preferred target until a delayed rendered host attaches, unless a later explicit selection wins. The coding agent assigns approval Enter and Escape to `useFocusScopeInput`, which is the accepted targetless-boundary owner, rather than depending on target attachment timing.
+
+The packed coding-agent, `mo`, `machud`, and fork verifiers pass from the committed artifacts. Image-observed Inline and Fullscreen focus-routing journeys pass modal reopen, target restoration, bracketed paste, normal/alternate buffer ownership, cursor and protocol cleanup, exact termios restoration, and post-exit shell input. Full `vp run ready` and one justified local `CI=true vp run ci` pass at this core lifecycle boundary. No push or GitHub Actions run was triggered.
+
+R2 and R9 are closed. Stage 3 is active because R3 and conditional R5 still leave materially different honest public contracts: Runtime ownership and the declarative scoped-slot need are established, but the supported entry, public name, and collection identity policy are not uniquely determined by the evidence. Those choices require Yunfei's decision before implementation; the demonstrated pre-handoff history-loss bug in R4 does not require a separate decision once the public contract is selected.
