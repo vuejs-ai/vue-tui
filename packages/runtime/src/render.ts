@@ -131,6 +131,19 @@ import {
   processSuspensionHost,
   type SuspensionHost,
 } from "./process-suspension.ts";
+import {
+  createInternalClipboardService,
+  normalizeClipboardTransport,
+  type ClipboardTransport,
+  type InternalClipboardService,
+} from "./clipboard/clipboard-service.ts";
+import { InternalClipboardServiceKey } from "./clipboard/context.ts";
+import {
+  createInternalTextSelectionController,
+  type InternalTextSelectionController,
+} from "./selection/selection-controller.ts";
+import { InternalTextSelectionControllerKey } from "./selection/context.ts";
+import type { InternalSelectionPaintFrame } from "./selection/selection-paint.ts";
 
 export interface MountOptions {
   stdout?: NodeJS.WriteStream;
@@ -204,6 +217,12 @@ export interface MountOptions {
    * @see https://sw.kovidgoyal.net/kitty/keyboard-protocol/
    */
   kittyKeyboard?: KittyKeyboardOptions;
+  /**
+   * Configure the one clipboard transport owned by this mounted application.
+   * OSC 52 can report only that a request was written; a custom transport may
+   * report a confirmed copy.
+   */
+  clipboard?: ClipboardTransport;
 }
 
 // Extends `App<TuiNode>` (the renderer's real app type) so `TuiApp` inherits Vue's full app
@@ -324,6 +343,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedTestInputHostDetach: (() => void) | null = null;
   let mountedFocusController: InternalFocusController | null = null;
   let mountedCaretController: InternalCaretController | null = null;
+  let mountedClipboard: InternalClipboardService | null = null;
+  let mountedTextSelection: InternalTextSelectionController | null = null;
   let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
@@ -791,6 +812,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedFocusController = null;
         runBestEffort(() => focusController.dispose());
       }
+      if (mountedClipboard) {
+        const clipboard = mountedClipboard;
+        mountedClipboard = null;
+        runBestEffort(() => clipboard.dispose());
+      }
+      if (mountedTextSelection) {
+        const textSelection = mountedTextSelection;
+        mountedTextSelection = null;
+        runBestEffort(() => textSelection.dispose());
+      }
       // Dispose the animation scheduler after Vue unmount: each useAnimation's
       // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
       if (mountedAnimationScheduler) {
@@ -1016,6 +1047,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const liveUpdatesOverride = validateLiveUpdates(
       (options as { readonly liveUpdates?: unknown }).liveUpdates,
     );
+    const clipboardTransport = normalizeClipboardTransport(
+      (options as { readonly clipboard?: unknown }).clipboard,
+    );
     const stdout = options.stdout ?? process.stdout;
     const stdin = options.stdin ?? process.stdin;
     const stderr = options.stderr ?? process.stderr;
@@ -1205,6 +1239,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
         const writer = mountedWriter;
         mountedCaretController?.setOutputAvailable(false, { surfaceReleased: true });
+        mountedTextSelection?.setSurfaceAvailable(false, { suspended: true });
         if (fixedFullscreenSurface) {
           mountedGeometry?.setSurfaceAvailable(false);
           if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
@@ -1261,6 +1296,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runLifecycleTransaction(() => {
           terminalSuspended = true;
           terminalResumeInProgress = false;
+          runSuspensionStep(() => mountedClipboard?.suspend());
           runSuspensionStep(() => mountedScheduler?.cancel());
           runSuspensionStep(() => mountedKittyController?.suspend(true));
           runSuspensionStep(() => mountedMouseController?.suspend());
@@ -1344,6 +1380,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               try {
                 mountedMouseController?.resume();
                 mountedGeometry?.setSurfaceAvailable(!isScreenReaderEnabled);
+                mountedTextSelection?.setSurfaceAvailable(
+                  fixedFullscreenSurface && !isScreenReaderEnabled,
+                );
                 applyPreparedSurface?.();
               } finally {
                 terminalResumePainting = false;
@@ -1374,6 +1413,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 return;
               }
               terminalSuspended = false;
+              mountedClipboard?.resume();
               suspendedFullscreenSurface = false;
               suspendedInlineSurface = false;
               resizeHandledGeneration = Math.max(
@@ -1592,6 +1632,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writeToStdout,
         writeToStderr,
       };
+      const clipboard = createInternalClipboardService({
+        transport: clipboardTransport,
+        osc52Available:
+          dynamicUpdatesLive &&
+          surface.session.output.destination === "terminal" &&
+          surface.session.output.presentation === "visual",
+        osc52UnavailableReason: isScreenReaderEnabled ? "screen-reader" : "output-not-terminal",
+        writeOsc52(text) {
+          runLifecycleTransaction(() => {
+            if (teardownStarted) throw new Error("clipboard transport is disposed");
+            if (terminalSuspended) throw new Error("clipboard transport is suspended");
+            const payload = Buffer.from(text, "utf8").toString("base64");
+            stdout.write(`\x1b]52;c;${payload}\x07`);
+          });
+        },
+      });
+      mountedClipboard = clipboard;
       mountedAppContext = appContext;
       // Reserve the stream only after every mount option and session fact needed
       // above has been read successfully. From this point teardown can always
@@ -1704,6 +1761,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedGeometry = geometry;
         if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
         setInternalGeometryService(appContext, geometry);
+        const textSelection = createInternalTextSelectionController({
+          surfaceAvailable: fixedFullscreenSurface && !isScreenReaderEnabled,
+          unavailableReason: isScreenReaderEnabled ? "screen-reader" : "host-unavailable",
+          requestPaint: () => scheduledCommit(),
+          clipboard: mountedClipboard!,
+        });
+        mountedTextSelection = textSelection;
         const mouseController = fixedFullscreenSurface
           ? createFullscreenMouseController({
               stdin: stdinController,
@@ -1780,6 +1844,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               writer.sync("", { cursor: false });
             });
             mountedGeometry?.invalidateSurface();
+            mountedTextSelection?.invalidateSurface();
             return;
           }
           if (isScreenReaderEnabled) {
@@ -1792,6 +1857,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               frameState.outputHeight = 0;
             });
             mountedGeometry?.invalidateSurface();
+            mountedTextSelection?.invalidateSurface();
             return;
           }
           writer.clear();
@@ -1802,6 +1868,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // while a real commit can paint it again from this owned origin.
           writer.reset({ cursorDirty: false });
           mountedGeometry?.invalidateSurface();
+          mountedTextSelection?.invalidateSurface();
         });
       };
       const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
@@ -2056,11 +2123,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
+        selection?: InternalSelectionPaintFrame,
       ): string {
         if (!isScreenReaderEnabled) {
           const output = paint(tuiRoot, {
             viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
             geometry,
+            selection,
           });
           // The hard paint viewport is the primary guard. Keep a final physical
           // row bound as defense-in-depth for future paint extensions: Inline
@@ -2077,6 +2146,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (terminalSuspended && !terminalResumePainting) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         let geometryFrame: InternalGeometryPaintFrame | undefined;
+        let selectionFrame: InternalSelectionPaintFrame | undefined;
         let caretFrame: InternalPreparedCaretFrame | undefined;
         let mouseFrame: PreparedMouseFrame | undefined;
         try {
@@ -2105,7 +2175,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             );
             try {
               geometryFrame = mountedGeometry?.beginFrame();
-              const frame = renderFrame(w, undefined, geometryFrame);
+              selectionFrame = mountedTextSelection?.beginFrame();
+              const frame = renderFrame(w, undefined, geometryFrame, selectionFrame);
               renderObserver?.onCommit?.({
                 dynamic: frame,
                 staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2119,6 +2190,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 stdout.write(staticOutput);
               }
               geometryFrame?.commit();
+              selectionFrame?.accept();
             } finally {
               restoreLayoutGuards();
             }
@@ -2170,7 +2242,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               : undefined;
             const paintViewportRows = exactViewportRows ?? inlineViewportRows;
             geometryFrame = isScreenReaderEnabled ? undefined : mountedGeometry?.beginFrame();
-            const frame = renderFrame(w, paintViewportRows, geometryFrame);
+            selectionFrame = isScreenReaderEnabled ? undefined : mountedTextSelection?.beginFrame();
+            const frame = renderFrame(w, paintViewportRows, geometryFrame, selectionFrame);
             if (geometryFrame && mountedMouseController) {
               mouseFrame = mountedMouseController.prepareFrame(geometryFrame);
             }
@@ -2198,6 +2271,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 caretFrame!,
               );
               geometryFrame?.commit();
+              selectionFrame?.accept();
               mouseFrame?.accept();
               caretFrame?.accept();
               return;
@@ -2264,6 +2338,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             );
             markBoundaryErrorFrameRendered(frame);
             geometryFrame?.commit();
+            selectionFrame?.accept();
             caretFrame?.accept();
           } finally {
             restoreLayoutGuards();
@@ -2277,6 +2352,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             caretFrame.discard();
           }
           mouseFrame?.discard();
+          selectionFrame?.discard();
           if (
             pendingBoundaryError !== undefined &&
             pendingBoundaryFrameReady === pendingBoundaryError &&
@@ -2291,6 +2367,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         } finally {
           caretFrame?.discard();
           mouseFrame?.discard();
+          selectionFrame?.discard();
           geometryFrame?.discard();
           leaveLifecycleTransaction();
         }
@@ -2327,6 +2404,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(AppContextKey, appContext);
       baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
       baseApp.provide(InternalCaretControllerKey, mountedCaretController!);
+      baseApp.provide(InternalClipboardServiceKey, mountedClipboard!);
+      baseApp.provide(InternalTextSelectionControllerKey, mountedTextSelection!);
       baseApp.provide(StdinContextKey, stdinController);
       // useAnimation coalesces ticks within this same window so committed deltas
       // accumulate to the real wall-clock elapsed time (the value committed to

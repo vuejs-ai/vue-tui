@@ -11,6 +11,7 @@ import {
   type RenderResult,
   type ScreenSnapshot,
   type TestHost,
+  type TestClipboardBehavior,
   type TestMouse,
   type TestMouseButtonOptions,
   type TestMouseModifiers,
@@ -33,6 +34,7 @@ const inlineTtyOptions: RenderOptions = {
   },
 };
 const fullscreenOptions: RenderOptions = { host: { mode: "fullscreen" } };
+const clipboardOptions: RenderOptions = { host: { clipboard: "copied" } };
 const transcriptStreamOptions: RenderOptions = {
   host: {
     mode: "fullscreen",
@@ -46,6 +48,7 @@ const transcriptStreamOptions: RenderOptions = {
 expectTypeOf(defaultOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(inlineTtyOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(fullscreenOptions).toMatchTypeOf<RenderOptions>();
+expectTypeOf(clipboardOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(transcriptStreamOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf<NonNullable<RenderOptions["host"]>>().toEqualTypeOf<TestHost>();
 
@@ -68,6 +71,8 @@ const invalidUpdates: RenderOptions = { host: { updates: "sometimes" } };
 const invalidStdin: RenderOptions = { host: { stdin: "pipe" } };
 // @ts-expect-error Only TTY and stream output hosts are modeled.
 const invalidStdout: RenderOptions = { host: { stdout: "file" } };
+// @ts-expect-error Clipboard behavior is a finite deterministic result.
+const invalidClipboard: RenderOptions = { host: { clipboard: "system" } };
 void removedLiveUpdates;
 void removedDebug;
 void removedExitOnCtrlC;
@@ -76,6 +81,11 @@ void invalidPresentation;
 void invalidUpdates;
 void invalidStdin;
 void invalidStdout;
+void invalidClipboard;
+
+expectTypeOf<TestClipboardBehavior>().toEqualTypeOf<
+  "copied" | "requested" | "unavailable" | "rejected"
+>();
 
 declare const result: RenderResult;
 declare const frame: ContentFrame;
@@ -93,6 +103,7 @@ expectTypeOf(result.mouse).toEqualTypeOf<TestMouse>();
 expectTypeOf(result.mouse.reporting).toEqualTypeOf<TestMouseReportingState>();
 expectTypeOf(result.mouse.reporting.current).toEqualTypeOf<TestMouseReportingLevel>();
 expectTypeOf(result.mouse.reporting.history).toEqualTypeOf<readonly TestMouseReportingLevel[]>();
+expectTypeOf(result.clipboard.requests).toEqualTypeOf<readonly string[]>();
 expectTypeOf<TestMouse["down"]>().toEqualTypeOf<
   (point: CellPoint, options?: TestMouseButtonOptions) => Promise<void>
 >();
@@ -135,6 +146,8 @@ result.terminal.rawMode.current = false;
 result.mouse.reporting.current = "none";
 // @ts-expect-error Mouse-reporting history is a readonly live observation.
 result.mouse.reporting.history.push("button");
+// @ts-expect-error Clipboard requests are readonly observations.
+result.clipboard.requests.push("replacement");
 // @ts-expect-error TestMouse deliberately does not manufacture production clicks.
 result.mouse.click({ x: 0, y: 0 });
 // @ts-expect-error Physical test input uses the runtime's public mouse-button vocabulary.

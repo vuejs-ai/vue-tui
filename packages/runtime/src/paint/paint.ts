@@ -8,6 +8,7 @@ import {
   tokenize,
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
+import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
 import { applyChalk, applyColor } from "./text-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
@@ -41,6 +42,12 @@ import {
   deriveTextGeometry,
   virtualTextDescendants,
 } from "../geometry/paint-geometry.ts";
+import type {
+  InternalSelectionPaintFrame,
+  InternalSelectionPaintTarget,
+  InternalSelectionTraceCell,
+  InternalTextSelectionTrace,
+} from "../selection/selection-paint.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -67,6 +74,17 @@ interface WriteOp {
   y: number;
   lines: string[];
   transformers: Transformer[];
+  selection: readonly OutputSelectionTrace[];
+}
+
+interface OutputSelectionTrace {
+  readonly target: InternalSelectionPaintTarget;
+  readonly trace: InternalTextSelectionTrace;
+}
+
+interface OutputSelectionProvenance {
+  readonly target: InternalSelectionPaintTarget;
+  readonly cell: InternalSelectionTraceCell;
 }
 
 interface ClipOp {
@@ -80,6 +98,53 @@ interface UnclipOp {
 
 type Op = WriteOp | ClipOp | UnclipOp;
 
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function styledGraphemesFromAnsi(line: string): StyledChar[] {
+  if (!hasAnsiControlCharacters(line)) return styledCharsFromTokens(tokenize(line));
+
+  const tokens = tokenizeAnsi(line).flatMap((token) => {
+    if (token.type === "text" || token.type === "csi" || token.type === "osc") {
+      return tokenize(token.value);
+    }
+    return [];
+  });
+  const characters = styledCharsFromTokens(tokens);
+  if (characters.length < 2) return characters;
+
+  const plain = characters.map((character) => character.value).join("");
+  const graphemes = [...graphemeSegmenter.segment(plain)];
+  if (
+    graphemes.length === characters.length &&
+    graphemes.every((part, index) => part.segment === characters[index]!.value)
+  ) {
+    return characters;
+  }
+
+  const result: StyledChar[] = [];
+  let characterIndex = 0;
+  let characterOffset = 0;
+  for (const part of graphemes) {
+    while (
+      characterIndex < characters.length - 1 &&
+      characterOffset + characters[characterIndex]!.value.length <= part.index
+    ) {
+      characterOffset += characters[characterIndex]!.value.length;
+      characterIndex++;
+    }
+    const leading = characters[characterIndex]!;
+    // A terminal cell cannot carry independent styles for code points inside
+    // one grapheme. Keep the leading code point's style and preserve the whole
+    // grapheme instead of dropping a combining or joining code point at an ANSI boundary.
+    result.push({
+      ...leading,
+      value: part.segment,
+      fullWidth: stringWidth(part.segment) > 1,
+    });
+  }
+  return result;
+}
+
 class OutputCaches {
   private widths = new Map<string, number>();
   private blockWidths = new Map<string, number>();
@@ -88,7 +153,7 @@ class OutputCaches {
   getStyledChars(line: string): StyledChar[] {
     let cached = this.styledCharsCache.get(line);
     if (cached === undefined) {
-      cached = styledCharsFromTokens(tokenize(line));
+      cached = styledGraphemesFromAnsi(line);
       this.styledCharsCache.set(line, cached);
     }
     return cached;
@@ -134,15 +199,39 @@ class Output {
   private ops: Op[] = [];
   private readonly caches: OutputCaches = new OutputCaches();
   private readonly hardClip: ClipRect | undefined;
+  private readonly selectionFrame: InternalSelectionPaintFrame | undefined;
+  private readonly selectionTraces = new Map<object, OutputSelectionTrace>();
 
-  constructor(width: number, height: number, clipToBounds = false) {
+  constructor(
+    width: number,
+    height: number,
+    clipToBounds = false,
+    selectionFrame?: InternalSelectionPaintFrame,
+  ) {
     this.width = width;
     this.height = height;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
+    this.selectionFrame = selectionFrame;
   }
 
-  write(x: number, y: number, lines: string[], transformers: Transformer[]): void {
-    this.ops.push({ type: "write", x, y, lines, transformers });
+  recordSelection(target: InternalSelectionPaintTarget, trace: InternalTextSelectionTrace): void {
+    const entry = { target, trace };
+    this.selectionTraces.set(target.key, entry);
+    this.selectionFrame?.record(target, trace);
+  }
+
+  recordUnavailableSelection(target: InternalSelectionPaintTarget): void {
+    this.selectionFrame?.record(target, null);
+  }
+
+  write(
+    x: number,
+    y: number,
+    lines: string[],
+    transformers: Transformer[],
+    selection: readonly OutputSelectionTrace[] = [],
+  ): void {
+    this.ops.push({ type: "write", x, y, lines, transformers, selection });
   }
 
   clip(rect: ClipRect): void {
@@ -163,6 +252,24 @@ class Output {
       }
       output.push(row);
     }
+    const provenance: Array<Array<OutputSelectionProvenance | undefined>> = Array.from(
+      { length: this.height },
+      () => Array.from<OutputSelectionProvenance | undefined>({ length: this.width }),
+    );
+
+    const clearProvenance = (x: number, y: number): void => {
+      const row = provenance[y];
+      if (!row || x < 0 || x >= this.width) return;
+      const previous = row[x];
+      if (!previous) {
+        row[x] = undefined;
+        return;
+      }
+      for (let offset = 0; offset < previous.cell.width; offset++) {
+        const candidateX: number = previous.cell.x + offset;
+        if (row[candidateX] === previous) row[candidateX] = undefined;
+      }
+    };
 
     const clips: ClipRect[] = [];
 
@@ -178,6 +285,12 @@ class Output {
 
       // op.type === "write"
       const { transformers } = op;
+      const selectionBySurface = new Map<string, OutputSelectionProvenance>();
+      for (const entry of op.selection) {
+        for (const cell of entry.trace.cells) {
+          selectionBySurface.set(`${cell.x}:${cell.y}`, { target: entry.target, cell });
+        }
+      }
       let { x, y } = op;
       let lines = op.lines;
 
@@ -313,6 +426,8 @@ class Output {
           offsetX > 0 &&
           this.caches.getStringWidth(currentLine[offsetX - 1]?.value ?? "") > 1
         ) {
+          clearProvenance(offsetX - 1, y + offsetY);
+          clearProvenance(offsetX, y + offsetY);
           currentLine[offsetX - 1] = spaceCell;
         }
 
@@ -342,7 +457,30 @@ class Output {
             continue;
           }
 
+          for (let i = 0; i < characterWidth; i++) {
+            clearProvenance(offsetX + i, y + offsetY);
+          }
+
           currentLine[offsetX] = character;
+
+          const source = selectionBySurface.get(`${offsetX}:${y + offsetY}`);
+          const exactSource =
+            source &&
+            source.cell.width === characterWidth &&
+            source.cell.text.normalize("NFC") === character.value.normalize("NFC")
+              ? source
+              : undefined;
+          if (
+            exactSource &&
+            y + offsetY >= 0 &&
+            y + offsetY < this.height &&
+            offsetX >= 0 &&
+            offsetX + characterWidth <= this.width
+          ) {
+            for (let i = 0; i < characterWidth; i++) {
+              provenance[y + offsetY]![offsetX + i] = exactSource;
+            }
+          }
 
           if (characterWidth > 1) {
             for (let i = 1; i < characterWidth; i++) {
@@ -359,6 +497,7 @@ class Output {
         }
 
         if (currentLine[offsetX]?.value === "") {
+          clearProvenance(offsetX, y + offsetY);
           currentLine[offsetX] = spaceCell;
         }
 
@@ -366,10 +505,96 @@ class Output {
       }
     }
 
+    const baselineLines = output.map((line) =>
+      styledCharsToString(line.filter((item) => item !== undefined)).trimEnd(),
+    );
+    const baselineWidths = baselineLines.map((line) => this.caches.getStringWidth(line));
+    const highlighted = new Set<OutputSelectionProvenance>();
+    for (const entry of this.selectionTraces.values()) {
+      const visible = new Set<number>();
+      for (const cell of entry.trace.cells) {
+        let complete = true;
+        let first: OutputSelectionProvenance | undefined;
+        const row = provenance[cell.y];
+        for (let offset = 0; offset < cell.width; offset++) {
+          const candidate = row?.[cell.x + offset];
+          if (
+            !candidate ||
+            candidate.target.key !== entry.target.key ||
+            candidate.cell.id !== cell.id ||
+            (first && candidate !== first)
+          ) {
+            complete = false;
+            break;
+          }
+          first ??= candidate;
+        }
+        if (
+          complete &&
+          first &&
+          cell.x >= 0 &&
+          cell.x + cell.width <= (baselineWidths[cell.y] ?? 0)
+        ) {
+          visible.add(cell.id);
+        }
+      }
+      const snapshot = {
+        text: entry.trace.text,
+        boundaries: entry.trace.boundaries,
+        stops: entry.trace.stops,
+        cells: entry.trace.cells.map((cell) => ({
+          start: cell.start,
+          end: cell.end,
+          x: cell.x,
+          y: cell.y,
+          width: cell.width,
+          visible: visible.has(cell.id),
+        })),
+      };
+      const range = this.selectionFrame?.prepare(entry.target, snapshot) ?? null;
+      if (!range) continue;
+      const start = Math.min(range.anchor, range.extent);
+      const end = Math.max(range.anchor, range.extent);
+      for (const row of provenance) {
+        for (const candidate of row) {
+          if (
+            candidate?.target.key === entry.target.key &&
+            visible.has(candidate.cell.id) &&
+            candidate.cell.start >= start &&
+            candidate.cell.end <= end
+          ) {
+            highlighted.add(candidate);
+          }
+        }
+      }
+    }
+
+    const inverseCode = Object.freeze({
+      type: "ansi" as const,
+      code: "\x1b[7m",
+      endCode: "\x1b[27m",
+    });
+    const highlightedRows = new Set<number>();
+    for (let y = 0; y < provenance.length; y++) {
+      for (let x = 0; x < provenance[y]!.length; x++) {
+        const candidate = provenance[y]![x];
+        if (!candidate || !highlighted.has(candidate)) continue;
+        const character = output[y]?.[x];
+        if (!character) continue;
+        const inverseIndex = character.styles.findIndex((style) => style.code === inverseCode.code);
+        const styles = [...character.styles];
+        if (inverseIndex >= 0) styles.splice(inverseIndex, 1);
+        else styles.push(inverseCode);
+        output[y]![x] = { ...character, styles };
+        highlightedRows.add(y);
+      }
+    }
+
     const generatedOutput = output
-      .map((line) => {
-        const lineWithoutEmptyItems = line.filter((item) => item !== undefined);
-        return styledCharsToString(lineWithoutEmptyItems).trimEnd();
+      .map((line, row) => {
+        if (!highlightedRows.has(row)) return baselineLines[row]!;
+        const emittedWidth = baselineWidths[row]!;
+        return emittedWidth === 0 ? "" : styledCharsToString(line.slice(0, emittedWidth));
       })
       .join("\n");
 
@@ -808,6 +1033,8 @@ function createTopTextGeometry(input: {
 export interface PaintOptions {
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: InternalGeometryPaintFrame;
+  /** Private frame-local selectable-text collector. Publication follows a successful write. */
+  readonly selection?: InternalSelectionPaintFrame;
   /**
    * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
    * rendering uses this to keep off-screen layout from wrapping or scrolling
@@ -875,9 +1102,9 @@ export function paint(root: TuiNode, options: PaintOptions = {}): string {
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
-  const out = new Output(width, height, options.viewport !== undefined);
+  const out = new Output(width, height, options.viewport !== undefined, options.selection);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry);
+  paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry, options.selection);
   return out.get().output;
 }
 
@@ -890,6 +1117,7 @@ function paintNode(
   inheritedBg?: string,
   clip?: HitRect,
   geometry?: InternalGeometryPaintFrame,
+  selection?: InternalSelectionPaintFrame,
 ): void {
   // Geometry is demand-driven. Once no observed target exists in this subtree,
   // keep ordinary paint on its pre-geometry path: in particular, a large Text
@@ -911,7 +1139,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, x0, y0, transformers, undefined, clip, geometry);
+        paintNode(child, output, x0, y0, transformers, undefined, clip, geometry, selection);
       }
       return;
     }
@@ -1007,7 +1235,7 @@ function paintNode(
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
           if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
+            paintNode(child, output, x, y, transformers, childBg, childClip, geometry, selection);
           } else {
             recordZeroContentGeometry(child, x, y, geometry);
           }
@@ -1017,7 +1245,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
+        paintNode(child, output, x, y, transformers, childBg, childClip, geometry, selection);
       }
 
       if (clipped) output.unclip();
@@ -1044,7 +1272,9 @@ function paintNode(
       // fast-path returns it verbatim.
       const wrapWidth = Math.floor(layout.width);
       const wrapped = wrapText(text, wrapWidth, node.props.wrap ?? "wrap");
-      if (geometry) {
+      const selectionTargets = selection?.targetsFor(node) ?? [];
+      const outputSelection: OutputSelectionTrace[] = [];
+      if (geometry || selectionTargets.length > 0) {
         const traced = deriveTextGeometry({
           node,
           renderedText: text,
@@ -1054,21 +1284,33 @@ function paintNode(
           surfaceOrigin: { x, y },
           clip,
           provenanceAvailable: transformers.length === 0,
+          selectionTargets,
         });
-        geometry.record(
-          node,
-          transformers.length > 0
-            ? { status: "unavailable" }
-            : createTopTextGeometry({
-                parent: { x: layout.left, y: layout.top, width: w, height: h },
-                surface: { x, y, width: w, height: h },
-                clip,
-                caretSlots: traced.topCaretSlots,
-                fragments: traced.topFragments,
-              }),
-        );
-        for (const [target, targetGeometry] of traced.virtual) {
-          geometry.record(target, targetGeometry);
+        if (geometry) {
+          geometry.record(
+            node,
+            transformers.length > 0
+              ? { status: "unavailable" }
+              : createTopTextGeometry({
+                  parent: { x: layout.left, y: layout.top, width: w, height: h },
+                  surface: { x, y, width: w, height: h },
+                  clip,
+                  caretSlots: traced.topCaretSlots,
+                  fragments: traced.topFragments,
+                }),
+          );
+          for (const [target, targetGeometry] of traced.virtual) {
+            geometry.record(target, targetGeometry);
+          }
+        }
+        for (const target of selectionTargets) {
+          const trace = traced.selection.get(target.key) ?? null;
+          if (trace) {
+            output.recordSelection(target, trace);
+            outputSelection.push({ target, trace });
+          } else {
+            output.recordUnavailableSelection(target);
+          }
         }
       }
       // Skip writing empty text — avoids applying line transformers to empty
@@ -1095,7 +1337,7 @@ function paintNode(
           }
         }
       }
-      output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
+      output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers, outputSelection);
       return;
     }
     case "tui-static": {
@@ -1155,7 +1397,7 @@ function paintNode(
       // — recurse so the child <Text>/<Box> lays out and paints normally, with
       // the transform pushed onto the line-transformers.
       for (const child of node.children) {
-        paintNode(child, output, x, y, next, inheritedBg, clip, geometry);
+        paintNode(child, output, x, y, next, inheritedBg, clip, geometry, selection);
       }
       return;
     }

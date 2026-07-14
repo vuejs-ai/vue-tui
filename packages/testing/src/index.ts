@@ -6,6 +6,7 @@ export {
   type RenderResult,
   type Terminal,
   type TestHost,
+  type TestClipboardBehavior,
   type TestRenderSession,
 } from "./render.ts";
 export type { ScreenSnapshot } from "./emulator.ts";

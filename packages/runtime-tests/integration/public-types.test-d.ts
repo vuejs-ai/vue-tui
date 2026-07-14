@@ -20,6 +20,7 @@ import {
 import {
   useApp,
   useCaret,
+  useClipboard,
   useElementGeometry,
   useExternalInput,
   useFocus,
@@ -41,6 +42,12 @@ import type {
   CaretState,
   CellPoint,
   CellRect,
+  ClipboardAvailability,
+  ClipboardTransport,
+  ClipboardTransportResult,
+  ClipboardUnavailableReason,
+  ClipboardWriteResult,
+  CustomClipboardTransport,
   ElementGeometry,
   ElementGeometryFragment,
   ElementTarget,
@@ -58,6 +65,7 @@ import type {
   StaticStyle,
   TransformProps,
   NewlineProps,
+  Osc52ClipboardTransport,
   SpacerProps,
   MountOptions,
   TuiInputEvent,
@@ -66,6 +74,7 @@ import type {
   TuiInputSource,
   UseCaretOptions,
   UseCaretReturn,
+  UseClipboardReturn,
   UseElementGeometryReturn,
   UseFocusManagerReturn,
   UseFocusOptions,
@@ -86,7 +95,7 @@ import type {
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
-import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
+import { useMouseDrag, useMouseEvent, useTextSelection } from "@vue-tui/runtime/fullscreen";
 import type {
   CellDelta,
   MouseButton,
@@ -98,17 +107,33 @@ import type {
   TuiMouseDragEvent,
   TuiMouseEventMap,
   TuiMouseWheelEvent,
+  TextSelectionCommands,
+  TextSelectionCopyResult,
+  TextSelectionMove,
+  TextSelectionRange,
+  TextSelectionState,
+  TextSelectionUnavailableReason,
   UseMouseDragOptions,
   UseMouseDragReturn,
   UseMouseEventOptions,
+  UseTextSelectionOptions,
 } from "@vue-tui/runtime/fullscreen";
 
 const defaultMountOptions: MountOptions = {};
 const inlineMountOptions: MountOptions = { mode: "inline", liveUpdates: false };
 const fullscreenMountOptions: MountOptions = { mode: "fullscreen", liveUpdates: true };
+const customClipboard: CustomClipboardTransport = {
+  kind: "custom",
+  writeText: async () => ({ status: "copied" }),
+};
+const osc52Clipboard: Osc52ClipboardTransport = { kind: "osc52" };
+const clipboardMountOptions: MountOptions = { clipboard: customClipboard };
+const osc52MountOptions: MountOptions = { clipboard: osc52Clipboard };
 expectTypeOf(defaultMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(inlineMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(fullscreenMountOptions).toMatchTypeOf<MountOptions>();
+expectTypeOf(clipboardMountOptions).toMatchTypeOf<MountOptions>();
+expectTypeOf(osc52MountOptions).toMatchTypeOf<MountOptions>();
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -126,6 +151,10 @@ const removedExitOnCtrlCOption: MountOptions = { exitOnCtrlC: false };
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error liveUpdates is a boolean override.
 const invalidLiveUpdatesOption: MountOptions = { liveUpdates: "yes" };
+// @ts-expect-error A custom transport must provide writeText.
+const invalidCustomClipboardOption: MountOptions = { clipboard: { kind: "custom" } };
+// @ts-expect-error Clipboard transport kinds are finite.
+const invalidClipboardKindOption: MountOptions = { clipboard: { kind: "platform" } };
 void removedFullscreenOption;
 void removedAlternateScreenOption;
 void removedInteractiveOption;
@@ -134,6 +163,121 @@ void removedRawModeOption;
 void removedExitOnCtrlCOption;
 void invalidModeOption;
 void invalidLiveUpdatesOption;
+void invalidCustomClipboardOption;
+void invalidClipboardKindOption;
+
+expectTypeOf<ClipboardTransport>().toEqualTypeOf<
+  CustomClipboardTransport | Osc52ClipboardTransport
+>();
+expectTypeOf<ClipboardTransportResult>().toEqualTypeOf<
+  | { readonly status: "copied" }
+  | { readonly status: "requested" }
+  | { readonly status: "unavailable"; readonly reason?: string }
+  | { readonly status: "rejected"; readonly cause?: unknown }
+>();
+expectTypeOf<ClipboardUnavailableReason>().toEqualTypeOf<
+  | "not-configured"
+  | "output-not-terminal"
+  | "screen-reader"
+  | "suspended"
+  | "disposed"
+  | "string-host"
+  | "transport-unavailable"
+>();
+expectTypeOf<ClipboardAvailability>().toEqualTypeOf<
+  | { readonly status: "available"; readonly transport: "custom" | "osc52" }
+  | { readonly status: "unavailable"; readonly reason: ClipboardUnavailableReason }
+>();
+expectTypeOf<ClipboardWriteResult>().toEqualTypeOf<
+  | { readonly status: "copied"; readonly text: string }
+  | { readonly status: "requested"; readonly text: string }
+  | {
+      readonly status: "unavailable";
+      readonly text: string;
+      readonly reason: ClipboardUnavailableReason;
+      readonly detail?: string;
+    }
+  | { readonly status: "rejected"; readonly text: string; readonly cause: unknown }
+>();
+expectTypeOf<ReturnType<typeof useClipboard>>().toEqualTypeOf<UseClipboardReturn>();
+expectTypeOf<UseClipboardReturn>().toEqualTypeOf<{
+  readonly availability: Readonly<ShallowRef<ClipboardAvailability>>;
+  readonly writeText: (text: string) => Promise<ClipboardWriteResult>;
+}>();
+declare const clipboardProjection: UseClipboardReturn;
+// @ts-expect-error Clipboard availability is renderer-owned and readonly.
+clipboardProjection.availability.value = { status: "unavailable", reason: "disposed" };
+// @ts-expect-error Clipboard payloads are exact strings.
+void clipboardProjection.writeText(new Uint8Array());
+
+expectTypeOf<TextSelectionMove>().toEqualTypeOf<
+  | "backward"
+  | "forward"
+  | "up"
+  | "down"
+  | "line-start"
+  | "line-end"
+  | "document-start"
+  | "document-end"
+>();
+expectTypeOf<TextSelectionRange>().toEqualTypeOf<{
+  readonly anchor: number;
+  readonly extent: number;
+  readonly direction: "forward" | "backward";
+  readonly collapsed: boolean;
+}>();
+expectTypeOf<TextSelectionUnavailableReason>().toEqualTypeOf<
+  "host-unavailable" | "screen-reader" | "string-host" | "mapping-unavailable"
+>();
+expectTypeOf<TextSelectionState>().toEqualTypeOf<
+  | { readonly status: "inactive" | "pending"; readonly range: null; readonly selectedText: "" }
+  | {
+      readonly status: "unavailable";
+      readonly reason: TextSelectionUnavailableReason;
+      readonly range: null;
+      readonly selectedText: "";
+    }
+  | {
+      readonly status: "ready" | "suspended";
+      readonly text: string;
+      readonly range: TextSelectionRange | null;
+      readonly selectedText: string;
+    }
+>();
+expectTypeOf<TextSelectionCopyResult>().toEqualTypeOf<
+  { readonly status: "empty" } | ClipboardWriteResult
+>();
+expectTypeOf<UseTextSelectionOptions>().toEqualTypeOf<{
+  readonly isActive?: MaybeRefOrGetter<boolean>;
+  readonly pointer?: MaybeRefOrGetter<boolean>;
+}>();
+expectTypeOf<Parameters<typeof useTextSelection>>().toEqualTypeOf<
+  [target: ElementTarget, options?: UseTextSelectionOptions]
+>();
+expectTypeOf<ReturnType<typeof useTextSelection>>().toEqualTypeOf<TextSelectionCommands>();
+expectTypeOf<TextSelectionCommands>().toEqualTypeOf<{
+  readonly state: Readonly<ShallowRef<TextSelectionState>>;
+  move(direction: TextSelectionMove, options?: { readonly extend?: boolean }): boolean;
+  selectAll(): boolean;
+  clear(): boolean;
+  copy(): Promise<TextSelectionCopyResult>;
+}>();
+const selectionTarget = shallowRef<ComponentPublicInstance | null>(null);
+const selectionProjection = useTextSelection(selectionTarget, {
+  isActive: shallowRef(true),
+  pointer: () => true,
+});
+selectionProjection.move("forward", { extend: true });
+// @ts-expect-error Selection state is renderer-owned and readonly.
+selectionProjection.state.value = { status: "inactive", range: null, selectedText: "" };
+// @ts-expect-error Movement names are semantic and finite.
+selectionProjection.move("left");
+// @ts-expect-error Pointer activation is boolean.
+useTextSelection(selectionTarget, { pointer: "yes" });
+// @ts-expect-error Fullscreen text selection is not duplicated on the common root.
+export type _UseTextSelectionIsFullscreenOnly = typeof import("@vue-tui/runtime").useTextSelection;
+// @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
+export type _UseClipboardIsCommonOnly = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
 
 // Prop types carry their component's real, declared props.
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<

@@ -1,10 +1,10 @@
 # Fullscreen targeted pointer
 
-> **Status:** selected unstamped F6 public contract, implemented and complete on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, full local repository gates, and a direct native macOS Terminal observation agree with this record. F6 and the dependent F7 Scroll composition foundation are Done; F8 is Active. No VOUCHED stamp changed. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
+> **Status:** selected unstamped F6 public contract, implemented and complete on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, full local repository gates, and a direct native macOS Terminal observation agree with this record. F6, F7 Scroll composition, and F8 selection plus clipboard are Done. No VOUCHED stamp changed. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
 
 ## Product boundary
 
-F6 supplies renderer-targeted mouse behavior for an effective visual Fullscreen terminal. It does not make common visual components interactive, manufacture a physical origin for Inline, provide a terminal-wide raw event stream, or solve application-owned selection and copy.
+F6 supplies renderer-targeted mouse behavior for an effective visual Fullscreen terminal. It does not make common visual components interactive, manufacture a physical origin for Inline, provide a terminal-wide raw event stream, or itself solve application-owned selection and copy. F8 now owns that separate selected contract in [Fullscreen text selection and clipboard](./fullscreen-selection-and-copy.md).
 
 The layers remain separate:
 
@@ -229,7 +229,7 @@ Pointer hit generations follow the F5 frame transaction. Paint prepares exact re
 | Deterministic modeled Fullscreen host                                                                                 | Attach to modeled visible geometry, expose modeled button/button-motion ownership, and accept parsed physical mouse phases through the public test driver below. |
 | Hidden, zero-size, fully clipped, detached, or not-yet-painted target                                                 | Remain non-hittable and contribute no terminal reporting demand.                                                                                                 |
 
-The Fullscreen subpath plus an active visible hook expresses the targeted-mouse choice; there is no separate authorization, mount flag, or combined availability query. Mouse reporting still redirects ordinary terminal selection and wheel behavior while active, including on the alternate screen. F6 documents and minimizes this interval. F8 owns application selection, copy commands, clipboard capability, and fallback.
+The Fullscreen subpath plus an active visible hook expresses the targeted-mouse choice; there is no separate authorization, mount flag, or combined availability query. Mouse reporting still redirects ordinary terminal selection and wheel behavior while active, including on the alternate screen. F6 documents and minimizes this interval. F8's separate completed [contract](./fullscreen-selection-and-copy.md) owns application selection, copy commands, clipboard capability, and fallback.
 
 ## Deterministic testing surface
 
@@ -336,7 +336,7 @@ F6 closure must prove three vertical journeys in addition to focused mechanics.
 - HMR, suspension, continuation, normal exit, fatal exit, signals, acquisition failure, and cleanup failure restore exact raw, SGR, cursor, screen, listener, ref, and termios ownership.
 - The direct native macOS Terminal observation records that native drag-selection is suppressed and wheel input reaches the application while reporting is active, then native selection and Terminal scrollback return after the final target disappears and after shell restoration; the PTY evidence separately proves control-sequence and termios balance.
 
-Closure required exact root and `/fullscreen` export guards, declaration inspection, Vue 3.4 SFC/TSX consumption under TypeScript 6 with `skipLibCheck: false`, focused unit/integration tests, relevant real PTYs, the repository visual-review loop, `vp run ready`, fresh `CI=true vp run ci`, updated PCR/vault trackers, independent review, and the direct GUI observation above. All gates pass. The GUI run used the built runtime and components and launched the fixture from `packages/runtime-tests/integration/pty/fixtures`, where the workspace-local `tsx` loader resolves. Screenshots were inspected directly for each transition rather than inferring visible behavior from mouse control sequences. F6 did not itself select the later F7 scroll contract; F7 now closes that dependency separately. F8 still owns selection and copy.
+Closure required exact root and `/fullscreen` export guards, declaration inspection, Vue 3.4 SFC/TSX consumption under TypeScript 6 with `skipLibCheck: false`, focused unit/integration tests, relevant real PTYs, the repository visual-review loop, `vp run ready`, fresh `CI=true vp run ci`, updated PCR/vault trackers, independent review, and the direct GUI observation above. All gates pass. The GUI run used the built runtime and components and launched the fixture from `packages/runtime-tests/integration/pty/fixtures`, where the workspace-local `tsx` loader resolves. Screenshots were inspected directly for each transition rather than inferring visible behavior from mouse control sequences. F6 did not itself select the later F7 scroll contract; F7 closes that dependency separately. F8 now closes the separate selection and clipboard contract.
 
 ## Deliberately deferred
 
@@ -345,4 +345,4 @@ Closure required exact root and `/fullscreen` export guards, declaration inspect
 - hover, move-without-button, enter, and leave (`1003`);
 - multi-click count and double-click policy;
 - a terminal-wide parsed mouse stream or embedded-PTY mouse adapter;
-- application selection, copy, OSC 52, and terminal fallback until F8.
+- application selection, copy, OSC 52, and terminal fallback were deferred from F6; completed F8 implements their separate contract.

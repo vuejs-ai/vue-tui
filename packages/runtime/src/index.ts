@@ -12,6 +12,16 @@ import type { NewlineProps } from "./components/newline-props.ts";
 
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
+export { useClipboard, type UseClipboardReturn } from "./composables/useClipboard.ts";
+export type {
+  ClipboardAvailability,
+  ClipboardTransport,
+  ClipboardTransportResult,
+  ClipboardUnavailableReason,
+  ClipboardWriteResult,
+  CustomClipboardTransport,
+  Osc52ClipboardTransport,
+} from "./clipboard/clipboard-service.ts";
 
 // Publish only the stable author-facing constructor shape. Exposing the SFC's
 // generated `DefineComponent` type bakes the build-time Vue patch release's

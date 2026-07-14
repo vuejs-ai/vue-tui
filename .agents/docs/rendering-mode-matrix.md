@@ -30,6 +30,8 @@ elementHitTesting = surface.kind === "fullscreen-terminal";
 
 F6 does not resolve or acquire a blanket mouse path here. After a successful paint, active visible `/fullscreen` registrations on L6 contribute demand; the mouse controller then acquires the minimum xterm-compatible reporting level or fails exactly when managed input or local profile acquisition is unavailable.
 
+F8 likewise does not add a surface resolver input. Active `useTextSelection()` requires L6, derives semantic Text mapping from the successfully displayed paint, and composes optional pointer selection through the F6 demand path. Clipboard remains an independent app service: a custom transport follows its own configured result across live hosts, while OSC 52 is available only for live visual terminal output and never claims terminal acceptance.
+
 `mode` accepts only `"inline"`, `"fullscreen"`, or `undefined`; omission becomes an Inline request. Own `fullscreen`, `alternateScreen`, `interactive`, or `debug` keys fail synchronously, including when their value is `undefined`. `liveUpdates` accepts only a boolean or `undefined`. These checks run before stream getters, stdout ownership, terminal probing, raw mode, listeners, Vue setup, or terminal writes. The removed-key error wins when an old key and invalid `mode` appear together.
 
 `liveUpdates` is an output-cadence request, not a statement that the application can receive input. CI and stdout TTY state only choose its default; an explicit value wins. The session records requested/effective mode, output, dimensions, and structural capabilities separately, and F1.8 exposes its readonly projection through `useRenderSession()`. F3 still owns the public raw-input contract; F1.4 temporarily preserves the prior default input-acquisition timing from the resolved live-update request rather than publishing it as a session fact.
@@ -60,7 +62,7 @@ Deterministic commit observation uses an internal render observer that receives 
 
 An in-place Vue hot update keeps the mounted session and repaints through its existing surface. A Vite full reload runs the registered internal teardown before replacing the app, restoring terminal modes and the alternate screen without settling the old app's exit promise; the newly imported app then acquires its surface again. The target keeps that distinction: a hot update preserves the session, while a full reload must completely release and reacquire terminal ownership.
 
-### Input and hit-map modifier
+### Input, hit-map, selection, and clipboard modifier
 
 stdin is independent of the output surface:
 
@@ -71,6 +73,10 @@ stdin is independent of the output surface:
 | stdin and stdout are TTY, surface is not L6 | F3 semantic input remains available where the host permits it. An active `/fullscreen` mouse composable on effective visual Inline fails immediately instead of acquiring reporting; screen-reader and other expected non-targetable presentations remain inert. |
 | stdin and stdout are TTY, surface is L6     | Visible `/fullscreen` targets use the last successful paint geometry and acquire the minimum xterm-compatible SGR button (`1000 + 1006`) or button-motion (`1002 + 1006`) reporting level.                                                                       |
 | stdin and stdout are TTY, surface is L7     | Keyboard input can remain available, but Fullscreen-targeted mouse stays inert and the renderer reports no element hit-testing capability for the transcript.                                                                                                    |
+
+Fullscreen Text selection follows the same targetable-surface boundary without becoming an input capability. An active registration on visual Inline fails immediately; final, non-terminal, screen-reader, and string surfaces report an explicit unavailable selection state; deterministic Fullscreen uses modeled successful paint and the existing parsed mouse driver. An inactive registration stays inert. Suspension preserves the last accepted range as suspended, and continuation must successfully repaint before it becomes ready again.
+
+Clipboard is orthogonal to the table's stdin facts. An app with no transport reports `not-configured`; a custom transport can serve Inline, Fullscreen, final, non-terminal, or screen-reader live applications and supplies its own result; OSC 52 requires live updates to visual terminal output and otherwise reports `output-not-terminal` or `screen-reader`. The string host accepts no transport and reports `string-host`. Suspension and disposal temporarily or permanently replace the base availability, and queued work rechecks the current state before it starts.
 
 ## Current deterministic and string hosts
 

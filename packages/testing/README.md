@@ -101,16 +101,20 @@ interface TestHost {
   readonly updates?: "live" | "at-teardown";
   readonly stdin?: "tty" | "non-tty";
   readonly stdout?: "tty" | "stream";
+  readonly clipboard?: TestClipboardBehavior;
 }
+
+type TestClipboardBehavior = "copied" | "requested" | "unavailable" | "rejected";
 ```
 
-| Host field     | Default                                      | Meaning                                                      |
-| -------------- | -------------------------------------------- | ------------------------------------------------------------ |
-| `mode`         | `"inline"`                                   | Requested production screen model                            |
-| `presentation` | `"visual"`                                   | Visual renderer or linear screen-reader transcript           |
-| `updates`      | `"live"` for TTY; `"at-teardown"` for stream | Dynamic-output cadence                                       |
-| `stdin`        | `"tty"`                                      | Whether input supports TTY behavior such as raw mode         |
-| `stdout`       | `"tty"`                                      | Whether output can acquire a terminal surface and dimensions |
+| Host field     | Default                                      | Meaning                                                          |
+| -------------- | -------------------------------------------- | ---------------------------------------------------------------- |
+| `mode`         | `"inline"`                                   | Requested production screen model                                |
+| `presentation` | `"visual"`                                   | Visual renderer or linear screen-reader transcript               |
+| `updates`      | `"live"` for TTY; `"at-teardown"` for stream | Dynamic-output cadence                                           |
+| `stdin`        | `"tty"`                                      | Whether input supports TTY behavior such as raw mode             |
+| `stdout`       | `"tty"`                                      | Whether output can acquire a terminal surface and dimensions     |
+| `clipboard`    | —                                            | Modeled custom clipboard result; omission leaves it unconfigured |
 
 These controls model production facts rather than setting unrelated internal booleans. In particular:
 
@@ -118,6 +122,7 @@ These controls model production facts rather than setting unrelated internal boo
 - `updates: "live"` on a stream enables the live stream updater but does not create a stable viewport or terminal hit testing;
 - a Fullscreen screen-reader request resolves to an Inline transcript on the normal screen;
 - `updates: "at-teardown"` uses the final-stream policy even when the underlying output is a TTY.
+- `clipboard` models one app-owned custom transport and never reads or writes the ambient system clipboard.
 
 The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can prevent it for one event by returning `"consume"` or a complete decision whose `defaultAction` is `"prevent"`.
 
@@ -229,7 +234,7 @@ interface ScreenSnapshot {
 
 `lines` contains every visible row, including trailing cell spaces. `scrollback` contains rows above the normal buffer viewport. `cursor.visible` reports the terminal's current DECTCEM visibility mode after all pending output has been parsed; it does not model cursor blinking or whether a graphical terminal window has focus. Trim lines in the assertion when padding is irrelevant. A TTY host models the output line discipline that moves a line feed to column zero; a stream host preserves raw line-feed cursor movement because no TTY performs that conversion.
 
-### Input and terminal controls
+### Input, clipboard, and terminal controls
 
 | Property or method                   | Behavior                                                                                                                                                            |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -239,6 +244,7 @@ interface ScreenSnapshot {
 | `mouse.move(point, modifiers?)`      | Injects one left-button motion fact while button-motion reporting and an unmatched left down are active                                                             |
 | `mouse.up(point, options?)`          | Injects one parsed physical button-up fact                                                                                                                          |
 | `mouse.wheel(point, direction, ...)` | Injects one parsed four-direction wheel fact                                                                                                                        |
+| `clipboard.requests`                 | Runtime-readonly exact text passed to the modeled custom transport, in call order                                                                                   |
 | `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
 | `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering                                               |
 | `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
@@ -254,6 +260,34 @@ await result.mouse.down({ x: 2, y: 1 });
 await result.mouse.up({ x: 2, y: 1 });
 expect(clicks).toHaveLength(1);
 ```
+
+The clipboard host returns exactly the selected behavior through the production `useClipboard()` service. `"unavailable"` becomes a `ClipboardWriteResult` with reason `"transport-unavailable"`; `"rejected"` returns the production rejected shape. Every call that reaches the modeled adapter is retained in the readonly requests list, including exact newlines and Unicode; an immediately unavailable call during suspension or after disposal does not invoke or record an adapter request:
+
+```tsx
+import { defineComponent } from "vue";
+import { expect } from "vitest";
+import { Text, useClipboard, type UseClipboardReturn } from "@vue-tui/runtime";
+import { render } from "@vue-tui/testing";
+
+let clipboard!: UseClipboardReturn;
+const Copy = defineComponent(() => {
+  clipboard = useClipboard();
+  return () => <Text>Copy</Text>;
+});
+
+const result = await render(Copy, { host: { clipboard: "copied" } });
+try {
+  await expect(clipboard.writeText("line\n你🙂")).resolves.toEqual({
+    status: "copied",
+    text: "line\n你🙂",
+  });
+  expect(result.clipboard.requests).toEqual(["line\n你🙂"]);
+} finally {
+  result.dispose();
+}
+```
+
+Fullscreen `useTextSelection()` uses the same modeled successful paint and the existing mouse driver. Drive a down/move/up sequence to test pointer selection, or call the public commands for application keyboard bindings; `selection.copy()` then records its exact non-empty `selectedText` in `clipboard.requests`. There is no test-only range setter, so tests do not bypass grapheme movement, paint provenance, drag capture, or the production copy bridge.
 
 ### Lifecycle methods
 

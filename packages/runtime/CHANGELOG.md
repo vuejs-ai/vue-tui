@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+### Added
+
+- Added the common `useClipboard()` service and `MountOptions.clipboard` with one explicit custom or OSC 52 transport. Writes report `copied`, `requested`, `unavailable`, or `rejected`, always retain the exact text for caller-owned fallback, serialize queued adapters, and keep suspension, disposal, string, screen-reader, and non-terminal behavior explicit. OSC 52 reports only that vue-tui wrote a request, never that the terminal accepted it.
+- Added `useTextSelection()` to `@vue-tui/runtime/fullscreen` for application-owned command and pointer selection over exactly one top-level `<Text>`. Selection follows complete grapheme boundaries and successful final-paint provenance, supports visual-row and document movement, select-all, clear, and copy, keeps one active range per app, and reports unsupported or ambiguous mappings rather than approximating.
+
 ### Changed
 
 - Replaced the legacy string-plus-`Key` `useInput()` contract with frozen normalized key, text, paste, and uninterpreted events plus a required synchronous route result. Added `useInputAvailability()`, made active semantic input own its terminal resources, retained `useStdin().stdin` as the raw mounted-stream escape hatch, and removed `usePaste`, public `Key`, public raw-mode controls, mount `rawMode`, and `exitOnCtrlC`.

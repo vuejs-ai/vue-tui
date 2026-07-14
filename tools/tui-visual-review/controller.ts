@@ -14,6 +14,7 @@ import {
   parseScrollCompositionScenario,
   startScrollCompositionSession,
 } from "./scroll-composition.ts";
+import { parseSelectionCopyScenario, startSelectionCopySession } from "./selection-copy.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
 
 type ReviewTarget =
@@ -22,6 +23,7 @@ type ReviewTarget =
   | "input-routing"
   | "focus-routing"
   | "scroll-composition"
+  | "selection-copy"
   | "scroll-box";
 
 interface Request {
@@ -57,12 +59,13 @@ function reviewTarget(args: string[]): ReviewTarget {
     value === "input-routing" ||
     value === "focus-routing" ||
     value === "scroll-composition" ||
+    value === "selection-copy" ||
     value === "scroll-box"
   ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, or scroll-box, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, or scroll-box, received ${value}`,
   );
 }
 
@@ -177,7 +180,9 @@ async function main(): Promise<void> {
           ? parseFocusRoutingScenario(option(args, "--scenario"))
           : target === "scroll-composition"
             ? parseScrollCompositionScenario(option(args, "--scenario"))
-            : undefined;
+            : target === "selection-copy"
+              ? parseSelectionCopyScenario(option(args, "--scenario"))
+              : undefined;
   const { session, mode } =
     target === "fullscreen-origin"
       ? await startFullscreenOriginSession(outputDir, parseFullscreenOriginScenario(scenario))
@@ -190,9 +195,11 @@ async function main(): Promise<void> {
                 outputDir,
                 parseScrollCompositionScenario(scenario),
               )
-            : target === "scroll-box"
-              ? await startScrollBoxSession(outputDir)
-              : await startBasicTemplateSession(outputDir);
+            : target === "selection-copy"
+              ? await startSelectionCopySession(outputDir, parseSelectionCopyScenario(scenario))
+              : target === "scroll-box"
+                ? await startScrollBoxSession(outputDir)
+                : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

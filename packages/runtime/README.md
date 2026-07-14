@@ -12,6 +12,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Vue SFC & JSX** — `<template>`, TSX, or render functions — your choice
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
 - **Built-in input system** — keyboard handling, focus management, Tab navigation
+- **Fullscreen selection and copy** — semantic Text ranges plus explicit custom or OSC 52 clipboard transport
 - **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
 - **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
@@ -91,27 +92,29 @@ useInput((event) => {
 
 ## Composables
 
-| Composable                      | Description                                                                                  |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`      | Normalized key, text, paste, and uninterpreted input with an explicit routing result         |
-| `useInputAvailability()`        | Readonly managed-input availability for the current host                                     |
-| `useMouseEvent(ref, event, fn)` | Targeted Fullscreen `"click"` or `"wheel"`; import from `@vue-tui/runtime/fullscreen`        |
-| `useMouseDrag(ref, fn, opts?)`  | One captured Fullscreen drag lifecycle; import from `@vue-tui/runtime/fullscreen`            |
-| `useFocus(ref, opts?)`          | Opaque ref-bound focus target with rendered-order traversal and boolean `focus()` / `blur()` |
-| `useFocusScope(opts?)`          | Nested active region or hard trapped boundary provided to descendants                        |
-| `useFocusedInput(target, fn)`   | Normalized input attached to one exact focused target                                        |
-| `useFocusScopeInput(scope, fn)` | Normalized input attached to a boundary or ancestor scope                                    |
-| `useExternalInput(target, fn)`  | One normalized external fallthrough receiver for an exact focused target                     |
-| `useFocusManager()`             | Exact focused-target observation plus boundary traversal and blur                            |
-| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                   |
-| `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities         |
-| `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                         |
-| `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                         |
-| `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref  |
-| `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state             |
-| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                            |
-| `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream              |
-| `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream     |
+| Composable                      | Description                                                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`      | Normalized key, text, paste, and uninterpreted input with an explicit routing result                        |
+| `useInputAvailability()`        | Readonly managed-input availability for the current host                                                    |
+| `useMouseEvent(ref, event, fn)` | Targeted Fullscreen `"click"` or `"wheel"`; import from `@vue-tui/runtime/fullscreen`                       |
+| `useMouseDrag(ref, fn, opts?)`  | One captured Fullscreen drag lifecycle; import from `@vue-tui/runtime/fullscreen`                           |
+| `useTextSelection(ref, opts?)`  | Command and pointer selection for exactly one top-level Fullscreen Text; import from the Fullscreen subpath |
+| `useClipboard()`                | Read and write through the one app-owned custom or OSC 52 clipboard transport                               |
+| `useFocus(ref, opts?)`          | Opaque ref-bound focus target with rendered-order traversal and boolean `focus()` / `blur()`                |
+| `useFocusScope(opts?)`          | Nested active region or hard trapped boundary provided to descendants                                       |
+| `useFocusedInput(target, fn)`   | Normalized input attached to one exact focused target                                                       |
+| `useFocusScopeInput(scope, fn)` | Normalized input attached to a boundary or ancestor scope                                                   |
+| `useExternalInput(target, fn)`  | One normalized external fallthrough receiver for an exact focused target                                    |
+| `useFocusManager()`             | Exact focused-target observation plus boundary traversal and blur                                           |
+| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                  |
+| `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities                        |
+| `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                                        |
+| `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                                        |
+| `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref                 |
+| `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state                            |
+| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
+| `useStdout()`                   | Commit geometry-safe styled lines, or access the deliberately raw stdout stream                             |
+| `useStderr()`                   | Commit geometry-safe styled lines to a TTY, or access the deliberately raw stderr stream                    |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event. For advanced routing, return a complete `InputRouteDecision` to choose action reporting, later routing, terminal defaults, and external forwarding independently. All application-global handlers run in registration order for each event before their decisions are merged.
 
@@ -122,6 +125,58 @@ Raw stdin runs in parallel with vue-tui's managed input route. It may include te
 `useElementGeometry(ref)` reports one frozen, readonly geometry generation derived from what paint actually mapped. Resolved states expose full parent-relative and dynamic-render-surface bounds plus exact fragments whose `visibleSurface` is the clipped surface-coordinate rectangle or `null`; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` are separate states. It supports both rendering modes without exposing Inline's unstable physical terminal row, and reports `unavailable` when a visual 2D target surface does not exist.
 
 `useCaret(ref, { focus, position })` connects one rendered element to one exact `useFocus()` result. `position` is a zero-based rendered cell local to `ref`; the editor remains responsible for converting its logical insertion point to that cell. The runtime publishes a frozen readonly `state` and maps a visible request through paint into the current mode writer. It emits no targeted terminal-cursor controls for inactive, clipped, detached, invalid, non-TTY, screen-reader, or string-host requests. The public caret describes an editor's insertion marker; the private terminal cursor is only the physical transport used to display it.
+
+### Fullscreen text selection and clipboard
+
+`useTextSelection()` is exported from `@vue-tui/runtime/fullscreen`. It targets exactly one top-level `<Text>` and derives the copied semantic document from that Text tree, including nested styled Text. It does not accept a duplicate text value, a Box, a nested Text target, or a list of sources.
+
+```vue
+<script setup lang="ts">
+import { shallowRef, type ComponentPublicInstance } from "vue";
+import { Text, useInput } from "@vue-tui/runtime";
+import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+
+const documentRef = shallowRef<ComponentPublicInstance | null>(null);
+const selection = useTextSelection(documentRef);
+
+useInput((event) => {
+  if (event.kind === "text" && event.text === "a") {
+    selection.selectAll();
+    return "consume";
+  }
+  if (event.kind === "text" && event.text === "c") {
+    void selection.copy();
+    return "consume";
+  }
+  return "continue";
+});
+</script>
+
+<template>
+  <Text ref="documentRef"
+    >Select 你🙂 across <Text color="cyan">nested styles</Text> and wraps.</Text
+  >
+</template>
+```
+
+`move()` accepts `backward`, `forward`, `up`, `down`, `line-start`, `line-end`, `document-start`, or `document-end`, with `{ extend: true }` retaining the anchor. Movement and pointer drag stop only at complete grapheme boundaries; up/down and line commands use visual rows, while soft wraps do not insert copied newlines. `selectAll()` and `clear()` return whether they changed the selection. `copy()` returns `{ status: "empty" }` when there is no range or the range is collapsed and otherwise returns the clipboard result with the exact selected text.
+
+Selection is built from semantic Text and successful final-paint provenance. Clipped or covered content remains part of command selection, but inverse highlighting appears only on target cells that survive final composition in the displayed frame. A failed write retains the preceding accepted mapping. Transform, truncation, or another source-to-cell mapping that cannot remain exact reports `mapping-unavailable` instead of approximating. Removing or retargeting the Text clears its range; several documents may register, but only one range remains active across the app.
+
+`isActive` and `pointer` both default to true. `{ pointer: false }` keeps command selection without acquiring mouse demand and allows command-only selection on a targetable Fullscreen output whose managed stdin is unavailable. The default active pointer path uses F6 preflight and fails rather than publishing a dead mouse route. Active visual Inline use throws because Inline has no stable targetable origin; final or non-terminal output reports `host-unavailable`, screen-reader output reports `screen-reader`, and string rendering reports `string-host`. Suspension preserves the accepted text and range with status `suspended`, then continuation makes it ready only after repaint.
+
+`useClipboard()` is exported from the common root and requires one explicit mount transport:
+
+```ts
+createApp(App).mount({
+  mode: "fullscreen",
+  clipboard: { kind: "osc52" },
+});
+```
+
+The OSC 52 adapter returns `requested` after writing the UTF-8 Base64 request; vue-tui cannot observe terminal acceptance and never reports `copied` for it. A custom adapter has the shape `{ kind: "custom", writeText }` and returns `copied`, `requested`, `unavailable`, or `rejected`. Calls run in FIFO order and recheck suspension or disposal before queued work starts. Every `ClipboardWriteResult` contains the exact requested text, so unavailable or rejected results can be shown as a manual fallback without retaining another copy source. The runtime supplies no default transport, operating-system command, payload-limit guess, or automatic fallback chain.
+
+`useClipboard().availability` distinguishes an `available` custom or OSC 52 transport from `not-configured`, `output-not-terminal`, `screen-reader`, `suspended`, `disposed`, or `string-host`. A custom adapter can work on Inline, Fullscreen, final, non-terminal, or screen-reader live hosts; when that adapter returns unavailable, the write result uses `transport-unavailable` and preserves its optional reason as `detail`. OSC 52 requires live visual terminal output.
 
 ### Render-session facts
 
@@ -164,9 +219,9 @@ await app.waitUntilExit();
 createApp(App).mount({ stdout, stdin, stderr });
 ```
 
-Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. `Box` and `Text` remain passive in both modes; attach targeted click, wheel, or captured-drag behavior to an ordinary component ref through `useMouseEvent()` or `useMouseDrag()` from `@vue-tui/runtime/fullscreen`. Active hooks reject an effective visual Inline surface instead of silently doing nothing. Expected non-targetable presentations such as screen-reader transcripts, final-output streams, and string rendering remain inert.
+Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. `Box` and `Text` remain passive in both modes; attach targeted click, wheel, captured-drag, or top-level-Text selection behavior to an ordinary component ref through `useMouseEvent()`, `useMouseDrag()`, or `useTextSelection()` from `@vue-tui/runtime/fullscreen`. Active hooks reject an effective visual Inline surface instead of silently doing nothing. Expected non-targetable pointer presentations remain inert, while selection reports an explicit unavailable state.
 
-Mouse reporting is demand-driven: only a visible target from an accepted Fullscreen frame acquires the minimum required SGR level, and removing the last target restores it. While reporting is active, the terminal normally gives mouse selection and wheel input to the application instead of its native selection or scrolling. Application-owned selection and copy are separate features; do not attach a mouse hook when terminal-native behavior should remain in control.
+Mouse reporting is demand-driven: only a visible target from an accepted Fullscreen frame acquires the minimum required SGR level, and removing the last target restores it. While reporting is active, the terminal normally gives mouse selection and wheel input to the application instead of its native selection or scrolling. `useTextSelection()` provides application-owned replacement selection for one Text document; leaving it and other mouse hooks inactive keeps terminal-native behavior in control.
 
 The live host requires controllable TTY input and an xterm-compatible SGR mouse profile; `TERM=dumb` is rejected when a visible target first demands reporting. SGR has no capability handshake, so a terminal that accepts the control bytes but silently ignores mouse reporting is indistinguishable from a user who sends no mouse input. In that case the hook receives no events and vue-tui does not guess or fall back to a different protocol.
 

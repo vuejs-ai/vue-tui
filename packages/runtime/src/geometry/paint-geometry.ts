@@ -9,6 +9,10 @@ import type {
   InternalElementGeometry,
   InternalGeometryFragment,
 } from "./geometry-service.ts";
+import type {
+  InternalSelectionPaintTarget,
+  InternalTextSelectionTrace,
+} from "../selection/selection-paint.ts";
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -248,6 +252,7 @@ export interface TextGeometryResult {
   readonly topCaretSlots: readonly InternalCaretSlot[] | null;
   readonly topFragments: readonly InternalGeometryFragment[] | null;
   readonly virtual: ReadonlyMap<TuiVirtualText, InternalElementGeometry>;
+  readonly selection: ReadonlyMap<object, InternalTextSelectionTrace | null>;
 }
 
 /** Trace complete graphemes through one authoritative wrapped Text generation. */
@@ -260,14 +265,24 @@ export function deriveTextGeometry(input: {
   readonly surfaceOrigin: InternalCellPoint;
   readonly clip?: InternalCellRect;
   readonly provenanceAvailable?: boolean;
+  readonly selectionTargets?: readonly InternalSelectionPaintTarget[];
 }): TextGeometryResult {
   const virtualTargets = collectVirtualTexts(input.node);
   const unavailableVirtual = () =>
     new Map<TuiVirtualText, InternalElementGeometry>(
       virtualTargets.map((target) => [target, { status: "unavailable" }]),
     );
+  const unavailableSelection = () =>
+    new Map<object, InternalTextSelectionTrace | null>(
+      (input.selectionTargets ?? []).map((target) => [target.key, null]),
+    );
   if (input.provenanceAvailable === false || containsTransform(input.node)) {
-    return { topCaretSlots: null, topFragments: null, virtual: unavailableVirtual() };
+    return {
+      topCaretSlots: null,
+      topFragments: null,
+      virtual: unavailableVirtual(),
+      selection: unavailableSelection(),
+    };
   }
 
   const owners: Array<TuiText | TuiVirtualText> = [input.node, ...virtualTargets];
@@ -292,7 +307,12 @@ export function deriveTextGeometry(input: {
   const plain = segments.map((segment) => segment.text).join("");
   const actualRows = input.wrapped.map(stripAnsi);
   if (plain !== stripAnsi(input.renderedText)) {
-    return { topCaretSlots: null, topFragments: null, virtual: unavailableVirtual() };
+    return {
+      topCaretSlots: null,
+      topFragments: null,
+      virtual: unavailableVirtual(),
+      selection: unavailableSelection(),
+    };
   }
 
   const truncating =
@@ -305,6 +325,7 @@ export function deriveTextGeometry(input: {
       topCaretSlots: directCaretSlots(actualRows, input.surfaceOrigin, input.clip),
       topFragments: null,
       virtual: unavailableVirtual(),
+      selection: unavailableSelection(),
     };
   }
 
@@ -344,7 +365,17 @@ export function deriveTextGeometry(input: {
     });
   }
   const boundary = new Map<number, InternalCellPoint>();
+  const selectionStops = new Map<number, InternalCellPoint[]>();
+  const recordSelectionStop = (offset: number, point: InternalCellPoint): void => {
+    let points = selectionStops.get(offset);
+    if (!points) selectionStops.set(offset, (points = []));
+    if (!points.some((candidate) => candidate.x === point.x && candidate.y === point.y)) {
+      points.push(point);
+    }
+  };
+  const mappedSourceCells = new Map<number, TraceCell>();
   boundary.set(0, { ...input.surfaceOrigin });
+  recordSelectionStop(0, { ...input.surfaceOrigin });
   let sourceIndex = 0;
   let mismatch = false;
   for (const [rowIndex, row] of actualRows.entries()) {
@@ -362,7 +393,13 @@ export function deriveTextGeometry(input: {
       }
       const start = { x: input.surfaceOrigin.x + column, y: input.surfaceOrigin.y + rowIndex };
       if (!boundary.has(candidate.start)) boundary.set(candidate.start, start);
+      recordSelectionStop(candidate.start, start);
       if (candidate.width > 0) {
+        mappedSourceCells.set(candidate.start, {
+          surfaceX: start.x,
+          surfaceY: start.y,
+          width: candidate.width,
+        });
         for (const owner of candidate.owners) {
           if (unavailableOwners.has(owner)) continue;
           const trace = traces.get(owner)!;
@@ -374,6 +411,7 @@ export function deriveTextGeometry(input: {
       }
       const end = { x: input.surfaceOrigin.x + column, y: input.surfaceOrigin.y + rowIndex };
       boundary.set(candidate.end, end);
+      recordSelectionStop(candidate.end, end);
       sourceIndex++;
     }
     if (mismatch) break;
@@ -388,16 +426,24 @@ export function deriveTextGeometry(input: {
         }
         trace.origins.set(rowIndex + 1, nextRow.x);
       }
-      boundary.set(newline.start, {
+      const newlineStart = {
         x: input.surfaceOrigin.x + column,
         y: input.surfaceOrigin.y + rowIndex,
-      });
+      };
+      boundary.set(newline.start, newlineStart);
+      recordSelectionStop(newline.start, newlineStart);
       boundary.set(newline.end, nextRow);
+      recordSelectionStop(newline.end, nextRow);
       sourceIndex++;
     }
   }
   if (mismatch || sourceIndex !== source.graphemes.length) {
-    return { topCaretSlots: null, topFragments: null, virtual: unavailableVirtual() };
+    return {
+      topCaretSlots: null,
+      topFragments: null,
+      virtual: unavailableVirtual(),
+      selection: unavailableSelection(),
+    };
   }
 
   const topTrace = traces.get(0)!;
@@ -578,6 +624,60 @@ export function deriveTextGeometry(input: {
     });
   }
 
+  const selection = new Map<object, InternalTextSelectionTrace | null>();
+  for (const target of input.selectionTargets ?? []) {
+    const ownerId = ids.get(target.node);
+    const meta = ownerId === undefined ? undefined : metas.get(ownerId);
+    const hasStandaloneZeroWidthGrapheme =
+      meta !== undefined &&
+      source.graphemes.some(
+        (grapheme) =>
+          grapheme.start >= meta.start &&
+          grapheme.end <= meta.end &&
+          grapheme.text !== "\n" &&
+          grapheme.width === 0 &&
+          grapheme.owners.includes(meta.id),
+      );
+    if (!meta || unavailableOwners.has(meta.id) || hasStandaloneZeroWidthGrapheme) {
+      selection.set(target.key, null);
+      continue;
+    }
+    const text = plain.slice(meta.start, meta.end);
+    const boundaries = [0];
+    for (const part of graphemeSegmenter.segment(text)) {
+      boundaries.push(part.index + part.segment.length);
+    }
+    const stops = [...selectionStops.entries()]
+      .filter(([offset]) => offset >= meta.start && offset <= meta.end)
+      .flatMap(([offset, points]) =>
+        points.map((point) => ({ offset: offset - meta.start, x: point.x, y: point.y })),
+      );
+    const cells = source.graphemes.flatMap((grapheme, id) => {
+      if (
+        grapheme.start < meta.start ||
+        grapheme.end > meta.end ||
+        !grapheme.owners.includes(meta.id) ||
+        grapheme.width <= 0
+      ) {
+        return [];
+      }
+      const mapped = mappedSourceCells.get(grapheme.start);
+      if (!mapped) return [];
+      return [
+        {
+          id,
+          text: grapheme.text,
+          start: grapheme.start - meta.start,
+          end: grapheme.end - meta.start,
+          x: mapped.surfaceX,
+          y: mapped.surfaceY,
+          width: mapped.width,
+        },
+      ];
+    });
+    selection.set(target.key, Object.freeze({ text, boundaries, stops, cells }));
+  }
+
   return {
     topCaretSlots: slotsByOwner.get(input.node) ?? [],
     topFragments,
@@ -587,6 +687,7 @@ export function deriveTextGeometry(input: {
         geometryByOwner.get(target) ?? ({ status: "unavailable" } as const),
       ]),
     ),
+    selection,
   };
 }
 

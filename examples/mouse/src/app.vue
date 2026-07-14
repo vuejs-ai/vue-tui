@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { shallowRef, type ComponentPublicInstance } from "vue";
-import { Box, Text, useInput } from "@vue-tui/runtime";
+import { Box, Text, useClipboard, useInput } from "@vue-tui/runtime";
 import {
   useMouseDrag,
   useMouseEvent,
+  useTextSelection,
+  type TextSelectionMove,
   type TuiMouseClickEvent,
   type TuiMouseDragEvent,
   type TuiMouseWheelEvent,
@@ -14,12 +16,65 @@ const lastClick = shallowRef("none");
 const lastWheel = shallowRef("none");
 const panelRef = shallowRef<ComponentPublicInstance | null>(null);
 const dragRef = shallowRef<ComponentPublicInstance | null>(null);
+const selectionRef = shallowRef<ComponentPublicInstance | null>(null);
 const dragLeft = shallowRef(2);
-const dragTop = shallowRef(7);
+const dragTop = shallowRef(2);
+const copyStatus = shallowRef("not requested");
+const manualFallback = shallowRef("");
+const instructions =
+  "Drag text to select. a: all · c: copy · arrows: move · Shift+arrows: extend · Esc: clear · q: quit";
+const selectionLead = "Select complete graphemes like 你🙂 across ";
+const selectionTail = " and soft wraps.";
+const selectionMoves: Readonly<Record<string, TextSelectionMove>> = {
+  left: "backward",
+  right: "forward",
+  up: "up",
+  down: "down",
+  home: "line-start",
+  end: "line-end",
+};
+
+const clipboard = useClipboard();
+const clipboardAvailability = clipboard.availability;
+const selection = useTextSelection(selectionRef);
+const selectionState = selection.state;
+
+async function copySelection() {
+  const result = await selection.copy();
+  copyStatus.value = result.status;
+  manualFallback.value =
+    result.status === "unavailable" || result.status === "rejected" ? result.text : "";
+}
 
 useInput((event) => {
-  if (event.kind === "text" && event.text === "q") {
+  if (event.kind === "key" && event.key.phase !== "release") {
+    const direction = event.key.name === null ? undefined : selectionMoves[event.key.name];
+    if (direction) {
+      selection.move(direction, { extend: event.key.modifiers.shift });
+      return "consume";
+    }
+    if (event.key.name === "escape") {
+      selection.clear();
+      return "consume";
+    }
+  }
+
+  const text =
+    event.kind === "text"
+      ? event.text
+      : event.kind === "key" && event.key.phase !== "release"
+        ? event.key.reportedText
+        : null;
+  if (text === "q") {
     process.exit(0);
+    return "consume";
+  }
+  if (text === "a") {
+    selection.selectAll();
+    return "consume";
+  }
+  if (text === "c") {
+    void copySelection();
     return "consume";
   }
   return "continue";
@@ -49,20 +104,29 @@ useMouseDrag(dragRef, onDrag);
 
 <template>
   <Box flexDirection="column" width="100%" height="100%" :paddingX="1" :paddingY="1">
-    <Text bold color="cyan">vue-tui mouse input</Text>
-    <Text dimColor>Click, wheel, or drag the block. Press q to quit.</Text>
+    <Text bold color="cyan">vue-tui mouse, selection, and copy</Text>
+    <Text dimColor>{{ instructions }}</Text>
 
     <Box :marginTop="1" flexDirection="column">
       <Text>Clicks: {{ clicks }}</Text>
       <Text>Last click: {{ lastClick }}</Text>
       <Text>Last wheel: {{ lastWheel }}</Text>
+      <Text>Selection: {{ JSON.stringify(selectionState.selectedText) }}</Text>
+      <Text>Clipboard: {{ clipboardAvailability.status }} · copy result: {{ copyStatus }}</Text>
+      <Text v-if="manualFallback" color="yellow">Manual fallback: {{ manualFallback }}</Text>
+    </Box>
+
+    <Box :marginTop="1" :width="50" :height="4" borderStyle="single" borderColor="cyan">
+      <Text ref="selectionRef"
+        >{{ selectionLead }}<Text color="yellow">nested styles</Text>{{ selectionTail }}</Text
+      >
     </Box>
 
     <Box
       ref="panelRef"
       :marginTop="1"
       :width="50"
-      :height="10"
+      :height="5"
       borderStyle="single"
       borderColor="gray"
     >

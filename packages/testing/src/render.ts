@@ -27,7 +27,11 @@ export interface TestHost {
   readonly stdin?: "tty" | "non-tty";
   /** Output stream class. @default "tty" */
   readonly stdout?: "tty" | "stream";
+  /** Modeled application clipboard result. Omission leaves clipboard unconfigured. */
+  readonly clipboard?: TestClipboardBehavior;
 }
+
+export type TestClipboardBehavior = "copied" | "requested" | "unavailable" | "rejected";
 
 export interface RenderOptions {
   readonly host?: TestHost;
@@ -79,6 +83,9 @@ export interface RenderResult {
     write(data: string): Promise<void>;
   };
   readonly mouse: TestMouse;
+  readonly clipboard: {
+    readonly requests: readonly string[];
+  };
   readonly terminal: Terminal;
   /** Tear down the app while retaining the emulator for restoration assertions. */
   unmount(this: void): void;
@@ -99,6 +106,7 @@ interface NormalizedTestHost {
     readonly rows: number | undefined;
   };
   readonly emulatorRows: number;
+  readonly clipboard: TestClipboardBehavior | undefined;
 }
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
@@ -151,12 +159,17 @@ function normalizeOptions(options: RenderOptions): {
   const propsOption = root.props;
 
   const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
-  rejectUnknownKeys(host, ["mode", "presentation", "updates", "stdin", "stdout"], "render host");
+  rejectUnknownKeys(
+    host,
+    ["mode", "presentation", "updates", "stdin", "stdout", "clipboard"],
+    "render host",
+  );
   const modeOption = host.mode;
   const presentationOption = host.presentation;
   const updatesOption = host.updates;
   const stdinOption = host.stdin;
   const stdoutOption = host.stdout;
+  const clipboardOption = host.clipboard;
 
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
@@ -184,6 +197,17 @@ function normalizeOptions(options: RenderOptions): {
     throw new TypeError('render host updates must be "live" or "at-teardown".');
   }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
+  if (
+    clipboardOption !== undefined &&
+    clipboardOption !== "copied" &&
+    clipboardOption !== "requested" &&
+    clipboardOption !== "unavailable" &&
+    clipboardOption !== "rejected"
+  ) {
+    throw new TypeError(
+      'render host clipboard must be "copied", "requested", "unavailable", or "rejected".',
+    );
+  }
 
   return {
     props: propsOption as Record<string, unknown> | undefined,
@@ -194,6 +218,7 @@ function normalizeOptions(options: RenderOptions): {
       stdin,
       stdout: { kind, columns, rows },
       emulatorRows,
+      clipboard: clipboardOption,
     },
   };
 }
@@ -234,6 +259,8 @@ export async function render(
 
   const frames: ContentFrame[] = [];
   const publicFrames = readonly(frames) as readonly ContentFrame[];
+  const clipboardRequests: string[] = [];
+  const publicClipboardRequests = readonly(clipboardRequests) as readonly string[];
   let session: TestRenderSession | undefined;
   const observer: InternalRenderObserver = {
     onSession(value) {
@@ -343,6 +370,22 @@ export async function render(
       isScreenReaderEnabled: host.presentation === "screen-reader",
       patchConsole: false,
       maxFps: 0,
+      clipboard:
+        host.clipboard === undefined
+          ? undefined
+          : {
+              kind: "custom",
+              writeText(text: string) {
+                clipboardRequests.push(text);
+                if (host.clipboard === "copied" || host.clipboard === "requested") {
+                  return { status: host.clipboard };
+                }
+                if (host.clipboard === "unavailable") {
+                  return { status: "unavailable", reason: "modeled unavailable" };
+                }
+                return { status: "rejected", cause: new Error("modeled rejection") };
+              },
+            },
       [INTERNAL_RENDER_OBSERVER]: observer,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
@@ -458,6 +501,7 @@ export async function render(
       },
     },
     mouse: mouseController.mouse,
+    clipboard: Object.freeze({ requests: publicClipboardRequests }),
     terminal,
     unmount,
     dispose,

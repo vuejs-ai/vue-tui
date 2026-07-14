@@ -16,6 +16,7 @@ Build with components, develop with HMR, test with confidence.
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
 - **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`npm run dev`)
 - **Input & focus** — keyboard handling, focus management, Tab navigation, Kitty keyboard protocol
+- **Fullscreen selection & clipboard** — semantic Text selection with command and mouse control, plus explicit custom or OSC 52 clipboard transport
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 - **Coding-agent visual development guide** — a version-matched method for running the real app, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees ([guide](./packages/runtime/docs/visual-development-feedback-loops.md))
 
@@ -110,21 +111,21 @@ createApp(App).mount();
 
 | Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables (`useInput`, `useFocus`, `useApp`, etc.), and yoga-based flexbox layout. _API stabilizing._                                                                                                      |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables for input, focus, geometry, selection, clipboard, and lifecycle, and yoga-based flexbox layout. _API stabilizing._                                                                               |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect resolved session facts and content commits, and assert the terminal-emulated screen                                                                                                                                                         |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
 
 ## Examples
 
-| Example                                       | Description                                                 |
-| --------------------------------------------- | ----------------------------------------------------------- |
-| [`basic-template`](./examples/basic-template) | Vue SFC with `<template>` syntax                            |
-| [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                             |
-| [`coding-agent`](./examples/coding-agent)     | AI coding agent with LLM streaming and interactive UI       |
-| [`flappy-bird`](./examples/flappy-bird)       | Physics-based terminal game with reactive state and borders |
-| [`mouse`](./examples/mouse)                   | Full-screen targeted mouse events and dragging              |
-| [`scroll-box`](./examples/scroll-box)         | Bounded viewport with app-controlled scrolling              |
+| Example                                       | Description                                                          |
+| --------------------------------------------- | -------------------------------------------------------------------- |
+| [`basic-template`](./examples/basic-template) | Vue SFC with `<template>` syntax                                     |
+| [`basic-jsx`](./examples/basic-jsx)           | Same app in TSX                                                      |
+| [`coding-agent`](./examples/coding-agent)     | AI coding agent with LLM streaming and interactive UI                |
+| [`flappy-bird`](./examples/flappy-bird)       | Physics-based terminal game with reactive state and borders          |
+| [`mouse`](./examples/mouse)                   | Full-screen targeted mouse, semantic Text selection, and OSC 52 copy |
+| [`scroll-box`](./examples/scroll-box)         | Bounded viewport with app-controlled scrolling                       |
 
 ## Components
 
@@ -150,27 +151,29 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 ## Composables (Hooks)
 
-| Composable                      | Description                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result             |
-| `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                            |
-| `useMouseEvent(ref, event, fn)` | Handle a targeted Fullscreen `"click"` or `"wheel"` event; imported from `@vue-tui/runtime/fullscreen`                           |
-| `useMouseDrag(ref, fn, opts?)`  | Handle one captured Fullscreen drag lifecycle; imported from `@vue-tui/runtime/fullscreen`                                       |
-| `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`      |
-| `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                       |
-| `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                  |
-| `useFocusScopeInput(scope, fn)` | Attach normalized input to an active boundary or focused target's logical ancestor scope                                         |
-| `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                   |
-| `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                       |
-| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                       |
-| `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities           |
-| `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                   |
-| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                |
-| `useStdout()`                   | Write directly to stdout                                                                                                         |
-| `useStderr()`                   | Write directly to stderr                                                                                                         |
-| `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts |
-| `useCaret(ref, opts)`           | Declare a focus-bound caret at an element-local rendered cell and observe whether it is visible                                  |
-| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                     |
+| Composable                      | Description                                                                                                                         |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`      | Handle normalized key, text, paste, and uninterpreted input events; every handler returns an explicit routing result                |
+| `useInputAvailability()`        | Inspect whether managed input is available, or why the current host cannot provide it                                               |
+| `useMouseEvent(ref, event, fn)` | Handle a targeted Fullscreen `"click"` or `"wheel"` event; imported from `@vue-tui/runtime/fullscreen`                              |
+| `useMouseDrag(ref, fn, opts?)`  | Handle one captured Fullscreen drag lifecycle; imported from `@vue-tui/runtime/fullscreen`                                          |
+| `useTextSelection(ref, opts?)`  | Select the semantic document of exactly one top-level Fullscreen `<Text>` by command or mouse; imported from the Fullscreen subpath |
+| `useClipboard()`                | Inspect and use the one custom or OSC 52 clipboard transport configured for the mounted application                                 |
+| `useFocus(ref, opts?)`          | Register an opaque ref-bound focus target with rendered-order traversal, eligibility, and programmatic `focus()` / `blur()`         |
+| `useFocusScope(opts?)`          | Create a nested active region or hard trapped focus boundary and provide it to descendants                                          |
+| `useFocusedInput(target, fn)`   | Attach normalized input to one exact target while it owns focus                                                                     |
+| `useFocusScopeInput(scope, fn)` | Attach normalized input to an active boundary or focused target's logical ancestor scope                                            |
+| `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                      |
+| `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                          |
+| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                          |
+| `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities              |
+| `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                      |
+| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                   |
+| `useStdout()`                   | Write directly to stdout                                                                                                            |
+| `useStderr()`                   | Write directly to stderr                                                                                                            |
+| `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts    |
+| `useCaret(ref, opts)`           | Declare a focus-bound caret at an element-local rendered cell and observe whether it is visible                                     |
+| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                        |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
 
@@ -189,7 +192,42 @@ useMouseDrag(dividerRef, (event) => {
 });
 ```
 
-An active hook requires an effective visual Fullscreen surface. It acquires only the SGR mouse reporting level needed by a visible accepted target and releases that level when the last target disappears. While reporting is active, the terminal normally sends selection and wheel input to the application instead of performing its native selection or scrolling; vue-tui keeps that interval demand-driven, while application-owned selection and copy remain separate features.
+An active hook requires an effective visual Fullscreen surface. It acquires only the SGR mouse reporting level needed by a visible accepted target and releases that level when the last target disappears. While reporting is active, the terminal normally sends selection and wheel input to the application instead of performing its native selection or scrolling; vue-tui keeps that interval demand-driven.
+
+Fullscreen applications can replace native drag selection with one semantic Text selection owner:
+
+```vue
+<script setup lang="ts">
+import { shallowRef, type ComponentPublicInstance } from "vue";
+import { Text } from "@vue-tui/runtime";
+import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+
+const documentRef = shallowRef<ComponentPublicInstance | null>(null);
+const selection = useTextSelection(documentRef);
+
+// Bind these semantic commands to the application's own input or menu policy.
+function selectEverything() {
+  selection.selectAll();
+}
+</script>
+
+<template>
+  <Text ref="documentRef">Selectable text with <Text color="cyan">nested styles</Text>.</Text>
+</template>
+```
+
+The target is exactly one top-level `<Text>`, while nested styled Text is part of its semantic document. Endpoints remain on complete graphemes, soft wraps do not add copied newlines, and highlighting follows only cells from the last successfully displayed final paint. `move()`, `selectAll()`, `clear()`, and `copy()` are commands rather than hidden keyboard bindings; pointer selection is enabled by default and can be disabled with `{ pointer: false }`.
+
+Configure one clipboard transport at mount and inspect it from any rendering mode with `useClipboard()`:
+
+```ts
+createApp(App).mount({
+  mode: "fullscreen",
+  clipboard: { kind: "osc52" },
+});
+```
+
+OSC 52 returns `requested` after vue-tui writes the request; it cannot prove that the terminal accepted it. A `{ kind: "custom", writeText }` adapter may instead return `copied`, `requested`, `unavailable`, or `rejected`. Every non-empty write result includes the exact text so the application can show a manual fallback. No transport is configured by default, and vue-tui does not choose an operating-system command or automatic fallback chain.
 
 `useRenderSession()` is the authoritative way for a component to inspect what rendering surface actually became effective. The session object keeps one identity for the render tree; mode, output, host, and capabilities are immutable for that session, while a live-update surface refreshes `dimensions` reactively on accepted resize and continuation events. A final-output surface retains the dimensions resolved at mount because it has no runtime resize lifecycle. Use `session.output.presentation === "screen-reader"` to adapt to the active linear presentation. `useLayoutSize()` derives from that same session and keeps destructured dimensions reactive; its `rows` ref is `null` for a row-unbounded stream, transcript, or string document.
 

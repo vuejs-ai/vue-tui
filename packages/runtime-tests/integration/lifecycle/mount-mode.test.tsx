@@ -80,6 +80,24 @@ test.each([null, 0, "true", {}, []])(
   },
 );
 
+test.each([
+  null,
+  "osc52",
+  { kind: "platform" },
+  { kind: "custom" },
+  { kind: "custom", writeText: 42 },
+])("invalid clipboard transport %# fails before another mount option is read", (clipboard) => {
+  const options = Object.defineProperty({ clipboard }, "stdout", {
+    enumerable: true,
+    get() {
+      throw new Error("stdout getter must not run");
+    },
+  });
+
+  const app = createApp(App);
+  expect(() => app.mount(options as never)).toThrow('mount option "clipboard"');
+});
+
 test("screen-reader Fullscreen request stays on the main screen", async () => {
   const stdout = makeFakeWritable({ columns: 80, rows: 24 });
   const stderr = makeFakeWritable({ columns: 80, rows: 24 });

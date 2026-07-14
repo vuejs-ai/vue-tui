@@ -491,6 +491,7 @@ test("render snapshots every root and host accessor exactly once", async () => {
       updates: getter("updates", "live", "sometimes"),
       stdin: getter("stdin", "tty", "maybe"),
       stdout: getter("stdout", "tty", "file"),
+      clipboard: getter("clipboard", "copied", "invalid"),
     },
   );
   const options = Object.defineProperties(
@@ -517,6 +518,7 @@ test("render snapshots every root and host accessor exactly once", async () => {
     updates: 1,
     stdin: 1,
     stdout: 1,
+    clipboard: 1,
   });
 });
 
@@ -553,6 +555,8 @@ test.each([
   [{ host: { stdin: null } }, "render host stdin"],
   [{ host: { stdout: "file" } }, "render host stdout"],
   [{ host: { stdout: null } }, "render host stdout"],
+  [{ host: { clipboard: "system" } }, "render host clipboard"],
+  [{ host: { clipboard: null } }, "render host clipboard"],
   [{ columns: 0 }, "render columns"],
   [{ rows: Number.NaN }, "render rows"],
   [{ liveUpdates: false }, 'render option "liveUpdates" was removed'],

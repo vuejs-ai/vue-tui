@@ -31,6 +31,10 @@ import {
   type InternalStringRenderSessionService,
   type RenderPresentation,
 } from "./render-session.ts";
+import { InternalClipboardServiceKey } from "./clipboard/context.ts";
+import { createStringClipboardService } from "./clipboard/clipboard-service.ts";
+import { createInternalTextSelectionController } from "./selection/selection-controller.ts";
+import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -117,6 +121,13 @@ function renderStringDocument(
     outputAvailable: false,
     requestPaint: () => {},
   });
+  const clipboard = createStringClipboardService();
+  const textSelection = createInternalTextSelectionController({
+    surfaceAvailable: false,
+    unavailableReason: "string-host",
+    requestPaint: () => {},
+    clipboard,
+  });
   const renderedTargets = createRenderedTargetController(root, focusController);
   setRenderedTargetController(appContext, renderedTargets);
   let yogaAttached = false;
@@ -169,6 +180,8 @@ function renderStringDocument(
     app.provide(AppContextKey, appContext);
     app.provide(InternalFocusControllerKey, focusController);
     app.provide(InternalCaretControllerKey, caretController);
+    app.provide(InternalClipboardServiceKey, clipboard);
+    app.provide(InternalTextSelectionControllerKey, textSelection);
     app.provide(StdinContextKey, stdinContext);
     app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
 
@@ -275,6 +288,12 @@ function renderStringDocument(
     }
     try {
       caretController.dispose();
+    } catch {
+      // Best-effort: F4/string-host cleanup below must still run.
+    }
+    try {
+      textSelection.dispose();
+      clipboard.dispose();
     } catch {
       // Best-effort: F4/string-host cleanup below must still run.
     }

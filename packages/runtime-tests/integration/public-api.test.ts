@@ -23,6 +23,7 @@ const PUBLIC_VALUE_EXPORTS = [
   "useAnimation",
   "useApp",
   "useCaret",
+  "useClipboard",
   "useElementGeometry",
   "useExternalInput",
   "useFocus",
@@ -44,14 +45,21 @@ const PUBLIC_VALUE_EXPORTS = [
   "kittyModifiers",
 ];
 
-const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent"];
+const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent", "useTextSelection"];
 
 test("public API surface is exactly the documented value-export set", () => {
   expect(Object.keys(api).sort()).toEqual([...PUBLIC_VALUE_EXPORTS].sort());
 });
 
-test("Fullscreen API surface is exactly the targeted-mouse value-export set", () => {
+test("Fullscreen API surface is exactly the Fullscreen interaction value-export set", () => {
   expect(Object.keys(fullscreenApi).sort()).toEqual(FULLSCREEN_VALUE_EXPORTS);
+});
+
+test("keeps clipboard common and selectable text Fullscreen-only", () => {
+  expect(api).toHaveProperty("useClipboard");
+  expect(api).not.toHaveProperty("useTextSelection");
+  expect(fullscreenApi).toHaveProperty("useTextSelection");
+  expect(fullscreenApi).not.toHaveProperty("useClipboard");
 });
 
 test("removes the superseded root mouse APIs without compatibility shims", () => {

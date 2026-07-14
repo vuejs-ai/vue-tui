@@ -1,6 +1,6 @@
 # ScrollBox — decision record
 
-> **Status:** F7 Scroll composition is Done. The maintainer selected a boolean movement result for all four existing operations: `true` means only that the effective top content line changed after flooring and clamping. A sticky-following re-arm without movement returns `false`. Public types, runtime and JavaScript behavior, package consumption, deterministic F4/F6 routing, real PTY, visual restoration, full repository gates, and fresh CI agree. The component remains common, passive, and input-free; F8 is Active and no VOUCHED stamp is implied.
+> **Status:** F7 Scroll composition is Done. The maintainer selected a boolean movement result for all four existing operations: `true` means only that the effective top content line changed after flooring and clamping. A sticky-following re-arm without movement returns `false`. Public types, runtime and JavaScript behavior, package consumption, deterministic F4/F6 routing, real PTY, visual restoration, full repository gates, and fresh CI agree. The component remains common, passive, and input-free; completed F8 owns its separate Text-selection and clipboard contract. No VOUCHED stamp is implied.
 
 > Decisions specific to `@vue-tui/components`'s `ScrollBox`. Shared conventions live in
 > [components-design-principles.md](../components-design-principles.md). Tracking: #221.
@@ -53,10 +53,10 @@ job, not a built-in prop:
   valid application policy, but they do not imply portable wheel support.
 
 Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse
-ownership, reliable geometry, and hit testing. Preserving application-controlled text selection and
-copy after mouse capture would additionally require a selection and clipboard model. Both concerns
-are out of scope for this input-free component; see
-[terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
+ownership, reliable geometry, and hit testing. F8 now supplies a separate application-controlled
+Text selection and clipboard model after mouse capture; neither concern becomes `ScrollBox` state
+or input. See [Fullscreen text selection and clipboard](../fullscreen-selection-and-copy.md),
+[terminal UI prior art](../terminal-ui-prior-art.md), and [api-design.md](../api-design.md).
 
 The implemented unstamped F6 contract composes Fullscreen wheel behavior through a ref-bound runtime
 composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
