@@ -8,7 +8,7 @@ import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
-import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
+import { prepareStaticOutput } from "./paint/static-channel.ts";
 import {
   AppContextKey,
   StdinContextKey,
@@ -157,13 +157,15 @@ function renderStringDocument(
             Yoga.DIRECTION_LTR,
           );
           try {
-            // Flush static output from intermediate renders
-            for (const stat of findStatics(root)) {
-              const staticFrame = paintStaticNode(stat, columns, isScreenReaderEnabled);
-              if (staticFrame && staticFrame !== "\n") {
-                capturedStaticOutput += staticFrame + "\n";
-              }
+            // String rendering has no physical stream handoff. Accept the
+            // candidate only after its complete text is appended to the local
+            // document accumulator, so preparation itself remains side-effect
+            // free just like the live renderer's pre-write path.
+            const preparedStatic = prepareStaticOutput(root, columns, isScreenReaderEnabled);
+            if (preparedStatic.output && preparedStatic.output !== "\n") {
+              capturedStaticOutput += preparedStatic.output;
             }
+            preparedStatic.accept();
           } finally {
             restoreLayoutGuards();
           }
@@ -248,7 +250,7 @@ function renderStringDocument(
     // The static channel appends a trailing newline for terminal rendering
     // (so dynamic output starts on a fresh line). Strip it here so
     // renderToString returns clean output. This applies in BOTH modes: SR mode
-    // linearizes static items into plain text too (paintStaticNode branches on
+    // linearizes static items into plain text too (prepareStaticOutput branches on
     // isScreenReaderEnabled), and Ink's SR renderer likewise returns the static
     // output when node.staticNode exists (renderer.ts:24-33). Prepending the
     // captured static output mirrors the non-SR path so SR renderToString does

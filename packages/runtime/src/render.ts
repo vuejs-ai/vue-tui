@@ -49,7 +49,7 @@ import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
-import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
+import { prepareStaticOutput, type PreparedStaticOutput } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./io/frame-writer.ts";
 import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
@@ -2039,20 +2039,37 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function renderInteractiveFrame(
         output: string,
         outputHeight: number,
-        staticOutput: string,
+        preparedStatic: PreparedStaticOutput,
         caretFrame: InternalPreparedCaretFrame,
       ) {
         return withWriterCaretOwnership(caretFrame.position, () =>
-          renderInteractiveFrameWithOwnedCaret(output, outputHeight, staticOutput, caretFrame),
+          renderInteractiveFrameWithOwnedCaret(output, outputHeight, preparedStatic, caretFrame),
         );
+      }
+
+      function writePreparedStatic(prepared: PreparedStaticOutput, chunk: string): void {
+        try {
+          stdout.write(chunk);
+        } catch (error) {
+          // A throwing Writable may have handed off none, some, or all of the
+          // chunk. The outcome is indeterminate, so never retry this Static batch
+          // automatically during a boundary repaint or teardown commit.
+          prepared.abandon();
+          throw error;
+        }
+        // Node's `false` return means accepted with backpressure, not rejected.
+        // A normally returned write therefore commits the Static batch now,
+        // before any later dynamic-frame or terminal-restoration operation.
+        prepared.accept();
       }
 
       function renderInteractiveFrameWithOwnedCaret(
         output: string,
         outputHeight: number,
-        staticOutput: string,
+        preparedStatic: PreparedStaticOutput,
         caretFrame: InternalPreparedCaretFrame,
       ) {
+        const staticOutput = preparedStatic.output;
         const hasStaticOutput = staticOutput !== "";
         const isTty = !!stdout.isTTY;
         const viewportRows = renderSession.session.dimensions.layout.rows;
@@ -2070,7 +2087,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               hasStaticOutput || shouldWarnStatic
                 ? () => {
                     if (shouldWarnStatic) stderr.write(FULLSCREEN_STATIC_WARNING);
-                    if (hasStaticOutput) stdout.write(staticOutput);
+                    if (hasStaticOutput) writePreparedStatic(preparedStatic, staticOutput);
                   }
                 : undefined,
             frameCaret: { position: caretFrame.position },
@@ -2100,7 +2117,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // Clear frame -> write static -> re-render frame via log-update
           runSynchronizedOutput(() => {
             writer.clear();
-            stdout.write(staticOutput);
+            writePreparedStatic(preparedStatic, staticOutput);
             writer.write(outputToRender);
           });
         } else {
@@ -2204,15 +2221,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           const start = onRender ? performance.now() : 0;
           mountedRenderedTargets?.reconcile();
 
-          // Capture static output as a string (for both interactive and non-interactive paths)
+          // Prepare Static output without advancing its component cursors. The
+          // transaction is accepted only after its physical stdout write returns
+          // normally, or after a successful output-free renderer commit.
           const w = renderSession.session.dimensions.layout.columns;
-          let staticOutput = "";
-          for (const stat of findStatics(tuiRoot)) {
-            const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
-            if (staticFrame.length > 0) {
-              staticOutput += staticFrame + "\n";
-            }
-          }
+          const preparedStatic = prepareStaticOutput(tuiRoot, w, isScreenReaderEnabled);
+          const staticOutput = preparedStatic.output;
           const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
           if (!dynamicUpdatesLive) {
             // Non-interactive: compute the dynamic frame now, write static output
@@ -2238,10 +2252,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
               if (onRender) onRender({ renderTime: performance.now() - start });
               if (hasStaticOutput) {
-                stdout.write(staticOutput);
+                writePreparedStatic(preparedStatic, staticOutput);
               }
               geometryFrame?.commit();
               selectionFrame?.accept();
+              // Empty/anchor-only Static batches have no bytes to hand off. They
+              // advance only after every fallible operation in this commit passed.
+              preparedStatic.accept();
             } finally {
               restoreLayoutGuards();
             }
@@ -2322,16 +2339,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               // callback can terminate the process synchronously.
               ensureFullscreenSurface();
               if (onRender) onRender({ renderTime: performance.now() - start });
-              renderInteractiveFrame(
-                frame,
-                outputHeight,
-                hasStaticOutput ? staticOutput : "",
-                caretFrame!,
-              );
+              renderInteractiveFrame(frame, outputHeight, preparedStatic, caretFrame!);
               geometryFrame?.commit();
               selectionFrame?.accept();
               mouseFrame?.accept();
               caretFrame?.accept();
+              preparedStatic.accept();
               return;
             }
 
@@ -2358,7 +2371,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                     frameState.outputHeight > 0
                       ? ansiEscapes.eraseLines(frameState.outputHeight)
                       : "";
-                  stdout.write(erase + staticOutput);
+                  writePreparedStatic(preparedStatic, erase + staticOutput);
                   frameState.outputHeight = 0;
                 }
 
@@ -2383,21 +2396,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
               });
               markBoundaryErrorFrameRendered(frame);
+              preparedStatic.accept();
               return;
             }
 
             // Interactive path
             if (onRender) onRender({ renderTime: performance.now() - start });
-            renderInteractiveFrame(
-              frame,
-              outputHeight,
-              hasStaticOutput ? staticOutput : "",
-              caretFrame!,
-            );
+            renderInteractiveFrame(frame, outputHeight, preparedStatic, caretFrame!);
             markBoundaryErrorFrameRendered(frame);
             geometryFrame?.commit();
             selectionFrame?.accept();
             caretFrame?.accept();
+            preparedStatic.accept();
           } finally {
             restoreLayoutGuards();
           }

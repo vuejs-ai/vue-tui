@@ -439,9 +439,18 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       return;
     }
     if (el.type === "tui-static" && key === "internal_onWritten") {
-      // Callback the renderer invokes post-commit to advance the <Static>
-      // component's cursor so written items unmount. Not styling/layout.
-      el.onWritten = typeof next === "function" ? (next as () => void) : undefined;
+      // Callback the renderer invokes after Static output acceptance to advance
+      // the component cursor so written items unmount. Not styling/layout.
+      el.onWritten =
+        typeof next === "function" ? (next as (renderedThrough: number) => void) : undefined;
+      onCommit();
+      return;
+    }
+    if (el.type === "tui-static" && key === "internal_renderedThrough") {
+      // Snapshot the item prefix represented by the currently mounted children.
+      // Acceptance must use this render-time value, not a possibly re-entrantly
+      // mutated items array observed after stdout.write() returns.
+      el.renderedThrough = typeof next === "number" ? next : 0;
       onCommit();
       return;
     }

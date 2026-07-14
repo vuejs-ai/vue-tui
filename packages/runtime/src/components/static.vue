@@ -10,12 +10,16 @@ const props = defineProps(staticProps);
 defineSlots<{ default?: (slotProps: { item: unknown; index: number }) => unknown }>();
 
 // Mirrors Ink's useState(0): only items at/after `cursor` render; the renderer
-// advances the cursor post-paint via onWritten so written items unmount.
+// advances the cursor only after output acceptance so written items unmount.
 const cursor = shallowRef(0);
-// GROW/steady-state: advance only AFTER paint. Assigning items.length is a
-// reactivity no-op when unchanged (Object.is), so resync can't loop.
-const onWritten = () => {
-  cursor.value = (props.items as unknown[]).length;
+// GROW/steady-state: advance only through the prefix represented by the accepted
+// host render. The items array can grow synchronously inside stdout.write(), so
+// reading its current length at acceptance would skip the re-entrant append.
+const onWritten = (renderedThrough: number) => {
+  cursor.value = Math.max(
+    cursor.value,
+    Math.min(renderedThrough, (props.items as unknown[]).length),
+  );
 };
 // SHRINK: lower the cursor immediately so a later append isn't dropped.
 watch(
@@ -31,6 +35,7 @@ const merged = computed(() => ({
   flexDirection: "column",
   ...props.style,
   internal_onWritten: onWritten,
+  internal_renderedThrough: (props.items as unknown[]).length,
 }));
 const itemsToRender = computed(() => (props.items as unknown[]).slice(cursor.value));
 </script>

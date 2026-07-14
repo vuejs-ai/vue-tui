@@ -38,34 +38,49 @@ function isInertStaticAnchor(child: TuiNode): boolean {
   return child.type === "comment" || (child.type === "text-leaf" && child.value === "");
 }
 
+interface PreparedStaticBatch {
+  readonly stat: TuiStatic;
+  readonly fresh: readonly TuiNode[];
+  readonly frame: string;
+  readonly renderedThrough: number;
+}
+
 /**
- * Paint the not-yet-written children of a single <Static> node and record them
- * as written. Returns the painted frame (without trailing "\n"), or "" when
- * there is nothing fresh to write.
- *
- * Static items are write-once. `stat.children` only ever holds the currently-
- * mounted (un-written) items because the <Static> component slices written ones
- * out — but between a write and the component's cursor advance, the just-written
- * children are still mounted, so we must skip any child already in `writtenNodes`
- * (identity-tracked, since one item = several host nodes incl. fragment anchors).
- * After painting the fresh children we call `onWritten` so the component advances
- * its cursor and unmounts them (the post-commit step mirroring Ink's
- * `useLayoutEffect(setIndex)`).
+ * One candidate Static output transaction. Preparation is side-effect free with
+ * respect to write-once bookkeeping. `accept()` settles every prepared node and
+ * advances each component only after the corresponding output write returns
+ * normally. `abandon()` settles the nodes without advancing the components when
+ * a write throws: the stream may already have handed off some bytes, so retrying
+ * automatically could duplicate history.
  */
-export function paintStaticNode(
+export interface PreparedStaticOutput {
+  /** Combined fresh Static bytes, including each non-empty frame's trailing newline. */
+  readonly output: string;
+  /** Confirm a normally returned output write, or a successful output-free commit. */
+  accept(): void;
+  /** Prevent retry after an indeterminate throwing output write. */
+  abandon(): void;
+}
+
+/**
+ * Paint the not-yet-settled children of one <Static> node without changing its
+ * write-once state. The returned frame excludes the terminal-channel newline.
+ *
+ * Static items are write-once. `stat.children` normally holds the currently
+ * uncommitted items because the component slices accepted ones out. Between a
+ * successful write and the component's cursor update, accepted children remain
+ * mounted briefly, so preparation skips identities already in `writtenNodes`.
+ */
+function prepareStaticNode(
   stat: TuiStatic,
   columns: number,
   isScreenReaderEnabled = false,
-): string {
+): PreparedStaticBatch {
   const fresh = stat.children.filter((child) => !stat.writtenNodes.has(child));
   const paintableFresh = fresh.filter((child) => !isInertStaticAnchor(child));
-  // Paint (and record as written) only when there is something fresh — but the
-  // prune and onWritten steps below run on EVERY commit, including the empty
-  // commit that follows a cursor advance (children sliced to []). That empty
-  // commit is exactly when we must (a) prune stale unmounted nodes and (b)
-  // re-sync the cursor to items.length: on a shrink ([A,B]→[A]), nothing fresh
-  // paints, yet Ink's `useLayoutEffect(setIndex(items.length))` still fires and
-  // lowers the cursor so subsequent grows ([A,C]) render and write the new item.
+  // Paint only when there is something fresh. A genuinely fresh item that
+  // renders no bytes (for example a template anchor or empty Text) is still
+  // settled and notified after a successful output-free commit.
   let frame = "";
   if (paintableFresh.length > 0) {
     if (isScreenReaderEnabled) {
@@ -98,35 +113,87 @@ export function paintStaticNode(
     } else {
       frame = paintIsolated(paintableFresh, columns, stat);
     }
-    for (const child of paintableFresh) stat.writtenNodes.add(child);
   }
-  // Empty text leaves and comments can be framework anchors around a template
-  // v-for. They render no content, but still need write-once bookkeeping so
-  // the cursor/prune path behaves like a normal painted batch.
-  for (const child of fresh) {
-    if (isInertStaticAnchor(child)) stat.writtenNodes.add(child);
-  }
-  // Prune entries that are no longer mounted so the set can't grow unbounded
-  // over a long-running app (written children get unmounted on the next render).
-  if (stat.writtenNodes.size > stat.children.length) {
-    const live = new Set(stat.children);
-    for (const node of stat.writtenNodes) {
-      if (!live.has(node)) stat.writtenNodes.delete(node);
+  return { stat, fresh, frame, renderedThrough: stat.renderedThrough };
+}
+
+/** Prepare every Static region as one ordered output transaction. */
+export function prepareStaticOutput(
+  root: TuiNode,
+  columns: number,
+  isScreenReaderEnabled = false,
+): PreparedStaticOutput {
+  const batches = findStatics(root).map((stat) =>
+    prepareStaticNode(stat, columns, isScreenReaderEnabled),
+  );
+  const output = batches.map(({ frame }) => (frame.length > 0 ? frame + "\n" : "")).join("");
+  let state: "pending" | "accepted" | "abandoned" = "pending";
+
+  const settle = (next: "accepted" | "abandoned"): boolean => {
+    if (state !== "pending") return false;
+    state = next;
+
+    // Mark every prepared identity before invoking any component callback. One
+    // combined stdout write covers every batch; if a callback throws after that
+    // write, no later batch may become eligible for duplicate output.
+    for (const { stat, fresh } of batches) {
+      for (const child of fresh) stat.writtenNodes.add(child);
+
+      // Accepted children unmount on the next Vue update. Prune identities that
+      // are already gone so a long-running application retains only live nodes.
+      if (stat.writtenNodes.size > stat.children.length) {
+        const live = new Set(stat.children);
+        for (const node of stat.writtenNodes) {
+          if (!live.has(node)) stat.writtenNodes.delete(node);
+        }
+      }
     }
-  }
-  // Defer the cursor sync to AFTER this commit so the just-painted items are
-  // still mounted while they are written; the callback re-renders and drops
-  // them. Always called (even on empty commits) so the cursor tracks
-  // items.length every commit — mirroring Ink's effect on [items.length].
-  // Setting the cursor to an unchanged value is a reactivity no-op, so this
-  // cannot loop.
-  stat.onWritten?.();
-  return frame;
+    return true;
+  };
+
+  return {
+    output,
+    accept() {
+      if (!settle("accepted")) return;
+
+      // Run every notification even if one unexpectedly throws. The bytes for
+      // all batches have already been accepted, so all cursors must observe the
+      // same outcome before the first callback error propagates.
+      const errors: unknown[] = [];
+      for (const { stat, fresh, renderedThrough } of batches) {
+        // A genuinely fresh empty-rendering item still has host identities and
+        // must advance. A batch with no fresh identity is only a bookkeeping
+        // no-op; in particular, it must not turn an earlier indeterminate write
+        // abandoned into a later false acceptance during teardown.
+        if (fresh.length === 0) continue;
+        try {
+          stat.onWritten?.(renderedThrough);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) {
+        throw new AggregateError(errors, "Failed to accept Static output.");
+      }
+    },
+    abandon() {
+      settle("abandoned");
+    },
+  };
 }
 
 export function flushStatic(root: TuiNode, stream: NodeJS.WriteStream): void {
-  for (const stat of findStatics(root)) {
-    const frame = paintStaticNode(stat, stream.columns ?? 80);
-    if (frame.length > 0) stream.write(frame + "\n");
+  const prepared = prepareStaticOutput(root, stream.columns ?? 80);
+  if (prepared.output.length === 0) {
+    prepared.accept();
+    return;
   }
+  try {
+    stream.write(prepared.output);
+  } catch (error) {
+    prepared.abandon();
+    throw error;
+  }
+  prepared.accept();
 }

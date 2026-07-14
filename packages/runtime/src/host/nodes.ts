@@ -81,25 +81,27 @@ export interface TuiStatic extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
+  /** Exclusive item index represented by the currently mounted host children. */
+  renderedThrough: number;
   /**
-   * Host child nodes already written to the static channel. Static items are
-   * write-once: each commit only paints the children NOT in this set. We track
-   * by node identity rather than a count because a single logical item expands
-   * to several host nodes (the <Text>/<Box> plus empty text-leaf fragment
-   * anchors Vue inserts), so a positional `writtenCount` would mis-slice. Once a
-   * child is painted it is recorded here, then the <Static> component advances
-   * its cursor and unmounts it (mirroring Ink's `setIndex(items.length)`).
+   * Host child nodes settled by the static output channel. Static items are
+   * write-once: each preparation skips children in this set. We track by node
+   * identity rather than a count because one logical item expands to several
+   * host nodes, including Vue fragment anchors. A normally returned write adds
+   * its complete prepared batch before the component cursor advances. A
+   * throwing write also adds that batch because handoff is indeterminate and an
+   * automatic retry could duplicate bytes, but it does not report acceptance to
+   * the component.
    */
   writtenNodes: Set<TuiNode>;
   /**
-   * Callback registered by the <Static> component, invoked by the renderer AFTER
-   * a commit has painted freshly-written items. It advances the component's
-   * reactive cursor (Ink's `index`) so the just-written items are sliced out and
-   * unmount on the next render — the vue-tui analogue of Ink's post-commit
-   * `useLayoutEffect(() => setIndex(items.length))`. Advancing AFTER paint (never
-   * during render) guarantees items are written before they are dropped.
+   * Callback registered by the <Static> component, invoked only after the
+   * corresponding output write returns normally or an output-free renderer
+   * commit succeeds. The prepared render's exclusive item index is passed so a
+   * synchronous append during the stream write remains pending for a later
+   * commit instead of being skipped by the component cursor.
    */
-  onWritten?: () => void;
+  onWritten?: (renderedThrough: number) => void;
 }
 
 export interface TuiTransform extends NodeBase {
@@ -192,6 +194,7 @@ export function createStatic(): TuiStatic {
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
+    renderedThrough: 0,
     writtenNodes: new Set(),
   });
 }
