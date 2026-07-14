@@ -1,6 +1,6 @@
 # Fullscreen text selection and clipboard
 
-> **Status:** selected unstamped F8 public contract, implemented and complete on the current foundation branch. Public/type/package, deterministic, HMR, long-transcript, workbench, real-PTY, image-observed visual, native custom-clipboard, restoration, repository, fresh-CI, and independent-review evidence agree. F8 is Done on the branch; PR #265 integration and maintainer merge remain external gates before the next phase. This record carries no VOUCHED stamp.
+> **Status:** selected unstamped F8 public contract, implemented and complete at `3d7e197` on the current foundation branch. Public/type/package, deterministic, HMR, long-transcript, workbench, real-PTY, image-observed visual, native custom-clipboard, restoration, repository, fresh-CI, independent-review, and GitHub Actions evidence agree. F8 is Done and remains the accepted checkpoint from which Runtime foundation closure continues on the same worktree, branch, and PR #265. This record carries no VOUCHED stamp.
 
 ## Product boundary
 
@@ -237,4 +237,4 @@ F8 is Done on the current foundation branch. The completed evidence is:
 - final `vp run ready` passed 27 tasks: 685 runtime, 89 testing, 31 components, 30 Vite, 1,543 passing integration tests plus two expected failures and two skips, 174 real-PTY tests, six example tests, all builds, formatting, lint, types, and the clean package consumer;
 - one fresh `CI=true vp run ci` passed all 28 tasks with zero cache hits, and the required independent reviews ended with no remaining concrete finding.
 
-PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) still needs this coherent checkpoint, its one ordinary remote run, the approved replacement PR body, and maintainer merge. Runtime foundation closure must not begin from this branch. No VOUCHED stamp changed.
+PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) contains this coherent checkpoint and its ordinary remote run is green. Runtime foundation closure continues from it on the same branch; the complete replacement PR body remains intentionally deferred until the final technical scope is stable and Yunfei approves the exact text, and the maintainer merge remains outside this development goal. No VOUCHED stamp changed.

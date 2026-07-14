@@ -10,6 +10,8 @@ Do not start a renderer rewrite, replace the layout engine, add a native runtime
 
 Revisit performance when a representative journey exposes a measurable limit. At that point this record supplies hypotheses, candidate mechanisms, and a benchmark plan; it does not predetermine the implementation.
 
+The active [Runtime foundation closure](./runtime-foundation-closure.md) now supplies the first finite representative workload set. Measuring those fixed journeys is required closure evidence, not a decision to optimize: if they meet their predeclared correctness, responsiveness, resource, ordering, and restoration bounds, accept the current full-render architecture and keep the mechanisms below parked.
+
 ## First-principles cost model
 
 An interactive terminal renderer operates across three domains that must remain consistent:
@@ -68,7 +70,7 @@ The source establishes that line diff can reduce emitted output only after the f
 | Inline conversational application      | `Static` can move completed transcript items out of the changing region, keeping the live tail relatively small. | Long changing Markdown, code, tool output, or an application that retains its whole transcript in the dynamic tree.                                                                |
 | Full-screen conversational application | A fixed viewport makes cell diff useful.                                                                         | Long transcripts remain fully mounted in `ScrollBox`; search, selection, reflow, and streaming can still layout and paint far more than is visible.                                |
 | Real-time monitor                      | Ordinary dashboards with tens of rows can be inexpensive enough, and line diff avoids much output.               | A sparse metric update still produces a full paint; high update rates, large tables, or slow output streams amplify the cost.                                                      |
-| Multi-region workbench                 | Vue and Yoga are a good fit for independently composed panes.                                                    | Several large or frequently changing panes compound full-tree paint and allocation. Long lists require virtualization.                                                             |
+| Multi-region workbench                 | Vue and Yoga are a good fit for independently composed panes.                                                    | Several large or frequently changing panes compound full-tree paint and allocation. Measured failures may require application/component windowing.                                 |
 | Terminal workspace pane                | vue-tui can own pane bounds, focus, input routing, and surrounding UI.                                           | An externally emulated terminal must enter as a coarse styled-cell surface with dirty rows; representing every terminal cell as a Vue/Yoga node would create the wrong cost model. |
 
 These implications do not choose inline or full-screen as the primary rendering mode. They expose different terminal constraints that should share a core renderer where honest and use different rendering-mode behavior where necessary.
@@ -169,14 +171,9 @@ Reopen the performance architecture when at least one of these is true:
 - a small visible update scales with total mounted nodes or viewport area enough to block a real application;
 - a required scenario cannot be made correct with the current full-paint or non-virtualized model.
 
-Before changing architecture, commit deterministic benchmarks for four representative workloads:
+Before changing architecture, preserve deterministic harnesses for the fixed J1 through J6 workloads in [Runtime foundation closure](./runtime-foundation-closure.md#fixed-journeys-and-workloads): an Inline conversational transcript and finder, a Fullscreen long document, a sparse monitor, a multi-pane workbench, and deliberately slow Inline and Fullscreen writers. Those workloads supersede the earlier speculative requirement for a pre-virtualized collection or public styled-cell surface; neither mechanism is a prerequisite to measuring or accepting the current architecture.
 
-1. an inline coding-agent transcript with `Static`, a streaming live tail, approval, and resize;
-2. a full-screen long transcript or Markdown viewer with search, selection, streaming, and scroll;
-3. a fixed-layout monitor with sparse metric changes at controlled update rates;
-4. a multi-pane workbench with a large virtualized collection and a batched external styled-cell surface.
-
-Each benchmark should record layout nodes visited, measured text nodes, painted cells or row spans, diff-scanned cells, emitted cells and bytes, write count, coalesced or dropped frames, frame time, end-to-end input latency, event-loop delay, allocation, garbage collection, and backpressure. The acceptance question is whether a small update's work follows its affected area instead of the whole component tree or terminal.
+Measure end-to-end frame work, input latency, event-loop delay, retained memory, output order, write pressure, final visibility, and restoration. Add counters for layout nodes, measured text, painted or diffed cells, row spans, allocations, or emitted bytes only when a failed external bound needs diagnosis. The closure question is whether every fixed journey meets its declared product-level bounds. Work proportional to the affected area remains a useful optimization hypothesis and future reopen trigger, not a current acceptance requirement.
 
 If the benchmarks establish a problem, implement in this order and measure after each step:
 
