@@ -115,7 +115,7 @@ Mouse reporting still changes terminal-native selection even on the alternate sc
 
 Its public type rejects targeted mouse listeners, and its SFC does not let them fall through accidentally to the internal viewport `Box`. Fullscreen wheel behavior composes by binding `useMouseEvent()` to an existing target and calling the `ScrollBox` handle; no mouse-specific `ScrollBox` component is needed.
 
-A candidate refinement is for `scrollByLines`, `scrollToLine`, `scrollToTop`, and `scrollToBottom` to report whether the position changed. A nested wheel handler can then stop propagation only when the inner viewport actually moved; at an edge, the event can continue to an outer scroll owner. This return-type change is a proposal, not an accepted API. Keyboard policy remains outside `ScrollBox` until focused input routing exists.
+F7's API-neutral expected-failure journeys now prove that `scrollByLines`, `scrollToLine`, `scrollToTop`, and `scrollToBottom` need one synchronous transport-neutral observation of whether the effective top row changed. F4 focused-target-to-scope routing and F6 target-to-ancestor wheel routing can then stop only after inner movement and continue at an edge. Page commands reuse `scrollByLines()` with the accepted F5 wrapper height; `ScrollBox` remains input-free. The evidence does not distinguish boolean, a named literal, or a structured result that also exposes sticky-following changes, so the [exact public alternatives](./components/scroll-box.md#exact-public-alternatives-requiring-maintainer-selection) require maintainer selection before implementation.
 
 ### Terminal-wide raw mouse remains a separate capability
 

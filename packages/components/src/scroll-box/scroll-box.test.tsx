@@ -125,6 +125,97 @@ test("ScrollBox drives scrolling through the exposed handle", async () => {
   }
 });
 
+test.fails("ScrollBox reports actual movement consistently across every semantic operation", async () => {
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {messages(12).map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    const movement = (value: unknown): boolean => {
+      if (value === true || value === "moved") return true;
+      if (value === false || value === "unchanged") return false;
+      if (typeof value === "object" && value !== null && "moved" in value) {
+        return (value as { readonly moved: unknown }).moved === true;
+      }
+      return false;
+    };
+    const observations = [
+      movement(box.value?.scrollByLines(-1)),
+      movement(box.value?.scrollToTop()),
+      movement(box.value?.scrollToTop()),
+      movement(box.value?.scrollToLine(3)),
+      movement(box.value?.scrollToLine(3)),
+      movement(box.value?.scrollByLines(4)),
+      movement(box.value?.scrollByLines(999)),
+      movement(box.value?.scrollByLines(999)),
+      movement(box.value?.scrollToBottom()),
+    ];
+
+    expect(observations).toEqual([true, true, false, true, false, true, true, false, false]);
+  } finally {
+    result.unmount();
+  }
+});
+
+test("scrollToBottom can re-arm sticky following without moving the current viewport", async () => {
+  const items = shallowRef(messages(12));
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {items.value.map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    box.value?.scrollToLine(4);
+    await result.waitUntilRenderFlush();
+    items.value = messages(8);
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    const clampedAtBottom = result.lastFrame();
+
+    items.value = [...items.value, "control latest"];
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).not.toContain("control latest");
+    expect(result.lastFrame()).toContain("message 4");
+
+    items.value = messages(8);
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toBe(clampedAtBottom);
+
+    box.value?.scrollToBottom();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toBe(clampedAtBottom);
+
+    items.value = [...items.value, "streaming latest"];
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toContain("streaming latest");
+    expect(result.lastFrame()).not.toContain("message 4");
+  } finally {
+    result.unmount();
+  }
+});
+
 test("ScrollBox preserves a non-sticky offset across ancestor hiding", async () => {
   const visible = shallowRef(true);
   const box = shallowRef<ScrollBoxExpose>();
