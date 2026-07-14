@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, onMounted, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useApp } from "@vue-tui/runtime";
+import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { PassThrough } from "node:stream";
@@ -145,6 +145,41 @@ test("alternate screen - enters on mount and exits on unmount", async () => {
   expect(enterIndex).toBeLessThan(exitIndex);
   expect(enterIndex).toBe(0);
   expect(chunks[0]).toContain(ansiEscapes.enterAlternativeScreen);
+});
+
+test("alternate screen - enters before setup-owned input modes", async () => {
+  const stdout = makeTtyStream();
+  const stdin = makeFakeStdin();
+  const InputApp = defineComponent(() => {
+    useInput(() => "continue");
+    return () => <Text>Hello</Text>;
+  });
+
+  const app = createApp(InputApp);
+  app.mount({
+    stdout,
+    stdin,
+    stderr: makeTtyStream(),
+    mode: "fullscreen",
+    liveUpdates: true,
+    kittyKeyboard: { mode: "enabled" },
+  });
+  await nextTick();
+
+  const output = stdout.chunks.join("");
+  const enterIndex = output.indexOf(ansiEscapes.enterAlternativeScreen);
+  const hideIndex = output.indexOf("\x1b[?25l");
+  const kittyEnableIndex = output.indexOf("\x1b[>1u");
+  const pasteIndex = output.indexOf("\x1b[?2004h");
+
+  expect(enterIndex).toBe(0);
+  expect(hideIndex).toBeGreaterThan(enterIndex);
+  expect(kittyEnableIndex).toBeGreaterThan(hideIndex);
+  expect(pasteIndex).toBeGreaterThan(kittyEnableIndex);
+
+  const exited = app.waitUntilExit();
+  app.unmount();
+  await exited;
 });
 
 // Port of Ink ink.tsx:970-976 (setAlternateScreen): when entering the alternate

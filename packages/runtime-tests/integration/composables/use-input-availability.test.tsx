@@ -11,7 +11,7 @@ import {
   type InputAvailability,
   type UseInputAvailabilityReturn,
 } from "@vue-tui/runtime";
-import { makeFakeWritable } from "../lifecycle/test-streams.ts";
+import { captureWrites, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 describe("useInputAvailability", () => {
   test("returns one stable runtime-readonly available ref for a controllable TTY", async () => {
@@ -150,6 +150,8 @@ describe("useInputAvailability", () => {
     });
     const stdout = makeFakeWritable();
     const stderr = makeFakeWritable();
+    const stdoutWrites = captureWrites(stdout);
+    const stderrWrites = captureWrites(stderr);
     const active = shallowRef(false);
     let availability: UseInputAvailabilityReturn | undefined;
     const App = defineComponent(() => {
@@ -170,6 +172,9 @@ describe("useInputAvailability", () => {
     );
     expect(availability?.availability.value).toEqual({ status: "available" });
     expect(stdin.listenerCount("data")).toBe(0);
+    expect(stdoutWrites.join("") + stderrWrites.join("")).toContain(
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+    );
 
     app.unmount();
     stdin.destroy();

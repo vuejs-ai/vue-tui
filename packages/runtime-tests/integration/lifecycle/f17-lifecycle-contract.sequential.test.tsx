@@ -482,8 +482,11 @@ test.sequential("process.exit during a commit restores Fullscreen before the pro
 
   expect(exit).toEqual({ code: 0, signal: null });
   expect(stderr).toBe("");
-  expect(stdout).toContain(ansiEscapes.enterAlternativeScreen);
-  expect(stdout).toContain(ansiEscapes.exitAlternativeScreen);
+  const enterIndex = stdout.indexOf(ansiEscapes.enterAlternativeScreen);
+  const exitIndex = stdout.indexOf(ansiEscapes.exitAlternativeScreen);
+  expect(enterIndex).toBeGreaterThanOrEqual(0);
+  expect(exitIndex).toBeGreaterThan(enterIndex);
+  expect(stdout).not.toContain("frame");
 });
 
 test.sequential("process.exit during teardown's final commit still restores Fullscreen", async () => {

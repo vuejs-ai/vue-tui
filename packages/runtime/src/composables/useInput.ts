@@ -74,6 +74,15 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
   }
 
   const isActive = options.isActive ?? true;
+  // Register cleanup before the immediate watcher can activate managed input.
+  // Vue clears the current setup scope while handling a synchronous watcher
+  // failure, so registering afterward would itself warn and write to stderr on
+  // an expected unavailable-input exit.
+  onScopeDispose(() => {
+    desiredActive = false;
+    reconcileAttachment();
+  });
+
   watch(
     () => toValue(isActive),
     (value) => {
@@ -82,9 +91,4 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     },
     { immediate: true, flush: "sync" },
   );
-
-  onScopeDispose(() => {
-    desiredActive = false;
-    reconcileAttachment();
-  });
 }

@@ -77,6 +77,64 @@ test.sequential("registers suspension before the first terminal acquisition", ()
   }
 });
 
+test.sequential("activating managed input while Fullscreen is suspended defers every acquisition", async () => {
+  const stdout = makeWritable();
+  const stderr = makeWritable();
+  const stdin = makeRawTrackingStdin();
+  const suspensionHost = createManualSuspensionHost();
+  const active = shallowRef(false);
+  const writes: string[] = [];
+  const originalWrite = stdout.write.bind(stdout);
+  stdout.write = ((...args: unknown[]) => {
+    writes.push(String(args[0]));
+    return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+  }) as NodeJS.WriteStream["write"];
+  const App = defineComponent(() => {
+    useInput(() => "continue", { isActive: active });
+    return () => <Text>frame</Text>;
+  });
+  const app = createApp(App);
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "fullscreen",
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+      kittyKeyboard: { mode: "enabled" },
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    } as Parameters<TuiApp["mount"]>[0]);
+    await app.waitUntilRenderFlush();
+    await suspensionHost.suspend();
+    expect(stdin.isRaw).toBe(false);
+
+    const activationOffset = writes.length;
+    active.value = true;
+    await nextTick();
+
+    expect(writes.slice(activationOffset)).toEqual([]);
+    expect(stdin.isRaw).toBe(false);
+
+    await suspensionHost.resume();
+    const resumedOutput = writes.slice(activationOffset).join("");
+    const enterIndex = resumedOutput.indexOf(ansiEscapes.enterAlternativeScreen);
+    const pasteIndex = resumedOutput.indexOf("\x1b[?2004h");
+    const kittyIndex = resumedOutput.indexOf("\x1b[>1u");
+    expect(enterIndex).toBeGreaterThanOrEqual(0);
+    expect(pasteIndex).toBeGreaterThan(enterIndex);
+    expect(kittyIndex).toBeGreaterThan(enterIndex);
+    expect(stdin.isRaw).toBe(true);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
 type ResumeFailureStage = "enter" | "hide" | "repaint";
 
 test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(

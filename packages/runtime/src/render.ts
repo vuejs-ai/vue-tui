@@ -290,6 +290,24 @@ function getWritableStreamState(stdout: MaybeWritableStream): {
   };
 }
 
+const expectedManagedInputUnavailableError = Symbol("expected-managed-input-unavailable");
+
+function createManagedInputUnavailableError(message: string, expectedAtMount: boolean): Error {
+  const error = new Error(message);
+  if (expectedAtMount) {
+    Object.defineProperty(error, expectedManagedInputUnavailableError, { value: true });
+  }
+  return error;
+}
+
+function isExpectedManagedInputUnavailableError(error: Error): boolean {
+  return (
+    (error as Error & { [expectedManagedInputUnavailableError]?: boolean })[
+      expectedManagedInputUnavailableError
+    ] === true
+  );
+}
+
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
@@ -311,7 +329,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // resolveExit() before the deferred exit rejects with the thrown error instead
   // of resolving clean (BUG #2). Mirrors exitWithError's after-mount indirection
   // because pendingExitError/exitInitiated/teardownStarted are all in this scope.
-  let recordExitError: (e: Error) => void = () => {};
+  let recordExitError: (e: Error, silent?: boolean) => void = () => {};
 
   // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
   // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
@@ -384,6 +402,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // settling the exit promise.
   let pendingExitError: unknown = undefined;
   let pendingExitResult: unknown = undefined;
+  let pendingExitErrorIsSilent = false;
   let pendingExitErrorWasRendered = false;
   let pendingBoundaryError: Error | undefined;
   let pendingBoundaryFrameReady: Error | undefined;
@@ -751,6 +770,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // emits the durable report to stderr below. Live output still commits so an
       // Inline/transcript overview can remain when its stdout write succeeds.
       if (
+        !pendingExitErrorIsSilent &&
         !immediateTermination &&
         mountedCommit &&
         stdoutWritable &&
@@ -918,6 +938,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       if (
+        !pendingExitErrorIsSilent &&
         isErrorInput(pendingExitError) &&
         (!pendingExitErrorWasRendered || !mountedBoundaryErrorsAreDurable)
       ) {
@@ -946,6 +967,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({ onCommit: () => scheduledCommit() }),
   );
+
+  const captureComponentError = (error: Error): boolean => {
+    const silent = isExpectedManagedInputUnavailableError(error);
+    recordExitError(error, silent);
+    if (silent) mountedScheduler?.cancel();
+    void nextTick(() => {
+      exitWithError(error);
+    });
+    return silent;
+  };
+
   if (isDevConnected()) {
     // initHmrBridge already ran inside connectDevtools() with a live hot.
     // Clear any dev status left in the module-global `devState` by a previous
@@ -974,6 +1006,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // unchanged.
       const caught = shallowRef<unknown>(null);
       const errored = shallowRef(false);
+      const silentErrored = shallowRef(false);
 
       onErrorCaptured((err) => {
         // First-wins: only the FIRST captured error is recorded and routed to
@@ -983,7 +1016,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // first-wins, so without this guard the overview would show error #2
         // while waitUntilExit() rejects with error #1 (e17 display/reject
         // mismatch). Guarding on `errored` keeps both on the first thrown value.
-        if (!errored.value) {
+        if (!errored.value && !silentErrored.value) {
           // Preserve a genuine Error — including a cross-realm one (fails
           // `instanceof Error`, passes the `[object Error]` brand check) — so the
           // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
@@ -992,8 +1025,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // is wrapped with the SAME message ErrorOverview displays
           // (messageForNonError), so the shown and rejected messages agree (e17).
           const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
-          caught.value = err;
-          errored.value = true;
+          const silent = captureComponentError(e);
+          if (silent) {
+            silentErrored.value = true;
+          } else {
+            caught.value = err;
+            errored.value = true;
+          }
           // Record the exit error SYNCHRONOUSLY, but keep the teardown DEFERRED.
           // Two distinct concerns, decoupled:
           //   1. recordExitError(e) sets pendingExitError NOW (first-wins). A host
@@ -1013,15 +1051,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           //      racing-unmount case the unmount sets teardownStarted, so this
           //      later exit() no-ops via the exitInitiated||teardownStarted guard;
           //      with no race it proceeds normally.)
-          recordExitError(e);
-          void nextTick(() => {
-            exitWithError(e);
-          });
         }
         return false; // stop propagation
       });
 
       return () => {
+        if (silentErrored.value) return null;
         if (errored.value) {
           // Rendering this vnode only means the error frame is ready to paint.
           // Durability is recorded later, after the terminal write succeeds.
@@ -1701,6 +1736,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         appCtx: appContext,
         getMouseController: () => mountedMouseController,
         mouseProtocolAvailable,
+        beforeManagedInputAcquire: ensureFullscreenSurface,
         onSgrMouseModeChange: testInputHost
           ? (level) => testInputHost.onMouseReportingChange(level === "hover" ? "drag" : level)
           : undefined,
@@ -1835,10 +1871,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
+      function ensureFullscreenSurface(): void {
+        if (!fixedFullscreenSurface) return;
+        if (!mountedAlternateScreen) {
+          stdout.write(ansiEscapes.enterAlternativeScreen + "\x1b[H");
+          mountedAlternateScreen = true;
+        }
+        if (!mountedFullscreenCursorHidden) {
+          stdout.write("\x1b[?25l");
+          mountedFullscreenCursorHidden = true;
+        }
+      }
+
       mountedClear = () => {
         runLifecycleTransaction(() => {
           if (!dynamicUpdatesLive || terminalSuspended) return;
           if (fixedFullscreenSurface) {
+            ensureFullscreenSurface();
             runSynchronizedOutput(() => {
               stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
               writer.sync("", { cursor: false });
@@ -1959,6 +2008,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             : mountedCaretController?.writerPosition;
         withWriterCaretOwnership(caretPosition, () =>
           runLifecycleTransaction(() => {
+            ensureFullscreenSurface();
             // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
             // clear that surface after every coordinated side-channel write instead
             // of restoring relative to the cursor position that the write left
@@ -2143,6 +2193,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function commit() {
+        if (pendingExitErrorIsSilent) return;
         if (terminalSuspended && !terminalResumePainting) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         let geometryFrame: InternalGeometryPaintFrame | undefined;
@@ -2263,6 +2314,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             const outputHeight = frame === "" ? 0 : frame.split("\n").length;
 
             if (fixedFullscreenSurface) {
+              // A setup-owned managed-input demand may already have acquired
+              // the surface after its capability preflight. Input-free mounts
+              // reach this idempotent acquisition only after renderer-owned
+              // target, geometry, selection, mouse, and caret preparation has
+              // succeeded. Either path owns Fullscreen before a user onRender
+              // callback can terminate the process synchronously.
+              ensureFullscreenSurface();
               if (onRender) onRender({ renderTime: performance.now() - start });
               renderInteractiveFrame(
                 frame,
@@ -2363,6 +2421,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             // retry, so teardown cannot suppress the plain-text stderr fallback.
             pendingBoundaryFrameWriteFailed = true;
           }
+          if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
+            captureComponentError(error);
+            return;
+          }
           throw error;
         } finally {
           caretFrame?.discard();
@@ -2394,7 +2456,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedCommit = commit;
       prepareResumeSurface = () => commit;
       scheduledCommit = () => {
-        if (!terminalSuspended && !resizePaintPending) scheduler.schedule();
+        if (!pendingExitErrorIsSilent && !terminalSuspended && !resizePaintPending) {
+          scheduler.schedule();
+        }
       };
 
       // Internal provides — set before the actual mount so components can inject
@@ -2441,7 +2505,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       // Wire exit-with-error for the error boundary (must be set before mount).
       exitWithError = (e: Error) => appContext.exit(e);
-      recordExitError = (e: Error) => {
+      recordExitError = (e: Error, silent = false) => {
         // First-wins: don't overwrite an exit already decided (a clean exit() or a
         // prior error). Records the error so a racing unmount()'s resolveExit()
         // rejects with it instead of resolving clean (BUG #2). Mirrors the
@@ -2449,24 +2513,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // then the deferred exitWithError() drives teardown/resolveExit().
         if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
           pendingExitError = e;
-          pendingBoundaryError = e;
-          pendingExitErrorWasRendered = false;
-          pendingBoundaryFrameWriteFailed = false;
+          pendingExitErrorIsSilent = silent;
+          if (!silent) {
+            pendingBoundaryError = e;
+            pendingExitErrorWasRendered = false;
+            pendingBoundaryFrameWriteFailed = false;
+          }
         }
       };
-
-      // Enter the alternate screen before rendering starts when the resolved
-      // surface is an effective fullscreen terminal. Emit home explicitly so
-      // targeted mouse hit-testing can treat the frame origin as screen (0,0).
-      if (fixedFullscreenSurface) {
-        // These are acquisitions, not best-effort restores. A thrown write aborts
-        // the mount transaction; each lease is recorded only after its enable
-        // bytes were accepted, so rollback never disables an unacquired mode.
-        stdout.write(ansiEscapes.enterAlternativeScreen + "\x1b[H");
-        mountedAlternateScreen = true;
-        stdout.write("\x1b[?25l");
-        mountedFullscreenCursorHidden = true;
-      }
 
       // Patch console.log/warn/error etc. to route through writeToStdout /
       // writeToStderr so console output doesn't corrupt the rendered frame.
@@ -2512,9 +2566,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // visibility change on the first frame is the SHOW — exactly Ink's ordering.
       //
       // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
-      // dedicated write branch never routes through log-update, so no hide. The
-      // only mount-time hide that remains is the alt-screen one above
-      // (setAlternateScreen, alt-screen + isTTY gated), mirroring Ink.
+      // dedicated write branch never routes through log-update, so no hide.
+      // Fullscreen acquisition is lazy as well: after managed-input capability
+      // preflight, the first input demand or commit enters the alternate screen
+      // and hides the cursor before acquiring input modes or repainting.
 
       // Process-exit, termination, and suspension handlers are already wired
       // before terminal acquisition. This catch still routes renderer/patch-level
@@ -2853,6 +2908,8 @@ interface CreateStdinControllerOptions {
   appCtx: AppContext;
   acquireKittyKeyboardDemand: () => () => void;
   getMouseController: () => FullscreenMouseController | null;
+  /** Acquire the output surface after capability preflight and before input modes. */
+  beforeManagedInputAcquire: () => void;
   /** The mount's selected real or deterministic xterm-compatible SGR profile. */
   mouseProtocolAvailable: boolean;
   onSgrMouseModeChange?: (level: SgrMouseMode | undefined) => void;
@@ -3414,13 +3471,16 @@ function createStdinController(
   // Managed routes fail transactionally on a host that cannot provide terminal
   // input. The actual stream remains available through useStdin().stdin.
   const throwManagedInputUnavailable = (): never => {
+    const expectedAtMount = inputAvailability.value.status === "unavailable";
     if (stdin === process.stdin) {
-      throw new Error(
+      throw createManagedInputUnavailableError(
         "Managed input is unavailable because the current process.stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
+        expectedAtMount,
       );
     }
-    throw new Error(
+    throw createManagedInputUnavailableError(
       "Managed input is unavailable because the mounted stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
+      expectedAtMount,
     );
   };
 
@@ -3594,6 +3654,7 @@ function createStdinController(
         // silently attaching after its external owner returns it to cooked mode.
         throwManagedInputUnavailable();
       }
+      if (!suspended) opts.beforeManagedInputAcquire();
       const state = getRawModeState(stdin);
       const firstSharedRef = state.refs === 0;
       const localRefsBefore = localRefs;

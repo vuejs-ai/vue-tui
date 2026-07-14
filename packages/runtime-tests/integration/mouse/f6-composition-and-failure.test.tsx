@@ -201,10 +201,7 @@ test("a throwing drag handler abandons capture and balances terminal ownership",
   }
 });
 
-// Keep this last: Vue leaves later post-flush callbacks queued when one throws.
-// The production error is still caught exactly once here, but no unrelated
-// assertion should be made to flush that deliberately failed queue afterward.
-test("a non-TTY Fullscreen app fails when a visible target first demands mouse reporting", async () => {
+test("a non-TTY Fullscreen app rejects its lifetime when a visible target first demands mouse reporting", async () => {
   const visible = shallowRef(false);
   const App = defineComponent(() => {
     const target = shallowRef<Target>(null);
@@ -224,24 +221,30 @@ test("a non-TTY Fullscreen app fails when a visible target first demands mouse r
     rows: 8,
     host: { mode: "fullscreen", stdin: "non-tty" },
   });
+  const exited = captureExit(result);
 
   try {
     expect(result.mouse.reporting.history).toEqual([]);
+    expect(result.terminal.rawMode.history).toEqual([]);
     expect(result.terminal.rawMode.current).toBe(false);
 
     visible.value = true;
-    const updateErrors: unknown[] = [];
-    await nextTick().catch((error: unknown) => updateErrors.push(error));
+    await nextTick();
 
-    expect(updateErrors).toHaveLength(1);
-    expect(updateErrors[0]).toMatchObject({
-      message: expect.stringContaining(
-        "Managed input is unavailable because the mounted stdin is not a controllable TTY",
-      ),
+    const outcome = await exited;
+    expect(outcome).toMatchObject({
+      status: "rejected",
+      error: {
+        message: expect.stringContaining(
+          "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+        ),
+      },
     });
     expect(result.mouse.reporting.history).toEqual([]);
+    expect(result.terminal.rawMode.history).toEqual([]);
     expect(result.terminal.rawMode.current).toBe(false);
   } finally {
     result.dispose();
+    await exited;
   }
 });
