@@ -37,7 +37,7 @@ const approvalScope = useFocusScope({
   isActive: computed(() => state.value === "approving"),
   trapped: true,
 });
-const approval = useFocus(approvalHost, {
+useFocus(approvalHost, {
   scope: approvalScope,
   autoFocus: true,
 });
@@ -162,29 +162,16 @@ useFocusedInput(composer, (event) => {
   return "continue";
 });
 
-useFocusedInput(approval, (event) => {
-  if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
-    state.value = "streaming";
-    approvalResolve?.(true);
-    approvalResolve = null;
-    return "consume";
-  }
-  if (event.kind === "key" && event.key.name === "escape" && event.key.phase !== "release") {
-    state.value = "streaming";
-    approvalResolve?.(false);
-    approvalResolve = null;
-    return "consume";
-  }
-  return "continue";
-});
-
 useFocusScopeInput(approvalScope, (event) => {
   if (
     event.kind === "key" &&
     (event.key.name === "return" || event.key.name === "escape") &&
     event.key.phase !== "release"
   ) {
-    return "continue";
+    state.value = "streaming";
+    approvalResolve?.(event.key.name === "return");
+    approvalResolve = null;
+    return "consume";
   }
   return {
     action: "none",

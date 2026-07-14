@@ -1,0 +1,157 @@
+diff --git a/src/App.vue b/src/App.vue
+index 755dcd2..26ffa2c 100644
+--- a/src/App.vue
++++ b/src/App.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+ import { computed, ref, watchEffect } from "vue";
+-import { Box, Text, useWindowSize, useInput, useApp } from "@vue-tui/runtime";
++import { Box, Text, useLayoutSize, useInput, useApp } from "@vue-tui/runtime";
+ import { useMetrics } from "./composables/useMetrics";
+ import { emptyMetrics } from "./lib/empty";
+ import { theme, setThemeMode, nextThemeMode, type ThemeOverride } from "./theme";
+@@ -22,7 +22,7 @@ import NarrowView from "./components/NarrowView.vue";
+ const props = defineProps<{ snapshot?: Metrics; columns?: number; rows?: number }>();
+
+ const { metrics, history, now } = useMetrics();
+-const { columns, rows } = useWindowSize();
++const { columns, rows } = useLayoutSize();
+
+ const m = computed<Metrics>(() => props.snapshot ?? metrics.value ?? emptyMetrics());
+ const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now() : now.value));
+@@ -92,24 +92,33 @@ const effectiveMode = computed(() =>
+ );
+ watchEffect(() => setThemeMode(effectiveMode.value));
+
+-// Exit cleanly via the app lifecycle so the alternate screen is restored on quit.
+-// Ctrl+C is handled by mount's exitOnCtrlC. Both useApp/useInput are unavailable
+-// in the one-shot render path, so guard them.
+-let quit = () => process.exit(0);
+-try {
+-  const app = useApp();
+-  quit = () => app.exit();
+-} catch {
+-  // not in an interactive app context (one-shot render); keep the fallback.
+-}
+-try {
+-  useInput((input) => {
+-    if (input === "q") quit();
+-    else if (input === "t") themeOverride.value = nextThemeMode(themeOverride.value);
+-  });
+-} catch {
+-  // useInput is unavailable in one-shot render mode; ignore.
+-}
++// Exit cleanly via the app lifecycle so the full-screen surface is restored on quit.
++// String rendering provides inert app and input services, so this same setup also works for --once.
++const { exit } = useApp();
++useInput((event) => {
++  const input =
++    event.kind === "text"
++      ? event.text
++      : event.kind === "key" &&
++          event.key.reportedText !== null &&
++          event.key.phase !== "release" &&
++          !event.key.modifiers.ctrl &&
++          !event.key.modifiers.alt &&
++          !event.key.modifiers.meta &&
++          !event.key.modifiers.super &&
++          !event.key.modifiers.hyper
++        ? event.key.reportedText
++        : "";
++  if (input === "q") {
++    exit();
++    return "consume";
++  }
++  if (input === "t") {
++    themeOverride.value = nextThemeMode(themeOverride.value);
++    return "consume";
++  }
++  return "continue";
++});
+ </script>
+
+ <template>
+diff --git a/src/components/Graph.vue b/src/components/Graph.vue
+index 288b1fe..2c4d2f0 100644
+--- a/src/components/Graph.vue
++++ b/src/components/Graph.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+-import { ref, computed } from "vue";
+-import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
++import { computed, shallowRef, type ComponentPublicInstance } from "vue";
++import { Box, Text, useElementGeometry } from "@vue-tui/runtime";
+ import { brailleArea } from "../lib/sparkline";
+ import { ramp, supportsTruecolor } from "../lib/color";
+ import { theme } from "../theme";
+@@ -11,10 +11,18 @@ const props = withDefaults(
+ );
+
+ // Measure our own width so the graph always fills the panel, however flex sized it.
+-const box = ref();
+-const bm = useBoxMetrics(box);
++const box = shallowRef<ComponentPublicInstance | null>(null);
++const { geometry } = useElementGeometry(box);
++const width = computed(() => {
++  const value = geometry.value;
++  return value.status === "zero-size" ||
++    value.status === "fully-clipped" ||
++    value.status === "visible"
++    ? value.parent.width || 24
++    : 24;
++});
+ const rows = computed(() =>
+-  brailleArea(props.values, Math.max(1, bm.width.value || 24), props.height, props.max),
++  brailleArea(props.values, Math.max(1, width.value), props.height, props.max),
+ );
+
+ // Vertical gradient: top row brightest (the moving line), bottom dimmest (the filled base).
+diff --git a/src/components/Sparkline.vue b/src/components/Sparkline.vue
+index 4a3bbf5..14734bf 100644
+--- a/src/components/Sparkline.vue
++++ b/src/components/Sparkline.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+-import { ref, computed } from "vue";
+-import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
++import { computed, shallowRef, type ComponentPublicInstance } from "vue";
++import { Box, Text, useElementGeometry } from "@vue-tui/runtime";
+ import { sparkline } from "../lib/sparkline";
+ import { theme } from "../theme";
+
+@@ -11,9 +11,17 @@ const props = withDefaults(
+
+ // Measure our own width so the graph always fills the panel, however the flex
+ // layout sized it. Falls back to 24 cells until the first layout pass lands.
+-const box = ref();
+-const bm = useBoxMetrics(box);
+-const line = computed(() => sparkline(props.values, Math.max(1, bm.width.value || 24), props.max));
++const box = shallowRef<ComponentPublicInstance | null>(null);
++const { geometry } = useElementGeometry(box);
++const width = computed(() => {
++  const value = geometry.value;
++  return value.status === "zero-size" ||
++    value.status === "fully-clipped" ||
++    value.status === "visible"
++    ? value.parent.width || 24
++    : 24;
++});
++const line = computed(() => sparkline(props.values, Math.max(1, width.value), props.max));
+ </script>
+
+ <template>
+diff --git a/src/main.ts b/src/main.ts
+index 215b2b3..ace2d93 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -36,8 +36,8 @@ if (args.includes("--json")) {
+   process.stdout.write(renderToString(Snapshot, { columns }) + "\n");
+   process.exit(0);
+ } else {
+-  // alternateScreen: take over the terminal on a clean buffer (like btop/htop)
++  // Full-screen mode takes over the terminal on a clean buffer (like btop/htop)
+   // and restore the user's shell + scrollback on exit. Auto-ignored when not a
+   // TTY, so piping still works.
+-  createApp(App).mount({ alternateScreen: true });
++  createApp(App).mount({ mode: "fullscreen" });
+ }

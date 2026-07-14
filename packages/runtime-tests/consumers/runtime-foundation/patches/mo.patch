@@ -1,0 +1,142 @@
+diff --git a/src/components/selector.vue b/src/components/selector.vue
+index f8d650e..51823f8 100644
+--- a/src/components/selector.vue
++++ b/src/components/selector.vue
+@@ -95,61 +95,86 @@ const footerText = computed(() =>
+ )
+ const showBody = computed(() => state.value === 'list' || state.value === 'search')
+
+-useInput((input, key) => {
++useInput(event => {
+   if (state.value === 'succeed' || state.value === 'error') {
+-    return
++    return 'consume'
+   }
+
+-  if (key.ctrl && input === 'c') {
++  if (
++    event.kind === 'key' &&
++    event.key.name === 'c' &&
++    event.key.modifiers.ctrl &&
++    event.key.phase !== 'release'
++  ) {
+     cancel()
+-    return
++    return 'consume'
+   }
+
+-  if (key.escape) {
++  if (event.kind === 'key' && event.key.name === 'escape' && event.key.phase !== 'release') {
+     if (query.value) {
+       query.value = ''
+       resetCursor(listItems.value)
+     } else {
+       cancel()
+     }
+-    return
++    return 'consume'
+   }
+
+-  if (key.return) {
++  if (event.kind === 'key' && event.key.name === 'return' && event.key.phase !== 'release') {
+     if (currentPath.value) {
+       state.value = 'succeed'
+       selectedPath.value = currentPath.value
+       onSelect(currentPath.value)
+     }
+-    return
++    return 'consume'
+   }
+
+-  if (key.upArrow) {
++  if (event.kind === 'key' && event.key.name === 'up' && event.key.phase !== 'release') {
+     moveCursor(-1)
+-    return
++    return 'consume'
+   }
+
+-  if (key.downArrow) {
++  if (event.kind === 'key' && event.key.name === 'down' && event.key.phase !== 'release') {
+     moveCursor(1)
+-    return
++    return 'consume'
+   }
+
+-  if (key.tab) {
+-    return
++  if (event.kind === 'key' && event.key.name === 'tab' && event.key.phase !== 'release') {
++    return 'consume'
+   }
+
+-  if (key.backspace || key.delete) {
++  if (
++    event.kind === 'key' &&
++    (event.key.name === 'backspace' || event.key.name === 'delete') &&
++    event.key.phase !== 'release'
++  ) {
+     const newQuery = query.value.slice(0, -1)
+     query.value = newQuery
+     resetCursor(newQuery ? searchItems(newQuery, groups, root) : listItems.value)
+-    return
++    return 'consume'
+   }
+
+-  if (input && !key.ctrl && !key.meta) {
++  const input =
++    event.kind === 'text' || event.kind === 'paste'
++      ? event.text
++      : event.kind === 'key' &&
++          event.key.reportedText !== null &&
++          event.key.phase !== 'release' &&
++          !event.key.modifiers.ctrl &&
++          !event.key.modifiers.alt &&
++          !event.key.modifiers.meta &&
++          !event.key.modifiers.super &&
++          !event.key.modifiers.hyper
++        ? event.key.reportedText
++        : ''
++  if (input) {
+     const newQuery = query.value + input
+     query.value = newQuery
+     resetCursor(searchItems(newQuery, groups, root))
++    return 'consume'
+   }
++
++  return 'continue'
+ })
+
+ function buildListItems(root: string, groups: RepoGroup[]): ListItem[] {
+diff --git a/src/utils/selector.ts b/src/utils/selector.ts
+index 753eb1f..61a74b7 100644
+--- a/src/utils/selector.ts
++++ b/src/utils/selector.ts
+@@ -45,20 +45,18 @@ export async function withPathSelector<T>(
+     const app = createApp(Selector, {
+       root,
+       groups,
+-      onSelect: (selectedPath: string) => {
+-        setTimeout(() => {
+-          app.unmount()
+-          resolve(action(selectedPath))
+-        }, 50)
++      onSelect: async (selectedPath: string) => {
++        await app.waitUntilRenderFlush()
++        app.unmount()
++        resolve(action(selectedPath))
+       },
+-      onCancel: () => {
+-        setTimeout(() => {
+-          app.unmount()
+-          reject(new Error('Canceled.'))
+-        }, 50)
++      onCancel: async () => {
++        await app.waitUntilRenderFlush()
++        app.unmount()
++        reject(new Error('Canceled.'))
+       }
+     })
+
+-    app.mount({ exitOnCtrlC: false })
++    app.mount()
+   })
+ }
