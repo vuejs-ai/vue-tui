@@ -1,6 +1,6 @@
 # ScrollBox — decision record
 
-> **Status:** F7 Scroll composition is Active. API-neutral component, Inline/Fullscreen focused-keyboard, and Fullscreen targeted-wheel journeys prove that every semantic operation needs one synchronous transport-neutral observation of whether the effective top row changed. The evidence does not uniquely select `boolean`, a named literal result, or a structured result that also reports sticky-following changes, so the exact public return shape is a maintainer decision. The component remains common, passive, and input-free; no VOUCHED stamp is implied.
+> **Status:** F7 Scroll composition is Done. The maintainer selected a boolean movement result for all four existing operations: `true` means only that the effective top content line changed after flooring and clamping. A sticky-following re-arm without movement returns `false`. Public types, runtime and JavaScript behavior, package consumption, deterministic F4/F6 routing, real PTY, visual restoration, full repository gates, and fresh CI agree. The component remains common, passive, and input-free; F8 is Active and no VOUCHED stamp is implied.
 
 > Decisions specific to `@vue-tui/components`'s `ScrollBox`. Shared conventions live in
 > [components-design-principles.md](../components-design-principles.md). Tracking: #221.
@@ -28,10 +28,11 @@ component itself listens to **no** mouse or keyboard input.
 `ScrollBox` deliberately ships **no `wheel` / `keyboard` props**. It exposes an imperative handle
 (`ScrollBoxExpose`) via `defineExpose`, grabbed with a template ref:
 
-- `scrollToLine(line)` — absolute position in content lines (clamped)
-- `scrollByLines(lines)` — relative (positive = toward the bottom)
-- `scrollToTop()` / `scrollToBottom()` — jump to top / bottom (`scrollToBottom` re-arms sticky, so
-  streaming output is followed again)
+- `scrollToLine(line)` — move to an absolute content line after flooring and clamping, then return whether the effective top line changed
+- `scrollByLines(lines)` — move relatively, with positive values toward the bottom, then return whether the effective top line changed
+- `scrollToTop()` / `scrollToBottom()` — jump to the top or bottom and return whether the effective top line changed; `scrollToBottom()` always re-arms sticky following, even when it returns `false`
+
+`line` and `lines` must be finite numbers. JavaScript values that bypass the TypeScript surface fail synchronously with a `TypeError` before scroll position or sticky-following state changes. The public `scrollToLine()` wrapper accepts only its documented line argument; the private sticky-policy control is not reachable through an extra JavaScript argument.
 
 The consumer wires whatever mouse / keyboard it wants onto these actions. Why input is the app's
 job, not a built-in prop:
@@ -64,43 +65,25 @@ composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `Scr
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
 useMouseEvent(wheelTarget, "wheel", (event) => {
-  scrollBox.value?.scrollByLines(event.delta.y);
-  return "consume";
+  const moved = scrollBox.value?.scrollByLines(event.delta.y) ?? false;
+  return moved ? "consume" : "continue";
 });
 ```
 
-That example intentionally consumes every delivered wheel. F7's executable journeys now require
-scroll methods to report actual movement so a nested handler can return `"continue"` at an edge;
-only the exact public encoding remains undecided. The durable boundary is that targeted mouse input
-composes outside this component and follows the rendered target's lifetime.
+The boolean lets a nested handler consume wheel input while its viewport moves and continue to the registered ancestor at an edge. An outer owner may still choose its own policy when it also cannot move. The durable boundary is that targeted mouse input composes outside this component and follows the rendered target's lifetime.
 
-## F7 executable evidence and decision boundary
+## F7 accepted contract and closure evidence
 
-The current `void` surface cannot implement correct nested routing without duplicating `ScrollBox`'s private offset. Four target specifications now retain that gap as expected failures:
+The former `void` surface could not implement correct nested routing without duplicating `ScrollBox`'s private offset. Four target specifications first retained that gap as expected failures:
 
 - one component-mechanics journey applies relative, clamped, repeated, absolute, top, bottom, and page-sized line movements and requires the same synchronous changed-versus-unchanged observation;
 - the bounded conversational journey runs in deterministic Inline and Fullscreen, with an F4 focused inner viewport followed by its outer focus scope;
 - the Fullscreen workbench journey uses F6's deepest wheel target followed by its registered rendered ancestor;
 - the desired trace moves only the inner owner while it can move, continues to the outer owner at the inner edge, and returns to the inner owner immediately when direction reverses.
 
-Running those tests without `test.fails` gives the intended red evidence. The current four methods return `undefined` for both movement and an unchanged edge, so the route adapter cannot distinguish them: all nine component observations collapse to unchanged, both keyboard modes run the outer scope after every recognized inner operation, and Fullscreen wheel bubbles after every inner operation. The target tests live in `packages/components/src/scroll-box/scroll-box.test.tsx` and `packages/runtime-tests/integration/scroll/scroll-composition.test.tsx`; once a public signature is accepted, they must become ordinary passing tests without the temporary multi-shape adapter.
+Before implementation, running those tests without `test.fails` produced the intended red evidence. All component observations collapsed to `undefined`, both keyboard modes ran the outer scope after every recognized inner operation, and Fullscreen wheel bubbled after every inner operation. They are now ordinary passing tests that consume the public boolean directly, with no multi-shape adapter.
 
-The journeys establish the behavior independently of its TypeScript encoding:
-
-- the result is synchronous because F3 focused handlers and F6 mouse handlers must return synchronously;
-- it reports whether the effective top rendered row changed after flooring and clamping, including partial movement toward an edge;
-- unchanged means false-equivalent at the top, bottom, same absolute row, zero movement, or a non-overflowing viewport;
-- Page Up/Down need no new component method: the application reads the accepted wrapper height from F5 geometry and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
-- the result is not an `InputHandlerResult` or `MouseHandlerResult`: an inner unchanged operation continues to its outer owner, while an outer owner may apply a different keyboard policy, and F3 and F6 expose different route types;
-- the component remains the sole offset and sticky-following owner and still acquires no keyboard or mouse input.
-
-One existing edge makes the return meaning precise. Content shrink or viewport growth can clamp a non-sticky offset to the current bottom without re-arming follow. A later `scrollToBottom()` can therefore re-arm sticky-following without changing the top row; appended content then follows. An actual-movement result is unchanged in that call even though internal follow policy changed. A richer result could expose both facts, but no keyboard or wheel journey consumes the second fact.
-
-The bounded pinned-peer check does not settle the vue-tui shape. Textual's private non-animated pointer helper [returns whether clamped position changed](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L2718-L2822), and its wheel handler [stops bubbling only after movement](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L4777-L4805), but its public semantic scroll methods return `None` and its keyboard edge behavior differs. OpenTUI's [`scrollBy()` and `scrollTo()` return `void`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderables/ScrollBox.ts#L404-L473); recognized keyboard commands are handled regardless of movement and wheel can reach multiple ancestors. Ratatui [leaves input to the application](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui/src/lib.rs#L268-L289), while its stateful list scroll methods return unit. These sources support the mechanism and passive boundary, not one public Vue encoding.
-
-### Exact public alternatives requiring maintainer selection
-
-**A — boolean movement result (recommended):**
+### Accepted public contract
 
 ```ts
 export interface ScrollBoxExpose {
@@ -111,42 +94,26 @@ export interface ScrollBoxExpose {
 }
 ```
 
-`true` means only that the effective top row changed. This is the smallest result, maps directly to inner `"consume"` versus `"continue"`, allocates nothing on wheel input, and follows vue-tui's existing imperative-handle convention where focus and traversal attempts return booleans. The cost is that the meaning must be read from the method documentation, and a no-move sticky re-arm remains intentionally outside the result.
+The result has one exact meaning:
 
-**B — named literal movement result:**
+- the result is synchronous because F3 focused handlers and F6 mouse handlers must return synchronously;
+- it reports whether the effective top rendered row changed after flooring and clamping, including partial movement toward an edge;
+- `false` covers the top or bottom edge, the same absolute row, zero movement, values whose floored result is the same row, and a non-overflowing viewport;
+- Page Up/Down need no new component method: the application reads the accepted wrapper height from F5 geometry and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
+- the result is not an `InputHandlerResult` or `MouseHandlerResult`: an inner unchanged operation continues to its outer owner, while an outer owner may apply a different keyboard policy, and F3 and F6 expose different route types;
+- the component remains the sole offset and sticky-following owner and still acquires no keyboard or mouse input.
 
-```ts
-export type ScrollMovementResult = "moved" | "unchanged";
+One existing edge makes the return meaning precise. Content shrink or viewport growth can clamp a non-sticky offset to the current bottom without re-arming follow. A later `scrollToBottom()` can therefore re-arm sticky following without changing the top row; appended content then follows. That call returns `false` even though internal follow policy changed.
 
-export interface ScrollBoxExpose {
-  scrollToLine(line: number): ScrollMovementResult;
-  scrollByLines(lines: number): ScrollMovementResult;
-  scrollToTop(): ScrollMovementResult;
-  scrollToBottom(): ScrollMovementResult;
-}
-```
+All four existing names and parameters are retained, and their `void` return is replaced directly without an alias or compatibility shim. The named `ScrollBoxExpose` type and `InstanceType<typeof ScrollBox>` both expose the boolean. Template, TSX, and packed JavaScript consumers cover the type and runtime surface; the packed consumer uses Vue 3.4.38 and TypeScript 6.0.3 with `skipLibCheck: false` and proves both movement outcomes, invalid values, and continued use after an error.
 
-This carries the same single bit and makes call sites self-describing, but adds a new public type and more verbose routing with no behavioral distinction in any journey or peer source.
+Component tests cover relative, absolute, fractional, zero, clamped, repeated, top, bottom, non-overflowing, sticky-rearm, invalid-value, and extra-argument behavior. Deterministic nested tests run real F4 focus routing in Inline and Fullscreen and F6 target-to-ancestor wheel routing in Fullscreen; page movement reads the F5 wrapper height. A shared real-PTY fixture repeats the two keyboard modes and raw SGR wheel journey, including exact terminal-mode cleanup. Repository visual sessions inspected the same visible offsets and routes step by step, then proved normal-buffer, cursor, input-mode, termios, and post-exit shell restoration. `vp run ready` and a fresh zero-cache `CI=true vp run ci` pass.
 
-**C — structured operation result:**
+### Alternatives considered
 
-```ts
-export interface ScrollOperationResult {
-  readonly moved: boolean;
-  readonly followingChanged: boolean;
-}
+The bounded pinned-peer check does not settle the vue-tui shape. Textual's private non-animated pointer helper [returns whether clamped position changed](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L2718-L2822), and its wheel handler [stops bubbling only after movement](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L4777-L4805), but its public semantic scroll methods return `None` and its keyboard edge behavior differs. OpenTUI's [`scrollBy()` and `scrollTo()` return `void`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderables/ScrollBox.ts#L404-L473); recognized keyboard commands are handled regardless of movement and wheel can reach multiple ancestors. Ratatui [leaves input to the application](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui/src/lib.rs#L268-L289), while its stateful list scroll methods return unit. These sources support the mechanism and passive boundary, not one public Vue encoding.
 
-export interface ScrollBoxExpose {
-  scrollToLine(line: number): ScrollOperationResult;
-  scrollByLines(lines: number): ScrollOperationResult;
-  scrollToTop(): ScrollOperationResult;
-  scrollToBottom(): ScrollOperationResult;
-}
-```
-
-This distinguishes a top-row movement from the no-move sticky re-arm, but it exposes follow-policy detail through every operation, allocates or interns an object for frequent wheel input, and supplies information no representative handler needs. It is honest but broader than the current evidence.
-
-After selection, all four existing methods receive the same movement rule; no alias or compatibility shim retains `void`. The implementation, type guards, package consumer, example, PTY/visual journey, and ordinary tests must then agree before F7 can become Done.
+The selected boolean is the smallest conventional encoding of the one fact every journey consumes, maps directly to `"consume"` versus `"continue"`, and allocates nothing on wheel input. A named `"moved" | "unchanged"` result would carry the same bit with a new public type and more verbose routing. A structured `{ moved, followingChanged }` result could expose the no-move sticky re-arm, but that internal policy fact is unused by every representative handler and would broaden every operation. Those alternatives remain decision history, not queued compatibility surfaces.
 
 ## Future direction (not in scope now)
 

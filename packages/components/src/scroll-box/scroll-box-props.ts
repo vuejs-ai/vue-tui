@@ -34,14 +34,18 @@ export type ScrollBoxProps = ExtractPublicPropTypes<typeof scrollBoxProps>;
  * Imperative handle exposed by `<ScrollBox>` via `defineExpose`. Grab it with a
  * template ref and drive scrolling from the app. `ScrollBox` listens to no input
  * itself, so the consumer decides how to bind mouse / keyboard to these actions.
+ * Every method returns `true` only when the effective top content line changes
+ * synchronously after flooring and clamping. A `false` result from
+ * `scrollToBottom()` can still re-arm following when the viewport is already at
+ * the bottom.
  */
 export interface ScrollBoxExpose {
-  /** Scroll so content line `line` is at the viewport top (clamped). */
-  scrollToLine(line: number): void;
-  /** Scroll by `lines` relative to the current position (positive = toward the bottom). */
-  scrollByLines(lines: number): void;
+  /** Scroll so finite content line `line` is at the viewport top (floored and clamped). */
+  scrollToLine(line: number): boolean;
+  /** Scroll by a finite number of `lines` (`+` = toward the bottom). */
+  scrollByLines(lines: number): boolean;
   /** Jump to the top. */
-  scrollToTop(): void;
+  scrollToTop(): boolean;
   /** Jump to the bottom and resume following new content. */
-  scrollToBottom(): void;
+  scrollToBottom(): boolean;
 }

@@ -125,7 +125,7 @@ test("ScrollBox drives scrolling through the exposed handle", async () => {
   }
 });
 
-test.fails("ScrollBox reports actual movement consistently across every semantic operation", async () => {
+test("ScrollBox reports actual movement consistently across every semantic operation", async () => {
   const box = shallowRef<ScrollBoxExpose>();
   const App = defineComponent(() => {
     return () => (
@@ -141,27 +141,136 @@ test.fails("ScrollBox reports actual movement consistently across every semantic
 
   const result = await render(App, { columns: 40, rows: 8 });
   try {
-    const movement = (value: unknown): boolean => {
-      if (value === true || value === "moved") return true;
-      if (value === false || value === "unchanged") return false;
-      if (typeof value === "object" && value !== null && "moved" in value) {
-        return (value as { readonly moved: unknown }).moved === true;
-      }
-      return false;
-    };
+    const handle = box.value;
+    if (!handle) throw new Error("ScrollBox handle must be available after render");
     const observations = [
-      movement(box.value?.scrollByLines(-1)),
-      movement(box.value?.scrollToTop()),
-      movement(box.value?.scrollToTop()),
-      movement(box.value?.scrollToLine(3)),
-      movement(box.value?.scrollToLine(3)),
-      movement(box.value?.scrollByLines(4)),
-      movement(box.value?.scrollByLines(999)),
-      movement(box.value?.scrollByLines(999)),
-      movement(box.value?.scrollToBottom()),
+      handle.scrollByLines(-1),
+      handle.scrollToTop(),
+      handle.scrollToTop(),
+      handle.scrollByLines(0),
+      handle.scrollToLine(3.9),
+      handle.scrollToLine(3.1),
+      handle.scrollByLines(4),
+      handle.scrollByLines(999),
+      handle.scrollByLines(999),
+      handle.scrollToBottom(),
     ];
 
-    expect(observations).toEqual([true, true, false, true, false, true, true, false, false]);
+    expect(observations).toEqual([true, true, false, false, true, false, true, true, false, false]);
+  } finally {
+    result.unmount();
+  }
+});
+
+test("ScrollBox reports no movement when its content fits the viewport", async () => {
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {messages(3).map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    const handle = box.value;
+    if (!handle) throw new Error("ScrollBox handle must be available after render");
+    expect([
+      handle.scrollByLines(-1),
+      handle.scrollByLines(0),
+      handle.scrollByLines(1),
+      handle.scrollToLine(999),
+      handle.scrollToTop(),
+      handle.scrollToBottom(),
+    ]).toEqual([false, false, false, false, false, false]);
+  } finally {
+    result.unmount();
+  }
+});
+
+test("ScrollBox rejects invalid runtime movement inputs before changing state", async () => {
+  const items = shallowRef(messages(12));
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {items.value.map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    const handle = box.value;
+    if (!handle) throw new Error("ScrollBox handle must be available after render");
+    const runtimeHandle = handle as unknown as {
+      scrollToLine(value: unknown): boolean;
+      scrollByLines(value: unknown): boolean;
+    };
+    const before = result.lastFrame();
+
+    expect(() => runtimeHandle.scrollToLine(Number.NaN)).toThrowError(
+      "<ScrollBox>.scrollToLine() line must be a finite number.",
+    );
+    expect(() => runtimeHandle.scrollToLine("2")).toThrowError(
+      "<ScrollBox>.scrollToLine() line must be a finite number.",
+    );
+    expect(() => runtimeHandle.scrollByLines(Number.POSITIVE_INFINITY)).toThrowError(
+      "<ScrollBox>.scrollByLines() lines must be a finite number.",
+    );
+
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toBe(before);
+
+    items.value = [...items.value, "streaming latest"];
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toContain("streaming latest");
+  } finally {
+    result.unmount();
+  }
+});
+
+test("ScrollBox does not expose its internal sticky-following control to JavaScript", async () => {
+  const items = shallowRef(messages(12));
+  const box = shallowRef<ScrollBoxExpose>();
+  const App = defineComponent(() => {
+    return () => (
+      <Box height={4} width={20}>
+        <ScrollBox ref={box}>
+          {items.value.map((item) => (
+            <Text key={item}>{item}</Text>
+          ))}
+        </ScrollBox>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    const handle = box.value;
+    if (!handle) throw new Error("ScrollBox handle must be available after render");
+    expect(handle.scrollToLine(4)).toBe(true);
+    const runtimeHandle = handle as unknown as {
+      scrollToLine(line: number, internalSticky: boolean): boolean;
+    };
+    expect(runtimeHandle.scrollToLine(4, true)).toBe(false);
+
+    items.value = [...items.value, "must remain below the viewport"];
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(result.lastFrame()).toContain("message 4");
+    expect(result.lastFrame()).not.toContain("must remain below the viewport");
   } finally {
     result.unmount();
   }
@@ -202,7 +311,7 @@ test("scrollToBottom can re-arm sticky following without moving the current view
     await result.waitUntilRenderFlush();
     expect(result.lastFrame()).toBe(clampedAtBottom);
 
-    box.value?.scrollToBottom();
+    expect(box.value?.scrollToBottom()).toBe(false);
     await result.waitUntilRenderFlush();
     expect(result.lastFrame()).toBe(clampedAtBottom);
 

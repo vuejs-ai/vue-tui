@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** selected unstamped F6 public contract, implemented and complete on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, full local repository gates, and a direct native macOS Terminal observation agree with this record. F6 is Done and F7 is Active. No VOUCHED stamp changed. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
+> **Status:** selected unstamped F6 public contract, implemented and complete on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, full local repository gates, and a direct native macOS Terminal observation agree with this record. F6 and the dependent F7 Scroll composition foundation are Done; F8 is Active. No VOUCHED stamp changed. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
 
 ## Product boundary
 
@@ -199,7 +199,7 @@ useMouseDrag(dividerRef, (event) => {
 });
 ```
 
-The focus call uses the existing F4 handle and a trapped approval scope keeps its existing isolation. `ScrollBox` remains input-free and imperative. F7 will decide whether its methods report actual movement so a nested wheel owner can return `"continue"` at an edge.
+The focus call uses the existing F4 handle and a trapped approval scope keeps its existing isolation. `ScrollBox` remains input-free and imperative. F7 now makes each existing operation return a boolean top-line-change result, so a nested wheel owner returns `"consume"` after movement and `"continue"` at an edge without duplicating component state.
 
 ## Reporting demand and frame transactions
 
@@ -336,7 +336,7 @@ F6 closure must prove three vertical journeys in addition to focused mechanics.
 - HMR, suspension, continuation, normal exit, fatal exit, signals, acquisition failure, and cleanup failure restore exact raw, SGR, cursor, screen, listener, ref, and termios ownership.
 - The direct native macOS Terminal observation records that native drag-selection is suppressed and wheel input reaches the application while reporting is active, then native selection and Terminal scrollback return after the final target disappears and after shell restoration; the PTY evidence separately proves control-sequence and termios balance.
 
-Closure required exact root and `/fullscreen` export guards, declaration inspection, Vue 3.4 SFC/TSX consumption under TypeScript 6 with `skipLibCheck: false`, focused unit/integration tests, relevant real PTYs, the repository visual-review loop, `vp run ready`, fresh `CI=true vp run ci`, updated PCR/vault trackers, independent review, and the direct GUI observation above. All gates pass. The GUI run used the built runtime and components and launched the fixture from `packages/runtime-tests/integration/pty/fixtures`, where the workspace-local `tsx` loader resolves. Screenshots were inspected directly for each transition rather than inferring visible behavior from mouse control sequences. F6 is Done; this closure does not select an F7 scroll contract or an F8 selection/copy contract.
+Closure required exact root and `/fullscreen` export guards, declaration inspection, Vue 3.4 SFC/TSX consumption under TypeScript 6 with `skipLibCheck: false`, focused unit/integration tests, relevant real PTYs, the repository visual-review loop, `vp run ready`, fresh `CI=true vp run ci`, updated PCR/vault trackers, independent review, and the direct GUI observation above. All gates pass. The GUI run used the built runtime and components and launched the fixture from `packages/runtime-tests/integration/pty/fixtures`, where the workspace-local `tsx` loader resolves. Screenshots were inspected directly for each transition rather than inferring visible behavior from mouse control sequences. F6 did not itself select the later F7 scroll contract; F7 now closes that dependency separately. F8 still owns selection and copy.
 
 ## Deliberately deferred
 
@@ -345,5 +345,4 @@ Closure required exact root and `/fullscreen` export guards, declaration inspect
 - hover, move-without-button, enter, and leave (`1003`);
 - multi-click count and double-click policy;
 - a terminal-wide parsed mouse stream or embedded-PTY mouse adapter;
-- nested ScrollBox edge continuation until F7 supplies actual-movement evidence;
 - application selection, copy, OSC 52, and terminal fallback until F8.

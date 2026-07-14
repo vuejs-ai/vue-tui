@@ -54,22 +54,37 @@ function clampScrollTop(value: number): number {
   return Math.max(0, Math.min(maxScroll.value, Math.floor(value)));
 }
 
-function scrollToLine(value: number, nextSticky = false): void {
+function assertFiniteMovement(value: number, method: "scrollToLine" | "scrollByLines"): void {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    const parameter = method === "scrollToLine" ? "line" : "lines";
+    throw new TypeError(`<ScrollBox>.${method}() ${parameter} must be a finite number.`);
+  }
+}
+
+function applyScrollTop(value: number, nextSticky: boolean): boolean {
   const next = clampScrollTop(value);
+  const moved = next !== scrollTop.value;
   scrollTop.value = next;
   sticky.value = nextSticky || next >= maxScroll.value;
+  return moved;
 }
 
-function scrollByLines(delta: number): void {
-  scrollToLine(scrollTop.value + delta);
+function scrollToLine(value: number): boolean {
+  assertFiniteMovement(value, "scrollToLine");
+  return applyScrollTop(value, false);
 }
 
-function scrollToTop(): void {
-  scrollToLine(0);
+function scrollByLines(delta: number): boolean {
+  assertFiniteMovement(delta, "scrollByLines");
+  return applyScrollTop(scrollTop.value + delta, false);
 }
 
-function scrollToBottom(): void {
-  scrollToLine(maxScroll.value, true);
+function scrollToTop(): boolean {
+  return applyScrollTop(0, false);
+}
+
+function scrollToBottom(): boolean {
+  return applyScrollTop(maxScroll.value, true);
 }
 
 const exposed: ScrollBoxExpose = { scrollToLine, scrollByLines, scrollToTop, scrollToBottom };

@@ -509,10 +509,17 @@ export const InputProbe = defineComponent(() => {
   useFocusedInput(target, () => "continue");
   useFocusScopeInput(scope, () => "continue");
   useExternalInput(target, () => {});
-  scrollBox.value?.scrollByLines(1);
-  scrollBox.value?.scrollToLine(2);
-  scrollBox.value?.scrollToTop();
-  scrollBox.value?.scrollToBottom();
+  if (scrollBox.value) {
+    const movementResults: readonly boolean[] = [
+      scrollBox.value.scrollByLines(1),
+      scrollBox.value.scrollToLine(2),
+      scrollBox.value.scrollToTop(),
+      scrollBox.value.scrollToBottom(),
+    ];
+    // @ts-expect-error The private sticky-following control is not public.
+    scrollBox.value.scrollToLine(2, true);
+    void movementResults;
+  }
   return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{geometry.value.status}:{caret.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
 });
 `,
@@ -544,10 +551,17 @@ useFocusedInput(target, () => "continue");
 useFocusScopeInput(scope, () => "continue");
 useExternalInput(target, () => {});
 mountedStdin.stdin;
-scrollBox.value?.scrollByLines(1);
-scrollBox.value?.scrollToLine(2);
-scrollBox.value?.scrollToTop();
-scrollBox.value?.scrollToBottom();
+if (scrollBox.value) {
+  const movementResults: readonly boolean[] = [
+    scrollBox.value.scrollByLines(1),
+    scrollBox.value.scrollToLine(2),
+    scrollBox.value.scrollToTop(),
+    scrollBox.value.scrollToBottom(),
+  ];
+  // @ts-expect-error The private sticky-following control is not public.
+  scrollBox.value.scrollToLine(2, true);
+  void movementResults;
+}
 // @ts-expect-error Raw-mode control is not exposed by useStdin().
 mountedStdin.setRawMode(false);
 </script>
@@ -706,6 +720,36 @@ assert.equal(geometryApp.lastFrame().includes("geometry"), true);
 geometryApp.dispose();
 assert.deepEqual(geometryProjection.geometry.value, { status: "detached" });
 assert.deepEqual(caretProjection.state.value, { status: "inactive" });
+
+let movementHandle;
+const MovementProbe = defineComponent(() => {
+  movementHandle = shallowRef(null);
+  return () => h(Box, { width: 10, height: 2 }, () =>
+    h(ScrollBox, { ref: movementHandle }, {
+      default: () => Array.from({ length: 5 }, (_, index) =>
+        h(Text, { key: index }, () => \`line \${index}\`),
+      ),
+    }),
+  );
+});
+const movementApp = await render(MovementProbe, { columns: 20, rows: 5 });
+assert.equal(movementHandle.value.scrollByLines(-1), true);
+assert.equal(movementHandle.value.scrollToTop(), true);
+assert.equal(movementHandle.value.scrollToTop(), false);
+assert.equal(movementHandle.value.scrollToLine(1.9), true);
+assert.equal(movementHandle.value.scrollToLine(1.1), false);
+assert.equal(movementHandle.value.scrollToBottom(), true);
+assert.equal(movementHandle.value.scrollToBottom(), false);
+assert.throws(
+  () => movementHandle.value.scrollToLine(Number.NaN),
+  /scrollToLine\\(\\) line must be a finite number/,
+);
+assert.throws(
+  () => movementHandle.value.scrollByLines(Infinity),
+  /scrollByLines\\(\\) lines must be a finite number/,
+);
+assert.equal(movementHandle.value.scrollByLines(-1), true);
+movementApp.dispose();
 
 const clickEvents = [];
 const wheelEvents = [];

@@ -9,6 +9,7 @@
     "fullscreen-origin": "tsx controller.ts --target fullscreen-origin",
     "input-routing": "tsx controller.ts --target input-routing",
     "focus-routing": "tsx controller.ts --target focus-routing",
+    "scroll-composition": "tsx controller.ts --target scroll-composition",
     "scroll-box": "tsx controller.ts --target scroll-box",
     "smoke": "tsx smoke.ts",
     "check:type": "tsc --noEmit"

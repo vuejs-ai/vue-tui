@@ -42,15 +42,6 @@ const stopOwnedKey: InputRouteDecision = Object.freeze({
   external: "block",
 });
 
-function movementOccurred(value: unknown): boolean {
-  if (value === true || value === "moved") return true;
-  if (value === false || value === "unchanged") return false;
-  if (typeof value === "object" && value !== null && "moved" in value) {
-    return (value as { readonly moved: unknown }).moved === true;
-  }
-  return false;
-}
-
 function keyOperation(event: TuiInputEvent): ScrollOperation | null {
   if (event.kind !== "key" || event.key.phase === "release") return null;
   switch (event.key.name) {
@@ -66,17 +57,29 @@ function keyOperation(event: TuiInputEvent): ScrollOperation | null {
   }
 }
 
-function perform(handle: ScrollBoxExpose | undefined | null, operation: ScrollOperation): unknown {
-  if (!handle) return undefined;
+function visibleHeight(projection: UseElementGeometryReturn, owner: string): number {
+  const geometry = projection.geometry.value;
+  if (geometry.status !== "visible") {
+    throw new Error(`${owner} scroll target must be visible before page input`);
+  }
+  return geometry.parent.height;
+}
+
+function perform(
+  handle: ScrollBoxExpose | undefined | null,
+  operation: ScrollOperation,
+  pageLines: number,
+): boolean {
+  if (!handle) throw new Error("ScrollBox handle must be available before input delivery");
   switch (operation) {
     case "up":
       return handle.scrollByLines(-1);
     case "down":
       return handle.scrollByLines(1);
     case "pageup":
-      return handle.scrollByLines(-3);
+      return handle.scrollByLines(-pageLines);
     case "pagedown":
-      return handle.scrollByLines(3);
+      return handle.scrollByLines(pageLines);
     case "home":
       return handle.scrollToTop();
     case "end":
@@ -122,13 +125,15 @@ async function setOffsets(
 }
 
 for (const mode of modes) {
-  test.fails(`nested transcript keyboard scrolling continues only at an inner edge in ${mode}`, async () => {
+  test(`nested transcript keyboard scrolling continues only at an inner edge in ${mode}`, async () => {
     const outer = shallowRef<ScrollBoxExpose | null>(null);
     const inner = shallowRef<ScrollBoxExpose | null>(null);
     const trace: string[] = [];
     const App = defineComponent(() => {
       const outerTarget = shallowRef<Target>(null);
       const innerTarget = shallowRef<Target>(null);
+      const outerGeometry = useElementGeometry(outerTarget);
+      const innerGeometry = useElementGeometry(innerTarget);
       const outerScope = useFocusScope();
       const innerFocus = useFocus(innerTarget, {
         scope: outerScope,
@@ -139,14 +144,14 @@ for (const mode of modes) {
       useFocusedInput(innerFocus, (event): InputHandlerResult => {
         const operation = keyOperation(event);
         if (!operation) return "continue";
-        const moved = movementOccurred(perform(inner.value, operation));
+        const moved = perform(inner.value, operation, visibleHeight(innerGeometry, "inner"));
         trace.push(`inner:${operation}:${moved ? "moved" : "unchanged"}`);
         return moved ? "consume" : continueOwnedKey;
       });
       useFocusScopeInput(outerScope, (event): InputHandlerResult => {
         const operation = keyOperation(event);
         if (!operation) return "continue";
-        const moved = movementOccurred(perform(outer.value, operation));
+        const moved = perform(outer.value, operation, visibleHeight(outerGeometry, "outer"));
         trace.push(`outer:${operation}:${moved ? "moved" : "unchanged"}`);
         return moved ? "consume" : stopOwnedKey;
       });
@@ -191,7 +196,7 @@ for (const mode of modes) {
   });
 }
 
-test.fails("nested workbench wheel scrolling bubbles only at an inner edge", async () => {
+test("nested workbench wheel scrolling bubbles only at an inner edge", async () => {
   const outer = shallowRef<ScrollBoxExpose | null>(null);
   const inner = shallowRef<ScrollBoxExpose | null>(null);
   const trace: string[] = [];
@@ -206,7 +211,10 @@ test.fails("nested workbench wheel scrolling bubbles only at an inner edge", asy
       handle: ShallowRef<ScrollBoxExpose | null>,
       event: TuiMouseWheelEvent,
     ): MouseHandlerResult => {
-      const moved = movementOccurred(handle.value?.scrollByLines(event.delta.y));
+      const exposed = handle.value;
+      if (!exposed)
+        throw new Error(`${owner} ScrollBox handle must be available before wheel delivery`);
+      const moved = exposed.scrollByLines(event.delta.y);
       trace.push(`${owner}:${event.delivery}:${moved ? "moved" : "unchanged"}`);
       return moved ? "consume" : "continue";
     };
