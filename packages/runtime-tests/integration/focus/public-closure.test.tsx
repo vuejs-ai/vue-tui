@@ -178,9 +178,11 @@ async function runCodingAgentJourney(mode: RenderMode): Promise<readonly string[
         <Box ref={composerHost}>
           <Text>composer</Text>
         </Box>
-        <Box ref={approvalHost}>
-          <Text>approval</Text>
-        </Box>
+        {approvalActive.value ? (
+          <Box ref={approvalHost}>
+            <Text>approval</Text>
+          </Box>
+        ) : null}
       </Box>
     );
   });
@@ -198,6 +200,14 @@ async function runCodingAgentJourney(mode: RenderMode): Promise<readonly string[
     await result.stdin.write("a");
     expect(manager.focusedTarget.value).toBe(composer);
     await result.stdin.write("z");
+
+    // Reopening reuses the logical approval target after its v-if host attaches
+    // again; its one-shot autofocus request was already consumed on the first open.
+    await result.stdin.write("s");
+    expect(manager.focusedTarget.value).toBe(approval);
+    await result.stdin.write("y");
+    await result.stdin.write("a");
+    expect(manager.focusedTarget.value).toBe(composer);
   } finally {
     result.dispose();
   }
@@ -216,6 +226,12 @@ test("Inline and Fullscreen share the coding-agent composer, approval trap, and 
     "approval:a",
     "global:z",
     "composer:z",
+    "global:s",
+    "composer:s",
+    "global:y",
+    "approval:y",
+    "global:a",
+    "approval:a",
   ]);
   expect(traces[1]).toEqual(traces[0]);
 });

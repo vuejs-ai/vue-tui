@@ -93,6 +93,50 @@ describe("internal F4 focus policy experiment", () => {
     expect(label(focus.current)).toBe("modal-first");
   });
 
+  test("selects a remembered target that renders after its trapped scope reactivates", () => {
+    const focus = createInternalFocusPolicy();
+    const composer = focus.createTarget({ debugLabel: "composer", autoFocus: true });
+    const modal = focus.createScope({ debugLabel: "modal", active: false, trapped: true });
+    const approval = focus.createTarget({
+      debugLabel: "approval",
+      scope: modal,
+      autoFocus: true,
+    });
+    focus.setRenderedOrder([composer, approval]);
+
+    focus.updateScope(modal, { active: true });
+    expect(focus.current).toBe(approval);
+    focus.updateScope(modal, { active: false });
+    expect(focus.current).toBe(composer);
+
+    focus.setRenderedOrder([composer]);
+    focus.updateScope(modal, { active: true });
+    expect(focus.current).toBeNull();
+
+    focus.setRenderedOrder([composer, approval]);
+    expect(focus.current).toBe(approval);
+  });
+
+  test("does not let a delayed scope target replace a later explicit selection", () => {
+    const focus = createInternalFocusPolicy();
+    const delayedScope = focus.createScope({ debugLabel: "delayed" });
+    const delayed = focus.createTarget({
+      debugLabel: "delayed-target",
+      scope: delayedScope,
+      autoFocus: true,
+    });
+    const explicit = focus.createTarget({ debugLabel: "explicit" });
+    focus.setRenderedOrder([explicit]);
+
+    focus.updateScope(delayedScope, { active: false });
+    focus.updateScope(delayedScope, { active: true });
+    expect(focus.current).toBeNull();
+
+    expect(focus.focus(explicit)).toBe(true);
+    focus.setRenderedOrder([delayed, explicit]);
+    expect(focus.current).toBe(explicit);
+  });
+
   test("skips hidden and disabled targets and rejects programmatic escape around eligibility", () => {
     const focus = createInternalFocusPolicy();
     const a = focus.createTarget({ debugLabel: "a", autoFocus: true });

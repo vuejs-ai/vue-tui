@@ -235,6 +235,9 @@ export function createInternalFocusPolicy(): InternalFocusPolicy {
   };
 
   const select = (target: TargetState, within: ScopeState): void => {
+    if (preferredActivatedScope && isWithin(preferredActivatedScope, within)) {
+      preferredActivatedScope = null;
+    }
     focused = target;
     pendingRestore = null;
     if (target.autoFocus) target.autoFocusConsumed = true;
@@ -345,8 +348,8 @@ export function createInternalFocusPolicy(): InternalFocusPolicy {
         isWithin(preferredActivatedScope, boundary)
       ) {
         const preferred = preferredTarget(preferredActivatedScope, boundary);
-        preferredActivatedScope = null;
         if (preferred) {
+          preferredActivatedScope = null;
           select(preferred, boundary);
           return;
         }

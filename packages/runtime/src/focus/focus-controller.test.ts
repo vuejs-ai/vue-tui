@@ -427,6 +427,36 @@ describe("app-owned focus controller", () => {
     expect(focus.focusedTarget.value).toBe(secondApproval);
   });
 
+  test("selects a reactivated trap target whose rendered host commits afterward", () => {
+    const { focus, root } = createHarness();
+    const composerHost = connect(root, createBox());
+    const approvalHost = connect(root, createBox());
+    makeLayoutNode(composerHost);
+    makeLayoutNode(approvalHost);
+    const composer = focus.createTarget({ autoFocus: true });
+    const modal = focus.createScope({ active: false, trapped: true });
+    const approval = focus.createTarget({ scope: modal, autoFocus: true });
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(composer, composerHost);
+      focus.attachTarget(approval, approvalHost);
+    });
+
+    focus.updateScope(modal, { active: true });
+    expect(focus.focusedTarget.value).toBe(approval);
+    focus.updateScope(modal, { active: false });
+    expect(focus.focusedTarget.value).toBe(composer);
+
+    root.children.splice(root.children.indexOf(approvalHost), 1);
+    approvalHost.parent = null;
+    focus.reconcileRenderedTree();
+    focus.updateScope(modal, { active: true });
+    expect(focus.focusedTarget.value).toBeNull();
+
+    connect(root, approvalHost);
+    focus.reconcileRenderedTree();
+    expect(focus.focusedTarget.value).toBe(approval);
+  });
+
   test("keeps a targetless trapped scope selected and demands input only for its handler", () => {
     const { demand, dispatch, focus, routing } = createHarness();
     const modal = focus.createScope({ trapped: true });
