@@ -46,22 +46,53 @@ async function emulate(output: string): Promise<InstanceType<typeof Terminal>> {
   return terminal;
 }
 
-async function expectVisible(
-  output: string,
-  included: readonly string[],
-  excluded: readonly string[] = [],
-): Promise<void> {
+async function visibleScreen(output: string): Promise<string> {
   const terminal = await emulate(output);
   try {
     const buffer = terminal.buffer.active;
-    const visible = Array.from({ length: terminal.rows }, (_, index) =>
+    return Array.from({ length: terminal.rows }, (_, index) =>
       (buffer.getLine(buffer.viewportY + index)?.translateToString(true) ?? "").trimEnd(),
     ).join("\n");
-    for (const value of included) expect(visible).toContain(value);
-    for (const value of excluded) expect(visible).not.toContain(value);
   } finally {
     terminal.dispose();
   }
+}
+
+async function waitForVisible(
+  ps: ReturnType<typeof term>,
+  included: readonly string[],
+  excluded: readonly string[] = [],
+  timeoutMs = 10000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let observedLength = -1;
+  let visible = "";
+
+  while (true) {
+    const snapshot = ps.output;
+    if (snapshot.length !== observedLength) {
+      observedLength = snapshot.length;
+      visible = await visibleScreen(snapshot);
+      if (
+        included.every((value) => visible.includes(value)) &&
+        excluded.every((value) => !visible.includes(value))
+      ) {
+        return;
+      }
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    try {
+      await ps.waitForOutput((output) => output.length > observedLength, remaining);
+    } catch {
+      // Re-read once after a timeout so a final chunk delivered at the deadline
+      // is reflected in the failure diagnostics and can still satisfy the screen.
+    }
+  }
+
+  for (const value of included) expect(visible).toContain(value);
+  for (const value of excluded) expect(visible).not.toContain(value);
 }
 
 function expectExactCleanup(output: string, mode: "inline" | "fullscreen"): void {
@@ -113,41 +144,55 @@ test.each(["inline", "fullscreen"] as const)(
           output.includes("inner 2") &&
           output.includes("inner 4"),
       );
-      await expectVisible(ps.output, ["outer 1", "inner 2", "inner 3", "inner 4"]);
+      await waitForVisible(ps, ["route=ready", "outer 1", "inner 2", "inner 3", "inner 4"]);
 
-      let before = ps.output.length;
       ps.write("\x1b[B");
-      await ps.waitForOutput((output) => output.slice(before).includes("route=inner:down:moved"));
-      await expectVisible(ps.output, ["outer 1", "inner 3", "inner 4", "inner 5"]);
+      await waitForVisible(ps, [
+        "route=inner:down:moved",
+        "outer 1",
+        "inner 3",
+        "inner 4",
+        "inner 5",
+      ]);
 
-      before = ps.output.length;
       ps.write("\x1b[F");
-      await ps.waitForOutput((output) => output.slice(before).includes("route=inner:end:moved"));
-      await expectVisible(ps.output, ["outer 1", "inner 5", "inner 6", "inner 7"]);
+      await waitForVisible(ps, [
+        "route=inner:end:moved",
+        "outer 1",
+        "inner 5",
+        "inner 6",
+        "inner 7",
+      ]);
 
-      before = ps.output.length;
       ps.write("\x1b[B");
-      await ps.waitForOutput((output) =>
-        output.slice(before).includes("route=inner:down:unchanged > outer:down:moved"),
+      await waitForVisible(
+        ps,
+        ["route=inner:down:unchanged > outer:down:moved", "inner 5", "inner 6", "inner 7"],
+        ["outer 1"],
       );
-      await expectVisible(ps.output, ["inner 5", "inner 6", "inner 7"], ["outer 1"]);
 
-      before = ps.output.length;
       ps.write("\x1b[A");
-      await ps.waitForOutput((output) => output.slice(before).includes("route=inner:up:moved"));
-      await expectVisible(ps.output, ["inner 4", "inner 5", "inner 6"], ["outer 1"]);
-
-      before = ps.output.length;
-      ps.write("\x1b[H");
-      await ps.waitForOutput((output) => output.slice(before).includes("route=inner:home:moved"));
-      await expectVisible(ps.output, ["inner 0", "inner 1", "inner 2"], ["outer 1"]);
-
-      before = ps.output.length;
-      ps.write("\x1b[H");
-      await ps.waitForOutput((output) =>
-        output.slice(before).includes("route=inner:home:unchanged > outer:home:moved"),
+      await waitForVisible(
+        ps,
+        ["route=inner:up:moved", "inner 4", "inner 5", "inner 6"],
+        ["outer 1"],
       );
-      await expectVisible(ps.output, ["outer 0", "outer 1", "inner 0", "inner 2"]);
+
+      ps.write("\x1b[H");
+      await waitForVisible(
+        ps,
+        ["route=inner:home:moved", "inner 0", "inner 1", "inner 2"],
+        ["outer 1"],
+      );
+
+      ps.write("\x1b[H");
+      await waitForVisible(ps, [
+        "route=inner:home:unchanged > outer:home:moved",
+        "outer 0",
+        "outer 1",
+        "inner 0",
+        "inner 2",
+      ]);
 
       ps.write("q");
       await ps.waitForOutput((output) => output.includes("__SCROLL_COMPOSITION_OK__"));
@@ -179,38 +224,41 @@ test("nested wheel scrolling uses real SGR input and bubbles only at the inner e
         output.includes(ENABLE_BUTTON_MOUSE) &&
         output.includes(ENABLE_SGR_MOUSE),
     );
-    await expectVisible(ps.output, ["outer 1", "inner 2", "inner 3", "inner 4"]);
+    await waitForVisible(ps, ["route=ready", "outer 1", "inner 2", "inner 3", "inner 4"]);
 
-    let before = ps.output.length;
     ps.write("\x1b[B");
-    await ps.waitForOutput((output) => output.slice(before).includes("route=inner:down:moved"));
-    await expectVisible(ps.output, ["inner 3", "inner 4", "inner 5"]);
+    await waitForVisible(ps, ["route=inner:down:moved", "inner 3", "inner 4", "inner 5"]);
 
-    before = ps.output.length;
     ps.write(WHEEL_DOWN_AT_INNER);
-    await ps.waitForOutput((output) =>
-      output.slice(before).includes("route=inner:target:down:moved"),
-    );
-    await expectVisible(ps.output, ["inner 4", "inner 5", "inner 6", "outer 1"]);
+    await waitForVisible(ps, [
+      "route=inner:target:down:moved",
+      "inner 4",
+      "inner 5",
+      "inner 6",
+      "outer 1",
+    ]);
 
-    before = ps.output.length;
     ps.write("\x1b[F");
-    await ps.waitForOutput((output) => output.slice(before).includes("route=inner:end:moved"));
-    await expectVisible(ps.output, ["inner 5", "inner 6", "inner 7", "outer 1"]);
+    await waitForVisible(ps, ["route=inner:end:moved", "inner 5", "inner 6", "inner 7", "outer 1"]);
 
-    before = ps.output.length;
     ps.write(WHEEL_DOWN_AT_INNER);
-    await ps.waitForOutput((output) =>
-      output.slice(before).includes("route=inner:target:down:unchanged > outer:bubble:down:moved"),
+    await waitForVisible(
+      ps,
+      [
+        "route=inner:target:down:unchanged > outer:bubble:down:moved",
+        "inner 5",
+        "inner 6",
+        "inner 7",
+      ],
+      ["outer 1"],
     );
-    await expectVisible(ps.output, ["inner 5", "inner 6", "inner 7"], ["outer 1"]);
 
-    before = ps.output.length;
     ps.write(WHEEL_UP_AT_INNER);
-    await ps.waitForOutput((output) =>
-      output.slice(before).includes("route=inner:target:up:moved"),
+    await waitForVisible(
+      ps,
+      ["route=inner:target:up:moved", "inner 4", "inner 5", "inner 6"],
+      ["outer 1"],
     );
-    await expectVisible(ps.output, ["inner 4", "inner 5", "inner 6"], ["outer 1"]);
 
     ps.write("q");
     await ps.waitForOutput((output) => output.includes("__SCROLL_COMPOSITION_OK__"));
