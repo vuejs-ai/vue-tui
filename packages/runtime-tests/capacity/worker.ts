@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite-plus";
+import {
+  collectMemory,
+  memoryTrend,
+  type CapacityMemorySample,
+  type CapacityMemoryTrend,
+} from "./memory.ts";
 import type { CapacityJourneyId, CapacityVolume, JourneyExecution } from "./workloads.tsx";
-import { median, summarize } from "./metrics.ts";
+import { summarize } from "./metrics.ts";
 
 interface WorkerOptions {
   readonly journey: CapacityJourneyId;
@@ -15,20 +21,6 @@ interface WorkerOptions {
   readonly volume?: CapacityVolume;
 }
 
-interface MemorySample {
-  readonly phase: "warmup" | "measured";
-  readonly repetition: number;
-  readonly heapUsed: number;
-  readonly rss: number;
-}
-
-interface MemoryTrend {
-  readonly sampleCount: number;
-  readonly firstThreeHeapMedian: number;
-  readonly finalThreeHeapMedian: number;
-  readonly heapDelta: number;
-}
-
 interface WorkerEvidence {
   readonly journey: CapacityJourneyId;
   readonly kind: "journey" | "control";
@@ -37,8 +29,8 @@ interface WorkerEvidence {
   readonly maxFps: number;
   readonly volume?: CapacityVolume;
   readonly measured: readonly JourneyExecution[];
-  readonly memory: readonly MemorySample[];
-  readonly memoryTrend: MemoryTrend;
+  readonly memory: readonly CapacityMemorySample[];
+  readonly memoryTrend: CapacityMemoryTrend;
   readonly latency: ReturnType<typeof summarize>;
   readonly heartbeat: ReturnType<typeof summarize>;
   readonly renderDuration: ReturnType<typeof summarize>;
@@ -78,25 +70,6 @@ function parseOptions(): WorkerOptions {
   });
 }
 
-function collectMemory(phase: MemorySample["phase"], repetition: number): MemorySample {
-  if (!globalThis.gc) throw new Error("capacity workers require node --expose-gc");
-  globalThis.gc();
-  const usage = process.memoryUsage();
-  return Object.freeze({ phase, repetition, heapUsed: usage.heapUsed, rss: usage.rss });
-}
-
-function memoryTrend(samples: readonly MemorySample[]): MemoryTrend {
-  const measured = samples.filter((sample) => sample.phase === "measured");
-  const firstThreeHeapMedian = median(measured.slice(0, 3).map((sample) => sample.heapUsed));
-  const finalThreeHeapMedian = median(measured.slice(-3).map((sample) => sample.heapUsed));
-  return Object.freeze({
-    sampleCount: measured.length,
-    firstThreeHeapMedian,
-    finalThreeHeapMedian,
-    heapDelta: finalThreeHeapMedian - firstThreeHeapMedian,
-  });
-}
-
 const options = parseOptions();
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const evidenceDirectory = await mkdtemp(path.join(tmpdir(), "vue-tui-capacity-"));
@@ -122,18 +95,23 @@ try {
       volume?: CapacityVolume,
     ) => Promise<JourneyExecution>;
   };
-  const measuredPaths: string[] = [];
-  const memory: MemorySample[] = [];
   const total = options.warmups + options.repetitions;
+  // Fixed-size typed arrays keep the measurement recorder itself constant
+  // across repetitions. Growing JS arrays here would make later heap samples
+  // observe the capacity harness's own backing-store expansion.
+  const heapUsedSamples = new Float64Array(total);
+  const codeAndMetadataSamples = new Float64Array(total);
+  const bytecodeAndMetadataSamples = new Float64Array(total);
+  const retainedHeapUsedSamples = new Float64Array(total);
+  const rssSamples = new Float64Array(total);
 
-  async function runRepetition(repetition: number): Promise<string | null> {
+  async function runRepetition(repetition: number): Promise<void> {
     const result = await loaded[
       options.kind === "control" ? "runCapacityControl" : "runCapacityJourney"
     ](options.journey, options.maxFps, options.volume);
-    if (repetition < options.warmups) return null;
+    if (repetition < options.warmups) return;
     const resultPath = path.join(evidenceDirectory, `${repetition}.json`);
     await writeFile(resultPath, JSON.stringify(result));
-    return resultPath;
   }
 
   for (let repetition = 0; repetition < total; repetition++) {
@@ -141,12 +119,34 @@ try {
     // sample. Retaining every prior latency/heartbeat/render array here made
     // the measurement observe its own evidence accumulator rather than only
     // Runtime and host state that survived teardown.
-    const measuredPath = await runRepetition(repetition);
+    await runRepetition(repetition);
     const phase = repetition < options.warmups ? "warmup" : "measured";
-    memory.push(collectMemory(phase, repetition));
-    if (measuredPath !== null) measuredPaths.push(measuredPath);
+    const sample = collectMemory(phase, repetition);
+    heapUsedSamples[repetition] = sample.heapUsed;
+    codeAndMetadataSamples[repetition] = sample.codeAndMetadataSize;
+    bytecodeAndMetadataSamples[repetition] = sample.bytecodeAndMetadataSize;
+    retainedHeapUsedSamples[repetition] = sample.retainedHeapUsed;
+    rssSamples[repetition] = sample.rss;
   }
 
+  const memory: readonly CapacityMemorySample[] = Object.freeze(
+    Array.from({ length: total }, (_, repetition) =>
+      Object.freeze({
+        phase: repetition < options.warmups ? "warmup" : "measured",
+        repetition,
+        heapUsed: heapUsedSamples[repetition]!,
+        codeAndMetadataSize: codeAndMetadataSamples[repetition]!,
+        bytecodeAndMetadataSize: bytecodeAndMetadataSamples[repetition]!,
+        retainedHeapUsed: retainedHeapUsedSamples[repetition]!,
+        rss: rssSamples[repetition]!,
+      }),
+    ),
+  );
+  // Result paths are deterministic, so materialize them only after every heap
+  // sample instead of growing a string array inside the measured window.
+  const measuredPaths = Array.from({ length: options.repetitions }, (_, index) =>
+    path.join(evidenceDirectory, `${options.warmups + index}.json`),
+  );
   const measured = await Promise.all(
     measuredPaths.map(
       async (resultPath) => JSON.parse(await readFile(resultPath, "utf8")) as JourneyExecution,

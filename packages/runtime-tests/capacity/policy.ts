@@ -1,4 +1,5 @@
 import type { PercentileSummary } from "./metrics.ts";
+import type { CapacityMemorySample, CapacityMemoryTrend } from "./memory.ts";
 import {
   capacityManifest,
   type CapacityJourneyId,
@@ -23,18 +24,8 @@ export interface CapacityWorkerEvidence {
   readonly maxFps: number;
   readonly volume?: CapacityVolume;
   readonly measured: readonly JourneyExecution[];
-  readonly memory: readonly {
-    readonly phase: "warmup" | "measured";
-    readonly repetition: number;
-    readonly heapUsed: number;
-    readonly rss: number;
-  }[];
-  readonly memoryTrend: {
-    readonly sampleCount: number;
-    readonly firstThreeHeapMedian: number;
-    readonly finalThreeHeapMedian: number;
-    readonly heapDelta: number;
-  };
+  readonly memory: readonly CapacityMemorySample[];
+  readonly memoryTrend: CapacityMemoryTrend;
   readonly latency: PercentileSummary;
   readonly heartbeat: PercentileSummary;
   readonly renderDuration: PercentileSummary;
@@ -181,7 +172,7 @@ export function assessCapacityRun(
   const heapDeltaExcess = workloadHeapDelta - controlHeapDeltaAllowance;
   if (memoryEvaluated && heapDeltaExcess > 0) {
     repeatReasons.push(
-      `heap growth exceeded the matched control by ${heapDeltaExcess} bytes and requires the prescribed second run`,
+      `retained heap growth exceeded the matched control by ${heapDeltaExcess} bytes and requires the prescribed second run`,
     );
   }
 

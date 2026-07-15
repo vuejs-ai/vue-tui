@@ -142,7 +142,7 @@ for (const spec of selectCapacityRunSpecs(requestedJourneyArgument())) {
 }
 
 const evidence = Object.freeze({
-  schemaVersion: 2,
+  schemaVersion: 3,
   recordedAt: new Date().toISOString(),
   mode,
   thresholds: capacityThresholds,

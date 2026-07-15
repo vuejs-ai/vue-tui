@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
+import { memoryTrend, retainedHeapUsed, type CapacityMemorySample } from "./memory.ts";
 import { nearestRank } from "./metrics.ts";
 import { assessCapacityRun, type CapacityWorkerEvidence } from "./policy.ts";
 import { capacityRunSpecs, selectCapacityRunSpecs } from "./run-selection.ts";
@@ -118,15 +119,61 @@ test("the capacity runner executes both J6 volumes at the frozen repetition coun
   expect(source).toContain('Object.freeze({ journey: "j6f", volume: "large" })');
   const runnerSource = readFileSync(new URL("./run.ts", import.meta.url), "utf8");
   expect(runnerSource).toContain("repetitions: capacityManifest[journey].repetitions");
+  expect(runnerSource).toContain("warmups: 3");
+  expect(runnerSource).toContain("repetitions: 10");
+  expect(runnerSource).toContain("schemaVersion: 3");
 });
 
 test("capacity heap samples exclude retained execution evidence", () => {
   const source = readFileSync(new URL("./worker.ts", import.meta.url), "utf8");
   expect(source).toMatch(
-    /const measuredPath = await runRepetition\(repetition\);[\s\S]*memory\.push\(collectMemory\(phase, repetition\)\)/,
+    /await runRepetition\(repetition\);[\s\S]*const sample = collectMemory\(phase, repetition\)/,
   );
   expect(source).toMatch(/const measured = await Promise\.all\([\s\S]*readFile\(resultPath/);
   expect(source).not.toContain("measured.push(result)");
+  expect(source).not.toContain("memory.push(");
+  expect(source).not.toContain("measuredPaths.push(");
+  expect(source).toContain("const heapUsedSamples = new Float64Array(total)");
+  expect(source).toMatch(/const measuredPaths = Array\.from\([\s\S]*const measured =/);
+});
+
+test("capacity heap trends exclude V8 code tier-up without hiding retained growth", () => {
+  const sample = (
+    repetition: number,
+    heapUsed: number,
+    codeAndMetadataSize: number,
+    bytecodeAndMetadataSize = 100,
+  ): CapacityMemorySample => ({
+    phase: "measured",
+    repetition,
+    heapUsed,
+    codeAndMetadataSize,
+    bytecodeAndMetadataSize,
+    retainedHeapUsed: retainedHeapUsed(heapUsed, codeAndMetadataSize, bytecodeAndMetadataSize),
+    rss: 2_000,
+  });
+  const codeTierUp = Array.from({ length: 10 }, (_, index) =>
+    index < 5 ? sample(index, 1_100, 100) : sample(index, 1_673, 673),
+  );
+  expect(memoryTrend(codeTierUp)).toEqual({
+    basis: "heap-used-minus-v8-code-and-bytecode",
+    sampleCount: 10,
+    firstThreeRetainedHeapMedian: 900,
+    finalThreeRetainedHeapMedian: 900,
+    heapDelta: 0,
+  });
+
+  const retainedGrowth = codeTierUp.map((entry, index) =>
+    index < 7
+      ? entry
+      : sample(
+          entry.repetition,
+          entry.heapUsed + 1,
+          entry.codeAndMetadataSize,
+          entry.bytecodeAndMetadataSize,
+        ),
+  );
+  expect(memoryTrend(retainedGrowth).heapDelta).toBe(1);
 });
 
 test("capacity journey selection preserves the complete default and filters whole J6 volumes", () => {
@@ -182,9 +229,10 @@ function evidence(
     measured: [execution],
     memory: [],
     memoryTrend: {
+      basis: "heap-used-minus-v8-code-and-bytecode",
       sampleCount: 10,
-      firstThreeHeapMedian: 1_000,
-      finalThreeHeapMedian: 1_000 + (values.heapDelta ?? 0),
+      firstThreeRetainedHeapMedian: 1_000,
+      finalThreeRetainedHeapMedian: 1_000 + (values.heapDelta ?? 0),
       heapDelta: values.heapDelta ?? 0,
     },
     latency: {
@@ -257,11 +305,11 @@ describe("capacity acceptance policy", () => {
   });
 
   test("requires a second run for positive heap growth beyond the control", () => {
-    const workload = evidence("j2", { heapDelta: 20 });
+    const workload = evidence("j2", { heapDelta: 6 });
     const control = evidence("j2", { heapDelta: 5 });
     const assessment = assessCapacityRun("j2", workload, control, true);
     expect(assessment.status).toBe("needs-repeat");
-    expect(assessment.heapDeltaExcess).toBe(15);
+    expect(assessment.heapDeltaExcess).toBe(1);
   });
 
   test("treats missing J6 backpressure evidence as a hard failure", () => {
