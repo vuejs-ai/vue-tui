@@ -1,4 +1,5 @@
 import {
+  computed,
   defineComponent,
   nextTick,
   onErrorCaptured,
@@ -15,6 +16,7 @@ import {
   useFocusedInput,
   useFocusManager,
   useFocusScope,
+  useFocusScopeInput,
   useInput,
   type RenderMode,
   type TuiInputEvent,
@@ -234,6 +236,82 @@ test("Inline and Fullscreen share the coding-agent composer, approval trap, and 
     "approval:a",
   ]);
   expect(traces[1]).toEqual(traces[0]);
+});
+
+test.each(modes)("a reactivated %s approval boundary receives a lone Escape", async (mode) => {
+  const state = shallowRef<"idle" | "streaming" | "approving">("idle");
+  const approvals: string[] = [];
+  let composer!: UseFocusReturn;
+
+  const App = defineComponent(() => {
+    const composerHost = shallowRef<ComponentPublicInstance | null>(null);
+    const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
+    composer = useFocus(composerHost, {
+      autoFocus: true,
+      disabled: computed(() => state.value !== "idle"),
+    });
+    const approvalScope = useFocusScope({
+      isActive: computed(() => state.value === "approving"),
+      trapped: true,
+    });
+    useFocus(approvalHost, { scope: approvalScope, autoFocus: true });
+
+    useFocusedInput(composer, (event) => {
+      if (event.kind !== "key" || event.key.name !== "return") return "continue";
+      state.value = "streaming";
+      return "consume";
+    });
+    useFocusScopeInput(approvalScope, (event) => {
+      if (event.kind !== "key" || (event.key.name !== "return" && event.key.name !== "escape")) {
+        return "continue";
+      }
+      approvals.push(event.key.name);
+      state.value = "streaming";
+      return "consume";
+    });
+
+    return () => (
+      <Box flexDirection="column">
+        {state.value === "approving" ? (
+          <Box ref={approvalHost}>
+            <Text>approval</Text>
+          </Box>
+        ) : null}
+        <Box ref={composerHost}>
+          <Text>composer</Text>
+        </Box>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { host: { mode } });
+  const showApproval = async () => {
+    state.value = "approving";
+    await nextTick();
+    await result.waitUntilRenderFlush();
+  };
+  const restoreComposer = async () => {
+    state.value = "idle";
+    await nextTick();
+    composer.focus();
+    await result.waitUntilRenderFlush();
+  };
+
+  try {
+    await result.stdin.write("\r");
+    await showApproval();
+    await result.stdin.write("\r");
+    await restoreComposer();
+
+    await result.stdin.write("\r");
+    await showApproval();
+    await result.stdin.write("\x1b");
+
+    expect(approvals).toEqual(["return", "escape"]);
+    expect(state.value).toBe("streaming");
+  } finally {
+    result.dispose();
+  }
 });
 
 async function runIndependentRegionJourney(mode: RenderMode): Promise<readonly string[]> {

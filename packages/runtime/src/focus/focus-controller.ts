@@ -20,6 +20,7 @@ import {
   createInternalFocusPolicy,
   type InternalFocusCheckpoint,
   type InternalFocusPolicy,
+  type InternalFocusRoute,
   type InternalFocusScope,
   type InternalFocusTarget,
 } from "./focus-policy.ts";
@@ -153,6 +154,7 @@ type RouteRegistration =
 
 interface FocusGeneration {
   readonly owner: TargetRecord | null;
+  readonly route: InternalFocusRoute;
   readonly registrations: RouteRegistration[];
   readonly hasSequentialTarget: boolean;
   selection: InternalInputTopologySelection;
@@ -350,6 +352,7 @@ export function createInternalFocusController(
     const registrations: RouteRegistration[] = [];
     const generation: FocusGeneration = {
       owner,
+      route,
       registrations,
       hasSequentialTarget: policy.hasSequentialTarget(),
       selection: {},
@@ -464,6 +467,18 @@ export function createInternalFocusController(
     effectiveTargetRef.value = inert ? null : (generation?.owner?.handle ?? null);
   };
 
+  const routeMatches = (
+    generation: FocusGeneration,
+    route: InternalFocusRoute,
+    hasSequentialTarget: boolean,
+  ): boolean =>
+    generation.route.boundary === route.boundary &&
+    generation.route.owner === route.owner &&
+    generation.route.externalOwner === route.externalOwner &&
+    generation.hasSequentialTarget === hasSequentialTarget &&
+    generation.route.ancestors.length === route.ancestors.length &&
+    generation.route.ancestors.every((scope, index) => scope === route.ancestors[index]);
+
   const publishStableGeneration = (): void => {
     if (inert) {
       commitEffectiveTarget(null);
@@ -523,7 +538,22 @@ export function createInternalFocusController(
       routeInvalidated = false;
       try {
         reconcileRenderedFacts();
-        publishStableGeneration();
+        const route = policy.route();
+        const hasSequentialTarget = policy.hasSequentialTarget();
+        // Rendered-target post-flush watchers can request a second reconciliation
+        // after commit() already reconciled the same host tree. Replacing an
+        // otherwise identical atomic input generation would make a split fact
+        // (notably legacy Escape's 20ms disambiguation) stale even though no
+        // focus route changed. Reuse the accepted generation for a host-only
+        // no-op; logical mutations and every semantic route change still publish
+        // a replacement and retain F3's fail-closed generation boundary.
+        if (
+          logicalDirty ||
+          !currentGeneration ||
+          !routeMatches(currentGeneration, route, hasSequentialTarget)
+        ) {
+          publishStableGeneration();
+        }
       } catch (error) {
         routeInvalidated = wasInvalidated;
         throw error;

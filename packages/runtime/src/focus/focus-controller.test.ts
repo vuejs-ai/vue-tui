@@ -477,6 +477,25 @@ describe("app-owned focus controller", () => {
     expect(demand.at(-1)?.startsWith("release:")).toBe(true);
   });
 
+  test("keeps a split fact valid across a no-op rendered-target reconciliation", () => {
+    const { focus, root, routing } = createHarness();
+    const approvalHost = connect(root, createBox());
+    makeLayoutNode(approvalHost);
+    const modal = focus.createScope({ trapped: true });
+    const approval = focus.createTarget({ scope: modal, autoFocus: true });
+    focus.registerScopeInput(modal, continueRoute);
+    focus.attachTarget(approval, approvalHost);
+    const captured = routing.capture();
+
+    focus.reconcileRenderedTree();
+
+    expect(routing.resolve(captured).kind).toBe("selected");
+    expect(focus.focusedTarget.value).toBe(approval);
+
+    focus.updateScope(modal, { active: false });
+    expect(routing.resolve(captured).kind).toBe("stale");
+  });
+
   test("does not count an off-path target handler as input demand", () => {
     const { demand, focus, root } = createHarness();
     const firstHost = connect(root, createBox());
