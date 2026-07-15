@@ -423,7 +423,12 @@ class Output {
           // the write origin to clip.x1 and shifts the retained text left.
           if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
           const maxWidth = clipH.x2 - lineX;
-          line = safeSliceEnd(sliceAnsi(line, from, to), maxWidth);
+          const sliced = sliceAnsi(line, from, to);
+          if (from > 0 || to < lineWidth) {
+            line = safeSliceEnd(sliced, maxWidth);
+          } else {
+            line = sliced;
+          }
         }
 
         // Apply transforms to the (now horizontally clipped) line. `index` is the
@@ -440,7 +445,7 @@ class Output {
         // reopen cells outside the same overflow boundary. Re-clip only the
         // transformed result to the remaining right-hand capacity; lineX has
         // already preserved the retained source span's real surface origin.
-        if (clipH) {
+        if (clipH && transformers.length > 0) {
           const maxWidth = Math.max(0, clipH.x2 - lineX);
           line = safeSliceEnd(sliceAnsi(line, 0, maxWidth), maxWidth);
         }
