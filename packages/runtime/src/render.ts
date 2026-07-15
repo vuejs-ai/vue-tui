@@ -48,7 +48,7 @@ import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { acquireRuntimeResource, changeRuntimeResource } from "./resource-tracker.ts";
-import { paint } from "./paint/paint.ts";
+import { paint, releasePaintCaches } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
 import {
@@ -1090,7 +1090,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           setFullscreenCursorHidden(false);
         }
       }
-      if (mountedRoot) runBestEffort(() => detachYoga(mountedRoot!));
+      if (mountedRoot) {
+        runBestEffort(() => releasePaintCaches(mountedRoot!));
+        runBestEffort(() => detachYoga(mountedRoot!));
+      }
       mountedRoot = null;
       if (mountedResizeHandler && mountedAppContext) {
         const resizeHandler = mountedResizeHandler;

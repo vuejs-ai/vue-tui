@@ -14,6 +14,7 @@ import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
   TuiNode,
+  TuiRoot,
   TuiContainer,
   TextProps,
   TuiText,
@@ -162,10 +163,81 @@ function styledGraphemesFromAnsi(line: string): StyledChar[] {
   return result;
 }
 
-class OutputCaches {
-  private widths = new Map<string, number>();
-  private blockWidths = new Map<string, number>();
-  private styledCharsCache = new Map<string, StyledChar[]>();
+interface OutputCacheLimits {
+  readonly styledEntries: number;
+  readonly styledUnits: number;
+  readonly widthEntries: number;
+  readonly widthUnits: number;
+}
+
+const defaultOutputCacheLimits: OutputCacheLimits = {
+  styledEntries: 2_048,
+  styledUnits: 65_536,
+  widthEntries: 4_096,
+  widthUnits: 262_144,
+};
+
+class BoundedLruCache<Value> {
+  private readonly values = new Map<string, { value: Value; weight: number }>();
+  private totalWeight = 0;
+
+  constructor(
+    private readonly maxEntries: number,
+    private readonly maxWeight: number,
+    private readonly weightOf: (key: string, value: Value) => number,
+  ) {}
+
+  get(key: string): Value | undefined {
+    const cached = this.values.get(key);
+    if (cached === undefined) return undefined;
+    this.values.delete(key);
+    this.values.set(key, cached);
+    return cached.value;
+  }
+
+  set(key: string, value: Value): void {
+    const weight = this.weightOf(key, value);
+    if (this.maxEntries <= 0 || weight > this.maxWeight) return;
+
+    const previous = this.values.get(key);
+    if (previous) {
+      this.values.delete(key);
+      this.totalWeight -= previous.weight;
+    }
+    while (this.values.size >= this.maxEntries || this.totalWeight + weight > this.maxWeight) {
+      const oldestKey = this.values.keys().next().value;
+      if (oldestKey === undefined) break;
+      const oldest = this.values.get(oldestKey)!;
+      this.values.delete(oldestKey);
+      this.totalWeight -= oldest.weight;
+    }
+    this.values.set(key, { value, weight });
+    this.totalWeight += weight;
+  }
+
+  clear(): void {
+    this.values.clear();
+    this.totalWeight = 0;
+  }
+}
+
+export class OutputCaches {
+  private readonly widths: BoundedLruCache<number>;
+  private readonly styledCharsCache: BoundedLruCache<StyledChar[]>;
+
+  constructor(limits: Partial<OutputCacheLimits> = {}) {
+    const resolved = { ...defaultOutputCacheLimits, ...limits };
+    this.widths = new BoundedLruCache(
+      resolved.widthEntries,
+      resolved.widthUnits,
+      (text) => text.length,
+    );
+    this.styledCharsCache = new BoundedLruCache(
+      resolved.styledEntries,
+      resolved.styledUnits,
+      (line, characters) => Math.max(line.length, characters.length),
+    );
+  }
 
   getStyledChars(line: string): StyledChar[] {
     let cached = this.styledCharsCache.get(line);
@@ -185,19 +257,6 @@ class OutputCaches {
     return cached;
   }
 
-  getWidestLine(text: string): number {
-    let cached = this.blockWidths.get(text);
-    if (cached === undefined) {
-      let lineWidth = 0;
-      for (const line of text.split("\n")) {
-        lineWidth = Math.max(lineWidth, this.getStringWidth(line));
-      }
-      cached = lineWidth;
-      this.blockWidths.set(text, cached);
-    }
-    return cached;
-  }
-
   getSliceStart(text: string, requestedStart: number): number {
     let column = 0;
 
@@ -208,13 +267,34 @@ class OutputCaches {
 
     return column;
   }
+
+  clear(): void {
+    this.widths.clear();
+    this.styledCharsCache.clear();
+  }
+}
+
+const rootOutputCaches = new WeakMap<TuiRoot, OutputCaches>();
+
+function getRootOutputCaches(root: TuiRoot): OutputCaches {
+  let caches = rootOutputCaches.get(root);
+  if (!caches) {
+    caches = new OutputCaches();
+    rootOutputCaches.set(root, caches);
+  }
+  return caches;
+}
+
+export function releasePaintCaches(root: TuiRoot): void {
+  rootOutputCaches.get(root)?.clear();
+  rootOutputCaches.delete(root);
 }
 
 class Output {
   readonly width: number;
   readonly height: number;
   private ops: Op[] = [];
-  private readonly caches: OutputCaches = new OutputCaches();
+  private readonly caches: OutputCaches;
   private readonly hardClip: ClipRect | undefined;
   private readonly selectionFrame: InternalSelectionPaintFrame | undefined;
   private readonly selectionTraces = new Map<object, OutputSelectionTrace>();
@@ -224,11 +304,13 @@ class Output {
     height: number,
     clipToBounds = false,
     selectionFrame?: InternalSelectionPaintFrame,
+    caches = new OutputCaches(),
   ) {
     this.width = width;
     this.height = height;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
     this.selectionFrame = selectionFrame;
+    this.caches = caches;
   }
 
   recordSelection(target: InternalSelectionPaintTarget, trace: InternalTextSelectionTrace): void {
@@ -1277,7 +1359,13 @@ export function paint(root: TuiNode, options: PaintOptions = {}): string {
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
-  const out = new Output(width, height, options.viewport !== undefined, options.selection);
+  const out = new Output(
+    width,
+    height,
+    options.viewport !== undefined,
+    options.selection,
+    getRootOutputCaches(root),
+  );
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
   paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry, options.selection);
   return out.get().output;
