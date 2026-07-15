@@ -478,7 +478,7 @@ describe("app-owned focus controller", () => {
   });
 
   test("keeps a split fact valid across a no-op rendered-target reconciliation", () => {
-    const { focus, root, routing } = createHarness();
+    const { demand, focus, root, routing } = createHarness();
     const approvalHost = connect(root, createBox());
     makeLayoutNode(approvalHost);
     const modal = focus.createScope({ trapped: true });
@@ -486,14 +486,98 @@ describe("app-owned focus controller", () => {
     focus.registerScopeInput(modal, continueRoute);
     focus.attachTarget(approval, approvalHost);
     const captured = routing.capture();
+    const demandBeforeReconcile = [...demand];
 
     focus.reconcileRenderedTree();
 
     expect(routing.resolve(captured).kind).toBe("selected");
     expect(focus.focusedTarget.value).toBe(approval);
+    expect(demand).toEqual(demandBeforeReconcile);
 
     focus.updateScope(modal, { active: false });
     expect(routing.resolve(captured).kind).toBe("stale");
+  });
+
+  test("replaces a captured generation when host reorder changes Tab traversal", () => {
+    const { focus, root, routing } = createHarness();
+    const ownerHost = connect(root, createBox());
+    const secondHost = connect(root, createBox());
+    const thirdHost = connect(root, createBox());
+    makeLayoutNode(ownerHost);
+    makeLayoutNode(secondHost);
+    makeLayoutNode(thirdHost);
+    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
+    const second = focus.createTarget();
+    const third = focus.createTarget();
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(owner, ownerHost);
+      focus.attachTarget(second, secondHost);
+      focus.attachTarget(third, thirdHost);
+    });
+    const captured = routing.capture();
+
+    root.children.splice(0, 3, ownerHost, thirdHost, secondHost);
+    focus.reconcileRenderedTree();
+
+    expect(routing.resolve(captured).kind).toBe("stale");
+    expect(focus.focusedTarget.value).toBe(owner);
+    expect(focus.focusNext()).toBe(true);
+    expect(focus.focusedTarget.value).toBe(third);
+  });
+
+  test("tracks a non-sequential owner position in the rendered Tab order", () => {
+    const { focus, root, routing } = createHarness();
+    const secondHost = connect(root, createBox());
+    const ownerHost = connect(root, createBox());
+    const thirdHost = connect(root, createBox());
+    makeLayoutNode(secondHost);
+    makeLayoutNode(ownerHost);
+    makeLayoutNode(thirdHost);
+    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
+    const second = focus.createTarget();
+    const third = focus.createTarget();
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(owner, ownerHost);
+      focus.attachTarget(second, secondHost);
+      focus.attachTarget(third, thirdHost);
+    });
+    const captured = routing.capture();
+
+    root.children.splice(0, 3, secondHost, thirdHost, ownerHost);
+    focus.reconcileRenderedTree();
+
+    expect(routing.resolve(captured).kind).toBe("stale");
+    expect(focus.focusedTarget.value).toBe(owner);
+    expect(focus.focusNext()).toBe(true);
+    expect(focus.focusedTarget.value).toBe(second);
+  });
+
+  test("replaces a captured generation when host visibility changes Tab traversal", () => {
+    const { focus, root, routing } = createHarness();
+    let secondHidden = false;
+    const ownerHost = connect(root, createBox());
+    const secondHost = connect(root, createBox());
+    const thirdHost = connect(root, createBox());
+    makeLayoutNode(ownerHost);
+    makeLayoutNode(secondHost, () => (secondHidden ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX));
+    makeLayoutNode(thirdHost);
+    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
+    const second = focus.createTarget();
+    const third = focus.createTarget();
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(owner, ownerHost);
+      focus.attachTarget(second, secondHost);
+      focus.attachTarget(third, thirdHost);
+    });
+    const captured = routing.capture();
+
+    secondHidden = true;
+    focus.reconcileRenderedTree();
+
+    expect(routing.resolve(captured).kind).toBe("stale");
+    expect(focus.focusedTarget.value).toBe(owner);
+    expect(focus.focusNext()).toBe(true);
+    expect(focus.focusedTarget.value).toBe(third);
   });
 
   test("does not count an off-path target handler as input demand", () => {

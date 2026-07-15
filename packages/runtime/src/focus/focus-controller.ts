@@ -19,6 +19,7 @@ import { changeRuntimeResource } from "../resource-tracker.ts";
 import {
   createInternalFocusPolicy,
   type InternalFocusCheckpoint,
+  type InternalFocusInputSignature,
   type InternalFocusPolicy,
   type InternalFocusRoute,
   type InternalFocusScope,
@@ -155,6 +156,7 @@ type RouteRegistration =
 interface FocusGeneration {
   readonly owner: TargetRecord | null;
   readonly route: InternalFocusRoute;
+  readonly inputSignature: InternalFocusInputSignature;
   readonly registrations: RouteRegistration[];
   readonly hasSequentialTarget: boolean;
   selection: InternalInputTopologySelection;
@@ -348,13 +350,15 @@ export function createInternalFocusController(
 
   const buildGeneration = (expectedRevision: number): FocusGeneration => {
     const route = policy.route();
+    const inputSignature = policy.inputSignature();
     const owner = route.owner ? (targetByPolicy.get(route.owner) ?? null) : null;
     const registrations: RouteRegistration[] = [];
     const generation: FocusGeneration = {
       owner,
       route,
+      inputSignature,
       registrations,
-      hasSequentialTarget: policy.hasSequentialTarget(),
+      hasSequentialTarget: inputSignature.sequential.length > 0,
       selection: {},
       inputDemand: false,
       accepted: false,
@@ -470,14 +474,22 @@ export function createInternalFocusController(
   const routeMatches = (
     generation: FocusGeneration,
     route: InternalFocusRoute,
-    hasSequentialTarget: boolean,
+    inputSignature: InternalFocusInputSignature,
   ): boolean =>
     generation.route.boundary === route.boundary &&
     generation.route.owner === route.owner &&
     generation.route.externalOwner === route.externalOwner &&
-    generation.hasSequentialTarget === hasSequentialTarget &&
+    generation.hasSequentialTarget === inputSignature.sequential.length > 0 &&
     generation.route.ancestors.length === route.ancestors.length &&
-    generation.route.ancestors.every((scope, index) => scope === route.ancestors[index]);
+    generation.route.ancestors.every((scope, index) => scope === route.ancestors[index]) &&
+    generation.inputSignature.rendered.length === inputSignature.rendered.length &&
+    generation.inputSignature.rendered.every(
+      (target, index) => target === inputSignature.rendered[index],
+    ) &&
+    generation.inputSignature.sequential.length === inputSignature.sequential.length &&
+    generation.inputSignature.sequential.every(
+      (target, index) => target === inputSignature.sequential[index],
+    );
 
   const publishStableGeneration = (): void => {
     if (inert) {
@@ -539,7 +551,7 @@ export function createInternalFocusController(
       try {
         reconcileRenderedFacts();
         const route = policy.route();
-        const hasSequentialTarget = policy.hasSequentialTarget();
+        const inputSignature = policy.inputSignature();
         // Rendered-target post-flush watchers can request a second reconciliation
         // after commit() already reconciled the same host tree. Replacing an
         // otherwise identical atomic input generation would make a split fact
@@ -550,7 +562,7 @@ export function createInternalFocusController(
         if (
           logicalDirty ||
           !currentGeneration ||
-          !routeMatches(currentGeneration, route, hasSequentialTarget)
+          !routeMatches(currentGeneration, route, inputSignature)
         ) {
           publishStableGeneration();
         }

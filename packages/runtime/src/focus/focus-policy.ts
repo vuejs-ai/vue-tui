@@ -29,6 +29,11 @@ export interface InternalFocusRoute {
   readonly externalOwner: InternalFocusTarget | null;
 }
 
+export interface InternalFocusInputSignature {
+  readonly rendered: readonly InternalFocusTarget[];
+  readonly sequential: readonly InternalFocusTarget[];
+}
+
 export interface InternalFocusPolicy {
   readonly rootScope: InternalFocusScope;
   readonly current: InternalFocusTarget | null;
@@ -74,7 +79,8 @@ export interface InternalFocusPolicy {
   blur(target?: InternalFocusTarget): boolean;
   focusNext(): boolean;
   focusPrevious(): boolean;
-  hasSequentialTarget(): boolean;
+  /** Exact host-derived inputs used by the Tab traversal default. */
+  inputSignature(): InternalFocusInputSignature;
   route(): InternalFocusRoute;
 }
 
@@ -693,8 +699,11 @@ export function createInternalFocusPolicy(): InternalFocusPolicy {
       publishOrSchedule();
       return true;
     },
-    hasSequentialTarget() {
-      return sequentialTargets(boundary).length > 0;
+    inputSignature() {
+      return Object.freeze({
+        rendered: Object.freeze(rendered.map((target) => target.handle)),
+        sequential: Object.freeze(sequentialTargets(boundary).map((target) => target.handle)),
+      });
     },
     route() {
       return publishedRoute;
