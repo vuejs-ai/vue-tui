@@ -5,6 +5,7 @@ import { useInternalRenderSession } from "../render-session.ts";
 import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
 import { assertNoRejectedMouseListeners } from "./rejected-mouse-listeners.ts";
+import { explicitHostProps } from "./explicit-host-props.ts";
 
 // Renders the `<tui-text>` / `<tui-virtual-text>` host primitives. The `tui-` prefix
 // keeps the host tags out of the component namespace, so the component can take its
@@ -48,6 +49,10 @@ function validate(): true {
   assertValidBackgroundColor(props.backgroundColor);
   return true;
 }
+
+function hostProps(): Record<string, unknown> {
+  return explicitHostProps(props, componentInstance.vnode.props, textProps);
+}
 </script>
 
 <template>
@@ -59,13 +64,13 @@ function validate(): true {
       hasContent
     "
   >
-    <tui-virtual-text v-if="insideText" v-bind="props">
+    <tui-virtual-text v-if="insideText" v-bind="hostProps()">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
     </tui-virtual-text>
     <!-- Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when they
          overflow their container (e.g. in no-wrap flex rows). -->
-    <tui-text v-else v-bind="{ ...props, flexShrink: 1 }">
+    <tui-text v-else v-bind="{ ...hostProps(), flexShrink: 1 }">
       <template v-if="srLabel">{{ srLabel }}</template>
       <slot v-else />
     </tui-text>

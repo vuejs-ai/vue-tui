@@ -4,6 +4,7 @@ import { useInternalRenderSession } from "../render-session.ts";
 import { boxProps } from "./box-props.ts";
 import { assertBoxValid } from "./box-validate.ts";
 import { assertNoRejectedMouseListeners } from "./rejected-mouse-listeners.ts";
+import { explicitHostProps } from "./explicit-host-props.ts";
 
 // Renders the `<tui-box>` host primitive. The host tag's `tui-` prefix keeps it out
 // of the component namespace, so the component can take its real name "Box" with no
@@ -20,6 +21,10 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 
 function validateRejectedListeners(): true {
   return assertNoRejectedMouseListeners("Box", componentInstance.vnode.props);
+}
+
+function hostProps(): Record<string, unknown> {
+  return explicitHostProps(props, componentInstance.vnode.props, boxProps);
 }
 </script>
 
@@ -43,7 +48,7 @@ function validateRejectedListeners(): true {
        by the shared rendered-target resolver. -->
   <tui-box
     v-if="validateRejectedListeners() && !srHidden && (srEnabled || assertBoxValid(props))"
-    v-bind="props"
+    v-bind="hostProps()"
   >
     <tui-text v-if="srEnabled && props.ariaLabel">{{ props.ariaLabel }}</tui-text>
     <slot v-else />
