@@ -29,6 +29,8 @@ test("selection-only text mapping reuses one local generation and projects chang
     expect.objectContaining({ text: "A", x: 0, y: 0 }),
     expect.objectContaining({ text: "你", x: 1, y: 0, width: 2 }),
   ]);
+  expect(shifted.selection.get(key)?.stops).toBe(first.selection.get(key)?.stops);
+  expect(shifted.selection.get(key)?.cells).toBe(first.selection.get(key)?.cells);
   expect(deriveTextGeometry({ ...base, surfaceOrigin: { x: 4, y: -2 } })).toBe(shifted);
 
   node.textRevision++;

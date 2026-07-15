@@ -1,14 +1,12 @@
 import type { TuiText, TuiVirtualText } from "../host/nodes.ts";
-import type { InternalSelectionRange, InternalSelectionSnapshot } from "./selection-policy.ts";
+import type {
+  InternalSelectionCell,
+  InternalSelectionRange,
+  InternalSelectionSnapshot,
+} from "./selection-policy.ts";
 
-export interface InternalSelectionTraceCell {
-  readonly id: number;
+export interface InternalSelectionTraceCell extends InternalSelectionCell {
   readonly text: string;
-  readonly start: number;
-  readonly end: number;
-  readonly x: number;
-  readonly y: number;
-  readonly width: number;
 }
 
 export interface InternalTextSelectionTrace {

@@ -15,20 +15,25 @@ function traced(text: string): {
   const boundaries = [0];
   const stops: Array<{ offset: number; x: number; y: number }> = [{ offset: 0, x: 0, y: 0 }];
   const traceCells: InternalTextSelectionTrace["cells"][number][] = [];
-  const cells: InternalSelectionSnapshot["cells"][number][] = [];
   let x = 0;
   for (const [id, part] of [...segmenter.segment(text)].entries()) {
     const start = part.index;
     const end = start + part.segment.length;
     boundaries.push(end);
     traceCells.push({ id, text: part.segment, start, end, x, y: 0, width: 1 });
-    cells.push({ start, end, x, y: 0, width: 1, visible: true });
     x++;
     stops.push({ offset: end, x, y: 0 });
   }
   return {
     trace: { text, boundaries, surfaceOrigin: { x: 0, y: 0 }, stops, cells: traceCells },
-    snapshot: { text, boundaries, stops, cells },
+    snapshot: {
+      text,
+      boundaries,
+      surfaceOrigin: { x: 0, y: 0 },
+      visibleCellIds: new Set(traceCells.map((cell) => cell.id)),
+      stops,
+      cells: traceCells,
+    },
   };
 }
 

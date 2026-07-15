@@ -4,12 +4,12 @@ export interface InternalSelectionPoint {
 }
 
 export interface InternalSelectionCell extends InternalSelectionPoint {
+  /** Stable identity within one semantic document mapping. */
+  readonly id: number;
   /** UTF-16 offsets into the semantic plain-text document. */
   readonly start: number;
   readonly end: number;
   readonly width: number;
-  /** False when clipping or a later paint operation covered this grapheme. */
-  readonly visible: boolean;
 }
 
 export interface InternalSelectionStop extends InternalSelectionPoint {
@@ -22,9 +22,13 @@ export interface InternalSelectionSnapshot {
   readonly text: string;
   /** Sorted complete-grapheme boundaries, including zero and text.length. */
   readonly boundaries: readonly number[];
-  /** Visual caret stops. A soft-wrap boundary may appear on two rows. */
+  /** Surface translation for the origin-independent document mapping below. */
+  readonly surfaceOrigin: InternalSelectionPoint;
+  /** Cell ids that survived clipping and later overlapping paint operations. */
+  readonly visibleCellIds: ReadonlySet<number>;
+  /** Document-local visual caret stops. A soft-wrap boundary may appear on two rows. */
   readonly stops: readonly InternalSelectionStop[];
-  /** Painted graphemes, including cells currently clipped or covered. */
+  /** Document-local painted graphemes, including clipped or covered cells. */
   readonly cells: readonly InternalSelectionCell[];
 }
 
@@ -106,6 +110,15 @@ function validateSnapshot(snapshot: InternalSelectionSnapshot): void {
   if (typeof snapshot.text !== "string") {
     throw new TypeError("selection snapshot text must be a string");
   }
+  if (
+    !Number.isSafeInteger(snapshot.surfaceOrigin?.x) ||
+    !Number.isSafeInteger(snapshot.surfaceOrigin?.y)
+  ) {
+    throw new TypeError("selection snapshot surface origin must use safe integer cells");
+  }
+  if (!(snapshot.visibleCellIds instanceof Set)) {
+    throw new TypeError("selection snapshot visible cell ids must be a Set");
+  }
   const expected = expectedBoundaries(snapshot.text);
   if (
     snapshot.boundaries.length !== expected.length ||
@@ -119,8 +132,11 @@ function validateSnapshot(snapshot: InternalSelectionSnapshot): void {
       throw new TypeError("selection snapshot stops must use finite cells and grapheme boundaries");
     }
   }
+  const cellIds = new Set<number>();
   for (const cell of snapshot.cells) {
     if (
+      !Number.isSafeInteger(cell.id) ||
+      cellIds.has(cell.id) ||
       !boundarySet.has(cell.start) ||
       !boundarySet.has(cell.end) ||
       cell.start >= cell.end ||
@@ -131,7 +147,35 @@ function validateSnapshot(snapshot: InternalSelectionSnapshot): void {
     ) {
       throw new TypeError("selection snapshot cells must map complete graphemes to terminal cells");
     }
+    cellIds.add(cell.id);
   }
+  for (const id of snapshot.visibleCellIds) {
+    if (!cellIds.has(id)) {
+      throw new TypeError("selection snapshot visible cell ids must belong to mapped cells");
+    }
+  }
+}
+
+function surfaceX(snapshot: InternalSelectionSnapshot, point: InternalSelectionPoint): number {
+  return snapshot.surfaceOrigin.x + point.x;
+}
+
+function surfaceY(snapshot: InternalSelectionSnapshot, point: InternalSelectionPoint): number {
+  return snapshot.surfaceOrigin.y + point.y;
+}
+
+function localPoint(
+  snapshot: InternalSelectionSnapshot,
+  point: InternalSelectionPoint,
+): InternalSelectionPoint {
+  return {
+    x: point.x - snapshot.surfaceOrigin.x,
+    y: point.y - snapshot.surfaceOrigin.y,
+  };
+}
+
+function isVisible(snapshot: InternalSelectionSnapshot, cell: InternalSelectionCell): boolean {
+  return snapshot.visibleCellIds.has(cell.id);
 }
 
 function sameRange(a: InternalSelectionRange | null, b: InternalSelectionRange | null): boolean {
@@ -164,7 +208,7 @@ function compareCells(a: InternalSelectionCell, b: InternalSelectionCell): numbe
 function visibleRows(snapshot: InternalSelectionSnapshot): InternalSelectionCell[][] {
   const rows = new Map<number, InternalSelectionCell[]>();
   for (const cell of snapshot.cells) {
-    if (!cell.visible) continue;
+    if (!isVisible(snapshot, cell)) continue;
     let row = rows.get(cell.y);
     if (!row) rows.set(cell.y, (row = []));
     row.push(cell);
@@ -177,7 +221,12 @@ function cellAt(
   point: InternalSelectionPoint,
 ): InternalSelectionCell | null {
   for (const cell of snapshot.cells) {
-    if (cell.visible && point.y === cell.y && point.x >= cell.x && point.x < cell.x + cell.width) {
+    if (
+      isVisible(snapshot, cell) &&
+      point.y === cell.y &&
+      point.x >= cell.x &&
+      point.x < cell.x + cell.width
+    ) {
       return cell;
     }
   }
@@ -366,8 +415,8 @@ export function createInternalSelectionPolicy(): InternalSelectionPolicy {
         ? (snapshot.stops.find(
             (stop) =>
               stop.offset === previousExtentStop.offset &&
-              stop.x === previousExtentStop.x &&
-              stop.y === previousExtentStop.y,
+              surfaceX(snapshot, stop) === surfaceX(previousSnapshot, previousExtentStop) &&
+              surfaceY(snapshot, stop) === surfaceY(previousSnapshot, previousExtentStop),
           ) ?? null)
         : null;
       state.extentStop = mappedExtentStop;
@@ -449,9 +498,12 @@ export function createInternalSelectionPolicy(): InternalSelectionPolicy {
               Math.min(rows.length - 1, rowIndex + (direction === "up" ? -1 : 1)),
             );
             const target = rows[targetIndex]!;
-            const column = state.preferredColumn ?? currentStop!.x;
+            const column = state.preferredColumn ?? surfaceX(snapshot, currentStop!);
             nextStop = target.reduce((best, candidate) =>
-              Math.abs(candidate.x - column) < Math.abs(best.x - column) ? candidate : best,
+              Math.abs(surfaceX(snapshot, candidate) - column) <
+              Math.abs(surfaceX(snapshot, best) - column)
+                ? candidate
+                : best,
             );
             state.preferredColumn = column;
           }
@@ -468,7 +520,7 @@ export function createInternalSelectionPolicy(): InternalSelectionPolicy {
     },
     click(point, extend = false) {
       if (!state.snapshot) return "unavailable";
-      const boundary = nearestBoundary(state.snapshot, point);
+      const boundary = nearestBoundary(state.snapshot, localPoint(state.snapshot, point));
       const anchor = extend && state.range ? state.range.anchor : boundary.offset;
       state.dragAnchor = null;
       state.preferredColumn = null;
@@ -485,16 +537,17 @@ export function createInternalSelectionPolicy(): InternalSelectionPolicy {
         return "unchanged";
       }
       state.preferredColumn = null;
+      const surface = localPoint(snapshot, event.surface);
       if (event.phase === "start") {
         const movement = event.movement ?? { x: 0, y: 0 };
         const down = {
-          x: event.surface.x - movement.x,
-          y: event.surface.y - movement.y,
+          x: surface.x - movement.x,
+          y: surface.y - movement.y,
         };
         state.dragAnchor = nearestBoundary(snapshot, down).offset;
       }
       if (state.dragAnchor === null) return "unchanged";
-      const extent = dragExtent(snapshot, state.dragAnchor, event.surface);
+      const extent = dragExtent(snapshot, state.dragAnchor, surface);
       const result = setRange(
         frozenRange(state.dragAnchor, extent.offset),
         extent.stop ?? stopForOffset(snapshot, extent.offset, "forward"),

@@ -677,19 +677,10 @@ class Output {
       const snapshot = trustInternalSelectionPaintSnapshot({
         text: entry.trace.text,
         boundaries: entry.trace.boundaries,
-        stops: entry.trace.stops.map((stop) => ({
-          offset: stop.offset,
-          x: origin.x + stop.x,
-          y: origin.y + stop.y,
-        })),
-        cells: entry.trace.cells.map((cell) => ({
-          start: cell.start,
-          end: cell.end,
-          x: origin.x + cell.x,
-          y: origin.y + cell.y,
-          width: cell.width,
-          visible: visible.has(cell.id),
-        })),
+        surfaceOrigin: origin,
+        visibleCellIds: visible,
+        stops: entry.trace.stops,
+        cells: entry.trace.cells,
       });
       const range = this.selectionFrame?.prepare(entry.target, snapshot) ?? null;
       if (!range) continue;

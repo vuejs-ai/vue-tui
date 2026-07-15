@@ -11,24 +11,31 @@ function makeSnapshot(
   text: string,
   options: {
     readonly width?: number;
+    readonly xOffset?: number;
     readonly yOffset?: number;
+    readonly localXOffset?: number;
     readonly visible?: (sourceStart: number, x: number, y: number) => boolean;
   } = {},
 ): InternalSelectionSnapshot {
   const width = options.width ?? 80;
+  const xOffset = options.xOffset ?? 0;
   const yOffset = options.yOffset ?? 0;
+  const localXOffset = options.localXOffset ?? 0;
   const boundaries = [0];
-  const stops: Array<{ offset: number; x: number; y: number }> = [{ offset: 0, x: 0, y: yOffset }];
+  const stops: Array<{ offset: number; x: number; y: number }> = [
+    { offset: 0, x: localXOffset, y: 0 },
+  ];
   const cells: Array<{
+    id: number;
     start: number;
     end: number;
     x: number;
     y: number;
     width: number;
-    visible: boolean;
   }> = [];
+  const visibleCellIds = new Set<number>();
   let x = 0;
-  let y = yOffset;
+  let y = 0;
 
   for (const part of segmenter.segment(text)) {
     const start = part.index;
@@ -37,7 +44,7 @@ function makeSnapshot(
     if (part.segment === "\n") {
       y++;
       x = 0;
-      stops.push({ offset: end, x, y });
+      stops.push({ offset: end, x: localXOffset, y });
       continue;
     }
 
@@ -46,23 +53,34 @@ function makeSnapshot(
       y++;
       x = 0;
       // A soft wrap is a second visual stop for the same logical boundary.
-      stops.push({ offset: start, x, y });
+      stops.push({ offset: start, x: localXOffset, y });
     }
     if (cellWidth > 0) {
+      const id = cells.length;
       cells.push({
+        id,
         start,
         end,
-        x,
+        x: localXOffset + x,
         y,
         width: cellWidth,
-        visible: options.visible?.(start, x, y) ?? true,
       });
+      if (options.visible?.(start, xOffset + localXOffset + x, yOffset + y) ?? true) {
+        visibleCellIds.add(id);
+      }
       x += cellWidth;
     }
-    stops.push({ offset: end, x, y });
+    stops.push({ offset: end, x: localXOffset + x, y });
   }
 
-  return { text, boundaries, stops, cells };
+  return {
+    text,
+    boundaries,
+    surfaceOrigin: { x: xOffset, y: yOffset },
+    visibleCellIds,
+    stops,
+    cells,
+  };
 }
 
 describe("API-neutral Fullscreen text selection journeys", () => {
@@ -112,6 +130,25 @@ describe("API-neutral Fullscreen text selection journeys", () => {
 
     expect(policy.click({ x: 1, y: 1 })).toBe("changed");
     expect(policy.range).toEqual({ anchor: 3, extent: 3 });
+  });
+
+  test("translates nonzero surface origins for pointer selection", () => {
+    const policy = createInternalSelectionPolicy();
+    policy.accept(makeSnapshot("ab你c", { width: 3, xOffset: 10, yOffset: 5 }));
+
+    expect(policy.click({ x: 11, y: 6 })).toBe("changed");
+    expect(policy.range).toEqual({ anchor: 3, extent: 3 });
+    expect(
+      policy.drag({
+        phase: "start",
+        surface: { x: 11, y: 6 },
+        movement: { x: 1, y: 1 },
+      }),
+    ).toBe("changed");
+    expect(policy.drag({ phase: "move", surface: { x: 12, y: 6 }, movement: { x: 2, y: 0 } })).toBe(
+      "changed",
+    );
+    expect(policy.selectedText).toBe("ab你c");
   });
 
   test("keeps the exact visual row at a duplicated soft-wrap boundary", () => {
@@ -225,6 +262,34 @@ describe("API-neutral Fullscreen text selection journeys", () => {
     expect(policy.range).toEqual({ anchor: 3, extent: 6 });
     expect(policy.move("down", true)).toBe("changed");
     expect(policy.range).toEqual({ anchor: 3, extent: 10 });
+  });
+
+  test("keeps the surface column when local layout and origin shift together", () => {
+    const policy = createInternalSelectionPolicy();
+    const text = "abcd\nx\nabcd";
+    policy.accept(makeSnapshot(text, { width: 4, xOffset: 10 }));
+    policy.setSelection({ anchor: 3, extent: 3 });
+
+    expect(policy.move("down", true)).toBe("changed");
+    expect(policy.range).toEqual({ anchor: 3, extent: 6 });
+
+    policy.accept(makeSnapshot(text, { width: 4, xOffset: 8, localXOffset: 2 }));
+    expect(policy.move("down", true)).toBe("changed");
+    expect(policy.range).toEqual({ anchor: 3, extent: 10 });
+  });
+
+  test("drops the preferred surface column when the extent stop moves", () => {
+    const policy = createInternalSelectionPolicy();
+    const text = "abcd\nx\nabcd";
+    policy.accept(makeSnapshot(text, { width: 4 }));
+    policy.setSelection({ anchor: 3, extent: 3 });
+
+    expect(policy.move("down", true)).toBe("changed");
+    expect(policy.range).toEqual({ anchor: 3, extent: 6 });
+
+    policy.accept(makeSnapshot(text, { width: 4, xOffset: 1 }));
+    expect(policy.move("down", true)).toBe("changed");
+    expect(policy.range).toEqual({ anchor: 3, extent: 8 });
   });
 
   test("retains a selected prefix through append, resize, and clipping changes", () => {
