@@ -16,6 +16,8 @@ import {
 } from "./scroll-composition.ts";
 import { parseSelectionCopyScenario, startSelectionCopySession } from "./selection-copy.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
+import { startInlineHistorySession } from "./inline-history.ts";
+import { startVShowSession } from "./v-show.ts";
 
 type ReviewTarget =
   | "basic-template"
@@ -24,7 +26,9 @@ type ReviewTarget =
   | "focus-routing"
   | "scroll-composition"
   | "selection-copy"
-  | "scroll-box";
+  | "scroll-box"
+  | "inline-history"
+  | "v-show";
 
 interface Request {
   id?: string | number | null;
@@ -60,12 +64,14 @@ function reviewTarget(args: string[]): ReviewTarget {
     value === "focus-routing" ||
     value === "scroll-composition" ||
     value === "selection-copy" ||
-    value === "scroll-box"
+    value === "scroll-box" ||
+    value === "inline-history" ||
+    value === "v-show"
   ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, or scroll-box, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, scroll-box, inline-history, or v-show, received ${value}`,
   );
 }
 
@@ -199,7 +205,11 @@ async function main(): Promise<void> {
               ? await startSelectionCopySession(outputDir, parseSelectionCopyScenario(scenario))
               : target === "scroll-box"
                 ? await startScrollBoxSession(outputDir)
-                : await startBasicTemplateSession(outputDir);
+                : target === "inline-history"
+                  ? await startInlineHistorySession(outputDir)
+                  : target === "v-show"
+                    ? await startVShowSession(outputDir)
+                    : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

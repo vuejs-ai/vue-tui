@@ -7,7 +7,8 @@ import {
   type Ref,
 } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Static, Text } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import {
   useMouseDrag,
   useMouseEvent,
@@ -311,44 +312,44 @@ test("hit testing honors absolute position and last-painted overlap", async () =
   }
 });
 
-test("Static registrations stay non-targetable", async () => {
-  const staticClicks: TuiMouseClickEvent[] = [];
-  const dynamicClicks: TuiMouseClickEvent[] = [];
-  const StaticTarget = defineComponent(() => {
+test("Static rejection precedes Fullscreen mouse targeting and leaves a clean host", async () => {
+  const rejectedClicks: TuiMouseClickEvent[] = [];
+  const RejectedApp = defineComponent(() => {
     const target = shallowRef<Target>(null);
     useMouseEvent(target, "click", (event) => {
-      staticClicks.push(event);
-      return "consume";
-    });
-    return () => (
-      <Box ref={target} width={6} height={1}>
-        <Text>static</Text>
-      </Box>
-    );
-  });
-  const App = defineComponent(() => {
-    const dynamic = shallowRef<Target>(null);
-    useMouseEvent(dynamic, "click", (event) => {
-      dynamicClicks.push(event);
+      rejectedClicks.push(event);
       return "consume";
     });
     return () => (
       <Box>
-        <Box ref={dynamic} width={6} height={1}>
+        <Box ref={target} width={6} height={1}>
           <Text>dynamic</Text>
         </Box>
-        <Static items={["history"]}>{{ default: () => <StaticTarget /> }}</Static>
+        <Static items={[]}>{{ default: () => <Text>unreachable</Text> }}</Static>
       </Box>
     );
   });
-  const result = await renderFullscreen(App);
 
+  await expect(renderFullscreen(RejectedApp)).rejects.toThrow(
+    "<Static> cannot render on an effective visual Fullscreen surface",
+  );
+  expect(rejectedClicks).toEqual([]);
+
+  const validClicks: TuiMouseClickEvent[] = [];
+  const ValidApp = defineComponent(() => {
+    const target = shallowRef<Target>(null);
+    useMouseEvent(target, "click", (event) => {
+      validClicks.push(event);
+      return "consume";
+    });
+    return () => <Box ref={target} width={6} height={1} />;
+  });
+  const result = await renderFullscreen(ValidApp);
   try {
     expect(result.mouse.reporting.current).toBe("button");
     await result.mouse.down({ x: 0, y: 0 });
     await result.mouse.up({ x: 0, y: 0 });
-    expect(dynamicClicks).toHaveLength(1);
-    expect(staticClicks).toEqual([]);
+    expect(validClicks).toHaveLength(1);
   } finally {
     result.dispose();
   }

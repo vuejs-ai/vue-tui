@@ -2,7 +2,6 @@
 import { computed, shallowRef, type ComponentPublicInstance } from "vue";
 import {
   Box,
-  Static,
   Text,
   useApp,
   useFocus,
@@ -11,6 +10,7 @@ import {
   useFocusScopeInput,
   useInput,
 } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { runAgentLoop, type Message, type ToolCall } from "./agent";
 import MessageList from "./components/message-list.vue";
 

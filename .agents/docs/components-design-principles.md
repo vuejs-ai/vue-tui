@@ -12,7 +12,8 @@
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
-this package owns everything you can build by arranging `Box` / `Text` / `Static` / `Transform`
+this package owns everything you can build by arranging common `Box` / `Text` / `Transform`
+primitives, the mode-limited `Static` primitive from `@vue-tui/runtime/inline`,
 and reacting to the public composables. Every principle below follows from that one.
 
 ## What this package is — and isn't

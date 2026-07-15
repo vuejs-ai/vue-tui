@@ -1,3 +1,5 @@
+import { acquireRuntimeResource } from "./resource-tracker.ts";
+
 const DEFAULT_INTERVAL = 100;
 const MAX_TIMER_INTERVAL = 2_147_483_647;
 
@@ -35,6 +37,7 @@ export interface AnimationScheduler {
 export function createAnimationScheduler(renderThrottleMs = 0): AnimationScheduler {
   const subscribers = new Set<AnimationSubscriber>();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let releaseTimer: (() => void) | undefined;
   let scheduledDueTime = Number.POSITIVE_INFINITY;
   let isDispatching = false;
   const pending: Array<() => void> = [];
@@ -44,6 +47,8 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
       clearTimeout(timer);
       timer = undefined;
     }
+    releaseTimer?.();
+    releaseTimer = undefined;
     scheduledDueTime = Number.POSITIVE_INFINITY;
   }
 
@@ -61,10 +66,13 @@ export function createAnimationScheduler(renderThrottleMs = 0): AnimationSchedul
     // at-or-after the due time, so the frame lands on the first wakeup.
     const delay = Math.ceil(Math.max(0, earliest - performance.now()));
     timer = setTimeout(onTick, delay);
+    releaseTimer = acquireRuntimeResource("schedulerTimers");
   }
 
   function onTick() {
     timer = undefined;
+    releaseTimer?.();
+    releaseTimer = undefined;
     scheduledDueTime = Number.POSITIVE_INFINITY;
     const now = performance.now();
     isDispatching = true;

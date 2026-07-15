@@ -151,6 +151,117 @@ test("visible mouse demand becomes physical only after its prepared frame is acc
   expect(transitions).toEqual(["raw:on", "mouse:button", "mouse:none", "raw:off"]);
 });
 
+test("staging reconciles reporting without publishing the candidate frame", () => {
+  const { controller, frame, node, transitions } = createHarness();
+  controller.registerEvent(node, "click", () => () => "continue");
+
+  const prepared = controller.prepareFrame(frame(1));
+  prepared.stage();
+
+  expect(transitions).toEqual(["raw:on", "mouse:button"]);
+  expect(controller.captureInputSnapshot().frame.generation).toBe(0);
+
+  prepared.accept();
+  expect(transitions).toEqual(["raw:on", "mouse:button"]);
+  expect(controller.captureInputSnapshot().frame.generation).toBe(1);
+
+  controller.dispose();
+  expect(transitions).toEqual(["raw:on", "mouse:button", "mouse:none", "raw:off"]);
+});
+
+test("discarding a staged frame restores the previously accepted reporting demand", () => {
+  const { controller, frame, node, transitions } = createHarness();
+  controller.registerEvent(node, "click", () => () => "continue");
+  controller.prepareFrame(frame(1)).accept();
+  controller.registerDrag(node, () => () => {}, shallowRef(false));
+
+  const prepared = controller.prepareFrame(frame(2));
+  prepared.stage();
+  expect(transitions).toEqual(["raw:on", "mouse:button", "mouse:drag", "mouse:none"]);
+
+  prepared.discard();
+  expect(transitions).toEqual([
+    "raw:on",
+    "mouse:button",
+    "mouse:drag",
+    "mouse:none",
+    "mouse:button",
+    "mouse:none",
+  ]);
+  expect(controller.captureInputSnapshot().frame.generation).toBe(1);
+
+  controller.dispose();
+  expect(transitions).toEqual([
+    "raw:on",
+    "mouse:button",
+    "mouse:drag",
+    "mouse:none",
+    "mouse:button",
+    "mouse:none",
+    "mouse:none",
+    "raw:off",
+  ]);
+});
+
+test("an older staged frame cannot roll back a newer reporting claim", () => {
+  const { controller, frame, node, transitions } = createHarness();
+  controller.registerEvent(node, "click", () => () => "continue");
+  const older = controller.prepareFrame(frame(1));
+  controller.registerDrag(node, () => () => {}, shallowRef(false));
+  const newer = controller.prepareFrame(frame(2));
+
+  older.stage();
+  newer.stage();
+  older.discard();
+  expect(transitions).toEqual(["raw:on", "mouse:button", "mouse:drag", "mouse:none"]);
+  expect(controller.captureInputSnapshot().frame.generation).toBe(0);
+
+  newer.accept();
+  expect(controller.captureInputSnapshot().frame.generation).toBe(2);
+  expect(transitions).toEqual(["raw:on", "mouse:button", "mouse:drag", "mouse:none"]);
+
+  controller.dispose();
+  expect(transitions).toEqual([
+    "raw:on",
+    "mouse:button",
+    "mouse:drag",
+    "mouse:none",
+    "mouse:none",
+    "raw:off",
+  ]);
+});
+
+test("abandoning a staged frame releases its terminal reporting ownership", () => {
+  const { controller, frame, node, transitions } = createHarness();
+  controller.registerEvent(node, "click", () => () => "continue");
+  controller.prepareFrame(frame(1)).accept();
+  controller.registerDrag(node, () => () => {}, shallowRef(false));
+
+  const prepared = controller.prepareFrame(frame(2));
+  prepared.stage();
+  prepared.abandon();
+
+  expect(controller.captureInputSnapshot().frame.generation).toBe(1);
+  expect(transitions).toEqual([
+    "raw:on",
+    "mouse:button",
+    "mouse:drag",
+    "mouse:none",
+    "mouse:none",
+    "raw:off",
+  ]);
+
+  controller.dispose();
+  expect(transitions).toEqual([
+    "raw:on",
+    "mouse:button",
+    "mouse:drag",
+    "mouse:none",
+    "mouse:none",
+    "raw:off",
+  ]);
+});
+
 test("discarding a failed frame preserves the previously displayed hit geometry", () => {
   const { controller, frame, node } = createHarness();
   const clicks: number[] = [];

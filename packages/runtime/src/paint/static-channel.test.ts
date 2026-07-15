@@ -47,22 +47,24 @@ test("an unaccepted preparation leaves the Static batch eligible for a later att
   expect(accepted).toBe(1);
 });
 
-test("acceptance reports the item prefix captured during preparation", () => {
+test("acceptance reports the item identities captured during preparation", () => {
   const stat = createStatic();
   const anchor = createComment("");
   anchor.parent = stat;
   stat.children.push(anchor);
-  stat.renderedThrough = 1;
-  const accepted: number[] = [];
-  stat.onWritten = (renderedThrough) => {
-    accepted.push(renderedThrough);
+  const first = {};
+  const second = {};
+  stat.renderedItems = [first];
+  const accepted: Array<readonly unknown[]> = [];
+  stat.onWritten = (renderedItems) => {
+    accepted.push(renderedItems);
   };
 
   const prepared = prepareStaticOutput(stat, 80);
-  stat.renderedThrough = 2;
+  stat.renderedItems = [first, second];
   prepared.accept();
 
-  expect(accepted).toEqual([1]);
+  expect(accepted).toEqual([[first]]);
 });
 
 test("an indeterminate Static write is settled without reporting acceptance", () => {

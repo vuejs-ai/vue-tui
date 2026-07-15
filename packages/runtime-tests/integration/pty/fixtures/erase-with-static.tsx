@@ -1,5 +1,6 @@
 import process from "node:process";
-import { Box, Static, Text, createApp } from "@vue-tui/runtime";
+import { Box, Text, createApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { Fragment, defineComponent, h } from "vue";
 
 const EraseWithStatic = defineComponent(() => {

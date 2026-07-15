@@ -14,7 +14,6 @@ import {
   Text,
   Newline,
   Spacer,
-  Static,
   Transform,
   useInput,
   useApp,
@@ -34,6 +33,7 @@ import {
   useElementGeometry,
   type RenderSession,
 } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import {
   renderToStringWithScreenReader,
   useInternalInputRoutingForTest,

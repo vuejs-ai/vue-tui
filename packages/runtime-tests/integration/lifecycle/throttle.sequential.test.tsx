@@ -481,8 +481,8 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
     await nextTick();
 
     // Leading call wrote bsu + content + esu.
-    expect(writes.includes(bsu)).toBe(true);
-    expect(writes.includes(esu)).toBe(true);
+    expect(writes.join("")).toContain(bsu);
+    expect(writes.join("")).toContain(esu);
 
     // Mutate inside the throttle window — the trailing commit is deferred.
     writes.length = 0;
@@ -496,11 +496,12 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
     writes.length = 0;
     vi.advanceTimersByTime(1000);
 
-    expect(writes.includes(bsu)).toBe(true);
-    expect(writes.includes(esu)).toBe(true);
-    expect(writes.some((w) => w.includes("World"))).toBe(true);
-    // bsu precedes esu.
-    expect(writes.indexOf(bsu)).toBeLessThan(writes.indexOf(esu));
+    const transaction = writes.join("");
+    expect(transaction).toContain(bsu);
+    expect(transaction).toContain(esu);
+    expect(transaction).toContain("World");
+    expect(transaction.indexOf(bsu)).toBeLessThan(transaction.indexOf("World"));
+    expect(transaction.indexOf("World")).toBeLessThan(transaction.indexOf(esu));
 
     app.unmount();
   } finally {
@@ -535,7 +536,7 @@ test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
     await nextTick();
 
     // Initial (leading) render emitted bsu (proves synchronization is active).
-    expect(writes.includes(bsu)).toBe(true);
+    expect(writes.join("")).toContain(bsu);
 
     // Force an identical-output rerender inside the throttle window, then cross
     // the window so the trailing commit runs.
@@ -546,8 +547,8 @@ test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
     vi.advanceTimersByTime(1000);
 
     // Output was unchanged → willRender is false → neither barrier is emitted.
-    expect(writes.includes(bsu)).toBe(false);
-    expect(writes.includes(esu)).toBe(false);
+    expect(writes.join("")).not.toContain(bsu);
+    expect(writes.join("")).not.toContain(esu);
 
     app.unmount();
   } finally {

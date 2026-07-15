@@ -162,7 +162,7 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
       const shouldFail =
         !failureObserved &&
         ((armedFailure === "enter" && chunk.includes(ansiEscapes.enterAlternativeScreen)) ||
-          (armedFailure === "hide" && chunk === "\x1b[?25l") ||
+          (armedFailure === "hide" && chunk.includes("\x1b[?25l")) ||
           (armedFailure === "repaint" && chunk.includes(ansiEscapes.clearViewport)));
       if (shouldFail) {
         failureObserved = true;

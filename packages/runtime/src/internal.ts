@@ -1,5 +1,11 @@
 export { yogaNodeTracker, attachYoga } from "./host/yoga.ts";
 export {
+  runtimeResourceKinds,
+  runtimeResourceTracker,
+  type RuntimeResourceKind,
+  type RuntimeResourceSnapshot,
+} from "./resource-tracker.ts";
+export {
   createRoot,
   createBox,
   createText,

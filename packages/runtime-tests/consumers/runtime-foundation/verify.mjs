@@ -33,7 +33,7 @@ const consumers = {
   "coding-agent": {
     pin: "3e44c9a266e52ebeba2db669b4bb96521b9e2f3a",
     patch: "coding-agent.patch",
-    patchSha256: "472a0704d3fef2c2d0847452b0baab7fb501a4473d7a312074029b0557108ba6",
+    patchSha256: "c3d49dd747761e38cd2f6e737d0fa5ffb71a2f9e7d69544f9274957d1f51239b",
     changedPaths: ["examples/coding-agent/src/app.vue"],
     sourceRoot: "examples/coding-agent/src",
   },
@@ -276,7 +276,11 @@ function assertPublicProductImports(root, allowedPackages) {
 function assertConsumerPublicImports(name, clone) {
   assertPublicProductImports(
     join(clone, consumers[name].sourceRoot),
-    new Set(["@vue-tui/runtime"]),
+    new Set(
+      name === "coding-agent"
+        ? ["@vue-tui/runtime", "@vue-tui/runtime/inline"]
+        : ["@vue-tui/runtime"],
+    ),
   );
 }
 

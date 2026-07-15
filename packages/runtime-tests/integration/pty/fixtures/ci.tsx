@@ -1,4 +1,5 @@
-import { createApp, Static, Text } from "@vue-tui/runtime";
+import { createApp, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, onMounted, onScopeDispose, shallowRef } from "vue";
 
 const App = defineComponent(() => {

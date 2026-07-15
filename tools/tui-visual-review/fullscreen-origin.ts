@@ -16,6 +16,7 @@ export const fullscreenOriginScenarios = [
   "target-lifetime",
   "targeted-mouse",
   "screen-reader",
+  "foreground-reset",
 ] as const;
 
 export type FullscreenOriginScenario = (typeof fullscreenOriginScenarios)[number];

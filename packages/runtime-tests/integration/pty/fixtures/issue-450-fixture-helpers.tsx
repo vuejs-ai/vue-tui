@@ -1,5 +1,6 @@
 import process from "node:process";
-import { Box, Static, Text, createApp, useApp } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { Fragment, defineComponent, h, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type RerenderFixtureOptions = {

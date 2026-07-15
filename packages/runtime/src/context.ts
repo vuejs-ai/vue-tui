@@ -1,7 +1,11 @@
 import type { InjectionKey, Ref } from "vue";
 import type { AnimationScheduler } from "./animation-scheduler.ts";
-import type { InternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
+import type {
+  InternalInputRoutingDemandLease,
+  InternalInputRoutingRuntime,
+} from "./io/input-route-runtime.ts";
 import type { InputAvailability } from "./io/input-availability.ts";
+import type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 
 export interface AppContext {
   exit: (errorOrResult?: unknown) => void;
@@ -11,8 +15,8 @@ export interface AppContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
   setRawMode: (mode: boolean) => void;
-  writeToStdout: (data: string) => void;
-  writeToStderr: (data: string) => void;
+  writeToStdout: (data: string) => CoordinatedWriteResult;
+  writeToStderr: (data: string) => CoordinatedWriteResult;
 }
 
 export interface StdinContext {
@@ -20,10 +24,10 @@ export interface StdinContext {
   isRawModeSupported: boolean;
   readonly inputAvailability: Readonly<Ref<InputAvailability>>;
   internal_inputRouting: InternalInputRoutingRuntime;
-  acquireRawMode: () => void;
+  /** Returns false when output capacity must reconcile before raw input can activate. */
+  acquireRawMode: () => boolean | void;
   releaseRawMode: () => void;
-  acquireSemanticInput: () => void;
-  releaseSemanticInput: () => void;
+  acquireSemanticInput: () => InternalInputRoutingDemandLease;
   acquireSgrMouseMode: (level?: SgrMouseMode) => symbol;
   releaseSgrMouseMode: (token: symbol) => void;
 }

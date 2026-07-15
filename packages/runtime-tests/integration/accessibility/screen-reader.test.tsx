@@ -1,6 +1,7 @@
 import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Box, Text, Transform, Newline, Static, createApp, renderToString } from "@vue-tui/runtime";
+import { Box, Text, Transform, Newline, createApp, renderToString } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { render } from "@vue-tui/testing";
 import {
   createRoot,
@@ -37,8 +38,8 @@ function createTestAppContext(): AppContext {
     stdin: process.stdin,
     isRawModeSupported: false,
     setRawMode: () => {},
-    writeToStdout: () => {},
-    writeToStderr: () => {},
+    writeToStdout: () => ({ status: "accepted", writable: true }),
+    writeToStderr: () => ({ status: "accepted", writable: true }),
   };
 }
 

@@ -83,7 +83,13 @@ export function captureWrites(stdout: NodeJS.WriteStream): string[] {
 }
 
 export function getContentWrites(writes: string[]): string[] {
-  return writes.filter(
-    (w) => w !== "" && w !== nextLineEscape && !w.startsWith("\x1b[?25") && w !== bsu && w !== esu,
-  );
+  return writes
+    .map((write) =>
+      write
+        .replaceAll(bsu, "")
+        .replaceAll(esu, "")
+        .replaceAll("\x1b[?25l", "")
+        .replaceAll("\x1b[?25h", ""),
+    )
+    .filter((write) => write !== "" && write !== nextLineEscape);
 }

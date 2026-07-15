@@ -42,7 +42,7 @@ interface PreparedStaticBatch {
   readonly stat: TuiStatic;
   readonly fresh: readonly TuiNode[];
   readonly frame: string;
-  readonly renderedThrough: number;
+  readonly renderedItems: readonly unknown[];
 }
 
 /**
@@ -114,7 +114,7 @@ function prepareStaticNode(
       frame = paintIsolated(paintableFresh, columns, stat);
     }
   }
-  return { stat, fresh, frame, renderedThrough: stat.renderedThrough };
+  return { stat, fresh, frame, renderedItems: stat.renderedItems };
 }
 
 /** Prepare every Static region as one ordered output transaction. */
@@ -122,10 +122,9 @@ export function prepareStaticOutput(
   root: TuiNode,
   columns: number,
   isScreenReaderEnabled = false,
+  statics = findStatics(root),
 ): PreparedStaticOutput {
-  const batches = findStatics(root).map((stat) =>
-    prepareStaticNode(stat, columns, isScreenReaderEnabled),
-  );
+  const batches = statics.map((stat) => prepareStaticNode(stat, columns, isScreenReaderEnabled));
   const output = batches.map(({ frame }) => (frame.length > 0 ? frame + "\n" : "")).join("");
   let state: "pending" | "accepted" | "abandoned" = "pending";
 
@@ -160,14 +159,14 @@ export function prepareStaticOutput(
       // all batches have already been accepted, so all cursors must observe the
       // same outcome before the first callback error propagates.
       const errors: unknown[] = [];
-      for (const { stat, fresh, renderedThrough } of batches) {
+      for (const { stat, fresh, renderedItems } of batches) {
         // A genuinely fresh empty-rendering item still has host identities and
         // must advance. A batch with no fresh identity is only a bookkeeping
         // no-op; in particular, it must not turn an earlier indeterminate write
         // abandoned into a later false acceptance during teardown.
         if (fresh.length === 0) continue;
         try {
-          stat.onWritten?.(renderedThrough);
+          stat.onWritten?.(renderedItems);
         } catch (error) {
           errors.push(error);
         }

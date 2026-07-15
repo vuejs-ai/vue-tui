@@ -2731,9 +2731,12 @@ describe("kitty query-response - adversarial ingress ordering", () => {
 
         expect(errors).toHaveLength(capturesDisableError ? 1 : 0);
         expect(active.value).toBe(true);
-        expect(writes.filter((value) => value === enable || value === disable)).toEqual(
-          capturesDisableError ? [enable, disable, disable, enable] : [enable, disable, enable],
-        );
+        expect(writes.filter((value) => value === enable || value === disable)).toEqual([
+          enable,
+          disable,
+          disable,
+          enable,
+        ]);
         expect({
           isRaw: input.isRaw,
           refBalance,

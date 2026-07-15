@@ -2,6 +2,7 @@ import { shallowRef, type ShallowRef } from "vue";
 import type { AppContext } from "../context.ts";
 import type { TuiNode, TuiRoot } from "../host/nodes.ts";
 import type { RenderedTargetTransactionHost } from "../rendered-target.ts";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 
 export interface InternalCellPoint {
   readonly x: number;
@@ -207,6 +208,7 @@ export function createInternalGeometryService(
         active: true,
       };
       bindings.add(binding);
+      changeRuntimeResource("geometryBindings", 1);
       return {
         geometry: binding.value,
         observe(observer) {
@@ -251,6 +253,7 @@ export function createInternalGeometryService(
           assign(binding, DETACHED);
           binding.active = false;
           bindings.delete(binding);
+          changeRuntimeResource("geometryBindings", -1);
           queued.delete(binding);
           binding.observers.clear();
         },
@@ -383,6 +386,7 @@ export function createInternalGeometryService(
     dispose() {
       if (disposed) return;
       disposed = true;
+      changeRuntimeResource("geometryBindings", -bindings.size);
       for (const binding of bindings) {
         binding.target = null;
         assign(binding, DETACHED);

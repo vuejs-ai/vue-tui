@@ -8,6 +8,8 @@
     "test:integration": "vp test",
     "test:pty": "vp test run --config vitest.pty.config.ts --passWithNoTests",
     "test:examples": "vp test run --config vitest.examples.config.ts --passWithNoTests",
+    "capacity:check": "node --import=tsx capacity/run.ts --check",
+    "capacity:measure": "node --import=tsx capacity/run.ts --measure",
     "check:type": "tsc --noEmit && vp run check:fixtures",
     "check:fixtures": "vue-tsc -p integration/pty/fixtures/tsconfig.json --noEmit"
   },

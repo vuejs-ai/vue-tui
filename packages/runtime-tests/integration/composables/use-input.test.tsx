@@ -456,7 +456,7 @@ describe("semantic input terminal ownership", () => {
     app.unmount();
     await nextTick();
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(writes).toContain(PASTE_OFF);
+    expect(writes.join("")).toContain(PASTE_OFF);
 
     stdin.destroy();
     stdout.destroy();

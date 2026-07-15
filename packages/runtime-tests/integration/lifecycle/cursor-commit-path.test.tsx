@@ -26,11 +26,8 @@ const cursorTo = (x: number) => `\x1b[${x + 1}G`;
 function makeTtyStdout(): { stream: NodeJS.WriteStream; writes: string[] } {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(stream, { isTTY: true, columns: 100, rows: 100 });
-  // Capture EVERY write() call (like Ink's getWriteCalls). The cursor escapes
-  // and synchronized-update wrappers are separate write() calls, so an
-  // on("data") listener that coalesces chunks would still see them — but
-  // wrapping write directly mirrors Ink's sinon spy exactly and lets us count
-  // calls for the "writes increased" assertion.
+  // Capture every physical transaction. Runtime combines adjacent writes so a
+  // synchronized frame normally reaches Node as one finite chunk.
   const writes: string[] = [];
   const original = stream.write.bind(stream);
   stream.write = ((...args: unknown[]) => {
@@ -101,12 +98,12 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     // x=2 -> cursorTo(2) -> "\x1b[3G"
     expect(output).toContain(cursorTo(2));
 
-    const caretWrite = writes.findIndex((chunk) => chunk.includes(cursorTo(2)));
-    const transactionStart = writes.lastIndexOf(bsu, caretWrite);
-    const transactionEnd = writes.indexOf(esu, caretWrite);
+    const caretOffset = output.indexOf(cursorTo(2));
+    const transactionStart = output.lastIndexOf(bsu, caretOffset);
+    const transactionEnd = output.indexOf(esu, caretOffset);
     expect(transactionStart).toBeGreaterThanOrEqual(0);
-    expect(transactionEnd).toBeGreaterThan(caretWrite);
-    const firstCaretTransaction = writes.slice(transactionStart + 1, transactionEnd).join("");
+    expect(transactionEnd).toBeGreaterThan(caretOffset);
+    const firstCaretTransaction = output.slice(transactionStart + bsu.length, transactionEnd);
     expect(firstCaretTransaction).toContain(">\n");
     expect(firstCaretTransaction).toContain(cursorTo(2));
     expect(firstCaretTransaction).toContain(showCursorEscape);

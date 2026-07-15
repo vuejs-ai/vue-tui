@@ -1,7 +1,8 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "../src/index.ts";
-import { Static, Text, useApp } from "@vue-tui/runtime";
+import { Text, useApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 
 // Public content frames describe rendering-phase commits only. Teardown may
 // still write final output or terminal-restoration bytes to the emulated screen,

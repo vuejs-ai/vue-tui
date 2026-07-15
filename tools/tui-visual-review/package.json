@@ -12,6 +12,8 @@
     "scroll-composition": "tsx controller.ts --target scroll-composition",
     "selection-copy": "tsx controller.ts --target selection-copy",
     "scroll-box": "tsx controller.ts --target scroll-box",
+    "inline-history": "tsx controller.ts --target inline-history",
+    "v-show": "tsx controller.ts --target v-show",
     "smoke": "tsx smoke.ts",
     "check:type": "tsc --noEmit"
   },

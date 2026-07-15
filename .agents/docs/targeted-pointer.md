@@ -316,7 +316,7 @@ F6 closure must prove three vertical journeys in addition to focused mechanics.
 - A passive dashboard baseline emits no mouse mode.
 - Composer and approval clicks call the same F4 focus handles; the approval's trapped scope still isolates input and restoration.
 - A transcript wheel handler drives the existing input-free `ScrollBox`.
-- Passive Text, clipping, overlapping paint, coordinated Static output or Static nodes, removal, and ref retargeting cannot create stale or accidental targets.
+- Passive Text, clipping, overlapping paint, removal, and ref retargeting cannot create stale or accidental targets. Effective visual Fullscreen rejects any `/inline` Static node before a target frame, so it cannot publish stale geometry or a hit generation.
 - Click and wheel alone use `1000`, and removing the last target restores the terminal.
 
 ### Fullscreen workbench journey

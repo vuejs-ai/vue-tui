@@ -1,4 +1,9 @@
-import logUpdate, { type LogUpdate, type ResetOptions, type SyncOptions } from "./log-update.ts";
+import logUpdate, {
+  type LogUpdate,
+  type LogUpdateWrite,
+  type ResetOptions,
+  type SyncOptions,
+} from "./log-update.ts";
 import type { CursorPosition } from "./cursor-helpers.ts";
 
 export interface FrameWriter {
@@ -14,16 +19,21 @@ export interface FrameWriter {
   isCursorHidden: () => boolean;
   isCursorDirty: () => boolean;
   willRender: (frame: string) => boolean;
+  /** Restore bookkeeping after a captured transaction fails before full handoff. */
+  createRollback: () => () => void;
 }
 
 export function createFrameWriter(
   stream: NodeJS.WriteStream,
-  options: { incremental?: boolean },
+  options: { incremental?: boolean; write?: LogUpdateWrite },
 ): FrameWriter {
   // Sentinel: use a value that can never equal a real frame so the very first
   // write (even an empty string) is always emitted.
   let lastFrame: string | null = null;
-  const log: LogUpdate = logUpdate.create(stream, { incremental: options.incremental });
+  const log: LogUpdate = logUpdate.create(stream, {
+    incremental: options.incremental,
+    write: options.write,
+  });
 
   return {
     write(frame: string) {
@@ -76,6 +86,17 @@ export function createFrameWriter(
     },
     willRender(frame: string) {
       return log.willRender(frame);
+    },
+    createRollback() {
+      const previousLastFrame = lastFrame;
+      const rollbackLog = log.createRollback();
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        lastFrame = previousLastFrame;
+        rollbackLog();
+      };
     },
   };
 }

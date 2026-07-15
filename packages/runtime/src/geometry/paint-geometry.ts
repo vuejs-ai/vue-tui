@@ -256,7 +256,7 @@ export interface TextGeometryResult {
 }
 
 /** Trace complete graphemes through one authoritative wrapped Text generation. */
-export function deriveTextGeometry(input: {
+export interface DeriveTextGeometryInput {
   readonly node: TuiText;
   readonly renderedText: string;
   readonly wrapped: readonly string[];
@@ -266,7 +266,11 @@ export function deriveTextGeometry(input: {
   readonly clip?: InternalCellRect;
   readonly provenanceAvailable?: boolean;
   readonly selectionTargets?: readonly InternalSelectionPaintTarget[];
-}): TextGeometryResult {
+  /** False lets selection-only frames reuse the local document mapping across origins. */
+  readonly geometryRequested?: boolean;
+}
+
+function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometryResult {
   const virtualTargets = collectVirtualTexts(input.node);
   const unavailableVirtual = () =>
     new Map<TuiVirtualText, InternalElementGeometry>(
@@ -689,6 +693,120 @@ export function deriveTextGeometry(input: {
     ),
     selection,
   };
+}
+
+interface SelectionLayoutCache {
+  readonly revision: number;
+  readonly renderedText: string;
+  readonly wrapped: readonly string[];
+  readonly wrapWidth: number;
+  readonly wrapMode: TextProps["wrap"];
+  readonly provenanceAvailable: boolean | undefined;
+  readonly targetKeys: readonly object[];
+  readonly targetNodes: readonly (TuiText | TuiVirtualText)[];
+  readonly local: TextGeometryResult;
+  projectedX: number;
+  projectedY: number;
+  projected: TextGeometryResult;
+}
+
+const selectionLayoutCache = new WeakMap<TuiText, SelectionLayoutCache>();
+
+function sameIdentityList(left: readonly object[], right: readonly object[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameRows(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function projectSelectionLayout(
+  local: TextGeometryResult,
+  origin: InternalCellPoint,
+): TextGeometryResult {
+  const selection = new Map<object, InternalTextSelectionTrace | null>();
+  for (const [key, trace] of local.selection) {
+    selection.set(
+      key,
+      trace === null
+        ? null
+        : Object.freeze({
+            text: trace.text,
+            boundaries: trace.boundaries,
+            stops: Object.freeze(
+              trace.stops.map((stop) => ({
+                offset: stop.offset,
+                x: stop.x + origin.x,
+                y: stop.y + origin.y,
+              })),
+            ),
+            cells: Object.freeze(
+              trace.cells.map((cell) => ({
+                ...cell,
+                x: cell.x + origin.x,
+                y: cell.y + origin.y,
+              })),
+            ),
+          }),
+    );
+  }
+  return Object.freeze({
+    topCaretSlots: [],
+    topFragments: [],
+    virtual: new Map(),
+    selection,
+  });
+}
+
+/** Trace complete graphemes through one authoritative wrapped Text generation. */
+export function deriveTextGeometry(input: DeriveTextGeometryInput): TextGeometryResult {
+  const targets = input.selectionTargets ?? [];
+  if (input.geometryRequested !== false || targets.length === 0) {
+    return deriveTextGeometryUncached(input);
+  }
+
+  const targetKeys = targets.map((target) => target.key);
+  const targetNodes = targets.map((target) => target.node);
+  let cached = selectionLayoutCache.get(input.node);
+  if (
+    cached?.revision !== input.node.textRevision ||
+    cached.renderedText !== input.renderedText ||
+    cached.wrapWidth !== input.wrapWidth ||
+    cached.wrapMode !== input.wrapMode ||
+    cached.provenanceAvailable !== input.provenanceAvailable ||
+    !sameRows(cached.wrapped, input.wrapped) ||
+    !sameIdentityList(cached.targetKeys, targetKeys) ||
+    !sameIdentityList(cached.targetNodes, targetNodes)
+  ) {
+    const local = deriveTextGeometryUncached({
+      ...input,
+      surfaceOrigin: { x: 0, y: 0 },
+      clip: undefined,
+    });
+    const projected = projectSelectionLayout(local, input.surfaceOrigin);
+    cached = {
+      revision: input.node.textRevision,
+      renderedText: input.renderedText,
+      wrapped: Object.freeze([...input.wrapped]),
+      wrapWidth: input.wrapWidth,
+      wrapMode: input.wrapMode,
+      provenanceAvailable: input.provenanceAvailable,
+      targetKeys: Object.freeze(targetKeys),
+      targetNodes: Object.freeze(targetNodes),
+      local,
+      projectedX: input.surfaceOrigin.x,
+      projectedY: input.surfaceOrigin.y,
+      projected,
+    };
+    selectionLayoutCache.set(input.node, cached);
+    return projected;
+  }
+  if (cached.projectedX !== input.surfaceOrigin.x || cached.projectedY !== input.surfaceOrigin.y) {
+    cached.projectedX = input.surfaceOrigin.x;
+    cached.projectedY = input.surfaceOrigin.y;
+    cached.projected = projectSelectionLayout(cached.local, input.surfaceOrigin);
+  }
+  return cached.projected;
 }
 
 export function virtualTextDescendants(node: TuiNode): readonly TuiVirtualText[] {

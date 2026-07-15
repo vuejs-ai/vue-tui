@@ -11,6 +11,7 @@ import type {
   InternalGeometryPaintFrame,
 } from "../geometry/geometry-service.ts";
 import type { CaretHiddenReason, CaretState } from "../composables/useCaret.ts";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 
 export interface InternalCaretRegistration {
   readonly state: Readonly<ShallowRef<CaretState>>;
@@ -274,7 +275,10 @@ export function createInternalCaretController(
     if (owner.disposed) return;
     owner.disposed = true;
     registryRevision++;
-    if (owners.get(owner.focus) === owner) owners.delete(owner.focus);
+    if (owners.get(owner.focus) === owner) {
+      owners.delete(owner.focus);
+      changeRuntimeResource("caretOwners", -1);
+    }
     const stop = owner.stopFocusDependency;
     owner.stopFocusDependency = null;
     if (!fromFocus) stop?.();
@@ -337,13 +341,17 @@ export function createInternalCaretController(
           },
         });
         owners.set(focus, owner);
+        changeRuntimeResource("caretOwners", 1);
         registered = true;
         registryRevision++;
         refresh(false);
       } catch (error) {
         owner.stopFocusDependency?.();
         owner.stopFocusDependency = null;
-        if (owners.get(focus) === owner) owners.delete(focus);
+        if (owners.get(focus) === owner) {
+          owners.delete(focus);
+          changeRuntimeResource("caretOwners", -1);
+        }
         owner.disposed = true;
         throw error;
       }

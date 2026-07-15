@@ -9,7 +9,6 @@ index 5dd7fdb..4811156 100644
 +import { computed, shallowRef, type ComponentPublicInstance } from "vue";
 +import {
 +  Box,
-+  Static,
 +  Text,
 +  useApp,
 +  useFocus,
@@ -18,6 +17,7 @@ index 5dd7fdb..4811156 100644
 +  useFocusScopeInput,
 +  useInput,
 +} from "@vue-tui/runtime";
++import { Static } from "@vue-tui/runtime/inline";
  import { runAgentLoop, type Message, type ToolCall } from "./agent";
  import MessageList from "./components/message-list.vue";
 

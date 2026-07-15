@@ -1,5 +1,6 @@
 import { createInputParser, type InputEvent } from "./input-parser.ts";
 import { normalizeInputEvent, type NormalizedInputFact } from "./normalized-input.ts";
+import { acquireRuntimeResource, changeRuntimeResource } from "../resource-tracker.ts";
 
 const ESC = "\x1b";
 const FLUSH_DELAY = 20;
@@ -45,6 +46,7 @@ interface KittyQueryDetection {
   onResult: (supported: boolean) => void;
   readonly owner: Subscriber | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
+  releaseTimer: (() => void) | undefined;
   pending: boolean;
   notify: boolean;
 }
@@ -104,7 +106,9 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   const inputParser = createInputParser();
   let pendingInputRecipients: RecipientSnapshot | undefined;
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
+  let releasePendingFlushTimer: (() => void) | undefined;
   let inputListenerAttached = false;
+  let inputListenerTracked = false;
   let inputAttachmentEpoch = 0;
   let inputDemandEpoch = 0;
   let flowOwnedByIngress = false;
@@ -161,6 +165,22 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     if (pendingFlushTimer === undefined) return;
     clearTimeout(pendingFlushTimer);
     pendingFlushTimer = undefined;
+    releasePendingFlushTimer?.();
+    releasePendingFlushTimer = undefined;
+  }
+
+  function trackInputListener(attached: boolean): void {
+    if (inputListenerTracked === attached) return;
+    inputListenerTracked = attached;
+    changeRuntimeResource("streamListeners", attached ? 1 : -1);
+  }
+
+  function clearDetectionTimer(detection: KittyQueryDetection, cancel = true): void {
+    if (detection.timer === undefined) return;
+    if (cancel) clearTimeout(detection.timer);
+    detection.timer = undefined;
+    detection.releaseTimer?.();
+    detection.releaseTimer = undefined;
   }
 
   function currentFramingSnapshot(): RecipientSnapshot | undefined {
@@ -330,6 +350,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     const attachEpoch = ++inputAttachmentEpoch;
     try {
       stdin.on("data", handleData);
+      trackInputListener(true);
       reconcileOwnedFlow();
     } catch (error) {
       try {
@@ -338,6 +359,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         // Preserve the acquisition error; listener rollback is best-effort.
       }
       inputListenerAttached = stdin.listeners("data").includes(handleData);
+      trackInputListener(inputListenerAttached);
       try {
         reconcileOwnedFlow();
       } catch {
@@ -391,6 +413,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       }
     }
     inputListenerAttached = stdin.listeners("data").includes(handleData);
+    trackInputListener(inputListenerAttached);
     try {
       reconcileOwnedFlow();
     } catch (error) {
@@ -602,8 +625,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       detection.pending = false;
       detections.delete(detection);
       inputDemandEpoch++;
-      if (detection.timer !== undefined) clearTimeout(detection.timer);
-      detection.timer = undefined;
+      clearDetectionTimer(detection);
       if (detection.notify) settledDetections.push(detection);
     }
     for (const detection of settledDetections) {
@@ -637,6 +659,8 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     if (!inputParser.hasPendingEscape()) return;
     pendingFlushTimer = setTimeout(() => {
       pendingFlushTimer = undefined;
+      releasePendingFlushTimer?.();
+      releasePendingFlushTimer = undefined;
       runInputTransaction(() => {
         const recipients = pendingInputRecipients;
         const released = inputParser.flushPendingEscape();
@@ -645,6 +669,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         if (released) normalizeAndDeliver(released, recipients);
       });
     }, FLUSH_DELAY);
+    releasePendingFlushTimer = acquireRuntimeResource("inputTimers");
   }
 
   function drainAfterCurrentChunk(): void {
@@ -734,11 +759,11 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function timeoutDetection(detection: KittyQueryDetection): void {
+    clearDetectionTimer(detection, false);
     if (!detection.pending) return;
     detection.pending = false;
     detections.delete(detection);
     inputDemandEpoch++;
-    detection.timer = undefined;
     runInputTransaction(() => {
       releasePendingQueryPrefix();
       if (detection.notify) {
@@ -753,8 +778,9 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function armDetectionTimeout(detection: KittyQueryDetection): void {
-    if (detection.timer !== undefined) clearTimeout(detection.timer);
+    clearDetectionTimer(detection);
     detection.timer = setTimeout(() => timeoutDetection(detection), KITTY_QUERY_TIMEOUT);
+    detection.releaseTimer = acquireRuntimeResource("inputTimers");
     detection.timer.unref?.();
   }
 
@@ -777,8 +803,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     detection.notify = false;
     detections.delete(detection);
     inputDemandEpoch++;
-    if (detection.timer !== undefined) clearTimeout(detection.timer);
-    detection.timer = undefined;
+    clearDetectionTimer(detection);
     const release = () => {
       releasePendingQueryPrefix(detection.owner);
       reconcilePendingFlush();
@@ -878,6 +903,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         onResult,
         owner: ownerSubscriber,
         timer: undefined,
+        releaseTimer: undefined,
         pending: true,
         notify: true,
       };

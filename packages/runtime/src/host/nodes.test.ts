@@ -1,5 +1,6 @@
 import { expect, test } from "vite-plus/test";
-import { createBox, createTextLeaf, createTransform, isContainer } from "./nodes.ts";
+import Yoga from "yoga-layout";
+import { createBox, createText, createTextLeaf, createTransform, isContainer } from "./nodes.ts";
 import { buildNodeOps } from "./node-ops.ts";
 
 test("createBox returns shape with empty children + paintDirty true", () => {
@@ -9,6 +10,70 @@ test("createBox returns shape with empty children + paintDirty true", () => {
   expect(box.paintDirty).toBe(true);
   expect(box.parent).toBe(null);
   expect(box.props).toEqual({});
+  expect(box.style.display).toBe("");
+  expect(Object.keys(box)).not.toContain("style");
+});
+
+test("Box style.display maps Vue v-show writes onto Yoga display", () => {
+  let commits = 0;
+  const ops = buildNodeOps({ onCommit: () => commits++ });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+
+  expect(box.style.display).toBe("");
+  expect(Object.keys(box)).not.toContain("style");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+
+  box.style.display = "none";
+  expect(box.style.display).toBe("none");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(commits).toBe(1);
+
+  box.style.display = "";
+  expect(box.style.display).toBe("");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(commits).toBe(2);
+});
+
+test("Box display prop stays hidden under v-show and restores its latest value", () => {
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+
+  ops.patchProp(box, "display", undefined, "flex");
+  box.style.display = "none";
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+
+  // A prop update while v-show is still false must not reveal the subtree.
+  ops.patchProp(box, "display", "flex", "none");
+  ops.patchProp(box, "display", "none", "flex");
+  expect(box.style.display).toBe("none");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+
+  // Vue restores the original style string when v-show becomes true. The host
+  // reveals using the latest authored Box prop, not a stale mount-time value.
+  box.style.display = "flex";
+  expect(box.style.display).toBe("flex");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+
+  // Authored display=none wins even while v-show itself is true.
+  ops.patchProp(box, "display", "flex", "none");
+  box.style.display = "flex";
+  expect(box.style.display).toBe("none");
+  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+});
+
+test("Box style.display becomes inert before its Yoga node is freed", () => {
+  let commits = 0;
+  const ops = buildNodeOps({ onCommit: () => commits++ });
+  const parent = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  const child = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  ops.insert(child, parent, null);
+  ops.remove(child);
+  const commitsAfterRemoval = commits;
+
+  expect(() => {
+    child.style.display = "none";
+  }).not.toThrow();
+  expect(commits).toBe(commitsAfterRemoval);
 });
 
 test("createTextLeaf carries its value", () => {
@@ -16,6 +81,24 @@ test("createTextLeaf carries its value", () => {
   expect(leaf.type).toBe("text-leaf");
   expect(leaf.value).toBe("hello");
   expect(leaf.parent).toBe(null);
+});
+
+test("text measurement reuses one revision and invalidates after a text update", () => {
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const text = ops.createElement("tui-text") as ReturnType<typeof createText>;
+  const leaf = ops.createText("hello") as ReturnType<typeof createTextLeaf>;
+  ops.insert(leaf, text, null);
+  text.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.measuredCache).toBe("hello");
+
+  text.measuredCache = "sentinel";
+  text.yoga.markDirty();
+  text.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.measuredCache).toBe("sentinel");
+
+  ops.setText(leaf, "changed");
+  text.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.measuredCache).toBe("changed");
 });
 
 test("createTextLeaf coerces a non-string value to a string (Ink setTextNodeValue)", () => {

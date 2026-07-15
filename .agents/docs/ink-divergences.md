@@ -168,6 +168,12 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 - **vue-tui:** `findStatics(root)` renders **every** `<Static>` in the tree.
 - **Why:** a tree with two `<Static>` regions renders both. KEEP. [VOUCHED @hyf0]
 
+### `Static` has an explicit Inline entry and committed item identity
+
+- **Ink:** exports `Static` from its root. Pinned v7.0.4 [stores only a numeric rendered length](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L42), renders `items.slice(index)`, and later sets that index to the current `items.length`. It does not validate the identity of positions before the cursor, so replacement and reorder are silently ignored, while shrink can move the numeric cursor backward and reopen earlier positions to later output. Its alternate-screen option continues to accept Static through the same relative writer.
+- **vue-tui:** exports `Static` and its five named types only from `@vue-tui/runtime/inline`. The existing `items`, `style`, and Vue scoped-slot `{ item, index }` shape remains, but every committed prefix position must remain `Object.is`-identical. Replacement arrays and uncommitted-tail changes are allowed; shrink, replacement, or reorder within the committed prefix fails; remounting starts another independent region. Effective visual Fullscreen rejects any Static presence before its bytes or a new frame. A Fullscreen request that falls back to effective Inline for screen-reader presentation remains supported, as do non-TTY and string hosts.
+- **Why:** terminal history is write-once output, so a silent length cursor cannot promise what happens after collection edits. The identity rule makes accepted positions exact without adding keys or replacing Vue's scoped-slot API. The explicit entry says that history requires an Inline-like output surface; visual Fullscreen history instead remains application state inside the viewport. This accepted 2026-07-15 Stage 3 decision is unstamped and does not alter the vouched multiple-region or scoped-slot records.
+
 ### Ctrl+C exits under the kitty protocol while managed input is active
 
 - **Ink:** exits only on the legacy `\x03` byte (in `App`), so a kitty-protocol Ctrl+C
@@ -718,8 +724,10 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   repaints the complete frame from `(0,0)`, hiding the physical terminal cursor until the selected
   focus-bound semantic caret is restored.
   Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
-  repaint. `<Static>` bytes are emitted to stream observers but warned once and not retained
-  visually. Ordinary reactive rerenders replace the same surface, and deterministic observation does not change those bytes.
+  repaint. `Static` from `@vue-tui/runtime/inline` is instead rejected on presence before history
+  bytes, dynamic output, observation, or a new viewport frame. If setup already acquired terminal
+  leases, the ordinary fatal path restores them before reporting. Ordinary reactive rerenders
+  replace the same surface, and deterministic observation does not change those bytes.
 - **Why:** targeted mouse events, the resolved caret surface point, and Yoga layout all use viewport coordinates. If
   output outside the tree can move the visible frame while the hit map remains at row 0, clicking
   the visible element misses and clicking the log line can trigger it. Treating fullscreen as an
@@ -732,7 +740,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   transcript path; unlike Ink, a Fullscreen request resolves to effective Inline and remains on the
   main screen without targeted mouse. Introduced 2026-07-11 and completed for live mounts in F1.4.
   Tests: `fullscreen-origin.test.ts`; full contract:
-  [fullscreen-output.md](./fullscreen-output.md).
+  [fullscreen-output.md](./fullscreen-output.md). The Static rejection was accepted on 2026-07-15
+  during Runtime closure Stage 3 and adds no VOUCHED stamp.
 
 ### Degenerate boxes do not lay out or paint children when the content area is gone
 

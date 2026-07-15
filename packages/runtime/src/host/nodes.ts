@@ -19,6 +19,11 @@ export interface TextProps {
   wrap?: "wrap" | "hard" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
 }
 
+/** Minimal DOM-style surface used by Vue's built-in `v-show` directive. */
+export interface TuiHostStyle {
+  display: string;
+}
+
 interface NodeBase {
   parent: TuiContainer | null;
 }
@@ -37,6 +42,7 @@ export interface TuiBox extends NodeBase {
   type: "tui-box";
   children: TuiNode[];
   yoga: YogaNodeRef;
+  style: TuiHostStyle;
   props: BoxProps;
   paintDirty: boolean;
   internal_accessibility?: {
@@ -51,6 +57,8 @@ export interface TuiText extends NodeBase {
   yoga: YogaNodeRef;
   props: TextProps;
   measuredCache?: string;
+  /** Increments whenever cached text composition or measurement can become stale. */
+  textRevision: number;
 }
 
 export interface TuiVirtualText extends NodeBase {
@@ -81,8 +89,8 @@ export interface TuiStatic extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
-  /** Exclusive item index represented by the currently mounted host children. */
-  renderedThrough: number;
+  /** Exact item identities represented by the currently mounted host children. */
+  renderedItems: readonly unknown[];
   /**
    * Host child nodes settled by the static output channel. Static items are
    * write-once: each preparation skips children in this set. We track by node
@@ -97,11 +105,11 @@ export interface TuiStatic extends NodeBase {
   /**
    * Callback registered by the <Static> component, invoked only after the
    * corresponding output write returns normally or an output-free renderer
-   * commit succeeds. The prepared render's exclusive item index is passed so a
-   * synchronous append during the stream write remains pending for a later
-   * commit instead of being skipped by the component cursor.
+   * commit succeeds. The prepared render's exact identity snapshot is passed so
+   * a synchronous append or replacement during the stream write cannot be
+   * mistaken for content represented by the accepted bytes.
    */
-  onWritten?: (renderedThrough: number) => void;
+  onWritten?: (renderedItems: readonly unknown[]) => void;
 }
 
 export interface TuiTransform extends NodeBase {
@@ -145,14 +153,22 @@ export function createRoot(appContext: AppContext): TuiRoot {
 }
 
 export function createBox(): TuiBox {
-  return trackTuiNode({
+  const node = {
     type: "tui-box",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    // buildNodeOps replaces this placeholder with a Yoga-backed accessor after
+    // attaching the Yoga node. Keeping the field on the bare constructor makes
+    // the host shape truthful even in renderer-internal unit tests.
+    style: { display: "" },
     props: {},
     paintDirty: true,
-  });
+  } satisfies TuiBox;
+  // Host compatibility shims are implementation details, not declarative
+  // props or tree state. Keep them out of node enumeration and snapshots.
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createText(): TuiText {
@@ -162,6 +178,7 @@ export function createText(): TuiText {
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
+    textRevision: 0,
   });
 }
 
@@ -194,7 +211,7 @@ export function createStatic(): TuiStatic {
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
-    renderedThrough: 0,
+    renderedItems: [],
     writtenNodes: new Set(),
   });
 }

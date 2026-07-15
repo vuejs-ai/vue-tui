@@ -12,11 +12,11 @@
 
 vue-tui is layered by responsibility; each layer may depend **only downward**.
 
-- **`@vue-tui/runtime`** — the engine: the Yoga-flexbox renderer, the primitive components
-  (e.g. `Box`/`Text`/`Spacer`/`Static`), and the terminal-I/O composables (e.g. `useInput`,
+- **`@vue-tui/runtime`** — the engine: the Yoga-flexbox renderer, common primitive components
+  (e.g. root `Box`/`Text`/`Spacer`), the supported `/inline` terminal-history boundary (`Static`), and the terminal-I/O composables (e.g. `useInput`,
   `useFocus`, `useCaret`, `useClipboard`, `/fullscreen`'s `useMouseEvent`/`useMouseDrag`/`useTextSelection`, `useStdout`, `useRenderSession`, `useLayoutSize`). The lean core
   every app depends on; depends on nothing else in the family. What counts as runtime work
-  is the [runtime ↔ component boundary](./components-design-principles.md).
+  is the [runtime ↔ component boundary](./components-design-principles.md). `Static` remains Runtime work because its append-only acceptance and stream-commit ownership are renderer/output mechanics even though its authoring path is surface-specific.
 - **`@vue-tui/use`** — independent, reusable hooks that are **not tied to any single
   component** (shared headless behavior/logic). May depend on `runtime`; **must never depend
   on `components`.**

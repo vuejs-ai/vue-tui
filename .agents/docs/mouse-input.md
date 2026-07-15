@@ -81,8 +81,9 @@ top-left sits on the physical screen.
 - **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount.
   Every commit clears and homes that viewport, then paints the complete frame from screen origin
   `(0,0)`. Yoga receives the current terminal height, and paint plus hit testing are clipped to the
-  addressable rows. Coordinated Static/stdout/stderr/console writes are followed by the same repaint,
-  so they cannot move the visible frame away from the hit map. Direct `process.stdout.write()` calls
+  addressable rows. Coordinated stdout/stderr/console writes are followed by the same repaint, so
+  they cannot move the visible frame away from the hit map. `/inline` Static presence is rejected
+  before a new Fullscreen target frame, so it cannot move or publish stale hit geometry. Direct `process.stdout.write()` calls
   bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
 
 Full-screen is sufficient for the current implementation, not a universal requirement. fzf proves

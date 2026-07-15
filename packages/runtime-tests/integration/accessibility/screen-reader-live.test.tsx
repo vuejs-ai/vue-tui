@@ -1,7 +1,8 @@
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
-import { Box, createApp, Static, Text } from "@vue-tui/runtime";
+import { Box, createApp, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import {
   makeFakeStdin,
   makeFakeWritable,

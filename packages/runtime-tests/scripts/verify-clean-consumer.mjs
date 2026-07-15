@@ -12,12 +12,12 @@ const consumerDirectory = join(temporaryRoot, "consumer");
 mkdirSync(tarballDirectory);
 mkdirSync(consumerDirectory);
 
-function run(command, args, cwd = repositoryRoot) {
+function run(command, args, cwd = repositoryRoot, environment = {}) {
   try {
     return execFileSync(command, args, {
       cwd,
       encoding: "utf8",
-      env: { ...process.env, CI: "true" },
+      env: { ...process.env, CI: "true", ...environment },
       stdio: ["ignore", "pipe", "pipe"],
     });
   } catch (error) {
@@ -186,6 +186,13 @@ import {
   type UseMouseEventOptions,
   type UseTextSelectionOptions,
 } from "@vue-tui/runtime/fullscreen";
+import type {
+  StaticChildren,
+  StaticProps,
+  StaticSlot,
+  StaticSlotProps,
+  StaticStyle,
+} from "@vue-tui/runtime/inline";
 import type { RenderResult, TestClipboardBehavior, TestMouse } from "@vue-tui/testing";
 import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
 
@@ -193,6 +200,19 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
   ? true
   : false;
 type Expect<T extends true> = T;
+type _ExactStaticProps = Expect<Equal<StaticProps<number>["items"], number[]>>;
+type _ExactStaticStyle = Expect<
+  Equal<StaticStyle, import("@vue-tui/runtime").BoxLayoutStyle>
+>;
+type _ExactStaticSlotProps = Expect<
+  Equal<StaticSlotProps<number>, { item: number; index: number }>
+>;
+type _ExactStaticSlot = Expect<
+  Equal<StaticSlot<number>, (props: StaticSlotProps<number>) => import("vue").VNodeChild>
+>;
+type _ExactStaticChildren = Expect<
+  Equal<StaticChildren<number>, StaticSlot<number> | { default: StaticSlot<number> }>
+>;
 type _ExactStdinSurface = Expect<
   Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
 >;
@@ -540,6 +560,20 @@ type _RootUseMouseEvent = typeof import("@vue-tui/runtime").useMouseEvent;
 type _RootUseMouseDrag = typeof import("@vue-tui/runtime").useMouseDrag;
 // @ts-expect-error Fullscreen selection is available only from the subpath.
 type _RootUseTextSelection = typeof import("@vue-tui/runtime").useTextSelection;
+// @ts-expect-error Static is available only from the Inline history subpath.
+type _RootStatic = typeof import("@vue-tui/runtime").Static;
+// @ts-expect-error StaticChildren is available only from the Inline history subpath.
+type _RootStaticChildren = import("@vue-tui/runtime").StaticChildren;
+// @ts-expect-error StaticProps is available only from the Inline history subpath.
+type _RootStaticProps = import("@vue-tui/runtime").StaticProps;
+// @ts-expect-error StaticSlot is available only from the Inline history subpath.
+type _RootStaticSlot = import("@vue-tui/runtime").StaticSlot;
+// @ts-expect-error StaticSlotProps is available only from the Inline history subpath.
+type _RootStaticSlotProps = import("@vue-tui/runtime").StaticSlotProps;
+// @ts-expect-error StaticStyle is available only from the Inline history subpath.
+type _RootStaticStyle = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error Common component types are not duplicated on the Inline subpath.
+type _InlineBoxProps = import("@vue-tui/runtime/inline").BoxProps;
 // @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
 type _FullscreenUseClipboard = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
 // @ts-expect-error MouseButton moved to the Fullscreen subpath.
@@ -562,11 +596,25 @@ void invalidClipboardMount;
     `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
 import { Box, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 
 // @ts-expect-error Spinner is a leaf component and ignores child content.
 const unsupportedSpinnerChildren = <Spinner children="ignored" />;
 void unsupportedSpinnerChildren;
+
+const inferredStaticSlot = (
+  <Static items={[1, 2]}>
+    {({ item, index }) => {
+      item.toFixed(0);
+      index.toFixed(0);
+      // @ts-expect-error Static infers number rather than widening item to any.
+      item.toUpperCase();
+      return <Text>{item + index}</Text>;
+    }}
+  </Static>
+);
+void inferredStaticSlot;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<ComponentPublicInstance | null>(null);
@@ -616,8 +664,10 @@ import { shallowRef, type ComponentPublicInstance } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 import { Box, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+import { Static } from "@vue-tui/runtime/inline";
 
 const host = shallowRef<ComponentPublicInstance | null>(null);
+const vShowVisible = shallowRef(true);
 const selectableText = shallowRef<ComponentPublicInstance | null>(null);
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const scope = useFocusScope({ trapped: true });
@@ -658,7 +708,20 @@ mountedStdin.setRawMode(false);
 </script>
 
 <template>
-  <Box ref="host" :height="2"><ScrollBox ref="scrollBox"><Text ref="selectableText">{{ geometry.status }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox></Box>
+  <Box ref="host" :height="2">
+    <Static :items="[1, 2]">
+      <template #default="{ item, index }">
+        <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
+        <Text>
+          <!-- @vue-expect-error Static infers number rather than widening item to any. -->
+          {{ item.toUpperCase() }}
+        </Text>
+      </template>
+    </Static>
+    <Box v-show="vShowVisible">
+      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ geometry.status }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox>
+    </Box>
+  </Box>
 </template>
 `,
   );
@@ -708,13 +771,16 @@ const listener = () => {};
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
 import * as fullscreen from "@vue-tui/runtime/fullscreen";
+import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
-import { defineComponent, h, shallowRef } from "vue";
+import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
 const { Box, createApp, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
 const { useMouseDrag, useMouseEvent, useTextSelection } = fullscreen;
 assert.deepEqual(Object.keys(fullscreen).sort(), ["useMouseDrag", "useMouseEvent", "useTextSelection"]);
+assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
+assert.equal("Static" in runtime, false);
 assert.equal("usePaste" in runtime, false);
 assert.equal("useCursor" in runtime, false);
 assert.equal("useBoxMetrics" in runtime, false);
@@ -733,6 +799,133 @@ assert.equal(typeof useFocusScopeInput, "function");
 assert.equal(typeof useExternalInput, "function");
 assert.equal(typeof useClipboard, "function");
 assert.equal(typeof useTextSelection, "function");
+
+const inlineHistory = await render(
+  defineComponent(() => () =>
+    h(Box, null, () => [
+      h(inline.Static, { items: ["packed-history"] }, {
+        default: ({ item }) => h(Text, null, () => item),
+      }),
+      h(Text, null, () => "packed-live"),
+    ]),
+  ),
+);
+assert.equal(inlineHistory.frames.map((frame) => frame.staticOutput).join(""), "packed-history\\n");
+assert.equal(inlineHistory.lastFrame(), "packed-live");
+inlineHistory.dispose();
+
+const packedVShowVisible = shallowRef(false);
+const packedVShowRevision = shallowRef(0);
+let packedVShowMounts = 0;
+let packedVShowUnmounts = 0;
+const PackedVShowTarget = defineComponent(() => {
+  const localRevision = ref(packedVShowRevision.value);
+  watch(packedVShowRevision, (revision) => {
+    localRevision.value = revision;
+  }, { flush: "sync" });
+  onMounted(() => packedVShowMounts++);
+  onUnmounted(() => packedVShowUnmounts++);
+  return () => withDirectives(
+    h(Box, null, () => h(Text, null, () => "packed-v-show:" + localRevision.value)),
+    [[vShow, packedVShowVisible.value]],
+  );
+});
+const packedVShow = await render(
+  defineComponent(() => () => h(Box, { flexDirection: "column" }, () => [
+    h(PackedVShowTarget),
+    h(Text, null, () => "packed-v-show-tail"),
+  ])),
+);
+assert.equal(packedVShow.lastFrame(), "packed-v-show-tail");
+assert.equal(packedVShowMounts, 1);
+packedVShowRevision.value = 2;
+await nextTick();
+await packedVShow.waitUntilRenderFlush();
+assert.equal(packedVShow.lastFrame(), "packed-v-show-tail");
+packedVShowVisible.value = true;
+await nextTick();
+await packedVShow.waitUntilRenderFlush();
+assert.equal(packedVShow.lastFrame(), "packed-v-show:2\\npacked-v-show-tail");
+packedVShowVisible.value = false;
+await nextTick();
+await packedVShow.waitUntilRenderFlush();
+assert.equal(packedVShow.lastFrame(), "packed-v-show-tail");
+assert.equal(packedVShowMounts, 1);
+packedVShow.dispose();
+assert.equal(packedVShowUnmounts, 1);
+
+function packedForegroundCharacters(value) {
+  const result = [];
+  const sgr = /\\x1b\\[([0-9;]*)m/g;
+  let foreground = "default";
+  let cursor = 0;
+  const append = (text) => {
+    for (const character of text) {
+      if (character !== "\\n") result.push([character, foreground]);
+    }
+  };
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    append(value.slice(cursor, match.index));
+    for (const parameter of (match[1] || "0").split(";").map(Number)) {
+      if (parameter === 0 || parameter === 39) foreground = "default";
+      else if (parameter === 31) foreground = "red";
+      else if (parameter === 32) foreground = "green";
+      else if (parameter === 34) foreground = "blue";
+      else if ((parameter >= 30 && parameter <= 37) || parameter === 38) foreground = "other";
+    }
+    cursor = match.index + match[0].length;
+  }
+  append(value.slice(cursor));
+  return result;
+}
+
+for (const resetColor of ["revert", "initial"]) {
+  const packedReset = await render(
+    defineComponent(() => () => h(Text, null, () => [
+      h(Text, { color: "red" }, () => [
+        "AA",
+        h(Text, { color: resetColor }, () => "BBB"),
+        "CC",
+      ]),
+      h(Text, { color: "blue" }, () => "Z"),
+    ])),
+    { columns: 4 },
+  );
+  const frame = packedReset.lastFrame({ trimLines: true });
+  assert.equal(frame.replace(/\\x1b\\[[0-9;]*m/g, ""), "AABB\\nBCCZ");
+  assert.deepEqual(packedForegroundCharacters(frame), [
+    ["A", "red"], ["A", "red"],
+    ["B", "default"], ["B", "default"], ["B", "default"],
+    ["C", "red"], ["C", "red"],
+    ["Z", "blue"],
+  ]);
+  packedReset.dispose();
+}
+
+const packedPrivateUse = "\\uE000\\uE001";
+const packedNestedReset = await render(
+  defineComponent(() => () => h(Text, { color: "red" }, () => [
+    "A" + packedPrivateUse,
+    h(Text, { color: "revert" }, () => [
+      "B",
+      h(Text, { color: "green" }, () => "C"),
+      h(Text, { color: "initial" }, () => "D"),
+      "E",
+    ]),
+    "F",
+  ])),
+);
+const packedNestedFrame = packedNestedReset.lastFrame();
+assert.equal(
+  packedNestedFrame.replace(/\\x1b\\[[0-9;]*m/g, ""),
+  "A" + packedPrivateUse + "BCDEF",
+);
+assert.deepEqual(packedForegroundCharacters(packedNestedFrame), [
+  ["A", "red"], ["\\uE000", "red"], ["\\uE001", "red"],
+  ["B", "default"], ["C", "green"], ["D", "default"], ["E", "default"],
+  ["F", "red"],
+]);
+packedNestedReset.dispose();
 
 const stdin = new PassThrough();
 const stdout = new PassThrough();
@@ -1028,7 +1221,7 @@ assert.equal(focusApp.terminal.rawMode.current, false);
   run("npm", ["install", "--no-audit", "--no-fund", "--package-lock=false"], consumerDirectory);
   run("npx", ["tsc", "-p", "tsconfig.json"], consumerDirectory);
   run("npx", ["vue-tsc", "-p", "tsconfig.sfc.json"], consumerDirectory);
-  run(process.execPath, ["runtime.mjs"], consumerDirectory);
+  run(process.execPath, ["runtime.mjs"], consumerDirectory, { FORCE_COLOR: "3" });
 
   const dependencyTree = JSON.parse(
     run("npm", ["ls", "vue", "--all", "--json"], consumerDirectory),

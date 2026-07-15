@@ -15,13 +15,11 @@ component itself listens to **no** mouse or keyboard input.
 - Use it for an **app-owned bounded scroll region** in either rendering mode — for example a log pane
   in a full-screen dashboard or a fixed-height preview inside an inline workflow. The parent must
   allocate a height; mode does not create that bound by itself.
-- For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static`: let
+- For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static` from `@vue-tui/runtime/inline`: let
   the content flow into the terminal's scrollback, where the terminal owns scrolling and text
   selection natively. vue-tui's own `coding-agent` example does exactly this — it uses `Static`, not
   `ScrollBox`. Bounding streaming output in an inline `ScrollBox` fights the grain (see below).
-- Fullscreen does not retain `<Static>` output on its fixed surface: new Static bytes are emitted to
-  stream observers and then repainted away. Keep fullscreen history in reactive state inside a
-  `ScrollBox`; see [fullscreen-output.md](../fullscreen-output.md).
+- Effective visual Fullscreen rejects `<Static>` before committing its history or a new viewport frame. Keep fullscreen history in reactive state inside a `ScrollBox`; see [fullscreen-output.md](../fullscreen-output.md).
 
 ## No built-in input — imperative handle only
 

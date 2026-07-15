@@ -111,7 +111,7 @@ createApp(App).mount();
 
 | Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with components (`Box`, `Text`, `Static`, etc.), composables for input, focus, geometry, selection, clipboard, and lifecycle, and yoga-based flexbox layout. _API stabilizing._                                                                               |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, composables for input, focus, geometry, selection, clipboard, and lifecycle, and yoga-based flexbox layout. _API stabilizing._                                              |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect resolved session facts and content commits, and assert the terminal-emulated screen                                                                                                                                                         |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
@@ -135,8 +135,14 @@ createApp(App).mount();
 | [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
 | [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
-| [`<Static>`](./packages/runtime)    | Renders inline items once above the redrawn region; fullscreen does not retain them            |
+| [`<Static>`](./packages/runtime)    | Commits append-only terminal history; import from `@vue-tui/runtime/inline`                    |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
+
+`Static` is deliberately absent from the common root export. Import it and its named types from `@vue-tui/runtime/inline`. A mounted region may only append: every committed prefix position must remain `Object.is` identical until that region is remounted. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
+
+Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, focus, caret, geometry visibility, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text`, `Transform`, and `Static` roots is not supported.
+
+Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the foreground to the terminal default. They can wrap across lines and nest safely inside a colored parent; the parent's foreground resumes after the span, while background and boolean text styles continue to compose normally.
 
 `<Box>`, `<Text>`, and `<ScrollBox>` are passive visual components. Fullscreen mouse behavior is attached to an ordinary component ref with the dedicated composables below; listener props such as `@click` and `@wheel` are rejected so mode-dependent behavior cannot look universally available.
 
@@ -169,8 +175,8 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities              |
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                      |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                   |
-| `useStdout()`                   | Write directly to stdout                                                                                                            |
-| `useStderr()`                   | Write directly to stderr                                                                                                            |
+| `useStdout()`                   | Commit geometry-safe styled lines with explicit acceptance and flow control, or access raw stdout                                   |
+| `useStderr()`                   | Commit geometry-safe styled lines with explicit acceptance and flow control, or access raw stderr                                   |
 | `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts    |
 | `useCaret(ref, opts)`           | Declare a focus-bound caret at an element-local rendered cell and observe whether it is visible                                     |
 | `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                        |

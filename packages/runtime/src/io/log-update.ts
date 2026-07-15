@@ -1,5 +1,6 @@
 import type { Writable } from "node:stream";
 import ansiEscapes from "ansi-escapes";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 import {
   type CursorPosition,
   cursorPositionChanged,
@@ -30,6 +31,8 @@ export type ResetOptions = {
   cursorHidden?: boolean;
 };
 
+export type LogUpdateWrite = (data: string) => boolean;
+
 export type LogUpdate = {
   clear: () => void;
   done: () => void;
@@ -41,6 +44,8 @@ export type LogUpdate = {
   isCursorHidden: () => boolean;
   isCursorDirty: () => boolean;
   willRender: (str: string) => boolean;
+  /** Restore writer bookkeeping when a captured transaction was not handed off. */
+  createRollback: () => () => void;
   (str: string): boolean;
 };
 
@@ -71,23 +76,31 @@ const streamWidth = (stream: Writable): number | undefined =>
 const canWriteToStream = (stream: Writable): boolean =>
   !stream.destroyed && !(stream as { writableEnded?: boolean }).writableEnded;
 
-const hideCursor = (stream: Writable): void => {
+const defaultWrite =
+  (stream: Writable): LogUpdateWrite =>
+  (data) =>
+    stream.write(data);
+
+const hideCursor = (stream: Writable, write: LogUpdateWrite): void => {
   if (!isTtyStream(stream) || !canWriteToStream(stream)) {
     return;
   }
-  stream.write(hideCursorEscape);
+  write(hideCursorEscape);
 };
 
-const showCursor = (stream: Writable): void => {
+const showCursor = (stream: Writable, write: LogUpdateWrite): void => {
   if (!isTtyStream(stream) || !canWriteToStream(stream)) {
     return;
   }
-  stream.write(showCursorEscape);
+  write(showCursorEscape);
 };
 
 const createStandard = (
   stream: Writable,
-  { showCursor: showCursorOption = false } = {},
+  {
+    showCursor: showCursorOption = false,
+    write = defaultWrite(stream),
+  }: { showCursor?: boolean; write?: LogUpdateWrite } = {},
 ): LogUpdate => {
   let previousLineCount = 0;
   let previousOutput = "";
@@ -96,6 +109,12 @@ const createStandard = (
   let cursorDirty = false;
   let previousCursorPosition: CursorPosition | undefined;
   let cursorWasShown = false;
+
+  const setHiddenCursor = (hidden: boolean): void => {
+    if (hasHiddenCursor === hidden) return;
+    hasHiddenCursor = hidden;
+    changeRuntimeResource("cursorLeases", hidden ? 1 : -1);
+  };
 
   // Persistent-declaration: the active cursor is the LAST-declared position and
   // is re-emitted at the end of EVERY commit, so a focused input's caret stays
@@ -121,8 +140,8 @@ const createStandard = (
 
   const render = (str: string) => {
     if (!showCursorOption && !hasHiddenCursor) {
-      hideCursor(stream);
-      hasHiddenCursor = true;
+      hideCursor(stream, write);
+      setHiddenCursor(true);
     }
 
     const activeCursor = getActiveCursor();
@@ -144,7 +163,7 @@ const createStandard = (
     );
 
     if (str === previousOutput && cursorChanged) {
-      stream.write(
+      write(
         buildCursorOnlySequence({
           cursorWasShown,
           previousLineCount,
@@ -161,7 +180,7 @@ const createStandard = (
         previousLineCount,
         previousCursorPosition,
       );
-      stream.write(returnPrefix + ansiEscapes.eraseLines(previousLineCount) + str + cursorSuffix);
+      write(returnPrefix + ansiEscapes.eraseLines(previousLineCount) + str + cursorSuffix);
       previousOutput = str;
       previousLineCount = lines.length;
     }
@@ -178,7 +197,7 @@ const createStandard = (
       previousLineCount,
       previousCursorPosition,
     );
-    stream.write(prefix + ansiEscapes.eraseLines(previousLineCount));
+    write(prefix + ansiEscapes.eraseLines(previousLineCount));
     previousOutput = "";
     previousLineCount = 0;
     previousCursorPosition = undefined;
@@ -192,8 +211,8 @@ const createStandard = (
     cursorWasShown = false;
 
     if (!showCursorOption && hasHiddenCursor) {
-      showCursor(stream);
-      hasHiddenCursor = false;
+      showCursor(stream, write);
+      setHiddenCursor(false);
     }
   };
 
@@ -203,7 +222,7 @@ const createStandard = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
     cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
-    hasHiddenCursor = options?.cursorHidden ?? hasHiddenCursor;
+    setHiddenCursor(options?.cursorHidden ?? hasHiddenCursor);
   };
 
   render.getCursorReturnToBottom = () =>
@@ -232,11 +251,11 @@ const createStandard = (
     // After clear() cursorWasShown is already false, so that path (which
     // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
-      stream.write(hideCursorEscape);
+      write(hideCursorEscape);
     }
 
     if (activeCursor) {
-      stream.write(
+      write(
         buildCursorSuffix(
           visibleLineCount(lines, str),
           activeCursor,
@@ -261,13 +280,39 @@ const createStandard = (
   render.isCursorHidden = () => hasHiddenCursor;
   render.isCursorDirty = () => cursorDirty;
   render.willRender = (str: string) => hasChanges(str, getActiveCursor());
+  render.createRollback = () => {
+    const snapshot = {
+      previousLineCount,
+      previousOutput,
+      hasHiddenCursor,
+      cursorPosition: cursorPosition ? { ...cursorPosition } : undefined,
+      cursorDirty,
+      previousCursorPosition: previousCursorPosition ? { ...previousCursorPosition } : undefined,
+      cursorWasShown,
+    };
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      previousLineCount = snapshot.previousLineCount;
+      previousOutput = snapshot.previousOutput;
+      setHiddenCursor(snapshot.hasHiddenCursor);
+      cursorPosition = snapshot.cursorPosition;
+      cursorDirty = snapshot.cursorDirty;
+      previousCursorPosition = snapshot.previousCursorPosition;
+      cursorWasShown = snapshot.cursorWasShown;
+    };
+  };
 
   return render;
 };
 
 const createIncremental = (
   stream: Writable,
-  { showCursor: showCursorOption = false } = {},
+  {
+    showCursor: showCursorOption = false,
+    write = defaultWrite(stream),
+  }: { showCursor?: boolean; write?: LogUpdateWrite } = {},
 ): LogUpdate => {
   let previousLines: string[] = [];
   let previousOutput = "";
@@ -276,6 +321,12 @@ const createIncremental = (
   let cursorDirty = false;
   let previousCursorPosition: CursorPosition | undefined;
   let cursorWasShown = false;
+
+  const setHiddenCursor = (hidden: boolean): void => {
+    if (hasHiddenCursor === hidden) return;
+    hasHiddenCursor = hidden;
+    changeRuntimeResource("cursorLeases", hidden ? 1 : -1);
+  };
 
   // Persistent-declaration (see createStandard for the full rationale): the
   // active cursor is the last-declared position, re-emitted at the end of every
@@ -292,8 +343,8 @@ const createIncremental = (
 
   const render = (str: string) => {
     if (!showCursorOption && !hasHiddenCursor) {
-      hideCursor(stream);
-      hasHiddenCursor = true;
+      hideCursor(stream, write);
+      setHiddenCursor(true);
     }
 
     const activeCursor = getActiveCursor();
@@ -309,7 +360,7 @@ const createIncremental = (
     const previousVisible = visibleLineCount(previousLines, previousOutput);
 
     if (str === previousOutput && cursorChanged) {
-      stream.write(
+      write(
         buildCursorOnlySequence({
           cursorWasShown,
           previousLineCount: previousLines.length,
@@ -339,9 +390,7 @@ const createIncremental = (
         streamWidth(stream),
         str.endsWith("\n"),
       );
-      stream.write(
-        returnPrefix + ansiEscapes.eraseLines(previousLines.length) + str + cursorSuffix,
-      );
+      write(returnPrefix + ansiEscapes.eraseLines(previousLines.length) + str + cursorSuffix);
       cursorWasShown = activeCursor !== undefined;
       previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
       previousOutput = str;
@@ -402,7 +451,7 @@ const createIncremental = (
     );
     buffer.push(cursorSuffix);
 
-    stream.write(buffer.join(""));
+    write(buffer.join(""));
 
     cursorWasShown = activeCursor !== undefined;
     previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
@@ -418,7 +467,7 @@ const createIncremental = (
       previousLines.length,
       previousCursorPosition,
     );
-    stream.write(prefix + ansiEscapes.eraseLines(previousLines.length));
+    write(prefix + ansiEscapes.eraseLines(previousLines.length));
     previousOutput = "";
     previousLines = [];
     previousCursorPosition = undefined;
@@ -432,8 +481,8 @@ const createIncremental = (
     cursorWasShown = false;
 
     if (!showCursorOption && hasHiddenCursor) {
-      showCursor(stream);
-      hasHiddenCursor = false;
+      showCursor(stream, write);
+      setHiddenCursor(false);
     }
   };
 
@@ -443,7 +492,7 @@ const createIncremental = (
     previousCursorPosition = undefined;
     cursorWasShown = false;
     cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
-    hasHiddenCursor = options?.cursorHidden ?? hasHiddenCursor;
+    setHiddenCursor(options?.cursorHidden ?? hasHiddenCursor);
   };
 
   render.getCursorReturnToBottom = () =>
@@ -472,11 +521,11 @@ const createIncremental = (
     // After clear() cursorWasShown is already false, so that path (which
     // passes cursor:false → activeCursor undefined) writes no hide here either.
     if (!activeCursor && cursorWasShown) {
-      stream.write(hideCursorEscape);
+      write(hideCursorEscape);
     }
 
     if (activeCursor) {
-      stream.write(
+      write(
         buildCursorSuffix(
           visibleLineCount(lines, str),
           activeCursor,
@@ -501,19 +550,46 @@ const createIncremental = (
   render.isCursorHidden = () => hasHiddenCursor;
   render.isCursorDirty = () => cursorDirty;
   render.willRender = (str: string) => hasChanges(str, getActiveCursor());
+  render.createRollback = () => {
+    const snapshot = {
+      previousLines: [...previousLines],
+      previousOutput,
+      hasHiddenCursor,
+      cursorPosition: cursorPosition ? { ...cursorPosition } : undefined,
+      cursorDirty,
+      previousCursorPosition: previousCursorPosition ? { ...previousCursorPosition } : undefined,
+      cursorWasShown,
+    };
+    let active = true;
+    return () => {
+      if (!active) return;
+      active = false;
+      previousLines = snapshot.previousLines;
+      previousOutput = snapshot.previousOutput;
+      setHiddenCursor(snapshot.hasHiddenCursor);
+      cursorPosition = snapshot.cursorPosition;
+      cursorDirty = snapshot.cursorDirty;
+      previousCursorPosition = snapshot.previousCursorPosition;
+      cursorWasShown = snapshot.cursorWasShown;
+    };
+  };
 
   return render;
 };
 
 const create = (
   stream: Writable,
-  { showCursor: showCursorOption = false, incremental = false } = {},
+  {
+    showCursor: showCursorOption = false,
+    incremental = false,
+    write,
+  }: { showCursor?: boolean; incremental?: boolean; write?: LogUpdateWrite } = {},
 ): LogUpdate => {
   if (incremental) {
-    return createIncremental(stream, { showCursor: showCursorOption });
+    return createIncremental(stream, { showCursor: showCursorOption, write });
   }
 
-  return createStandard(stream, { showCursor: showCursorOption });
+  return createStandard(stream, { showCursor: showCursorOption, write });
 };
 
 const logUpdate = { create };

@@ -19,6 +19,7 @@ import type {
   TuiMouseDragEvent,
   TuiMouseEventMap,
 } from "./public-events.ts";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 
 type MouseEventType = keyof TuiMouseEventMap;
 
@@ -75,8 +76,14 @@ export interface FullscreenMouseInputSnapshot {
 }
 
 export interface PreparedMouseFrame {
+  /** Reconcile terminal reporting while leaving the accepted input frame unchanged. */
+  stage(): void;
+  /** Stage when necessary, then publish the candidate input frame. */
   accept(): void;
+  /** Settle and restore accepted reporting when this frame still owns the latest claim. */
   discard(): void;
+  /** Settle and release staged terminal ownership after a physical output failure. */
+  abandon(): void;
 }
 
 export interface FullscreenMouseController extends RenderedTargetTransactionHost {
@@ -227,6 +234,7 @@ export function createFullscreenMouseController(
   const invalidatedNodes = new WeakSet<TuiNode>();
   let nextRegistrationId = 1;
   let acceptedFrame = EMPTY_FRAME;
+  let reportingClaim = 0;
   let clickCandidate: ClickCandidate | undefined;
   let dragGesture: DragGesture | undefined;
   let dragDispatch: DragDispatchContext | undefined;
@@ -275,6 +283,7 @@ export function createFullscreenMouseController(
       drags: new Set(),
     };
     hosts.set(node, host);
+    changeRuntimeResource("pointerHosts", 1);
     return host;
   };
 
@@ -282,6 +291,7 @@ export function createFullscreenMouseController(
     if (host.events.click.size > 0 || host.events.wheel.size > 0 || host.drags.size > 0) return;
     if (hosts.get(host.node) !== host) return;
     hosts.delete(host.node);
+    changeRuntimeResource("pointerHosts", -1);
     host.detachGeometry();
     host.geometry.dispose();
   };
@@ -309,12 +319,15 @@ export function createFullscreenMouseController(
     if (firstError !== undefined) throw firstError;
   };
 
-  const reconcileReporting = (desired: SgrMouseMode | undefined): void => {
+  const reconcileReporting = (desired: SgrMouseMode | undefined): number => {
+    const claim = ++reportingClaim;
     if (disposed || suspended || silent) desired = undefined;
-    if (desired === reportingLevel && (desired === undefined || mouseToken !== undefined)) return;
+    if (desired === reportingLevel && (desired === undefined || mouseToken !== undefined)) {
+      return claim;
+    }
     if (!desired) {
       releaseReporting();
-      return;
+      return claim;
     }
     if (!protocolAvailable) {
       throw new Error(
@@ -350,6 +363,7 @@ export function createFullscreenMouseController(
       // still retry exact terminal cleanup.
       stdin.releaseSgrMouseMode(previousToken);
     }
+    return claim;
   };
 
   const reconcileAcceptedDemand = (): void => {
@@ -461,6 +475,7 @@ export function createFullscreenMouseController(
         ? activeDispatch.gesture
         : undefined;
     registration.active = false;
+    changeRuntimeResource("dragHandlers", -1);
     if (gesture?.cohort.includes(registration)) {
       registration.isDragging.value = false;
       gesture.cohort = gesture.cohort.filter((member) => member !== registration);
@@ -764,9 +779,8 @@ export function createFullscreenMouseController(
     dispatchEvent("click", surface, modifiers, receivers, { button: event.button });
   };
 
-  const acceptFrame = (frame: AcceptedMouseFrame): void => {
+  const publishAcceptedFrame = (frame: AcceptedMouseFrame): void => {
     if (disposed || suspended || silent) return;
-    reconcileReporting(desiredReporting(frame));
     acceptedFrame = frame;
     if (clickCandidate && !frame.hosts.has(clickCandidate.target)) clickCandidate = undefined;
     if (dragGesture && !frame.hosts.has(dragGesture.owner)) {
@@ -827,10 +841,12 @@ export function createFullscreenMouseController(
         active: true,
       };
       host.events[type].add(registration as never);
+      changeRuntimeResource("pointerHandlers", 1);
       requestPaint();
       return () => {
         if (!registration.active) return;
         registration.active = false;
+        changeRuntimeResource("pointerHandlers", -1);
         if (registration.type === "click") {
           clearClickCandidateFor(registration as unknown as EventRegistration<"click">);
         }
@@ -855,12 +871,13 @@ export function createFullscreenMouseController(
         active: true,
       };
       host.drags.add(registration);
+      changeRuntimeResource("dragHandlers", 1);
       requestPaint();
       return () => removeDragRegistration(registration);
     },
     prepareFrame(geometryFrame) {
       if (disposed || suspended || silent) {
-        return { accept() {}, discard() {} };
+        return { stage() {}, accept() {}, discard() {}, abandon() {} };
       }
       const acceptedHosts = new Map<TuiNode, AcceptedHost>();
       for (const host of hosts.values()) {
@@ -904,17 +921,81 @@ export function createFullscreenMouseController(
         generation: geometryFrame.generation,
         hosts: acceptedHosts,
       });
-      let settled = false;
-      return {
+      type State = "prepared" | "staging" | "staged" | "settled";
+      type DeferredSettlement = "accept" | "discard" | "abandon";
+      let state: State = "prepared";
+      let stagedClaim = 0;
+      let deferredSettlement: DeferredSettlement | undefined;
+
+      const prepared: PreparedMouseFrame = {
+        stage() {
+          if (state === "settled" || state === "staging") return;
+          if (state === "staged" && stagedClaim === reportingClaim) return;
+          state = "staging";
+          let claim: number;
+          try {
+            claim = reconcileReporting(desiredReporting(nextFrame));
+          } catch (error) {
+            if (state === "staging") state = "prepared";
+            throw error;
+          }
+          if (state !== "staging") return;
+          state = "staged";
+          stagedClaim = claim;
+          const settlement = deferredSettlement;
+          deferredSettlement = undefined;
+          if (settlement) prepared[settlement]();
+        },
         accept() {
-          if (settled) return;
-          settled = true;
-          acceptFrame(nextFrame);
+          if (state === "settled") return;
+          if (state === "staging") {
+            deferredSettlement = "accept";
+            return;
+          }
+          prepared.stage();
+          if (state !== "staged") return;
+          state = "settled";
+          publishAcceptedFrame(nextFrame);
         },
         discard() {
-          settled = true;
+          if (state === "settled") return;
+          if (state === "staging") {
+            deferredSettlement = "discard";
+            return;
+          }
+          const canRollback =
+            state === "staged" &&
+            stagedClaim === reportingClaim &&
+            !disposed &&
+            !suspended &&
+            !silent;
+          state = "settled";
+          if (canRollback) reconcileAcceptedDemand();
+        },
+        abandon() {
+          if (state === "settled") return;
+          if (state === "staging") {
+            deferredSettlement = "abandon";
+            return;
+          }
+          const canRelease =
+            state === "staged" &&
+            stagedClaim === reportingClaim &&
+            !disposed &&
+            !suspended &&
+            !silent;
+          state = "settled";
+          if (canRelease) {
+            try {
+              releaseReporting();
+            } catch {
+              // The output failure remains primary. App teardown and the stdin
+              // controller's uncertainty cleanup retry every physical release.
+            }
+          }
         },
       };
+      return prepared;
     },
     captureInputSnapshot() {
       return Object.freeze({ frame: acceptedFrame });
@@ -971,6 +1052,15 @@ export function createFullscreenMouseController(
         firstError = error;
       }
       disposed = true;
+      let eventRegistrations = 0;
+      let dragRegistrations = 0;
+      for (const host of hosts.values()) {
+        eventRegistrations += host.events.click.size + host.events.wheel.size;
+        dragRegistrations += host.drags.size;
+      }
+      changeRuntimeResource("pointerHandlers", -eventRegistrations);
+      changeRuntimeResource("dragHandlers", -dragRegistrations);
+      changeRuntimeResource("pointerHosts", -hosts.size);
       for (const host of hosts.values()) {
         for (const registration of host.events.click) registration.active = false;
         for (const registration of host.events.wheel) registration.active = false;

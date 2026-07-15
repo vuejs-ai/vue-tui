@@ -99,8 +99,10 @@ throw a `TypeError` before changing scroll state.
 
 Why no built-in `wheel` / `keyboard`: the mouse wheel needs terminal mouse tracking, which breaks
 native text selection window-wide; keyboard input is global and collides with a focused field. So
-input policy is the app's to decide. For inline streaming output, prefer `Static` (let it flow into
-the terminal's own scrollback).
+input policy is the app's to decide. For Inline streaming output, prefer `Static` from
+`@vue-tui/runtime/inline` and let its append-only output flow into terminal scrollback. Effective
+visual Fullscreen rejects `Static`; keep that history in application state inside a bounded
+`ScrollBox` instead.
 
 ## License
 

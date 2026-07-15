@@ -8,6 +8,7 @@ import {
   createTransform,
   createVirtualText,
   isContainer,
+  type TuiBox,
   type TuiContainer,
   type TuiNode,
   type TuiRoot,
@@ -206,11 +207,77 @@ function rejectsTextLeaf(parent: TuiContainer, value: string): boolean {
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
   const { onCommit } = options;
 
+  interface BoxDisplayController {
+    setAuthoredDisplay(value: unknown): void;
+    dispose(): void;
+  }
+
+  const boxDisplayControllers = new WeakMap<TuiBox, BoxDisplayController>();
+
+  /**
+   * Install the minimal DOM-style contract Vue's built-in `v-show` directive
+   * requires. Runtime-dom reads and writes `el.style.display`; the custom host
+   * maps that one property onto the same Yoga display state used by Box's
+   * `display` prop.
+   *
+   * Keep the authored Box prop separate from the directive's temporary hidden
+   * state. This matters when a Box prop changes while `v-show` remains false:
+   * the subtree must stay hidden, then reveal using the latest authored value.
+   */
+  function installBoxStyle(node: TuiBox): void {
+    let authoredDisplay: unknown;
+    let directiveHidden = false;
+    let effectiveDisplay: "flex" | "none" = "flex";
+    let disposed = false;
+
+    const normalizeAuthoredDisplay = (): "flex" | "none" =>
+      authoredDisplay != null && authoredDisplay !== "flex" ? "none" : "flex";
+
+    const applyEffectiveDisplay = (): void => {
+      const nextDisplay = directiveHidden ? "none" : normalizeAuthoredDisplay();
+      if (nextDisplay === effectiveDisplay) return;
+      effectiveDisplay = nextDisplay;
+      if (disposed) return;
+      applyYogaProp(node, "display", nextDisplay);
+      onCommit();
+    };
+
+    const style = {} as TuiBox["style"];
+    Object.defineProperty(style, "display", {
+      enumerable: true,
+      get: () => {
+        if (directiveHidden || normalizeAuthoredDisplay() === "none") return "none";
+        return authoredDisplay === "flex" ? "flex" : "";
+      },
+      set: (value: string) => {
+        directiveHidden = value === "none";
+        applyEffectiveDisplay();
+      },
+    });
+    Object.defineProperty(node, "style", {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: style,
+    });
+
+    boxDisplayControllers.set(node, {
+      setAuthoredDisplay(value: unknown): void {
+        authoredDisplay = value;
+        applyEffectiveDisplay();
+      },
+      dispose(): void {
+        disposed = true;
+      },
+    });
+  }
+
   function createElement(type: string): TuiNode {
     switch (type) {
       case "tui-box": {
         const n = createBox();
         attachYoga(n);
+        installBoxStyle(n);
         return n;
       }
       case "tui-text": {
@@ -414,6 +481,11 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       node.type === "tui-static" ||
       node.type === "tui-transform"
     ) {
+      if (node.type === "tui-box") {
+        // A retained host ref may outlive Vue's unmount. Make later
+        // style.display writes inert before freeing its Yoga allocation.
+        boxDisplayControllers.get(node)?.dispose();
+      }
       detachYoga(node);
     }
   }
@@ -434,6 +506,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (el.type === "tui-transform") {
       if (key === "transform" && typeof next === "function") {
         el.transform = next as (line: string, idx: number) => string;
+        const owner = findMeasureOwner(el.parent);
+        if (owner?.type === "tui-text") owner.textRevision++;
       }
       onCommit();
       return;
@@ -442,15 +516,17 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       // Callback the renderer invokes after Static output acceptance to advance
       // the component cursor so written items unmount. Not styling/layout.
       el.onWritten =
-        typeof next === "function" ? (next as (renderedThrough: number) => void) : undefined;
+        typeof next === "function"
+          ? (next as (renderedItems: readonly unknown[]) => void)
+          : undefined;
       onCommit();
       return;
     }
-    if (el.type === "tui-static" && key === "internal_renderedThrough") {
-      // Snapshot the item prefix represented by the currently mounted children.
-      // Acceptance must use this render-time value, not a possibly re-entrantly
-      // mutated items array observed after stdout.write() returns.
-      el.renderedThrough = typeof next === "number" ? next : 0;
+    if (el.type === "tui-static" && key === "internal_renderedItems") {
+      // Snapshot the exact item identities represented by the currently mounted
+      // children. Acceptance must not inspect a possibly re-entrantly mutated
+      // author array after stdout.write() returns.
+      el.renderedItems = Array.isArray(next) ? next : [];
       onCommit();
       return;
     }
@@ -460,6 +536,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       el.type === "tui-static" ||
       el.type === "root"
     ) {
+      if (el.type === "tui-box" && key === "display") {
+        // The controller composes the authored Box prop with `v-show`'s
+        // temporary hidden state and owns the resulting Yoga update.
+        boxDisplayControllers.get(el)?.setAuthoredDisplay(next);
+        return;
+      }
       if (isYogaProp(key)) {
         applyYogaProp(el, key, next, prev);
         // Some yoga props also need to be stored in el.props for the paint pass.
@@ -508,6 +590,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // (a deliberate, vouched divergence; see ink-divergences.md).
         if (key === "wrap" && el.type === "tui-text") {
           markTextDirty(el);
+        } else if (el.type === "tui-text") {
+          el.textRevision++;
         }
       } else if (key === "aria-role" || key === "ariaRole") {
         if (el.type === "tui-box") {
@@ -539,6 +623,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     if (el.type === "tui-virtual-text" && STYLE_PROPS.has(key)) {
       (el.props as Record<string, unknown>)[key] = next;
+      const owner = findMeasureOwner(el);
+      if (owner?.type === "tui-text") owner.textRevision++;
       onCommit();
     }
   }

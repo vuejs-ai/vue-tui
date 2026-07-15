@@ -8,7 +8,6 @@ import {
 import { expect, test } from "vite-plus/test";
 import {
   Box,
-  Static,
   Text,
   useCaret,
   useFocus,
@@ -16,6 +15,7 @@ import {
   useStdout,
   type UseCaretReturn,
 } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { render, type ScreenSnapshot } from "../src/index.ts";
 
 function screenText(screen: ScreenSnapshot): string {

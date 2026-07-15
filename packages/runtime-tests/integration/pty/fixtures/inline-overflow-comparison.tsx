@@ -1,15 +1,7 @@
 import process from "node:process";
 import ansiEscapes from "ansi-escapes";
-import {
-  Box,
-  Static,
-  Text,
-  createApp,
-  useApp,
-  useCaret,
-  useFocus,
-  useStdout,
-} from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp, useCaret, useFocus, useStdout } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import {
   defineComponent,
   nextTick,

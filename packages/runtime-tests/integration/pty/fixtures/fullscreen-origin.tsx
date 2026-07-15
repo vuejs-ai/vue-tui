@@ -9,7 +9,6 @@ import {
 } from "vue";
 import {
   Box,
-  Static,
   Text,
   Transform,
   createApp,
@@ -21,6 +20,7 @@ import {
   useStderr,
   useStdout,
 } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { inputText } from "./input-event.js";
@@ -38,7 +38,8 @@ type Scenario =
   | "horizontal-transform"
   | "target-lifetime"
   | "targeted-mouse"
-  | "screen-reader";
+  | "screen-reader"
+  | "foreground-reset";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
 const autoExitTargetLifetime = process.argv[4] === "auto-exit";
@@ -232,10 +233,15 @@ const App = defineComponent(() => {
       exit("screen-reader");
       return "consume";
     }
+    if (scenario === "foreground-reset" && input === "q") {
+      exit("foreground-reset");
+      return "consume";
+    }
     return "continue";
   });
 
   onMounted(() => {
+    if (scenario === "static") return;
     setTimeout(() => {
       if (scenario === "stdout") {
         write("LOG\n");
@@ -376,6 +382,31 @@ const App = defineComponent(() => {
       );
     }
 
+    if (scenario === "foreground-reset") {
+      return renderSurface(
+        <Box flexDirection="column">
+          <Text>Nested foreground reset</Text>
+          <Text color="red" backgroundColor="blue">
+            red:
+            <Text color="revert">
+              default:<Text color="green">green</Text>:default
+            </Text>
+            :red
+          </Text>
+          <Box width={4} flexShrink={0}>
+            <Text color="red">
+              AA<Text color="initial">BBB</Text>CC
+            </Text>
+          </Box>
+          <Text color="blue">blue sibling</Text>
+          <Text color="red">
+            literal:<Text color="revert">reset</Text>:red
+          </Text>
+          <Text>Press q to restore the shell</Text>
+        </Box>,
+      );
+    }
+
     return renderSurface(
       <>
         {scenario === "static" ? (
@@ -399,6 +430,14 @@ app.mount({
   maxFps: 0,
 });
 
-void app.waitUntilExit().then((result) => {
-  process.stdout.write(`__CLICKED__:${String(result)}\n`);
-});
+void app.waitUntilExit().then(
+  (result) => {
+    process.stdout.write(`__CLICKED__:${String(result)}\n`);
+  },
+  (error: unknown) => {
+    if (scenario === "static") {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stdout.write(`__STATIC_REJECTED__:${message}\n`);
+    }
+  },
+);

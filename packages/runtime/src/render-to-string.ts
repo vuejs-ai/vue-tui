@@ -422,8 +422,8 @@ function createStringContexts(columns: number): {
     stdin,
     isRawModeSupported: false,
     setRawMode: () => {},
-    writeToStdout: () => {},
-    writeToStderr: () => {},
+    writeToStdout: () => ({ status: "accepted", writable: true }),
+    writeToStderr: () => ({ status: "accepted", writable: true }),
   };
 
   const stdinContext = createNoOpStdinContext(stdin);
@@ -447,8 +447,7 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
     internal_inputRouting: createInternalInputRoutingRuntime(),
     acquireRawMode: () => {},
     releaseRawMode: () => {},
-    acquireSemanticInput: () => {},
-    releaseSemanticInput: () => {},
+    acquireSemanticInput: () => Object.freeze({ activate() {}, release() {} }),
     acquireSgrMouseMode: () => Symbol("noop-sgr-mouse"),
     releaseSgrMouseMode: () => {},
   };

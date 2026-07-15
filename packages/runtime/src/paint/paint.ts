@@ -9,7 +9,7 @@ import {
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { applyChalk, applyColor } from "./text-style.ts";
+import { applyChalk, applyColor, isForegroundResetColor } from "./text-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -285,12 +285,6 @@ class Output {
 
       // op.type === "write"
       const { transformers } = op;
-      const selectionBySurface = new Map<string, OutputSelectionProvenance>();
-      for (const entry of op.selection) {
-        for (const cell of entry.trace.cells) {
-          selectionBySurface.set(`${cell.x}:${cell.y}`, { target: entry.target, cell });
-        }
-      }
       let { x, y } = op;
       let lines = op.lines;
 
@@ -303,6 +297,20 @@ class Output {
         undefined,
       );
       const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
+      const selectionBySurface = new Map<string, OutputSelectionProvenance>();
+      for (const entry of op.selection) {
+        for (const cell of entry.trace.cells) {
+          if (
+            (clip?.x1 !== undefined && cell.x < clip.x1) ||
+            (clip?.x2 !== undefined && cell.x + cell.width > clip.x2) ||
+            (clip?.y1 !== undefined && cell.y < clip.y1) ||
+            (clip?.y2 !== undefined && cell.y >= clip.y2)
+          ) {
+            continue;
+          }
+          selectionBySurface.set(`${cell.x}:${cell.y}`, { target: entry.target, cell });
+        }
+      }
 
       if (clip) {
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
@@ -509,35 +517,38 @@ class Output {
       styledCharsToString(line.filter((item) => item !== undefined)).trimEnd(),
     );
     const baselineWidths = baselineLines.map((line) => this.caches.getStringWidth(line));
-    const highlighted = new Set<OutputSelectionProvenance>();
-    for (const entry of this.selectionTraces.values()) {
-      const visible = new Set<number>();
-      for (const cell of entry.trace.cells) {
-        let complete = true;
-        let first: OutputSelectionProvenance | undefined;
-        const row = provenance[cell.y];
-        for (let offset = 0; offset < cell.width; offset++) {
-          const candidate = row?.[cell.x + offset];
-          if (
-            !candidate ||
-            candidate.target.key !== entry.target.key ||
-            candidate.cell.id !== cell.id ||
-            (first && candidate !== first)
-          ) {
-            complete = false;
-            break;
-          }
-          first ??= candidate;
-        }
+    const visibleByTarget = new Map<object, Set<number>>();
+    const candidates = new Set<OutputSelectionProvenance>();
+    for (const row of provenance) {
+      for (const candidate of row) {
+        if (candidate) candidates.add(candidate);
+      }
+    }
+    for (const candidate of candidates) {
+      const { cell, target } = candidate;
+      let complete = true;
+      const row = provenance[cell.y];
+      for (let offset = 0; offset < cell.width; offset++) {
+        const current = row?.[cell.x + offset];
         if (
-          complete &&
-          first &&
-          cell.x >= 0 &&
-          cell.x + cell.width <= (baselineWidths[cell.y] ?? 0)
+          current !== candidate ||
+          current.target.key !== target.key ||
+          current.cell.id !== cell.id
         ) {
-          visible.add(cell.id);
+          complete = false;
+          break;
         }
       }
+      if (!complete || cell.x < 0 || cell.x + cell.width > (baselineWidths[cell.y] ?? 0)) {
+        continue;
+      }
+      let visible = visibleByTarget.get(target.key);
+      if (!visible) visibleByTarget.set(target.key, (visible = new Set()));
+      visible.add(cell.id);
+    }
+    const highlighted = new Set<OutputSelectionProvenance>();
+    for (const entry of this.selectionTraces.values()) {
+      const visible = visibleByTarget.get(entry.target.key) ?? new Set<number>();
       const snapshot = {
         text: entry.trace.text,
         boundaries: entry.trace.boundaries,
@@ -628,13 +639,42 @@ class Output {
 // host-level non-string values are treated as absent. An explicit
 // `backgroundColor=""` remains a string own bg, resolves to a falsy value, and
 // opts the span out.
-function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?: unknown): string {
-  if (!node.children || node.children.length === 0) return "";
+interface InlineTextChunk {
+  readonly value: string;
+  /** A nested reset span must not receive any enclosing Text foreground color. */
+  readonly blocksAncestorForeground: boolean;
+}
+
+type InlineText = readonly InlineTextChunk[];
+
+function mergeInlineText(chunks: InlineText): InlineTextChunk[] {
+  const merged: InlineTextChunk[] = [];
+  for (const chunk of chunks) {
+    if (chunk.value.length === 0) continue;
+    const previous = merged.at(-1);
+    if (previous?.blocksAncestorForeground === chunk.blocksAncestorForeground) {
+      merged[merged.length - 1] = { ...previous, value: previous.value + chunk.value };
+    } else {
+      merged.push(chunk);
+    }
+  }
+  return merged;
+}
+
+function inlineTextValue(chunks: InlineText): string {
+  return chunks.map((chunk) => chunk.value).join("");
+}
+
+function renderTextWithInlineStyles(
+  node: TuiText | TuiVirtualText,
+  inheritedBg?: unknown,
+): InlineText {
+  if (!node.children || node.children.length === 0) return [];
   // Concatenate children, each already carrying its OWN style (a nested <Text>
   // child wraps itself; the Box bg threads through unchanged), then wrap the whole
   // concatenation with THIS node's own style — Ink's parent-wraps-children model.
   const inner = squashInlineChildren(node.children, inheritedBg);
-  return sanitizeAnsiMultiline(applyOwnStyle(node.props, inner, inheritedBg));
+  return applyOwnStyle(node.props, inner, inheritedBg);
 }
 
 // Apply a Text node's OWN chalk styling as a wrap around its already-composed
@@ -645,7 +685,7 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?
 // defined props plus this effective bg, NOT the inherited boolean styles: those
 // already wrap us at the ancestor level, so re-applying them here would double
 // the SGR codes.
-function applyOwnStyle(props: TextProps, inner: string, inheritedBg: unknown): string {
+function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown): InlineText {
   if (inner.length === 0) return inner;
   const defined = Object.fromEntries(
     Object.entries(props).filter(([, v]) => v !== undefined),
@@ -656,7 +696,27 @@ function applyOwnStyle(props: TextProps, inner: string, inheritedBg: unknown): s
   const ownBg = defined.backgroundColor;
   const effectiveBg = typeof ownBg === "string" ? ownBg : inheritedBg;
   const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg };
-  return applyChalk(inner, styleProps);
+
+  // A foreground reset applies to the complete subtree. Keep that subtree as
+  // one structural chunk so every enclosing Text can skip only its foreground
+  // color while still applying background and boolean styles. This avoids the
+  // collision and nesting bugs of embedding sentinel characters in user text.
+  if (isForegroundResetColor(styleProps.color)) {
+    const value = sanitizeAnsiMultiline(applyChalk(inlineTextValue(inner), styleProps));
+    return value.length === 0 ? [] : [{ value, blocksAncestorForeground: true }];
+  }
+
+  return mergeInlineText(
+    inner.map((chunk) => {
+      const chunkProps = chunk.blocksAncestorForeground
+        ? { ...styleProps, color: undefined }
+        : styleProps;
+      return {
+        value: sanitizeAnsiMultiline(applyChalk(chunk.value, chunkProps)),
+        blocksAncestorForeground: chunk.blocksAncestorForeground,
+      };
+    }),
+  );
 }
 
 // Squash an array of inline children into styled text. Shared by text /
@@ -679,17 +739,17 @@ function applyOwnStyle(props: TextProps, inner: string, inheritedBg: unknown): s
 // `inheritedBg` is the nearest enclosing Box bg (NOT a merged style set): it
 // threads UNCHANGED to descendant <Text> nodes, which each wrap themselves with
 // their own style (Ink's parent-wraps-children composition).
-function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): string {
-  let out = "";
+function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): InlineText {
+  const chunks: InlineTextChunk[] = [];
   let transformIndex = 0;
   for (const child of children) {
-    out += squashTransformChild(child, transformIndex, inheritedBg);
+    chunks.push(...squashTransformChild(child, transformIndex, inheritedBg));
     // Comments (Vue's null/v-if/false renders) and EMPTY text-leaves (`{''}` /
     // template <slot/> anchors) contribute "" and, like React's absent childNodes,
     // must NOT advance the transform index.
     if (advancesLineIndex(child)) transformIndex++;
   }
-  return out;
+  return mergeInlineText(chunks);
 }
 
 // Render a standalone <Transform> (one NOT rendered inline inside a <Text>, and
@@ -701,7 +761,7 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
 // in the Output, never in squashTextNodes for the node it lives on. (G58)
 function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
-  return sanitizeAnsiMultiline(squashInlineChildren(node.children, inheritedBg));
+  return sanitizeAnsiMultiline(inlineTextValue(squashInlineChildren(node.children, inheritedBg)));
 }
 
 // Squash a single inline child into styled text, recursing GENERICALLY into
@@ -723,15 +783,17 @@ function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): strin
 // these glyphs — e.g. `<Box bg=red><Text bg=blue>x` would render red, not blue.
 // A nested <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
 // carrying its own style INSIDE the parent's eventual wrap.
-function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknown): string {
+function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknown): InlineText {
   if (child.type === "text-leaf") {
-    return child.value;
+    return child.value.length === 0
+      ? []
+      : [{ value: child.value, blocksAncestorForeground: false }];
   }
   if (child.type === "tui-virtual-text" || child.type === "tui-text") {
     return renderTextWithInlineStyles(child, inheritedBg);
   }
   if (child.type === "tui-transform") {
-    let innerText = "";
+    const chunks: InlineTextChunk[] = [];
     // Recursive twin of the G52 fix in renderTextWithInlineStyles: a grandchild's
     // positional index must skip Vue comment nodes (null/v-if/false renders),
     // which React would not have produced as childNodes, so a `{null}` inside this
@@ -741,16 +803,29 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
     // while keeping the index basis identical to the top-level loop.
     let grandIndex = 0;
     for (const grandchild of child.children) {
-      innerText += squashTransformChild(grandchild, grandIndex, inheritedBg);
+      chunks.push(...squashTransformChild(grandchild, grandIndex, inheritedBg));
       if (advancesLineIndex(grandchild)) grandIndex++;
     }
+    const inner = mergeInlineText(chunks);
+    const innerText = inlineTextValue(inner);
     if (innerText.length > 0 && child.transform) {
-      innerText = sanitizeAnsiMultiline(child.transform(innerText, index));
+      const transformed = sanitizeAnsiMultiline(child.transform(innerText, index));
+      if (transformed.length === 0) return [];
+      // A Transform is free to rewrite its complete input, so reset ranges can
+      // no longer be mapped exactly. Conservatively protect the transformed
+      // result when any source range reset foreground; this never leaks an
+      // ancestor color back into a reset subtree.
+      return [
+        {
+          value: transformed,
+          blocksAncestorForeground: inner.some((chunk) => chunk.blocksAncestorForeground),
+        },
+      ];
     }
-    return innerText;
+    return inner;
   }
   // Comments (null/undefined renders), boxes, etc. contribute nothing.
-  return "";
+  return [];
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
@@ -892,6 +967,59 @@ function fillBackground(
 
   const line = applyChalk(" ".repeat(width), { backgroundColor: color });
   for (let i = 0; i < height; i++) output.write(x, y + i, [line], transformers);
+}
+
+interface PreparedTextPaint {
+  readonly text: string;
+  readonly wrapped: string[];
+}
+
+interface PreparedTextPaintCache extends PreparedTextPaint {
+  readonly revision: number;
+  readonly inheritedBg: string | undefined;
+  readonly wrapWidth: number;
+  readonly wrapMode: TextProps["wrap"];
+}
+
+const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
+
+function containsInlineTransform(node: TuiNode): boolean {
+  if (node.type === "tui-transform") return true;
+  if (node.type === "text-leaf" || node.type === "comment") return false;
+  return node.children.some(containsInlineTransform);
+}
+
+function prepareTextPaint(
+  node: TuiText,
+  inheritedBg: string | undefined,
+  wrapWidth: number,
+): PreparedTextPaint {
+  const wrapMode = node.props.wrap;
+  const cacheable = !containsInlineTransform(node);
+  const cached = cacheable ? preparedTextPaintCache.get(node) : undefined;
+  if (
+    cached?.revision === node.textRevision &&
+    cached.inheritedBg === inheritedBg &&
+    cached.wrapWidth === wrapWidth &&
+    cached.wrapMode === wrapMode
+  ) {
+    return cached;
+  }
+
+  const text = inlineTextValue(renderTextWithInlineStyles(node, inheritedBg));
+  const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap");
+  if (inheritedBg) {
+    const padProps: TextProps = { backgroundColor: inheritedBg };
+    for (let index = 0; index < wrapped.length; index++) {
+      const pad = wrapWidth - stringWidth(wrapped[index]!);
+      if (pad > 0) wrapped[index] = wrapped[index]! + applyChalk(" ".repeat(pad), padProps);
+    }
+  }
+  const prepared = { text, wrapped };
+  if (!cacheable) return prepared;
+  const entry = { revision: node.textRevision, inheritedBg, wrapWidth, wrapMode, ...prepared };
+  preparedTextPaintCache.set(node, entry);
+  return entry;
 }
 
 interface HitRect {
@@ -1262,7 +1390,6 @@ function paintNode(
       // is resolved against this inherited bg inside applyOwnStyle
       // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
       // the node's whole children concatenation alongside its boolean styles.
-      const text = renderTextWithInlineStyles(node, inheritedBg);
       // Wrap at the TRUE cell width (unclamped), matching Ink's paint, which wraps at
       // getMaxWidth(yogaNode) — a value that can legitimately be 0 (flexBasis=0, width=0,
       // width="0%"). At width 0, wrapText returns the leading-newline wrap "\nA" → ["", "A"],
@@ -1271,7 +1398,7 @@ function paintNode(
       // row-sibling overwrites it (the text-drop bug). Fitting text is untouched: wrapText's
       // fast-path returns it verbatim.
       const wrapWidth = Math.floor(layout.width);
-      const wrapped = wrapText(text, wrapWidth, node.props.wrap ?? "wrap");
+      const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth);
       const selectionTargets = selection?.targetsFor(node) ?? [];
       const outputSelection: OutputSelectionTrace[] = [];
       if (geometry || selectionTargets.length > 0) {
@@ -1285,6 +1412,7 @@ function paintNode(
           clip,
           provenanceAvailable: transformers.length === 0,
           selectionTargets,
+          geometryRequested: geometry !== undefined,
         });
         if (geometry) {
           geometry.record(
@@ -1328,15 +1456,6 @@ function paintNode(
       // pad, matching Ink (getMaxWidth=0 → no padding). Clamping to 1 here would
       // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
       // collides with a row-sibling at the 0-width box origin.
-      if (inheritedBg) {
-        const padProps: TextProps = { backgroundColor: inheritedBg };
-        for (let i = 0; i < wrapped.length; i++) {
-          const pad = wrapWidth - stringWidth(wrapped[i]!);
-          if (pad > 0) {
-            wrapped[i] = wrapped[i]! + applyChalk(" ".repeat(pad), padProps);
-          }
-        }
-      }
       output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers, outputSelection);
       return;
     }

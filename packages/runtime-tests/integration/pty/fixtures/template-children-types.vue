@@ -7,13 +7,23 @@
 // MISSING-REQUIRED prop errors in templates (exercised below) but NOT excess/unknown
 // prop NAMES — a fat-fingered `<Box :bogusprop="1">` is not flagged here. That gap is
 // intentional (strictTemplates off); the `.tsx` JSX fixture does catch excess props.
-import { Box, Text, Static, Transform } from "@vue-tui/runtime";
+import { Box, Text, Transform } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 </script>
 
 <template>
   <!-- Valid: slot children + typed props -->
   <Box flex-direction="row"><Text color="green">ok</Text></Box>
-  <Static :items="[1, 2, 3]"><Text>x</Text></Static>
+  <Box v-show="true"><Text>v-show</Text></Box>
+  <Static :items="[1, 2, 3]">
+    <template #default="{ item, index }">
+      <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
+      <Text>
+        <!-- @vue-expect-error Static infers number rather than widening item to any -->
+        {{ item.toUpperCase() }}
+      </Text>
+    </template>
+  </Static>
   <Transform :transform="(line: string) => line"><Text>x</Text></Transform>
 
   <!-- @vue-expect-error display accepts "flex" | "none", not a number -->

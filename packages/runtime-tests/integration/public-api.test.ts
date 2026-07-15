@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import * as api from "@vue-tui/runtime";
 import * as fullscreenApi from "@vue-tui/runtime/fullscreen";
+import * as inlineApi from "@vue-tui/runtime/inline";
 import * as internalApi from "@vue-tui/runtime/internal";
 
 // The EXACT public runtime (value) export surface of `@vue-tui/runtime`. The test below snapshots
@@ -16,7 +17,6 @@ const PUBLIC_VALUE_EXPORTS = [
   "Box",
   "Newline",
   "Spacer",
-  "Static",
   "Text",
   "Transform",
   // Composables
@@ -46,6 +46,7 @@ const PUBLIC_VALUE_EXPORTS = [
 ];
 
 const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent", "useTextSelection"];
+const INLINE_VALUE_EXPORTS = ["Static"];
 
 test("public API surface is exactly the documented value-export set", () => {
   expect(Object.keys(api).sort()).toEqual([...PUBLIC_VALUE_EXPORTS].sort());
@@ -53,6 +54,17 @@ test("public API surface is exactly the documented value-export set", () => {
 
 test("Fullscreen API surface is exactly the Fullscreen interaction value-export set", () => {
   expect(Object.keys(fullscreenApi).sort()).toEqual(FULLSCREEN_VALUE_EXPORTS);
+});
+
+test("Inline API surface is exactly the terminal-history value-export set", () => {
+  expect(Object.keys(inlineApi).sort()).toEqual(INLINE_VALUE_EXPORTS);
+});
+
+test("keeps Static on the Inline subpath without root API duplication", () => {
+  expect(api).not.toHaveProperty("Static");
+  expect(inlineApi).toHaveProperty("Static");
+  expect(inlineApi).not.toHaveProperty("createApp");
+  expect(inlineApi).not.toHaveProperty("Box");
 });
 
 test("keeps clipboard common and selectable text Fullscreen-only", () => {

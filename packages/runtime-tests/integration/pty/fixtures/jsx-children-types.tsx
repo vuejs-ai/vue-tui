@@ -11,7 +11,8 @@
  *   - children rejected     -> the `accepted` cases error
  *   - prop validation lost   -> the `@ts-expect-error` directives become unused
  */
-import { Box, Newline, Spacer, Static, Text, Transform } from "@vue-tui/runtime";
+import { Box, Newline, Spacer, Text, Transform } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 
 // Children are accepted (the shim's whole purpose under the automatic runtime).
 export const accepted = [
@@ -23,6 +24,8 @@ export const accepted = [
     {({ item, index }) => {
       const renderedItem = item.toFixed(0);
       const renderedIndex = index.toFixed(0);
+      // @ts-expect-error Static infers number rather than widening the slot to any.
+      item.toUpperCase();
       return (
         <Text>
           {renderedIndex}:{renderedItem}

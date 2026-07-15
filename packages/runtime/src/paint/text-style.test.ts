@@ -48,6 +48,28 @@ test("unknown color name falls back to no color", () => {
   }
 });
 
+test("revert and initial foreground colors emit an explicit terminal-default span", () => {
+  const prev = chalk.level;
+  chalk.level = 1;
+  try {
+    expect(applyChalk("x", { color: "revert" })).toBe("\x1b[39mx\x1b[39m");
+    expect(applyChalk("x", { color: "initial" })).toBe("\x1b[39mx\x1b[39m");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
+test("foreground reset emits no ANSI when color output is disabled", () => {
+  const prev = chalk.level;
+  chalk.level = 0;
+  try {
+    expect(applyChalk("x", { color: "revert" })).toBe("x");
+    expect(applyChalk("x", { color: "initial" })).toBe("x");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
 test("ansi256 foreground color applies chalk.ansi256", () => {
   expect(applyChalk("x", { color: "ansi256(194)" })).toBe(chalk.ansi256(194)("x"));
 });

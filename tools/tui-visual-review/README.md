@@ -26,6 +26,8 @@ Wait for several streamed lines, observe the sticky-bottom state, then use Up or
 
 Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|target-lifetime|targeted-mouse|screen-reader>` after `--` to choose a focused state; `static` is the default.
 
+Use `vp run visual:fullscreen-origin -- --scenario foreground-reset` to inspect the final nested `revert`/`initial` foreground behavior, wrapping, sibling colors, inherited background, literal private-use characters, and shell restoration. Use `vp run visual:inline-history` to inspect the final Inline committed `Static` history plus newest live tail, and `vp run visual:v-show` to inspect hide, hidden-state update, show-again, mouse-mode ownership, and restoration one observed action at a time.
+
 For the Fullscreen targeted-mouse composition journey, use:
 
 ```sh

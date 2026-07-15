@@ -47,6 +47,7 @@ import type {
   ClipboardTransportResult,
   ClipboardUnavailableReason,
   ClipboardWriteResult,
+  CoordinatedWriteResult,
   CustomClipboardTransport,
   ElementGeometry,
   ElementGeometryFragment,
@@ -58,11 +59,6 @@ import type {
   InputHandlerResult,
   InputRouteDecision,
   TextProps,
-  StaticChildren,
-  StaticProps,
-  StaticSlot,
-  StaticSlotProps,
-  StaticStyle,
   TransformProps,
   NewlineProps,
   Osc52ClipboardTransport,
@@ -95,6 +91,13 @@ import type {
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
+import type {
+  StaticChildren,
+  StaticProps,
+  StaticSlot,
+  StaticSlotProps,
+  StaticStyle,
+} from "@vue-tui/runtime/inline";
 import { useMouseDrag, useMouseEvent, useTextSelection } from "@vue-tui/runtime/fullscreen";
 import type {
   CellDelta,
@@ -278,6 +281,20 @@ useTextSelection(selectionTarget, { pointer: "yes" });
 export type _UseTextSelectionIsFullscreenOnly = typeof import("@vue-tui/runtime").useTextSelection;
 // @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
 export type _UseClipboardIsCommonOnly = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
+// @ts-expect-error Static is exported only from the Inline history subpath.
+export type _StaticIsInlineOnly = typeof import("@vue-tui/runtime").Static;
+// @ts-expect-error StaticChildren is exported only from the Inline history subpath.
+export type _StaticChildrenIsInlineOnly = import("@vue-tui/runtime").StaticChildren;
+// @ts-expect-error StaticProps is exported only from the Inline history subpath.
+export type _StaticPropsIsInlineOnly = import("@vue-tui/runtime").StaticProps;
+// @ts-expect-error StaticSlot is exported only from the Inline history subpath.
+export type _StaticSlotIsInlineOnly = import("@vue-tui/runtime").StaticSlot;
+// @ts-expect-error StaticSlotProps is exported only from the Inline history subpath.
+export type _StaticSlotPropsIsInlineOnly = import("@vue-tui/runtime").StaticSlotProps;
+// @ts-expect-error StaticStyle is exported only from the Inline history subpath.
+export type _StaticStyleIsInlineOnly = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error Common component types are not duplicated on the Inline subpath.
+export type _BoxPropsIsCommonOnly = import("@vue-tui/runtime/inline").BoxProps;
 
 // Prop types carry their component's real, declared props.
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<
@@ -525,15 +542,25 @@ void publicStdin.isRawModeSupported;
 
 expectTypeOf<UseStdoutReturn>().toEqualTypeOf<{
   readonly stdout: NodeJS.WriteStream;
-  readonly write: (data: string) => void;
+  readonly write: (data: string) => CoordinatedWriteResult;
 }>();
 expectTypeOf<ReturnType<typeof useStdout>>().toEqualTypeOf<UseStdoutReturn>();
 
 expectTypeOf<UseStderrReturn>().toEqualTypeOf<{
   readonly stderr: NodeJS.WriteStream;
-  readonly write: (data: string) => void;
+  readonly write: (data: string) => CoordinatedWriteResult;
 }>();
 expectTypeOf<ReturnType<typeof useStderr>>().toEqualTypeOf<UseStderrReturn>();
+
+expectTypeOf<CoordinatedWriteResult>().toEqualTypeOf<
+  | { readonly status: "accepted"; readonly writable: true }
+  | {
+      readonly status: "accepted";
+      readonly writable: false;
+      readonly ready: Promise<void>;
+    }
+  | { readonly status: "blocked"; readonly ready: Promise<void> }
+>();
 
 expectTypeOf<UseAppReturn>().toEqualTypeOf<{
   readonly exit: (errorOrResult?: unknown) => void;

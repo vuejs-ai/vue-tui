@@ -1,12 +1,10 @@
 import BoxSfc from "./components/box.vue";
 import TextSfc from "./components/text.vue";
-import StaticSfc from "./components/static.vue";
 import SpacerSfc from "./components/spacer.vue";
 import NewlineSfc from "./components/newline.vue";
 import type { PublicComponent, PublicLeafComponent } from "./components/with-children.ts";
 import type { BoxProps } from "./components/box-props.ts";
 import type { TextProps } from "./components/text-props.ts";
-import type { StaticChildren, StaticProps, StaticSlot } from "./components/static-props.ts";
 import type { SpacerProps } from "./components/spacer-props.ts";
 import type { NewlineProps } from "./components/newline-props.ts";
 
@@ -47,28 +45,6 @@ export const Spacer = SpacerSfc as unknown as {
   new (): { $props: SpacerProps & { children?: never } };
 };
 export type { SpacerProps } from "./components/spacer-props.ts";
-// Static exposes typed scoped slots: children receive `{ item, index }` with
-// `item` inferred from `items: T[]` (parity with main's static.ts generic cast).
-// `as unknown as` REPLACES the SFC's type rather than intersecting it: a `.vue`
-// with a scoped `<slot>` emits an extra `__VLS_WithSlots` construct signature that
-// bakes a NON-generic `default?: (p: { item: unknown }) => …`. Intersecting (or
-// keeping `typeof StaticSfc` in the target) leaves that competing signature in
-// place and blocks `T` inference (item → any). A clean generic construct signature
-// is all JSX/template resolution needs, and it is exactly the public shape main's
-// defineComponent-based cast produced.
-export const Static = StaticSfc as unknown as {
-  new <T = unknown>(): {
-    $props: StaticProps<T> & { children?: StaticChildren<T> };
-    $slots: { default?: StaticSlot<T> };
-  };
-};
-export type {
-  StaticChildren,
-  StaticProps,
-  StaticSlot,
-  StaticSlotProps,
-  StaticStyle,
-} from "./components/static-props.ts";
 export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
@@ -104,6 +80,7 @@ export { useFocusManager, type UseFocusManagerReturn } from "./composables/useFo
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
+export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 export { useLayoutSize, type UseLayoutSizeReturn } from "./composables/useLayoutSize.ts";
 export { useRenderSession } from "./composables/useRenderSession.ts";
 export type {

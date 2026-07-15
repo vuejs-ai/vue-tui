@@ -10,6 +10,15 @@ import type { TextProps } from "../host/nodes.ts";
 // must fall through to bare text.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
+const foregroundResetColors = new Set(["revert", "initial"]);
+
+export function isForegroundResetColor(color: unknown): boolean {
+  return typeof color === "string" && foregroundResetColors.has(color);
+}
+
+function resetForeground(text: string): string {
+  return chalk.level > 0 ? `\x1b[39m${text}\x1b[39m` : text;
+}
 
 export function applyColor(c: ChalkInstance, color: unknown, bg: boolean): ChalkInstance {
   if (typeof color !== "string") return c;
@@ -117,7 +126,11 @@ export function applyChalk(text: string, props: TextProps): string {
   // different, non-Ink byte sequence for any multi-style Text (G68).
   let s = text;
   if (props.dimColor) s = chalk.dim(s);
-  if (props.color) s = applyColor(chalk, props.color, false)(s);
+  if (props.color) {
+    s = isForegroundResetColor(props.color)
+      ? resetForeground(s)
+      : applyColor(chalk, props.color, false)(s);
+  }
   if (props.backgroundColor) s = applyColor(chalk, props.backgroundColor, true)(s);
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);

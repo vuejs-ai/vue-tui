@@ -110,7 +110,7 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 
 ## Durable evidence
 
-- The first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent) exercises streaming, tool execution, approval, and inline `Static` output, although much of its higher-level interaction behavior is still application code.
+- The first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent) exercises streaming, tool execution, approval, and `@vue-tui/runtime/inline` `Static` output, although much of its higher-level interaction behavior is still application code.
 - [mo](https://github.com/liangmiQwQ/mo/tree/6bea467a6995f4912e809b417b5c56a3964cc556) is a real inline vue-tui consumer whose project selector exercises search, filtering, preview, selection, and shell handoff.
 - [machud](https://github.com/hyf0/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36) is a real full-screen vue-tui consumer that exercises layout, resize, input, HMR, and self-contained distribution.
 - [Herdr](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6) demonstrates the terminal-workspace subscenario with tabs, panes, real PTYs, persistent sessions, and agent state. Its Ratatui UI, `portable-pty` dependency, and vendored `libghostty-vt` keep the visible application framework and terminal-session engine as distinct responsibilities.

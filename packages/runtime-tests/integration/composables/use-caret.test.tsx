@@ -10,13 +10,13 @@ import { describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import {
   Box,
-  Static,
   Text,
   useCaret,
   useFocus,
   type UseCaretReturn,
   type UseFocusReturn,
 } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 
 describe("useCaret", () => {
   test.each(["inline", "fullscreen"] as const)(

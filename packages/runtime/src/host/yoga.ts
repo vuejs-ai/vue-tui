@@ -8,6 +8,7 @@ import type {
   TuiStatic,
   TuiText,
   TuiTransform,
+  TextProps,
 } from "./nodes.ts";
 import {
   flattenLeaves,
@@ -689,33 +690,60 @@ export function applyYogaProp(
 // --- text measure binding ------------------------------------------------
 
 export function bindTextMeasure(text: TuiText): void {
+  let cache:
+    | {
+        readonly revision: number;
+        readonly availableWidth: number;
+        readonly wrap: TextProps["wrap"];
+        readonly result: { readonly width: number; readonly height: number };
+      }
+    | undefined;
   text.yoga.setMeasureFunc((availableWidth) => {
+    const wrap = text.props.wrap;
+    if (
+      cache?.revision === text.textRevision &&
+      cache.availableWidth === availableWidth &&
+      cache.wrap === wrap
+    ) {
+      return cache.result;
+    }
     const raw = flattenLeaves(text);
     text.measuredCache = raw;
 
     // Empty text (no children or all-null children) — return zero dimensions
     // so yoga doesn't crash trying to measure an empty string.
-    if (raw === "") return { width: 0, height: 0 };
+    if (raw === "") {
+      const result = { width: 0, height: 0 };
+      cache = { revision: text.textRevision, availableWidth, wrap, result };
+      return result;
+    }
 
     const natural = measureTextNatural(raw);
 
     // Text fits into container, no need to wrap.
-    if (natural.width <= availableWidth) return natural;
+    if (natural.width <= availableWidth) {
+      cache = { revision: text.textRevision, availableWidth, wrap, result: natural };
+      return natural;
+    }
 
     // When <Box> is shrinking child nodes, yoga asks if we can fit this text
     // node in a sub-1px space. Return the natural size to tell yoga "no, I
     // need my full width". This matches Ink's behavior and prevents text from
     // wrapping to infinite height when given fractional widths.
     if (natural.width >= 1 && availableWidth > 0 && availableWidth < 1) {
+      cache = { revision: text.textRevision, availableWidth, wrap, result: natural };
       return natural;
     }
 
-    const wrapped = wrapText(raw, availableWidth, text.props.wrap ?? "wrap");
-    return measureTextNatural(wrapped.join("\n"));
+    const wrapped = wrapText(raw, availableWidth, wrap ?? "wrap");
+    const result = measureTextNatural(wrapped.join("\n"));
+    cache = { revision: text.textRevision, availableWidth, wrap, result };
+    return result;
   });
 }
 
 export function markTextDirty(text: TuiText): void {
+  text.textRevision++;
   text.yoga.markDirty();
 }
 

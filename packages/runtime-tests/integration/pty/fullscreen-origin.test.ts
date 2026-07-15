@@ -5,7 +5,6 @@ import term from "./helpers/term.ts";
 const { Terminal } = headless;
 
 type SurfaceScenario =
-  | "static"
   | "stdout"
   | "stderr"
   | "console"
@@ -81,7 +80,6 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
     expect(ps.output).toContain("\x1b[?25l\x1b[2J\x1b[H");
 
     const sideChannels: Partial<Record<SurfaceScenario, string>> = {
-      static: "HISTORY",
       stdout: "LOG",
       stderr: "ERROR",
       console: "CONSOLE",
@@ -96,17 +94,45 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
     ps.write("\x1b[<0;1;1M\x1b[<0;1;1m");
     await ps.waitForOutput((output) => output.includes("__CLICKED__:clicked"));
     await ps.waitForExit();
-    if (scenario === "static") {
-      expect(ps.output.match(/\[vue-tui\] <Static> output/g)?.length).toBe(1);
-    }
     exited = true;
   } finally {
     if (!exited) ps.kill("SIGTERM");
   }
 }
 
-test("fullscreen Static output does not move the live surface away from its hit map", async () => {
-  await assertStableFullscreenSurface("static");
+test("fullscreen Static rejects after restoring a setup-owned terminal surface", async () => {
+  const ps = term("fullscreen-origin", ["8", "static"]);
+  let exited = false;
+
+  try {
+    await ps.waitForOutput((output) => output.includes("__STATIC_REJECTED__:"));
+    await ps.waitForExit();
+    exited = true;
+
+    const output = ps.output;
+    const enterIndex = output.indexOf("\x1b[?1049h");
+    const exitIndex = output.lastIndexOf("\x1b[?1049l");
+    const pasteEnableIndex = output.indexOf("\x1b[?2004h");
+    const pasteDisableIndex = output.lastIndexOf("\x1b[?2004l");
+    const showCursorIndex = output.lastIndexOf("\x1b[?25h");
+    const reportIndex = output.indexOf(
+      "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface",
+    );
+    const markerIndex = output.indexOf("__STATIC_REJECTED__:");
+
+    expect(enterIndex).toBeGreaterThanOrEqual(0);
+    expect(exitIndex).toBeGreaterThan(enterIndex);
+    expect(pasteEnableIndex).toBeGreaterThan(enterIndex);
+    expect(pasteDisableIndex).toBeGreaterThan(pasteEnableIndex);
+    expect(showCursorIndex).toBeGreaterThan(exitIndex);
+    expect(reportIndex).toBeGreaterThan(Math.max(exitIndex, pasteDisableIndex, showCursorIndex));
+    expect(markerIndex).toBeGreaterThan(reportIndex);
+    expect(output).not.toContain("HISTORY");
+    expect(output).not.toContain("BUTTON");
+    expect(output).not.toContain("output is not retained in fullscreen mode");
+  } finally {
+    if (!exited) ps.kill("SIGTERM");
+  }
 });
 
 test("fullscreen useStdout output does not move the live surface away from its hit map", async () => {

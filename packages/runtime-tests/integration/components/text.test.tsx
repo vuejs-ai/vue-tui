@@ -1,7 +1,7 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { renderToString, Box, Text } from "@vue-tui/runtime";
+import { renderToString, Box, Text, Transform } from "@vue-tui/runtime";
 import chalk from "chalk";
 import stripAnsi from "strip-ansi";
 import ansiEscapes from "ansi-escapes";
@@ -47,6 +47,144 @@ test("text with standard color", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe(chalk.green("Test"));
+});
+
+type TestForeground = "default" | "red" | "green" | "blue" | "other";
+
+function foregroundCharacters(
+  value: string,
+): Array<{ character: string; foreground: TestForeground }> {
+  const result: Array<{ character: string; foreground: TestForeground }> = [];
+  const sgr = /\x1b\[([0-9;]*)m/g;
+  let foreground: TestForeground = "default";
+  let cursor = 0;
+
+  const append = (text: string) => {
+    for (const character of text) {
+      if (character !== "\n") result.push({ character, foreground });
+    }
+  };
+
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    append(value.slice(cursor, match.index));
+    for (const parameter of (match[1] || "0").split(";").map(Number)) {
+      if (parameter === 0 || parameter === 39) foreground = "default";
+      else if (parameter === 31) foreground = "red";
+      else if (parameter === 32) foreground = "green";
+      else if (parameter === 34) foreground = "blue";
+      else if ((parameter >= 30 && parameter <= 37) || parameter === 38) foreground = "other";
+    }
+    cursor = match.index + match[0].length;
+  }
+  append(value.slice(cursor));
+  return result;
+}
+
+test.each(["revert", "initial"] as const)(
+  'nested Text color="%s" keeps terminal-default foreground through wrapping',
+  async (resetColor) => {
+    const { lastFrame } = await render(
+      defineComponent(() => () => (
+        <Text>
+          <Text color="red">
+            AA<Text color={resetColor}>BBB</Text>CC
+          </Text>
+          <Text color="blue">Z</Text>
+        </Text>
+      )),
+      { columns: 4 },
+    );
+
+    const frame = lastFrame({ trimLines: true });
+    expect(stripAnsi(frame)).toBe("AABB\nBCCZ");
+    expect(foregroundCharacters(frame)).toEqual([
+      { character: "A", foreground: "red" },
+      { character: "A", foreground: "red" },
+      { character: "B", foreground: "default" },
+      { character: "B", foreground: "default" },
+      { character: "B", foreground: "default" },
+      { character: "C", foreground: "red" },
+      { character: "C", foreground: "red" },
+      { character: "Z", foreground: "blue" },
+    ]);
+  },
+);
+
+test("foreground reset preserves literal private-use characters and nested reset semantics", async () => {
+  const privateUse = "\uE000\uE001";
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text color="red">
+        A{privateUse}
+        <Text color="revert">
+          B<Text color="green">C</Text>
+          <Text color="initial">D</Text>E
+        </Text>
+        F
+      </Text>
+    )),
+    { columns: 100 },
+  );
+
+  const frame = lastFrame();
+  expect(stripAnsi(frame)).toBe(`A${privateUse}BCDEF`);
+  expect(foregroundCharacters(frame)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "\uE000", foreground: "red" },
+    { character: "\uE001", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "C", foreground: "green" },
+    { character: "D", foreground: "default" },
+    { character: "E", foreground: "default" },
+    { character: "F", foreground: "red" },
+  ]);
+});
+
+test("a Transform preserves literal private-use text while carrying a nested foreground reset", async () => {
+  const privateUse = "\uE000\uE001";
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text color="red">
+        A
+        <Transform transform={(value) => value + privateUse}>
+          <Text color="revert">B</Text>
+        </Transform>
+        C
+      </Text>
+    )),
+    { columns: 100 },
+  );
+
+  const frame = lastFrame();
+  expect(stripAnsi(frame)).toBe(`AB${privateUse}C`);
+  expect(foregroundCharacters(frame)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "\uE000", foreground: "default" },
+    { character: "\uE001", foreground: "default" },
+    { character: "C", foreground: "red" },
+  ]);
+});
+
+test("renderToString preserves nested foreground reset through a narrow wrap", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="red">
+        AA<Text color="revert">BBB</Text>CC
+      </Text>
+    )),
+    { columns: 4 },
+  );
+  expect(stripAnsi(output)).toBe("AABB\nBCC");
+  expect(foregroundCharacters(output)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "A", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "C", foreground: "red" },
+    { character: "C", foreground: "red" },
+  ]);
 });
 
 test("text with dim+bold", async () => {

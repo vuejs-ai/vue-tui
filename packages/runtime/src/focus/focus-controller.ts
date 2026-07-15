@@ -15,6 +15,7 @@ import type {
 } from "../io/input-route-runtime.ts";
 import type { NormalizedInputFact } from "../io/normalized-input.ts";
 import type { RenderedTargetTransactionHost } from "../rendered-target.ts";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 import {
   createInternalFocusPolicy,
   type InternalFocusCheckpoint,
@@ -711,12 +712,14 @@ export function createInternalFocusController(
           targetRecords.add(record);
           targetByHandle.set(handle, record);
           targetByPolicy.set(record.policy, record);
+          changeRuntimeResource("focusTargets", 1);
           return handle;
         },
         () => {
           record.disposed = true;
           targetRecords.delete(record);
           targetByPolicy.delete(record.policy);
+          changeRuntimeResource("focusTargets", -1);
         },
       );
       return created;
@@ -748,6 +751,7 @@ export function createInternalFocusController(
         record.acceptedHost = null;
         targetRecords.delete(record);
         targetByPolicy.delete(record.policy);
+        changeRuntimeResource("focusTargets", -1);
         disposeTargetDependents(record);
       });
     },
@@ -781,12 +785,14 @@ export function createInternalFocusController(
           scopeRecords.add(record);
           scopeByHandle.set(handle, record);
           scopeByPolicy.set(record.policy, record);
+          changeRuntimeResource("focusScopes", 1);
           return handle;
         },
         () => {
           record.disposed = true;
           scopeRecords.delete(record);
           scopeByPolicy.delete(record.policy);
+          changeRuntimeResource("focusScopes", -1);
         },
       );
     },
@@ -826,6 +832,8 @@ export function createInternalFocusController(
           scopeRecords.delete(scope);
           scopeByPolicy.delete(scope.policy);
         }
+        changeRuntimeResource("focusTargets", -removedTargets.length);
+        changeRuntimeResource("focusScopes", -removedScopes.length);
         for (const target of removedTargets) disposeTargetDependents(target);
       });
     },
@@ -1028,6 +1036,8 @@ export function createInternalFocusController(
       });
       effectiveTargetRef.value = null;
       for (const target of targetRecords) disposeTargetDependents(target);
+      changeRuntimeResource("focusTargets", -targetRecords.size);
+      changeRuntimeResource("focusScopes", -scopeRecords.size);
       targetByPolicy.clear();
       scopeByPolicy.clear();
       targetRecords.clear();

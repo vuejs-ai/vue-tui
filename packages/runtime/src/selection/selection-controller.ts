@@ -19,6 +19,7 @@ import {
   type InternalSelectionRange,
   type InternalSelectionSnapshot,
 } from "./selection-policy.ts";
+import { changeRuntimeResource } from "../resource-tracker.ts";
 
 export interface InternalTextSelectionRegistration {
   readonly key: object;
@@ -228,6 +229,7 @@ export function createInternalTextSelectionController(
         disposed: false,
       };
       owners.add(owner);
+      changeRuntimeResource("selectionOwners", 1);
       refresh(owner);
 
       return {
@@ -321,6 +323,7 @@ export function createInternalTextSelectionController(
           if (owner.disposed) return;
           owner.disposed = true;
           owners.delete(owner);
+          changeRuntimeResource("selectionOwners", -1);
           if (activeOwner === owner) activeOwner = null;
           if (owner.target && ownerByTarget.get(owner.target) === owner) {
             ownerByTarget.delete(owner.target);
@@ -445,6 +448,7 @@ export function createInternalTextSelectionController(
       if (disposed) return;
       disposed = true;
       activeFrame = null;
+      changeRuntimeResource("selectionOwners", -owners.size);
       for (const owner of owners) {
         owner.disposed = true;
         owner.target = null;

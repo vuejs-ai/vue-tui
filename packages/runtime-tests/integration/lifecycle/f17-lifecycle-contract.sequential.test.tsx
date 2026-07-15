@@ -324,24 +324,25 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
   failPayload = false;
 
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) => chunk.includes("COORDINATED_FAILURE"));
-  const restoreIndex = failureWrites.findIndex(
-    (chunk, index) => index > payloadIndex && chunk.includes("ACTIVE_FRAME"),
-  );
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("COORDINATED_FAILURE");
+  const restoreIndex = failureTransaction.indexOf("ACTIVE_FRAME", payloadIndex);
+  const endIndex = failureTransaction.indexOf(esu, restoreIndex);
   const observed = {
     error: writeError instanceof Error ? writeError.message : undefined,
-    beganSynchronizedOutput: failureWrites.includes(bsu),
-    endedSynchronizedOutput: failureWrites.includes(esu),
+    beganBeforePayload: beginIndex >= 0 && beginIndex < payloadIndex,
     restoredFrameAfterPayload: restoreIndex > payloadIndex,
+    endedAfterRestore: endIndex > restoreIndex,
   };
 
   app.unmount();
 
   expect(observed).toEqual({
     error: "coordinated data failed",
-    beganSynchronizedOutput: true,
-    endedSynchronizedOutput: true,
+    beganBeforePayload: true,
     restoredFrameAfterPayload: true,
+    endedAfterRestore: true,
   });
 });
 
@@ -355,7 +356,7 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   stdout.write = ((...args: unknown[]) => {
     const chunk = String(args[0]);
     writes.push(chunk);
-    if (failNextResizeBoundary && chunk === "\x1b[?25l") {
+    if (failNextResizeBoundary && chunk.includes("\x1b[?25l")) {
       failNextResizeBoundary = false;
       throw new Error("resize boundary failed");
     }
@@ -381,12 +382,14 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   await expect(exited).rejects.toThrow("resize boundary failed");
 
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) => chunk === "\x1b[?25l");
-  const esuIndex = failureWrites.findIndex((chunk, index) => index > payloadIndex && chunk === esu);
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("\x1b[?25l", beginIndex);
+  const esuIndex = failureTransaction.indexOf(esu, payloadIndex);
   app.unmount();
 
   expect({
-    beganSynchronizedOutput: failureWrites.includes(bsu),
+    beganSynchronizedOutput: beginIndex >= 0 && beginIndex < payloadIndex,
     closedAfterFailure: esuIndex > payloadIndex,
   }).toEqual({
     beganSynchronizedOutput: true,
@@ -436,14 +439,14 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
   failNextFrame = true;
   app.unmount();
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) =>
-    chunk.includes("ORDINARY_RENDER_FAILURE"),
-  );
-  const esuIndex = failureWrites.findIndex((chunk, index) => index > payloadIndex && chunk === esu);
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("ORDINARY_RENDER_FAILURE", beginIndex);
+  const esuIndex = failureTransaction.indexOf(esu, payloadIndex);
 
   expect({
     failedRenderAttempts,
-    beganSynchronizedOutput: failureWrites.includes(bsu),
+    beganSynchronizedOutput: beginIndex >= 0 && beginIndex < payloadIndex,
     closedAfterFailure: esuIndex > payloadIndex,
   }).toEqual({
     failedRenderAttempts: 1,

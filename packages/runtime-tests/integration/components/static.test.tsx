@@ -2,7 +2,8 @@ import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, onUnmounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render, type ContentFrame } from "@vue-tui/testing";
-import { Box, Text, Static, Spacer, createApp } from "@vue-tui/runtime";
+import { Box, Text, Spacer, createApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 
 function joinedOutput(frames: readonly ContentFrame[]): string {
   return frames.map((frame) => frame.staticOutput + frame.dynamic).join("");
@@ -419,49 +420,72 @@ test("written Static items unmount their components (Ink parity)", async () => {
   unmount();
 });
 
-// Ink reference: Static resets `index` to `items.length` on every length change
-// (`useLayoutEffect(() => setIndex(items.length), [items.length])`), so the cursor
-// can DECREASE. vue-tui must mirror this. A monotonic cursor (only-increase) drops
-// items after a shrink-then-grow: [A,B] writes (cursor→2); shrink to [A] (Ink resets
-// cursor→1); grow to [A,C] renders slice(1)=[C] and writes C. With a monotonic
-// cursor, slice(2)=[] and C is silently never painted.
-test("Static resets cursor on shrink so later items still paint (Ink parity)", async () => {
-  const items = shallowRef<string[]>(["A", "B"]);
-
+test.each([
+  ["shrinking it", (first: object, _second: object) => [first]],
+  ["replacing a committed item", (first: object, _second: object) => [first, { label: "C" }]],
+  ["reordering committed items", (first: object, second: object) => [second, first]],
+] as const)("Static rejects %s after output acceptance", async (_name, mutate) => {
+  const first = { label: "A" };
+  const second = { label: "B" };
+  const items = shallowRef([first, second]);
   const App = defineComponent(() => () => (
     <Box>
       <Static items={items.value}>
         {{
-          default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
+          default: ({ item }: { item: { label: string } }) => (
+            <Text key={item.label}>{item.label}</Text>
+          ),
         }}
       </Static>
       <Text>[live]</Text>
     </Box>
   ));
+  const result = await render(App);
+  const exited = result.waitUntilExit();
 
-  const { frames } = await render(App);
+  try {
+    expect(result.frames.map((frame) => frame.staticOutput).join("")).toBe("A\nB\n");
 
-  // Let A and B write (cursor advances to 2).
-  await nextTick();
-  await new Promise((r) => setTimeout(r, 50));
-  await nextTick();
-  expect(joinedOutput(frames)).toContain("A");
-  expect(joinedOutput(frames)).toContain("B");
+    items.value = mutate(first, second) as Array<{ label: string }>;
+    await nextTick();
+    await result.waitUntilRenderFlush();
 
-  // Shrink to [A]. Ink resets the cursor to items.length (1); no re-paint of A.
-  items.value = ["A"];
-  await nextTick();
-  await new Promise((r) => setTimeout(r, 50));
-  await nextTick();
+    await expect(exited).rejects.toThrow(
+      "<Static> items must preserve every committed prefix item by Object.is identity",
+    );
+    expect(result.frames.map((frame) => frame.staticOutput).join("")).toBe("A\nB\n");
+  } finally {
+    result.dispose();
+  }
+});
 
-  // Grow to [A, C]. With Ink-parity cursor reset, slice(1)=[C] paints C.
-  // With the monotonic bug, slice(2)=[] and C is dropped forever.
-  items.value = ["A", "C"];
-  await nextTick();
-  await new Promise((r) => setTimeout(r, 50));
-  await nextTick();
+test("Static accepts a fresh array with the same committed identities and a new tail", async () => {
+  const first = { label: "A" };
+  const second = { label: "B" };
+  const items = shallowRef([first]);
+  const App = defineComponent(() => () => (
+    <Box>
+      <Static items={items.value}>
+        {{
+          default: ({ item }: { item: { label: string } }) => <Text>{item.label}</Text>,
+        }}
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+  const result = await render(App);
 
-  expect(joinedOutput(frames)).toContain("C");
+  try {
+    first.label = "mutated without rewriting history";
+    items.value = [first, second];
+    await nextTick();
+    await result.waitUntilRenderFlush();
+
+    const transcript = result.frames.map((frame) => frame.staticOutput).join("");
+    expect(transcript).toBe("A\nB\n");
+  } finally {
+    result.dispose();
+  }
 });
 
 // Ink reference: src/components/Static.tsx merges

@@ -29,7 +29,9 @@ async function waitForWrite(writes: readonly string[], expected: string): Promis
     await nextTick();
     await flushInput();
   }
-  throw new Error(`Timed out waiting for terminal write ${JSON.stringify(expected)}`);
+  throw new Error(
+    `Timed out waiting for terminal write ${JSON.stringify(expected)}; writes=${JSON.stringify(writes)}`,
+  );
 }
 
 test("SGR mouse enable restores the terminal when stdout throws after the write", async () => {
@@ -96,6 +98,7 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
     }).toEqual({ isRaw: false, refBalance: 0, dataListeners: 0 });
   } finally {
     app.unmount();
+    await app.waitUntilExit().catch(() => {});
     if (previousTerm === undefined) delete process.env["TERM"];
     else process.env["TERM"] = previousTerm;
     stdin.destroy();
