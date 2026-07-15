@@ -1,5 +1,6 @@
 import type { PercentileSummary } from "./metrics.ts";
 import type { CapacityMemorySample, CapacityMemoryTrend } from "./memory.ts";
+import type { capacityWorkerV8Flags } from "./worker-config.ts";
 import {
   capacityManifest,
   type CapacityJourneyId,
@@ -23,6 +24,7 @@ export interface CapacityWorkerEvidence {
   readonly repetitions: number;
   readonly maxFps: number;
   readonly volume?: CapacityVolume;
+  readonly v8Flags: typeof capacityWorkerV8Flags;
   readonly measured: readonly JourneyExecution[];
   readonly memory: readonly CapacityMemorySample[];
   readonly memoryTrend: CapacityMemoryTrend;

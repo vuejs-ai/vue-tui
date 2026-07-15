@@ -11,6 +11,7 @@ import {
 } from "./memory.ts";
 import type { CapacityJourneyId, CapacityVolume, JourneyExecution } from "./workloads.tsx";
 import { summarize } from "./metrics.ts";
+import { assertCapacityWorkerV8Flags, capacityWorkerV8Flags } from "./worker-config.ts";
 
 interface WorkerOptions {
   readonly journey: CapacityJourneyId;
@@ -28,6 +29,7 @@ interface WorkerEvidence {
   readonly repetitions: number;
   readonly maxFps: number;
   readonly volume?: CapacityVolume;
+  readonly v8Flags: typeof capacityWorkerV8Flags;
   readonly measured: readonly JourneyExecution[];
   readonly memory: readonly CapacityMemorySample[];
   readonly memoryTrend: CapacityMemoryTrend;
@@ -71,6 +73,7 @@ function parseOptions(): WorkerOptions {
 }
 
 const options = parseOptions();
+assertCapacityWorkerV8Flags(process.execArgv);
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const evidenceDirectory = await mkdtemp(path.join(tmpdir(), "vue-tui-capacity-"));
 const server = await createServer({
@@ -163,6 +166,7 @@ try {
     repetitions: options.repetitions,
     maxFps: options.maxFps,
     ...(options.volume === undefined ? {} : { volume: options.volume }),
+    v8Flags: capacityWorkerV8Flags,
     measured: Object.freeze(measured),
     memory: Object.freeze(memory),
     memoryTrend: memoryTrend(memory),

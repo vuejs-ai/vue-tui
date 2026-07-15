@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { capacityManifest, type CapacityJourneyId, type CapacityVolume } from "./workloads.tsx";
 import { assessCapacityRun, capacityThresholds, type CapacityWorkerEvidence } from "./policy.ts";
 import { selectCapacityRunSpecs } from "./run-selection.ts";
+import { capacityWorkerV8Flags } from "./worker-config.ts";
 
 interface RunConfiguration {
   readonly mode: "check" | "measure";
@@ -71,6 +72,7 @@ async function runWorker(
 ): Promise<CapacityWorkerEvidence> {
   const worker = fileURLToPath(new URL("./worker.ts", import.meta.url));
   const args = [
+    ...capacityWorkerV8Flags,
     "--expose-gc",
     "--import=tsx",
     worker,
@@ -142,10 +144,11 @@ for (const spec of selectCapacityRunSpecs(requestedJourneyArgument())) {
 }
 
 const evidence = Object.freeze({
-  schemaVersion: 3,
+  schemaVersion: 4,
   recordedAt: new Date().toISOString(),
   mode,
   thresholds: capacityThresholds,
+  workerV8Flags: capacityWorkerV8Flags,
   environment: Object.freeze({
     commit: gitText("rev-parse", "HEAD"),
     dirty: gitText("status", "--porcelain").length > 0,

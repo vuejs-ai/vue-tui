@@ -4,6 +4,7 @@ import { memoryTrend, retainedHeapUsed, type CapacityMemorySample } from "./memo
 import { nearestRank } from "./metrics.ts";
 import { assessCapacityRun, type CapacityWorkerEvidence } from "./policy.ts";
 import { capacityRunSpecs, selectCapacityRunSpecs } from "./run-selection.ts";
+import { capacityWorkerV8Flags } from "./worker-config.ts";
 import { capacityManifest, type CapacityJourneyId, type JourneyExecution } from "./workloads.tsx";
 
 test("capacity manifest keeps the fixed J1-J6 workload", () => {
@@ -121,7 +122,10 @@ test("the capacity runner executes both J6 volumes at the frozen repetition coun
   expect(runnerSource).toContain("repetitions: capacityManifest[journey].repetitions");
   expect(runnerSource).toContain("warmups: 3");
   expect(runnerSource).toContain("repetitions: 10");
-  expect(runnerSource).toContain("schemaVersion: 3");
+  expect(runnerSource).toContain("...capacityWorkerV8Flags");
+  expect(runnerSource).toContain("workerV8Flags: capacityWorkerV8Flags");
+  expect(runnerSource).toContain("schemaVersion: 4");
+  expect(capacityWorkerV8Flags).toEqual(["--invocation-count-for-feedback-allocation=1"]);
 });
 
 test("capacity heap samples exclude retained execution evidence", () => {
@@ -226,6 +230,7 @@ function evidence(
     warmups: 3,
     repetitions: 10,
     maxFps: 30,
+    v8Flags: capacityWorkerV8Flags,
     measured: [execution],
     memory: [],
     memoryTrend: {
