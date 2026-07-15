@@ -356,6 +356,10 @@ export function createInternalTextSelectionController(
           projectedRange: null,
         });
       }
+      // Most applications never register selectable text. Do not make every
+      // paint allocate and settle an otherwise-empty transactional frame; the
+      // absence of a frame also lets paint skip its selection provenance grid.
+      if (frameOwners.size === 0) return undefined;
       let settled = false;
       const settle = (): boolean => {
         if (settled) return false;

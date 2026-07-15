@@ -92,6 +92,9 @@ interface TraceCell {
 interface LocalTraceCell extends TraceCell {
   readonly localX: number;
   readonly localY: number;
+}
+
+interface ProjectedLocalTraceCell extends LocalTraceCell {
   readonly visible: boolean;
 }
 
@@ -270,23 +273,47 @@ export interface DeriveTextGeometryInput {
   readonly geometryRequested?: boolean;
 }
 
-function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometryResult {
+type PrepareTextLayoutInput = Omit<
+  DeriveTextGeometryInput,
+  "surfaceOrigin" | "clip" | "geometryRequested"
+>;
+
+interface TextLayoutBase {
+  readonly virtualTargets: readonly TuiVirtualText[];
+  readonly selectionKeys: readonly object[];
+}
+
+interface UnavailableTextLayout extends TextLayoutBase {
+  readonly kind: "unavailable";
+}
+
+interface TruncatedTextLayout extends TextLayoutBase {
+  readonly kind: "truncated";
+  readonly actualRows: readonly string[];
+}
+
+interface MappedTextLayout extends TextLayoutBase {
+  readonly kind: "mapped";
+  readonly ids: ReadonlyMap<TuiText | TuiVirtualText, number>;
+  readonly metas: ReadonlyMap<number, OwnerMeta>;
+  readonly traces: ReadonlyMap<number, OwnerTrace>;
+  readonly boundary: ReadonlyMap<number, InternalCellPoint>;
+  readonly unavailableOwners: ReadonlySet<number>;
+  readonly localSelection: ReadonlyMap<object, InternalTextSelectionTrace | null>;
+}
+
+type PreparedTextLayout = UnavailableTextLayout | TruncatedTextLayout | MappedTextLayout;
+
+function prepareTextLayout(input: PrepareTextLayoutInput): PreparedTextLayout {
   const virtualTargets = collectVirtualTexts(input.node);
-  const unavailableVirtual = () =>
-    new Map<TuiVirtualText, InternalElementGeometry>(
-      virtualTargets.map((target) => [target, { status: "unavailable" }]),
-    );
-  const unavailableSelection = () =>
-    new Map<object, InternalTextSelectionTrace | null>(
-      (input.selectionTargets ?? []).map((target) => [target.key, null]),
-    );
+  const selectionKeys = (input.selectionTargets ?? []).map((target) => target.key);
+  const unavailable = (): UnavailableTextLayout => ({
+    kind: "unavailable",
+    virtualTargets,
+    selectionKeys,
+  });
   if (input.provenanceAvailable === false || containsTransform(input.node)) {
-    return {
-      topCaretSlots: null,
-      topFragments: null,
-      virtual: unavailableVirtual(),
-      selection: unavailableSelection(),
-    };
+    return unavailable();
   }
 
   const owners: Array<TuiText | TuiVirtualText> = [input.node, ...virtualTargets];
@@ -311,12 +338,7 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
   const plain = segments.map((segment) => segment.text).join("");
   const actualRows = input.wrapped.map(stripAnsi);
   if (plain !== stripAnsi(input.renderedText)) {
-    return {
-      topCaretSlots: null,
-      topFragments: null,
-      virtual: unavailableVirtual(),
-      selection: unavailableSelection(),
-    };
+    return unavailable();
   }
 
   const truncating =
@@ -326,10 +348,10 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
     input.wrapMode === "truncate-end";
   if (truncating) {
     return {
-      topCaretSlots: directCaretSlots(actualRows, input.surfaceOrigin, input.clip),
-      topFragments: null,
-      virtual: unavailableVirtual(),
-      selection: unavailableSelection(),
+      kind: "truncated",
+      virtualTargets,
+      selectionKeys,
+      actualRows,
     };
   }
 
@@ -378,8 +400,8 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
     }
   };
   const mappedSourceCells = new Map<number, TraceCell>();
-  boundary.set(0, { ...input.surfaceOrigin });
-  recordSelectionStop(0, { ...input.surfaceOrigin });
+  boundary.set(0, { x: 0, y: 0 });
+  recordSelectionStop(0, { x: 0, y: 0 });
   let sourceIndex = 0;
   let mismatch = false;
   for (const [rowIndex, row] of actualRows.entries()) {
@@ -395,7 +417,7 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
         mismatch = true;
         break;
       }
-      const start = { x: input.surfaceOrigin.x + column, y: input.surfaceOrigin.y + rowIndex };
+      const start = { x: column, y: rowIndex };
       if (!boundary.has(candidate.start)) boundary.set(candidate.start, start);
       recordSelectionStop(candidate.start, start);
       if (candidate.width > 0) {
@@ -413,7 +435,7 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
         }
         column += candidate.width;
       }
-      const end = { x: input.surfaceOrigin.x + column, y: input.surfaceOrigin.y + rowIndex };
+      const end = { x: column, y: rowIndex };
       boundary.set(candidate.end, end);
       recordSelectionStop(candidate.end, end);
       sourceIndex++;
@@ -421,19 +443,16 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
     if (mismatch) break;
     const newline = source.graphemes[sourceIndex];
     if (newline?.text === "\n") {
-      const nextRow = { x: input.surfaceOrigin.x, y: input.surfaceOrigin.y + rowIndex + 1 };
+      const nextRow = { x: 0, y: rowIndex + 1 };
       for (const owner of newline.owners) {
         if (unavailableOwners.has(owner)) continue;
         const trace = traces.get(owner)!;
         if ((trace.rows.get(rowIndex)?.length ?? 0) === 0 && !trace.origins.has(rowIndex)) {
-          trace.origins.set(rowIndex, input.surfaceOrigin.x + column);
+          trace.origins.set(rowIndex, column);
         }
         trace.origins.set(rowIndex + 1, nextRow.x);
       }
-      const newlineStart = {
-        x: input.surfaceOrigin.x + column,
-        y: input.surfaceOrigin.y + rowIndex,
-      };
+      const newlineStart = { x: column, y: rowIndex };
       boundary.set(newline.start, newlineStart);
       recordSelectionStop(newline.start, newlineStart);
       boundary.set(newline.end, nextRow);
@@ -442,25 +461,20 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
     }
   }
   if (mismatch || sourceIndex !== source.graphemes.length) {
-    return {
-      topCaretSlots: null,
-      topFragments: null,
-      virtual: unavailableVirtual(),
-      selection: unavailableSelection(),
-    };
+    return unavailable();
   }
 
   const topTrace = traces.get(0)!;
   for (const rowIndex of actualRows.keys()) {
     if (actualRows[rowIndex] === "" && !topTrace.origins.has(rowIndex)) {
-      topTrace.origins.set(rowIndex, input.surfaceOrigin.x);
+      topTrace.origins.set(rowIndex, 0);
     }
   }
 
   for (const meta of metas.values()) {
     if (meta.start !== meta.end || unavailableOwners.has(meta.id)) continue;
-    const origin = boundary.get(meta.start) ?? input.surfaceOrigin;
-    traces.get(meta.id)!.origins.set(origin.y - input.surfaceOrigin.y, origin.x);
+    const origin = boundary.get(meta.start) ?? { x: 0, y: 0 };
+    traces.get(meta.id)!.origins.set(origin.y, origin.x);
   }
 
   for (const trace of traces.values()) {
@@ -477,7 +491,6 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
           ...cell,
           localX,
           localY,
-          visible: glyphVisible(cell, input.clip),
         };
         localCells.push(localCell);
         trace.localBySurface.set(surfaceKey(cell.surfaceX, cell.surfaceY), {
@@ -493,11 +506,8 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
       trace.localRows.set(localY, localCells);
       trace.surfaceRowByLocal.set(localY, surfaceRow);
       const originX = cells[0]?.surfaceX ?? trace.origins.get(surfaceRow);
-      if (
-        originX !== undefined &&
-        !trace.localBySurface.has(surfaceKey(originX, input.surfaceOrigin.y + surfaceRow))
-      ) {
-        trace.localBySurface.set(surfaceKey(originX, input.surfaceOrigin.y + surfaceRow), {
+      if (originX !== undefined && !trace.localBySurface.has(surfaceKey(originX, surfaceRow))) {
+        trace.localBySurface.set(surfaceKey(originX, surfaceRow), {
           x: 0,
           y: localY,
         });
@@ -505,130 +515,7 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
     }
   }
 
-  const geometryByOwner = new Map<TuiText | TuiVirtualText, InternalElementGeometry>();
-  const slotsByOwner = new Map<TuiText | TuiVirtualText, InternalCaretSlot[]>();
-  let topFragments: readonly InternalGeometryFragment[] | null = [];
-  for (const trace of traces.values()) {
-    if (unavailableOwners.has(trace.meta.id)) {
-      geometryByOwner.set(trace.meta.node, { status: "unavailable" });
-      if (trace.meta.node.type === "tui-text") topFragments = null;
-      continue;
-    }
-    const fragments: InternalGeometryFragment[] = [];
-    const slots = new Map<string, InternalCaretSlot>();
-    for (const [localY, cells] of trace.localRows) {
-      if (cells.length === 0) {
-        // Only structurally empty Text or an explicit empty newline row creates
-        // an insertion origin. A non-empty zero-width grapheme creates no cell.
-        const surfaceRow = trace.surfaceRowByLocal.get(localY);
-        if (surfaceRow === undefined) continue;
-        const surface = {
-          x: trace.origins.get(surfaceRow)!,
-          y: input.surfaceOrigin.y + surfaceRow,
-        };
-        slots.set(`0:${localY}`, {
-          local: { x: 0, y: localY },
-          surface,
-          visible: pointVisible(surface, input.clip),
-        });
-        continue;
-      }
-
-      let run: LocalTraceCell[] = [];
-      const finishRun = () => {
-        if (run.length === 0) return;
-        const first = run[0]!;
-        const last = run.at(-1)!;
-        const width = last.localX + last.width - first.localX;
-        const surface: InternalCellRect = {
-          x: first.surfaceX,
-          y: first.surfaceY,
-          width: last.surfaceX + last.width - first.surfaceX,
-          height: 1,
-        };
-        const local: InternalCellRect = { x: first.localX, y: localY, width, height: 1 };
-        const parentPoint = trace.meta.parentOwner
-          ? traces
-              .get(ids.get(trace.meta.parentOwner)!)
-              ?.localBySurface.get(surfaceKey(first.surfaceX, first.surfaceY))
-          : {
-              x: first.surfaceX - input.surfaceOrigin.x,
-              y: first.surfaceY - input.surfaceOrigin.y,
-            };
-        fragments.push({
-          local,
-          parent: {
-            x: parentPoint?.x ?? local.x,
-            y: parentPoint?.y ?? local.y,
-            width,
-            height: 1,
-          },
-          surface,
-          visibleSurface: first.visible ? surface : null,
-        });
-        run = [];
-      };
-      for (const cell of cells) {
-        const previous = run.at(-1);
-        if (
-          previous &&
-          (previous.surfaceX + previous.width !== cell.surfaceX ||
-            previous.localX + previous.width !== cell.localX ||
-            previous.visible !== cell.visible)
-        ) {
-          finishRun();
-        }
-        run.push(cell);
-        const startSurface = { x: cell.surfaceX, y: cell.surfaceY };
-        const endSurface = { x: cell.surfaceX + cell.width, y: cell.surfaceY };
-        slots.set(`${cell.localX}:${localY}`, {
-          local: { x: cell.localX, y: localY },
-          surface: startSurface,
-          visible: cell.visible && pointVisible(startSurface, input.clip),
-        });
-        slots.set(`${cell.localX + cell.width}:${localY}`, {
-          local: { x: cell.localX + cell.width, y: localY },
-          surface: endSurface,
-          visible: cell.visible && pointVisible(endSurface, input.clip),
-        });
-      }
-      finishRun();
-    }
-
-    const caretSlots = [...slots.values()];
-    slotsByOwner.set(trace.meta.node, caretSlots);
-    if (trace.meta.node.type === "tui-text") {
-      topFragments = fragments;
-      continue;
-    }
-    if (fragments.length === 0) {
-      const origin = boundary.get(trace.meta.start) ?? input.surfaceOrigin;
-      const parentPoint = trace.meta.parentOwner
-        ? traces
-            .get(ids.get(trace.meta.parentOwner)!)
-            ?.localBySurface.get(surfaceKey(origin.x, origin.y))
-        : { x: origin.x - input.surfaceOrigin.x, y: origin.y - input.surfaceOrigin.y };
-      geometryByOwner.set(trace.meta.node, {
-        status: "zero-size",
-        parent: { x: parentPoint?.x ?? 0, y: parentPoint?.y ?? 0, width: 0, height: 0 },
-        surface: { ...origin, width: 0, height: 0 },
-        fragments: [],
-        caretSlots,
-      });
-      continue;
-    }
-    const surface = bounds(fragments.map((fragment) => fragment.surface));
-    const parent = bounds(fragments.map((fragment) => fragment.parent));
-    geometryByOwner.set(trace.meta.node, {
-      status: fragments.some((fragment) => fragment.visibleSurface) ? "visible" : "fully-clipped",
-      parent,
-      surface,
-      fragments,
-      caretSlots,
-    });
-  }
-
-  const selection = new Map<object, InternalTextSelectionTrace | null>();
+  const localSelection = new Map<object, InternalTextSelectionTrace | null>();
   for (const target of input.selectionTargets ?? []) {
     const ownerId = ids.get(target.node);
     const meta = ownerId === undefined ? undefined : metas.get(ownerId);
@@ -643,7 +530,7 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
           grapheme.owners.includes(meta.id),
       );
     if (!meta || unavailableOwners.has(meta.id) || hasStandaloneZeroWidthGrapheme) {
-      selection.set(target.key, null);
+      localSelection.set(target.key, null);
       continue;
     }
     const text = plain.slice(meta.start, meta.end);
@@ -679,23 +566,26 @@ function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometr
         },
       ];
     });
-    selection.set(target.key, Object.freeze({ text, boundaries, stops, cells }));
+    localSelection.set(
+      target.key,
+      Object.freeze({ text, boundaries, surfaceOrigin: { x: 0, y: 0 }, stops, cells }),
+    );
   }
 
   return {
-    topCaretSlots: slotsByOwner.get(input.node) ?? [],
-    topFragments,
-    virtual: new Map(
-      virtualTargets.map((target) => [
-        target,
-        geometryByOwner.get(target) ?? ({ status: "unavailable" } as const),
-      ]),
-    ),
-    selection,
+    kind: "mapped",
+    virtualTargets,
+    selectionKeys,
+    ids,
+    metas,
+    traces,
+    boundary,
+    unavailableOwners,
+    localSelection,
   };
 }
 
-interface SelectionLayoutCache {
+interface TextLayoutCache {
   readonly revision: number;
   readonly renderedText: string;
   readonly wrapped: readonly string[];
@@ -704,13 +594,18 @@ interface SelectionLayoutCache {
   readonly provenanceAvailable: boolean | undefined;
   readonly targetKeys: readonly object[];
   readonly targetNodes: readonly (TuiText | TuiVirtualText)[];
-  readonly local: TextGeometryResult;
+  readonly layout: PreparedTextLayout;
   projectedX: number;
   projectedY: number;
+  projectedClipX: number | undefined;
+  projectedClipY: number | undefined;
+  projectedClipWidth: number | undefined;
+  projectedClipHeight: number | undefined;
+  projectedGeometry: boolean;
   projected: TextGeometryResult;
 }
 
-const selectionLayoutCache = new WeakMap<TuiText, SelectionLayoutCache>();
+const textLayoutCache = new WeakMap<TuiText, TextLayoutCache>();
 
 function sameIdentityList(left: readonly object[], right: readonly object[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
@@ -721,11 +616,11 @@ function sameRows(left: readonly string[], right: readonly string[]): boolean {
 }
 
 function projectSelectionLayout(
-  local: TextGeometryResult,
+  local: ReadonlyMap<object, InternalTextSelectionTrace | null>,
   origin: InternalCellPoint,
-): TextGeometryResult {
+): ReadonlyMap<object, InternalTextSelectionTrace | null> {
   const selection = new Map<object, InternalTextSelectionTrace | null>();
-  for (const [key, trace] of local.selection) {
+  for (const [key, trace] of local) {
     selection.set(
       key,
       trace === null
@@ -733,41 +628,246 @@ function projectSelectionLayout(
         : Object.freeze({
             text: trace.text,
             boundaries: trace.boundaries,
-            stops: Object.freeze(
-              trace.stops.map((stop) => ({
-                offset: stop.offset,
-                x: stop.x + origin.x,
-                y: stop.y + origin.y,
-              })),
-            ),
-            cells: Object.freeze(
-              trace.cells.map((cell) => ({
-                ...cell,
-                x: cell.x + origin.x,
-                y: cell.y + origin.y,
-              })),
-            ),
+            surfaceOrigin: Object.freeze({ x: origin.x, y: origin.y }),
+            stops: trace.stops,
+            cells: trace.cells,
           }),
     );
   }
-  return Object.freeze({
-    topCaretSlots: [],
-    topFragments: [],
-    virtual: new Map(),
+  return selection;
+}
+
+function unavailableVirtualGeometry(
+  targets: readonly TuiVirtualText[],
+): ReadonlyMap<TuiVirtualText, InternalElementGeometry> {
+  return new Map(targets.map((target) => [target, { status: "unavailable" } as const]));
+}
+
+function unavailableSelectionGeometry(
+  keys: readonly object[],
+): ReadonlyMap<object, InternalTextSelectionTrace | null> {
+  return new Map(keys.map((key) => [key, null]));
+}
+
+function projectMappedTextLayout(
+  layout: MappedTextLayout,
+  origin: InternalCellPoint,
+  clip: InternalCellRect | undefined,
+): TextGeometryResult {
+  const geometryByOwner = new Map<TuiText | TuiVirtualText, InternalElementGeometry>();
+  const slotsByOwner = new Map<TuiText | TuiVirtualText, InternalCaretSlot[]>();
+  let topFragments: readonly InternalGeometryFragment[] | null = [];
+
+  for (const trace of layout.traces.values()) {
+    if (layout.unavailableOwners.has(trace.meta.id)) {
+      geometryByOwner.set(trace.meta.node, { status: "unavailable" });
+      if (trace.meta.node.type === "tui-text") topFragments = null;
+      continue;
+    }
+
+    const fragments: InternalGeometryFragment[] = [];
+    const slots = new Map<string, InternalCaretSlot>();
+    for (const [localY, localCells] of trace.localRows) {
+      if (localCells.length === 0) {
+        // Only structurally empty Text or an explicit empty newline row creates
+        // an insertion origin. A non-empty zero-width grapheme creates no cell.
+        const surfaceRow = trace.surfaceRowByLocal.get(localY);
+        const originX = surfaceRow === undefined ? undefined : trace.origins.get(surfaceRow);
+        if (surfaceRow === undefined || originX === undefined) continue;
+        const surface = { x: origin.x + originX, y: origin.y + surfaceRow };
+        slots.set(`0:${localY}`, {
+          local: { x: 0, y: localY },
+          surface,
+          visible: pointVisible(surface, clip),
+        });
+        continue;
+      }
+
+      const cells: ProjectedLocalTraceCell[] = localCells.map((cell) => {
+        const projected = {
+          ...cell,
+          surfaceX: origin.x + cell.surfaceX,
+          surfaceY: origin.y + cell.surfaceY,
+        };
+        return { ...projected, visible: glyphVisible(projected, clip) };
+      });
+      let run: ProjectedLocalTraceCell[] = [];
+      const finishRun = (): void => {
+        if (run.length === 0) return;
+        const first = run[0]!;
+        const last = run.at(-1)!;
+        const width = last.localX + last.width - first.localX;
+        const surface: InternalCellRect = {
+          x: first.surfaceX,
+          y: first.surfaceY,
+          width: last.surfaceX + last.width - first.surfaceX,
+          height: 1,
+        };
+        const local: InternalCellRect = { x: first.localX, y: localY, width, height: 1 };
+        const layoutX = first.surfaceX - origin.x;
+        const layoutY = first.surfaceY - origin.y;
+        const parentPoint = trace.meta.parentOwner
+          ? layout.traces
+              .get(layout.ids.get(trace.meta.parentOwner)!)
+              ?.localBySurface.get(surfaceKey(layoutX, layoutY))
+          : { x: layoutX, y: layoutY };
+        fragments.push({
+          local,
+          parent: {
+            x: parentPoint?.x ?? local.x,
+            y: parentPoint?.y ?? local.y,
+            width,
+            height: 1,
+          },
+          surface,
+          visibleSurface: first.visible ? surface : null,
+        });
+        run = [];
+      };
+
+      for (const cell of cells) {
+        const previous = run.at(-1);
+        if (
+          previous &&
+          (previous.surfaceX + previous.width !== cell.surfaceX ||
+            previous.localX + previous.width !== cell.localX ||
+            previous.visible !== cell.visible)
+        ) {
+          finishRun();
+        }
+        run.push(cell);
+        const startSurface = { x: cell.surfaceX, y: cell.surfaceY };
+        const endSurface = { x: cell.surfaceX + cell.width, y: cell.surfaceY };
+        slots.set(`${cell.localX}:${localY}`, {
+          local: { x: cell.localX, y: localY },
+          surface: startSurface,
+          visible: cell.visible && pointVisible(startSurface, clip),
+        });
+        slots.set(`${cell.localX + cell.width}:${localY}`, {
+          local: { x: cell.localX + cell.width, y: localY },
+          surface: endSurface,
+          visible: cell.visible && pointVisible(endSurface, clip),
+        });
+      }
+      finishRun();
+    }
+
+    const caretSlots = [...slots.values()];
+    slotsByOwner.set(trace.meta.node, caretSlots);
+    if (trace.meta.node.type === "tui-text") {
+      topFragments = fragments;
+      continue;
+    }
+    if (fragments.length === 0) {
+      const localOrigin = layout.boundary.get(trace.meta.start) ?? { x: 0, y: 0 };
+      const parentPoint = trace.meta.parentOwner
+        ? layout.traces
+            .get(layout.ids.get(trace.meta.parentOwner)!)
+            ?.localBySurface.get(surfaceKey(localOrigin.x, localOrigin.y))
+        : localOrigin;
+      geometryByOwner.set(trace.meta.node, {
+        status: "zero-size",
+        parent: { x: parentPoint?.x ?? 0, y: parentPoint?.y ?? 0, width: 0, height: 0 },
+        surface: {
+          x: origin.x + localOrigin.x,
+          y: origin.y + localOrigin.y,
+          width: 0,
+          height: 0,
+        },
+        fragments: [],
+        caretSlots,
+      });
+      continue;
+    }
+    const surface = bounds(fragments.map((fragment) => fragment.surface));
+    const parent = bounds(fragments.map((fragment) => fragment.parent));
+    geometryByOwner.set(trace.meta.node, {
+      status: fragments.some((fragment) => fragment.visibleSurface) ? "visible" : "fully-clipped",
+      parent,
+      surface,
+      fragments,
+      caretSlots,
+    });
+  }
+
+  return {
+    topCaretSlots: slotsByOwner.get(layout.metas.get(0)!.node) ?? [],
+    topFragments,
+    virtual: new Map(
+      layout.virtualTargets.map((target) => [
+        target,
+        geometryByOwner.get(target) ?? ({ status: "unavailable" } as const),
+      ]),
+    ),
+    selection: projectSelectionLayout(layout.localSelection, origin),
+  };
+}
+
+function projectTextLayout(
+  layout: PreparedTextLayout,
+  origin: InternalCellPoint,
+  clip: InternalCellRect | undefined,
+  includeGeometry: boolean,
+): TextGeometryResult {
+  if (layout.kind === "mapped") {
+    if (includeGeometry) return projectMappedTextLayout(layout, origin, clip);
+    return {
+      topCaretSlots: [],
+      topFragments: [],
+      virtual: new Map(),
+      selection: projectSelectionLayout(layout.localSelection, origin),
+    };
+  }
+  const selection = unavailableSelectionGeometry(layout.selectionKeys);
+  if (!includeGeometry) {
+    return { topCaretSlots: [], topFragments: [], virtual: new Map(), selection };
+  }
+  if (layout.kind === "unavailable") {
+    return {
+      topCaretSlots: null,
+      topFragments: null,
+      virtual: unavailableVirtualGeometry(layout.virtualTargets),
+      selection,
+    };
+  }
+  return {
+    topCaretSlots: directCaretSlots(layout.actualRows, origin, clip),
+    topFragments: null,
+    virtual: unavailableVirtualGeometry(layout.virtualTargets),
     selection,
-  });
+  };
+}
+
+function prepareInput(input: DeriveTextGeometryInput): PrepareTextLayoutInput {
+  return {
+    node: input.node,
+    renderedText: input.renderedText,
+    wrapped: input.wrapped,
+    wrapWidth: input.wrapWidth,
+    wrapMode: input.wrapMode,
+    provenanceAvailable: input.provenanceAvailable,
+    selectionTargets: input.selectionTargets,
+  };
+}
+
+/** Direct derivation used to verify that cached projections preserve semantics. */
+export function deriveTextGeometryUncached(input: DeriveTextGeometryInput): TextGeometryResult {
+  const targets = input.selectionTargets ?? [];
+  return projectTextLayout(
+    prepareTextLayout(prepareInput(input)),
+    input.surfaceOrigin,
+    input.clip,
+    input.geometryRequested !== false || targets.length === 0,
+  );
 }
 
 /** Trace complete graphemes through one authoritative wrapped Text generation. */
 export function deriveTextGeometry(input: DeriveTextGeometryInput): TextGeometryResult {
   const targets = input.selectionTargets ?? [];
-  if (input.geometryRequested !== false || targets.length === 0) {
-    return deriveTextGeometryUncached(input);
-  }
-
+  const includeGeometry = input.geometryRequested !== false || targets.length === 0;
   const targetKeys = targets.map((target) => target.key);
   const targetNodes = targets.map((target) => target.node);
-  let cached = selectionLayoutCache.get(input.node);
+  let cached = textLayoutCache.get(input.node);
   if (
     cached?.revision !== input.node.textRevision ||
     cached.renderedText !== input.renderedText ||
@@ -778,12 +878,8 @@ export function deriveTextGeometry(input: DeriveTextGeometryInput): TextGeometry
     !sameIdentityList(cached.targetKeys, targetKeys) ||
     !sameIdentityList(cached.targetNodes, targetNodes)
   ) {
-    const local = deriveTextGeometryUncached({
-      ...input,
-      surfaceOrigin: { x: 0, y: 0 },
-      clip: undefined,
-    });
-    const projected = projectSelectionLayout(local, input.surfaceOrigin);
+    const layout = prepareTextLayout(prepareInput(input));
+    const projected = projectTextLayout(layout, input.surfaceOrigin, input.clip, includeGeometry);
     cached = {
       revision: input.node.textRevision,
       renderedText: input.renderedText,
@@ -793,18 +889,41 @@ export function deriveTextGeometry(input: DeriveTextGeometryInput): TextGeometry
       provenanceAvailable: input.provenanceAvailable,
       targetKeys: Object.freeze(targetKeys),
       targetNodes: Object.freeze(targetNodes),
-      local,
+      layout,
       projectedX: input.surfaceOrigin.x,
       projectedY: input.surfaceOrigin.y,
+      projectedClipX: input.clip?.x,
+      projectedClipY: input.clip?.y,
+      projectedClipWidth: input.clip?.width,
+      projectedClipHeight: input.clip?.height,
+      projectedGeometry: includeGeometry,
       projected,
     };
-    selectionLayoutCache.set(input.node, cached);
+    textLayoutCache.set(input.node, cached);
     return projected;
   }
-  if (cached.projectedX !== input.surfaceOrigin.x || cached.projectedY !== input.surfaceOrigin.y) {
+  if (
+    cached.projectedX !== input.surfaceOrigin.x ||
+    cached.projectedY !== input.surfaceOrigin.y ||
+    cached.projectedClipX !== input.clip?.x ||
+    cached.projectedClipY !== input.clip?.y ||
+    cached.projectedClipWidth !== input.clip?.width ||
+    cached.projectedClipHeight !== input.clip?.height ||
+    cached.projectedGeometry !== includeGeometry
+  ) {
     cached.projectedX = input.surfaceOrigin.x;
     cached.projectedY = input.surfaceOrigin.y;
-    cached.projected = projectSelectionLayout(cached.local, input.surfaceOrigin);
+    cached.projectedClipX = input.clip?.x;
+    cached.projectedClipY = input.clip?.y;
+    cached.projectedClipWidth = input.clip?.width;
+    cached.projectedClipHeight = input.clip?.height;
+    cached.projectedGeometry = includeGeometry;
+    cached.projected = projectTextLayout(
+      cached.layout,
+      input.surfaceOrigin,
+      input.clip,
+      includeGeometry,
+    );
   }
   return cached.projected;
 }

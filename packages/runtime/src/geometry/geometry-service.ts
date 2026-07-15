@@ -1,6 +1,6 @@
 import { shallowRef, type ShallowRef } from "vue";
 import type { AppContext } from "../context.ts";
-import type { TuiNode, TuiRoot } from "../host/nodes.ts";
+import type { TuiNode, TuiRoot, TuiText } from "../host/nodes.ts";
 import type { RenderedTargetTransactionHost } from "../rendered-target.ts";
 import { changeRuntimeResource } from "../resource-tracker.ts";
 
@@ -60,6 +60,8 @@ export interface InternalGeometryPaintFrame {
   isObserved(target: TuiNode): boolean;
   /** True when this target or one of its descendants was observed at frame start. */
   hasObservedSubtree(target: TuiNode): boolean;
+  /** Whether a Text needs grapheme fragments/caret slots instead of its Yoga rectangle. */
+  requiresTextGeometry(target: TuiText): boolean;
   /** Read this frame's frozen paint result without publishing the generation. */
   geometryFor(target: TuiNode): InternalElementGeometry;
   /** Paint traversal order for an observed target recorded in this frame. */
@@ -72,7 +74,7 @@ export interface InternalGeometryPaintFrame {
 
 export interface InternalGeometryService extends RenderedTargetTransactionHost {
   readonly generation: number;
-  createBinding(): InternalGeometryBinding;
+  createBinding(options?: { readonly textGeometry?: "full" | "rect" }): InternalGeometryBinding;
   beginFrame(): InternalGeometryPaintFrame;
   setSurfaceAvailable(available: boolean): void;
   invalidateSurface(): void;
@@ -125,6 +127,7 @@ interface MutableBinding {
   readonly value: ShallowRef<InternalElementGeometry>;
   readonly observers: Set<(geometry: InternalElementGeometry, target: TuiNode | null) => void>;
   target: TuiNode | null;
+  textGeometry: "full" | "rect";
   active: boolean;
 }
 
@@ -199,12 +202,13 @@ export function createInternalGeometryService(
     get generation() {
       return currentGeneration;
     },
-    createBinding() {
+    createBinding(bindingOptions = {}) {
       if (disposed) throw new Error("geometry service is disposed");
       const binding: MutableBinding = {
         value: shallowRef<InternalElementGeometry>(detachedState()),
         observers: new Set(),
         target: null,
+        textGeometry: bindingOptions.textGeometry ?? "full",
         active: true,
       };
       bindings.add(binding);
@@ -267,13 +271,25 @@ export function createInternalGeometryService(
       let nextPaintOrder = 0;
       const observedTargets = new Set<TuiNode>();
       const observedSubtrees = new Set<TuiNode>();
+      const fullTextGeometry = new Set<TuiText>();
       for (const binding of bindings) {
         if (!binding.target) continue;
         observedTargets.add(binding.target);
         let current: TuiNode | null = binding.target;
+        let textRoot: TuiText | null = null;
         while (current) {
           observedSubtrees.add(current);
+          if (current.type === "tui-text") textRoot = current;
           current = current.parent;
+        }
+        // A top-level Text used only as a pointer hit target needs its Yoga
+        // rectangle, not tens of thousands of caret slots. Nested virtual Text
+        // has no Yoga rectangle, so even a pointer binding needs the full trace.
+        if (
+          textRoot &&
+          (binding.textGeometry === "full" || binding.target.type === "tui-virtual-text")
+        ) {
+          fullTextGeometry.add(textRoot);
         }
       }
       let settled = false;
@@ -290,6 +306,9 @@ export function createInternalGeometryService(
         },
         hasObservedSubtree(target) {
           return observedSubtrees.has(target);
+        },
+        requiresTextGeometry(target) {
+          return fullTextGeometry.has(target);
         },
         geometryFor(target) {
           if (settled) throw new Error("geometry paint frame is already settled");

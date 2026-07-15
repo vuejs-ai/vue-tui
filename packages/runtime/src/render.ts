@@ -1557,6 +1557,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         lastOutputToRender: "" as string | undefined,
         outputHeight: 0,
       };
+      let fullscreenBaselineValid = false;
+      let fullscreenBaselineColumns: number | null = null;
+      let fullscreenBaselineRows: number | null = null;
       let fullscreenEnterPending = false;
       let fullscreenCursorHidePending = false;
       let inlineRegionStarted = false;
@@ -1575,6 +1578,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedAbandonPendingTerminalOutput = (abandonment) => {
         fullscreenEnterPending = false;
         fullscreenCursorHidePending = false;
+        if (fixedFullscreenSurface && abandonment?.physicalStateUncertain) {
+          fullscreenBaselineValid = false;
+        }
         (mountedKittyController ?? mountedEmergencyKittyController)?.abandonPendingOutput();
         (mountedStdinController ?? mountedEmergencyStdinController)?.abandonPendingTerminalOutput(
           abandonment,
@@ -1624,6 +1630,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedCaretController?.setOutputAvailable(false, { surfaceReleased: true });
         mountedTextSelection?.setSurfaceAvailable(false, { suspended: true });
         if (fixedFullscreenSurface) {
+          fullscreenBaselineValid = false;
           mountedGeometry?.setSurfaceAvailable(false);
           if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
           if (mountedAlternateScreen) {
@@ -1922,6 +1929,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               if (fixedFullscreenSurface) {
                 repaintFullscreen(frameState.lastOutput, {
                   writeBefore: () => writeRuntimeOutput(stdout, outputData),
+                  forceFull: true,
                 });
                 return;
               }
@@ -1957,6 +1965,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               if (fixedFullscreenSurface) {
                 repaintFullscreen(frameState.lastOutput, {
                   writeBefore: () => writeRuntimeOutput(stderr, outputData),
+                  forceFull: true,
                 });
                 return;
               }
@@ -2286,6 +2295,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const previousAlternateScreen = mountedAlternateScreen;
         const previousFullscreenCursorHidden = mountedFullscreenCursorHidden;
         const previousWriterCaretDeclaration = writerCaretDeclaration;
+        const previousFullscreenBaselineValid = fullscreenBaselineValid;
+        const previousFullscreenBaselineColumns = fullscreenBaselineColumns;
+        const previousFullscreenBaselineRows = fullscreenBaselineRows;
         let active = true;
 
         return () => {
@@ -2299,6 +2311,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           setAlternateScreenOwned(previousAlternateScreen);
           setFullscreenCursorHidden(previousFullscreenCursorHidden);
           writerCaretDeclaration = previousWriterCaretDeclaration;
+          fullscreenBaselineValid = previousFullscreenBaselineValid;
+          fullscreenBaselineColumns = previousFullscreenBaselineColumns;
+          fullscreenBaselineRows = previousFullscreenBaselineRows;
         };
       }
       mountedCreateOutputStateRollback = createOutputStateRollback;
@@ -2307,6 +2322,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (!fixedFullscreenSurface) return true;
         let accepted = true;
         if (!mountedAlternateScreen && !fullscreenEnterPending) {
+          fullscreenBaselineValid = false;
           fullscreenEnterPending = true;
           if (
             !writeTerminalOutput(ansiEscapes.enterAlternativeScreen + "\x1b[H", () => {
@@ -2346,6 +2362,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             runLifecycleTransaction(() => {
               if (!dynamicUpdatesLive || terminalSuspended) return;
               if (fixedFullscreenSurface) {
+                fullscreenBaselineValid = false;
                 ensureFullscreenSurface();
                 runSynchronizedOutput(() => {
                   writeRuntimeOutput(stdout, hideCursorEscape + ansiEscapes.clearViewport);
@@ -2487,6 +2504,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         output: string,
         options: {
           readonly writeBefore?: () => void;
+          /** Side-channel output invalidates every row, even when frame text is unchanged. */
+          readonly forceFull?: boolean;
           /** Present for a new render frame, including an explicit hidden caret. */
           readonly frameCaret?: { readonly position: InternalPreparedCaretFrame["position"] };
         } = {},
@@ -2496,25 +2515,63 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           : activeWriterCaretOwner
             ? activeWriterCaretOwner.position
             : mountedCaretController?.writerPosition;
+        const viewportColumns = renderSession.session.dimensions.layout.columns;
+        const viewportRows = renderSession.session.dimensions.layout.rows;
+        const dimensionsMatch =
+          fullscreenBaselineColumns === viewportColumns && fullscreenBaselineRows === viewportRows;
+        const caretUnchanged =
+          writerCaretDeclaration?.x === caretPosition?.x &&
+          writerCaretDeclaration?.y === caretPosition?.y;
+        if (
+          options.writeBefore === undefined &&
+          fullscreenBaselineValid &&
+          dimensionsMatch &&
+          output === frameState.lastOutput &&
+          caretUnchanged
+        ) {
+          return;
+        }
         withWriterCaretOwnership(caretPosition, () =>
           runLifecycleTransaction(() => {
             ensureFullscreenSurface();
-            // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
-            // clear that surface after every coordinated side-channel write instead
-            // of restoring relative to the cursor position that the write left
-            // behind. This keeps paint geometry, cursor coordinates, and the mouse
-            // hit map in the same viewport coordinate system.
+            const previousRows = frameState.lastOutput.split("\n");
+            const nextRows = output.split("\n");
+            const canDiff =
+              options.forceFull !== true &&
+              fullscreenBaselineValid &&
+              dimensionsMatch &&
+              viewportRows !== null &&
+              previousRows.length === viewportRows &&
+              nextRows.length === viewportRows;
             runCoordinatedWrite(
               () => {
-                // Hide first even on terminals without synchronized updates. A declared
-                // caret may be visible after the previous sync; leaving it visible while
-                // a full repaint streams produces a corner-to-caret flash.
+                // A declared caret may be visible after the previous sync. Hide it
+                // before either a full repaint or absolute row replacements.
                 writeRuntimeOutput(stdout, hideCursorEscape);
                 options.writeBefore?.();
               },
               () => {
                 setWriterCaretPosition(caretPosition);
-                writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
+                if (canDiff) {
+                  const changedRows: string[] = [];
+                  for (let row = 0; row < viewportRows; row++) {
+                    if (previousRows[row] === nextRows[row]) continue;
+                    changedRows.push(
+                      ansiEscapes.cursorTo(0, row),
+                      "\x1b[0m",
+                      nextRows[row]!,
+                      "\x1b[0m",
+                      ansiEscapes.eraseEndLine,
+                    );
+                  }
+                  // FrameWriter.sync() places a semantic caret relative to the
+                  // frame bottom. Re-establish that physical anchor even for a
+                  // caret-only update with no changed rows.
+                  changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, viewportRows - 1)));
+                  writeRuntimeOutput(stdout, changedRows.join(""));
+                } else {
+                  writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
+                }
                 writer.sync(output);
               },
             );
@@ -2522,6 +2579,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             frameState.lastOutput = output;
             frameState.lastOutputToRender = output;
             frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+            fullscreenBaselineValid = true;
+            fullscreenBaselineColumns = viewportColumns;
+            fullscreenBaselineRows = viewportRows;
           }),
         );
       }

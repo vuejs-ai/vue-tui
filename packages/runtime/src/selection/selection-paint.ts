@@ -14,6 +14,8 @@ export interface InternalSelectionTraceCell {
 export interface InternalTextSelectionTrace {
   readonly text: string;
   readonly boundaries: readonly number[];
+  /** Surface translation for the origin-independent document mapping below. */
+  readonly surfaceOrigin: { readonly x: number; readonly y: number };
   readonly stops: readonly { readonly offset: number; readonly x: number; readonly y: number }[];
   readonly cells: readonly InternalSelectionTraceCell[];
 }

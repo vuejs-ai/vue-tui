@@ -48,6 +48,7 @@ import type {
   InternalSelectionTraceCell,
   InternalTextSelectionTrace,
 } from "../selection/selection-paint.ts";
+import { trustInternalSelectionPaintSnapshot } from "../selection/selection-policy.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -68,6 +69,20 @@ function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
   };
 }
 
+function firstSelectionCellAtOrAfterRow(
+  cells: readonly InternalSelectionTraceCell[],
+  localY: number,
+): number {
+  let low = 0;
+  let high = cells.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (cells[middle]!.y < localY) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 interface WriteOp {
   type: "write";
   x: number;
@@ -85,6 +100,8 @@ interface OutputSelectionTrace {
 interface OutputSelectionProvenance {
   readonly target: InternalSelectionPaintTarget;
   readonly cell: InternalSelectionTraceCell;
+  readonly surfaceX: number;
+  readonly surfaceY: number;
 }
 
 interface ClipOp {
@@ -243,21 +260,28 @@ class Output {
   }
 
   get(): { output: string; height: number } {
-    // Initialize output grid with StyledChar cells
-    const output: StyledChar[][] = [];
-    for (let y = 0; y < this.height; y++) {
-      const row: StyledChar[] = [];
-      for (let x = 0; x < this.width; x++) {
-        row.push({ type: "char", value: " ", fullWidth: false, styles: [] });
-      }
-      output.push(row);
-    }
-    const provenance: Array<Array<OutputSelectionProvenance | undefined>> = Array.from(
-      { length: this.height },
-      () => Array.from<OutputSelectionProvenance | undefined>({ length: this.width }),
+    // Blank cells are immutable in practice: every paint or selection change
+    // replaces the array slot with another StyledChar. Share one baseline cell
+    // instead of allocating an object and an empty styles array per terminal
+    // cell on every frame.
+    const blankCell: StyledChar = {
+      type: "char",
+      value: " ",
+      fullWidth: false,
+      styles: [],
+    };
+    const output: StyledChar[][] = Array.from({ length: this.height }, () =>
+      Array.from({ length: this.width }, () => blankCell),
     );
+    const provenance: Array<Array<OutputSelectionProvenance | undefined>> | undefined = this
+      .selectionFrame
+      ? Array.from({ length: this.height }, () =>
+          Array.from<OutputSelectionProvenance | undefined>({ length: this.width }),
+        )
+      : undefined;
 
     const clearProvenance = (x: number, y: number): void => {
+      if (!provenance) return;
       const row = provenance[y];
       if (!row || x < 0 || x >= this.width) return;
       const previous = row[x];
@@ -266,7 +290,7 @@ class Output {
         return;
       }
       for (let offset = 0; offset < previous.cell.width; offset++) {
-        const candidateX: number = previous.cell.x + offset;
+        const candidateX: number = previous.surfaceX + offset;
         if (row[candidateX] === previous) row[candidateX] = undefined;
       }
     };
@@ -299,16 +323,29 @@ class Output {
       const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
       const selectionBySurface = new Map<string, OutputSelectionProvenance>();
       for (const entry of op.selection) {
-        for (const cell of entry.trace.cells) {
+        const origin = entry.trace.surfaceOrigin;
+        const start =
+          clip?.y1 === undefined
+            ? 0
+            : firstSelectionCellAtOrAfterRow(entry.trace.cells, clip.y1 - origin.y);
+        for (let index = start; index < entry.trace.cells.length; index++) {
+          const cell = entry.trace.cells[index]!;
+          const surfaceX = origin.x + cell.x;
+          const surfaceY = origin.y + cell.y;
+          if (clip?.y2 !== undefined && surfaceY >= clip.y2) break;
           if (
-            (clip?.x1 !== undefined && cell.x < clip.x1) ||
-            (clip?.x2 !== undefined && cell.x + cell.width > clip.x2) ||
-            (clip?.y1 !== undefined && cell.y < clip.y1) ||
-            (clip?.y2 !== undefined && cell.y >= clip.y2)
+            (clip?.x1 !== undefined && surfaceX < clip.x1) ||
+            (clip?.x2 !== undefined && surfaceX + cell.width > clip.x2) ||
+            (clip?.y1 !== undefined && surfaceY < clip.y1)
           ) {
             continue;
           }
-          selectionBySurface.set(`${cell.x}:${cell.y}`, { target: entry.target, cell });
+          selectionBySurface.set(`${surfaceX}:${surfaceY}`, {
+            target: entry.target,
+            cell,
+            surfaceX,
+            surfaceY,
+          });
         }
       }
 
@@ -417,13 +454,6 @@ class Output {
           continue;
         }
 
-        const spaceCell: StyledChar = {
-          type: "char",
-          value: " ",
-          fullWidth: false,
-          styles: [],
-        };
-
         // Wide characters (e.g. CJK) occupy two cells: a leading cell with
         // the character and a trailing placeholder with value ''. When an
         // overlapping write lands in the middle of a wide character, the
@@ -436,7 +466,7 @@ class Output {
         ) {
           clearProvenance(offsetX - 1, y + offsetY);
           clearProvenance(offsetX, y + offsetY);
-          currentLine[offsetX - 1] = spaceCell;
+          currentLine[offsetX - 1] = blankCell;
         }
 
         // Normal relative output has NO x-bounds check here — matching Ink's Output write loop
@@ -480,6 +510,7 @@ class Output {
               : undefined;
           if (
             exactSource &&
+            provenance &&
             y + offsetY >= 0 &&
             y + offsetY < this.height &&
             offsetX >= 0 &&
@@ -506,7 +537,7 @@ class Output {
 
         if (currentLine[offsetX]?.value === "") {
           clearProvenance(offsetX, y + offsetY);
-          currentLine[offsetX] = spaceCell;
+          currentLine[offsetX] = blankCell;
         }
 
         offsetY++;
@@ -516,6 +547,8 @@ class Output {
     const baselineLines = output.map((line) =>
       styledCharsToString(line.filter((item) => item !== undefined)).trimEnd(),
     );
+    if (!provenance) return { output: baselineLines.join("\n"), height: output.length };
+
     const baselineWidths = baselineLines.map((line) => this.caches.getStringWidth(line));
     const visibleByTarget = new Map<object, Set<number>>();
     const candidates = new Set<OutputSelectionProvenance>();
@@ -527,9 +560,9 @@ class Output {
     for (const candidate of candidates) {
       const { cell, target } = candidate;
       let complete = true;
-      const row = provenance[cell.y];
+      const row = provenance[candidate.surfaceY];
       for (let offset = 0; offset < cell.width; offset++) {
-        const current = row?.[cell.x + offset];
+        const current = row?.[candidate.surfaceX + offset];
         if (
           current !== candidate ||
           current.target.key !== target.key ||
@@ -539,7 +572,11 @@ class Output {
           break;
         }
       }
-      if (!complete || cell.x < 0 || cell.x + cell.width > (baselineWidths[cell.y] ?? 0)) {
+      if (
+        !complete ||
+        candidate.surfaceX < 0 ||
+        candidate.surfaceX + cell.width > (baselineWidths[candidate.surfaceY] ?? 0)
+      ) {
         continue;
       }
       let visible = visibleByTarget.get(target.key);
@@ -549,19 +586,24 @@ class Output {
     const highlighted = new Set<OutputSelectionProvenance>();
     for (const entry of this.selectionTraces.values()) {
       const visible = visibleByTarget.get(entry.target.key) ?? new Set<number>();
-      const snapshot = {
+      const origin = entry.trace.surfaceOrigin;
+      const snapshot = trustInternalSelectionPaintSnapshot({
         text: entry.trace.text,
         boundaries: entry.trace.boundaries,
-        stops: entry.trace.stops,
+        stops: entry.trace.stops.map((stop) => ({
+          offset: stop.offset,
+          x: origin.x + stop.x,
+          y: origin.y + stop.y,
+        })),
         cells: entry.trace.cells.map((cell) => ({
           start: cell.start,
           end: cell.end,
-          x: cell.x,
-          y: cell.y,
+          x: origin.x + cell.x,
+          y: origin.y + cell.y,
           width: cell.width,
           visible: visible.has(cell.id),
         })),
-      };
+      });
       const range = this.selectionFrame?.prepare(entry.target, snapshot) ?? null;
       if (!range) continue;
       const start = Math.min(range.anchor, range.extent);
@@ -1385,6 +1427,14 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
+      // A Text entirely above or below an authoritative clip cannot affect the
+      // output grid. When no geometry or selection consumer needs its document
+      // mapping, skip composition and write-op allocation as well. Limit this
+      // to Text: a clipped Box may still contain an absolutely positioned or
+      // overflow-visible descendant that re-enters the viewport.
+      if (!geometry && !selection && clip && (y + h <= clip.y || y >= clip.y + clip.height)) {
+        return;
+      }
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
       // squash. The Text's own backgroundColor — including an explicit "" opt-out —
       // is resolved against this inherited bg inside applyOwnStyle
@@ -1401,8 +1451,10 @@ function paintNode(
       const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth);
       const selectionTargets = selection?.targetsFor(node) ?? [];
       const outputSelection: OutputSelectionTrace[] = [];
-      if (geometry || selectionTargets.length > 0) {
-        const traced = deriveTextGeometry({
+      const requiresTextGeometry = geometry?.requiresTextGeometry(node) ?? false;
+      let traced: ReturnType<typeof deriveTextGeometry> | null = null;
+      if (requiresTextGeometry || selectionTargets.length > 0) {
+        traced = deriveTextGeometry({
           node,
           renderedText: text,
           wrapped,
@@ -1412,21 +1464,9 @@ function paintNode(
           clip,
           provenanceAvailable: transformers.length === 0,
           selectionTargets,
-          geometryRequested: geometry !== undefined,
+          geometryRequested: requiresTextGeometry,
         });
-        if (geometry) {
-          geometry.record(
-            node,
-            transformers.length > 0
-              ? { status: "unavailable" }
-              : createTopTextGeometry({
-                  parent: { x: layout.left, y: layout.top, width: w, height: h },
-                  surface: { x, y, width: w, height: h },
-                  clip,
-                  caretSlots: traced.topCaretSlots,
-                  fragments: traced.topFragments,
-                }),
-          );
+        if (geometry && requiresTextGeometry) {
           for (const [target, targetGeometry] of traced.virtual) {
             geometry.record(target, targetGeometry);
           }
@@ -1440,6 +1480,20 @@ function paintNode(
             output.recordUnavailableSelection(target);
           }
         }
+      }
+      if (geometry) {
+        geometry.record(
+          node,
+          transformers.length > 0
+            ? { status: "unavailable" }
+            : createTopTextGeometry({
+                parent: { x: layout.left, y: layout.top, width: w, height: h },
+                surface: { x, y, width: w, height: h },
+                clip,
+                caretSlots: traced?.topCaretSlots ?? [],
+                fragments: traced?.topFragments ?? [],
+              }),
+        );
       }
       // Skip writing empty text — avoids applying line transformers to empty
       // content, which matches Ink's behavior of not writing empty text nodes.

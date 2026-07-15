@@ -178,6 +178,39 @@ describe("private paint-derived geometry service", () => {
     frame.discard();
   });
 
+  test("lets pointer-only top-level Text use rect geometry while preserving full consumers", () => {
+    const f = fixture();
+    const top = f.text();
+    const nested = f.virtualText();
+    f.leaf(nested, "nested");
+    f.insert(top, nested);
+    f.insert(f.root, top);
+    const service = createInternalGeometryService(f.root);
+
+    const rect = service.createBinding({ textGeometry: "rect" });
+    rect.attach(top);
+    let frame = service.beginFrame();
+    expect(frame.requiresTextGeometry(top)).toBe(false);
+    frame.discard();
+
+    const full = service.createBinding();
+    full.attach(top);
+    frame = service.beginFrame();
+    expect(frame.requiresTextGeometry(top)).toBe(true);
+    frame.discard();
+    full.dispose();
+
+    const nestedRect = service.createBinding({ textGeometry: "rect" });
+    nestedRect.attach(nested);
+    frame = service.beginFrame();
+    expect(frame.requiresTextGeometry(top)).toBe(true);
+    frame.discard();
+
+    nestedRect.dispose();
+    rect.dispose();
+    service.dispose();
+  });
+
   test("publishes one frozen Box snapshot with parent, surface, and visible mapping", () => {
     const f = fixture();
     const parent = f.box();

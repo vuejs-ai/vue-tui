@@ -102,6 +102,7 @@ function paintFrame(
     generation: 1,
     isObserved: (target) => values.has(target),
     hasObservedSubtree: () => true,
+    requiresTextGeometry: () => true,
     geometryFor(target) {
       const geometry = values.get(target);
       if (!geometry) throw new Error("unobserved");

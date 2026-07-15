@@ -267,7 +267,10 @@ export function createFullscreenMouseController(
   const ensureHost = (node: TuiNode): RegisteredHost => {
     const existing = hosts.get(node);
     if (existing) return existing;
-    const geometryBinding = geometry.createBinding();
+    // Pointer hit-testing needs only a top-level Text's painted Yoga rectangle.
+    // The geometry service still upgrades nested virtual Text and any concurrent
+    // public/caret consumer to the complete grapheme trace.
+    const geometryBinding = geometry.createBinding({ textGeometry: "rect" });
     let detachGeometry: (() => void) | undefined;
     try {
       detachGeometry = geometryBinding.attach(node);

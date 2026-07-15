@@ -27,12 +27,35 @@ function traced(text: string): {
     stops.push({ offset: end, x, y: 0 });
   }
   return {
-    trace: { text, boundaries, stops, cells: traceCells },
+    trace: { text, boundaries, surfaceOrigin: { x: 0, y: 0 }, stops, cells: traceCells },
     snapshot: { text, boundaries, stops, cells },
   };
 }
 
 describe("text selection paint transaction", () => {
+  test("does not create a frame without an active attached owner", () => {
+    const clipboard = createStringClipboardService();
+    const controller = createInternalTextSelectionController({
+      surfaceAvailable: true,
+      unavailableReason: "host-unavailable",
+      requestPaint() {},
+      clipboard,
+    });
+    const node = { type: "tui-text", parent: null } as unknown as TuiText;
+
+    expect(controller.beginFrame()).toBeUndefined();
+
+    const inactive = controller.register(false);
+    inactive.attach(node);
+    expect(controller.beginFrame()).toBeUndefined();
+
+    inactive.setActive(true);
+    expect(controller.beginFrame()).toBeDefined();
+
+    controller.dispose();
+    clipboard.dispose();
+  });
+
   test("publishes only accepted frames and invalidates stale pointer geometry after clear", async () => {
     const clipboard = createStringClipboardService();
     const controller = createInternalTextSelectionController({

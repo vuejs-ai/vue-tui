@@ -80,6 +80,15 @@ interface InternalSelectionBoundary {
 }
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const trustedPaintSnapshots = new WeakSet<InternalSelectionSnapshot>();
+
+/** Mark a snapshot assembled from Runtime's already-validated text layout trace. */
+export function trustInternalSelectionPaintSnapshot(
+  snapshot: InternalSelectionSnapshot,
+): InternalSelectionSnapshot {
+  trustedPaintSnapshots.add(snapshot);
+  return snapshot;
+}
 
 function expectedBoundaries(text: string): number[] {
   const boundaries = [0];
@@ -93,6 +102,7 @@ function validateSnapshot(snapshot: InternalSelectionSnapshot): void {
   if (typeof snapshot !== "object" || snapshot === null) {
     throw new TypeError("selection snapshot must be an object");
   }
+  if (trustedPaintSnapshots.has(snapshot)) return;
   if (typeof snapshot.text !== "string") {
     throw new TypeError("selection snapshot text must be a string");
   }

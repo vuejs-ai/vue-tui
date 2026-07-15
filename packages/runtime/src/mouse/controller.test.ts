@@ -119,6 +119,9 @@ function createHarness(options: HarnessOptions = {}) {
     hasObservedSubtree() {
       return true;
     },
+    requiresTextGeometry() {
+      return true;
+    },
     geometryFor(target) {
       return observed.has(target) ? frameGeometry : { status: "pending" };
     },
