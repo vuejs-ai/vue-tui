@@ -1,6 +1,6 @@
 # Fullscreen text selection and clipboard
 
-> **Status:** selected unstamped F8 public contract, implemented and complete at `3d7e197` on the current foundation branch. Public/type/package, deterministic, HMR, long-transcript, workbench, real-PTY, image-observed visual, native custom-clipboard, restoration, repository, fresh-CI, independent-review, and GitHub Actions evidence agree. F8 is Done and remains the accepted checkpoint from which Runtime foundation closure continues on the same worktree, branch, and PR #265. This record carries no VOUCHED stamp.
+> **Status:** selected unstamped F8 public contract, first completed at `3d7e197` and reconfirmed by final Runtime foundation closure on local candidate implementation head `e31aa1a`. F8 is Done; Runtime closure no longer continues from this checkpoint. Final evidence is centralized in [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence). This record carries no VOUCHED stamp.
 
 ## Product boundary
 
@@ -148,6 +148,8 @@ Selection endpoints are UTF-16 offsets into `state.text`, matching JavaScript st
 
 Paint supplies provenance rather than merely a bounding rectangle. A candidate maps semantic graphemes to their final cells, clipping and later overlay composition mark which source cells still survive, and the controller publishes the candidate only after the corresponding output frame succeeds. A failed write retains the last accepted document, range, and highlight mapping. Selected semantic text may include clipped or covered content, while inverse highlighting is applied only to surviving cells from that target in the displayed frame. This prevents an overlay, wide-glyph continuation cell, or stale failed frame from receiving a false highlight.
 
+Runtime may reuse an origin-independent local trace for one top-level Text only when its text revision, rendered and wrapped content, wrap width and mode, provenance identities, and selection-target identities remain equal. The trace stores document-local stops and cells. Each candidate frame still projects the current surface origin and clip, recomputes visible-cell survival during composition, and publishes selection and highlight state only after the frame is successfully written. This internal reuse does not change public coordinates, exact selected text, or successful-final-paint authority.
+
 When paint cannot preserve an exact semantic mapping, the state is `unavailable` with `mapping-unavailable` instead of approximating. Current deliberate examples include line transforms, truncation, and ambiguous standalone zero-width graphemes. Removing or retargeting the Text clears the accepted document and range; reattaching it does not revive the previous selection. A compatible later document may retain a range only when the source prefix through both endpoints is unchanged and both endpoints remain grapheme boundaries.
 
 ## Selection ownership and commands
@@ -223,9 +225,9 @@ The configured behavior acts as one app-owned custom transport. Every call that 
 - **Assuming OSC 52 means copied:** writing a control sequence proves only that vue-tui requested the operation. The terminal, multiplexer, remote boundary, and user policy remain outside the process.
 - **Automatic OSC 52, native addon, command, or shell fallback:** this would add platform policy, process spawning, security, and ambiguous confirmation to the runtime. Applications can provide one explicit custom adapter instead.
 
-## Closure state
+## Historical F8 checkpoint and final reconfirmation
 
-F8 is Done on the current foundation branch. The completed evidence is:
+F8 first became Done at `3d7e197`. The following values and totals are historical evidence for that checkpoint; they are retained rather than rewritten as final Runtime totals:
 
 - the guarded root and `/fullscreen` values and named types, Vue template and TSX behavior, JavaScript validation, package declarations, `@vue-tui/testing` model, clean Vue 3.4.38 and TypeScript 6.0.3 tarball consumer, documentation, changelog, and first-party mouse example agree;
 - deterministic journeys cover exact complete-grapheme command, click, Shift-click and captured-drag behavior; one active range across several documents; compatible updates; removal and retargeting; clipping, wrapping, nested styles, overlays, transforms, truncation, zero-width ambiguity, failed output, suspension, unsupported hosts, and lifecycle disposal;
@@ -237,4 +239,4 @@ F8 is Done on the current foundation branch. The completed evidence is:
 - final `vp run ready` passed 27 tasks: 685 runtime, 89 testing, 31 components, 30 Vite, 1,543 passing integration tests plus two expected failures and two skips, 174 real-PTY tests, six example tests, all builds, formatting, lint, types, and the clean package consumer;
 - one fresh `CI=true vp run ci` passed all 28 tasks with zero cache hits, and the required independent reviews ended with no remaining concrete finding.
 
-PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) contains this coherent checkpoint and its ordinary remote run is green. Runtime foundation closure continues from it on the same branch; the complete replacement PR body remains intentionally deferred until the final technical scope is stable and Yunfei approves the exact text, and the maintainer merge remains outside this development goal. No VOUCHED stamp changed.
+Final Runtime closure reconfirmed public values, named types, package consumption, deterministic and long-document behavior, clipboard outcomes, real PTYs, image-observed Unicode soft-wrap selection, capacity, release, repository, and review evidence at [Final closure evidence](./runtime-foundation-closure.md#final-closure-evidence). PR #265 was the development vehicle, but its current external state and older remote head are recorded separately from the local candidate. Push, PR-body or review-state changes, merge, release, and publication remain maintainer-directed external work. No VOUCHED stamp changed.
