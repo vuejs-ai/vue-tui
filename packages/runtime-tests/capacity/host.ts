@@ -34,6 +34,8 @@ export interface CapacityHostOptions {
   readonly columns: number;
   readonly rows: number;
   readonly mode: NonNullable<MountOptions["mode"]>;
+  /** Focused functional tests may opt out; capacity workloads require the default census. */
+  readonly trackLifetime?: boolean;
   readonly maxFps?: number;
   readonly clipboard?: (
     text: string,
@@ -360,24 +362,27 @@ async function mountCapacityHostWithOutput(
   // producer therefore runs while the first setup/frame transaction owns the
   // 200ms backpressure epoch instead of starting only after it has drained.
   slowOutput?.beginMeasuredPhase();
-  const stopTuiNodeObservation = observeTuiNodeCreations((node) => {
-    if (node.type === "root") {
-      trackCapacityLeakTarget("tui-root", node);
-      trackCapacityLeakTarget("runtime-app-context", node.appContext);
-    } else {
-      trackCapacityLeakTarget("host-node", node);
-    }
-  });
+  const trackLifetimeTarget = options.trackLifetime === false ? null : trackCapacityLeakTarget;
+  const stopTuiNodeObservation = trackLifetimeTarget
+    ? observeTuiNodeCreations((node) => {
+        if (node.type === "root") {
+          trackLifetimeTarget("tui-root", node);
+          trackLifetimeTarget("runtime-app-context", node.appContext);
+        } else {
+          trackLifetimeTarget("host-node", node);
+        }
+      })
+    : () => {};
   try {
     app = createApp(component);
   } catch (error) {
     stopTuiNodeObservation();
     throw error;
   }
-  trackCapacityLeakTarget("tui-app", app);
-  trackCapacityLeakTarget("stdin", stdin);
-  trackCapacityLeakTarget("stdout", stdout);
-  trackCapacityLeakTarget("stderr", stderr);
+  trackLifetimeTarget?.("tui-app", app);
+  trackLifetimeTarget?.("stdin", stdin);
+  trackLifetimeTarget?.("stdout", stdout);
+  trackLifetimeTarget?.("stderr", stderr);
   const clipboard = options.clipboard
     ? {
         kind: "custom" as const,
@@ -409,7 +414,7 @@ async function mountCapacityHostWithOutput(
     stopTuiNodeObservation();
     throw error;
   }
-  trackCapacityLeakTarget("root-proxy", rootProxy);
+  trackLifetimeTarget?.("root-proxy", rootProxy);
   mounted = true;
 
   const privateApp = app as TuiApp & {
@@ -417,10 +422,10 @@ async function mountCapacityHostWithOutput(
     readonly _context?: object | null;
   };
   if (isObject(privateApp._instance)) {
-    trackCapacityLeakTarget("vue-root-instance", privateApp._instance);
+    trackLifetimeTarget?.("vue-root-instance", privateApp._instance);
   }
   if (isObject(privateApp._context)) {
-    trackCapacityLeakTarget("vue-app-context", privateApp._context);
+    trackLifetimeTarget?.("vue-app-context", privateApp._context);
   }
 
   async function screen(): Promise<CapacityScreen> {

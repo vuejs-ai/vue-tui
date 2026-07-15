@@ -18,6 +18,7 @@ test("Fullscreen rewrites changed rows absolutely and resets after clear or resi
     columns: 10,
     rows: 3,
     mode: "fullscreen",
+    trackLifetime: false,
     maxFps: 0,
   });
 
