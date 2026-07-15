@@ -78,13 +78,7 @@ top-left sits on the physical screen.
   row, so an absolute click cannot currently be mapped reliably to a node. Content flushed outside
   the tracked layout, such as `<Static>`, can also shift the live region.
 
-- **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount.
-  Every commit clears and homes that viewport, then paints the complete frame from screen origin
-  `(0,0)`. Yoga receives the current terminal height, and paint plus hit testing are clipped to the
-  addressable rows. Coordinated stdout/stderr/console writes are followed by the same repaint, so
-  they cannot move the visible frame away from the hit map. `/inline` Static presence is rejected
-  before a new Fullscreen target frame, so it cannot move or publish stale hit geometry. Direct `process.stdout.write()` calls
-  bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
+- **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount. After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, `app.clear()`, uncertain physical output state, and coordinated stdout/stderr/console output clear, home, and repaint the complete viewport. Yoga receives the current terminal height, and paint plus hit testing are clipped to the addressable rows, so output cannot move the visible frame away from the hit map. `/inline` Static presence is rejected before a new Fullscreen target frame, so it cannot move or publish stale hit geometry. Direct `process.stdout.write()` calls bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
 
 Full-screen is sufficient for the current implementation, not a universal requirement. fzf proves
 that a bounded main-screen application can query its physical origin, translate SGR coordinates,

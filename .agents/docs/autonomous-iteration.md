@@ -84,7 +84,7 @@ The foundation roadmap is the single ordered backlog for this program. This live
 6. Implement the smallest coherent change. Update affected examples, public documentation, and unstamped records in the same change.
 7. Run focused checks during development and `vp run ready` for a coherent implementation batch. Run a fresh local `CI=true vp run ci` only at a meaningful public-API, core-Runtime, lifecycle, package, environment-sensitive, or final-acceptance boundary.
 8. Follow the shipped visual development guide for terminal-visible changes and use the repository controller for this repository. If both modes are affected, inspect both; if one mode is affected, inspect it plus a no-regression journey for the other when practical.
-9. Commit independently reviewable units locally. Push only when a substantial externally reviewable phase genuinely benefits from remote evidence or at final acceptance, never more than once in one autonomous run; let at most one ordinary remote run follow that push. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
+9. Commit coherent units locally. Push or trigger remote CI only on explicit maintainer direction. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
 10. Overwrite the live objective, candidates, evidence, and blockers as truth changes. A per-run checkpoint is a reporting and synchronization boundary, not the end of Runtime foundation closure.
 
 ## Verification rules

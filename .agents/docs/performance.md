@@ -48,7 +48,7 @@ The current runtime already has a retained Vue host tree and a scheduler that co
 The main implementation consequences are:
 
 - [`paint()` and `Output.get()`](../../packages/runtime/src/paint/paint.ts) still perform full-tree paint and full-grid allocation and stringification for each dynamic frame. The tokenization and width caches belong to that newly created `Output`, so they do not survive across frames.
-- [`incrementalRendering`](../../packages/runtime/src/render.ts) defaults to `false`. When enabled, the [incremental frame writer](../../packages/runtime/src/io/log-update.ts) reduces terminal output through line comparison, but it receives the already completed frame string and therefore does not reduce layout or paint work.
+- [`incrementalRendering`](../../packages/runtime/src/render.ts) defaults to `false` and controls the relative Inline writer. Fullscreen automatically replaces changed rows through absolute addressing after a valid baseline, independently of this option. Both writers receive the already completed frame string, so neither reduces layout or paint work.
 - [`paintDirty`](../../packages/runtime/src/host/nodes.ts) exists on box nodes but is not consumed by the painter. The Yoga binding writes `measuredCache` in [`bindTextMeasure`](../../packages/runtime/src/host/yoga.ts), but current code does not read it as a cross-frame text measurement cache.
 - The [zero-content guard](../../packages/runtime/src/host/layout-guards.ts) and [`Static` discovery](../../packages/runtime/src/paint/static-channel.ts) traverse the host tree on every commit.
 - [`ScrollBox`](../../packages/components/src/scroll-box/scroll-box.vue) mounts its complete content and scrolls by applying a negative top margin. It clips paint but does not virtualize layout or mounted nodes.
@@ -150,7 +150,7 @@ The candidate mechanisms are:
 Both modes can share host nodes, incremental layout, primitives, cell buffers, damage tracking, and ANSI encoding, but they cannot share every output assumption:
 
 - **Inline:** treat completed transcript output as append-only main-screen content and manage only the live region that remains addressable. When resize makes the old physical row mapping untrustworthy, leave that snapshot untouched, establish a fresh bounded region at the terminal bottom, and only erase rows owned by the new region.
-- **Full-screen:** treat the alternate screen as a fixed addressable viewport. Damage can use absolute rows, and a later implementation may use terminal scrolling regions for large vertical shifts when capability detection and correctness evidence justify it.
+- **Full-screen:** treat the alternate screen as a fixed addressable viewport. Ordinary consecutive frames currently replace changed absolute rows, while lifecycle and uncertain-output boundaries repaint the complete viewport. A later implementation may use terminal scrolling regions for large vertical shifts when capability detection and correctness evidence justify it.
 
 The mode-specific writer is an internal architecture boundary, not evidence that either mode should become the product default.
 

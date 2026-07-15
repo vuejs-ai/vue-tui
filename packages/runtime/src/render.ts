@@ -210,12 +210,10 @@ export interface MountOptions {
    */
   isScreenReaderEnabled?: boolean;
   /**
-   * Enable incremental rendering. When enabled, the frame writer uses
-   * line-diffing to minimize terminal writes — only changed lines are
-   * rewritten instead of erasing and repainting the entire frame.
-   *
-   * Fixed fullscreen rendering currently favors coordinate correctness and
-   * always repaints the complete viewport, so this option has no effect there.
+   * Enable relative line-diffing for Inline rendering. Fullscreen instead
+   * replaces changed rows through automatic absolute cursor addressing after
+   * a valid baseline, independently of this option; lifecycle and uncertain
+   * output boundaries still repaint its complete fixed viewport.
    *
    * @default false
    */

@@ -719,22 +719,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `console.log`, and patched `console.error` writes move the dynamic frame down one more row each.
   With `debug: true`, rerenders append in place (`DYNAMICFRAME-1FRAME-2`) instead of replacing the
   alternate-screen surface.
-- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport.
-  Yoga receives both dimensions; paint and hit testing clip to them; every commit clears, homes, and
-  repaints the complete frame from `(0,0)`, hiding the physical terminal cursor until the selected
-  focus-bound semantic caret is restored.
-  Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
-  repaint. `Static` from `@vue-tui/runtime/inline` is instead rejected on presence before history
-  bytes, dynamic output, observation, or a new viewport frame. If setup already acquired terminal
-  leases, the ordinary fatal path restores them before reporting. Ordinary reactive rerenders
-  replace the same surface, and deterministic observation does not change those bytes.
-- **Why:** targeted mouse events, the resolved caret surface point, and Yoga layout all use viewport coordinates. If
-  output outside the tree can move the visible frame while the hit map remains at row 0, clicking
-  the visible element misses and clicking the log line can trigger it. Treating fullscreen as an
-  owned fixed surface keeps all four coordinate systems identical and prevents tall content from
-  scrolling the alternate buffer. The first implementation favors correctness with a full repaint,
-  even when `incrementalRendering: true`; a later absolute-cell diff may optimize bytes without
-  changing this contract.
+- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport. Yoga receives both dimensions, and paint plus hit testing clip to them. After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, `app.clear()`, uncertain physical output state, and coordinated stdout, stderr, or patched-console output clear, home, and repaint the complete viewport. The renderer hides the physical cursor before output and restores the selected focus-bound semantic caret afterward. `Static` from `@vue-tui/runtime/inline` is rejected on presence before history bytes, dynamic output, observation, or a new viewport frame. If setup already acquired terminal leases, the ordinary fatal path restores them before reporting. Deterministic observation does not change physical output.
+- **Why:** targeted mouse events, the resolved caret surface point, and Yoga layout all use viewport coordinates. If output outside the tree can move the visible frame while the hit map remains at row 0, clicking the visible element misses and clicking the log line can trigger it. Treating Fullscreen as an owned fixed surface keeps all four coordinate systems identical and prevents tall content from scrolling the alternate buffer. Absolute row replacement reduces ordinary output without changing that contract and is independent of `incrementalRendering`.
 - **Boundary:** direct `process.stdout.write()` / `process.stderr.write()` calls bypass the runtime
   coordinator and cannot be repaired automatically. Screen-reader presentation stays on its linear
   transcript path; unlike Ink, a Fullscreen request resolves to effective Inline and remains on the
