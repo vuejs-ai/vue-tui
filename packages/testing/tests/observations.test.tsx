@@ -190,7 +190,7 @@ test("stream screen output preserves raw LF cursor movement", async () => {
   expect(screen.lines.slice(0, 2).map((line) => line.trimEnd())).toEqual(["A", " B"]);
 });
 
-test("screen observes useCaret becoming visible and inactive", async () => {
+test("screen observes useCaret moving and becoming inactive", async () => {
   const position = shallowRef<{ x: number; y: number } | null>({ x: 1, y: 0 });
   let caret!: UseCaretReturn;
   const App = defineComponent(() => {
@@ -208,6 +208,13 @@ test("screen observes useCaret becoming visible and inactive", async () => {
   try {
     expect(caret.state.value.status).toBe("visible");
     expect((await result.screen()).cursor.visible).toBe(true);
+
+    position.value = { x: 2, y: 0 };
+    await nextTick();
+    await result.waitUntilRenderFlush();
+
+    expect(caret.state.value).toEqual({ status: "visible", surface: { x: 2, y: 0 } });
+    expect((await result.screen()).cursor).toMatchObject({ column: 2, row: 0, visible: true });
 
     position.value = null;
     await nextTick();

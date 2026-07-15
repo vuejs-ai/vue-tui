@@ -2520,15 +2520,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const viewportRows = renderSession.session.dimensions.layout.rows;
         const dimensionsMatch =
           fullscreenBaselineColumns === viewportColumns && fullscreenBaselineRows === viewportRows;
-        const caretUnchanged =
-          writerCaretDeclaration?.x === caretPosition?.x &&
-          writerCaretDeclaration?.y === caretPosition?.y;
+        // The enclosing frame owner has already applied the candidate declaration.
+        // Cursor dirtiness therefore records whether the physical baseline still
+        // needs a move, show, or hide even when every rendered row is unchanged.
         if (
           options.writeBefore === undefined &&
           fullscreenBaselineValid &&
           dimensionsMatch &&
           output === frameState.lastOutput &&
-          caretUnchanged
+          !writer.isCursorDirty()
         ) {
           return;
         }
