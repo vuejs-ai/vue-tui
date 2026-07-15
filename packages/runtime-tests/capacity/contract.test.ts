@@ -120,6 +120,15 @@ test("the capacity runner executes both J6 volumes at the frozen repetition coun
   expect(runnerSource).toContain("repetitions: capacityManifest[journey].repetitions");
 });
 
+test("capacity heap samples exclude retained execution evidence", () => {
+  const source = readFileSync(new URL("./worker.ts", import.meta.url), "utf8");
+  expect(source).toMatch(
+    /const measuredPath = await runRepetition\(repetition\);[\s\S]*memory\.push\(collectMemory\(phase, repetition\)\)/,
+  );
+  expect(source).toMatch(/const measured = await Promise\.all\([\s\S]*readFile\(resultPath/);
+  expect(source).not.toContain("measured.push(result)");
+});
+
 test("capacity journey selection preserves the complete default and filters whole J6 volumes", () => {
   expect(selectCapacityRunSpecs()).toBe(capacityRunSpecs);
   expect(selectCapacityRunSpecs("j2,j6f")).toStrictEqual([

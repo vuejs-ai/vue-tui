@@ -1,3 +1,5 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite-plus";
@@ -97,6 +99,7 @@ function memoryTrend(samples: readonly MemorySample[]): MemoryTrend {
 
 const options = parseOptions();
 const directory = path.dirname(fileURLToPath(import.meta.url));
+const evidenceDirectory = await mkdtemp(path.join(tmpdir(), "vue-tui-capacity-"));
 const server = await createServer({
   root: path.dirname(directory),
   configFile: path.join(path.dirname(directory), "vite.config.ts"),
@@ -119,17 +122,36 @@ try {
       volume?: CapacityVolume,
     ) => Promise<JourneyExecution>;
   };
-  const measured: JourneyExecution[] = [];
+  const measuredPaths: string[] = [];
   const memory: MemorySample[] = [];
   const total = options.warmups + options.repetitions;
-  for (let repetition = 0; repetition < total; repetition++) {
+
+  async function runRepetition(repetition: number): Promise<string | null> {
     const result = await loaded[
       options.kind === "control" ? "runCapacityControl" : "runCapacityJourney"
     ](options.journey, options.maxFps, options.volume);
+    if (repetition < options.warmups) return null;
+    const resultPath = path.join(evidenceDirectory, `${repetition}.json`);
+    await writeFile(resultPath, JSON.stringify(result));
+    return resultPath;
+  }
+
+  for (let repetition = 0; repetition < total; repetition++) {
+    // Spool the complete execution evidence outside the JS heap before the
+    // sample. Retaining every prior latency/heartbeat/render array here made
+    // the measurement observe its own evidence accumulator rather than only
+    // Runtime and host state that survived teardown.
+    const measuredPath = await runRepetition(repetition);
     const phase = repetition < options.warmups ? "warmup" : "measured";
     memory.push(collectMemory(phase, repetition));
-    if (repetition >= options.warmups) measured.push(result);
+    if (measuredPath !== null) measuredPaths.push(measuredPath);
   }
+
+  const measured = await Promise.all(
+    measuredPaths.map(
+      async (resultPath) => JSON.parse(await readFile(resultPath, "utf8")) as JourneyExecution,
+    ),
+  );
 
   const latencySamples = measured.flatMap((result) => result.actionLatencies);
   const heartbeatSamples = measured.flatMap((result) => result.heartbeatExcess);
@@ -151,5 +173,9 @@ try {
 
   process.stdout.write(`${JSON.stringify(evidence)}\n`);
 } finally {
-  await server.close();
+  try {
+    await server.close();
+  } finally {
+    await rm(evidenceDirectory, { recursive: true, force: true });
+  }
 }
