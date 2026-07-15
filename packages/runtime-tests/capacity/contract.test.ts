@@ -1,10 +1,17 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
-import { memoryTrend, retainedHeapUsed, type CapacityMemorySample } from "./memory.ts";
+import {
+  heapUsedWithoutCodeAndBytecode,
+  memoryTrend,
+  type CapacityMemorySample,
+} from "./memory.ts";
 import { nearestRank } from "./metrics.ts";
 import { assessCapacityRun, type CapacityWorkerEvidence } from "./policy.ts";
 import { capacityRunSpecs, selectCapacityRunSpecs } from "./run-selection.ts";
 import { capacityWorkerV8Flags } from "./worker-config.ts";
+import { capacityLeakTargetKinds } from "./leak-probe.ts";
 import { capacityManifest, type CapacityJourneyId, type JourneyExecution } from "./workloads.tsx";
 
 test("capacity manifest keeps the fixed J1-J6 workload", () => {
@@ -124,28 +131,51 @@ test("the capacity runner executes both J6 volumes at the frozen repetition coun
   expect(runnerSource).toContain("repetitions: 10");
   expect(runnerSource).toContain("...capacityWorkerV8Flags");
   expect(runnerSource).toContain("workerV8Flags: capacityWorkerV8Flags");
-  expect(runnerSource).toContain("schemaVersion: 4");
+  expect(runnerSource).toContain("schemaVersion: 6");
+  expect(runnerSource).toContain('basis: "tracked-runtime-lifetimes-v1"');
+  expect(runnerSource).toContain("supersedesSchemas: Object.freeze([4, 5])");
+  expect(runnerSource).toContain('oracle: "v8.queryObjects"');
+  expect(runnerSource).toContain('hostNodeCoverage: "every TuiNode identity at construction"');
+  expect(runnerSource).toContain("affectsAcceptance: false");
+  expect(runnerSource).toContain("v8: process.versions.v8");
   expect(capacityWorkerV8Flags).toEqual(["--invocation-count-for-feedback-allocation=1"]);
 });
 
-test("capacity heap samples exclude retained execution evidence", () => {
+test("capacity diagnostics exclude retained execution evidence", () => {
   const source = readFileSync(new URL("./worker.ts", import.meta.url), "utf8");
   expect(source).toMatch(
-    /await runRepetition\(repetition\);[\s\S]*const sample = collectMemory\(phase, repetition\)/,
+    /await runRepetition\(repetition\);[\s\S]*auditCapacityLeakCohort[\s\S]*const sample = await collectMemory\(phase, repetition\)/,
   );
   expect(source).toMatch(/const measured = await Promise\.all\([\s\S]*readFile\(resultPath/);
   expect(source).not.toContain("measured.push(result)");
   expect(source).not.toContain("memory.push(");
   expect(source).not.toContain("measuredPaths.push(");
   expect(source).toContain("const heapUsedSamples = new Float64Array(total)");
+  expect(source).toContain("const reachableJsMemoryEstimateSamples = new Float64Array(total)");
+  expect(source).toContain("loaded.beginCapacityLeakCohort(phase, repetition)");
+  expect(source).toContain("`${repetition}.retention.json`");
+  const hostSource = readFileSync(new URL("./host.ts", import.meta.url), "utf8");
+  expect(hostSource).toContain("observeTuiNodeCreations((node) =>");
+  expect(hostSource).not.toContain("trackTuiTree");
+  const nodeSource = readFileSync(
+    new URL("../../runtime/src/host/nodes.ts", import.meta.url),
+    "utf8",
+  );
+  expect(nodeSource).toMatch(
+    /function trackTuiNode[\s\S]*tuiNodeCreationObservers[\s\S]*return node/,
+  );
   expect(source).toMatch(/const measuredPaths = Array\.from\([\s\S]*const measured =/);
+  const memorySource = readFileSync(new URL("./memory.ts", import.meta.url), "utf8");
+  expect(memorySource).toContain('measureMemory({ mode: "detailed", execution: "eager" })');
+  expect(memorySource).toContain("current?.jsMemoryEstimate");
 });
 
-test("capacity heap trends exclude V8 code tier-up without hiding retained growth", () => {
+test("capacity memory trends preserve reachable-JavaScript diagnostics", () => {
   const sample = (
     repetition: number,
     heapUsed: number,
     codeAndMetadataSize: number,
+    reachableJsMemoryEstimate: number,
     bytecodeAndMetadataSize = 100,
   ): CapacityMemorySample => ({
     phase: "measured",
@@ -153,18 +183,24 @@ test("capacity heap trends exclude V8 code tier-up without hiding retained growt
     heapUsed,
     codeAndMetadataSize,
     bytecodeAndMetadataSize,
-    retainedHeapUsed: retainedHeapUsed(heapUsed, codeAndMetadataSize, bytecodeAndMetadataSize),
+    heapUsedWithoutCodeAndBytecode: heapUsedWithoutCodeAndBytecode(
+      heapUsed,
+      codeAndMetadataSize,
+      bytecodeAndMetadataSize,
+    ),
+    reachableJsMemoryEstimate,
+    reachableJsMemoryRange: [reachableJsMemoryEstimate, reachableJsMemoryEstimate],
     rss: 2_000,
   });
   const codeTierUp = Array.from({ length: 10 }, (_, index) =>
-    index < 5 ? sample(index, 1_100, 100) : sample(index, 1_673, 673),
+    index < 5 ? sample(index, 1_100, 100, 900) : sample(index, 1_673, 673, 900),
   );
   expect(memoryTrend(codeTierUp)).toEqual({
-    basis: "heap-used-minus-v8-code-and-bytecode",
+    basis: "current-v8-context-reachable-js-memory-estimate",
     sampleCount: 10,
-    firstThreeRetainedHeapMedian: 900,
-    finalThreeRetainedHeapMedian: 900,
-    heapDelta: 0,
+    firstThreeReachableJsMemoryMedian: 900,
+    finalThreeReachableJsMemoryMedian: 900,
+    memoryDelta: 0,
   });
 
   const retainedGrowth = codeTierUp.map((entry, index) =>
@@ -174,10 +210,38 @@ test("capacity heap trends exclude V8 code tier-up without hiding retained growt
           entry.repetition,
           entry.heapUsed + 1,
           entry.codeAndMetadataSize,
+          entry.reachableJsMemoryEstimate + 1,
           entry.bytecodeAndMetadataSize,
         ),
   );
-  expect(memoryTrend(retainedGrowth).heapDelta).toBe(1);
+  expect(memoryTrend(retainedGrowth).memoryDelta).toBe(1);
+});
+
+test("reachable JavaScript memory detects and releases a real retained object graph", () => {
+  execFileSync(
+    process.execPath,
+    [
+      ...capacityWorkerV8Flags,
+      "--expose-gc",
+      "--import=tsx",
+      fileURLToPath(new URL("./memory-positive-control.ts", import.meta.url)),
+    ],
+    {
+      env: { ...process.env, NODE_NO_WARNINGS: "1" },
+      stdio: "pipe",
+    },
+  );
+});
+
+test("the Runtime lifetime probe detects and releases a retained target", () => {
+  execFileSync(
+    process.execPath,
+    ["--import=tsx", fileURLToPath(new URL("./leak-probe-positive-control.ts", import.meta.url))],
+    {
+      env: { ...process.env, NODE_NO_WARNINGS: "1" },
+      stdio: "pipe",
+    },
+  );
 });
 
 test("capacity journey selection preserves the complete default and filters whole J6 volumes", () => {
@@ -206,7 +270,7 @@ function evidence(
     readonly latencyMaximum?: number;
     readonly heartbeatP99?: number;
     readonly heartbeatMaximum?: number;
-    readonly heapDelta?: number;
+    readonly memoryDelta?: number;
   } = {},
 ): CapacityWorkerEvidence {
   const execution: JourneyExecution = {
@@ -216,6 +280,7 @@ function evidence(
     heartbeatExcess: [],
     assertionCount: 1,
     resources: Object.freeze({}) as JourneyExecution["resources"],
+    yoga: { liveBefore: 0, liveAfter: 0, created: 1, freed: 1 },
     output: {
       stdoutWrites: 1,
       stdoutBytes: 1,
@@ -234,11 +299,35 @@ function evidence(
     measured: [execution],
     memory: [],
     memoryTrend: {
-      basis: "heap-used-minus-v8-code-and-bytecode",
+      basis: "current-v8-context-reachable-js-memory-estimate",
       sampleCount: 10,
-      firstThreeRetainedHeapMedian: 1_000,
-      finalThreeRetainedHeapMedian: 1_000 + (values.heapDelta ?? 0),
-      heapDelta: values.heapDelta ?? 0,
+      firstThreeReachableJsMemoryMedian: 1_000,
+      finalThreeReachableJsMemoryMedian: 1_000 + (values.memoryDelta ?? 0),
+      memoryDelta: values.memoryDelta ?? 0,
+    },
+    retention: {
+      protocol: "tracked-runtime-lifetimes-v1",
+      calibration: {
+        basis: "v8-query-objects-weakmap-witness",
+        baselineWitnesses: 0,
+        releasedWitnesses: 0,
+        retainedWitnesses: 1,
+        witnessesAfterRelease: 0,
+        releasedWeakReferenceCleared: true,
+        retainedWeakReferenceObserved: true,
+        retainedWeakReferenceCleared: true,
+        valid: true,
+      },
+      audits: Array.from({ length: 13 }, (_, repetition) => ({
+        phase: repetition < 3 ? ("warmup" as const) : ("measured" as const),
+        repetition,
+        observedTargets: Object.fromEntries(
+          capacityLeakTargetKinds.map((kind) => [kind, 1]),
+        ) as Record<(typeof capacityLeakTargetKinds)[number], number>,
+        survivingKinds: [],
+        survivingWitnesses: 0,
+        censusConsistent: true,
+      })),
     },
     latency: {
       count: 1,
@@ -309,12 +398,55 @@ describe("capacity acceptance policy", () => {
     expect(assessment.status).toBe("needs-maintainer-decision");
   });
 
-  test("requires a second run for positive heap growth beyond the control", () => {
-    const workload = evidence("j2", { heapDelta: 6 });
-    const control = evidence("j2", { heapDelta: 5 });
+  test("records positive aggregate memory growth without treating it as a leak", () => {
+    const workload = evidence("j2", { memoryDelta: 6 });
+    const control = evidence("j2", { memoryDelta: 5 });
     const assessment = assessCapacityRun("j2", workload, control, true);
-    expect(assessment.status).toBe("needs-repeat");
-    expect(assessment.heapDeltaExcess).toBe(1);
+    expect(assessment.status).toBe("pass");
+    expect(assessment.memoryDeltaExcess).toBe(1);
+    expect(assessment.memoryGrowthObserved).toBe(true);
+  });
+
+  test("fails when a tracked Runtime lifetime remains reachable", () => {
+    const workload = evidence("j2");
+    const firstAudit = workload.retention.audits[0]!;
+    const retained: CapacityWorkerEvidence = {
+      ...workload,
+      retention: {
+        ...workload.retention,
+        audits: [
+          { ...firstAudit, survivingKinds: ["tui-app"], survivingWitnesses: 1 },
+          ...workload.retention.audits.slice(1),
+        ],
+      },
+    };
+    const assessment = assessCapacityRun("j2", retained, evidence("j2"), true);
+    expect(assessment.status).toBe("fail");
+    expect(assessment.retentionReleased).toBe(false);
+  });
+
+  test("fails when lifetime coverage or Yoga release evidence is incomplete", () => {
+    const workload = evidence("j3");
+    const execution = workload.measured[0]!;
+    const firstAudit = workload.retention.audits[0]!;
+    const incomplete: CapacityWorkerEvidence = {
+      ...workload,
+      measured: [{ ...execution, yoga: { ...execution.yoga, freed: 0 } }],
+      retention: {
+        ...workload.retention,
+        audits: [
+          {
+            ...firstAudit,
+            observedTargets: { ...firstAudit.observedTargets, "host-node": 0 },
+          },
+          ...workload.retention.audits.slice(1),
+        ],
+      },
+    };
+    const assessment = assessCapacityRun("j3", incomplete, evidence("j3"), true);
+    expect(assessment.status).toBe("fail");
+    expect(assessment.yogaReleased).toBe(false);
+    expect(assessment.retentionCoverageComplete).toBe(false);
   });
 
   test("treats missing J6 backpressure evidence as a hard failure", () => {

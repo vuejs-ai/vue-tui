@@ -8,6 +8,7 @@ import { capacityManifest, type CapacityJourneyId, type CapacityVolume } from ".
 import { assessCapacityRun, capacityThresholds, type CapacityWorkerEvidence } from "./policy.ts";
 import { selectCapacityRunSpecs } from "./run-selection.ts";
 import { capacityWorkerV8Flags } from "./worker-config.ts";
+import { capacityLeakTargetKinds } from "./leak-probe.ts";
 
 interface RunConfiguration {
   readonly mode: "check" | "measure";
@@ -144,15 +145,31 @@ for (const spec of selectCapacityRunSpecs(requestedJourneyArgument())) {
 }
 
 const evidence = Object.freeze({
-  schemaVersion: 4,
+  schemaVersion: 6,
   recordedAt: new Date().toISOString(),
   mode,
   thresholds: capacityThresholds,
+  retentionProtocol: Object.freeze({
+    basis: "tracked-runtime-lifetimes-v1",
+    supersedesSchemas: Object.freeze([4, 5]),
+    oracle: "v8.queryObjects",
+    association: "WeakMap target to cohort witness set",
+    targetKinds: capacityLeakTargetKinds,
+    hostNodeCoverage: "every TuiNode identity at construction",
+    maximumSurvivingTargetKinds: 0,
+    appliesTo: "every warmup and measured repetition",
+  }),
+  memoryDiagnostics: Object.freeze({
+    basis: "current-v8-context-reachable-js-memory-estimate",
+    api: "node:vm measureMemory detailed/eager current context",
+    affectsAcceptance: false,
+  }),
   workerV8Flags: capacityWorkerV8Flags,
   environment: Object.freeze({
     commit: gitText("rev-parse", "HEAD"),
     dirty: gitText("status", "--porcelain").length > 0,
     node: process.version,
+    v8: process.versions.v8,
     platform: process.platform,
     release: os.release(),
     architecture: process.arch,

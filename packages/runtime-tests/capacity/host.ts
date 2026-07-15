@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";
-import { nextTick, type Component } from "vue";
+import { nextTick, type Component, type ComponentPublicInstance } from "vue";
 import {
   createApp,
   type ClipboardTransportResult,
@@ -12,12 +12,15 @@ import {
   INTERNAL_TERMINAL_SIZE_PROBE,
   INTERNAL_TEST_INPUT_HOST,
   createManualSuspensionHost,
+  observeTuiNodeCreations,
   runtimeResourceTracker,
+  yogaNodeTracker,
   type InternalTestInputHost,
   type RuntimeResourceSnapshot,
 } from "@vue-tui/runtime/internal";
 import { createTestMouse, type TestMouse } from "../../testing/src/mouse.ts";
 import { createCapacityTerminalEmulator } from "./emulator.ts";
+import { trackCapacityLeakTarget } from "./leak-probe.ts";
 
 export type CapacityResourceSnapshot = RuntimeResourceSnapshot;
 
@@ -63,6 +66,13 @@ export interface CapacityBackpressureProbe {
   waitForIdle(): Promise<void>;
 }
 
+export interface CapacityYogaLifecycle {
+  readonly liveBefore: number;
+  readonly liveAfter: number;
+  readonly created: number;
+  readonly freed: number;
+}
+
 export interface CapacityHost {
   readonly app: TuiApp;
   readonly stdin: NodeJS.ReadStream;
@@ -89,8 +99,13 @@ export interface CapacityHost {
   screen(): Promise<CapacityScreen>;
   dispose(): Promise<{
     readonly resources: RuntimeResourceSnapshot;
+    readonly yoga: CapacityYogaLifecycle;
     readonly screen: CapacityScreen;
   }>;
+}
+
+function isObject(value: unknown): value is object {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
 }
 
 function makeInput(): {
@@ -301,6 +316,7 @@ async function mountCapacityHostWithOutput(
   options: CapacityHostOptions,
   slow: boolean,
 ): Promise<CapacityHost> {
+  const yogaBefore = yogaNodeTracker.snapshot();
   const emulator = createCapacityTerminalEmulator(options.columns, options.rows);
   emulator.write("PRE_APP_HISTORY\n");
   const stdoutWrites: string[] = [];
@@ -344,33 +360,68 @@ async function mountCapacityHostWithOutput(
   // producer therefore runs while the first setup/frame transaction owns the
   // 200ms backpressure epoch instead of starting only after it has drained.
   slowOutput?.beginMeasuredPhase();
-  app = createApp(component);
+  const stopTuiNodeObservation = observeTuiNodeCreations((node) => {
+    if (node.type === "root") {
+      trackCapacityLeakTarget("tui-root", node);
+      trackCapacityLeakTarget("runtime-app-context", node.appContext);
+    } else {
+      trackCapacityLeakTarget("host-node", node);
+    }
+  });
+  try {
+    app = createApp(component);
+  } catch (error) {
+    stopTuiNodeObservation();
+    throw error;
+  }
+  trackCapacityLeakTarget("tui-app", app);
+  trackCapacityLeakTarget("stdin", stdin);
+  trackCapacityLeakTarget("stdout", stdout);
+  trackCapacityLeakTarget("stderr", stderr);
   const clipboard = options.clipboard
     ? {
         kind: "custom" as const,
         writeText: options.clipboard,
       }
     : undefined;
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: options.mode,
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: options.maxFps,
-    onRender: ({ renderTime }) => options.onRender?.(renderTime),
-    kittyKeyboard: { mode: "disabled" },
-    clipboard,
-    [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
-  } as MountOptions & {
-    readonly [INTERNAL_SUSPENSION_HOST]: typeof suspensionHost;
-    readonly [INTERNAL_TERMINAL_SIZE_PROBE]: () => { readonly kind: "unavailable" };
-    readonly [INTERNAL_TEST_INPUT_HOST]: InternalTestInputHost;
-  });
+  let rootProxy: ComponentPublicInstance;
+  try {
+    rootProxy = app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: options.mode,
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: options.maxFps,
+      onRender: ({ renderTime }) => options.onRender?.(renderTime),
+      kittyKeyboard: { mode: "disabled" },
+      clipboard,
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
+    } as MountOptions & {
+      readonly [INTERNAL_SUSPENSION_HOST]: typeof suspensionHost;
+      readonly [INTERNAL_TERMINAL_SIZE_PROBE]: () => { readonly kind: "unavailable" };
+      readonly [INTERNAL_TEST_INPUT_HOST]: InternalTestInputHost;
+    });
+  } catch (error) {
+    stopTuiNodeObservation();
+    throw error;
+  }
+  trackCapacityLeakTarget("root-proxy", rootProxy);
   mounted = true;
+
+  const privateApp = app as TuiApp & {
+    readonly _instance?: object | null;
+    readonly _context?: object | null;
+  };
+  if (isObject(privateApp._instance)) {
+    trackCapacityLeakTarget("vue-root-instance", privateApp._instance);
+  }
+  if (isObject(privateApp._context)) {
+    trackCapacityLeakTarget("vue-app-context", privateApp._context);
+  }
 
   async function screen(): Promise<CapacityScreen> {
     const snapshot = await emulator.snapshot();
@@ -407,7 +458,14 @@ async function mountCapacityHostWithOutput(
     await flush();
   };
 
-  if (!slowOutput) await flush();
+  if (!slowOutput) {
+    try {
+      await flush();
+    } catch (error) {
+      stopTuiNodeObservation();
+      throw error;
+    }
+  }
 
   const host = {
     app,
@@ -450,22 +508,36 @@ async function mountCapacityHostWithOutput(
     async dispose() {
       if (disposed) throw new Error("The capacity host was already disposed");
       disposed = true;
-      mouseController.clearPressedButtons();
-      app.unmount();
-      await app.waitUntilExit();
-      await slowOutput?.probe.waitForIdle();
-      await Promise.resolve();
-      await Promise.resolve();
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      await emulator.flush();
-      const finalScreen = await screen();
-      const resources = runtimeResourceTracker.snapshot();
-      stdout.destroy();
-      stderr.destroy();
-      stdin.destroy();
-      await emulator.dispose();
-      mounted = false;
-      return Object.freeze({ resources, screen: finalScreen });
+      try {
+        mouseController.clearPressedButtons();
+        app.unmount();
+        await app.waitUntilExit();
+        await slowOutput?.probe.waitForIdle();
+        await Promise.resolve();
+        await Promise.resolve();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await emulator.flush();
+        const finalScreen = await screen();
+        const resources = runtimeResourceTracker.snapshot();
+        const yogaAfter = yogaNodeTracker.snapshot();
+        stdout.destroy();
+        stderr.destroy();
+        stdin.destroy();
+        await emulator.dispose();
+        mounted = false;
+        return Object.freeze({
+          resources,
+          yoga: Object.freeze({
+            liveBefore: yogaBefore.live,
+            liveAfter: yogaAfter.live,
+            created: yogaAfter.created - yogaBefore.created,
+            freed: yogaAfter.freed - yogaBefore.freed,
+          }),
+          screen: finalScreen,
+        });
+      } finally {
+        stopTuiNodeObservation();
+      }
     },
   } satisfies CapacityHost;
   return Object.freeze(host);

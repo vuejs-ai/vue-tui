@@ -2,6 +2,11 @@ import type { PercentileSummary } from "./metrics.ts";
 import type { CapacityMemorySample, CapacityMemoryTrend } from "./memory.ts";
 import type { capacityWorkerV8Flags } from "./worker-config.ts";
 import {
+  capacityLeakTargetKinds,
+  type CapacityLeakCohortAudit,
+  type CapacityLeakProbeCalibration,
+} from "./leak-probe.ts";
+import {
   capacityManifest,
   type CapacityJourneyId,
   type CapacityVolume,
@@ -28,6 +33,11 @@ export interface CapacityWorkerEvidence {
   readonly measured: readonly JourneyExecution[];
   readonly memory: readonly CapacityMemorySample[];
   readonly memoryTrend: CapacityMemoryTrend;
+  readonly retention: {
+    readonly protocol: "tracked-runtime-lifetimes-v1";
+    readonly calibration: CapacityLeakProbeCalibration;
+    readonly audits: readonly CapacityLeakCohortAudit[];
+  };
   readonly latency: PercentileSummary;
   readonly heartbeat: PercentileSummary;
   readonly renderDuration: PercentileSummary;
@@ -39,10 +49,15 @@ export interface CapacityAssessment {
   readonly repeatReasons: readonly string[];
   readonly maintainerDecisionReasons: readonly string[];
   readonly resourcesReleased: boolean;
-  readonly memoryEvaluated: boolean;
-  readonly workloadHeapDelta: number;
-  readonly controlHeapDeltaAllowance: number;
-  readonly heapDeltaExcess: number;
+  readonly yogaReleased: boolean;
+  readonly leakProbeCalibrated: boolean;
+  readonly retentionCoverageComplete: boolean;
+  readonly retentionReleased: boolean;
+  readonly memoryDiagnosticSampled: boolean;
+  readonly memoryGrowthObserved: boolean;
+  readonly workloadMemoryDelta: number;
+  readonly controlMemoryDeltaAllowance: number;
+  readonly memoryDeltaExcess: number;
 }
 
 function inRepeatBand(value: number, limit: number): boolean {
@@ -63,10 +78,46 @@ export function assessCapacityRun(
   const hardFailures: string[] = [];
   const repeatReasons: string[] = [];
   const maintainerDecisionReasons: string[] = [];
-  const resourcesReleased = workload.measured.every((execution) =>
+  const workers = [workload, control] as const;
+  const executions = workers.flatMap((worker) => worker.measured);
+  const resourcesReleased = executions.every((execution) =>
     Object.values(execution.resources).every((count) => count === 0),
   );
   if (!resourcesReleased) hardFailures.push("a Runtime resource count remained nonzero");
+  const yogaReleased = executions.every(
+    (execution) =>
+      execution.yoga.created === execution.yoga.freed &&
+      execution.yoga.liveAfter === execution.yoga.liveBefore,
+  );
+  if (!yogaReleased) hardFailures.push("Yoga nodes did not return to the pre-mount baseline");
+
+  const leakProbeCalibrated = workers.every((worker) => worker.retention.calibration.valid);
+  if (!leakProbeCalibrated) hardFailures.push("the Runtime lifetime probe failed calibration");
+  const retentionCoverageComplete = workers.every(
+    (worker) =>
+      worker.retention.protocol === "tracked-runtime-lifetimes-v1" &&
+      worker.retention.audits.length === worker.warmups + worker.repetitions &&
+      worker.retention.audits.every(
+        (audit, repetition) =>
+          audit.repetition === repetition &&
+          audit.phase === (repetition < worker.warmups ? "warmup" : "measured") &&
+          capacityLeakTargetKinds.every((kind) => audit.observedTargets[kind] > 0),
+      ),
+  );
+  if (!retentionCoverageComplete) {
+    hardFailures.push("the Runtime lifetime probe did not observe every required target kind");
+  }
+  const retentionReleased = workers.every((worker) =>
+    worker.retention.audits.every(
+      (audit) =>
+        audit.censusConsistent &&
+        audit.survivingWitnesses === 0 &&
+        audit.survivingKinds.length === 0,
+    ),
+  );
+  if (!retentionReleased) {
+    hardFailures.push("a tracked Runtime lifetime target remained reachable after teardown");
+  }
 
   if (isJ6(journey)) {
     for (const [index, execution] of workload.measured.entries()) {
@@ -167,16 +218,12 @@ export function assessCapacityRun(
     }
   }
 
-  const memoryEvaluated =
+  const memoryDiagnosticSampled =
     workload.memoryTrend.sampleCount >= 10 && control.memoryTrend.sampleCount >= 10;
-  const workloadHeapDelta = workload.memoryTrend.heapDelta;
-  const controlHeapDeltaAllowance = Math.max(0, control.memoryTrend.heapDelta);
-  const heapDeltaExcess = workloadHeapDelta - controlHeapDeltaAllowance;
-  if (memoryEvaluated && heapDeltaExcess > 0) {
-    repeatReasons.push(
-      `retained heap growth exceeded the matched control by ${heapDeltaExcess} bytes and requires the prescribed second run`,
-    );
-  }
+  const workloadMemoryDelta = workload.memoryTrend.memoryDelta;
+  const controlMemoryDeltaAllowance = Math.max(0, control.memoryTrend.memoryDelta);
+  const memoryDeltaExcess = workloadMemoryDelta - controlMemoryDeltaAllowance;
+  const memoryGrowthObserved = memoryDiagnosticSampled && memoryDeltaExcess > 0;
 
   let status: CapacityAssessment["status"] = "pass";
   if (hardFailures.length > 0) status = "fail";
@@ -188,9 +235,14 @@ export function assessCapacityRun(
     repeatReasons: Object.freeze(repeatReasons),
     maintainerDecisionReasons: Object.freeze(maintainerDecisionReasons),
     resourcesReleased,
-    memoryEvaluated,
-    workloadHeapDelta,
-    controlHeapDeltaAllowance,
-    heapDeltaExcess,
+    yogaReleased,
+    leakProbeCalibrated,
+    retentionCoverageComplete,
+    retentionReleased,
+    memoryDiagnosticSampled,
+    memoryGrowthObserved,
+    workloadMemoryDelta,
+    controlMemoryDeltaAllowance,
+    memoryDeltaExcess,
   });
 }

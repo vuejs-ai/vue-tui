@@ -44,7 +44,14 @@ import {
   type CapacityBackpressureSnapshot,
   type CapacityHost,
   type CapacityResourceSnapshot,
+  type CapacityYogaLifecycle,
 } from "./host.ts";
+export {
+  auditCapacityLeakCohort,
+  beginCapacityLeakCohort,
+  calibrateCapacityLeakProbe,
+  takeCapacityLeakCohort,
+} from "./leak-probe.ts";
 import { startHeartbeat } from "./metrics.ts";
 
 export const capacityManifest = Object.freeze({
@@ -159,6 +166,7 @@ export interface JourneyExecution {
   readonly heartbeatExcess: readonly number[];
   readonly assertionCount: number;
   readonly resources: CapacityResourceSnapshot;
+  readonly yoga: CapacityYogaLifecycle;
   readonly output: {
     readonly stdoutWrites: number;
     readonly stdoutBytes: number;
@@ -198,6 +206,12 @@ async function finish(
   assert.equal(host.mouseReporting.current, "none", "mouse reporting must restore after teardown");
   assert.equal(final.screen.activeBuffer, "normal", "teardown must return to the normal buffer");
   assert.equal(final.screen.cursorVisible, true, "teardown must restore the terminal cursor");
+  assert.equal(final.yoga.created, final.yoga.freed, "every created Yoga node must be freed");
+  assert.equal(
+    final.yoga.liveAfter,
+    final.yoga.liveBefore,
+    "Yoga live nodes must return to baseline",
+  );
   const stdoutWriteBytes = host.writes.stdout.map((write) => Buffer.byteLength(write));
   const stderrWriteBytes = host.writes.stderr.map((write) => Buffer.byteLength(write));
   const backpressure = host.backpressure?.snapshot();
@@ -207,8 +221,9 @@ async function finish(
     actionLatencies: Object.freeze([...latencies]),
     renderDurations: Object.freeze([...renderDurations]),
     heartbeatExcess: Object.freeze(heartbeat.samples.map((sample) => sample.excessDelay)),
-    assertionCount: assertionCount + 4,
+    assertionCount: assertionCount + 6,
     resources: final.resources,
+    yoga: final.yoga,
     output: Object.freeze({
       stdoutWrites: stdoutWriteBytes.length,
       stdoutBytes: stdoutWriteBytes.reduce((total, bytes) => total + bytes, 0),

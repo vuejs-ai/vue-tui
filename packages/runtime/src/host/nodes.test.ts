@@ -1,7 +1,41 @@
 import { expect, test } from "vite-plus/test";
 import Yoga from "yoga-layout";
-import { createBox, createText, createTextLeaf, createTransform, isContainer } from "./nodes.ts";
+import type { AppContext } from "../context.ts";
+import {
+  createBox,
+  createComment,
+  createRoot,
+  createStatic,
+  createText,
+  createTextLeaf,
+  createTransform,
+  createVirtualText,
+  isContainer,
+  observeTuiNodeCreations,
+  type TuiNode,
+} from "./nodes.ts";
 import { buildNodeOps } from "./node-ops.ts";
+
+test("Tui node creation observation covers every constructor and disposes idempotently", () => {
+  const observed: TuiNode[] = [];
+  const stop = observeTuiNodeCreations((node) => observed.push(node));
+  const created = [
+    createRoot({} as AppContext),
+    createBox(),
+    createText(),
+    createVirtualText(),
+    createTextLeaf("text"),
+    createStatic(),
+    createTransform((line) => line),
+    createComment("comment"),
+  ];
+  expect(observed).toEqual(created);
+
+  stop();
+  stop();
+  createBox();
+  expect(observed).toEqual(created);
+});
 
 test("createBox returns shape with empty children + paintDirty true", () => {
   const box = createBox();

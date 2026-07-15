@@ -10,6 +10,7 @@ export {
   createBox,
   createText,
   createTextLeaf,
+  observeTuiNodeCreations,
   type TuiRoot,
   type TuiBox,
   type TuiText,

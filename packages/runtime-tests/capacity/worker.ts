@@ -12,6 +12,11 @@ import {
 import type { CapacityJourneyId, CapacityVolume, JourneyExecution } from "./workloads.tsx";
 import { summarize } from "./metrics.ts";
 import { assertCapacityWorkerV8Flags, capacityWorkerV8Flags } from "./worker-config.ts";
+import type {
+  CapacityLeakCohort,
+  CapacityLeakCohortAudit,
+  CapacityLeakProbeCalibration,
+} from "./leak-probe.ts";
 
 interface WorkerOptions {
   readonly journey: CapacityJourneyId;
@@ -33,6 +38,11 @@ interface WorkerEvidence {
   readonly measured: readonly JourneyExecution[];
   readonly memory: readonly CapacityMemorySample[];
   readonly memoryTrend: CapacityMemoryTrend;
+  readonly retention: {
+    readonly protocol: "tracked-runtime-lifetimes-v1";
+    readonly calibration: CapacityLeakProbeCalibration;
+    readonly audits: readonly CapacityLeakCohortAudit[];
+  };
   readonly latency: ReturnType<typeof summarize>;
   readonly heartbeat: ReturnType<typeof summarize>;
   readonly renderDuration: ReturnType<typeof summarize>;
@@ -97,7 +107,12 @@ try {
       maxFps?: number,
       volume?: CapacityVolume,
     ) => Promise<JourneyExecution>;
+    beginCapacityLeakCohort: (phase: CapacityLeakCohortAudit["phase"], repetition: number) => void;
+    takeCapacityLeakCohort: () => CapacityLeakCohort;
+    auditCapacityLeakCohort: (cohort: CapacityLeakCohort) => Promise<CapacityLeakCohortAudit>;
+    calibrateCapacityLeakProbe: () => Promise<CapacityLeakProbeCalibration>;
   };
+  const leakCalibration = await loaded.calibrateCapacityLeakProbe();
   const total = options.warmups + options.repetitions;
   // Fixed-size typed arrays keep the measurement recorder itself constant
   // across repetitions. Growing JS arrays here would make later heap samples
@@ -105,7 +120,10 @@ try {
   const heapUsedSamples = new Float64Array(total);
   const codeAndMetadataSamples = new Float64Array(total);
   const bytecodeAndMetadataSamples = new Float64Array(total);
-  const retainedHeapUsedSamples = new Float64Array(total);
+  const heapUsedWithoutCodeAndBytecodeSamples = new Float64Array(total);
+  const reachableJsMemoryEstimateSamples = new Float64Array(total);
+  const reachableJsMemoryMinimumSamples = new Float64Array(total);
+  const reachableJsMemoryMaximumSamples = new Float64Array(total);
   const rssSamples = new Float64Array(total);
 
   async function runRepetition(repetition: number): Promise<void> {
@@ -122,13 +140,22 @@ try {
     // sample. Retaining every prior latency/heartbeat/render array here made
     // the measurement observe its own evidence accumulator rather than only
     // Runtime and host state that survived teardown.
-    await runRepetition(repetition);
     const phase = repetition < options.warmups ? "warmup" : "measured";
-    const sample = collectMemory(phase, repetition);
+    loaded.beginCapacityLeakCohort(phase, repetition);
+    await runRepetition(repetition);
+    const leakAudit = await loaded.auditCapacityLeakCohort(loaded.takeCapacityLeakCohort());
+    await writeFile(
+      path.join(evidenceDirectory, `${repetition}.retention.json`),
+      JSON.stringify(leakAudit),
+    );
+    const sample = await collectMemory(phase, repetition);
     heapUsedSamples[repetition] = sample.heapUsed;
     codeAndMetadataSamples[repetition] = sample.codeAndMetadataSize;
     bytecodeAndMetadataSamples[repetition] = sample.bytecodeAndMetadataSize;
-    retainedHeapUsedSamples[repetition] = sample.retainedHeapUsed;
+    heapUsedWithoutCodeAndBytecodeSamples[repetition] = sample.heapUsedWithoutCodeAndBytecode;
+    reachableJsMemoryEstimateSamples[repetition] = sample.reachableJsMemoryEstimate;
+    reachableJsMemoryMinimumSamples[repetition] = sample.reachableJsMemoryRange[0];
+    reachableJsMemoryMaximumSamples[repetition] = sample.reachableJsMemoryRange[1];
     rssSamples[repetition] = sample.rss;
   }
 
@@ -140,7 +167,12 @@ try {
         heapUsed: heapUsedSamples[repetition]!,
         codeAndMetadataSize: codeAndMetadataSamples[repetition]!,
         bytecodeAndMetadataSize: bytecodeAndMetadataSamples[repetition]!,
-        retainedHeapUsed: retainedHeapUsedSamples[repetition]!,
+        heapUsedWithoutCodeAndBytecode: heapUsedWithoutCodeAndBytecodeSamples[repetition]!,
+        reachableJsMemoryEstimate: reachableJsMemoryEstimateSamples[repetition]!,
+        reachableJsMemoryRange: Object.freeze([
+          reachableJsMemoryMinimumSamples[repetition]!,
+          reachableJsMemoryMaximumSamples[repetition]!,
+        ] as const),
         rss: rssSamples[repetition]!,
       }),
     ),
@@ -153,6 +185,13 @@ try {
   const measured = await Promise.all(
     measuredPaths.map(
       async (resultPath) => JSON.parse(await readFile(resultPath, "utf8")) as JourneyExecution,
+    ),
+  );
+  const retentionAudits = await Promise.all(
+    Array.from({ length: total }, (_, repetition) =>
+      readFile(path.join(evidenceDirectory, `${repetition}.retention.json`), "utf8").then(
+        (value) => JSON.parse(value) as CapacityLeakCohortAudit,
+      ),
     ),
   );
 
@@ -170,6 +209,11 @@ try {
     measured: Object.freeze(measured),
     memory: Object.freeze(memory),
     memoryTrend: memoryTrend(memory),
+    retention: Object.freeze({
+      protocol: "tracked-runtime-lifetimes-v1",
+      calibration: leakCalibration,
+      audits: Object.freeze(retentionAudits),
+    }),
     latency: summarize(latencySamples),
     heartbeat: summarize(heartbeatSamples),
     renderDuration: summarize(renderSamples),

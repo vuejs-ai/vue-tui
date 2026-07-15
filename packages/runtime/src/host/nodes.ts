@@ -128,9 +128,26 @@ export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 // public prop for a renderer node, while this registry also recognizes direct
 // host refs used by renderer-internal adapters without exposing a public brand.
 const tuiNodes = new WeakSet<object>();
+const tuiNodeCreationObservers = new Set<(node: TuiNode) => void>();
+
+/**
+ * Observe every host-node identity at construction time. This internal test
+ * seam is intentionally synchronous: an instrumentation failure must invalidate
+ * the run instead of silently producing incomplete lifetime evidence.
+ */
+export function observeTuiNodeCreations(observer: (node: TuiNode) => void): () => void {
+  tuiNodeCreationObservers.add(observer);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    tuiNodeCreationObservers.delete(observer);
+  };
+}
 
 function trackTuiNode<T extends TuiNode>(node: T): T {
   tuiNodes.add(node);
+  for (const observer of tuiNodeCreationObservers) observer(node);
   return node;
 }
 
