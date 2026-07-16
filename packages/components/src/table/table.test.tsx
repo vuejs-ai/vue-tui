@@ -25,7 +25,6 @@ describe("Table", () => {
   // -------------------------------------------------------------------------
   test("renders a basic table with auto-derived columns from data", async () => {
     const result = await render(Table, {
-      interactive: false,
       props: { data: simpleData },
     });
     try {
@@ -59,7 +58,6 @@ describe("Table", () => {
       { label: "Age", key: "age" },
     ];
     const result = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns },
     });
     try {
@@ -78,7 +76,6 @@ describe("Table", () => {
   // -------------------------------------------------------------------------
   test("renders empty data array without error", async () => {
     const result = await render(Table, {
-      interactive: false,
       props: { data: [] },
     });
     try {
@@ -100,7 +97,7 @@ describe("Table", () => {
     // left-aligned cell: pad=1 space + "AB" + fill=3 spaces = " AB   "
     const data = [{ a: "AB" }];
     const columns = [{ label: "HHHH", key: "a", align: "left" as const }];
-    const result = await render(Table, { interactive: false, props: { data, columns } });
+    const result = await render(Table, { props: { data, columns } });
     try {
       const out = result.lastFrame() ?? "";
       // Data row has no ANSI inside cell content; only borders are bold-wrapped.
@@ -116,7 +113,7 @@ describe("Table", () => {
     // Same setup: width=6, centered: (6-2)/2 = 2 spaces each side → "  AB  "
     const data = [{ a: "AB" }];
     const columns = [{ label: "HHHH", key: "a", align: "center" as const }];
-    const result = await render(Table, { interactive: false, props: { data, columns } });
+    const result = await render(Table, { props: { data, columns } });
     try {
       const out = result.lastFrame() ?? "";
       const clean = out.replace(/\x1b\[[\d;]*m/g, "");
@@ -130,7 +127,7 @@ describe("Table", () => {
     // Same setup: width=6, right-aligned: fill=3 spaces + "AB" + pad=1 → "   AB "
     const data = [{ a: "AB" }];
     const columns = [{ label: "HHHH", key: "a", align: "right" as const }];
-    const result = await render(Table, { interactive: false, props: { data, columns } });
+    const result = await render(Table, { props: { data, columns } });
     try {
       const out = result.lastFrame() ?? "";
       const clean = out.replace(/\x1b\[[\d;]*m/g, "");
@@ -152,7 +149,6 @@ describe("Table", () => {
       },
     ];
     const result = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns },
     });
     try {
@@ -172,7 +168,6 @@ describe("Table", () => {
     // width = max(1, 5) + 0 = 5, cell = "value"
     const columns = [{ label: "K", key: "key" }];
     const result = await render(Table, {
-      interactive: false,
       props: { data: singleRow, columns, padding: 0 },
     });
     try {
@@ -189,7 +184,6 @@ describe("Table", () => {
     // width = max(1, 5) + 4 = 9, cell (left-aligned) = "  value  "
     const columns = [{ label: "K", key: "key" }];
     const result = await render(Table, {
-      interactive: false,
       props: { data: singleRow, columns, padding: 2 },
     });
     try {
@@ -214,7 +208,7 @@ describe("Table", () => {
         </Table>
       );
     });
-    const result = await render(App, { interactive: false });
+    const result = await render(App);
     try {
       const out = result.lastFrame() ?? "";
       // Default rendering is plain text; custom slot wraps in brackets
@@ -242,7 +236,7 @@ describe("Table", () => {
         </Table>
       );
     });
-    const result = await render(App, { interactive: false });
+    const result = await render(App);
     try {
       const out = result.lastFrame() ?? "";
       // Default header renders bold blue; custom slot wraps in brackets
@@ -262,7 +256,6 @@ describe("Table", () => {
       { a: null, b: undefined, c: "fine" },
     ];
     const result = await render(Table, {
-      interactive: false,
       props: { data },
     });
     try {
@@ -287,11 +280,9 @@ describe("Table", () => {
     const columnsDefault = [{ label: "Name", key: "name" }];
     const columnsGreen = [{ label: "Name", key: "name", headerColor: "green" }];
     const resultDefault = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns: columnsDefault },
     });
     const resultGreen = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns: columnsGreen },
     });
     try {
@@ -325,11 +316,9 @@ describe("Table", () => {
       },
     ];
     const r1 = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns: colsPlain },
     });
     const r2 = await render(Table, {
-      interactive: false,
       props: { data: simpleData, columns: colsColored },
     });
     try {
@@ -353,7 +342,6 @@ describe("Table", () => {
     ];
     const data = [{ name: "Alice", age: 30, city: "NYC" }];
     const result = await render(Table, {
-      interactive: false,
       props: { data, columns },
     });
     try {
@@ -377,7 +365,6 @@ describe("Table", () => {
   test("throws for negative padding", async () => {
     await expect(
       render(Table, {
-        interactive: false,
         props: { data: simpleData, padding: -1 },
       }),
     ).rejects.toThrow("[Table] padding must be a non-negative integer");
@@ -386,7 +373,6 @@ describe("Table", () => {
   test("throws for fractional padding", async () => {
     await expect(
       render(Table, {
-        interactive: false,
         props: { data: simpleData, padding: 1.5 },
       }),
     ).rejects.toThrow("[Table] padding must be a non-negative integer");
@@ -394,7 +380,6 @@ describe("Table", () => {
 
   test("accepts zero padding", async () => {
     const result = await render(Table, {
-      interactive: false,
       props: { data: simpleData, padding: 0 },
     });
     try {
@@ -411,7 +396,6 @@ describe("Table", () => {
   test("strips newlines from cell values to preserve single-line rows", async () => {
     const data = [{ a: "line1\nline2" }];
     const result = await render(Table, {
-      interactive: false,
       props: { data },
     });
     try {
