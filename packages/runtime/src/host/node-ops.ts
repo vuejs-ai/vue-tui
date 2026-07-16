@@ -1,4 +1,4 @@
-import { type RendererOptions } from "@vue/runtime-core";
+import { type RendererOptions } from "vue";
 import {
   createBox,
   createComment as createCommentNode,
@@ -13,6 +13,7 @@ import {
   type TuiRoot,
 } from "./nodes.ts";
 import type { MouseHandlerName, MouseHandlerProps } from "../mouse/events.ts";
+import { getRenderedTargetController } from "../rendered-target.ts";
 import {
   attachYoga,
   detachYoga,
@@ -406,13 +407,24 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   function remove(child: TuiNode): void {
     const parent = child.parent;
     if (!parent) return;
-    findRoot(child)?.appContext.internal_mouse?.removeNode(child);
+    const root = findRoot(child);
+    try {
+      if (root) getRenderedTargetController(root.appContext)?.invalidateSubtree(child);
+    } catch {
+      // Every target adapter already received its cleanup turn. A failing
+      // disposer must not prevent Vue from detaching and freeing the host tree.
+    }
+    try {
+      root?.appContext.internal_mouse?.removeNode(child);
+    } catch {
+      // Mouse cleanup is also a host-removal backstop; preserve structural
+      // removal even if a custom stream/controller implementation fails.
+    }
 
     // Track static node removal: clear root.staticNode only if it still
     // points at this node. On key-driven remounts, insert() already
     // registered the new instance before the old one is removed.
     if (child.type === "tui-static") {
-      const root = findRoot(child);
       if (root && root.staticNode === child) {
         root.staticNode = undefined;
       }

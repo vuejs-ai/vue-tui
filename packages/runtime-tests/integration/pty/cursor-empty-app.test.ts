@@ -2,25 +2,28 @@
 // hides on the first render that actually writes (log-update.ts:55-59), and the
 // onRender outer gate `output !== lastOutput || log.isCursorDirty()`
 // (ink.tsx:1094) skips log-update entirely for an empty frame (both ""). So an
-// interactive app whose root renders nothing emits ZERO cursor escapes; vue-tui
-// must match. Non-empty + useCursor apps still hide on the first render (the
+// interactive app whose root renders nothing emits no cursor escape on its
+// initial commit; vue-tui must match. Teardown may still restore cursor
+// visibility. Non-empty + useCursor apps hide on the first render (the
 // lazy hide), so the cursor lifecycle is preserved.
 //
 // These run under a real PTY (run() spawns a TTY child with FORCE_COLOR=3 +
 // CI=false) so the genuine interactive log-update path is exercised, not the
-// debug helper.
+// deterministic content-frame observer.
 import { test as it, expect } from "vite-plus/test";
 import { run } from "./helpers/run.ts";
 
 const HIDE = "\x1b[?25l";
 const SHOW = "\x1b[?25h";
+const NEL = "\x1bE";
 
 it("interactive empty app (() => null) emits NO cursor-hide escape", async () => {
   const output = await run("cursor-empty-app");
   expect(output).toContain("exited");
   // The bug: vue-tui eagerly hid the cursor at mount even though nothing
-  // renders. Ink emits zero cursor escapes for an empty frame.
+  // renders. Ink emits no hide escape for an empty initial frame.
   expect(output).not.toContain(HIDE);
+  expect(output).not.toContain(NEL);
 });
 
 it("interactive non-empty app still hides the cursor on first render", async () => {

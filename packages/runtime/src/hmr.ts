@@ -1,4 +1,4 @@
-import { type InjectionKey, shallowRef, type ShallowRef } from "@vue/runtime-core";
+import { type InjectionKey, shallowRef, type ShallowRef } from "vue";
 
 export interface DevErrorInfo {
   message: string;

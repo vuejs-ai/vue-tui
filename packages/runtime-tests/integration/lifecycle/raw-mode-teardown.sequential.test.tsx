@@ -69,7 +69,7 @@ test.sequential("swapping useInput components clears pending parser state (no le
   const { stream: stdin } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await nextTick();
 
   // Buffer a partial escape sequence (CSI start, no final byte). The parser
@@ -115,7 +115,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   const { stream: stdin, rawMode } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
   await nextTick();
 
   expect(rawMode.current).toBe(true);

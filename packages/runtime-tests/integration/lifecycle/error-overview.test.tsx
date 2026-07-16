@@ -71,7 +71,7 @@ async function renderErrorFrame(component: Parameters<typeof createApp>[0]): Pro
   const writes = captureWrites(stdout);
 
   const app = createApp(component);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   // The exit promise rejects (component threw); swallow it. Then wait for the
   // boundary's onErrorCaptured → nextTick → ErrorOverview commit → exit chain.
@@ -101,7 +101,7 @@ async function renderFrameAndReject(component: Parameters<typeof createApp>[0]):
   const writes = captureWrites(stdout);
 
   const app = createApp(component);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   let reject: { kind: "rejected"; message: unknown; isError: boolean } | { kind: "resolved" } = {
     kind: "resolved",

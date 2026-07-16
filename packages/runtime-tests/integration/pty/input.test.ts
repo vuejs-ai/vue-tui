@@ -25,16 +25,16 @@ it("useInput - \\r should not count as an uppercase character", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - pasted carriage return", async () => {
+it("useInput - bracketed paste preserves carriage return", async () => {
   const ps = term("use-input", ["pastedCarriageReturn"]);
-  ps.write("\rtest");
+  ps.write("\x1b[200~\rtest\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - pasted tab", async () => {
+it("useInput - bracketed paste preserves tab", async () => {
   const ps = term("use-input", ["pastedTab"]);
-  ps.write("\ttest");
+  ps.write("\x1b[200~\ttest\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
@@ -294,10 +294,10 @@ it("useInput - handle Ctrl+C when exitOnCtrlC is false", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - handle Ctrl+C via kitty codepoint-3 form when exitOnCtrlC is false", async () => {
+it("useInput - handle Ctrl+C via Kitty CSI-u when exitOnCtrlC is false", async () => {
   const ps = term("use-input-ctrl-c");
-  // Ctrl+C via kitty codepoint 3 form (modifier 5 = ctrl(4) + 1)
-  ps.write("[3;5u");
+  // Kitty reports the printable key codepoint plus the Ctrl modifier.
+  ps.write("[99;5u");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });

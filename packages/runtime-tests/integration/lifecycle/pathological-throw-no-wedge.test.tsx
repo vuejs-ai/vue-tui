@@ -30,7 +30,7 @@ async function expectMountDoesNotWedge(thrown: unknown): Promise<void> {
   const { stream: stdin } = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, debug: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
 
   const outcome = await Promise.race([
     app

@@ -8,7 +8,7 @@
 // entry forever (poisoning the stdout: every later mount() hit the reuse guard
 // and no-op'd), the yoga root leaked, and raw mode was left on.
 
-import { PassThrough } from "node:stream";
+import { createRequire } from "node:module";
 import { defineComponent } from "vue";
 import { expect, test, vi, afterEach } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
@@ -48,15 +48,16 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
     throw ttyError;
   };
 
-  const { restore } = spyOnGuardWarnings();
+  const { warnings, restore } = spyOnGuardWarnings();
 
   // (1) mount() must rethrow the injected error (the caller still sees it).
   // rawMode defaults to "always" + interactive (TTY stdout) → the App acquires
   // a lifetime raw-mode hold, which calls the throwing setRawMode.
   const app1 = createApp(App);
-  expect(() => app1.mount({ stdout, stdin, stderr, interactive: true })).toThrow(
+  expect(() => app1.mount({ stdout, stdin, stderr, liveUpdates: true })).toThrow(
     "ERR_TTY_INIT_FAILED",
   );
+  expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) The stdout is NOT poisoned: a subsequent mount() on the SAME stdout
   // succeeds and renders, proving liveInstances was cleaned up by teardown()
@@ -64,7 +65,7 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
   const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -102,17 +103,18 @@ test.sequential("a synchronous stdout.write throw during kitty enable runs teard
       stdout,
       stdin,
       stderr,
-      interactive: true,
+      liveUpdates: true,
       kittyKeyboard: { mode: "enabled" },
     }),
   ).toThrow("BROKEN_STREAM_ON_KITTY_ENABLE");
+  expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) Not poisoned: a fresh mount on the same stdout must NOT warn (the
   // registry entry was evicted by teardown). Repair the stream first.
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
   const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, debug: true, exitOnCtrlC: false });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();
@@ -120,24 +122,27 @@ test.sequential("a synchronous stdout.write throw during kitty enable runs teard
 
 test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga root", async () => {
   // Targets the `mountedRoot = tuiRoot` ordering: attachYoga() has already
-  // allocated the root's yoga node, and setWidth(resolveSize(stdout).columns)
-  // throws. Recording mountedRoot BEFORE setWidth lets teardown's
+  // allocated the root's yoga node, and its initial setWidth() throws. Recording mountedRoot
+  // BEFORE setWidth lets teardown's
   // `if (mountedRoot) detachYoga(mountedRoot)` free that node.
   yogaNodeTracker.reset();
   const liveBefore = yogaNodeTracker.snapshot().live;
 
   const App = defineComponent(() => () => <Text>after-attach</Text>);
 
-  // A TTY stdout whose `columns` getter throws — resolveSize() reads it to
-  // produce the setWidth() argument, so setWidth throws AFTER attachYoga ran.
-  const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
-  const sizeError = new Error("COLUMNS_READ_FAILED");
-  Object.defineProperty(stdout, "columns", {
-    get() {
-      throw sizeError;
-    },
+  // Resolve the runtime's own Yoga dependency and fail the exact root-width
+  // call. A throwing stdout getter would now fail earlier during F1.4 session
+  // resolution and would no longer exercise this post-allocation window.
+  const localRequire = createRequire(import.meta.url);
+  const runtimeRequire = createRequire(localRequire.resolve("@vue-tui/runtime/package.json"));
+  const yogaModule = (await import(runtimeRequire.resolve("yoga-layout"))) as {
+    default: { Node: { prototype: { setWidth(width: number): void } } };
+  };
+  const widthError = new Error("YOGA_SET_WIDTH_FAILED");
+  vi.spyOn(yogaModule.default.Node.prototype, "setWidth").mockImplementationOnce(() => {
+    throw widthError;
   });
-  Object.assign(stdout, { rows: 100, isTTY: true });
+  const stdout = makeFakeWritable({ columns: 100, rows: 100 });
 
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -145,9 +150,10 @@ test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga
 
   // (1) mount() rethrows the setWidth error.
   const app1 = createApp(App);
-  expect(() => app1.mount({ stdout, stdin, stderr, interactive: false })).toThrow(
-    "COLUMNS_READ_FAILED",
+  expect(() => app1.mount({ stdout, stdin, stderr, liveUpdates: false })).toThrow(
+    "YOGA_SET_WIDTH_FAILED",
   );
+  expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   restore();
 

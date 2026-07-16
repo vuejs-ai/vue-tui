@@ -1,8 +1,6 @@
 // Stream-level cursor parity (Ink test/cursor.tsx:89-193). The existing
-// use-cursor.test.tsx tests pass for the WRONG reason — they go through the
-// debug render() helper (debug:true => FrameWriter.log is null, so log-update
-// never runs) and only assert a local capturedX + lastFrame().toContain. These
-// tests mount a REAL interactive TTY (isTTY:true, debug:false) so log-update
+// use-cursor.test.tsx tests observe semantic frames rather than terminal bytes.
+// These tests mount a REAL interactive TTY (isTTY:true) so log-update
 // actually composes the cursor escapes, then capture the raw stdout write
 // chunks (like Ink's getWriteCalls) and assert the real ANSI cursor sequence.
 //
@@ -319,7 +317,7 @@ describe("cursor commit-path wiring (interactive stream level)", () => {
     // true, ...) — which begins with hideCursorEscape (`\x1b[?25l`). So the cursor
     // that was SHOWN at the child's position must be HIDDEN when the owner unmounts.
     //
-    // This is observable only at the interactive stream level: the debug render()
+    // This is observable only at the interactive stream level: semantic frame
     // helper has FrameWriter.log === null, so log-update (and its cursor escapes)
     // never runs. We capture raw stdout write chunks (Ink's getWriteCalls pattern).
     const showChild = shallowRef(true);

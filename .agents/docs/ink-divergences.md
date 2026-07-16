@@ -122,6 +122,29 @@ re-render. Matching Ink's well-tuned cadence buys the same perceived responsiven
 guarantees without re-deriving them. One deliberate exception: resize cancels the pending trailing
 commit — see the divergence "Resize unconditionally cancels the pending trailing commit".
 
+### Non-TTY output defaults to a final stream while explicit live updates remain possible
+
+The stdout policy deliberately matches Ink v7.0.4. Both runtimes [resolve live updates](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L979-L981) as the explicit override when present, otherwise as
+`!isInCi && Boolean(stdout.isTTY)`. Ink names the override `interactive`; vue-tui's public name is the narrower `liveUpdates`, recorded as an API divergence below. With live updates disabled, newly committed `Static` bytes are written
+immediately, dynamic commits only replace the retained latest frame, and teardown writes that
+latest dynamic frame plus a newline. This keeps ordinary redirected output useful and avoids
+emitting cursor-relative update bytes by default.
+
+That alignment describes clean completion. Fatal completion is a deliberate durability exception: vue-tui does not replay a retained successful frame after a later render error, writes a sanitized stack or message to stderr, and settles only after the error write completes.
+
+The override remains real rather than advisory: explicitly enabling live updates on a non-TTY
+stream runs the relative or screen-reader writer and may emit live frames plus ANSI erase or cursor
+movement bytes. Commit throttling can coalesce intermediate states, so the contract is not that
+every reactive state is observable. Alternate-screen entry still independently requires a TTY
+stdout; forcing live updates cannot acquire Fullscreen, a stable viewport, or a hit map on a pipe.
+
+This alignment is about output policy, not a broad claim that the application has no input. A TTY
+stdin can still acquire raw mode through an input consumer while stdout uses final-output mode.
+Ink's `debug: true` remains a separate append-oriented diagnostic branch, but vue-tui deliberately does not carry that branch as part of this output-policy alignment: deterministic observation is orthogonal and the public `debug` option is removed, as recorded below. Finally, Ink's screen-reader flag does not itself prevent alternate-screen entry; vue-tui's target fallback from a Fullscreen screen-reader request to a main-screen transcript is a separate product decision from the non-TTY alignment.
+
+The pinned upstream behavior was run-verified through Ink's [non-TTY and explicit-override tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1152-L1247), CI tests, [alternate-screen tests](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx#L1712-L1757), and Static tests. vue-tui's current behavior is covered by
+[`non-interactive-final-frame.test.tsx`](../../packages/runtime-tests/integration/lifecycle/non-interactive-final-frame.test.tsx), [`unmount-stream.test.tsx`](../../packages/runtime-tests/integration/lifecycle/unmount-stream.test.tsx), [`cursor-non-tty.test.tsx`](../../packages/runtime-tests/integration/lifecycle/cursor-non-tty.test.tsx), [`alternate-screen.test.tsx`](../../packages/runtime-tests/integration/lifecycle/alternate-screen.test.tsx), and [`fatal-output-durability.test.tsx`](../../packages/runtime-tests/integration/lifecycle/fatal-output-durability.test.tsx).
+
 ### Literal tabs in `<Text>` are not normalized (measure vs paint width)
 
 Tabs in `<Text>` aren't normalized — measured width can disagree with painted width (shared with
@@ -149,34 +172,17 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 - **Ink:** exits only on the legacy `\x03` byte (in `App`), so a kitty-protocol Ctrl+C
   (`\x1b[99;5u`) parses fine but never exits. Its guard is byte-specific, not
   Ctrl+C-specific.
-- **vue-tui:** one encoding-agnostic exit in the always-on stdin controller (`emitInput`),
-  via `parseKeypress`. It matches Ctrl+C in both the legacy and kitty forms (but not
-  Ctrl+Shift+C), so it fires no matter which composable holds raw mode (`useInput` /
-  `useFocus` / `usePaste`, or none).
+- **vue-tui:** one encoding-agnostic exit in the always-on stdin controller (`emitInput`) reads the shared normalized key fact. It matches an exact Ctrl+C in legacy and kitty forms, including a kitty base-layout `c`. When a protocol reports Shift, Alt, Super, Hyper, or Meta separately, that combination remains an application shortcut; legacy terminals may encode Ctrl+Shift+C as the indistinguishable `\x03`, which still exits. The default therefore fires no matter which composable holds raw mode (`useInput` / `useFocus` / `usePaste`, or none).
 - **Why:** `exitOnCtrlC` is defined in terms of Ctrl+C, not one byte encoding. Keeping the
   exit at the single always-on layer avoids splitting the behavior across two places. Opt
   out with `exitOnCtrlC: false`. KEEP. [VOUCHED @hyf0] Tests:
   `usePaste-only app exits on {legacy,kitty} Ctrl+C` in `input-kitty.test.ts`.
 
-### `parseKeypress` filters kitty query-responses
+### The stdin ingress owns kitty query-responses
 
-- **Ink:** filters kitty keyboard-protocol query-responses (`ESC[?Nu`) in exactly **one**
-  place: the auto-detection lifecycle in `ink.tsx`
-  (`stripKittyQueryResponsesAndTrailingPartial` on a private `onData` buffer). Its
-  `parse-keypress.ts` has no query-response branch.
-- **vue-tui:** mirrors that detection layer (in `kitty-keyboard.ts`) **and** adds a
-  parser-level filter: `parseKeypress` returns `{ ignore: true }` for `ESC[?Nu`, which
-  `useInput` then drops.
-- **Why:** the detection layer does **not** cover the runtime input pipeline (`stdin 'data'`
-  -> `inputParser` -> `emitInput` -> `useInput` -> `parseKeypress`). In `enabled` mode it
-  never runs; in `auto` mode its `onData` listener and the stdin controller's
-  `handleData` both subscribe to the same `'data'` event, so stripping its private buffer
-  cannot stop the chunk reaching `handleData`; and after detection settles the listener is
-  gone. Empirically (Layer 2 removed, rebuilt) a stray query-response reaches a `useInput`
-  handler as spurious `"[?1u"` input in all of those cases, including a response split
-  across two reads, which `inputParser` reassembles before dispatch. The parser-level
-  filter is therefore intentional, not redundant. Introduced 2026-05-31. Tests: "kitty
-  query-response - end-to-end filtering" in `kitty-lifecycle.test.ts` (RED without it).
+- **Ink:** its auto-detection lifecycle listens to stdin in parallel with application input, strips replies from a private buffer, and `unshift()`s the remaining bytes. Its ordinary key parser has no query-response branch. Pinned v7.0.4 runs prove that a complete reply can still reach `useInput`.
+- **vue-tui:** one weakly registered ingress per physical stdin is the only framework listener for byte decoding, structural control-sequence and paste framing, detection, and ordered application multicast. It consumes complete `ESC[?Nu` replies outside bracketed-paste payloads before application delivery. Each accepted query owns a 200ms FIFO slot; cancellation leaves a callback-free tombstone that retains query-shaped partial replies, the same owner can revive that slot on continuation, and a rejected write aborts an unwritten slot. Structural events are sent once to app generations eligible when the event began. A semantic parser-level `ignore` remains the backstop for explicitly enabled mode and late or stray complete replies.
+- **Why:** competing listeners cannot establish ownership, and per-app filters can classify the same physical bytes differently. The previous detector replayed ordinary bytes already handled by the application controller, a reply split after 35ms escaped as `"[?"` plus `"1u"`, and reply-shaped bytes inside a paste were deleted. Protocol input must be removed once before application routing, not repaired independently in every public listener. The finite 200ms query window and ordinary 20ms Escape ambiguity boundary are explicit. Real-stream tests cover interleaved ordinary input, re-entrant and throwing protocol-enable writes, overlapping, cancelled, revived, rejected, staggered, long-split and late queries, invalid prefixes and UTF-8, consecutive Escape, paste payloads, flow pause and resume, synchronous mount and continuation responses, teardown, and shared-stdin behavior. See [normalized input and routing](./input-routing.md). This is an unstamped F3 implementation decision; priority, continuation, defaults, external-owner fallthrough, and the public input surface remain open.
 
 ### `useAnimation()` outside a render tree drives a standalone animation
 
@@ -205,6 +211,8 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   — a reasonable Vue-idiomatic adoption (the component-instance ref is the natural Vue path;
   the bare host-node ref stays Ink-identical). [VOUCHED @hyf0]
 
+> **Unstamped F2 implementation note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer now reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useBoxMetrics()` and `useDraggable()` are the first two adapters. See [rendered-target-lifetime.md](./rendered-target-lifetime.md). This note records implementation evidence and does not extend the VOUCHED public API decision above.
+
 ### Two apps sharing one stdin both receive input
 
 - **Ink:** raw-mode count and the input listener are **per-`App`** (`useRef`), and Ink reads
@@ -225,6 +233,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   share one input. The common one-app-to-terminal flow is unchanged: one controller's
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyf0]
+- **F3.1–F3.4 implementation update (unstamped):** one weakly registered framework ingress now replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, normalizes each event once into the same immutable semantic fact for all eligible app controllers, and carries each app's fact-start route-lease snapshot through split framing. Distinct facts are dispatched serially and recapture routes after the preceding callback even when Node batches them into one chunk; plain text remains one fact when the wire provides no finer boundary. Current hooks consume a cached Ink-shaped edge projection; richer key identity remains internal. A private pure F3.4 model now tests explicit global, selected-boundary, supplied-focus-path, delayed-default, and optional-external layers while keeping action, continuation, defaults, and external permission independent; it is not live dispatch or a public API, and its external representation is honestly limited to normalized UTF-8 sequences because invalid raw bytes are already lost. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. Controller integration, activation leases, exact source provenance, current-API disposition, and the final public route remain open. See [normalized input and routing](./input-routing.md).
 
 ## Vue API and Mental Model Divergences
 
@@ -247,8 +256,9 @@ current-props model, or API conventions.
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
   follows this — `useFocusManager().activeId` is a single ref read as `.value`, while a
-  composable may instead return an **object of refs** (`useWindowSize()` returns
-  `{ columns, rows }`, read as `.columns.value` / `.rows.value`). An empty single-ref state
+  composable may instead return an **object of refs** (`useLayoutSize()` returns
+  `{ columns, rows }`, read as `.columns.value` / `.rows.value`, with `rows.value === null`
+  for an unbounded layout). An empty single-ref state
   holds `null` (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`),
   where Ink's plain value is `undefined`.
 - **Why:** the two frameworks track a changing value differently. React reads the newest
@@ -265,7 +275,7 @@ current-props model, or API conventions.
 - **vue-tui:** in a **development** build, a component whose `setup()` throws additionally
   produces Vue's own `[Vue warn]` lines on stderr (for example, the missing-render-function
   warning) that Ink has no analog for. While console patching is active (the default;
-  disabled by `patchConsole: false` or `debug`, independent of interactive mode), vue-tui
+  disabled by `patchConsole: false`, independent of live-update mode), vue-tui
   treats the `[Vue warn]` prefix as Vue's framework-diagnostics channel and drops those
   stderr lines. The patch is installed before the first mount (matching Ink, which patches
   before the first render), so a `setup()` throw during the **initial** mount is filtered
@@ -424,9 +434,10 @@ current-props model, or API conventions.
 - **vue-tui:** public APIs are Vue **composables** (`useFocus`, `useInput`, ...). Where a
   composable's return type is exported under a name, the name always follows VueUse's
   `UseXReturn` convention (`UseAppReturn`, `UseStdinReturn`, `UseStdoutReturn`,
-  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`); the remaining composables
-  return `void`, plain `boolean`, or small unexported inline shapes — never an `XProps`
-  type. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
+  `UseStderrReturn`, `UseAnimationReturn`, `UseBoxMetricsReturn`, `UseLayoutSizeReturn`); the remaining composables
+  return `void` or small unexported inline shapes — never an `XProps` type. `useRenderSession()`
+  returns the exported domain model `RenderSession` rather than adding a duplicate hook-specific
+  alias. `XProps` is reserved for component props (`BoxProps`/`TextProps`, derived via
   `ExtractPublicPropTypes`).
 - **Options types follow the same principle:** Ink names a composable's options type locally
   `Options` / `Props` and usually does **not** export it (e.g. `useAnimation`'s `Options` is
@@ -528,7 +539,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   calls `yogaNode.markDirty()`. Only `setTextNodeValue` (a text-CONTENT change) dirties the
   measure func. So when ONLY `wrap` toggles, yoga keeps the previously-measured height while
   paint renders with the new wrap mode → layout and paint disagree. Run-verified vs v7.0.4
-  (`/tmp/ink-verify`, debug-mode frame capture): a width-6 column `<Box>` with
+  (`/tmp/ink-verify`, append-oriented diagnostic capture): a width-6 column `<Box>` with
   `<Text wrap>` over `"aaaa bbbb cccc"` and a `ZZZZ` sentinel below, toggled wrap→truncate,
   yields `"aaaa …\n\n\nZZZZ"` — the truncated text paints on row 1 but yoga still reserves 3
   rows, stranding `ZZZZ` on row 4 with blank rows. Toggling text content alongside `wrap`
@@ -578,13 +589,25 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   keeping the running app stable beats auto-tearing it down (which would churn on a re-render
   glitch). KEEP. [VOUCHED @hyf0] Test: `instance-reuse-guard.test.tsx`.
 
-### Raw mode is owned for the interactive lifetime by default (`rawMode` option)
+### Screen mode and live output cadence use separate mount fields
+
+- **Ink:** `alternateScreen?: boolean` requests the alternate buffer and `interactive?: boolean` controls its broad live-output policy. The resolved state is not available as one public fact, and the word “interactive” can be mistaken for stdin or logical-input availability.
+- **vue-tui:** `mode?: "inline" | "fullscreen"` requests one of the two terminal screen models, while `liveUpdates?: boolean` only overrides output cadence. Omission requests Inline and otherwise follows Ink's `!isInCi && Boolean(stdout.isTTY)` default. Own `fullscreen`, `alternateScreen`, and `interactive` keys fail synchronously before terminal mutation; there are no compatibility aliases. The internal render session keeps the request, effective mode, fallback, output, dimensions, and capabilities distinct.
+- **Why:** the screen model and whether dynamic bytes update live are different decisions. A non-TTY stream may update live without acquiring either terminal mode; a TTY may use final-stream output; stdin can have its own availability. Separate, accurately named fields prevent application code from treating one boolean as all three facts. The direct replacement is appropriate while vue-tui is experimental, and one `createApp` still owns the shared Vue lifecycle. Introduced in F1.4; no VOUCHED stamp has been added.
+
+### Deterministic observation is separate from output; `debug` is removed
+
+- **Ink:** public `debug: true` changes stdout behavior: every commit writes complete current content, Static history can be replayed, clear and console-patching behavior changes, and final-stream teardown follows a distinct diagnostic path.
+- **vue-tui:** own `debug` keys on live mounts and `@vue-tui/testing` render options are removed programming errors and fail before terminal or component mutation. The testing package installs a symbol-keyed internal render observer that receives structured `{ dynamic, staticOutput }` commits without selecting a host, changing stdout, disabling console handling, or changing scheduling. Terminal-visible assertions use an independent xterm emulator; `maxFps: 0` remains an unthrottled scheduler choice rather than an output mode.
+- **Why:** output policy and observation have different consumers. Making tests alter application bytes produced sessions that claimed production cadence while stdout followed an append-only diagnostic branch, and content frames had to be inferred from a stream containing terminal controls. Orthogonal observation lets the deterministic host exercise the real Inline, Fullscreen, screen-reader, live-stream, and final-stream paths while exposing both semantic commits and the resulting terminal screen. Direct removal is appropriate while vue-tui is experimental. Implemented and verified in F1.5.
+
+### Raw mode is owned for the live-update-request lifetime by default (`rawMode` option)
 
 - **Ink:** raw mode is **lazy / reference-counted to input hooks**. `useInput` /
   `useFocus` / `usePaste` enable it on mount and release it when the last one unmounts, so
   a screen with no input handler falls back to cooked mode. There is no option to hold it.
 - **vue-tui:** the `rawMode` mount option defaults to **`'always'`**. Raw mode is enabled at
-  mount and held for the whole interactive run (when `interactive` and stdin is a TTY),
+  mount and held for the whole run when live updates were requested and stdin is a TTY,
   regardless of which input composables are mounted. `rawMode: 'auto'` opts back into Ink's
   exact lazy behavior.
 - **Why:** for a long-running interactive app (a full-screen TUI, a coding agent), Ink's
@@ -661,14 +684,84 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `shouldClearTerminalForFrame` clears (because the previous frame overflowed), Ink emits a
   **second** `clearTerminal`.
 - **vue-tui:** `onResize` calls `scheduler.cancel()` as its **first, unconditional** step on
-  **every** resize (not only narrowing ones), dropping any pending throttled commit before
-  its synchronous commit, so the redundant trailing clear never fires.
-- **Why:** the synchronous resize commit already reflects the current tree, so the pending
-  commit would repeat the same clear. The dedup is triggered by an overflowing frame plus a
-  pending commit — not by narrowing specifically; a widening resize cancels the pending
-  commit too. Emitting one clear instead of two has no visible behavior difference
-  (issue #26). The separate narrowing-only `writer.clear()` frame reset is a distinct
-  mechanism.
+  **every** resize, dropping any pending throttled commit before its synchronous commit. A
+  same-size event consumes the pending tree once; a real Inline geometry change establishes
+  a fresh region once and cannot be followed by a stale timer repaint.
+- **Why:** the synchronous resize commit already reflects the current host tree. A pending
+  timer represents the same tree and would only repeat terminal writes after the resize
+  boundary (issue #26). Cancellation is independent of whether the terminal narrowed,
+  widened, or only changed height.
+
+### Inline bounds its live region instead of deleting terminal history
+
+- **Ink:** Inline Yoga receives only terminal width. A frame that fills the terminal omits its
+  trailing newline, but layout itself remains vertically unbounded. After an earlier overflow,
+  on a fit-to-overflow transition, on a full-height/overflow-to-shorter transition, or while
+  tearing down a full-height frame, Ink writes `ansiEscapes.clearTerminal`, retained Static
+  output, and the current frame. With ansi-escapes 7.3.0 that reset is `ED2 + ED3 + Home`; ED3
+  deletes scrollback, including output from before the application.
+- **vue-tui:** a visual Inline terminal session exposes terminal rows as a **maximum** layout
+  height. The runtime first computes natural Yoga layout; only a tree that exceeds the maximum
+  is recalculated against the available rows, which avoids making percentages inside a short
+  tree resolve against terminal height. Paint then hard-clips both columns and the final root
+  height, so a non-shrinking child or transform cannot create extra physical wraps or rows.
+  Overflow keeps the layout's row-zero projection; a coding-agent tail, finder selection, or
+  monitor follow state is expressed by Static, ScrollBox, or application state rather than a
+  renderer-wide tail slice.
+- **Ownership:** before the first visible managed output, vue-tui emits one NEL on the main
+  screen. This leaves a pre-existing partial row untouched and gives the relative writer a row
+  boundary it can own; an empty app emits no initial NEL. Static and coordinated stdout/stderr
+  output clear only the known live region, append bytes once, finish an unterminated TTY payload
+  with NEL, and redraw below it. On TTY destinations the coordinated helpers retain styled lines
+  while stripping cursor/erase and other geometry-changing control bytes. Redirected stderr and
+  non-TTY streams remain byte-exact; returned raw streams and direct process writes stay outside
+  the guarantee. After `app.clear()` erases the live region, vue-tui forgets that physical
+  baseline so a repeated clear cannot walk upward into pre-app history.
+- **Resize and teardown:** after a real Inline dimension change, terminal reflow makes the old
+  logical-line count untrustworthy. vue-tui moves to the resized viewport bottom, creates a new
+  row, resets writer bookkeeping **without erasing**, and paints a fresh bounded region; the old
+  frame is immutable history. Screen-reader transcript resize uses the same snapshot boundary
+  while keeping layout rows unbounded and clamps to the physical terminal bottom even when the
+  row count is unavailable. Teardown first returns a declared application caret to the region
+  bottom; a full-height final frame then advances once so subsequent shell output begins below
+  it. Framework-generated Inline controls emit no ED2, ED3, or Home.
+- **Escape hatch:** destructive main-screen control remains session-external: an application may
+  clear before mount or after teardown, or choose Fullscreen for arbitrary viewport repaint.
+  There is no ordinary `preserveHistory: false` policy or mounted destructive reset.
+- **Evidence:** `inline-overflow-comparison.test.ts`, `inline-resize-history.test.ts`,
+  `inline-clear-history.test.ts`, `resize-clear.test.tsx`, deterministic host screen tests,
+  geometry-safe text/coordinator tests, and frame-writer reset tests cover pre-app scrollback,
+  partial rows, repeated clear, overflow, width/height resize, Static, coordinated output,
+  screen-reader fallback, declared-caret teardown, and the post-app line. This deliberately
+  replaces Ink's overflow behavior rather than treating its ED3 fallback as compatibility.
+
+### Fullscreen owns a fixed viewport instead of reusing the inline writer
+
+- **Ink:** `alternateScreen: true` switches buffers but keeps the relative inline output writer.
+  Run-verified against v7.0.4 (`40b3a757`, real PTY + xterm, 32×10): an initial `<Static>` leaves
+  `STATIC` on row 0 and moves `DYNAMIC` to row 1; successive `useStdout`, `useStderr`, patched
+  `console.log`, and patched `console.error` writes move the dynamic frame down one more row each.
+  With `debug: true`, rerenders append in place (`DYNAMICFRAME-1FRAME-2`) instead of replacing the
+  alternate-screen surface.
+- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport.
+  Yoga receives both dimensions; paint and hit testing clip to them; every commit clears, homes, and
+  repaints the complete frame from `(0,0)`, hiding the caret until a declared position is restored.
+  Coordinated stdout, stderr, and patched console writes are emitted and then followed by the same
+  repaint. `<Static>` bytes are emitted to stream observers but warned once and not retained
+  visually. Ordinary reactive rerenders replace the same surface, and deterministic observation does not change those bytes.
+- **Why:** targeted mouse events, `useCursor()`, and Yoga layout all use viewport coordinates. If
+  output outside the tree can move the visible frame while the hit map remains at row 0, clicking
+  the visible element misses and clicking the log line can trigger it. Treating fullscreen as an
+  owned fixed surface keeps all four coordinate systems identical and prevents tall content from
+  scrolling the alternate buffer. The first implementation favors correctness with a full repaint,
+  even when `incrementalRendering: true`; a later absolute-cell diff may optimize bytes without
+  changing this contract.
+- **Boundary:** direct `process.stdout.write()` / `process.stderr.write()` calls bypass the runtime
+  coordinator and cannot be repaired automatically. Screen-reader presentation stays on its linear
+  transcript path; unlike Ink, a Fullscreen request resolves to effective Inline and remains on the
+  main screen without targeted mouse. Introduced 2026-07-11 and completed for live mounts in F1.4.
+  Tests: `fullscreen-origin.test.ts`; full contract:
+  [fullscreen-output.md](./fullscreen-output.md).
 
 ### Degenerate boxes do not lay out or paint children when the content area is gone
 
@@ -762,10 +855,9 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
-- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useWindowSize`,
-  `useFocus`, `useFocusManager`, `useInput`, `useMouseInput`, `usePaste`, `useCursor`, and
-  `useIsScreenReaderEnabled` **throw** when their context is absent ("... must be called
-  inside a vue-tui render tree"). `useBoxMetrics` and `useAnimation` do **not** throw:
+- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
+  `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useMouseInput`, `usePaste`, and
+  `useCursor` **throw** when their required context is absent. `useBoxMetrics` and `useAnimation` do **not** throw:
   they fall back. `useBoxMetrics` reports zero metrics, and `useAnimation` drives a
   standalone scheduler. See the additive entry.
 - **Why:** a composable used in the wrong place is a bug, and a thrown error names it at

@@ -26,10 +26,39 @@ let server: ViteDevServer | undefined;
 const origAppVue = readFileSync(appVue, "utf8");
 
 afterEach(async () => {
+  const testGlobal = globalThis as Record<string, unknown>;
+  const app = testGlobal.__VT_TEST_APP__ as { unmount(): void } | undefined;
+  app?.unmount();
   await server?.close();
   server = undefined;
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
+  delete (globalThis as Record<string, unknown>).__VT_RENDER_SESSION__;
+  delete (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
+  delete (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
+  delete (globalThis as Record<string, unknown>).__VT_TEST_APP__;
+});
+
+test("a script hot update preserves the render-session object", async () => {
+  const read = capture();
+  server = await createServer({
+    root,
+    logLevel: "silent",
+    configFile: false,
+    plugins: [vue(), vueTui()],
+  });
+  await server.listen();
+  await waitFor(read, "session=stable");
+
+  writeFileSync(
+    appVue,
+    origAppVue.replace('const label = "LABEL-A";', 'const label = "LABEL-B-HOT";'),
+  );
+  await waitFor(read, "LABEL-B-HOT");
+
+  const updatedOutput = read().slice(read().lastIndexOf("LABEL-B-HOT"));
+  expect(updatedOutput).toContain("session=stable");
+  expect(updatedOutput).not.toContain("session=changed");
 });
 
 test("a build error renders the in-process dev overlay", async () => {

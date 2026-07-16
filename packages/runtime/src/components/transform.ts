@@ -1,16 +1,7 @@
-import {
-  Comment,
-  defineComponent,
-  h,
-  inject,
-  isVNode,
-  provide,
-  type ExtractPublicPropTypes,
-  type PropType,
-  type VNode,
-} from "vue";
-import { AppContextKey, TextContextKey } from "../context.ts";
-import type { WithChildren } from "./with-children.ts";
+import { Comment, defineComponent, h, isVNode, provide, type PropType, type VNode } from "vue";
+import { TextContextKey } from "../context.ts";
+import { useInternalRenderSession } from "../render-session.ts";
+import type { PublicComponent } from "./with-children.ts";
 
 type TransformFn = (line: string, lineIndex: number) => string;
 
@@ -26,7 +17,7 @@ const TransformImpl = defineComponent({
   name: "Transform",
   props: transformProps,
   setup(props, { slots }) {
-    const appCtx = inject(AppContextKey, null);
+    const renderSession = useInternalRenderSession();
     // A <Transform> is a text context: Ink models it as an ink-text host, so
     // descendant <Text>/<Newline> render inline (squashed into the transform's
     // text). It only provides — it never injects. (G58)
@@ -66,7 +57,7 @@ const TransformImpl = defineComponent({
         return null;
       }
 
-      const isScreenReaderEnabled = appCtx?.isScreenReaderEnabled ?? false;
+      const isScreenReaderEnabled = renderSession.session.output.presentation === "screen-reader";
 
       // When screen reader is enabled and accessibilityLabel is set,
       // render the label text instead of children.
@@ -79,7 +70,7 @@ const TransformImpl = defineComponent({
   },
 });
 
-export const Transform = TransformImpl as WithChildren<typeof TransformImpl>;
+export const Transform = TransformImpl as unknown as PublicComponent<TransformProps>;
 
 /**
  * The Vue analogue of Ink's `children === undefined || children === null` guard
@@ -96,4 +87,7 @@ function isNoRenderableChildren(children: VNode[] | undefined): boolean {
 }
 
 /** Props accepted by `<Transform>` — the vue-tui analogue of Ink's `TransformProps`. */
-export type TransformProps = ExtractPublicPropTypes<typeof transformProps>;
+export interface TransformProps {
+  transform: TransformFn;
+  accessibilityLabel?: string;
+}

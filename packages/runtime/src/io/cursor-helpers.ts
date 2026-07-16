@@ -7,8 +7,13 @@ export type CursorPosition = {
 
 const showCursorEscape = "[?25h";
 const hideCursorEscape = "[?25l";
+// ECMA-48 NEL (Next Line): move to column zero of the following row and scroll
+// when already at the bottom margin. ansi-escapes.cursorNextLine is CSI E
+// (CNL), which xterm clamps at the bottom and can let later output overwrite
+// the final row instead of committing it to scrollback.
+const nextLineEscape = "\x1bE";
 
-export { showCursorEscape, hideCursorEscape };
+export { showCursorEscape, hideCursorEscape, nextLineEscape };
 
 /**
  * Compare two cursor positions. Returns true if they differ.
@@ -24,14 +29,13 @@ export const cursorPositionChanged = (
  *
  * The starting row depends on the trailing newline. A frame written WITH a
  * trailing newline leaves the cursor on the blank row just past the content
- * (row `visibleLineCount`); a fullscreen frame is written WITHOUT a trailing
- * newline (render.ts:962 `isFullscreen ? output : output + "\n"`), so the cursor
- * stays on the LAST visible row (`visibleLineCount - 1`). `hasTrailingNewline`
- * selects the correct basis — using `visibleLineCount` for a no-trailing-newline
- * frame would move up one row too many, misplacing the declared caret and then
- * desyncing the next frame's buildReturnToBottom (it would undershoot the true
- * bottom, leaving stale rows). Defaults to true to preserve the trailing-newline
- * callers byte-for-byte.
+ * (row `visibleLineCount`); a frame written WITHOUT a trailing newline (for
+ * example, a viewport-filling relative-writer frame) leaves it on the LAST
+ * visible row (`visibleLineCount - 1`). `hasTrailingNewline` selects the correct
+ * basis — using `visibleLineCount` for a no-trailing-newline frame would move up
+ * one row too many, misplacing the declared caret and then desyncing the next
+ * frame's buildReturnToBottom (it would undershoot the true bottom, leaving
+ * stale rows). Defaults to true to preserve trailing-newline callers byte-for-byte.
  *
  * The position is clamped to the visible region before emitting: under the
  * persistent-declaration re-emit (the caret is re-asserted every commit until
@@ -105,7 +109,7 @@ export type CursorOnlyInput = {
   cursorPosition: CursorPosition | undefined;
   width?: number;
   // Whether the (unchanged) output ends with a newline; threaded to
-  // buildCursorSuffix so a fullscreen frame's caret lands on the right row.
+  // buildCursorSuffix so a no-trailing-newline frame's caret lands on the right row.
   // Defaults to true (trailing-newline) when omitted.
   hasTrailingNewline?: boolean;
 };

@@ -61,6 +61,24 @@ export function messageForNonError(value: unknown): string {
   return typeof message === "string" ? message : safeString(value);
 }
 
+/**
+ * Produce a durable plain-text fatal report without assuming that the rich
+ * ErrorOverview viewport survives teardown. The read is defensive because an
+ * Error-like value may expose throwing stack/name/message accessors.
+ */
+export function formatErrorForStderr(value: unknown): string {
+  let stack: unknown;
+  try {
+    stack = (value as { stack?: unknown })?.stack;
+  } catch {
+    stack = undefined;
+  }
+  if (typeof stack === "string" && stack.trim() !== "") {
+    return `${stack.trimEnd()}\n`;
+  }
+  return `Error: ${messageForNonError(value)}\n`;
+}
+
 // Classify a thrown/exit() value as error-vs-result, matching Ink's isErrorInput
 // (ink.tsx:154-159 @ v7.0.4). Co-located with messageForNonError because the two
 // are always paired (a genuine Error is re-thrown/rejected as-is; a non-Error is
@@ -161,12 +179,16 @@ export const ErrorOverview = defineComponent({
 
       // ── White-on-red " ERROR " label + the error message ──
       children.push(
-        h(Box, null, {
-          default: () => [
-            h(Text, { backgroundColor: "red", color: "white" }, { default: () => " ERROR " }),
-            h(Text, null, { default: () => ` ${errorMessage}` }),
-          ],
-        }),
+        h(
+          Box,
+          { flexShrink: 0 },
+          {
+            default: () => [
+              h(Text, { backgroundColor: "red", color: "white" }, { default: () => " ERROR " }),
+              h(Text, null, { default: () => ` ${errorMessage}` }),
+            ],
+          },
+        ),
       );
 
       // ── Parsed file:line:column origin (dimColor) ──
@@ -311,7 +333,11 @@ export const ErrorOverview = defineComponent({
         );
       }
 
-      return h(Box, { flexDirection: "column", padding: 1 }, { default: () => children });
+      // Keep the fatal header on physical row zero. Vertical padding can consume
+      // the entire bounded Inline viewport when the terminal has one row,
+      // leaving no observable error at all. Horizontal padding retains the
+      // existing visual separation without weakening the renderer row bound.
+      return h(Box, { flexDirection: "column", paddingX: 1 }, { default: () => children });
     };
   },
 });

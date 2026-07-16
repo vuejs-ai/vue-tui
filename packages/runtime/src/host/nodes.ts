@@ -32,10 +32,6 @@ export interface TuiRoot extends NodeBase {
   appContext: AppContext;
   /** Currently mounted <Static> node (if any). Updated on insert/remove. */
   staticNode?: TuiStatic;
-  /** Previous commit's staticNode — used to detect identity changes. */
-  previousStaticNode?: TuiStatic;
-  /** Callback invoked when the <Static> identity changes (mount/unmount/remount). */
-  onStaticChange?: () => void;
   /** Listeners invoked after every layout calculation (yoga.calculateLayout). */
   layoutListeners: Set<() => void>;
 }

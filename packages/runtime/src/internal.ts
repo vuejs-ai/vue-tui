@@ -21,8 +21,30 @@ export {
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
   type KittyKeyboardController,
+  type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
-export { INTERNAL_FRAME_SINK, type FrameSink } from "./io/frame-sink.ts";
+export {
+  INTERNAL_RENDER_OBSERVER,
+  type InternalContentFrame,
+  type InternalRenderObserver,
+} from "./io/render-observer.ts";
+export {
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  type TerminalSizeProbe,
+  type TerminalSizeProbeResult,
+} from "./terminal-size-probe.ts";
+export {
+  useInternalRenderSession,
+  type InternalRenderSessionSnapshot,
+  type InternalLiveRenderSessionSnapshot,
+  type InternalStringRenderSessionSnapshot,
+} from "./render-session.ts";
+export {
+  INTERNAL_SUSPENSION_HOST,
+  createManualSuspensionHost,
+  type ManualSuspensionHost,
+  type SuspensionHost,
+} from "./process-suspension.ts";
 // Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.

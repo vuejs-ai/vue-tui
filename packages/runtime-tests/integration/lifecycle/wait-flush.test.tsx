@@ -159,7 +159,7 @@ test("waitUntilExit waits for stdout barrier when only writableLength is exposed
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: false, patchConsole: false });
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false, patchConsole: false });
   await nextTick();
   await nextTick();
 

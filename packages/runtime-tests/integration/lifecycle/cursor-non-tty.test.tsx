@@ -2,7 +2,7 @@
 // matching Ink. Ink routes every cursor hide/show through `cli-cursor`, which
 // short-circuits `if (!stream.isTTY) return` (cli-cursor/index.js:8-24), and
 // its mount-hide is alt-screen-only (also isTTY-gated). So when a caller forces
-// `interactive: true` onto a piped, non-TTY stdout (isTTY false), Ink writes
+// `liveUpdates: true` onto a piped, non-TTY stdout (isTTY false), Ink writes
 // neither `\x1b[?25l` nor `\x1b[?25h`. vue must do the same: the cursor-control
 // writes are a TTY concern, and forcing interactive must not leak them to a pipe.
 import { defineComponent, nextTick } from "vue";
@@ -62,7 +62,7 @@ test("forced interactive + non-TTY stdout emits NO cursor hide/show escapes", as
     stdout,
     stdin,
     stderr: makeTtyStream(),
-    interactive: true,
+    liveUpdates: true,
     exitOnCtrlC: false,
   });
   await nextTick();

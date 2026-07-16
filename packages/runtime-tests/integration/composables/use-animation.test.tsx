@@ -1107,9 +1107,7 @@ describe("useAnimation", () => {
   });
 
   // ---------------------------------------------------------------
-  // Tests using createApp directly (for maxFps / interactive options)
-  // The testing render() helper always uses debug:true which disables
-  // render throttling. These tests need mount-level options.
+  // Tests using createApp directly for mount-level scheduling options.
   // ---------------------------------------------------------------
 
   /**
@@ -1119,9 +1117,8 @@ describe("useAnimation", () => {
   function mountWithOptions(
     component: ReturnType<typeof defineComponent>,
     mountOpts: {
-      debug?: boolean;
       maxFps?: number;
-      interactive?: boolean;
+      liveUpdates?: boolean;
     } = {},
   ) {
     const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -1153,10 +1150,9 @@ describe("useAnimation", () => {
       stdout,
       stdin,
       stderr,
-      debug: mountOpts.debug ?? false,
       exitOnCtrlC: false,
       maxFps: mountOpts.maxFps,
-      interactive: mountOpts.interactive,
+      liveUpdates: mountOpts.liveUpdates,
     });
 
     return {
@@ -1298,7 +1294,7 @@ describe("useAnimation", () => {
     expect(maxDelta).toBeGreaterThanOrEqual(30);
   });
 
-  test("animations advance in debug mode when interactive is false", async () => {
+  test("animations advance with unthrottled commits when live updates are disabled", async () => {
     let frameVal = 0;
     const App = defineComponent(() => {
       const { frame } = useAnimation({ interval: 50 });
@@ -1308,12 +1304,12 @@ describe("useAnimation", () => {
       return () => <Text>{String(frame.value)}</Text>;
     });
 
-    // Mount with debug: true + interactive: false. Animations should still
+    // Mount with maxFps: 0 + liveUpdates: false. Animations should still
     // advance because the animation timer (setInterval) is independent of
     // the interactive/non-interactive rendering mode.
     const { unmount } = mountWithOptions(App, {
-      debug: true,
-      interactive: false,
+      maxFps: 0,
+      liveUpdates: false,
     });
     await nextTick();
 

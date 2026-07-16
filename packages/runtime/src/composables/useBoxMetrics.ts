@@ -1,6 +1,7 @@
-import { nextTick, shallowRef, watchPostEffect, type Ref, type ShallowRef } from "vue";
+import { nextTick, shallowRef, type Ref, type ShallowRef } from "vue";
 import { addLayoutListener } from "../host/nodes.ts";
 import { findRootNode, resolveTuiNode, resolveYogaNode } from "../host/resolve-node.ts";
+import { useRenderedTargetRegistration } from "../rendered-target.ts";
 
 // Yoga's `right`/`bottom` are omitted: always `0` for flow layout and
 // unintuitive for absolute positioning. Matches Ink's BoxMetrics type.
@@ -111,19 +112,23 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsReturn {
   const top = shallowRef(0);
   const hasMeasured = shallowRef(false);
 
+  let activeTarget: ReturnType<typeof resolveTuiNode> = null;
+
+  function resetMetrics() {
+    const changed = width.value !== 0 || height.value !== 0 || left.value !== 0 || top.value !== 0;
+    if (changed) {
+      width.value = 0;
+      height.value = 0;
+      left.value = 0;
+      top.value = 0;
+    }
+    if (hasMeasured.value) hasMeasured.value = false;
+  }
+
   function updateMetrics() {
-    const node = resolveYogaNode(ref.value);
+    const node = resolveYogaNode(activeTarget);
     if (!node) {
-      // Reset to zeros when detached
-      const changed =
-        width.value !== 0 || height.value !== 0 || left.value !== 0 || top.value !== 0;
-      if (changed) {
-        width.value = 0;
-        height.value = 0;
-        left.value = 0;
-        top.value = 0;
-      }
-      if (hasMeasured.value) hasMeasured.value = false;
+      resetMetrics();
       return;
     }
 
@@ -140,67 +145,30 @@ export function useBoxMetrics(ref: Ref<unknown>): UseBoxMetricsReturn {
     if (!hasMeasured.value) hasMeasured.value = true;
   }
 
-  // Track the current layout listener unsubscribe function so we can
-  // re-subscribe when the ref changes (and the root node might differ).
-  let removeLayoutListener: (() => void) | undefined;
-
-  function subscribeToLayout() {
-    // Clean up previous subscription
-    if (removeLayoutListener) {
-      removeLayoutListener();
-      removeLayoutListener = undefined;
-    }
-
-    const tuiNode = resolveTuiNode(ref.value);
-    const root = findRootNode(tuiNode);
-    if (!root) return;
-
-    removeLayoutListener = addLayoutListener(root, updateMetrics);
-  }
-
-  // Re-measure after each render commit. watchPostEffect triggers when the
-  // ref changes (component mount / unmount). The yoga layout is calculated
-  // inside the commit scheduler's queuePostFlushCb, which may run after this
-  // watcher in the same flush cycle. We use nextTick to defer the read so
-  // that it runs after the scheduler's commit has called calculateLayout.
-  //
-  // This also re-subscribes to the layout listener in case the ref moved
-  // to a different node (and thus potentially a different root).
-  watchPostEffect((onCleanup) => {
-    // Access ref.value to track the dependency — when the ref changes,
-    // this effect re-runs and schedules a new measurement.
-    const node = resolveYogaNode(ref.value);
-    if (!node) {
-      // Detached: reset metrics and clean up listener
-      const changed =
-        width.value !== 0 || height.value !== 0 || left.value !== 0 || top.value !== 0;
-      if (changed) {
-        width.value = 0;
-        height.value = 0;
-        left.value = 0;
-        top.value = 0;
-      }
-      if (hasMeasured.value) hasMeasured.value = false;
-      if (removeLayoutListener) {
+  useRenderedTargetRegistration(
+    () => {
+      const target = resolveTuiNode(ref.value);
+      return resolveYogaNode(target) ? target : null;
+    },
+    (target) => {
+      const root = findRootNode(target);
+      if (!root) return;
+      activeTarget = target;
+      const removeLayoutListener = addLayoutListener(root, updateMetrics);
+      // A ref can be reassigned to an already-laid-out target without causing a
+      // renderer commit. The root listener handles normal commits; this deferred
+      // read covers that no-render retarget without reading pre-layout Yoga data.
+      void nextTick(() => {
+        if (activeTarget === target) updateMetrics();
+      });
+      return () => {
         removeLayoutListener();
-        removeLayoutListener = undefined;
-      }
-      return;
-    }
-
-    // Subscribe (or re-subscribe) to layout listener
-    subscribeToLayout();
-
-    // Defer the initial read to after calculateLayout runs
-    void nextTick(updateMetrics);
-
-    onCleanup(() => {
-      if (removeLayoutListener) {
-        removeLayoutListener();
-        removeLayoutListener = undefined;
-      }
-    });
-  });
+        if (activeTarget !== target) return;
+        activeTarget = null;
+        resetMetrics();
+      };
+    },
+  );
 
   return { width, height, left, top, hasMeasured };
 }

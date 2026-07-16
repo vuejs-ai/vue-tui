@@ -12,7 +12,7 @@ import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 // the test is timing-robust (it never races the trailing timer).
 
 test("non-interactive teardown flushes a deferred trailing commit into the final frame", async () => {
-  // Bug: in non-interactive non-debug mode the dynamic frame is deferred to the
+  // Bug: in final-stream mode the dynamic frame is deferred to the
   // unmount-time trailing write, which emits frameState.lastOutput — the LAST
   // commit that actually ran. If a reactive change is deferred to the throttle's
   // trailing edge and the app unmounts before the ~34ms timer fires, teardown()
@@ -35,9 +35,9 @@ test("non-interactive teardown flushes a deferred trailing commit into the final
   });
 
   const app = createApp(App);
-  // debug is left unset (false): debug forces `unthrottled`, which would set
-  // renderThrottleMs=0 and erase the very throttle this bug needs.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, interactive: false });
+  // Keep the default maxFps so the real throttle remains active; maxFps: 0
+  // would erase the very throttle this bug needs.
+  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false });
 
   await nextTick();
   await nextTick();

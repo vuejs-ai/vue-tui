@@ -20,7 +20,7 @@
  * triggers restoreLastOutput, both lastOutputToRender and lastOutput are "", so the
  * restore chunk must be "\n" (Ink) rather than "" (buggy ??).
  *
- * Uses createApp with debug:false + a fake TTY stream so the real interactive
+ * Uses createApp with a fake TTY stream so the real live
  * writeToStdout -> restoreLastOutput path runs. Test config forces CI:"false".
  */
 import { PassThrough } from "node:stream";
@@ -70,7 +70,6 @@ test("restoreLastOutput re-emits lastOutput+'\\n' when lastOutputToRender is emp
     stdout,
     stdin,
     stderr,
-    debug: false,
     exitOnCtrlC: false,
     isScreenReaderEnabled: true,
   });

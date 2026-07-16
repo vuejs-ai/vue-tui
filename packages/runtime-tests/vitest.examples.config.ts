@@ -21,8 +21,8 @@ export default defineConfig({
     // suites under `vp run ready` / CI. Generous on purpose; a healthy launch resolves in seconds.
     testTimeout: 60000,
     hookTimeout: 60000,
-    // FORCE_COLOR so the spawned apps emit ANSI; CI:false so vue-tui's interactive detection stays
-    // on for the real PTY (the launch helper sets both per-child too, this covers the runner level).
+    // FORCE_COLOR so the spawned apps emit ANSI; CI:false so vue-tui's default live updates stay on
+    // for the real PTY (the launch helper sets both per-child too, this covers the runner level).
     env: { FORCE_COLOR: "3", CI: "false" },
   },
 });

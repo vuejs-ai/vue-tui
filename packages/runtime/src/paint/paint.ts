@@ -9,7 +9,7 @@ import {
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
 import { applyChalk, applyColor } from "./text-style.ts";
-import { sanitizeAnsi } from "./sanitize-ansi.ts";
+import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
   TuiNode,
@@ -41,6 +41,16 @@ interface ClipRect {
   x2: number | undefined;
   y1: number | undefined;
   y2: number | undefined;
+}
+
+function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
+  if (!a) return b;
+  return {
+    x1: a.x1 === undefined ? b.x1 : b.x1 === undefined ? a.x1 : Math.max(a.x1, b.x1),
+    x2: a.x2 === undefined ? b.x2 : b.x2 === undefined ? a.x2 : Math.min(a.x2, b.x2),
+    y1: a.y1 === undefined ? b.y1 : b.y1 === undefined ? a.y1 : Math.max(a.y1, b.y1),
+    y2: a.y2 === undefined ? b.y2 : b.y2 === undefined ? a.y2 : Math.min(a.y2, b.y2),
+  };
 }
 
 interface WriteOp {
@@ -104,10 +114,12 @@ class Output {
   readonly height: number;
   private ops: Op[] = [];
   private readonly caches: OutputCaches = new OutputCaches();
+  private readonly hardClip: ClipRect | undefined;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, clipToBounds = false) {
     this.width = width;
     this.height = height;
+    this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
   }
 
   write(x: number, y: number, lines: string[], transformers: Transformer[]): void {
@@ -150,8 +162,11 @@ class Output {
       let { x, y } = op;
       let lines = op.lines;
 
-      // Only the most recent clip applies (top-only, matching Ink behavior)
-      const clip = clips.at(-1);
+      // Only the most recent component clip applies (top-only, matching Ink
+      // behavior). A fullscreen viewport is a separate hard boundary and must
+      // intersect even that top clip so nested overflow cannot escape it.
+      const stackedClip = clips.at(-1);
+      const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
 
       if (clip) {
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
@@ -190,6 +205,10 @@ class Output {
       let offsetY = 0;
 
       for (let [index, line] of lines.entries()) {
+        // Every write operation is already split into structural rows. Remove
+        // C0/DEL and unsafe terminal controls before width calculation or
+        // clipping so the measured grid and emitted bytes stay identical.
+        line = sanitizeAnsi(line, { singleLine: true });
         const currentLine = output[y + offsetY];
 
         // Line can be missing if text is taller than pre-initialized output
@@ -231,7 +250,10 @@ class Output {
         // post-vertical-clip line index — unchanged from the loop counter, matching
         // Ink's `transformer(line, index)` where index is the entry index.
         for (const transformer of transformers) {
-          line = transformer(line, index);
+          // Transform is a line-to-line API. Sanitize every callback result so a
+          // transform cannot re-introduce cursor/erase controls after Text was
+          // sanitized or add physical rows that bypass layout and viewport bounds.
+          line = sanitizeAnsi(transformer(line, index), { singleLine: true });
         }
 
         const characters = this.caches.getStyledChars(line);
@@ -263,7 +285,7 @@ class Output {
           currentLine[offsetX - 1] = spaceCell;
         }
 
-        // NO x-bounds check here — matches Ink's Output write loop
+        // Normal relative output has NO x-bounds check here — matching Ink's Output write loop
         // (output.ts:272-294), which writes `currentLine[offsetX] = character`
         // and the trailing placeholder cells regardless of `this.width`. A wide
         // char whose LEADING cell is in-bounds but whose TRAILING cell exceeds
@@ -275,8 +297,19 @@ class Output {
         // edge, so an edge-aligned `aa你` rendered as `aa`. Box-level
         // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
         // path); this loop must not re-implement a second, glyph-truncating clip.
+        // The one exception is the explicit fullscreen hard boundary below: a
+        // glyph beyond the addressable viewport would make the terminal wrap.
         for (const character of characters) {
           const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
+
+          // A transformer runs after the line-level clip and may expand the
+          // text again. A wide glyph may also straddle the final cell. Keep the
+          // viewport as a hard cell boundary in both cases so the terminal
+          // cannot auto-wrap an extra glyph and scroll the fullscreen surface.
+          if (this.hardClip && (offsetX < 0 || offsetX + characterWidth > this.width)) {
+            offsetX += characterWidth;
+            continue;
+          }
 
           currentLine[offsetX] = character;
 
@@ -345,7 +378,7 @@ function renderTextWithInlineStyles(node: TuiText | TuiVirtualText, inheritedBg?
   // child wraps itself; the Box bg threads through unchanged), then wrap the whole
   // concatenation with THIS node's own style — Ink's parent-wraps-children model.
   const inner = squashInlineChildren(node.children, inheritedBg);
-  return sanitizeAnsi(applyOwnStyle(node.props, inner, inheritedBg));
+  return sanitizeAnsiMultiline(applyOwnStyle(node.props, inner, inheritedBg));
 }
 
 // Apply a Text node's OWN chalk styling as a wrap around its already-composed
@@ -412,7 +445,7 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
 // in the Output, never in squashTextNodes for the node it lives on. (G58)
 function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): string {
   if (!node.children || node.children.length === 0) return "";
-  return sanitizeAnsi(squashInlineChildren(node.children, inheritedBg));
+  return sanitizeAnsiMultiline(squashInlineChildren(node.children, inheritedBg));
 }
 
 // Squash a single inline child into styled text, recursing GENERICALLY into
@@ -456,7 +489,7 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
       if (advancesLineIndex(grandchild)) grandIndex++;
     }
     if (innerText.length > 0 && child.transform) {
-      innerText = child.transform(innerText, index);
+      innerText = sanitizeAnsiMultiline(child.transform(innerText, index));
     }
     return innerText;
   }
@@ -614,6 +647,12 @@ interface HitRect {
 
 export interface PaintOptions {
   readonly hitMap?: MouseHitMapEntry[];
+  /**
+   * Clip paint and hit testing to an app-owned viewport. Fullscreen rendering
+   * uses this to keep off-screen layout from wrapping or scrolling the
+   * alternate screen, and to exclude mouse targets outside addressable cells.
+   */
+  readonly viewport?: { readonly width: number; readonly height: number };
 }
 
 function intersectHitRect(rect: HitRect, clip: HitRect | undefined): HitRect | undefined {
@@ -678,7 +717,7 @@ function collectVirtualTextSpans(
     }
     if (child.type === "tui-transform") {
       const text = renderTransformAsText(child, inheritedBg);
-      out += text.length > 0 ? child.transform(text, 0) : text;
+      out += text.length > 0 ? sanitizeAnsiMultiline(child.transform(text, 0)) : text;
     }
   }
   return out;
@@ -740,10 +779,11 @@ function recordVirtualTextHits(
 export function paint(root: TuiNode, options: PaintOptions = {}): string {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
   const layout = root.yoga.getComputedLayout();
-  const width = Math.max(1, Math.floor(layout.width));
-  const height = Math.max(1, Math.floor(layout.height));
-  const out = new Output(width, height);
-  paintNode(root, out, 0, 0, [], undefined, options.hitMap);
+  const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
+  const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
+  const out = new Output(width, height, options.viewport !== undefined);
+  const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
+  paintNode(root, out, 0, 0, [], undefined, options.hitMap, viewportClip);
   return out.get().output;
 }
 

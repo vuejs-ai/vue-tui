@@ -3,16 +3,18 @@
 // __VT_TEST_STDOUT__ sink — see each test file's SEQUENTIAL header for why they can't run
 // concurrently. This file is not a test (no .test/.spec suffix), just their shared toolkit.
 
-// Install the process-global frame sink and return a reader for the accumulated output.
-// Only `write` + `isTTY:false` are needed: a non-TTY stdout disables the renderer's
-// interactive path (cursor moves, ANSI erases, resize listener), so the mock can be a
-// minimal sink that just accumulates the emitted frames.
+// Install the process-global output stream and return a reader for the accumulated output.
+// Only `write` + `isTTY:false` are needed. The fixtures explicitly request live
+// updates so their mounted HMR frames reach this minimal stream immediately;
+// the stream still cannot acquire a terminal mode or terminal capabilities.
 export function capture(): () => string {
   let buf = "";
-  (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__ = {
-    write: (s: string) => ((buf += s), true),
-    isTTY: false,
-  };
+  const stream = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stream, { isTTY: false });
+  stream.on("data", (chunk) => {
+    buf += String(chunk);
+  });
+  (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__ = stream;
   return () => buf;
 }
 
@@ -36,3 +38,4 @@ export async function waitFor(read: () => string, needle: string, ms = 8000): Pr
   }
   throw new Error(`timeout waiting for ${JSON.stringify(needle)}; got:\n${read().slice(-400)}`);
 }
+import { PassThrough } from "node:stream";

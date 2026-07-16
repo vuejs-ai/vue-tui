@@ -1,11 +1,6 @@
 # Accessibility (ARIA + screen-reader) API
 
-How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the
-aria-camelCase vouched entry in [ink-divergences](./ink-divergences.md); `renderToString` being layout-only and the
-`useWindowSize` name are now Ink parity (not divergences), and the reactive-refs return shape is
-covered by the shallowRef entry there. This file keeps the _why_ and the researched / run-verified
-findings those entries deliberately omit, so they are not re-derived expensively. The exported aria
-types are part of the public contract — see [api-contract](./api-contract.md).
+How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the aria-camelCase vouched entry in [ink-divergences](./ink-divergences.md); `renderToString` being layout-only remains Ink parity, while the public render-session and layout-size composables deliberately replace Ink's narrower environment hooks. This file keeps the _why_ and the researched / run-verified findings those entries deliberately omit, so they are not re-derived expensively. The exported aria types are part of the public contract — see [api-contract](./api-contract.md).
 
 ## The constraint that shapes everything
 
@@ -76,10 +71,8 @@ sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` h
 
 - **Live path:** `app.mount({ isScreenReaderEnabled })` (or `INK_SCREEN_READER=true`) makes each
   commit emit the linearized SR text instead of the ANSI frame.
-- **`renderToString`:** public, **layout-only** (matches Ink). Its SR-capable variant is
-  `renderToStringWithScreenReader` in `@vue-tui/runtime/internal`, used by the accessibility test
-  suite — the public string API does not surface SR (Ink also keeps its SR-string rendering
-  test-internal).
+- **Component adaptation:** `useRenderSession().output.presentation === "screen-reader"` reports the presentation the current host actually selected. It replaces the removed `useIsScreenReaderEnabled()` hook and describes output behavior rather than claiming to detect screen-reader hardware or a user process.
+- **`renderToString`:** public, **layout-only** (matches Ink). Its SR-capable variant is `renderToStringWithScreenReader` in `@vue-tui/runtime/internal`, used by the accessibility test suite — the public string API does not surface SR (Ink also keeps its SR-string rendering test-internal). F1.5 fixes these as separate visual and screen-reader document hosts: the public function rejects recognizable hidden presentation passthrough, the internal helper name selects SR without another flag, both provide truthful string-session facts, and both use isolated inert streams rather than process terminal state.
 - **`renderScreenReaderOutput(node)`:** the linearizer that walks the host tree's
   `internal_accessibility`. **`/internal`-only** [VOUCHED @hyf0]. Ink keeps its
   counterpart (`renderNodeToScreenReaderOutput`) module-internal and never exports it; we match

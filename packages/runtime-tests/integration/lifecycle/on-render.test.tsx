@@ -18,7 +18,7 @@ test("onRender callback is called with renderTime on each commit", async () => {
     stdout,
     stdin,
     stderr,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);
@@ -52,7 +52,7 @@ test("onRender is called on subsequent state updates", async () => {
     stdout,
     stdin,
     stderr,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);
@@ -69,7 +69,7 @@ test("onRender is called on subsequent state updates", async () => {
 
   // Ink render.tsx:892-950 resets the onRender stub between rerenders and asserts
   // callCount === 1 for each — i.e. exactly ONE onRender per state mutation, not
-  // ">". In debug mode every commit is synchronous so a single mutation must add
+  // ">". With maxFps: 0 every commit is synchronous, so a single mutation must add
   // exactly one render (no coalescing, no double-fire).
   expect(renderTimes.length).toBe(initialCount + 1);
 
@@ -99,7 +99,7 @@ test("no onRender callback when option is not provided", async () => {
     stdout,
     stdin,
     stderr,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
   });
 
@@ -113,7 +113,7 @@ test("no onRender callback when option is not provided", async () => {
 
 async function expectOnRenderWriteBeforeFrame(
   options: {
-    debug?: boolean;
+    maxFps?: number;
     isScreenReaderEnabled?: boolean;
   } = {},
 ) {
@@ -151,8 +151,8 @@ async function expectOnRenderWriteBeforeFrame(
   app.unmount();
 }
 
-test("onRender fires before debug output is written", async () => {
-  await expectOnRenderWriteBeforeFrame({ debug: true });
+test("onRender fires before unthrottled output is written", async () => {
+  await expectOnRenderWriteBeforeFrame({ maxFps: 0 });
 });
 
 test("onRender fires before interactive output is written", async () => {
@@ -186,7 +186,7 @@ test("onRender fires on input-triggered state update", async () => {
     stdout,
     stdin,
     stderr,
-    debug: true,
+    maxFps: 0,
     exitOnCtrlC: false,
     onRender: (info) => {
       renderTimes.push(info.renderTime);

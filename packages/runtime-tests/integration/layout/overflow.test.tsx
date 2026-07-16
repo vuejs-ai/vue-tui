@@ -578,48 +578,18 @@ test("nested overflow", async () => {
 /** Build a round-border box of the given inner width / total height, like
  * boxen('', { width, height, borderStyle: 'round' }). All lines are exactly
  * `width` columns wide (the border glyphs included). */
-function roundBox(width: number, height: number): string {
-  const inner = width - 2;
-  const top = `╭${"─".repeat(inner)}╮`;
-  const bottom = `╰${"─".repeat(inner)}╯`;
-  const middle = `│${" ".repeat(inner)}│`;
-  const lines = [top];
-  for (let i = 0; i < height - 2; i++) lines.push(middle);
-  lines.push(bottom);
-  return lines.join("\n");
-}
-
-// Ink overflow.tsx:509-528 ("out of bounds writes do not crash"): a width-12,
-// height-10 round-border box rendered into a 10-column terminal. The box is 2
-// columns WIDER than the terminal, so the renderer clips. Ink keeps the past-width
-// right-border glyph as a sparse cell while the over-width interior column (col 10)
-// is dropped — so each middle row collapses from "│"+10 spaces+"│" to "│"+9
-// spaces+"│" (the col-10 hole filtered out, the right "│" surviving at col 11). The
-// top/bottom border rows keep their full 12-column run. Mirrors Ink's exact frame
-// (it slices middle lines to `line.slice(0,10) + line[11]`).
-test("out of bounds writes do not crash (exact clipped frame)", async () => {
+// Visual Inline is a hard terminal-cell boundary. Unlike Ink's unbounded frame,
+// no glyph may survive past column 10 and trigger an extra physical wrap.
+test("out of bounds writes are hard-clipped to the Inline terminal width", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Box width={12} height={10} borderStyle="round" />),
     { columns: 10 },
   );
 
-  const expected = roundBox(12, 10)
-    .split("\n")
-    .map((line, index) =>
-      index === 0 || index === 9
-        ? line // top/bottom borders survive at full 12-column width
-        : `${line.slice(0, 10)}${line[11] ?? ""}`,
-    )
-    .join("\n");
+  const expected = [`╭${"─".repeat(9)}`, ...Array<string>(8).fill("│"), `╰${"─".repeat(9)}`].join(
+    "\n",
+  );
 
-  // Sanity-check the constructed expectation matches the documented shape:
-  // full borders top/bottom, "│" + 9 spaces + "│" (11 cols) middle rows.
-  const expectedLines = expected.split("\n");
-  expect(expectedLines[0]).toBe(`╭${"─".repeat(10)}╮`);
-  expect(expectedLines[9]).toBe(`╰${"─".repeat(10)}╯`);
-  expect(expectedLines[1]).toBe(`│${" ".repeat(9)}│`);
-
-  // lastFrame() (no trim) is byte-exact — assert the full clipped frame.
   expect(lastFrame()).toBe(expected);
 });
 

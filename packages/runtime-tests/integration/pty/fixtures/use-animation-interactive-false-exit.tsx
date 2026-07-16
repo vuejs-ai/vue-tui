@@ -15,7 +15,7 @@ const Spinner = defineComponent(() => {
 });
 
 const app = createApp(Spinner);
-app.mount({ interactive: false });
+app.mount({ liveUpdates: false });
 
 await app.waitUntilExit();
 console.log("exited");
