@@ -50,14 +50,7 @@ test.sequential("an Inline transaction never writes again between write(false) a
   const Root = defineComponent(
     () => () =>
       h(Box, { flexDirection: "column" }, () => [
-        h(
-          Static,
-          { items: [history] },
-          {
-            default: ({ item }: { item: typeof history }) =>
-              h(Text, null, () => `${item.id}:${item.text}`),
-          },
-        ),
+        h(Static, null, () => h(Text, null, () => `${history.id}:${history.text}`)),
         h(Text, null, () => "latest-live-frame"),
       ]),
   );

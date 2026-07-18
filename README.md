@@ -135,10 +135,18 @@ createApp(App).mount();
 | [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
 | [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
 | [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
-| [`<Static>`](./packages/runtime)    | Commits append-only terminal history; import from `@vue-tui/runtime/inline`                    |
+| [`<Static>`](./packages/runtime)    | Commits one mounted slot tree to terminal history; import from `@vue-tui/runtime/inline`       |
 | [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
 
-`Static` is deliberately absent from the common root export. Import it and its named types from `@vue-tui/runtime/inline`. A mounted region may only append: every committed prefix position must remain `Object.is` identical until that region is remounted. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
+`Static` is deliberately absent from the common root export and has no collection API. Import the component from `@vue-tui/runtime/inline`, then use ordinary Vue iteration and stable keys when committing a list:
+
+```vue
+<Static v-for="entry in completedEntries" :key="entry.id">
+  <CompletedEntry :entry="entry" />
+</Static>
+```
+
+Each mounted instance commits its slot tree once, including an output-free first commit; gate the instance itself with `v-if` when its content is not ready. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. A Static below a hidden Box remains pending and commits once when that Box is shown. Do not nest Static inside another Static, Text, or Transform. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
 
 Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, focus, caret, geometry visibility, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text`, `Transform`, and `Static` roots is not supported.
 

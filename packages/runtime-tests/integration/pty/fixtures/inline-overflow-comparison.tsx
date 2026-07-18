@@ -102,8 +102,8 @@ const App = defineComponent(() => {
 
     if (scenario === "partial-row-static") {
       return (
-        <Static items={["COMMITTED"]}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+        <Static>
+          <Text>COMMITTED</Text>
         </Static>
       );
     }
@@ -112,9 +112,11 @@ const App = defineComponent(() => {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
       return (
         <>
-          <Static items={completed}>
-            {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-          </Static>
+          {completed.map((item) => (
+            <Static key={item}>
+              <Text>{item}</Text>
+            </Static>
+          ))}
           <Text>TAIL {revision.value}</Text>
         </>
       );

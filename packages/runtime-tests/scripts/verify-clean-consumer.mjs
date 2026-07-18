@@ -186,13 +186,6 @@ import {
   type UseMouseEventOptions,
   type UseTextSelectionOptions,
 } from "@vue-tui/runtime/fullscreen";
-import type {
-  StaticChildren,
-  StaticProps,
-  StaticSlot,
-  StaticSlotProps,
-  StaticStyle,
-} from "@vue-tui/runtime/inline";
 import type { RenderResult, TestClipboardBehavior, TestMouse } from "@vue-tui/testing";
 import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
 
@@ -200,19 +193,6 @@ type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ?
   ? true
   : false;
 type Expect<T extends true> = T;
-type _ExactStaticProps = Expect<Equal<StaticProps<number>["items"], number[]>>;
-type _ExactStaticStyle = Expect<
-  Equal<StaticStyle, import("@vue-tui/runtime").BoxLayoutStyle>
->;
-type _ExactStaticSlotProps = Expect<
-  Equal<StaticSlotProps<number>, { item: number; index: number }>
->;
-type _ExactStaticSlot = Expect<
-  Equal<StaticSlot<number>, (props: StaticSlotProps<number>) => import("vue").VNodeChild>
->;
-type _ExactStaticChildren = Expect<
-  Equal<StaticChildren<number>, StaticSlot<number> | { default: StaticSlot<number> }>
->;
 type _ExactStdinSurface = Expect<
   Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
 >;
@@ -562,16 +542,26 @@ type _RootUseMouseDrag = typeof import("@vue-tui/runtime").useMouseDrag;
 type _RootUseTextSelection = typeof import("@vue-tui/runtime").useTextSelection;
 // @ts-expect-error Static is available only from the Inline history subpath.
 type _RootStatic = typeof import("@vue-tui/runtime").Static;
-// @ts-expect-error StaticChildren is available only from the Inline history subpath.
-type _RootStaticChildren = import("@vue-tui/runtime").StaticChildren;
-// @ts-expect-error StaticProps is available only from the Inline history subpath.
-type _RootStaticProps = import("@vue-tui/runtime").StaticProps;
-// @ts-expect-error StaticSlot is available only from the Inline history subpath.
-type _RootStaticSlot = import("@vue-tui/runtime").StaticSlot;
-// @ts-expect-error StaticSlotProps is available only from the Inline history subpath.
-type _RootStaticSlotProps = import("@vue-tui/runtime").StaticSlotProps;
-// @ts-expect-error StaticStyle is available only from the Inline history subpath.
-type _RootStaticStyle = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+type _RemovedRootStaticChildren = import("@vue-tui/runtime").StaticChildren;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+type _RemovedRootStaticProps = import("@vue-tui/runtime").StaticProps;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+type _RemovedRootStaticSlot = import("@vue-tui/runtime").StaticSlot;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+type _RemovedRootStaticSlotProps = import("@vue-tui/runtime").StaticSlotProps;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+type _RemovedRootStaticStyle = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+type _RemovedInlineStaticChildren = import("@vue-tui/runtime/inline").StaticChildren;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+type _RemovedInlineStaticProps = import("@vue-tui/runtime/inline").StaticProps;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+type _RemovedInlineStaticSlot = import("@vue-tui/runtime/inline").StaticSlot;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+type _RemovedInlineStaticSlotProps = import("@vue-tui/runtime/inline").StaticSlotProps;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+type _RemovedInlineStaticStyle = import("@vue-tui/runtime/inline").StaticStyle;
 // @ts-expect-error Common component types are not duplicated on the Inline subpath.
 type _InlineBoxProps = import("@vue-tui/runtime/inline").BoxProps;
 // @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
@@ -603,18 +593,19 @@ import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 const unsupportedSpinnerChildren = <Spinner children="ignored" />;
 void unsupportedSpinnerChildren;
 
-const inferredStaticSlot = (
-  <Static items={[1, 2]}>
-    {({ item, index }) => {
-      item.toFixed(0);
-      index.toFixed(0);
-      // @ts-expect-error Static infers number rather than widening item to any.
-      item.toUpperCase();
-      return <Text>{item + index}</Text>;
-    }}
+const keyedStaticChildren = [1, 2].map((item) => (
+  <Static key={item}>
+    <Text>{item}</Text>
   </Static>
-);
-void inferredStaticSlot;
+));
+void keyedStaticChildren;
+
+// @ts-expect-error Static does not own application collection items.
+const unsupportedStaticItems = <Static items={[1]}><Text>x</Text></Static>;
+// @ts-expect-error Layout is composed inside Static's ordinary slot.
+const unsupportedStaticStyle = <Static style={{ flexDirection: "row" }}><Text>x</Text></Static>;
+void unsupportedStaticItems;
+void unsupportedStaticStyle;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<ComponentPublicInstance | null>(null);
@@ -709,14 +700,8 @@ mountedStdin.setRawMode(false);
 
 <template>
   <Box ref="host" :height="2">
-    <Static :items="[1, 2]">
-      <template #default="{ item, index }">
-        <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
-        <Text>
-          <!-- @vue-expect-error Static infers number rather than widening item to any. -->
-          {{ item.toUpperCase() }}
-        </Text>
-      </template>
+    <Static v-for="(item, index) in [1, 2]" :key="item">
+      <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
       <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ geometry.status }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox>
@@ -803,9 +788,7 @@ assert.equal(typeof useTextSelection, "function");
 const inlineHistory = await render(
   defineComponent(() => () =>
     h(Box, null, () => [
-      h(inline.Static, { items: ["packed-history"] }, {
-        default: ({ item }) => h(Text, null, () => item),
-      }),
+      h(inline.Static, null, () => h(Text, null, () => "packed-history")),
       h(Text, null, () => "packed-live"),
     ]),
   ),

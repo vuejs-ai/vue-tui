@@ -20,18 +20,8 @@ export const accepted = [
   <Box flexDirection="row">
     <Text>nested child</Text>
   </Box>,
-  <Static items={[1, 2, 3]}>
-    {({ item, index }) => {
-      const renderedItem = item.toFixed(0);
-      const renderedIndex = index.toFixed(0);
-      // @ts-expect-error Static infers number rather than widening the slot to any.
-      item.toUpperCase();
-      return (
-        <Text>
-          {renderedIndex}:{renderedItem}
-        </Text>
-      );
-    }}
+  <Static>
+    <Text>ordinary static child</Text>
   </Static>,
   <Transform transform={(line) => line}>
     <Text>transformed child</Text>
@@ -54,8 +44,10 @@ export const rejected = [
   <Box bogusProp="x">x</Box>,
   // @ts-expect-error `transform` is required
   <Transform>x</Transform>,
-  // @ts-expect-error `items` is required
-  <Static>x</Static>,
+  // @ts-expect-error Static does not own collection items.
+  <Static items={[1]}>x</Static>,
+  // @ts-expect-error Static does not own cross-item layout style.
+  <Static style={{ flexDirection: "row" }}>x</Static>,
   // @ts-expect-error `<Text>` has an ordinary default slot, not a scoped slot
   <Text>{({ item }: { item: string }) => item}</Text>,
   // @ts-expect-error `<Box>` has no named `foo` slot
@@ -66,10 +58,4 @@ export const rejected = [
   <Newline>x</Newline>,
   // @ts-expect-error `<Spacer>` does not accept children
   <Spacer>x</Spacer>,
-  // @ts-expect-error `<Static>` children are Vue scoped slots: one `{ item, index }` object
-  <Static items={[1]}>{(item: number, index: number) => <Text>{item + index}</Text>}</Static>,
-  // @ts-expect-error `style` is the supported layout style surface, not an arbitrary object
-  <Static items={[1]} style={{ flexDirektion: "row" }}>
-    {({ item }) => <Text>{item}</Text>}
-  </Static>,
 ];

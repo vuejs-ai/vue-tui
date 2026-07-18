@@ -95,11 +95,11 @@ test("non-TTY default writes Static immediately and only the latest dynamic fram
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">
-        <Static items={items.value}>
-          {{
-            default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-          }}
-        </Static>
+        {items.value.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>{dynamic.value}</Text>
       </Box>
     );

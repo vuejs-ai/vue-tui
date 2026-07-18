@@ -8,6 +8,7 @@ import {
   createTransform,
   createVirtualText,
   isContainer,
+  NESTED_STATIC_ERROR,
   type TuiBox,
   type TuiContainer,
   type TuiNode,
@@ -134,6 +135,22 @@ function isInsideTextOrTransformContext(node: TuiContainer): boolean {
     current = current.parent;
   }
   return false;
+}
+
+function isInsideStaticContext(node: TuiNode | null): boolean {
+  let current = node;
+  while (current) {
+    if (current.type === "tui-static") return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function hasNestedStatic(node: TuiNode, staticAncestor: boolean): boolean {
+  const nextStaticAncestor = staticAncestor || node.type === "tui-static";
+  if (node.type === "tui-static" && staticAncestor) return true;
+  if (!isContainer(node)) return false;
+  return node.children.some((child) => hasNestedStatic(child, nextStaticAncestor));
 }
 
 /**
@@ -372,6 +389,13 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     const parentC = parent as TuiContainer;
 
+    // Static owns one indivisible history block. Validate the complete subtree
+    // relation before Yoga insertion so either Vue construction order (parent
+    // first or child first) rejects nested history before any renderer commit.
+    if (hasNestedStatic(child, isInsideStaticContext(parentC))) {
+      throw new Error(NESTED_STATIC_ERROR);
+    }
+
     // <Box> inside a text context is invalid (matches Ink's validation). Ink
     // models <Transform> as ink-text (hostContext.isInsideText), so its
     // reconciler throws the SAME error for a <Box> directly inside a <Transform>
@@ -381,6 +405,9 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // context check to mirror Ink exactly. (G58 should-fix)
     if (child.type === "tui-box" && isInsideTextOrTransformContext(parentC)) {
       throw new Error("<Box> can’t be nested inside <Text> component");
+    }
+    if (child.type === "tui-static" && isInsideTextOrTransformContext(parentC)) {
+      throw new Error("<Static> cannot be nested inside <Text> or <Transform> component");
     }
 
     // Text-leaf nodes must live inside a <Text> context. The rejection condition
@@ -423,11 +450,6 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // no measure func), so resolve it via findMeasureOwner. (G58)
     dirtyTextMeasureOwner(parentC);
 
-    // Track static node identity on the root (mirrors Ink's reconciler).
-    if (child.type === "tui-static") {
-      const root = findRoot(child);
-      if (root) root.staticNode = child;
-    }
     onCommit();
   }
 
@@ -441,15 +463,6 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       // Every target adapter already received its cleanup turn. A failing
       // disposer must not prevent Vue from detaching and freeing the host tree.
     }
-    // Track static node removal: clear root.staticNode only if it still
-    // points at this node. On key-driven remounts, insert() already
-    // registered the new instance before the old one is removed.
-    if (child.type === "tui-static") {
-      if (root && root.staticNode === child) {
-        root.staticNode = undefined;
-      }
-    }
-
     const idx = parent.children.indexOf(child as never);
     if (idx >= 0) parent.children.splice(idx, 1);
     removeYogaChild(parent, child);
@@ -512,21 +525,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       onCommit();
       return;
     }
-    if (el.type === "tui-static" && key === "internal_onWritten") {
-      // Callback the renderer invokes after Static output acceptance to advance
-      // the component cursor so written items unmount. Not styling/layout.
-      el.onWritten =
-        typeof next === "function"
-          ? (next as (renderedItems: readonly unknown[]) => void)
-          : undefined;
-      onCommit();
-      return;
-    }
-    if (el.type === "tui-static" && key === "internal_renderedItems") {
-      // Snapshot the exact item identities represented by the currently mounted
-      // children. Acceptance must not inspect a possibly re-entrantly mutated
-      // author array after stdout.write() returns.
-      el.renderedItems = Array.isArray(next) ? next : [];
+    if (el.type === "tui-static" && key === "internal_onAccepted") {
+      // Internal callback used to release the accepted slot subtree while the
+      // public <Static> component instance remains mounted as its identity.
+      el.onAccepted = typeof next === "function" ? (next as () => void) : undefined;
       onCommit();
       return;
     }

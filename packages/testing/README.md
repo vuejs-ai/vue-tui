@@ -197,7 +197,7 @@ interface ContentFrame {
 }
 ```
 
-`dynamic` is the complete current dynamic region. `staticOutput` is only the new `<Static>` content produced by that commit. Both strings retain SGR styling emitted by the renderer, while output-writer controls and direct side-channel writes remain outside the frame. Teardown commits are excluded, so unmounting or exiting does not append cleanup frames.
+`dynamic` is the complete current dynamic region. `staticOutput` is only the content of newly accepted `<Static>` instances in that commit. Both strings retain SGR styling emitted by the renderer, while output-writer controls and direct side-channel writes remain outside the frame. Teardown commits are excluded, so unmounting or exiting does not append cleanup frames.
 
 ### `lastFrame(options?)`
 

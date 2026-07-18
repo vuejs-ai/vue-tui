@@ -1,8 +1,8 @@
 diff --git a/examples/coding-agent/src/app.vue b/examples/coding-agent/src/app.vue
-index 5dd7fdb..4811156 100644
+index 5dd7fdb..2b2bd39 100644
 --- a/examples/coding-agent/src/app.vue
 +++ b/examples/coding-agent/src/app.vue
-@@ -1,6 +1,16 @@
+@@ -1,22 +1,58 @@
  <script setup lang="ts">
 -import { shallowRef } from "vue";
 -import { Box, Text, Static, useInput, useApp } from "@vue-tui/runtime";
@@ -20,18 +20,27 @@ index 5dd7fdb..4811156 100644
 +import { Static } from "@vue-tui/runtime/inline";
  import { runAgentLoop, type Message, type ToolCall } from "./agent";
  import MessageList from "./components/message-list.vue";
-
-@@ -11,12 +21,26 @@ const inputText = shallowRef("");
- const completedMessages = shallowRef<Message[]>([]);
+ 
+ type AppState = "idle" | "streaming" | "approving";
++interface CompletedMessage {
++  id: number;
++  message: Message;
++}
+ 
+ const state = shallowRef<AppState>("idle");
+ const inputText = shallowRef("");
+-const completedMessages = shallowRef<Message[]>([]);
++const completedMessages = shallowRef<CompletedMessage[]>([]);
  const streamingText = shallowRef("");
  const pendingCommand = shallowRef("");
 +const composerHost = shallowRef<ComponentPublicInstance | null>(null);
 +const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
  const messages: Message[] = [];
-
++let nextCompletedMessageId = 0;
+ 
  let approvalResolve: ((approved: boolean) => void) | null = null;
  const { exit } = useApp();
-
+ 
  const autoApprove = process.argv.includes("--yolo");
 +const composer = useFocus(composerHost, {
 +  autoFocus: true,
@@ -45,16 +54,72 @@ index 5dd7fdb..4811156 100644
 +  scope: approvalScope,
 +  autoFocus: true,
 +});
-
++
++function appendCompletedMessages(...pending: Message[]) {
++  completedMessages.value = [
++    ...completedMessages.value,
++    ...pending.map((message) => ({ id: nextCompletedMessageId++, message })),
++  ];
++}
+ 
  async function submit() {
    const text = inputText.value.trim();
-@@ -84,36 +108,77 @@ async function submit() {
+@@ -26,7 +62,7 @@ async function submit() {
+   state.value = "streaming";
+   streamingText.value = "";
+ 
+-  completedMessages.value = [...completedMessages.value, { role: "user" as const, content: text }];
++  appendCompletedMessages({ role: "user", content: text });
+ 
+   try {
+     const updated = await runAgentLoop(text, messages, {
+@@ -35,28 +71,21 @@ async function submit() {
+       },
+       onToolCall(tc: ToolCall, command: string) {
+         if (streamingText.value) {
+-          completedMessages.value = [
+-            ...completedMessages.value,
+-            { role: "assistant", content: streamingText.value },
+-          ];
++          appendCompletedMessages({ role: "assistant", content: streamingText.value });
+           streamingText.value = "";
+         }
+         pendingCommand.value = command;
+       },
+       onToolResult(tc: ToolCall, output: string) {
+-        completedMessages.value = [
+-          ...completedMessages.value,
++        appendCompletedMessages(
+           { role: "assistant", tool_calls: [tc] },
+           { role: "tool", tool_call_id: tc.id, content: output },
+-        ];
++        );
+         pendingCommand.value = "";
+       },
+       onComplete() {
+         if (streamingText.value) {
+-          completedMessages.value = [
+-            ...completedMessages.value,
+-            { role: "assistant", content: streamingText.value },
+-          ];
++          appendCompletedMessages({ role: "assistant", content: streamingText.value });
+           streamingText.value = "";
+         }
+       },
+@@ -78,63 +107,108 @@ async function submit() {
+       errParts.push({ role: "assistant", content: streamingText.value });
+     }
+     errParts.push({ role: "assistant", content: `Error: ${err.message}` });
+-    completedMessages.value = [...completedMessages.value, ...errParts];
++    appendCompletedMessages(...errParts);
+   }
+ 
    streamingText.value = "";
    pendingCommand.value = "";
    state.value = "idle";
 +  composer.focus();
  }
-
+ 
 -useInput((input, key) => {
 -  if (key.ctrl && input === "c") {
 +useInput((event) => {
@@ -66,9 +131,8 @@ index 5dd7fdb..4811156 100644
 +  if (isCtrlC) {
      exit();
 -    return;
-+    return "consume";
-   }
-
+-  }
+-
 -  if (state.value === "approving") {
 -    if (key.return) {
 -      state.value = "streaming";
@@ -80,12 +144,13 @@ index 5dd7fdb..4811156 100644
 -      approvalResolve = null;
 -    }
 -    return;
--  }
--
++    return "consume";
+   }
+ 
 -  if (state.value !== "idle") return;
 +  return "continue";
 +});
-
+ 
 -  if (key.return) {
 +useFocusedInput(composer, (event) => {
 +  if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
@@ -146,11 +211,21 @@ index 5dd7fdb..4811156 100644
 +  };
  });
  </script>
-
-@@ -129,12 +194,18 @@ useInput((input, key) => {
+ 
+ <template>
+   <Box flexDirection="column">
+-    <Static :items="completedMessages">
+-      <template #default="{ item, index }">
+-        <MessageList :key="index" :message="item" />
+-      </template>
++    <Static v-for="entry in completedMessages" :key="entry.id">
++      <MessageList :message="entry.message" />
+     </Static>
+ 
+     <Box v-if="streamingText">
        <Text>{{ streamingText }}</Text>
      </Box>
-
+ 
 -    <Box v-if="state === 'approving'" borderStyle="round" borderColor="yellow" :paddingX="1">
 +    <Box
 +      v-if="state === 'approving'"
@@ -162,7 +237,7 @@ index 5dd7fdb..4811156 100644
        <Text color="yellow">{{ pendingCommand }}</Text>
        <Text dimColor>{{ "  [Enter] run / [Esc] skip" }}</Text>
      </Box>
-
+ 
 -    <Box>
 +    <Box ref="composerHost">
        <Text v-if="state === 'idle'">

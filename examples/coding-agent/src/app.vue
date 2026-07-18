@@ -15,15 +15,20 @@ import { runAgentLoop, type Message, type ToolCall } from "./agent";
 import MessageList from "./components/message-list.vue";
 
 type AppState = "idle" | "streaming" | "approving";
+interface CompletedMessage {
+  id: number;
+  message: Message;
+}
 
 const state = shallowRef<AppState>("idle");
 const inputText = shallowRef("");
-const completedMessages = shallowRef<Message[]>([]);
+const completedMessages = shallowRef<CompletedMessage[]>([]);
 const streamingText = shallowRef("");
 const pendingCommand = shallowRef("");
 const composerHost = shallowRef<ComponentPublicInstance | null>(null);
 const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
 const messages: Message[] = [];
+let nextCompletedMessageId = 0;
 
 let approvalResolve: ((approved: boolean) => void) | null = null;
 const { exit } = useApp();
@@ -42,6 +47,13 @@ useFocus(approvalHost, {
   autoFocus: true,
 });
 
+function appendCompletedMessages(...pending: Message[]) {
+  completedMessages.value = [
+    ...completedMessages.value,
+    ...pending.map((message) => ({ id: nextCompletedMessageId++, message })),
+  ];
+}
+
 async function submit() {
   const text = inputText.value.trim();
   if (!text) return;
@@ -50,7 +62,7 @@ async function submit() {
   state.value = "streaming";
   streamingText.value = "";
 
-  completedMessages.value = [...completedMessages.value, { role: "user" as const, content: text }];
+  appendCompletedMessages({ role: "user", content: text });
 
   try {
     const updated = await runAgentLoop(text, messages, {
@@ -59,28 +71,21 @@ async function submit() {
       },
       onToolCall(tc: ToolCall, command: string) {
         if (streamingText.value) {
-          completedMessages.value = [
-            ...completedMessages.value,
-            { role: "assistant", content: streamingText.value },
-          ];
+          appendCompletedMessages({ role: "assistant", content: streamingText.value });
           streamingText.value = "";
         }
         pendingCommand.value = command;
       },
       onToolResult(tc: ToolCall, output: string) {
-        completedMessages.value = [
-          ...completedMessages.value,
+        appendCompletedMessages(
           { role: "assistant", tool_calls: [tc] },
           { role: "tool", tool_call_id: tc.id, content: output },
-        ];
+        );
         pendingCommand.value = "";
       },
       onComplete() {
         if (streamingText.value) {
-          completedMessages.value = [
-            ...completedMessages.value,
-            { role: "assistant", content: streamingText.value },
-          ];
+          appendCompletedMessages({ role: "assistant", content: streamingText.value });
           streamingText.value = "";
         }
       },
@@ -102,7 +107,7 @@ async function submit() {
       errParts.push({ role: "assistant", content: streamingText.value });
     }
     errParts.push({ role: "assistant", content: `Error: ${err.message}` });
-    completedMessages.value = [...completedMessages.value, ...errParts];
+    appendCompletedMessages(...errParts);
   }
 
   streamingText.value = "";
@@ -184,10 +189,8 @@ useFocusScopeInput(approvalScope, (event) => {
 
 <template>
   <Box flexDirection="column">
-    <Static :items="completedMessages">
-      <template #default="{ item, index }">
-        <MessageList :key="index" :message="item" />
-      </template>
+    <Static v-for="entry in completedMessages" :key="entry.id">
+      <MessageList :message="entry.message" />
     </Static>
 
     <Box v-if="streamingText">

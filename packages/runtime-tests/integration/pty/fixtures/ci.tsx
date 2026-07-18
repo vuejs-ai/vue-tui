@@ -30,9 +30,11 @@ const App = defineComponent(() => {
 
   return () => (
     <>
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item}>
+          <Text>{item}</Text>
+        </Static>
+      ))}
       <Text>Counter: {counter.value}</Text>
     </>
   );

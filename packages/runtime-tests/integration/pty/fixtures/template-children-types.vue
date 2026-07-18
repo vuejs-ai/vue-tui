@@ -15,21 +15,14 @@ import { Static } from "@vue-tui/runtime/inline";
   <!-- Valid: slot children + typed props -->
   <Box flex-direction="row"><Text color="green">ok</Text></Box>
   <Box v-show="true"><Text>v-show</Text></Box>
-  <Static :items="[1, 2, 3]">
-    <template #default="{ item, index }">
-      <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
-      <Text>
-        <!-- @vue-expect-error Static infers number rather than widening item to any -->
-        {{ item.toUpperCase() }}
-      </Text>
-    </template>
+  <Static v-for="(item, index) in [1, 2, 3]" :key="item">
+    <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
   </Static>
+  <Static>x</Static>
   <Transform :transform="(line: string) => line"><Text>x</Text></Transform>
 
   <!-- @vue-expect-error display accepts "flex" | "none", not a number -->
   <Box :display="123">x</Box>
   <!-- @vue-expect-error bold accepts a boolean, not a string -->
   <Text :bold="'yes'">x</Text>
-  <!-- @vue-expect-error items is required -->
-  <Static>x</Static>
 </template>

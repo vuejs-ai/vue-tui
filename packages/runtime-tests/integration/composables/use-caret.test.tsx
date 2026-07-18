@@ -203,10 +203,8 @@ describe("useCaret", () => {
       caret = useCaret(caretTarget, { focus, position: { x: 0, y: 0 } });
       return () => (
         <Box ref={focusTarget} flexDirection="column">
-          <Static items={["history"]}>
-            {{
-              default: ({ item }: { item: string }) => <Text ref={caretTarget}>{item}</Text>,
-            }}
+          <Static>
+            <Text ref={caretTarget}>history</Text>
           </Static>
           <Text>live</Text>
         </Box>

@@ -14,9 +14,7 @@ const App = defineComponent(() => {
   // would print to stdout and pollute the duplication assertion in exit.test.ts.
   return () => (
     <>
-      <Static items={["A", "B", "C"]}>
-        {{ default: ({ item }: { item: string }) => h(Text, { key: item }, () => item) }}
-      </Static>
+      {["A", "B", "C"].map((item) => h(Static, { key: item }, () => h(Text, null, () => item)))}
       {h(Text, null, () => "Dynamic")}
     </>
   );

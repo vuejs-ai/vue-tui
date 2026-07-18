@@ -1,6 +1,8 @@
 import type { AppContext } from "../context.ts";
 import type { Node as YogaNode } from "yoga-layout";
 
+export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";
+
 export type YogaNodeRef = YogaNode;
 
 export interface BoxProps {
@@ -34,8 +36,6 @@ export interface TuiRoot extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   appContext: AppContext;
-  /** Currently mounted <Static> node (if any). Updated on insert/remove. */
-  staticNode?: TuiStatic;
 }
 
 export interface TuiBox extends NodeBase {
@@ -89,27 +89,18 @@ export interface TuiStatic extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   props: BoxProps;
-  /** Exact item identities represented by the currently mounted host children. */
-  renderedItems: readonly unknown[];
   /**
-   * Host child nodes settled by the static output channel. Static items are
-   * write-once: each preparation skips children in this set. We track by node
-   * identity rather than a count because one logical item expands to several
-   * host nodes, including Vue fragment anchors. A normally returned write adds
-   * its complete prepared batch before the component cursor advances. A
-   * throwing write also adds that batch because handoff is indeterminate and an
-   * automatic retry could duplicate bytes, but it does not report acceptance to
-   * the component.
+   * Runtime-owned write-once state for this mounted host instance. A normally
+   * returned write accepts it; an indeterminate throwing write abandons it.
+   * Either terminal state permanently prevents replay.
    */
-  writtenNodes: Set<TuiNode>;
+  commitState: "open" | "accepted" | "abandoned";
   /**
-   * Callback registered by the <Static> component, invoked only after the
-   * corresponding output write returns normally or an output-free renderer
-   * commit succeeds. The prepared render's exact identity snapshot is passed so
-   * a synchronous append or replacement during the stream write cannot be
-   * mistaken for content represented by the accepted bytes.
+   * Internal component callback invoked after Runtime has marked the host
+   * accepted. It releases the accepted slot subtree while retaining the public
+   * component instance as the write-once identity.
    */
-  onWritten?: (renderedItems: readonly unknown[]) => void;
+  onAccepted?: () => void;
 }
 
 export interface TuiTransform extends NodeBase {
@@ -228,8 +219,7 @@ export function createStatic(): TuiStatic {
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
-    renderedItems: [],
-    writtenNodes: new Set(),
+    commitState: "open",
   });
 }
 

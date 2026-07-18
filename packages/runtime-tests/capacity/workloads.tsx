@@ -293,13 +293,11 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
 
     return () => (
       <Box width="100%" flexDirection="column">
-        <Static items={records.value}>
-          {{
-            default: ({ item }: { item: J1Record }) => (
-              <Text>{`${item.marker} request\nanswer ${item.id.toString().padStart(3, "0")}`}</Text>
-            ),
-          }}
-        </Static>
+        {records.value.map((item) => (
+          <Static key={item.id}>
+            <Text>{`${item.marker} request\nanswer ${item.id.toString().padStart(3, "0")}`}</Text>
+          </Static>
+        ))}
         <Text>{marker()}</Text>
         <Text>{`response ${"x".repeat(tokenCount.value)}`}</Text>
         {approval.value === "closed" ? null : (
@@ -448,9 +446,11 @@ async function runJ2(maxFps: number): Promise<JourneyExecution> {
     });
     return () => (
       <Box width={100} height={30} flexDirection="column">
-        <Static items={accepted.value}>
-          {{ default: ({ item }: { item: Candidate }) => <Text>{`accepted ${item.id}`}</Text> }}
-        </Static>
+        {accepted.value.map((item) => (
+          <Static key={item.id}>
+            <Text>{`accepted ${item.id}`}</Text>
+          </Static>
+        ))}
         <Text>{marker()}</Text>
         <Text>{`query ${query.value}`}</Text>
         {visible.value.map((candidate, offset) => {
@@ -1323,13 +1323,11 @@ async function runJ6Inline(volume: CapacityVolume): Promise<JourneyExecution> {
     exit = useApp().exit;
     return () => (
       <Box width="100%" flexDirection="column">
-        <Static items={records.value}>
-          {{
-            default: ({ item }: { item: J6InlineRecord }) => (
-              <Text>{`${item.marker} request\nanswer ${item.id.toString().padStart(4, "0")}`}</Text>
-            ),
-          }}
-        </Static>
+        {records.value.map((item) => (
+          <Static key={item.id}>
+            <Text>{`${item.marker} request\nanswer ${item.id.toString().padStart(4, "0")}`}</Text>
+          </Static>
+        ))}
         <Text>{`${frameMarker()} ${"L".repeat(768)}`}</Text>
       </Box>
     );

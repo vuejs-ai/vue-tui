@@ -325,7 +325,9 @@ test("Static rejection precedes Fullscreen mouse targeting and leaves a clean ho
         <Box ref={target} width={6} height={1}>
           <Text>dynamic</Text>
         </Box>
-        <Static items={[]}>{{ default: () => <Text>unreachable</Text> }}</Static>
+        <Static>
+          <Text>unreachable</Text>
+        </Static>
       </Box>
     );
   });

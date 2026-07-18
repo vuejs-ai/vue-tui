@@ -51,7 +51,10 @@ test("lastFrame() still reads the last real render after unmount", async () => {
 
 test("unmount() with <Static> does not append static + dynamic teardown frames", async () => {
   const { frames, unmount } = await render(() => (
-    <Static items={["a", "b"]}>{({ item }: { item: string }) => <Text>{item}</Text>}</Static>
+    <Static>
+      <Text>a</Text>
+      <Text>b</Text>
+    </Static>
   ));
   const before = frames.length;
   expect(before).toBeGreaterThan(0);
@@ -67,7 +70,10 @@ test("useApp().exit() with <Static> does not append static + dynamic teardown fr
     const { exit } = useApp();
     doExit = () => exit();
     return () => (
-      <Static items={["a", "b"]}>{({ item }: { item: string }) => <Text>{item}</Text>}</Static>
+      <Static>
+        <Text>a</Text>
+        <Text>b</Text>
+      </Static>
     );
   });
 

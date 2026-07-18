@@ -977,25 +977,23 @@ describe("screen reader enabled mode", () => {
   });
 
   // G17 follow-up, finding 2 (Ink parity): SR renderToString must NOT drop
-  // <Static> content. The SR static flush linearizes static items, but the SR
+  // <Static> content. The SR static flush linearizes static blocks, but the SR
   // return branch previously returned only the dynamic output (rendered with
   // skipStaticElements:true), discarding the captured static output. Ink's SR
   // renderer returns staticOutput when node.staticNode exists (renderer.ts:24-33).
-  test("renderToString in SR mode includes <Static> item text (does not drop it)", () => {
+  test("renderToString in SR mode includes keyed <Static> blocks", () => {
     const output = renderToStringWithScreenReader(
       defineComponent(() => {
         const items = ["First", "Second"];
         return () => (
           <Box flexDirection="column">
-            <Static items={items}>
-              {{
-                default: ({ item }: { item: string }) => (
-                  <Box key={item} borderStyle="round">
-                    <Text>{item}</Text>
-                  </Box>
-                ),
-              }}
-            </Static>
+            {items.map((item) => (
+              <Static key={item}>
+                <Box borderStyle="round">
+                  <Text>{item}</Text>
+                </Box>
+              </Static>
+            ))}
             <Text>Live</Text>
           </Box>
         );
@@ -1006,79 +1004,67 @@ describe("screen reader enabled mode", () => {
     expect(output).toContain("Second");
     // Dynamic content still present.
     expect(output).toContain("Live");
-    // SR mode linearizes — no border glyphs from the bordered static items.
+    // SR mode linearizes — no border glyphs from the bordered static blocks.
     for (const glyph of ["╭", "╮", "╰", "╯", "─", "│"]) {
       expect(output).not.toContain(glyph);
     }
   });
 
-  // G17 follow-up, finding 1 (Ink parity): the SR static linearization must
-  // honor the <Static>'s resolved flexDirection for separator + child order,
-  // matching how screen-reader.ts linearizes a container (row/row-reverse → " ",
-  // *-reverse reverses children). The default column case still joins with "\n".
-  test("renderToString in SR mode honors Static flexDirection=row (space separator)", () => {
+  // G17 follow-up, finding 1 (Ink parity): SR static linearization must honor
+  // the ordinary Box layout composed inside one Static block.
+  test("renderToString in SR mode honors a row Box inside Static", () => {
     const output = renderToStringWithScreenReader(
-      defineComponent(() => {
-        const items = ["Alpha", "Beta"];
-        return () => (
-          <Static items={items} style={{ flexDirection: "row" }}>
-            {{
-              default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-            }}
-          </Static>
-        );
-      }),
+      defineComponent(() => () => (
+        <Static>
+          <Box flexDirection="row">
+            <Text>Alpha</Text>
+            <Text>Beta</Text>
+          </Box>
+        </Static>
+      )),
     );
     // Row direction uses a space separator (screen-reader.ts:76), not "\n".
     expect(output).toBe("Alpha Beta");
   });
 
-  test("renderToString in SR mode honors Static flexDirection=row-reverse (reversed, space)", () => {
+  test("renderToString in SR mode honors a row-reverse Box inside Static", () => {
     const output = renderToStringWithScreenReader(
-      defineComponent(() => {
-        const items = ["Alpha", "Beta"];
-        return () => (
-          <Static items={items} style={{ flexDirection: "row-reverse" }}>
-            {{
-              default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-            }}
-          </Static>
-        );
-      }),
+      defineComponent(() => () => (
+        <Static>
+          <Box flexDirection="row-reverse">
+            <Text>Alpha</Text>
+            <Text>Beta</Text>
+          </Box>
+        </Static>
+      )),
     );
     // row-reverse reverses child order (screen-reader.ts:79-82) + space separator.
     expect(output).toBe("Beta Alpha");
   });
 
-  test("renderToString in SR mode honors Static flexDirection=column-reverse (reversed, newline)", () => {
+  test("renderToString in SR mode honors a column-reverse Box inside Static", () => {
     const output = renderToStringWithScreenReader(
-      defineComponent(() => {
-        const items = ["Alpha", "Beta"];
-        return () => (
-          <Static items={items} style={{ flexDirection: "column-reverse" }}>
-            {{
-              default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-            }}
-          </Static>
-        );
-      }),
+      defineComponent(() => () => (
+        <Static>
+          <Box flexDirection="column-reverse">
+            <Text>Alpha</Text>
+            <Text>Beta</Text>
+          </Box>
+        </Static>
+      )),
     );
     // column-reverse reverses order, newline separator (default non-row).
     expect(output).toBe("Beta\nAlpha");
   });
 
-  test("renderToString in SR mode default Static (column) joins with newline, forward order", () => {
+  test("renderToString in SR mode uses Static's default column layout", () => {
     const output = renderToStringWithScreenReader(
-      defineComponent(() => {
-        const items = ["Alpha", "Beta"];
-        return () => (
-          <Static items={items}>
-            {{
-              default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-            }}
-          </Static>
-        );
-      }),
+      defineComponent(() => () => (
+        <Static>
+          <Text>Alpha</Text>
+          <Text>Beta</Text>
+        </Static>
+      )),
     );
     // Default column: forward order, newline separator (unchanged behavior).
     expect(output).toBe("Alpha\nBeta");

@@ -87,17 +87,25 @@ useInput((event) => {
 | `<Text>`      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
 | `<Spacer>`    | Expands to fill available space (`flex-grow: 1`)                                               |
 | `<Newline>`   | Inserts line breaks (configurable `count`)                                                     |
-| `<Static>`    | Commits append-only terminal history; import from `@vue-tui/runtime/inline`                    |
+| `<Static>`    | Commits one mounted slot tree to terminal history; import from `@vue-tui/runtime/inline`       |
 | `<Transform>` | Applies a string transform function to each rendered line                                      |
 
-`Static` and its five named types live only on `@vue-tui/runtime/inline`:
+`Static` lives only on `@vue-tui/runtime/inline` and has no props or collection-specific named types:
 
 ```ts
 import { Box, Text } from "@vue-tui/runtime";
-import { Static, type StaticProps } from "@vue-tui/runtime/inline";
+import { Static } from "@vue-tui/runtime/inline";
 ```
 
-Each mounted `Static` region accepts only an appended tail. Replacing the array is fine when every committed prefix position remains `Object.is` identical; shrinking, replacing, or reordering that prefix is a programming error. Mutating fields on the same item object does not rewrite terminal history, and remounting starts a new region. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`.
+Use ordinary Vue iteration and stable keys for a collection:
+
+```vue
+<Static v-for="entry in completedEntries" :key="entry.id">
+  <CompletedEntry :entry="entry" />
+</Static>
+```
+
+Each mounted instance commits its current slot tree once. Acceptance releases the slot subtree but preserves the component instance as its write-once identity, so reactive updates and keyed reorder do not replay accepted history. An output-free first commit also accepts the instance; use an outer `v-if` if content is not ready. A Static below a Box hidden by `display="none"` or `v-show` remains open and commits once when that ancestor is shown. Do not nest Static inside another Static, Text, or Transform. Remounting creates a new history block. Open instances in one transaction commit in current tree order, but terminal history is irreversible: a new instance later inserted before an accepted sibling still appends physically. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`.
 
 Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, focus, geometry, caret, and Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text`, `Transform`, or `Static` is not supported.
 
@@ -238,7 +246,7 @@ Mouse reporting is demand-driven: only a visible target from an accepted Fullscr
 
 The live host requires controllable TTY input and an xterm-compatible SGR mouse profile; `TERM=dumb` is rejected when a visible target first demands reporting. SGR has no capability handshake, so a terminal that accepts the control bytes but silently ignores mouse reporting is indistinguishable from a user who sends no mouse input. In that case the hook receives no events and vue-tui does not guess or fall back to a different protocol.
 
-Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use `<Static>` from `@vue-tui/runtime/inline` for completed append-only history, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
+Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use one keyed `<Static>` instance from `@vue-tui/runtime/inline` per completed history block, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
 
 Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>`, `useStdout().write()`, `useStderr().write()`, and patched console calls coordinate with the live region and commit their output once. On a TTY, the coordinated `write()` functions accept styled multiline text: they retain SGR, OSC 8 hyperlinks, and line feeds while removing cursor/erase sequences, other OSC commands, and geometry-changing control bytes. Redirected stderr and non-TTY streams remain byte-exact. The `stdout`/`stderr` streams returned by those composables, direct `process.stdout.write()`, and other raw stream writes deliberately bypass sanitization and ownership coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
 

@@ -1,5 +1,7 @@
 # Component Authoring: SFC vs Render Function
 
+> Active boundary note (2026-07-19): the Runtime-foundation re-audit removes Static's collection props and scoped payload. `Static` remains a template SFC with one ordinary slot and an internal accepted flag. Historical explanations below still record why the old collection-shaped implementation was authored as an SFC; they are not its current public API. The same re-audit may make other listed conveniences private, so use the active export ledger for current surface decisions.
+
 vue-tui's public components (`Box`, `Text`, `Spacer`, `Static`, `Newline`, `Transform`) are
 authored as **Vue `<script setup>` template SFCs by default**. Exactly one — `Transform` —
 is a `defineComponent` render function (`.ts`), because it must **inspect its own materialized
@@ -17,7 +19,7 @@ not a reason to abandon the template. Two of the fixes also corrected latent inc
 | ----------- | --------------------------- | ------------------------------------------------------ |
 | `Spacer`    | template SFC                | one host node                                          |
 | `Newline`   | template SFC                | `"\n".repeat(count)` interpolation + a context branch  |
-| `Static`    | template SFC                | reactive cursor + `v-for` scoped slot                  |
+| `Static`    | template SFC                | accepted flag + one ordinary slot                      |
 | `Box`       | template SFC                | root `v-if` validation guard + `<slot/>`               |
 | `Text`      | template SFC                | `<slot/>` + `tui-virtual-text`/`tui-text` branch       |
 | `Transform` | **render function (`.ts`)** | inspects children: all-inert children → render nothing |
@@ -67,13 +69,7 @@ Authoring the templates and running the **existing** suites surfaced three custo
 realities. None was reasoned out up front; each was caught green-to-red (run, don't reason)
 and fixed at the root:
 
-- **Static — the static paint channel didn't skip inert anchors.** An empty `v-for` leaves a
-  Vue Fragment placeholder (an empty `text-leaf` anchor), so `stat.children` is `[anchor]`,
-  not `[]`. `paintStaticNode` filtered only already-written nodes, so the anchor passed the
-  `fresh.length > 0` gate and `paintIsolated` painted the container's **padding** as stray
-  blank lines — while `findStatics` in the same file already skipped `text-leaf`/`comment`.
-  Fix: `paintStaticNode` skips inert anchors too (safe: `node-ops.ts` forbids non-empty bare
-  text under `<tui-static>`, so the only `text-leaf` there is an empty anchor).
+- **Static — output-free slot trees must still settle.** A conditional or empty ordinary slot leaves inert Vue anchors. The static channel skips those anchors for paint but still accepts the whole mounted host after a successful output-free transaction. The component then releases that host and its Yoga subtree while retaining its own accepted state, so later slot content cannot replay the same history identity.
 - **Text — `<slot/>` fragment anchors shifted the transform line-index, exposing an Ink-parity
   bug.** A `<slot/>` mounts as a Fragment whose boundary anchors are empty `text-leaf`s; the
   squash loops that give a nested `<Transform>` its positional line index counted every
@@ -96,8 +92,9 @@ and fixed at the root:
 - **Bind host-element props in camelCase, or via `v-bind="object"`.** The renderer matches
   yoga/style props by exact camelCase key, and Vue passes a custom-element binding name
   verbatim — so `:flex-grow="1"` reaches the renderer as `flex-grow` and is rejected. Use
-  `:flexGrow="1"`, or `v-bind="someObject"` (object keys are preserved). `Box`/`Text`/`Static`
-  bind a whole props/style object with `v-bind`; `Spacer` uses explicit camelCase.
+  `:flexGrow="1"`, or `v-bind="someObject"` (object keys are preserved). `Box` and `Text` bind
+  their public props object with `v-bind`; Static binds only its private host configuration, and
+  `Spacer` uses explicit camelCase.
 - **Host primitive tags are `tui-`-prefixed** (`tui-box`/`tui-text`/`tui-virtual-text`/
   `tui-static`/`tui-transform`), mirroring Ink's `ink-box`/`ink-text`. The prefix keeps the
   renderer's intrinsic elements in their own namespace, so a template `<tui-box>` never
@@ -115,6 +112,6 @@ and fixed at the root:
   compile to raw element vnodes via the build's `isCustomElement` option and are an **internal**
   detail. Consumers use `<Box>` / `<Text>`, never `<tui-box>`. SFC templates may reference the
   host tags directly; their loose typing under `vue-tsc` (no `strictTemplates`) is intentional.
-- Runtime primitives export typed props (`ExtractPublicPropTypes` over the runtime props object) and keep the `WithChildren` shim (`with-children.ts`): Vue's automatic JSX runtime routes children to a `children` prop that declared slots do not provide, so the shim is required for JSX consumers. It is harmless for templates — a `WithChildren`-wrapped component still type-checks correctly in consumer `<template>`s under vue-tsc (verified), and no `GlobalComponents` augmentation is needed because consumers import the components.
+- Runtime components publish stable author-facing constructors rather than the generated SFC `DefineComponent` type. Components with an ordinary default slot use the `PublicComponent` type shim because Vue's automatic JSX runtime routes children through a `children` prop that a declared slot alone does not provide. Prop-free `Static` uses `PublicComponent<Record<never, never>>`, which keeps that ordinary zero-payload slot while preventing the generated SFC type from admitting inherited HTML-like props.
 - The separate `@vue-tui/components` package exports each SFC through a stable author-facing constructor rather than leaking the `DefineComponent` generic arity generated by the Vue patch used at build time. Components with a default slot use `PublicComponent<Props, Exposed>` so template and TSX refs preserve their public handle; leaf components use `PublicLeafComponent<Props>` so ignored `children` are rejected. Every exported imperative handle needs a declaration test and a clean packed-consumer test.
 - Build/tooling: the `pack` build carries `unplugin-vue/rolldown` (with `isCustomElement` for the host tags) and emits SFC declarations via `dts: { vue: true }`; package declarations must externalize `vue` and `@vue/*` so a consumer resolves one Vue instance and can use a different supported Vue patch release. The runtime **test** Vite config also carries `unplugin-vue/vite` because unit tests import the `.vue` components; `check:type` is `vue-tsc`.

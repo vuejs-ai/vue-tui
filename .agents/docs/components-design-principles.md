@@ -85,9 +85,7 @@ component's types should be treated as contract — the same principle
 - typed props, typed `v-model` (`defineModel<T>()`), typed scoped-slot payloads, and typed
   `defineExpose` handles — so a wrong-typed prop, a mismatched `v-model` binding, or a misused
   slot variable is a **compile error**, not a silent no-op;
-- a component over a collection or value is **generic** and infers it — the way `Static<T>` flows
-  its item type into the `{ item, index }` slot — so the consumer annotates nothing and misuse
-  still type-checks;
+- a higher-level component that owns a collection or value is **generic** and infers it, so a typed `{ item, index }` scoped payload can flow without consumer annotations; Runtime's one-slot `Static` deliberately owns no collection;
 - no leaked `any` (it silently switches checking off); keep the `WithChildren` shim so JSX
   children stay typed;
 - **prove it by running the checker** against real template _and_ TSX usage (`vue-tsc` for
@@ -104,8 +102,8 @@ consistent and to flag real authoring traps:
 - **Two-way value** → author with `defineModel()` (Vue 3.4+); it generates `modelValue` +
   `update:modelValue`. Use named models (`defineModel("query")`) when there is more than one
   binding. Display-only components have no model — the pattern simply doesn't apply.
-- **Slots (correctness constraint, not just a pattern)** → primary / repeated content goes in the
-  **default** scoped slot exposing `{ item, index }` (mirrors `Static`). This is load-bearing:
+- **Slots (correctness constraint, not just a pattern)** → when a higher-level collection component supplies repeated content, it uses the
+  **default** scoped slot exposing one `{ item, index }` object. Runtime's `Static` is not that wrapper; applications normally compose keyed `Static` instances with `v-for`. The object rule remains load-bearing for a future collection wrapper:
   Vue's automatic JSX runtime routes JSX children to a `children` prop that resolves to the
   **default** slot (the `WithChildren` shim only makes that type-check), so primary content placed
   in a **named** slot silently drops for JSX consumers. Reserve **named** scoped slots for

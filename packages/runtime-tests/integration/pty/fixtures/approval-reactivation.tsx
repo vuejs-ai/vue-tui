@@ -14,11 +14,13 @@ import {
 import { Static } from "@vue-tui/runtime/inline";
 
 type State = "idle" | "streaming" | "approving";
+type HistoryEntry = { readonly id: number; readonly text: string };
 
 const App = defineComponent(() => {
   const state = shallowRef<State>("idle");
   const approvals = shallowRef<readonly string[]>([]);
-  const history = shallowRef<string[]>([]);
+  const history = shallowRef<HistoryEntry[]>([]);
+  let nextHistoryId = 0;
   const composerHost = shallowRef<ComponentPublicInstance | null>(null);
   const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
   const { exit } = useApp();
@@ -32,9 +34,13 @@ const App = defineComponent(() => {
   });
   useFocus(approvalHost, { scope: approvalScope, autoFocus: true });
 
+  const appendHistory = (text: string) => {
+    history.value = [...history.value, { id: nextHistoryId++, text }];
+  };
+
   const settleToIdle = () => {
     setTimeout(() => {
-      history.value = [...history.value, `complete-${approvals.value.length}`];
+      appendHistory(`complete-${approvals.value.length}`);
       state.value = "idle";
       composer.focus();
     }, 10);
@@ -49,10 +55,10 @@ const App = defineComponent(() => {
   });
   useFocusedInput(composer, (event) => {
     if (event.kind !== "key" || event.key.name !== "return") return "continue";
-    history.value = [...history.value, `user-${approvals.value.length + 1}`];
+    appendHistory(`user-${approvals.value.length + 1}`);
     state.value = "streaming";
     setTimeout(() => {
-      history.value = [...history.value, `assistant-${approvals.value.length + 1}`];
+      appendHistory(`assistant-${approvals.value.length + 1}`);
       state.value = "approving";
     }, 10);
     return "consume";
@@ -67,7 +73,7 @@ const App = defineComponent(() => {
       };
     }
     approvals.value = [...approvals.value, event.key.name];
-    history.value = [...history.value, `tool-${event.key.name}`];
+    appendHistory(`tool-${event.key.name}`);
     state.value = "streaming";
     settleToIdle();
     return "consume";
@@ -75,9 +81,11 @@ const App = defineComponent(() => {
 
   return () => (
     <Box flexDirection="column">
-      <Static items={history.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {history.value.map((entry) => (
+        <Static key={entry.id}>
+          <Text>{entry.text}</Text>
+        </Static>
+      ))}
       <Text>{`state=${state.value} approvals=${approvals.value.join(",") || "none"}`}</Text>
       {state.value === "approving" ? (
         <Box ref={approvalHost}>

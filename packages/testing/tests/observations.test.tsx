@@ -73,9 +73,11 @@ test("final-stream host writes Static immediately and only the latest dynamic fr
   const dynamic = shallowRef("first");
   const App = defineComponent(() => () => (
     <Box>
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item}>
+          <Text>{item}</Text>
+        </Static>
+      ))}
       <Text>{dynamic.value}</Text>
     </Box>
   ));
@@ -127,9 +129,11 @@ test("Static delta is structured separately from the dynamic region", async () =
   const result = await render(
     defineComponent(() => () => (
       <Box>
-        <Static items={items.value}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-        </Static>
+        {items.value.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>live</Text>
       </Box>
     )),

@@ -174,6 +174,8 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 - **vue-tui:** exports `Static` and its five named types only from `@vue-tui/runtime/inline`. The existing `items`, `style`, and Vue scoped-slot `{ item, index }` shape remains, but every committed prefix position must remain `Object.is`-identical. Replacement arrays and uncommitted-tail changes are allowed; shrink, replacement, or reorder within the committed prefix fails; remounting starts another independent region. Effective visual Fullscreen rejects any Static presence before its bytes or a new frame. A Fullscreen request that falls back to effective Inline for screen-reader presentation remains supported, as do non-TTY and string hosts.
 - **Why:** terminal history is write-once output, so a silent length cursor cannot promise what happens after collection edits. The identity rule makes accepted positions exact without adding keys or replacing Vue's scoped-slot API. The explicit entry says that history requires an Inline-like output surface; visual Fullscreen history instead remains application state inside the viewport. This accepted 2026-07-15 Stage 3 decision is unstamped and does not alter the vouched multiple-region or scoped-slot records.
 
+**Active superseding note (unstamped, 2026-07-19):** the minimum-Runtime re-audit keeps the vouched multiple-region behavior and `/inline` placement but removes Static's collection responsibility. The current `Static` has no props or collection-specific named types: one mounted component instance commits one ordinary slot tree once, and applications use Vue `v-for` with stable keys for collections. The internal output transaction still supplies the decision-independent guarantee established above: a normal or output-free handoff accepts exactly once, while an indeterminate throwing write abandons the whole instance without retry. The former `items`, `style`, scoped payload, and `Object.is` prefix rule remain historical evidence.
+
 ### Ctrl+C exits under the kitty protocol while managed input is active
 
 - **Ink:** exits only on the legacy `\x03` byte (in `App`), so a kitty-protocol Ctrl+C
@@ -480,6 +482,8 @@ current-props model, or API conventions.
   pass one props object, not multiple positional arguments, and that object form is what
   Vue users expect for slot payloads. The rendered item/index values remain equivalent.
   KEEP. [VOUCHED @hyf0]
+
+**Active superseding note (unstamped, 2026-07-19):** `Static` no longer owns a collection and therefore exposes an ordinary zero-payload default slot. The vouched Vue rule remains applicable to any future collection wrapper: if it supplies item and index, it passes one scoped-slot props object rather than React-style positional arguments.
 
 #### ARIA props are typed camelCase; kebab still works but is not type-checked
 

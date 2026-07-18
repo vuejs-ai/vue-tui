@@ -38,7 +38,6 @@ import {
 } from "@vue-tui/runtime";
 import type {
   BoxProps,
-  BoxLayoutStyle,
   CaretState,
   CellPoint,
   CellRect,
@@ -91,13 +90,7 @@ import type {
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
-import type {
-  StaticChildren,
-  StaticProps,
-  StaticSlot,
-  StaticSlotProps,
-  StaticStyle,
-} from "@vue-tui/runtime/inline";
+import { Static } from "@vue-tui/runtime/inline";
 import { useMouseDrag, useMouseEvent, useTextSelection } from "@vue-tui/runtime/fullscreen";
 import type {
   CellDelta,
@@ -283,16 +276,26 @@ export type _UseTextSelectionIsFullscreenOnly = typeof import("@vue-tui/runtime"
 export type _UseClipboardIsCommonOnly = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
 // @ts-expect-error Static is exported only from the Inline history subpath.
 export type _StaticIsInlineOnly = typeof import("@vue-tui/runtime").Static;
-// @ts-expect-error StaticChildren is exported only from the Inline history subpath.
-export type _StaticChildrenIsInlineOnly = import("@vue-tui/runtime").StaticChildren;
-// @ts-expect-error StaticProps is exported only from the Inline history subpath.
-export type _StaticPropsIsInlineOnly = import("@vue-tui/runtime").StaticProps;
-// @ts-expect-error StaticSlot is exported only from the Inline history subpath.
-export type _StaticSlotIsInlineOnly = import("@vue-tui/runtime").StaticSlot;
-// @ts-expect-error StaticSlotProps is exported only from the Inline history subpath.
-export type _StaticSlotPropsIsInlineOnly = import("@vue-tui/runtime").StaticSlotProps;
-// @ts-expect-error StaticStyle is exported only from the Inline history subpath.
-export type _StaticStyleIsInlineOnly = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+export type _RemovedRootStaticChildren = import("@vue-tui/runtime").StaticChildren;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+export type _RemovedRootStaticProps = import("@vue-tui/runtime").StaticProps;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+export type _RemovedRootStaticSlot = import("@vue-tui/runtime").StaticSlot;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+export type _RemovedRootStaticSlotProps = import("@vue-tui/runtime").StaticSlotProps;
+// @ts-expect-error The removed Static collection types are not exported from the root.
+export type _RemovedRootStaticStyle = import("@vue-tui/runtime").StaticStyle;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+export type _RemovedInlineStaticChildren = import("@vue-tui/runtime/inline").StaticChildren;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+export type _RemovedInlineStaticProps = import("@vue-tui/runtime/inline").StaticProps;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+export type _RemovedInlineStaticSlot = import("@vue-tui/runtime/inline").StaticSlot;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+export type _RemovedInlineStaticSlotProps = import("@vue-tui/runtime/inline").StaticSlotProps;
+// @ts-expect-error The no-prop Static component has no named author type exports.
+export type _RemovedInlineStaticStyle = import("@vue-tui/runtime/inline").StaticStyle;
 // @ts-expect-error Common component types are not duplicated on the Inline subpath.
 export type _BoxPropsIsCommonOnly = import("@vue-tui/runtime/inline").BoxProps;
 
@@ -315,21 +318,11 @@ expectTypeOf<TextProps["onMousedown"]>().toEqualTypeOf<undefined>();
 expectTypeOf<TextProps["onMouseup"]>().toEqualTypeOf<undefined>();
 expectTypeOf<TextProps["onClick"]>().toEqualTypeOf<undefined>();
 expectTypeOf<TextProps["onWheel"]>().toEqualTypeOf<undefined>();
-expectTypeOf<StaticProps["items"]>().toEqualTypeOf<unknown[]>();
-expectTypeOf<StaticProps<string>["items"]>().toEqualTypeOf<string[]>();
-expectTypeOf<StaticProps["style"]>().toEqualTypeOf<StaticStyle | undefined>();
-expectTypeOf<StaticStyle>().toEqualTypeOf<BoxLayoutStyle>();
-expectTypeOf<StaticStyle["flexDirection"]>().toEqualTypeOf<BoxProps["flexDirection"]>();
-expectTypeOf<StaticSlotProps<string>>().toEqualTypeOf<{ item: string; index: number }>();
-expectTypeOf<StaticSlot<string>>().toEqualTypeOf<
-  (props: StaticSlotProps<string>) => import("vue").VNodeChild
->();
-expectTypeOf<StaticChildren<string>>().toEqualTypeOf<
-  | StaticSlot<string>
-  | {
-      default: StaticSlot<string>;
-    }
->();
+type StaticComponentProps = InstanceType<typeof Static>["$props"];
+// @ts-expect-error Static no longer owns an application collection.
+export type _RemovedStaticItemsProp = StaticComponentProps["items"];
+// @ts-expect-error Layout is composed inside Static's ordinary slot.
+export type _RemovedStaticStyleProp = StaticComponentProps["style"];
 expectTypeOf<TransformProps["transform"]>().toEqualTypeOf<
   (line: string, lineIndex: number) => string
 >();

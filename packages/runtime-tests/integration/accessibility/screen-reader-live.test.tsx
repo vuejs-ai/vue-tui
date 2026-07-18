@@ -133,17 +133,12 @@ test.sequential("live commit path WITHOUT SR still emits 2D grid with border gly
 // renderNodeToScreenReaderOutput({ skipStaticElements:false }).
 test.sequential("live static channel emits linear screen-reader text (no border glyphs) when SR enabled", async () => {
   const App = defineComponent(() => {
-    const items = ["Logged in"];
     return () => (
       <Box flexDirection="column">
-        <Static items={items}>
-          {{
-            default: ({ item }: { item: string }) => (
-              <Box key={item} borderStyle="round">
-                <Text>{item}</Text>
-              </Box>
-            ),
-          }}
+        <Static>
+          <Box borderStyle="round">
+            <Text>Logged in</Text>
+          </Box>
         </Static>
         <Text>Live</Text>
       </Box>
@@ -301,10 +296,8 @@ test.sequential("tall/overflowing SR transcript never clears terminal, replays s
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">
-        <Static items={["History line"]}>
-          {{
-            default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-          }}
+        <Static>
+          <Text>History line</Text>
         </Static>
         <Text>Alpha {tick.value}</Text>
         <Text>Bravo</Text>

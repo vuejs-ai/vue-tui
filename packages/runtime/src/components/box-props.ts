@@ -36,9 +36,7 @@ type BorderStyle =
 // Exported so consumers can type their custom border objects (Ink parity, G13).
 export type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
 
-// The layout-only subset of BoxProps — exported so `<Static>` (and consumers) can
-// type a `style` object against the same flex/spacing/size keys a `<Box>` accepts,
-// without the color/border/aria surface. (Type aliases hoist, so referencing
+// The layout-only subset of BoxProps. (Type aliases hoist, so referencing
 // BoxProps here — defined at the bottom of this file — is fine.)
 export type BoxLayoutStyle = Pick<
   BoxProps,

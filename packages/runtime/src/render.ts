@@ -2956,7 +2956,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const start = onRender ? performance.now() : 0;
         mountedRenderedTargets?.reconcile();
 
-        // Prepare Static output without advancing its component cursors. The
+        // Prepare Static output without settling its mounted host instances. The
         // transaction is accepted only after its physical stdout write returns
         // normally, or after a successful output-free renderer commit.
         const w = renderSession.session.dimensions.layout.columns;

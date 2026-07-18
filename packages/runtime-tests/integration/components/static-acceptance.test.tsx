@@ -90,8 +90,8 @@ test.each(acceptanceHosts)(
     const live = shallowRef("live-1");
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
-        <Static items={[marker]}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+        <Static>
+          <Text>{marker}</Text>
         </Static>
         <Text>{live.value}</Text>
       </Box>
@@ -147,7 +147,7 @@ test("effective visual Fullscreen rejects empty Static before terminal ownership
   const dynamicMarker = "FULLSCREEN_DYNAMIC_MUST_NOT_RENDER";
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={[]}>{{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}</Static>
+      <Static />
       <Text>{dynamicMarker}</Text>
     </Box>
   ));
@@ -196,9 +196,7 @@ test("visual Fullscreen rolls back setup-owned input before reporting Static rej
     useInput(() => "continue");
     return () => (
       <Box flexDirection="column">
-        <Static items={[]}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-        </Static>
+        <Static />
         <Text>{dynamicMarker}</Text>
       </Box>
     );
@@ -281,8 +279,8 @@ test("inserting Static after a Fullscreen frame rejects before any replacement f
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
       {showStatic.value ? (
-        <Static items={[staticMarker]}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+        <Static>
+          <Text>{staticMarker}</Text>
         </Static>
       ) : null}
       <Text>{live.value}</Text>
@@ -356,8 +354,8 @@ test("Static inserted while Fullscreen is suspended rejects before surface or in
     return () => (
       <Box flexDirection="column">
         {showStatic.value ? (
-          <Static items={[staticMarker]}>
-            {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+          <Static>
+            <Text>{staticMarker}</Text>
           </Static>
         ) : null}
         <Text>FULLSCREEN_BEFORE_SUSPEND</Text>
@@ -394,12 +392,14 @@ test("Static inserted while Fullscreen is suspended rejects before surface or in
 test("a synchronous append during the Static write remains pending for the next commit", async () => {
   const first = "STATIC_REENTRANT_FIRST";
   const second = "STATIC_REENTRANT_SECOND";
-  const items = ref<string[]>([first]);
+  const items = ref([{ id: 1, text: first }]);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item.id}>
+          <Text>{item.text}</Text>
+        </Static>
+      ))}
       <Text>live</Text>
     </Box>
   ));
@@ -415,7 +415,7 @@ test("a synchronous append during the Static write remains pending for the next 
     const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
     if (!appended && chunk.includes(first)) {
       appended = true;
-      items.value.push(second);
+      items.value.push({ id: 2, text: second });
     }
     return result;
   }) as NodeJS.WriteStream["write"];
@@ -448,15 +448,18 @@ test("a synchronous append during the Static write remains pending for the next 
   }
 });
 
-test("a synchronous committed-prefix replacement rejects against the written snapshot", async () => {
+test("a throwing Static write abandons the instance before a synchronous slot replacement", async () => {
   const first = "STATIC_REENTRANT_WRITTEN";
   const replacement = "STATIC_REENTRANT_REPLACEMENT_MUST_NOT_RENDER";
-  const items = ref<string[]>([first]);
+  const text = ref(first);
+  const showStatic = shallowRef(false);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {showStatic.value ? (
+        <Static>
+          <Text>{text.value}</Text>
+        </Static>
+      ) : null}
       <Text>live</Text>
     </Box>
   ));
@@ -466,6 +469,7 @@ test("a synchronous committed-prefix replacement rejects against the written sna
   const chunks: string[] = [];
   stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
   const originalWrite = stdout.write.bind(stdout);
+  const injected = new Error("injected reentrant Static write failure");
   let replaced = false;
   let firstAttempts = 0;
   stdout.write = ((...args: unknown[]) => {
@@ -475,8 +479,9 @@ test("a synchronous committed-prefix replacement rejects against the written sna
       firstAttempts++;
       if (!replaced) {
         replaced = true;
-        items.value = [replacement];
+        text.value = replacement;
       }
+      throw injected;
     }
     return result;
   }) as NodeJS.WriteStream["write"];
@@ -494,9 +499,12 @@ test("a synchronous committed-prefix replacement rejects against the written sna
       maxFps: 0,
     });
 
-    await expect(exited).rejects.toThrow(
-      "<Static> items must preserve every committed prefix item by Object.is identity",
-    );
+    await app.waitUntilRenderFlush();
+    showStatic.value = true;
+    stdout.columns = 79;
+    stdout.emit("resize");
+
+    await expect(exited).rejects.toBe(injected);
     const output = stripAnsi(chunks.join(""));
     expect(replaced).toBe(true);
     expect(firstAttempts).toBe(1);
@@ -513,13 +521,15 @@ test("a synchronous committed-prefix replacement rejects against the written sna
 test("accepted Static output is not replayed when the later dynamic write throws", async () => {
   const staticMarker = "STATIC_BEFORE_DYNAMIC_FAILURE";
   const dynamicMarker = "DYNAMIC_WRITE_FAILURE";
-  const items = shallowRef<string[]>([]);
+  const showStatic = shallowRef(false);
   const live = shallowRef("ready");
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {showStatic.value ? (
+        <Static>
+          <Text>{staticMarker}</Text>
+        </Static>
+      ) : null}
       <Text>{live.value}</Text>
     </Box>
   ));
@@ -557,7 +567,7 @@ test("accepted Static output is not replayed when the later dynamic write throws
     const exited = app.waitUntilExit();
 
     failDynamic = true;
-    items.value = [staticMarker];
+    showStatic.value = true;
     live.value = dynamicMarker;
     // Let the resize transaction own the pending Vue update. Its explicit
     // failure path turns the injected writer error into application teardown,
@@ -578,12 +588,14 @@ test("accepted Static output is not replayed when the later dynamic write throws
 
 test("a throwing Static write is indeterminate and is not retried during teardown", async () => {
   const marker = "STATIC_THROW_NO_RETRY";
-  const items = shallowRef<string[]>([]);
+  const showStatic = shallowRef(false);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {showStatic.value ? (
+        <Static>
+          <Text>{marker}</Text>
+        </Static>
+      ) : null}
       <Text>live</Text>
     </Box>
   ));
@@ -618,7 +630,7 @@ test("a throwing Static write is indeterminate and is not retried during teardow
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
-    items.value = [marker];
+    showStatic.value = true;
     stdout.columns = 79;
     stdout.emit("resize");
 
@@ -634,12 +646,14 @@ test("a throwing Static write is indeterminate and is not retried during teardow
 });
 
 test("resize never replays accepted Static output and new items use the new width", async () => {
-  const items = shallowRef(["AAAAAAAA"]);
+  const items = shallowRef([{ id: 1, text: "AAAAAAAA" }]);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item.id}>
+          <Text>{item.text}</Text>
+        </Static>
+      ))}
       <Text>live</Text>
     </Box>
   ));
@@ -650,7 +664,7 @@ test("resize never replays accepted Static output and new items use the new widt
     expect(staticTranscript(result.frames)).toBe("AAAAAAAA\n");
 
     await result.terminal.resize(4, 6);
-    items.value = ["AAAAAAAA", "BBBBBBBB"];
+    items.value = [...items.value, { id: 2, text: "BBBBBBBB" }];
     await nextTick();
     await result.waitUntilRenderFlush();
 
@@ -661,12 +675,14 @@ test("resize never replays accepted Static output and new items use the new widt
 });
 
 test("Static append waits while suspended and commits once after continuation", async () => {
-  const items = shallowRef<string[]>(["STATIC_BEFORE_SUSPEND"]);
+  const items = shallowRef([{ id: 1, text: "STATIC_BEFORE_SUSPEND" }]);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item.id}>
+          <Text>{item.text}</Text>
+        </Static>
+      ))}
       <Text>live</Text>
     </Box>
   ));
@@ -677,7 +693,7 @@ test("Static append waits while suspended and commits once after continuation", 
     await result.terminal.suspend();
     const suspendedOffset = result.frames.length;
 
-    items.value = ["STATIC_BEFORE_SUSPEND", "STATIC_DURING_SUSPEND"];
+    items.value = [...items.value, { id: 2, text: "STATIC_DURING_SUSPEND" }];
     await nextTick();
     expect(staticTranscript(result.frames.slice(suspendedOffset))).not.toContain(
       "STATIC_DURING_SUSPEND",
@@ -697,15 +713,17 @@ test("coordinated external output stays ordered between exact Static commits", a
   const first = "STATIC_BEFORE_SIDE_OUTPUT";
   const side = "COORDINATED_SIDE_OUTPUT";
   const second = "STATIC_AFTER_SIDE_OUTPUT";
-  const items = shallowRef<string[]>([]);
+  const items = shallowRef<Array<{ id: number; text: string }>>([]);
   let write: ((data: string) => void) | undefined;
   const App = defineComponent(() => {
     write = useStdout().write;
     return () => (
       <Box flexDirection="column">
-        <Static items={items.value}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-        </Static>
+        {items.value.map((item) => (
+          <Static key={item.id}>
+            <Text>{item.text}</Text>
+          </Static>
+        ))}
         <Text>live</Text>
       </Box>
     );
@@ -729,11 +747,11 @@ test("coordinated external output stays ordered between exact Static commits", a
     });
     await app.waitUntilRenderFlush();
 
-    items.value = [first];
+    items.value = [{ id: 1, text: first }];
     await nextTick();
     await app.waitUntilRenderFlush();
     write?.(`${side}\n`);
-    items.value = [first, second];
+    items.value = [...items.value, { id: 2, text: second }];
     await nextTick();
     await app.waitUntilRenderFlush();
 
@@ -753,12 +771,14 @@ test("coordinated external output stays ordered between exact Static commits", a
 
 test("ordinary teardown commits one pending throttled Static append", async () => {
   const marker = "STATIC_PENDING_AT_TEARDOWN";
-  const items = shallowRef<string[]>([]);
+  const showStatic = shallowRef(false);
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {showStatic.value ? (
+        <Static>
+          <Text>{marker}</Text>
+        </Static>
+      ) : null}
       <Text>live</Text>
     </Box>
   ));
@@ -781,7 +801,7 @@ test("ordinary teardown commits one pending throttled Static append", async () =
     });
     await app.waitUntilRenderFlush();
 
-    items.value = [marker];
+    showStatic.value = true;
     await nextTick();
     app.unmount();
     await app.waitUntilExit();

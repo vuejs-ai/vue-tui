@@ -141,35 +141,12 @@ function renderStringDocument(
     yogaAttached = true;
     root.yoga.setWidth(columns);
 
-    // Capture static output from intermediate renders.
-    // The <Static> component uses watchEffect / onMounted to clear its children
-    // after the first commit. The onCommit callback fires on each DOM mutation,
-    // giving us a chance to capture static content before it is cleared.
-    let capturedStaticOutput = "";
-
     const renderer = createRenderer<TuiNode, TuiNode>(
       buildNodeOps({
-        onCommit: () => {
-          const restoreLayoutGuards = calculateLayoutWithContentGuards(
-            root,
-            columns,
-            undefined,
-            Yoga.DIRECTION_LTR,
-          );
-          try {
-            // String rendering has no physical stream handoff. Accept the
-            // candidate only after its complete text is appended to the local
-            // document accumulator, so preparation itself remains side-effect
-            // free just like the live renderer's pre-write path.
-            const preparedStatic = prepareStaticOutput(root, columns, isScreenReaderEnabled);
-            if (preparedStatic.output && preparedStatic.output !== "\n") {
-              capturedStaticOutput += preparedStatic.output;
-            }
-            preparedStatic.accept();
-          } finally {
-            restoreLayoutGuards();
-          }
-        },
+        // Unlike the live renderer, the synchronous string host must not settle
+        // Static on each host mutation: the tui-static host is inserted before
+        // its slot children. The complete tree is collected once after mount.
+        onCommit: () => {},
       }),
     );
 
@@ -218,7 +195,15 @@ function renderStringDocument(
       Yoga.DIRECTION_LTR,
     );
     let output: string;
+    let capturedStaticOutput = "";
     try {
+      // String rendering has no physical handoff. Snapshot every complete open
+      // Static subtree only after mount, then accept that local document prefix
+      // before painting the mutable region that excludes Static hosts.
+      const preparedStatic = prepareStaticOutput(root, columns, isScreenReaderEnabled);
+      capturedStaticOutput = preparedStatic.output;
+      preparedStatic.accept();
+
       // Render the dynamic frame to a string.
       output = isScreenReaderEnabled
         ? renderScreenReaderOutput(root, { skipStaticElements: true })
@@ -250,7 +235,7 @@ function renderStringDocument(
     // The static channel appends a trailing newline for terminal rendering
     // (so dynamic output starts on a fresh line). Strip it here so
     // renderToString returns clean output. This applies in BOTH modes: SR mode
-    // linearizes static items into plain text too (prepareStaticOutput branches on
+    // linearizes static blocks into plain text too (prepareStaticOutput branches on
     // isScreenReaderEnabled), and Ink's SR renderer likewise returns the static
     // output when node.staticNode exists (renderer.ts:24-33). Prepending the
     // captured static output mirrors the non-SR path so SR renderToString does

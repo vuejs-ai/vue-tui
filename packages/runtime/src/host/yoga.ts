@@ -671,8 +671,8 @@ export function applyYogaProp(
   // existed in the old vnode and were dropped from the new one.
   //
   // Blocker 2: Vue's HOST renderer passes next=null (not undefined) when a key
-  // disappears from a spread props object (e.g. Static spreads `style` into host
-  // props, Box forwards). So `value == null` (null OR undefined) is treated as
+  // disappears from a reactive `v-bind` object. So `value == null` (null OR
+  // undefined) is treated as
   // removal — forwarding raw null to a yoga dimension setter would write NaN/0
   // and corrupt state instead of resetting to the documented default.
   if (value == null) {

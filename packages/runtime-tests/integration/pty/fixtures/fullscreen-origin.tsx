@@ -410,8 +410,8 @@ const App = defineComponent(() => {
     return renderSurface(
       <>
         {scenario === "static" ? (
-          <Static items={["HISTORY"]}>
-            {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+          <Static>
+            <Text>HISTORY</Text>
           </Static>
         ) : null}
         <Box ref={clickTarget} width={7} height={1}>

@@ -578,13 +578,15 @@ describe("renderToString", () => {
     expect(output).toBe("HELLO");
   });
 
-  test("renders Static component with items", () => {
+  test("renders keyed Static instances", () => {
     const items = ["A", "B", "C"];
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
-        <Static items={items}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-        </Static>
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>Dynamic</Text>
       </Box>
     ));
@@ -595,9 +597,13 @@ describe("renderToString", () => {
   test("render static-only output has no trailing newline", () => {
     const items = ["A", "B"];
     const App = defineComponent(() => () => (
-      <Static items={items}>
-        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-      </Static>
+      <Box flexDirection="column">
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
+      </Box>
     ));
     const output = renderToString(App);
     expect(output).toBe("A\nB");
@@ -607,9 +613,11 @@ describe("renderToString", () => {
     const items = ["A", "B"];
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
-        <Static items={items}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-        </Static>
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>Dynamic</Text>
       </Box>
     ));

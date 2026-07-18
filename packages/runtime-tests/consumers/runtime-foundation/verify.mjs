@@ -33,7 +33,7 @@ const consumers = {
   "coding-agent": {
     pin: "3e44c9a266e52ebeba2db669b4bb96521b9e2f3a",
     patch: "coding-agent.patch",
-    patchSha256: "c3d49dd747761e38cd2f6e737d0fa5ffb71a2f9e7d69544f9274957d1f51239b",
+    patchSha256: "a1fee89cea36f71d0d2bdc10d0609a6d12830de8fb334585ccef827c1806261b",
     changedPaths: ["examples/coding-agent/src/app.vue"],
     sourceRoot: "examples/coding-agent/src",
   },

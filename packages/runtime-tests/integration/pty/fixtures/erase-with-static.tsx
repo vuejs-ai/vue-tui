@@ -6,11 +6,7 @@ import { Fragment, defineComponent, h } from "vue";
 const EraseWithStatic = defineComponent(() => {
   return () =>
     h(Fragment, [
-      h(
-        Static,
-        { items: ["A", "B", "C"] },
-        { default: ({ item }: { item: string }) => h(Text, { key: item }, () => item) },
-      ),
+      ...["A", "B", "C"].map((item) => h(Static, { key: item }, () => h(Text, null, () => item))),
       h(Box, { flexDirection: "column" }, () => [
         h(Text, null, () => "D"),
         h(Text, null, () => "E"),
