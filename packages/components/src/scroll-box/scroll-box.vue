@@ -36,7 +36,7 @@ const contentStyle = computed(() => ({
   flexDirection: "column" as const,
   flexShrink: 0,
   marginTop: -scrollTop.value,
-  width: "100%",
+  width: "100%" as const,
 }));
 const maxScroll = computed(() =>
   Math.max(0, Math.ceil(contentHeight.value - viewportHeight.value)),

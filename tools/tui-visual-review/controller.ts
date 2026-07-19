@@ -10,6 +10,7 @@ import {
 import { parseFocusRoutingScenario, startFocusRoutingSession } from "./focus-routing.ts";
 import { parseInputRoutingScenario, startInputRoutingSession } from "./input-routing.ts";
 import { startScrollBoxSession } from "./scroll-box.ts";
+import { startSpinnerSession } from "./spinner.ts";
 import {
   parseScrollCompositionScenario,
   startScrollCompositionSession,
@@ -27,6 +28,7 @@ type ReviewTarget =
   | "scroll-composition"
   | "selection-copy"
   | "scroll-box"
+  | "spinner"
   | "inline-history"
   | "v-show";
 
@@ -65,13 +67,14 @@ function reviewTarget(args: string[]): ReviewTarget {
     value === "scroll-composition" ||
     value === "selection-copy" ||
     value === "scroll-box" ||
+    value === "spinner" ||
     value === "inline-history" ||
     value === "v-show"
   ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, scroll-box, inline-history, or v-show, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, scroll-box, spinner, inline-history, or v-show, received ${value}`,
   );
 }
 
@@ -205,11 +208,13 @@ async function main(): Promise<void> {
               ? await startSelectionCopySession(outputDir, parseSelectionCopyScenario(scenario))
               : target === "scroll-box"
                 ? await startScrollBoxSession(outputDir)
-                : target === "inline-history"
-                  ? await startInlineHistorySession(outputDir)
-                  : target === "v-show"
-                    ? await startVShowSession(outputDir)
-                    : await startBasicTemplateSession(outputDir);
+                : target === "spinner"
+                  ? await startSpinnerSession(outputDir)
+                  : target === "inline-history"
+                    ? await startInlineHistorySession(outputDir)
+                    : target === "v-show"
+                      ? await startVShowSession(outputDir)
+                      : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

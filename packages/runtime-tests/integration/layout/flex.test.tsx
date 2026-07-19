@@ -88,21 +88,6 @@ test('set flex basis with flexDirection="row" container', async () => {
   expect(lastFrame({ trimLines: true })).toBe("A  B");
 });
 
-test('set flex basis in percent with flexDirection="row" container', async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row" width={6}>
-        <Box flexBasis="50%">
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame({ trimLines: true })).toBe("A  B");
-});
-
 test('set flex basis with flexDirection="column" container', async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -118,102 +103,13 @@ test('set flex basis with flexDirection="column" container', async () => {
   expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB\n\n");
 });
 
-test('set flex basis in percent with flexDirection="column" container', async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box height={6} flexDirection="column">
-        <Box flexBasis="50%">
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame({ trimLines: true })).toBe("A\n\n\nB\n\n");
-});
-
-// Ink coerces ANY string flexBasis to a percent (styles.ts:547-555): a bare
-// numeric string like "3" is parsed as 3% of the container, NOT 3 absolute
-// cells. At width 6, "3" → 3% → 0 cells, so box A collapses and B takes the row.
-test("bare numeric-string flexBasis is a percent (Ink parity), not absolute", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row" width={6}>
-        <Box flexBasis="3">
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  // 3% of 6 = 0 cells → A width 0 → only B is rendered.
-  expect(lastFrame({ trimLines: true })).toBe("B");
-});
-
-// Guard: a "50%" string still resolves to 50% (3 cells of 6) → "A  B".
-test('percent-string flexBasis "50%" still resolves as percent', async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row" width={6}>
-        <Box flexBasis="50%">
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame({ trimLines: true })).toBe("A  B");
-});
-
-// Guard: a numeric flexBasis stays absolute (3 cells) → "A  B".
-test("numeric flexBasis stays absolute", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row" width={6}>
-        <Box flexBasis={3}>
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame({ trimLines: true })).toBe("A  B");
-});
-
-// Ink's flexBasis branch (styles.ts:547-555) is number→setFlexBasis,
-// string→setFlexBasisPercent, ELSE→setFlexBasisAuto. A non-number/non-string
-// runtime value (Vue's [Number,String] prop validation only WARNS — it still
-// forwards the value) must fall back to auto, not throw. Ink renders "AB"
-// (flexBasis ignored → box shrinks to content). flexBasis={false} is the
-// canonical case; the cast bypasses the compile-time prop type to exercise the
-// real runtime branch a mis-typed app would hit.
-test("non-number/non-string flexBasis falls back to auto (Ink parity), does not throw", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row" width={6}>
-        <Box flexBasis={false as unknown as number}>
-          <Text>A</Text>
-        </Box>
-        <Text>B</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  // Auto fallback → box shrinks to content → A and B adjacent, matching Ink.
-  expect(lastFrame({ trimLines: true })).toBe("AB");
-});
-
 // A zero-width inner content rect has no legal child paint area. Children must
 // neither paint nor reserve the extra rows Ink's zero-width wrapping creates.
 test("zero flexBasis hides children and does not reserve invisible rows", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box flexDirection="row" width={6}>
-        <Box flexBasis="0">
+        <Box flexBasis={0}>
           <Text>A</Text>
         </Box>
         <Text>B</Text>

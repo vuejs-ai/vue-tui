@@ -129,14 +129,11 @@ createApp(App).mount();
 
 ## Components
 
-| Component                           | Description                                                                                    |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime)       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
-| [`<Text>`](./packages/runtime)      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
-| [`<Spacer>`](./packages/runtime)    | Expands to fill available space (`flex-grow: 1`)                                               |
-| [`<Newline>`](./packages/runtime)   | Inserts line breaks (configurable `count`)                                                     |
-| [`<Static>`](./packages/runtime)    | Commits one mounted slot tree to terminal history; import from `@vue-tui/runtime/inline`       |
-| [`<Transform>`](./packages/runtime) | Applies a string transform function to each rendered line                                      |
+| Component                        | Description                                                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime)    | Terminal layout container with the supported flex, size, spacing, border, clipping, visibility, and accessibility primitives |
+| [`<Text>`](./packages/runtime)   | Terminal text with foreground/background color, dim, bold, inverse, wrapping, truncation, and accessibility primitives       |
+| [`<Static>`](./packages/runtime) | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`                              |
 
 `Static` is deliberately absent from the common root export and has no collection API. Import the component from `@vue-tui/runtime/inline`, then use ordinary Vue iteration and stable keys when committing a list:
 
@@ -146,13 +143,20 @@ createApp(App).mount();
 </Static>
 ```
 
-Each mounted instance commits its slot tree once, including an output-free first commit; gate the instance itself with `v-if` when its content is not ready. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. A Static below a hidden Box remains pending and commits once when that Box is shown. Do not nest Static inside another Static, Text, or Transform. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
+Each mounted instance commits its slot tree once, including an output-free first commit; gate the instance itself with `v-if` when its content is not ready. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. A Static below a hidden Box remains pending and commits once when that Box is shown. Do not nest Static inside another Static or Text. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
 
-Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, focus, caret, geometry visibility, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text`, `Transform`, and `Static` roots is not supported.
+Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, focus, caret, geometry visibility, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text` and `Static` roots is not supported.
 
-Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the foreground to the terminal default. They can wrap across lines and nest safely inside a colored parent; the parent's foreground resumes after the span, while background and boolean text styles continue to compose normally.
+Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the foreground to the terminal default. They can wrap across lines and nest safely inside a colored parent; the parent's foreground resumes after the span, while background and the retained boolean text styles continue to compose normally.
 
-`<Box>`, `<Text>`, and `<ScrollBox>` are passive visual components. Fullscreen mouse behavior is attached to an ordinary component ref with the dedicated composables below; listener props such as `@click` and `@wheel` are rejected so mode-dependent behavior cannot look universally available.
+Runtime does not export layout conveniences as separate components. Write line breaks as text, and use an ordinary Box when a flex spacer is useful:
+
+```vue
+<Text>{{ "\n".repeat(count) }}</Text>
+<Box :flexGrow="1" :flexShrink="1" />
+```
+
+`<Box>` and `<Text>` have closed prop surfaces: removed props, misspellings, browser attributes, and listener props such as `@click` and `@wheel` are rejected at runtime instead of being silently ignored. `<ScrollBox>` is also passive. Fullscreen mouse behavior is attached to an ordinary component ref with the dedicated composables below so mode-dependent behavior cannot look universally available.
 
 ## High-level Components
 
@@ -187,7 +191,6 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useStderr()`                   | Commit geometry-safe styled lines with explicit acceptance and flow control, or access raw stderr                                   |
 | `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts    |
 | `useCaret(ref, opts)`           | Declare a focus-bound caret at an element-local rendered cell and observe whether it is visible                                     |
-| `useAnimation(opts?)`           | Frame-based animation driver — reactive `{ frame, time, delta }` + `reset()`                                                        |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
 

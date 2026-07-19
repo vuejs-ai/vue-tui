@@ -187,12 +187,10 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
 // --- prop application ----------------------------------------------------
 
 const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
-  // Mirror Ink's applyDimensionStyles width/height branch exactly (styles.ts:664-682):
+  // Apply the public width contract while preserving the private raw-host fallback:
   //   number → setWidth (absolute cells)
-  //   string → setWidthPercent(Number.parseInt(v, 10)) — ANY string is a PERCENT,
-  //     so a bare-numeric string like "50" is 50%, NOT 50 absolute cells, and
-  //     parseInt TRUNCATES fractions ("55.9%" → 55%). parseInt("") → NaN, which
-  //     yoga's percent setter accepts without throwing.
+  //   a `%` string → setWidthPercent with its complete decimal value
+  //   any other private raw-host string → retain the older parseInt fallback
   //   else   → setWidthAuto() — this is the load-bearing fallback (like flexBasis's
   //     setFlexBasisAuto): Vue's [Number, String] prop validation only WARNS on a
   //     bad runtime value (e.g. width={false}/{}/[]) and still forwards it, so
@@ -204,7 +202,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
     if (typeof v === "number") {
       n.setWidth(v);
     } else if (typeof v === "string") {
-      n.setWidthPercent(Number.parseInt(v, 10));
+      const percentage = v.endsWith("%") ? Number(v.slice(0, -1)) : Number.parseInt(v, 10);
+      n.setWidthPercent(percentage);
     } else {
       n.setWidthAuto();
     }

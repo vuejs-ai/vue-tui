@@ -150,7 +150,7 @@ describe("Fullscreen selection public journey", () => {
     const App = defineComponent(() => {
       selection = useTextSelection(target, { pointer: false });
       return () =>
-        h(Box, { height: 8, overflow: "hidden" }, () => h(Text, { ref: target }, () => document));
+        h(Box, { height: 8, overflowY: "hidden" }, () => h(Text, { ref: target }, () => document));
     });
 
     const result = await render(App, {

@@ -50,8 +50,8 @@ test("click targets the deepest matching registration and rebases bubbling coord
 
     return () => (
       <Box width={10} height={2}>
-        <Box ref={parent} marginLeft={2} width={5} height={1}>
-          <Box ref={child} marginLeft={1} width={2} height={1} />
+        <Box ref={parent} position="absolute" left={2} width={5} height={1}>
+          <Box ref={child} position="absolute" left={1} width={2} height={1} />
         </Box>
       </Box>
     );
@@ -247,35 +247,6 @@ test("a nested Text registration uses its exact painted fragment", async () => {
   }
 });
 
-test("hit testing excludes clipped cells", async () => {
-  const events: TuiMouseClickEvent[] = [];
-  const App = defineComponent(() => {
-    const target = shallowRef<Target>(null);
-    useMouseEvent(target, "click", (event) => {
-      events.push(event);
-      return "consume";
-    });
-    return () => (
-      <Box width={4} height={1} overflow="hidden">
-        <Box ref={target} marginLeft={3} width={3} height={1} />
-      </Box>
-    );
-  });
-  const result = await renderFullscreen(App);
-
-  try {
-    await result.mouse.down({ x: 3, y: 0 });
-    await result.mouse.up({ x: 3, y: 0 });
-    await result.mouse.down({ x: 4, y: 0 });
-    await result.mouse.up({ x: 4, y: 0 });
-
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ surface: { x: 3, y: 0 }, local: { x: 0, y: 0 } });
-  } finally {
-    result.dispose();
-  }
-});
-
 test("hit testing honors absolute position and last-painted overlap", async () => {
   const calls: Array<[string, TuiMouseClickEvent]> = [];
   const App = defineComponent(() => {
@@ -453,7 +424,7 @@ test("a stable component ref retargets to a keyed replacement without inheriting
           <Text>AAAA</Text>
         </Box>
       ) : (
-        <Box key="b" marginLeft={5} width={4} height={1}>
+        <Box key="b" position="absolute" left={5} width={4} height={1}>
           <Text>BBBB</Text>
         </Box>
       ),

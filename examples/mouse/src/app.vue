@@ -103,7 +103,15 @@ useMouseDrag(dragRef, onDrag);
 </script>
 
 <template>
-  <Box flexDirection="column" width="100%" height="100%" :paddingX="1" :paddingY="1">
+  <Box
+    flexDirection="column"
+    width="100%"
+    :flexGrow="1"
+    :paddingTop="1"
+    :paddingBottom="1"
+    :paddingLeft="1"
+    :paddingRight="1"
+  >
     <Text bold color="cyan">vue-tui mouse, selection, and copy</Text>
     <Text dimColor>{{ instructions }}</Text>
 

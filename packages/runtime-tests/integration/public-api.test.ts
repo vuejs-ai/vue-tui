@@ -15,12 +15,8 @@ const PUBLIC_VALUE_EXPORTS = [
   "createApp",
   // Components
   "Box",
-  "Newline",
-  "Spacer",
   "Text",
-  "Transform",
   // Composables
-  "useAnimation",
   "useApp",
   "useCaret",
   "useClipboard",
@@ -88,6 +84,13 @@ test("does not retain the superseded render-fact hooks", () => {
 
 test("does not retain the superseded split input API", () => {
   expect(api).not.toHaveProperty("usePaste");
+});
+
+test("does not publish application-level rendering conveniences", () => {
+  expect(api).not.toHaveProperty("Newline");
+  expect(api).not.toHaveProperty("Spacer");
+  expect(api).not.toHaveProperty("Transform");
+  expect(api).not.toHaveProperty("useAnimation");
 });
 
 test("replaces the superseded Yoga measurement APIs with semantic geometry", () => {

@@ -4,7 +4,14 @@ import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
 import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
 
-const removedListeners = ["onMousedown", "onMouseup", "onClick", "onWheel"] as const;
+const removedListeners = [
+  "onMousedown",
+  "onMouseDown",
+  "onMouseup",
+  "onMouseUp",
+  "onClick",
+  "onWheel",
+] as const;
 
 function rejection(component: "Box" | "Text", listener: (typeof removedListeners)[number]): RegExp {
   return new RegExp(
@@ -77,3 +84,55 @@ test("a removed listener introduced by a later render exits the application", as
 
   await expect(exited).rejects.toThrow(rejection("Box", "onClick"));
 });
+
+test.each([
+  ["Box", Box, "paddingX"],
+  ["Box", Box, "flexWrap"],
+  ["Box", Box, "marginLeft"],
+  ["Box", Box, "padddingLeft"],
+  ["Text", Text, "underline"],
+  ["Text", Text, "colour"],
+] as const)("%s rejects undeclared attribute %s at render time", (name, component, attr) => {
+  const App = defineComponent(
+    () => () =>
+      h(component, { [attr]: 1 } as Record<string, unknown>, {
+        default: () => h(Text, null, () => "x"),
+      }),
+  );
+
+  expect(() => renderToString(App)).toThrow(
+    `<${name}> does not accept the undeclared attribute "${attr}"`,
+  );
+});
+
+test("Vue component mechanics remain available on the closed primitives", () => {
+  const App = defineComponent(
+    () => () =>
+      h(
+        Box,
+        {
+          key: "box",
+          ref: () => {},
+          onVnodeMounted: () => {},
+        },
+        { default: () => h(Text, null, () => "x") },
+      ),
+  );
+
+  expect(renderToString(App)).toBe("x");
+});
+
+test.each(["class", "style", "data-state"])(
+  "browser-style attribute %s has no silent terminal meaning",
+  (attr) => {
+    const App = defineComponent(
+      () => () =>
+        h(Box, { [attr]: "value" } as Record<string, unknown>, {
+          default: () => h(Text, null, () => "x"),
+        }),
+    );
+    expect(() => renderToString(App)).toThrow(
+      `<Box> does not accept the undeclared attribute "${attr}"`,
+    );
+  },
+);

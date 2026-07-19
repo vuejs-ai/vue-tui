@@ -111,30 +111,6 @@ test("truncate CJK text at end", () => {
   expect(stringWidth(stripAnsi(output))).toBeLessThanOrEqual(20);
 });
 
-test("truncate CJK text in the middle", () => {
-  const output = renderToString(
-    defineComponent(() => () => (
-      <Box width={20}>
-        <Text wrap="truncate-middle">あいうえおかきくけこ|end</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(stringWidth(stripAnsi(output))).toBeLessThanOrEqual(20);
-});
-
-test("truncate CJK text at start", () => {
-  const output = renderToString(
-    defineComponent(() => () => (
-      <Box width={20}>
-        <Text wrap="truncate-start">あいうえおかきくけこ|end</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(stringWidth(stripAnsi(output))).toBeLessThanOrEqual(20);
-});
-
 test("truncate CJK text does not exceed Box width", () => {
   const output = renderToString(
     defineComponent(() => () => (
@@ -201,21 +177,6 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あい 漢字テスト けこ");
-});
-
-test("clipped empty write does not corrupt existing wide characters", () => {
-  const output = renderToString(
-    defineComponent(() => () => (
-      <Box width={4} height={1} overflowX="hidden">
-        <Text>あい</Text>
-        <Box position="absolute" left={-1} width={1}>
-          <Text>Z</Text>
-        </Box>
-      </Box>
-    )),
-    { columns: 4 },
-  );
-  expect(stripAnsi(output)).toBe("あい");
 });
 
 // A wide char whose LEADING cell is in-bounds but TRAILING cell exceeds the

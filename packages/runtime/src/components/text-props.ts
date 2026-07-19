@@ -1,28 +1,19 @@
 import { type ExtractPublicPropTypes, type PropType } from "vue";
-import { rejectedMouseListenerProps } from "./rejected-mouse-listeners.ts";
+import type { Color } from "./color.ts";
 
-type WrapMode =
-  | "wrap"
-  | "hard"
-  | "truncate"
-  | "truncate-end"
-  | "truncate-middle"
-  | "truncate-start";
+type TextColor = Color | "revert" | "initial";
+type WrapMode = "wrap" | "truncate";
 
 export const textProps = {
-  color: String,
-  backgroundColor: String,
+  color: String as PropType<TextColor>,
+  backgroundColor: String as PropType<Color>,
   dimColor: Boolean,
   bold: Boolean,
-  italic: Boolean,
-  underline: Boolean,
-  strikethrough: Boolean,
   inverse: Boolean,
   wrap: { type: String as PropType<WrapMode>, default: "wrap" },
   ariaLabel: String,
   ariaHidden: Boolean,
-  ...rejectedMouseListenerProps,
 };
 
-/** Props accepted by `<Text>` — the vue-tui analogue of Ink's `TextProps`. */
+/** Props accepted by the public `<Text>` primitive. */
 export type TextProps = ExtractPublicPropTypes<typeof textProps>;

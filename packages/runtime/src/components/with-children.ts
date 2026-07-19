@@ -23,10 +23,3 @@ export type PublicComponent<
     $slots: Slots;
   };
 };
-
-/** Public constructor shape for components that accept no children. */
-export type PublicLeafComponent<Props> = {
-  new (): ComponentPublicInstance<Props> & {
-    $props: Props & { children?: never };
-  };
-};

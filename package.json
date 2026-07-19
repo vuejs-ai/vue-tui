@@ -18,6 +18,7 @@
     "visual:scroll-composition": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/tui-visual-review#scroll-composition",
     "visual:selection-copy": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#selection-copy",
     "visual:scroll-box": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/example-scroll-box#build && vp run @vue-tui/tui-visual-review#scroll-box",
+    "visual:spinner": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/tui-visual-review#spinner",
     "visual:inline-history": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#inline-history",
     "visual:v-show": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#v-show",
     "visual:basic-template:smoke": "vp run @vue-tui/runtime#build && vp run @vue-tui/example-basic-template#build && vp run @vue-tui/tui-visual-review#smoke",

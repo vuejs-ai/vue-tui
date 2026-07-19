@@ -12,7 +12,7 @@
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
-this package owns everything you can build by arranging common `Box` / `Text` / `Transform`
+this package owns everything you can build by arranging common `Box` / `Text`
 primitives, the mode-limited `Static` primitive from `@vue-tui/runtime/inline`,
 and reacting to the public composables. Every principle below follows from that one.
 
@@ -46,8 +46,8 @@ The runtime owns anything that touches the terminal I/O boundary or the layout/c
 A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 
 - emit a new escape sequence, or flip a terminal mode;
-- hook the commit/animation scheduler _directly_ — note `useAnimation` already exposes
-  frame-driven animation, so needing animation is _not_ runtime work;
+- hook the terminal commit scheduler _directly_; an ordinary component-owned timer, such as
+  Spinner's frame counter, is not Runtime work;
 - require geometry that the runtime's semantic `useElementGeometry()` snapshots do not already expose.
 
 Otherwise it is a component. The clean illustration: **targeted mouse input is runtime work** —

@@ -10,7 +10,6 @@ import {
 import {
   Box,
   Text,
-  Transform,
   createApp,
   useApp,
   useCaret,
@@ -35,7 +34,6 @@ type Scenario =
   | "horizontal-overflow"
   | "horizontal-left-wide"
   | "horizontal-wide"
-  | "horizontal-transform"
   | "target-lifetime"
   | "targeted-mouse"
   | "screen-reader"
@@ -54,13 +52,13 @@ const LifetimeTarget = defineComponent(() => {
     if (targetPhase.value === "none") return null;
     if (targetPhase.value === "first") {
       return (
-        <Box key="first" width={7} height={2}>
+        <Box key="first" position="absolute" left={0} width={7} height={2}>
           <Text>FIRST</Text>
         </Box>
       );
     }
     return (
-      <Box key="second" marginLeft={5} width={11} height={1}>
+      <Box key="second" position="absolute" left={5} width={11} height={1}>
         <Text>TARGET-B</Text>
       </Box>
     );
@@ -286,7 +284,7 @@ const App = defineComponent(() => {
                   <Text>CLICK</Text>
                 </Box>
               </Box>
-              <Box ref={targetedWheelTarget} width={8} height={2} flexShrink={0} overflow="hidden">
+              <Box ref={targetedWheelTarget} width={8} height={2} flexShrink={0} overflowY="hidden">
                 <ScrollBox ref={targetedScrollBox}>
                   {Array.from({ length: 5 }, (_, index) => (
                     <Box key={index} height={1} flexShrink={0}>
@@ -298,7 +296,8 @@ const App = defineComponent(() => {
               <Box ref={targetedDivider} width={5} height={1} flexShrink={0}>
                 <Text>-----</Text>
               </Box>
-              <Box width={3} height={1} flexShrink={0} overflow="hidden">
+              <Box flexDirection="row" width={105} height={1} flexShrink={0}>
+                <Box width={97} height={1} flexShrink={0} />
                 <Box ref={targetedClippedTarget} width={8} height={1} flexShrink={0}>
                   <Text>CLIPPED</Text>
                 </Box>
@@ -313,25 +312,13 @@ const App = defineComponent(() => {
       return renderSurface(
         <Box flexDirection="column">
           <Text>phase={targetPhase.value}</Text>
-          <LifetimeTarget ref={target} />
+          <Box height={2} flexShrink={0}>
+            <LifetimeTarget ref={target} />
+          </Box>
           <Text>
             target={targetMetrics.value.width}x{targetMetrics.value.height}:
             {String(targetMetrics.value.measured)} dragging={String(drag.isDragging.value)}
           </Text>
-        </Box>,
-      );
-    }
-
-    if (scenario === "horizontal-transform") {
-      return renderSurface(
-        <Box ref={clickTarget} width={1} height={1} flexShrink={0}>
-          {{
-            default: () => (
-              <Transform transform={() => "Y".repeat(101)}>
-                <Text>X</Text>
-              </Transform>
-            ),
-          }}
         </Box>,
       );
     }
@@ -346,8 +333,8 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-left-wide") {
       return renderSurface(
-        <Box ref={clickTarget} width={4} height={1} overflow="hidden">
-          <Box marginLeft={-1} flexShrink={0}>
+        <Box ref={clickTarget} width={4} height={1} overflowY="hidden">
+          <Box position="absolute" left={-1} flexShrink={0}>
             <Text>中x</Text>
           </Box>
         </Box>,

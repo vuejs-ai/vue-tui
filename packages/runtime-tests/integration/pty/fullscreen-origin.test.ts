@@ -12,8 +12,7 @@ type SurfaceScenario =
   | "overflow"
   | "horizontal-overflow"
   | "horizontal-left-wide"
-  | "horizontal-wide"
-  | "horizontal-transform";
+  | "horizontal-wide";
 
 async function emulate(output: string, rows = 8): Promise<InstanceType<typeof Terminal>> {
   const terminal = new Terminal({ cols: 100, rows, allowProposedApi: true });
@@ -55,9 +54,7 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
               ? " x"
               : scenario === "horizontal-wide"
                 ? "X".repeat(99)
-                : scenario === "horizontal-transform"
-                  ? "Y".repeat(100)
-                  : "BUTTON";
+                : "BUTTON";
 
     expect(lines[0]).toBe(expected);
     if (scenario === "overflow") {
@@ -67,8 +64,7 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
     } else if (
       scenario === "horizontal-overflow" ||
       scenario === "horizontal-left-wide" ||
-      scenario === "horizontal-wide" ||
-      scenario === "horizontal-transform"
+      scenario === "horizontal-wide"
     ) {
       expect(lines.slice(1).every((line) => line === "")).toBe(true);
     } else {
@@ -165,10 +161,6 @@ test("fullscreen drops a wide glyph that crosses the viewport's right edge", asy
 
 test("fullscreen left clipping preserves the column after a straddling wide glyph", async () => {
   await assertStableFullscreenSurface("horizontal-left-wide");
-});
-
-test("fullscreen hard-clips text expanded by a paint transform", async () => {
-  await assertStableFullscreenSurface("horizontal-transform");
 });
 
 test("fullscreen target behavior follows a stable component ref's rendered host lifetime", async () => {
@@ -274,7 +266,7 @@ test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping
     expect(visibleLines(terminal)[0]).toBe("targets=visible focused=false");
     expect(visibleLines(terminal)).toContain("CLICK");
     expect(visibleLines(terminal)).toContain("-----");
-    expect(visibleLines(terminal)).toContain("CLI");
+    expect(visibleLines(terminal).some((line) => line.endsWith("CLI"))).toBe(true);
 
     // The child first continues, so the parent receives a bubble delivery. The
     // child also focuses itself through the F4 ref-bound focus handle.
@@ -310,15 +302,15 @@ test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping
     terminal = await emulate(ps.output, rows);
     expect(visibleLines(terminal)).toContain("ITEM2");
 
-    // The target is eight cells wide but only its first three cells are painted
-    // through the clipping parent. A hit in that fragment dispatches; a hit in
-    // the clipped-away part does not.
+    // The target is eight cells wide but begins three cells before the viewport's
+    // right edge. A hit in that visible fragment dispatches; a hit in the part
+    // clipped by the terminal viewport does not.
     before = ps.output.length;
-    ps.write("\x1b[<0;2;6M\x1b[<0;2;6mp");
+    ps.write("\x1b[<0;99;6M\x1b[<0;99;6mp");
     await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
     expect(ps.output.slice(before)).toContain("__MOUSE__:click:clipped:target:1,0");
     before = ps.output.length;
-    ps.write("\x1b[<0;7;6M\x1b[<0;7;6mp");
+    ps.write("\x1b[<0;102;6M\x1b[<0;102;6mp");
     await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
     expect(ps.output.slice(before)).not.toContain("__MOUSE__:click:clipped");
 

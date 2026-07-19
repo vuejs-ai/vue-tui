@@ -1,18 +1,19 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, inject, provide } from "vue";
+import { computed, getCurrentInstance, inject, provide, useAttrs } from "vue";
 import { TextContextKey } from "../context.ts";
 import { useInternalRenderSession } from "../render-session.ts";
-import { assertValidBackgroundColor, assertValidForegroundColor } from "../paint/text-style.ts";
 import { textProps } from "./text-props.ts";
-import { assertNoRejectedMouseListeners } from "./rejected-mouse-listeners.ts";
+import { assertTextValid } from "./text-validate.ts";
+import { assertNoUnsupportedAttrs } from "./unsupported-attrs.ts";
 import { explicitHostProps } from "./explicit-host-props.ts";
 
 // Renders the `<tui-text>` / `<tui-virtual-text>` host primitives. The `tui-` prefix
 // keeps the host tags out of the component namespace, so the component can take its
 // real name "Text" with no vue-tsc self-recursion. Public export wired in index.ts.
-defineOptions({ name: "Text" });
+defineOptions({ name: "Text", inheritAttrs: false });
 const props = defineProps(textProps);
 const slots = defineSlots<{ default?: () => unknown }>();
+const attrs = useAttrs();
 const instance = getCurrentInstance();
 if (!instance) throw new Error("<Text> must be created inside a Vue component instance");
 const componentInstance = instance;
@@ -29,27 +30,6 @@ const srHidden = computed(() => srEnabled.value && props.ariaHidden);
 const srLabel = computed(() => (srEnabled.value && props.ariaLabel ? props.ariaLabel : null));
 const hasContent = computed(() => srLabel.value != null || slots.default != null);
 
-// Validate color + backgroundColor every render (matches Box); throws into the
-// error boundary. BEFORE the hasContent gate but after !srHidden, so a childless
-// Text with an invalid color still throws (Phase-3 always-validate — an invalid
-// color is invalid regardless of content; the content gate is a latent footgun).
-// Validating during RENDER (not paint) means a value Ink's colorize.ts throws on —
-// a chalk-modifier-name backgroundColor, or a foreground key chalk has but can't
-// call like "level" — is caught by vue-tui's error boundary, not the post-flush
-// paint pass where a throw wedges the scheduler. Returns true for the v-if.
-//
-// Skipped under GLOBAL screen-reader mode (`srEnabled ||` in the v-if below): under
-// SR vue-tui (like Ink) linearizes the tree to PLAIN TEXT and never colorizes any
-// node, so these color props are never painted — validating them would throw
-// spuriously and crash a screen-reader user out of accessible content. Verified
-// against Ink v7.0.4 (INK_SCREEN_READER=true → modifier-name bg renders plain text,
-// does NOT throw; without it Ink throws in colorize). Mirrors box.vue.
-function validate(): true {
-  assertValidForegroundColor(props.color);
-  assertValidBackgroundColor(props.backgroundColor);
-  return true;
-}
-
 function hostProps(): Record<string, unknown> {
   return explicitHostProps(props, componentInstance.vnode.props, textProps);
 }
@@ -58,9 +38,9 @@ function hostProps(): Record<string, unknown> {
 <template>
   <template
     v-if="
-      assertNoRejectedMouseListeners('Text', componentInstance.vnode.props) &&
+      assertNoUnsupportedAttrs('Text', attrs) &&
+      assertTextValid(props, !srEnabled) &&
       !srHidden &&
-      (srEnabled || validate()) &&
       hasContent
     "
   >

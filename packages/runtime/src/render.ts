@@ -46,7 +46,6 @@ import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
-import { createAnimationScheduler } from "./animation-scheduler.ts";
 import { acquireRuntimeResource, changeRuntimeResource } from "./resource-tracker.ts";
 import { paint, releasePaintCaches } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
@@ -81,7 +80,6 @@ import {
 import {
   AppContextKey,
   StdinContextKey,
-  AnimationSchedulerKey,
   type AppContext,
   type SgrMouseMode,
   type StdinContext,
@@ -195,8 +193,8 @@ export interface MountOptions {
   onRender?: (info: { renderTime: number }) => void;
   /**
    * Maximum frames per second. Controls the render-throttle window
-   * (`ceil(1000 / maxFps)` ms) that throttles both the commit scheduler and
-   * the useAnimation tick coalescing. Defaults to 30 (≈34ms), matching Ink.
+   * (`ceil(1000 / maxFps)` ms) used by the terminal commit scheduler.
+   * Defaults to 30 (approximately 34ms), matching Ink.
    *
    * Ignored in screen-reader mode and when non-positive (commits are immediate).
    * @default 30
@@ -386,7 +384,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedRestoreConsole: (() => void) | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedOutputCoordinator: OutputCoordinator | null = null;
-  let mountedAnimationScheduler: ReturnType<typeof createAnimationScheduler> | null = null;
   let mountedCommit: (() => CoordinatedWriteResult) | null = null;
   let mountedCreateOutputStateRollback: (() => () => void) | null = null;
   let mountedAlternateScreen = false;
@@ -1032,13 +1029,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedTextSelection = null;
         runBestEffort(() => textSelection.dispose());
       }
-      // Dispose the animation scheduler after Vue unmount: each useAnimation's
-      // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
-      if (mountedAnimationScheduler) {
-        const animationScheduler = mountedAnimationScheduler;
-        runBestEffort(() => animationScheduler.dispose());
-      }
-      mountedAnimationScheduler = null;
       if (mountedKittyController) {
         // Disable-kitty is a restore escape: on the signal path it must flush
         // synchronously too (Finding A).
@@ -3141,12 +3131,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
-      // A single render-throttle window derived from maxFps drives BOTH the
-      // commit scheduler and the animation scheduler, mirroring Ink where one
-      // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
-      // to useAnimation (ink.tsx:337-344, 650). Screen-reader paths and
-      // non-positive maxFps are unthrottled (0 = commit every tick), matching
-      // Ink's `unthrottled` gate.
+      // A render-throttle window derived from maxFps drives terminal commits.
+      // Screen-reader paths and non-positive maxFps are unthrottled, matching
+      // Ink's terminal-rendering behavior.
       const unthrottled = isScreenReaderEnabled || maxFps <= 0;
       const renderThrottleMs =
         !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
@@ -3177,14 +3164,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(InternalClipboardServiceKey, mountedClipboard!);
       baseApp.provide(InternalTextSelectionControllerKey, mountedTextSelection!);
       baseApp.provide(StdinContextKey, stdinController);
-      // useAnimation coalesces ticks within this same window so committed deltas
-      // accumulate to the real wall-clock elapsed time (the value committed to
-      // stdout), rather than a single scheduler interval. It shares the exact
-      // renderThrottleMs the commit scheduler uses, so the animation cadence
-      // tracks the actual commit cadence (Ink ink.tsx:650).
-      const animationScheduler = createAnimationScheduler(renderThrottleMs);
-      mountedAnimationScheduler = animationScheduler;
-      baseApp.provide(AnimationSchedulerKey, animationScheduler);
       if (isDevConnected()) {
         baseApp.provide(DevStateKey, devState);
         // Register this app's INTERNAL teardown (not unmount()) with the HMR

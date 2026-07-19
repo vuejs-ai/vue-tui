@@ -37,6 +37,8 @@ import {
   useStderr,
 } from "@vue-tui/runtime";
 import type {
+  AriaRole,
+  AriaState,
   BoxProps,
   CaretState,
   CellPoint,
@@ -47,6 +49,7 @@ import type {
   ClipboardUnavailableReason,
   ClipboardWriteResult,
   CoordinatedWriteResult,
+  Color,
   CustomClipboardTransport,
   ElementGeometry,
   ElementGeometryFragment,
@@ -58,10 +61,7 @@ import type {
   InputHandlerResult,
   InputRouteDecision,
   TextProps,
-  TransformProps,
-  NewlineProps,
   Osc52ClipboardTransport,
-  SpacerProps,
   MountOptions,
   TuiInputEvent,
   TuiInputModifiers,
@@ -300,34 +300,108 @@ export type _RemovedInlineStaticStyle = import("@vue-tui/runtime/inline").Static
 export type _BoxPropsIsCommonOnly = import("@vue-tui/runtime/inline").BoxProps;
 
 // Prop types carry their component's real, declared props.
-expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<
-  "row" | "row-reverse" | "column" | "column-reverse" | undefined
+expectTypeOf<keyof BoxProps>().toEqualTypeOf<
+  | "flexDirection"
+  | "flexGrow"
+  | "flexShrink"
+  | "flexBasis"
+  | "alignItems"
+  | "justifyContent"
+  | "gap"
+  | "width"
+  | "height"
+  | "minWidth"
+  | "minHeight"
+  | "position"
+  | "top"
+  | "left"
+  | "marginTop"
+  | "paddingTop"
+  | "paddingBottom"
+  | "paddingLeft"
+  | "paddingRight"
+  | "borderStyle"
+  | "borderColor"
+  | "backgroundColor"
+  | "overflowY"
+  | "display"
+  | "ariaLabel"
+  | "ariaHidden"
+  | "ariaRole"
+  | "ariaState"
 >();
+expectTypeOf<keyof TextProps>().toEqualTypeOf<
+  | "color"
+  | "backgroundColor"
+  | "dimColor"
+  | "bold"
+  | "inverse"
+  | "wrap"
+  | "ariaLabel"
+  | "ariaHidden"
+>();
+expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<"row" | "column" | undefined>();
+expectTypeOf<BoxProps["alignItems"]>().toEqualTypeOf<"center" | "stretch" | undefined>();
+expectTypeOf<BoxProps["justifyContent"]>().toEqualTypeOf<
+  "flex-start" | "center" | "space-between" | undefined
+>();
+expectTypeOf<BoxProps["width"]>().toEqualTypeOf<number | `${number}%` | undefined>();
+expectTypeOf<BoxProps["height"]>().toEqualTypeOf<number | undefined>();
+expectTypeOf<BoxProps["position"]>().toEqualTypeOf<"absolute" | undefined>();
+expectTypeOf<BoxProps["borderStyle"]>().toEqualTypeOf<"single" | "round" | undefined>();
+expectTypeOf<BoxProps["overflowY"]>().toEqualTypeOf<"visible" | "hidden" | undefined>();
+expectTypeOf<BoxProps["display"]>().toEqualTypeOf<"flex" | "none" | undefined>();
 expectTypeOf<BoxProps["gap"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<TextProps["bold"]>().toEqualTypeOf<boolean | undefined>();
-expectTypeOf<TextProps["color"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<BoxProps["borderBackgroundColor"]>().toEqualTypeOf<string | undefined>();
-expectTypeOf<BoxProps["onMousedown"]>().toEqualTypeOf<undefined>();
-expectTypeOf<BoxProps["onMouseup"]>().toEqualTypeOf<undefined>();
-expectTypeOf<BoxProps["onClick"]>().toEqualTypeOf<undefined>();
-expectTypeOf<BoxProps["onWheel"]>().toEqualTypeOf<undefined>();
-expectTypeOf<TextProps["onMousedown"]>().toEqualTypeOf<undefined>();
-expectTypeOf<TextProps["onMouseup"]>().toEqualTypeOf<undefined>();
-expectTypeOf<TextProps["onClick"]>().toEqualTypeOf<undefined>();
-expectTypeOf<TextProps["onWheel"]>().toEqualTypeOf<undefined>();
+expectTypeOf<TextProps["color"]>().toEqualTypeOf<Color | "revert" | "initial" | undefined>();
+expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
+expectTypeOf<TextProps["wrap"]>().toEqualTypeOf<"wrap" | "truncate" | undefined>();
+expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
+expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<Color | undefined>();
+expectTypeOf<BoxProps["ariaRole"]>().toEqualTypeOf<AriaRole | undefined>();
+expectTypeOf<BoxProps["ariaState"]>().toEqualTypeOf<AriaState | undefined>();
+
+const namedColor: Color = "gray";
+const rgbColor: Color = "#12abEF";
+// @ts-expect-error British spelling is not a canonical Runtime color.
+const removedGreyAlias: Color = "grey";
+// @ts-expect-error blackBright is not a second name for the canonical gray entry.
+const removedBlackBrightAlias: Color = "blackBright";
+void namedColor;
+void rgbColor;
+void removedGreyAlias;
+void removedBlackBrightAlias;
+
+// Removed props are absent, rather than retained as `never` tombstones.
+// @ts-expect-error Mouse listeners are not Box props.
+export type _RemovedBoxClick = BoxProps["onClick"];
+// @ts-expect-error Spacing shorthands are not Box props.
+export type _RemovedBoxPaddingX = BoxProps["paddingX"];
+// @ts-expect-error Unevidenced horizontal margin is not a Box prop.
+export type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
+// @ts-expect-error Horizontal clipping is not a Box prop.
+export type _RemovedBoxOverflowX = BoxProps["overflowX"];
+// @ts-expect-error Unevidenced text decoration is not a Text prop.
+export type _RemovedTextUnderline = TextProps["underline"];
 type StaticComponentProps = InstanceType<typeof Static>["$props"];
 // @ts-expect-error Static no longer owns an application collection.
 export type _RemovedStaticItemsProp = StaticComponentProps["items"];
 // @ts-expect-error Layout is composed inside Static's ordinary slot.
 export type _RemovedStaticStyleProp = StaticComponentProps["style"];
-expectTypeOf<TransformProps["transform"]>().toEqualTypeOf<
-  (line: string, lineIndex: number) => string
->();
-expectTypeOf<NewlineProps["count"]>().toEqualTypeOf<number | undefined>();
-expectTypeOf<keyof SpacerProps>().toEqualTypeOf<never>();
+// @ts-expect-error BoxLayoutStyle exposed the removed Yoga vocabulary.
+export type _RemovedBoxLayoutStyle = import("@vue-tui/runtime").BoxLayoutStyle;
+// @ts-expect-error Custom border glyph objects are not a public Runtime contract.
+export type _RemovedBoxStyle = import("@vue-tui/runtime").BoxStyle;
+// @ts-expect-error Newline is ordinary Text composition.
+export type _RemovedNewlineProps = import("@vue-tui/runtime").NewlineProps;
+// @ts-expect-error Spacer is ordinary growing Box composition.
+export type _RemovedSpacerProps = import("@vue-tui/runtime").SpacerProps;
+// @ts-expect-error Transform remains a private renderer mechanism.
+export type _RemovedTransformProps = import("@vue-tui/runtime").TransformProps;
+// @ts-expect-error Animation scheduling is ordinary Vue timer policy.
+export type _RemovedUseAnimationOptions = import("@vue-tui/runtime").UseAnimationOptions;
+// @ts-expect-error Animation scheduling is ordinary Vue timer policy.
+export type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimationReturn;
 
 // Public render-session facts and projections.
 expectTypeOf<RenderMode>().toEqualTypeOf<"inline" | "fullscreen">();

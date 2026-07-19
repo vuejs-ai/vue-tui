@@ -1,5 +1,5 @@
 diff --git a/examples/coding-agent/src/app.vue b/examples/coding-agent/src/app.vue
-index 5dd7fdb..2b2bd39 100644
+index 5dd7fdb..a083d66 100644
 --- a/examples/coding-agent/src/app.vue
 +++ b/examples/coding-agent/src/app.vue
 @@ -1,22 +1,58 @@
@@ -20,13 +20,13 @@ index 5dd7fdb..2b2bd39 100644
 +import { Static } from "@vue-tui/runtime/inline";
  import { runAgentLoop, type Message, type ToolCall } from "./agent";
  import MessageList from "./components/message-list.vue";
- 
+
  type AppState = "idle" | "streaming" | "approving";
 +interface CompletedMessage {
 +  id: number;
 +  message: Message;
 +}
- 
+
  const state = shallowRef<AppState>("idle");
  const inputText = shallowRef("");
 -const completedMessages = shallowRef<Message[]>([]);
@@ -37,10 +37,10 @@ index 5dd7fdb..2b2bd39 100644
 +const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
  const messages: Message[] = [];
 +let nextCompletedMessageId = 0;
- 
+
  let approvalResolve: ((approved: boolean) => void) | null = null;
  const { exit } = useApp();
- 
+
  const autoApprove = process.argv.includes("--yolo");
 +const composer = useFocus(composerHost, {
 +  autoFocus: true,
@@ -61,16 +61,16 @@ index 5dd7fdb..2b2bd39 100644
 +    ...pending.map((message) => ({ id: nextCompletedMessageId++, message })),
 +  ];
 +}
- 
+
  async function submit() {
    const text = inputText.value.trim();
 @@ -26,7 +62,7 @@ async function submit() {
    state.value = "streaming";
    streamingText.value = "";
- 
+
 -  completedMessages.value = [...completedMessages.value, { role: "user" as const, content: text }];
 +  appendCompletedMessages({ role: "user", content: text });
- 
+
    try {
      const updated = await runAgentLoop(text, messages, {
 @@ -35,28 +71,21 @@ async function submit() {
@@ -106,20 +106,20 @@ index 5dd7fdb..2b2bd39 100644
            streamingText.value = "";
          }
        },
-@@ -78,63 +107,108 @@ async function submit() {
+@@ -78,63 +107,109 @@ async function submit() {
        errParts.push({ role: "assistant", content: streamingText.value });
      }
      errParts.push({ role: "assistant", content: `Error: ${err.message}` });
 -    completedMessages.value = [...completedMessages.value, ...errParts];
 +    appendCompletedMessages(...errParts);
    }
- 
+
    streamingText.value = "";
    pendingCommand.value = "";
    state.value = "idle";
 +  composer.focus();
  }
- 
+
 -useInput((input, key) => {
 -  if (key.ctrl && input === "c") {
 +useInput((event) => {
@@ -146,11 +146,11 @@ index 5dd7fdb..2b2bd39 100644
 -    return;
 +    return "consume";
    }
- 
+
 -  if (state.value !== "idle") return;
 +  return "continue";
 +});
- 
+
 -  if (key.return) {
 +useFocusedInput(composer, (event) => {
 +  if (event.kind === "key" && event.key.name === "return" && event.key.phase !== "release") {
@@ -211,7 +211,7 @@ index 5dd7fdb..2b2bd39 100644
 +  };
  });
  </script>
- 
+
  <template>
    <Box flexDirection="column">
 -    <Static :items="completedMessages">
@@ -221,25 +221,40 @@ index 5dd7fdb..2b2bd39 100644
 +    <Static v-for="entry in completedMessages" :key="entry.id">
 +      <MessageList :message="entry.message" />
      </Static>
- 
+
      <Box v-if="streamingText">
        <Text>{{ streamingText }}</Text>
      </Box>
- 
+
 -    <Box v-if="state === 'approving'" borderStyle="round" borderColor="yellow" :paddingX="1">
 +    <Box
 +      v-if="state === 'approving'"
 +      ref="approvalHost"
 +      borderStyle="round"
 +      borderColor="yellow"
-+      :paddingX="1"
++      :paddingLeft="1"
++      :paddingRight="1"
 +    >
        <Text color="yellow">{{ pendingCommand }}</Text>
        <Text dimColor>{{ "  [Enter] run / [Esc] skip" }}</Text>
      </Box>
- 
+
 -    <Box>
 +    <Box ref="composerHost">
        <Text v-if="state === 'idle'">
          <Text color="cyan">&gt; </Text>{{ inputText }}<Text dimColor>█</Text>
        </Text>
+diff --git a/examples/coding-agent/src/components/message-list.vue b/examples/coding-agent/src/components/message-list.vue
+index 3525824..a6aac50 100644
+--- a/examples/coding-agent/src/components/message-list.vue
++++ b/examples/coding-agent/src/components/message-list.vue
+@@ -23,7 +23,8 @@ function parseCommand(tc: { function: { arguments: string } }): string {
+       :key="tc.id"
+       borderStyle="round"
+       borderColor="yellow"
+-      :paddingX="1"
++      :paddingLeft="1"
++      :paddingRight="1"
+     >
+       <Text color="yellow">{{ parseCommand(tc) }}</Text>
+     </Box>

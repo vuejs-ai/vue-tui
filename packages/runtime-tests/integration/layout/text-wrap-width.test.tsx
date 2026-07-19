@@ -34,7 +34,7 @@ test("text wraps within padding content area", async () => {
   // Content area is 12 - 2 = 10 chars.
   const { lastFrame } = await render(
     defineComponent(() => () => (
-      <Box width={12} paddingX={1}>
+      <Box width={12} paddingLeft={1} paddingRight={1}>
         <Text>Hello World!</Text>
       </Box>
     )),
@@ -54,7 +54,7 @@ test("text wraps within border+padding content area", async () => {
   // Content area is 14 - 2 (border) - 2 (padding) = 10 chars.
   const { lastFrame } = await render(
     defineComponent(() => () => (
-      <Box borderStyle="single" width={14} paddingX={1}>
+      <Box borderStyle="single" width={14} paddingLeft={1} paddingRight={1}>
         <Text>Hello World!</Text>
       </Box>
     )),
@@ -94,7 +94,7 @@ test("children are not painted when border consumes content width", async () => 
 test("children are not painted when padding consumes the remaining content area", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
-      <Box borderStyle="single" width={4} height={3} paddingX={1}>
+      <Box borderStyle="single" width={4} height={3} paddingLeft={1} paddingRight={1}>
         <Text>x</Text>
       </Box>
     )),
@@ -102,17 +102,4 @@ test("children are not painted when padding consumes the remaining content area"
   );
 
   expect(lastFrame()).toBe("┌──┐\n│  │\n└──┘");
-});
-
-test("children are not painted inside a zero-height side-only border box", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box borderStyle="single" borderTop={false} borderBottom={false} height={0}>
-        <Text>x</Text>
-      </Box>
-    )),
-    { columns: 20 },
-  );
-
-  expect(lastFrame()).toBe("");
 });

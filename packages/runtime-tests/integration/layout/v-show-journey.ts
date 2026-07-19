@@ -115,21 +115,27 @@ export default defineComponent({
 
     return () =>
       withDirectives(
-        h(Box, { flexDirection: "column" }, () => [
-          h(
-            Box,
-            {
-              key: props.targetKey,
-              ref: target,
-              display: props.authoredDisplay,
-              marginLeft: props.targetKey === 0 ? 0 : 4,
-              width: 12,
-              height: 1,
-              flexShrink: 0,
-            },
-            () => h(Text, null, () => `probe:${value.value}`),
-          ),
-        ]),
+        h(
+          Box,
+          {
+            flexDirection: "column",
+            paddingLeft: props.targetKey === 0 ? 0 : 4,
+          },
+          () => [
+            h(
+              Box,
+              {
+                key: props.targetKey,
+                ref: target,
+                display: props.authoredDisplay,
+                width: 12,
+                height: 1,
+                flexShrink: 0,
+              },
+              () => h(Text, null, () => `probe:${value.value}`),
+            ),
+          ],
+        ),
         [[vShow, props.visible]],
       );
   },

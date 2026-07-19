@@ -12,9 +12,6 @@ import {
   renderToString,
   Box,
   Text,
-  Newline,
-  Spacer,
-  Transform,
   useInput,
   useApp,
   useFocus,
@@ -29,7 +26,6 @@ import {
   useCaret,
   useLayoutSize,
   useRenderSession,
-  useAnimation,
   useElementGeometry,
   type RenderSession,
 } from "@vue-tui/runtime";
@@ -400,9 +396,9 @@ describe("renderToString", () => {
 
   // ── Layout ─────────────────────────────────────────────
 
-  test("renders margin", () => {
+  test("renders left padding", () => {
     const App = defineComponent(() => () => (
-      <Box marginLeft={2}>
+      <Box paddingLeft={2}>
         <Text>Margined</Text>
       </Box>
     ));
@@ -459,22 +455,6 @@ describe("renderToString", () => {
     expect(output).toBe("A B");
   });
 
-  // Byte-exact gap variants (Ink gap.tsx). The live render() gap tests use
-  // trimLines:true, which masks trailing-space regressions; the renderToString path
-  // is byte-exact, so these lock the WRAP and COLUMN gaps without that mask.
-  test("renders gap with flexWrap (wraps to a new row separated by a row gap)", () => {
-    const App = defineComponent(() => () => (
-      <Box gap={1} width={3} flexWrap="wrap">
-        <Text>A</Text>
-        <Text>B</Text>
-        <Text>C</Text>
-      </Box>
-    ));
-    // Ink: t.is(output, 'A B\n\nC') — "A B" fills width 3, "C" wraps below, the
-    // blank line is the row gap between the two wrapped rows.
-    expect(renderToString(App)).toBe("A B\n\nC");
-  });
-
   test("renders column gap (blank line between stacked items)", () => {
     const App = defineComponent(() => () => (
       <Box flexDirection="column" gap={1}>
@@ -486,11 +466,11 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe("A\n\nB");
   });
 
-  test("renders spacer pushing content apart", () => {
+  test("renders an empty growing Box pushing content apart", () => {
     const App = defineComponent(() => () => (
       <Box width={20}>
         <Text>Left</Text>
-        <Spacer />
+        <Box flexGrow={1} flexShrink={1} />
         <Text>Right</Text>
       </Box>
     ));
@@ -498,11 +478,11 @@ describe("renderToString", () => {
     expect(output).toBe("Left           Right");
   });
 
-  test("renders newline inserting blank line", () => {
+  test("renders explicit newline text as a standalone layout item", () => {
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
         <Text>Above</Text>
-        <Newline />
+        <Text>{"\n"}</Text>
         <Text>Below</Text>
       </Box>
     ));
@@ -564,18 +544,6 @@ describe("renderToString", () => {
     expect(lines.length).toBe(2);
     expect(lines[0]).toBe("A".repeat(30));
     expect(lines[1]).toBe("A".repeat(20));
-  });
-
-  // ── Components ─────────────────────────────────────────
-
-  test("renders Transform component", () => {
-    const App = defineComponent(() => () => (
-      <Transform transform={(output: string) => output.toUpperCase()}>
-        <Text>hello</Text>
-      </Transform>
-    ));
-    const output = renderToString(App);
-    expect(output).toBe("HELLO");
   });
 
   test("renders keyed Static instances", () => {
@@ -718,8 +686,8 @@ describe("renderToString", () => {
   //
   // Ink composes nested <Text> by WRAPPING: squash-text-nodes.ts concatenates a
   // node's already-styled children, then the PARENT Text's internal_transform
-  // wraps the WHOLE concatenation. So a parent's boolean styles (bold/italic/
-  // underline/strikethrough/dim) stay OPEN across a nested child — the child only
+  // wraps the WHOLE concatenation. So a parent's retained styles (bold, inverse,
+  // and dim) stay OPEN across a nested child — the child only
   // ADDS its own style on top. The Ink composition is literally
   // `chalk.<style>("A" + chalk.<childStyle>("B"))`, which is what we assert here.
   // (The earlier merge-down + per-leaf model closed the parent SGR at the nested
@@ -733,15 +701,6 @@ describe("renderToString", () => {
       </Text>
     ));
     expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B")));
-  });
-
-  test("nested <Text> inherits ancestor underline across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text underline>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.underline("A" + chalk.green("B")));
   });
 
   test("ancestor bold stays open across a PLAIN nested child", () => {
@@ -762,24 +721,6 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe(chalk.dim("A" + chalk.green("B")));
   });
 
-  test("nested <Text> inherits ancestor italic across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text italic>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.italic("A" + chalk.green("B")));
-  });
-
-  test("nested <Text> inherits ancestor strikethrough across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text strikethrough>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.strikethrough("A" + chalk.green("B")));
-  });
-
   test("ancestor bold survives leading/trailing parent text around a nested child", () => {
     const App = defineComponent(() => () => (
       <Text bold>
@@ -793,12 +734,12 @@ describe("renderToString", () => {
     const App = defineComponent(() => () => (
       <Text bold>
         A
-        <Text underline>
+        <Text inverse>
           B<Text color="green">C</Text>
         </Text>
       </Text>
     ));
-    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.underline("B" + chalk.green("C"))));
+    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.inverse("B" + chalk.green("C"))));
   });
 
   test("nested child's own color composes on top of inherited bold (child stays bold too)", () => {
@@ -813,58 +754,14 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe(chalk.bold(chalk.green("B")));
   });
 
-  // BONUS: a nested inline <Text backgroundColor=""> inside a green Box. The inner
-  // "" is INVISIBLE here. The inner Text's effective bg is `"" ?? inheritedGreen`,
-  // which is `""` (not the green) — so "b" is composed with NO bg of its own and
-  // contributes RAW. But the OUTER plain Text inherits the green Box bg and wraps
-  // the WHOLE "a"+"b"+"c" concatenation in one green span, so its inherited green
-  // covers "b" uniformly along with "a" and "c". Because nothing applies a bg
-  // INSIDE that outer span, there is no inner bg-reset: the bytes are a single
-  // `chalk.bgGreen("abc")` (one bg-open, one trailing bg-reset, no inner \x1b[49m).
-  // The inner "" would only become visible if the outer Text had no inherited bg.
-  test("BONUS: nested inline backgroundColor='' inside a green Box", () => {
-    const App = defineComponent(() => () => (
-      <Box backgroundColor="green" alignSelf="flex-start">
-        <Text>
-          a<Text backgroundColor="">b</Text>c
-        </Text>
-      </Box>
-    ));
-    // The outer Text's inherited green wraps the whole concatenation; the inner ""
-    // is invisible (no inner \x1b[49m before the final reset — see chalk bytes below).
-    expect(renderToString(App, { columns: 100 })).toBe(chalk.bgGreen("a" + "b" + "c"));
-  });
-
-  // LOCK (high blast radius): a bare text-leaf inside a <Transform> under a
-  // <Box backgroundColor> renders WITHOUT the Box bg on its glyphs. This is
-  // Ink-faithful: in Ink only <Box> provides backgroundContext and <Transform>
-  // does NOT consume it — the bare "#text" carries no internal_transform, so its
-  // glyphs are RAW. The Box bg surfaces ONLY as the trailing fill padding the Box
-  // paints to reach its width. Branch behavior: bare text-leaves return RAW text
-  // (no inherited bg applied at the leaf), so the `[hi]` glyphs are uncolored and
-  // only the 6-space fill is green. Byte-matched against Ink v7.0.4 (40b3a75):
-  //   renderToString(<Box bg=green width=10><Transform>hi</Transform></Box>)
-  //     === "[hi]\x1b[42m      \x1b[49m"  (i.e. "[hi]" + chalk.bgGreen("      "))
-  // NOTE: this is a NEW lock (not a red→green fix) — it documents and pins the
-  // already-correct branch behavior so a future change can't silently regress it.
-  test("LOCK: bare text in <Transform> under a Box bg has no bg on its glyphs", () => {
-    const App = defineComponent(() => () => (
-      <Box backgroundColor="green" width={10}>
-        <Transform transform={(s: string) => "[" + s + "]"}>hi</Transform>
-      </Box>
-    ));
-    // "[hi]" glyphs are RAW (no bg SGR); only the trailing Box-fill padding is green.
-    expect(renderToString(App, { columns: 100 })).toBe("[hi]" + chalk.bgGreen("      "));
-  });
-
   // ── B29: renderToString serves the TERMINAL composables with inert no-op
   // contexts ──────────────────────────────────────────────────────────────
   //
   // renderToString runs with NO terminal session: it provides no-op AppContext +
-  // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
+  // StdinContext. The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCaret, semantic input, useAnimation, and useElementGeometry — so that
+  // useCaret, semantic input, and useElementGeometry — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -909,17 +806,6 @@ describe("renderToString", () => {
       expect(renderToString(App, { columns: 13 })).toBe("13xunbounded");
     });
 
-    test("useAnimation does not throw in renderToString (frame frozen at 0)", () => {
-      const App = defineComponent(() => {
-        // The no-op AnimationScheduler never ticks, so frame stays 0 and no timer
-        // leaks (subscribe returns an inert unsubscribe).
-        const { frame } = useAnimation({ interval: 50 });
-        return () => <Text>{`frame:${frame.value}`}</Text>;
-      });
-      const output = renderToString(App);
-      expect(output).toBe("frame:0");
-    });
-
     test("useElementGeometry reports unavailable in renderToString", () => {
       const App = defineComponent(() => {
         const boxRef = shallowRef<ComponentPublicInstance | null>(null);
@@ -934,11 +820,10 @@ describe("renderToString", () => {
       expect(output).toContain("unavailable");
     });
 
-    test("caret, input, animation, and geometry render together without throwing", () => {
+    test("caret, input, and geometry render together without throwing", () => {
       let caretStatus = "unset";
       const App = defineComponent(() => {
         useInput(() => "continue");
-        const { frame } = useAnimation({ interval: 30 });
         const boxRef = shallowRef<ComponentPublicInstance | null>(null);
         const focus = useFocus(boxRef, { autoFocus: true });
         const { state } = useCaret(boxRef, { focus, position: { x: 1, y: 0 } });
@@ -946,12 +831,12 @@ describe("renderToString", () => {
         useElementGeometry(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{`all:${frame.value}`}</Text>
+            <Text>all</Text>
           </Box>
         );
       });
       const output = renderToString(App, { columns: 40 });
-      expect(output).toContain("all:0");
+      expect(output).toContain("all");
       expect(caretStatus).toBe("unavailable");
     });
   });

@@ -128,7 +128,7 @@ const App = defineComponent(() => {
             { dimColor: true },
             () => `document=${document.length} code units; visible excerpt:`,
           ),
-          h(Box, { width: 18, height: 8, flexShrink: 0, overflow: "hidden" }, () =>
+          h(Box, { width: 18, height: 8, flexShrink: 0, overflowY: "hidden" }, () =>
             h(Text, { ref: target }, () => document),
           ),
           h(Text, null, () => `last=${lastAction.value}`),

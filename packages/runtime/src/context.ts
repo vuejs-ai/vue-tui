@@ -1,5 +1,4 @@
 import type { InjectionKey, Ref } from "vue";
-import type { AnimationScheduler } from "./animation-scheduler.ts";
 import type {
   InternalInputRoutingDemandLease,
   InternalInputRoutingRuntime,
@@ -36,8 +35,7 @@ export type SgrMouseMode = "button" | "drag" | "hover";
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");
-export const AnimationSchedulerKey: InjectionKey<AnimationScheduler> = Symbol("vue-tui:animation");
-// Provided by <Text> and <Transform>; injected by <Text> and <Newline> to decide
+// Provided by <Text> and the private transform mechanism; injected by <Text> to decide
 // whether they render inline `virtual-text` (inside a text context) or a standalone
 // yoga `text`. Replaces the former getCurrentInstance() parent-walk — see
 // .agents/docs/component-authoring.md.

@@ -137,6 +137,8 @@ import {
   useInput,
   useInputAvailability,
   useStdin,
+  type BoxProps,
+  type Color,
   type ExternalInputHandler,
   type ExternalInputSource,
   type InputAvailability,
@@ -151,7 +153,9 @@ import {
   type ElementGeometry,
   type ElementTarget,
   type MountOptions,
+  type RenderToStringOptions,
   type TuiInputEvent,
+  type TextProps,
   type UseFocusManagerReturn,
   type UseFocusOptions,
   type UseFocusReturn,
@@ -196,6 +200,75 @@ type Expect<T extends true> = T;
 type _ExactStdinSurface = Expect<
   Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
 >;
+type _ExactBoxProps = Expect<
+  Equal<
+    keyof BoxProps,
+    | "flexDirection"
+    | "flexGrow"
+    | "flexShrink"
+    | "flexBasis"
+    | "alignItems"
+    | "justifyContent"
+    | "gap"
+    | "width"
+    | "height"
+    | "minWidth"
+    | "minHeight"
+    | "position"
+    | "top"
+    | "left"
+    | "marginTop"
+    | "paddingTop"
+    | "paddingBottom"
+    | "paddingLeft"
+    | "paddingRight"
+    | "borderStyle"
+    | "borderColor"
+    | "backgroundColor"
+    | "overflowY"
+    | "display"
+    | "ariaLabel"
+    | "ariaHidden"
+    | "ariaRole"
+    | "ariaState"
+  >
+>;
+type _ExactTextProps = Expect<
+  Equal<
+    keyof TextProps,
+    | "color"
+    | "backgroundColor"
+    | "dimColor"
+    | "bold"
+    | "inverse"
+    | "wrap"
+    | "ariaLabel"
+    | "ariaHidden"
+  >
+>;
+type _ExactColor = Expect<
+  Equal<
+    Color,
+    | "black"
+    | "red"
+    | "green"
+    | "yellow"
+    | "blue"
+    | "magenta"
+    | "cyan"
+    | "white"
+    | "gray"
+    | "redBright"
+    | "greenBright"
+    | "yellowBright"
+    | "blueBright"
+    | "magentaBright"
+    | "cyanBright"
+    | "whiteBright"
+    | \`#\${string}\`
+  >
+>;
+type _ExactRenderToStringOptions = Expect<Equal<keyof RenderToStringOptions, "columns">>;
 type _ExactDecision = Expect<
   Equal<
     InputRouteDecision,
@@ -506,6 +579,10 @@ const customClipboardMount: MountOptions = {
 const osc52ClipboardMount: MountOptions = { clipboard: { kind: "osc52" } };
 // @ts-expect-error A custom clipboard transport requires writeText.
 const invalidClipboardMount: MountOptions = { clipboard: { kind: "custom" } };
+const packedColor: Color = "gray";
+const packedRgbColor: Color = "#12abEF";
+// @ts-expect-error Runtime has one canonical gray spelling.
+const removedGreyColor: Color = "grey";
 // @ts-expect-error A void handler does not make an input routing decision.
 useInput((_event) => {});
 // @ts-expect-error Input routing is synchronous.
@@ -518,6 +595,34 @@ type _RemovedKey = import("@vue-tui/runtime").Key;
 type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
 // @ts-expect-error The separate paste options were removed with usePaste().
 type _RemovedUsePasteOptions = import("@vue-tui/runtime").UsePasteOptions;
+// @ts-expect-error Removed Box props are absent rather than never tombstones.
+type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
+// @ts-expect-error Removed spacing shorthands are absent rather than never tombstones.
+type _RemovedBoxPaddingX = BoxProps["paddingX"];
+// @ts-expect-error Removed Text decoration is not a public prop.
+type _RemovedTextUnderline = TextProps["underline"];
+// @ts-expect-error Newline is ordinary Text composition.
+type _RemovedNewline = typeof import("@vue-tui/runtime").Newline;
+// @ts-expect-error Spacer is ordinary Box composition.
+type _RemovedSpacer = typeof import("@vue-tui/runtime").Spacer;
+// @ts-expect-error Transform is private renderer material.
+type _RemovedTransform = typeof import("@vue-tui/runtime").Transform;
+// @ts-expect-error Animation policy is not a Runtime primitive.
+type _RemovedUseAnimation = typeof import("@vue-tui/runtime").useAnimation;
+// @ts-expect-error Broad Yoga style vocabulary is not a public named type.
+type _RemovedBoxStyle = import("@vue-tui/runtime").BoxStyle;
+// @ts-expect-error Broad Yoga layout vocabulary is not a public named type.
+type _RemovedBoxLayoutStyle = import("@vue-tui/runtime").BoxLayoutStyle;
+// @ts-expect-error Newline has no public prop type after value removal.
+type _RemovedNewlineProps = import("@vue-tui/runtime").NewlineProps;
+// @ts-expect-error Spacer has no public prop type after value removal.
+type _RemovedSpacerProps = import("@vue-tui/runtime").SpacerProps;
+// @ts-expect-error Transform has no public prop type while private.
+type _RemovedTransformProps = import("@vue-tui/runtime").TransformProps;
+// @ts-expect-error Removed timer policy has no public options type.
+type _RemovedUseAnimationOptions = import("@vue-tui/runtime").UseAnimationOptions;
+// @ts-expect-error Removed timer policy has no public return type.
+type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimationReturn;
 // @ts-expect-error Parent-only scalar metrics were replaced by semantic geometry.
 type _RemovedUseBoxMetrics = typeof import("@vue-tui/runtime").useBoxMetrics;
 // @ts-expect-error Imperative Yoga reads were removed.
@@ -579,6 +684,9 @@ void removedExitOnCtrlC;
 void customClipboardMount;
 void osc52ClipboardMount;
 void invalidClipboardMount;
+void packedColor;
+void packedRgbColor;
+void removedGreyColor;
 `,
   );
   writeFileSync(
@@ -604,8 +712,17 @@ void keyedStaticChildren;
 const unsupportedStaticItems = <Static items={[1]}><Text>x</Text></Static>;
 // @ts-expect-error Layout is composed inside Static's ordinary slot.
 const unsupportedStaticStyle = <Static style={{ flexDirection: "row" }}><Text>x</Text></Static>;
+// @ts-expect-error Horizontal margin is not in the minimum Box vocabulary.
+const unsupportedBoxMarginLeft = <Box marginLeft={1}><Text>x</Text></Box>;
+// @ts-expect-error Spacing shorthands are application composition.
+const unsupportedBoxPaddingX = <Box paddingX={1}><Text>x</Text></Box>;
+// @ts-expect-error Unevidenced text decoration is not a Runtime primitive.
+const unsupportedTextUnderline = <Text underline>x</Text>;
 void unsupportedStaticItems;
 void unsupportedStaticStyle;
+void unsupportedBoxMarginLeft;
+void unsupportedBoxPaddingX;
+void unsupportedTextUnderline;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<ComponentPublicInstance | null>(null);
@@ -714,31 +831,15 @@ mountedStdin.setRawMode(false);
     join(consumerDirectory, "RejectedMouseListeners.vue"),
     `<script setup lang="ts">
 import { ScrollBox } from "@vue-tui/components";
-import { Box, Text } from "@vue-tui/runtime";
+import { Text } from "@vue-tui/runtime";
 
 const listener = () => {};
 </script>
 
 <template>
-  <!-- Each directive is load-bearing: vue-tsc fails if the following listener becomes accepted. -->
-  <!-- @vue-expect-error Box rejects the removed mousedown listener. -->
-  <Box @mousedown="listener"><Text>box</Text></Box>
-  <!-- @vue-expect-error Box rejects the removed mouseup listener. -->
-  <Box @mouseup="listener"><Text>box</Text></Box>
-  <!-- @vue-expect-error Box rejects the removed click listener. -->
-  <Box @click="listener"><Text>box</Text></Box>
-  <!-- @vue-expect-error Box rejects the removed wheel listener. -->
-  <Box @wheel="listener"><Text>box</Text></Box>
-
-  <!-- @vue-expect-error Text rejects the removed mousedown listener. -->
-  <Text @mousedown="listener">text</Text>
-  <!-- @vue-expect-error Text rejects the removed mouseup listener. -->
-  <Text @mouseup="listener">text</Text>
-  <!-- @vue-expect-error Text rejects the removed click listener. -->
-  <Text @click="listener">text</Text>
-  <!-- @vue-expect-error Text rejects the removed wheel listener. -->
-  <Text @wheel="listener">text</Text>
-
+  <!-- Vue templates accept undeclared listeners as fallthrough attributes. Box and Text
+       therefore diagnose these removed listeners at render time; runtime.mjs verifies
+       the packed-package behavior. ScrollBox still declares negative listener props. -->
   <!-- @vue-expect-error ScrollBox rejects the removed mousedown listener. -->
   <ScrollBox @mousedown="listener"><Text>scroll</Text></ScrollBox>
   <!-- @vue-expect-error ScrollBox rejects the removed mouseup listener. -->
@@ -776,6 +877,10 @@ assert.equal("useMouseEvent" in runtime, false);
 assert.equal("useMouseDrag" in runtime, false);
 assert.equal("useTextSelection" in runtime, false);
 assert.equal("useClipboard" in fullscreen, false);
+assert.equal("Newline" in runtime, false);
+assert.equal("Spacer" in runtime, false);
+assert.equal("Transform" in runtime, false);
+assert.equal("useAnimation" in runtime, false);
 assert.equal(typeof useElementGeometry, "function");
 assert.equal(typeof useCaret, "function");
 assert.equal(typeof useFocusScope, "function");
@@ -784,6 +889,79 @@ assert.equal(typeof useFocusScopeInput, "function");
 assert.equal(typeof useExternalInput, "function");
 assert.equal(typeof useClipboard, "function");
 assert.equal(typeof useTextSelection, "function");
+
+for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
+  for (const listenerName of ["onMousedown", "onMouseDown", "onMouseup", "onMouseUp", "onClick", "onWheel"]) {
+    const RemovedListener = defineComponent(() => () =>
+      h(component, { [listenerName]: () => {} }, () => h(Text, null, () => "content")),
+    );
+    assert.throws(
+      () => runtime.renderToString(RemovedListener),
+      {
+        name: "Error",
+        message:
+          "<" + componentName + '> does not accept the removed mouse listener "' +
+          listenerName +
+          '". Use the mouse composables from "@vue-tui/runtime/fullscreen".',
+      },
+    );
+  }
+}
+
+for (const [componentName, component, attribute] of [
+  ["Box", Box, "paddingX"],
+  ["Box", Box, "marginLeft"],
+  ["Box", Box, "padddingLeft"],
+  ["Box", Box, "class"],
+  ["Text", Text, "underline"],
+  ["Text", Text, "colour"],
+]) {
+  const UnsupportedAttribute = defineComponent(() => () =>
+    h(component, { [attribute]: 1 }, () => h(Text, null, () => "content")),
+  );
+  assert.throws(
+    () => runtime.renderToString(UnsupportedAttribute),
+    {
+      name: "Error",
+      message:
+        "<" + componentName + '> does not accept the undeclared attribute "' + attribute + '". Use a declared <' + componentName + "> prop.",
+    },
+  );
+}
+
+const PackedPublicProps = defineComponent(() => () =>
+  h(Box, { borderStyle: "single", borderColor: "gray", backgroundColor: "#12abEF", width: "100%" }, () =>
+    h(Text, { color: "gray", backgroundColor: "#12abEF" }, () => "packed-colors"),
+  ),
+);
+assert.equal(runtime.renderToString(PackedPublicProps, { columns: 65_535 }).includes("packed-colors"), true);
+for (const color of ["grey", "#fff"]) {
+  const InvalidColor = defineComponent(() => () => h(Text, { color }, () => "invalid"));
+  assert.throws(() => runtime.renderToString(InvalidColor), /<Text> prop "color"/);
+}
+const InvalidPercentage = defineComponent(() => () =>
+  h(Box, { width: "100.00000000000000000001%" }, () => h(Text, null, () => "invalid")),
+);
+assert.throws(() => runtime.renderToString(InvalidPercentage), /<Box> prop "width"/);
+const InvalidDimension = defineComponent(() => () =>
+  h(Box, { width: 65_536 }, () => h(Text, null, () => "invalid")),
+);
+assert.throws(() => runtime.renderToString(InvalidDimension), /<Box> prop "width"/);
+assert.throws(
+  () => runtime.renderToString(PackedPublicProps, { columns: 65_536 }),
+  /option "columns" must be an integer between 1 and 65535/,
+);
+assert.throws(
+  () => runtime.renderToString(PackedPublicProps, { debug: true }),
+  /received an unknown option "debug"/,
+);
+const OversizedDocument = defineComponent(() => () =>
+  h(Box, { width: 1_024, height: 1_025, flexShrink: 0 }, () => h(Text, null, () => "large")),
+);
+assert.throws(
+  () => runtime.renderToString(OversizedDocument, { columns: 1_024 }),
+  /Paint surface 1024x1025 exceeds the 1048576-cell resource limit/,
+);
 
 const inlineHistory = await render(
   defineComponent(() => () =>

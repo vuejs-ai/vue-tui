@@ -13,7 +13,7 @@
 vue-tui is layered by responsibility; each layer may depend **only downward**.
 
 - **`@vue-tui/runtime`** — the engine: the Yoga-flexbox renderer, common primitive components
-  (e.g. root `Box`/`Text`/`Spacer`), the supported `/inline` terminal-history boundary (`Static`), and the terminal-I/O composables (e.g. `useInput`,
+  (`Box` and `Text`), the supported `/inline` terminal-history boundary (`Static`), and the terminal-I/O composables (e.g. `useInput`,
   `useFocus`, `useCaret`, `useClipboard`, `/fullscreen`'s `useMouseEvent`/`useMouseDrag`/`useTextSelection`, `useStdout`, `useRenderSession`, `useLayoutSize`). The lean core
   every app depends on; depends on nothing else in the family. What counts as runtime work
   is the [runtime ↔ component boundary](./components-design-principles.md). `Static` remains Runtime work because its one-attempt acceptance and stream-commit ownership are renderer/output mechanics even though Vue owns collection iteration and its authoring path is surface-specific.
@@ -60,4 +60,4 @@ which is exactly why `components` needs no broader name.
 
 ## Status
 
-`runtime` and `components` exist today. `use` is a **reserved layer**: its dependency contract is fixed now, but the package is created only when its first real member—an independent, reusable hook—actually ships. Creating that layer does not by itself justify renaming or repurposing `components`; any package-boundary change requires its own accepted architectural reason.
+`runtime` and `components` exist today. `use` is a **reserved, replaceable layer**: its dependency contract is fixed now, but the package is created only when real application practice produces its first independent reusable behavior. It must use only Runtime's supported public API, exactly like a third party. Creating the layer does not by itself justify inventing hooks, renaming `components`, or repurposing it; any package-boundary change requires its own accepted architectural reason.

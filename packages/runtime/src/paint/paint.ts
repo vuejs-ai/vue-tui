@@ -50,6 +50,7 @@ import type {
   InternalTextSelectionTrace,
 } from "../selection/selection-paint.ts";
 import { trustInternalSelectionPaintSnapshot } from "../selection/selection-policy.ts";
+import { assertPaintSurfaceSize } from "../numeric-limits.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
 
@@ -306,6 +307,7 @@ class Output {
     selectionFrame?: InternalSelectionPaintFrame,
     caches = new OutputCaches(),
   ) {
+    assertPaintSurfaceSize(width, height);
     this.width = width;
     this.height = height;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;

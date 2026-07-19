@@ -1,7 +1,7 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { renderToString, Box, Text, Transform } from "@vue-tui/runtime";
+import { renderToString, Box, Text } from "@vue-tui/runtime";
 import chalk from "chalk";
 import stripAnsi from "strip-ansi";
 import ansiEscapes from "ansi-escapes";
@@ -140,32 +140,6 @@ test("foreground reset preserves literal private-use characters and nested reset
   ]);
 });
 
-test("a Transform preserves literal private-use text while carrying a nested foreground reset", async () => {
-  const privateUse = "\uE000\uE001";
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Text color="red">
-        A
-        <Transform transform={(value) => value + privateUse}>
-          <Text color="revert">B</Text>
-        </Transform>
-        C
-      </Text>
-    )),
-    { columns: 100 },
-  );
-
-  const frame = lastFrame();
-  expect(stripAnsi(frame)).toBe(`AB${privateUse}C`);
-  expect(foregroundCharacters(frame)).toEqual([
-    { character: "A", foreground: "red" },
-    { character: "B", foreground: "default" },
-    { character: "\uE000", foreground: "default" },
-    { character: "\uE001", foreground: "default" },
-    { character: "C", foreground: "red" },
-  ]);
-});
-
 test("renderToString preserves nested foreground reset through a narrow wrap", () => {
   const output = renderToString(
     defineComponent(() => () => (
@@ -220,22 +194,6 @@ test("text with hex color", async () => {
   expect(lastFrame()).toBe(chalk.hex("#FF8800")("Test"));
 });
 
-test("text with rgb color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text color="rgb(255, 136, 0)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.rgb(255, 136, 0)("Test"));
-});
-
-test("text with ansi256 color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text color="ansi256(194)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.ansi256(194)("Test"));
-});
-
 test("text with standard background color", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Text backgroundColor="green">Test</Text>),
@@ -250,22 +208,6 @@ test("text with hex background color", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe(chalk.bgHex("#FF8800")("Test"));
-});
-
-test("text with rgb background color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text backgroundColor="rgb(255, 136, 0)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.bgRgb(255, 136, 0)("Test"));
-});
-
-test("text with ansi256 background color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text backgroundColor="ansi256(194)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.bgAnsi256(194)("Test"));
 });
 
 test("text with inversion", async () => {
@@ -460,61 +402,6 @@ test("don't wrap text if there is enough space", async () => {
   expect(lastFrame()).toBe("Hello World");
 });
 
-test("hard wrap text", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="hard">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hello W\norld");
-});
-
-test("hard wrap with long word", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={5}>
-        <Text wrap="hard">aaaaaaaaaa</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("aaaaa\naaaaa");
-});
-
-test("hard wrap inside a zero-width Box does not reserve invisible child rows", async () => {
-  // A Box whose resolved inner content width is 0 has no legal child paint area.
-  // The child text should therefore neither paint nor inflate the row height, even
-  // though Ink's zero-width hard-wrap path produces extra invisible rows.
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row">
-        <Box width={0}>
-          <Text wrap="hard">a b c</Text>
-        </Box>
-        <Text>X</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  const lines = stripAnsi(lastFrame()!).split("\n");
-  expect(lines).toEqual(["X"]);
-});
-
-test("don't hard wrap text if there is enough space", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={20}>
-        <Text wrap="hard">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hello World");
-});
-
 test("truncate text in the end", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -525,30 +412,6 @@ test("truncate text in the end", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe("Hello …");
-});
-
-test("truncate text in the middle", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="truncate-middle">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hel…rld");
-});
-
-test("truncate text in the beginning", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="truncate-start">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("… World");
 });
 
 // --- Ink ANSI sanitization tests ---

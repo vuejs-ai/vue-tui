@@ -362,32 +362,6 @@ test("truncate CJK text at end", () => {
   expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
 });
 
-test("truncate CJK text in the middle", () => {
-  const App = defineComponent(
-    () => () =>
-      h(Box, { width: 20 }, () =>
-        h(Text, { wrap: "truncate-middle" }, () => "あいうえおかきくけこ|end"),
-      ),
-  );
-
-  const output = renderToString(App, { columns: 40 });
-  const stripped = stripAnsi(output);
-  expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
-});
-
-test("truncate CJK text at start", () => {
-  const App = defineComponent(
-    () => () =>
-      h(Box, { width: 20 }, () =>
-        h(Text, { wrap: "truncate-start" }, () => "あいうえおかきくけこ|end"),
-      ),
-  );
-
-  const output = renderToString(App, { columns: 40 });
-  const stripped = stripAnsi(output);
-  expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
-});
-
 test("truncate CJK text does not exceed Box width", () => {
   const App = defineComponent(
     () => () =>
@@ -485,13 +459,14 @@ test("measureTextNatural counts an only-newline string as all empty lines", () =
   expect(measureTextNatural("\n\n")).toEqual({ width: 0, height: 3 });
 });
 
-test("clipped empty write does not corrupt existing wide characters", () => {
-  // When a write is clipped to an empty string, the boundary cleanup
-  // must not run, otherwise it would destroy a wide character that
-  // isn't actually being overwritten.
+test("terminal-viewport empty write does not corrupt existing wide characters", () => {
+  // When the terminal viewport clips a write to an empty string, the boundary
+  // cleanup must not run, otherwise it would destroy a wide character that
+  // isn't actually being overwritten. Private component-overflow behavior is
+  // covered through raw host tests rather than an unsupported public Box prop.
   const App = defineComponent(
     () => () =>
-      h(Box, { width: 4, height: 1, overflowX: "hidden" }, () => [
+      h(Box, { width: 4, height: 1 }, () => [
         h(Text, null, () => "あい"),
         h(Box, { position: "absolute", left: -1, width: 1 }, () => h(Text, null, () => "Z")),
       ]),

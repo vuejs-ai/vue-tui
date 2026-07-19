@@ -1,15 +1,7 @@
-import {
-  defineComponent,
-  h,
-  nextTick,
-  ref,
-  shallowRef,
-  type ComponentPublicInstance,
-  type ShallowRef,
-} from "vue";
+import { defineComponent, h, nextTick, ref, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test, vi } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, Transform } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
 import { useTextSelection, type TextSelectionCommands } from "@vue-tui/runtime/fullscreen";
 
 describe("Fullscreen text selection public boundary", () => {
@@ -114,25 +106,13 @@ describe("Fullscreen text selection public boundary", () => {
     }
   });
 
-  test.each([
-    [
-      "transformed",
-      (target: ShallowRef<ComponentPublicInstance | null>) =>
-        h(Text, { ref: target }, () =>
-          h(Transform, { transform: (line: string) => line }, () => "transformed"),
-        ),
-    ],
-    [
-      "truncated",
-      (target: ShallowRef<ComponentPublicInstance | null>) =>
-        h(Box, { width: 4 }, () => h(Text, { ref: target, wrap: "truncate" }, () => "truncated")),
-    ],
-  ] as const)("reports %s source mapping as unavailable", async (_label, renderDocument) => {
+  test("reports truncated source mapping as unavailable", async () => {
     let selection!: TextSelectionCommands;
     const target = shallowRef<ComponentPublicInstance | null>(null);
     const App = defineComponent(() => {
       selection = useTextSelection(target, { pointer: false });
-      return () => renderDocument(target);
+      return () =>
+        h(Box, { width: 4 }, () => h(Text, { ref: target, wrap: "truncate" }, () => "truncated"));
     });
     const result = await render(App, { host: { mode: "fullscreen" } });
     try {

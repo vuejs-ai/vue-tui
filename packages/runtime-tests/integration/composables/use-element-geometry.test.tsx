@@ -35,9 +35,11 @@ test.each(["inline", "fullscreen"] as const)(
       const target = shallowRef<ComponentPublicInstance | null>(null);
       projection = useElementGeometry(target);
       return () => (
-        <Box marginLeft={2} width={8} height={3}>
-          <Box ref={target} marginLeft={1} width={4} height={2}>
-            <Text>box</Text>
+        <Box paddingLeft={2}>
+          <Box paddingLeft={1} width={8} height={3}>
+            <Box ref={target} width={4} height={2}>
+              <Text>box</Text>
+            </Box>
           </Box>
         </Box>
       );
@@ -233,43 +235,6 @@ test("maps a wrapped nested Text without exposing private insertion slots", asyn
       },
     ]);
     expect(geometry).not.toHaveProperty("caretSlots");
-  } finally {
-    result.dispose();
-  }
-});
-
-test("distinguishes partial visibility from a fully clipped element", async () => {
-  const offset = shallowRef(3);
-  let projection!: UseElementGeometryReturn;
-  const App = defineComponent(() => {
-    const target = shallowRef<ComponentPublicInstance | null>(null);
-    projection = useElementGeometry(target);
-    return () => (
-      <Box width={4} height={1} overflowX="hidden">
-        <Box ref={target} marginLeft={offset.value} width={3} height={1} flexShrink={0}>
-          <Text>abc</Text>
-        </Box>
-      </Box>
-    );
-  });
-
-  const result = await render(App, { columns: 10, rows: 3 });
-  try {
-    const partiallyVisible = resolved(projection.geometry.value);
-    expect(partiallyVisible.status).toBe("visible");
-    expect(partiallyVisible.fragments[0]!.visibleSurface).toEqual({
-      x: 3,
-      y: 0,
-      width: 1,
-      height: 1,
-    });
-
-    offset.value = 4;
-    await nextTick();
-    await result.waitUntilRenderFlush();
-    const fullyClipped = resolved(projection.geometry.value);
-    expect(fullyClipped.status).toBe("fully-clipped");
-    expect(fullyClipped.fragments[0]!.visibleSurface).toBeNull();
   } finally {
     result.dispose();
   }

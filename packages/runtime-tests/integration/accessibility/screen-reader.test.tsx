@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type FunctionalComponent } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Box, Text, Transform, Newline, createApp, renderToString } from "@vue-tui/runtime";
+import { Box, Text, createApp, renderToString } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { render } from "@vue-tui/testing";
 import {
@@ -394,154 +394,6 @@ describe("Text aria props", () => {
   });
 });
 
-describe("Transform accessibility", () => {
-  // G21 follow-up, finding 2: squashTextContent must pass the transform's
-  // positional sibling index (not hardcoded 0) so SR output matches paint.
-  test("nested <Transform> as 2nd child of <Text> gets index 1 in screen-reader mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Text>
-          a<Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
-        </Text>
-      )),
-    );
-    // Transform is the 2nd child (index 1) of the Text node — must receive 1,
-    // not 0, matching paint.ts and Ink squash-text-nodes.ts:13,38 behavior.
-    expect(output).toBe("ab[1]");
-  });
-
-  // G23: a <Transform> directly under a <Box> in screen-reader mode must
-  // CONCATENATE its children with "" (not newline-join them). This matches Ink:
-  // a <Transform> is an `ink-text` node, so the SR path squashes it via
-  // squashTextNodes (squash-text-nodes.ts), which concatenates child text with
-  // "". Verified empirically against Ink 7.0.4: the transform node's OWN
-  // internal_transform is NOT applied when it is the top-level node handed to
-  // squashTextNodes (squash only applies the internal_transform of *child*
-  // nodes, line 34-39) — so a Transform directly under a Box yields the bare
-  // concatenated children, no wrapping.
-  test("<Transform> under <Box> concatenates children with no newline in screen-reader mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Box>
-          <Transform transform={(s: string) => `[${s}]`}>
-            <Text>a</Text>
-            <Text>b</Text>
-          </Transform>
-        </Box>
-      )),
-    );
-    // Children are concatenated ("ab"), NOT newline-joined ("a\nb").
-    expect(output).toBe("ab");
-  });
-
-  // G58 (SR twin): a standalone <Transform> with DIRECT bare-string children
-  // must include that text in screen-reader output. Ink's SR path squashes the
-  // ink-text via squashTextNodes, which includes #text children — the
-  // transform's OWN fn is NOT applied at the top level (only child transforms
-  // are). Ink reference: `<Transform transform={s=>`<${s}>`}>ab</Transform>` SR
-  // → "ab". Previously vue-tui dropped bare text-leaf children of a transform in
-  // the SR squash, yielding "".
-  test("G58: standalone <Transform> with bare-string children appears in screen-reader output", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => <Transform transform={(s: string) => `<${s}>`}>ab</Transform>),
-    );
-    expect(output).toBe("ab");
-  });
-
-  // G58 follow-up — MUST-FIX 3: a CHILD (nested) <Transform> inside a standalone
-  // outer <Transform> must have its OWN fn APPLIED in SR — it is a *child* being
-  // squashed, and Ink's squashTextNodes applies child internal_transform
-  // (squash-text-nodes.ts:34). The OUTER transform's own fn is still NOT applied
-  // (it is the top-level node handed to squash). Ink reference: outer fn skipped,
-  // inner fn `s=>`{${s}}`` applied to "x" → "{x}". Previously vue-tui rendered the
-  // child transform via the top-level SR rule (which skips the child's own fn),
-  // yielding "x".
-  test("G58 MF3: nested <Transform>'s own fn IS applied inside a standalone <Transform> (SR)", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => `(outer ${s})`}>
-          <Transform transform={(s: string) => `{${s}}`}>x</Transform>
-        </Transform>
-      )),
-    );
-    // Inner (child) fn applied → "{x}"; outer (top-level) fn NOT applied.
-    expect(output).toBe("{x}");
-  });
-
-  // G58 (SR Newline twin): a <Newline> directly inside a standalone <Transform>
-  // contributes its line break to the squashed SR text. Ink reference:
-  // `<Transform>a<Newline/>b</Transform>` SR → "a\nb".
-  test("G58: standalone <Transform> with <Newline> appears in screen-reader output", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => `<${s}>`}>
-          a<Newline />b
-        </Transform>
-      )),
-    );
-    expect(output).toBe("a\nb");
-  });
-
-  // G52: Vue materializes a null/v-if/false render as a COMMENT host node that
-  // occupies a positional slot. React never produces a childNode for such
-  // children (Ink squash-text-nodes.ts:13 never advances index past them), so
-  // the SR squash path must skip comment nodes when indexing the transform —
-  // staying in lockstep with paint and measurement.
-  test("G52: null sibling does not shift nested <Transform> index in screen-reader mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Text>
-          a{null}
-          <Transform transform={(s: string, i: number) => `${s}[${i}]`}>b</Transform>
-        </Text>
-      )),
-    );
-    // The null produces a comment that must NOT take a slot: a=0, Transform=1.
-    expect(output).toBe("ab[1]");
-  });
-
-  test("renders children normally when screen reader is disabled", () => {
-    const output = renderToString(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => s.toUpperCase()} accessibilityLabel="accessible label">
-          <Text>lowercase</Text>
-        </Transform>
-      )),
-      { columns: 40 },
-    );
-    expect(output).toContain("LOWERCASE");
-  });
-
-  // P19: Ink's null-children guard (Transform.tsx:28-30) runs BEFORE the
-  // accessibilityLabel substitution, so a <Transform accessibilityLabel="Acc">
-  // with NO children returns null even in screen-reader mode — it emits NOTHING.
-  // Ink reference (v7.0.4, SR on): `<Transform accessibilityLabel="Acc"/>` → "".
-  // Previously vue-tui ran the SR/label branch first and emitted "Acc".
-  test("P19: childless <Transform accessibilityLabel> emits nothing in screen-reader mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => s} accessibilityLabel="Acc" />
-      )),
-    );
-    // Null guard fires first → no node → no label text.
-    expect(output).toBe("");
-  });
-
-  // P19 control: WITH children the label substitution path is unchanged — a
-  // <Transform accessibilityLabel="Acc"> that HAS children still emits the label
-  // in SR mode. Ink reference (SR on): label substitutes for children → "Acc".
-  test("P19 control: <Transform accessibilityLabel> WITH children still emits label in SR mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => s} accessibilityLabel="Acc">
-          <Text>x</Text>
-        </Transform>
-      )),
-    );
-    expect(output).toBe("Acc");
-  });
-});
-
 describe("screen-reader ANSI sanitization (Ink parity)", () => {
   // Ink squashes every ink-text via squashTextNodes, which ALWAYS returns
   // sanitizeAnsi(text) (squash-text-nodes.ts:45) — stripping cursor/erase CSI
@@ -569,15 +421,6 @@ describe("screen-reader ANSI sanitization (Ink parity)", () => {
       )),
     );
     expect(output).toBe("xy");
-  });
-
-  test("strips an erase CSI inside a standalone <Transform> in screen-reader mode", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => s}>{`p${ERASE_SCREEN}q`}</Transform>
-      )),
-    );
-    expect(output).toBe("pq");
   });
 
   test("keeps SGR (color) sequences in screen-reader output, matching Ink's sanitizeAnsi", () => {
@@ -609,7 +452,7 @@ describe("integration: aria props via render", () => {
     expect(lastFrame()).toContain("Hello");
   });
 
-  test("all aria props render without errors", async () => {
+  test("Box and Text aria props render without errors", async () => {
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
         <Box aria-role="list" aria-state={{ busy: true }}>
@@ -620,16 +463,12 @@ describe("integration: aria props via render", () => {
             <Text>Item 2</Text>
           </Box>
         </Box>
-        <Transform transform={(s: string) => s} accessibilityLabel="transform label">
-          <Text>content</Text>
-        </Transform>
       </Box>
     ));
 
     const { lastFrame } = await render(App, { columns: 40 });
     expect(lastFrame()).toContain("Item 1");
     expect(lastFrame()).toContain("Item 2");
-    expect(lastFrame()).toContain("content");
   });
 });
 
@@ -660,7 +499,7 @@ describe("screen reader enabled mode", () => {
     const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
-          <Text bold color="green" inverse underline>
+          <Text bold color="green" inverse>
             Styled content
           </Text>
         </Box>
@@ -699,38 +538,6 @@ describe("screen reader enabled mode", () => {
     expect(output).toBe("Hello World");
   });
 
-  // G39 follow-up: pin the yoga-enum mapping + reverse-order branch that
-  // resolveBoxFlexDirection / renderScreenReaderOutput now own. row-reverse must
-  // join with a SPACE *and* reverse child order (Ink parity: reverse directions
-  // flip the visual/announced order).
-  test("render Box flexDirection=row-reverse joins with space and reverses children", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Box flexDirection="row-reverse">
-          <Text>Hello</Text>
-          <Text>World</Text>
-        </Box>
-      )),
-    );
-    // row-reverse: space separator + reversed order → "World Hello".
-    expect(output).toBe("World Hello");
-  });
-
-  // G39 follow-up: column-reverse must join with a NEWLINE (non-row separator)
-  // *and* reverse child order.
-  test("render Box flexDirection=column-reverse joins with newline and reverses children", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Box flexDirection="column-reverse">
-          <Text>Hello</Text>
-          <Text>World</Text>
-        </Box>
-      )),
-    );
-    // column-reverse: newline separator + reversed order → "World\nHello".
-    expect(output).toBe("World\nHello");
-  });
-
   // G39 stale-read guard (the core reason resolveBoxFlexDirection reads yoga, not
   // node.props): when a Box's flexDirection is dynamically REMOVED, the yoga node
   // resets to its row default (host/yoga.ts: flexDirection == null → ROW). Since
@@ -741,12 +548,7 @@ describe("screen reader enabled mode", () => {
   // post-removal assertion below.
   test.sequential("live SR Box resolves to row default (space) after flexDirection is dynamically removed", async () => {
     // shallowRef holding the reactive flexDirection: start "column", then clear.
-    // Typed as the Box FlexDirection union (not `string`) so the JSX prop
-    // typechecks under `vp run ci` — FlexDirection isn't exported from the
-    // public index, so we inline the literal union here.
-    const flexDirection = shallowRef<
-      "row" | "row-reverse" | "column" | "column-reverse" | undefined
-    >("column");
+    const flexDirection = shallowRef<"row" | "column" | undefined>("column");
     const App = defineComponent(() => () => (
       <Box flexDirection={flexDirection.value}>
         <Text>Hello</Text>
@@ -1027,36 +829,6 @@ describe("screen reader enabled mode", () => {
     expect(output).toBe("Alpha Beta");
   });
 
-  test("renderToString in SR mode honors a row-reverse Box inside Static", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Static>
-          <Box flexDirection="row-reverse">
-            <Text>Alpha</Text>
-            <Text>Beta</Text>
-          </Box>
-        </Static>
-      )),
-    );
-    // row-reverse reverses child order (screen-reader.ts:79-82) + space separator.
-    expect(output).toBe("Beta Alpha");
-  });
-
-  test("renderToString in SR mode honors a column-reverse Box inside Static", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Static>
-          <Box flexDirection="column-reverse">
-            <Text>Alpha</Text>
-            <Text>Beta</Text>
-          </Box>
-        </Static>
-      )),
-    );
-    // column-reverse reverses order, newline separator (default non-row).
-    expect(output).toBe("Beta\nAlpha");
-  });
-
   test("renderToString in SR mode uses Static's default column layout", () => {
     const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
@@ -1190,21 +962,5 @@ describe("screen reader: Ink test/screen-reader.tsx parity (component path)", ()
       )),
     );
     expect(output).toBe("button: Click me");
-  });
-
-  // Ink Transform.tsx:37-39 — in SR mode, accessibilityLabel REPLACES the children,
-  // and because the label is substituted as the transform node's content, the
-  // transform's OWN fn is NOT applied at the top level (screen-reader.ts leaves the
-  // top-level transform fn to its caller). So a lowercase child + an uppercasing
-  // transform still yields the bare label, NOT "X" uppercased nor "LOWERCASE".
-  test("Transform accessibilityLabel replaces children; transform not applied at top level", () => {
-    const output = renderToStringWithScreenReader(
-      defineComponent(() => () => (
-        <Transform transform={(s: string) => s.toUpperCase()} accessibilityLabel="X">
-          <Text>lowercase</Text>
-        </Transform>
-      )),
-    );
-    expect(output).toBe("X");
   });
 });

@@ -20,7 +20,7 @@ export default defineComponent(() => {
   });
 
   return () => (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <Text bold color="cyan">
         vue-tui basic (JSX)
       </Text>

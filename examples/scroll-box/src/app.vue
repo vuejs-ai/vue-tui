@@ -76,12 +76,19 @@ useFocusedInput(focus, (event) => {
 
 <template>
   <Box flexDirection="column" :height="rows ?? undefined">
-    <Box borderStyle="round" :paddingX="1">
+    <Box borderStyle="round" :paddingLeft="1" :paddingRight="1">
       <Text bold color="cyan">ScrollBox demo</Text>
       <Text dimColor> — ↑/↓ · PageUp/PageDown · Home/End · q</Text>
     </Box>
 
-    <Box :flexGrow="1" :minHeight="0" flexDirection="column" borderStyle="round" :paddingX="1">
+    <Box
+      :flexGrow="1"
+      :minHeight="0"
+      flexDirection="column"
+      borderStyle="round"
+      :paddingLeft="1"
+      :paddingRight="1"
+    >
       <Box ref="scrollTarget" :flexGrow="1" :minHeight="0" flexDirection="column">
         <ScrollBox ref="box">
           <Text v-for="line in lines" :key="line">{{ line }}</Text>
@@ -89,7 +96,7 @@ useFocusedInput(focus, (event) => {
       </Box>
     </Box>
 
-    <Box :paddingX="1">
+    <Box :paddingLeft="1" :paddingRight="1">
       <Text dimColor>
         {{ lines.length }} lines · focus={{ focus.isFocused.value ? "yes" : "no" }} ·
         {{ lastRoute }}

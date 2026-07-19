@@ -131,7 +131,13 @@ const App = defineComponent(() => {
     return () =>
       h(
         Box,
-        { ref: modalHost, borderStyle: "double", flexDirection: "column", paddingX: 1 },
+        {
+          ref: modalHost,
+          borderStyle: "round",
+          flexDirection: "column",
+          paddingLeft: 1,
+          paddingRight: 1,
+        },
         {
           default: () => [
             h(Text, { bold: true }, { default: () => "Approval modal (trapped)" }),
@@ -198,7 +204,13 @@ const App = defineComponent(() => {
   return () =>
     h(
       Box,
-      { flexDirection: "column", borderStyle: "round", width: 62, paddingX: 1 },
+      {
+        flexDirection: "column",
+        borderStyle: "round",
+        width: 62,
+        paddingLeft: 1,
+        paddingRight: 1,
+      },
       {
         default: () => [
           h(

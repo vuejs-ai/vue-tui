@@ -105,8 +105,8 @@ the most reasonable choice. Recording it means a later change that breaks the ma
 chosen, not accidental. Per the governing principle, the justification is always "this is the
 correct/reasonable behavior and Ink already has it," never "because Ink does it." Alignment
 carve-outs that are tightly bound to a specific divergence are noted inline within that divergence
-entry instead (e.g. the global screen-reader carve-out under "Invalid input is validated at the
-component layer").
+entry instead (e.g. the global screen-reader carve-out under "Box and Text validate their closed
+public contracts at the component layer").
 
 ### Commit timing (throttle cadence, FPS, synchronous resize)
 
@@ -193,17 +193,19 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
 - **vue-tui:** one weakly registered ingress per physical stdin is the only framework listener for byte decoding, structural control-sequence and paste framing, detection, and ordered application multicast. It consumes complete `ESC[?Nu` replies outside bracketed-paste payloads before application delivery. Each accepted query owns a 200ms FIFO slot; cancellation leaves a callback-free tombstone that retains query-shaped partial replies, the same owner can revive that slot on continuation, and a rejected write aborts an unwritten slot. Structural events are sent once to app generations eligible when the event began. A semantic parser-level `ignore` remains the backstop for explicitly enabled mode and late or stray complete replies.
 - **Why:** competing listeners cannot establish ownership, and per-app filters can classify the same physical bytes differently. The previous detector replayed ordinary bytes already handled by the application controller, a reply split after 35ms escaped as `"[?"` plus `"1u"`, and reply-shaped bytes inside a paste were deleted. Protocol input must be removed once before application routing, not repaired independently in every public listener. The finite 200ms query window and ordinary 20ms Escape ambiguity boundary are explicit. Real-stream tests cover interleaved ordinary input, re-entrant and throwing protocol-enable writes, overlapping, cancelled, revived, rejected, staggered, long-split and late queries, invalid prefixes and UTF-8, consecutive Escape, paste payloads, flow pause and resume, synchronous mount and continuation responses, teardown, and shared-stdin behavior. See [normalized input and routing](./input-routing.md). This is an unstamped completed F3 implementation decision; the normalized public contract and private priority, continuation, delayed-default, external-owner, host, and lifecycle mechanisms are implemented and verified.
 
-### `useAnimation()` outside a render tree drives a standalone animation
+### Historical: `useAnimation()` outside a render tree drove a standalone animation
 
 - **Ink:** the default `AnimationContext.subscribe()` is a no-op subscription with
   `startTime: 0`, so a `useAnimation` rendered outside an Ink tree never ticks.
-- **vue-tui:** `useAnimation` falls back to a freshly created standalone scheduler
+- **Historical vue-tui behavior:** `useAnimation` fell back to a freshly created standalone scheduler
   (`inject(AnimationSchedulerKey, null) ?? createAnimationScheduler()`), so `frame`/`time`/
   `delta` advance even with no surrounding app.
-- **Why:** the composable still does useful work in isolation, such as a unit test or a
-  non-rendered driver. Additive; inside a tree the injected scheduler is used exactly as
-  Ink's. Contrast with the terminal-bound composables in the outside-render-tree entry,
-  which throw because they have no meaningful standalone mode.
+- **Why it existed:** the composable did useful work in isolation, such as a unit test or a
+  non-rendered driver. Inside a tree the injected scheduler was used exactly as Ink's.
+- **Current disposition:** the minimum Runtime re-audit removed `useAnimation`, its public
+  types, and the shared animation scheduler. Animation policy does not require terminal or
+  renderer ownership; the retained Spinner owns a Vue-scoped timer directly. This entry is
+  historical comparison evidence, not a current Runtime capability.
 
 ### Two apps sharing one stdin both receive input
 
@@ -323,7 +325,7 @@ current-props model, or API conventions.
   a deliberate consistency rider — in each engine `() => []` and `() => [false]` behave
   alike (Ink renders a node for both, vue-tui omits both), and aligning only `[]` would
   create an asymmetry that exists in neither engine without reaching parity. KEEP. [VOUCHED @hyf0]
-  Test: `transform.test.tsx`.
+  Test: [`private-transform-wrapper.test.ts`](../../packages/runtime/src/components/private-transform-wrapper.test.ts).
 
 ### Vue-Idiomatic Choices
 
@@ -420,7 +422,7 @@ current-props model, or API conventions.
   code for the SET path (no layout regression), and the correct fallback on removal.
   Tests: `prop-reset.test.tsx`, `unit/yoga-prop-reset.test.ts`.
 
-#### Public composable naming follows Vue conventions
+#### Historical public composable naming followed Vue conventions
 
 - **Ink/React:** public APIs are hooks (`useFocus`, `useInput`, ...), but return-type naming
   is mixed: the stream/app hooks return exported context types named `XProps` (`useStdin` →
@@ -454,6 +456,11 @@ current-props model, or API conventions.
   refs for the model-implied reason documented above. Do not export Ink-compatible alias
   names for these types: Vue-first naming is more important than making type imports look
   portable across React and Vue. KEEP. [VOUCHED @hyf0]
+- **Current disposition:** this naming rule remains historical evidence for composables that
+  survive later boundary reviews, but it does not justify retaining a composable. The current
+  minimum Runtime work removed `useAnimation`, `UseAnimationOptions`, and
+  `UseAnimationReturn`; the vouched text above records the naming decision that applied while
+  those exports existed.
 
 #### Function-valued composable inputs use `MaybeRef`, not getters
 
@@ -562,8 +569,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   invariant. The fix is minimal (one `markDirty`) and matches the layout Ink ALREADY produces
   whenever its measure func happens to be invalidated. KEEP. [VOUCHED @hyf0] Tests:
   `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's stale
-  frame) and `text-wrap-remeasure-matrix.test.tsx` (full 6-mode / 30-transition matrix proving
-  the invariant; 16 transitions go RED without the fix).
+  frame) and [`text-wrap-remeasure-matrix.test.tsx`](../../packages/runtime-tests/integration/layout/text-wrap-remeasure-matrix.test.tsx) (the two public modes plus a private raw-host Vue-reactive suite covering the full retained 6-mode / 30-transition internal matrix; 16 transitions go RED without the fix).
 
 ### Second `mount()` on a live stdout is an inert no-op
 
@@ -791,14 +797,14 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **vue-tui:** drops the same straddling grapheme whole but advances the write origin to the first retained grapheme's original source column. The same example renders `" x"`: column 0 stays blank and `x` remains at column 1.
 - **Why:** clipping decides which source cells are visible; it must not change the layout coordinates of cells that remain visible. Reflowing retained text makes paint coordinates disagree with layout, geometry, hit testing, and caret placement. Preserving the gap keeps one stable surface coordinate for each painted source cell.
 - **Boundary:** horizontal clipping still runs before `<Transform>`. A transform receives the clipped substring, but its output begins at that retained substring's original column. Ordinary narrow-character clipping is unchanged, and a wide grapheme that straddles the right edge is still omitted whole.
-- **Evidence:** `grapheme-clip.test.tsx` and the left-edge cases in `overflow.test.tsx` cover plain and transformed text. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in `fullscreen-origin.test.ts` and is available to the visual review controller. The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
+- **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers plain wide and ZWJ graphemes at both viewport edges. [`private-transform.test.ts`](../../packages/runtime/src/paint/private-transform.test.ts) proves that the raw private Transform receives the clipped span while the following text keeps its source column. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in [`fullscreen-origin.test.ts`](../../packages/runtime-tests/integration/pty/fullscreen-origin.test.ts) and is available to the visual review controller. The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
 
 ### Nested overflow keeps every ancestor clip active
 
 - **Ink:** Output replay uses only the most recently pushed component clip, then applies `Transform` without clipping the callback result again. A larger inner `overflow:hidden` region or an expanding transform can therefore reopen cells already excluded by a narrower outer overflow ancestor.
 - **vue-tui:** Output replay intersects the complete active overflow stack, then intersects the terminal viewport boundary. `Transform` still receives the pre-clipped source span, but its result is contained by that same intersection. A descendant can narrow its visible region but cannot expand an ancestor-owned region.
 - **Why:** overflow is a containment boundary. Paint, semantic geometry, and later targeted pointer selection must agree on the same ancestor intersection; allowing paint to escape while hit testing remains clipped creates visible cells that no semantic target owns. This is an unstamped F5 implementation decision.
-- **Evidence:** `overflow.test.tsx` covers a width-eight nested clip inside a width-four ancestor, a transform at an empty intersected edge, post-transform containment, and the existing nested-overflow cases. `grapheme-clip.test.tsx` covers the same exclusive edge for constant and appending transforms.
+- **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers the retained public vertical ancestor intersection. [`private-transform.test.ts`](../../packages/runtime/src/paint/private-transform.test.ts) uses raw private hosts to cover a width-eight inner clip inside a width-four ancestor, post-transform containment, and constant plus appending Transform results at the ancestor's exclusive right edge. These Transform cases preserve internal paint evidence without making Transform or horizontal-overflow props public again.
 
 ### Historical: `measureElement` coerced a non-finite pre-layout dimension to `0`
 
@@ -809,23 +815,30 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Historical vue-tui behavior:** the former imperative API coerced a non-finite computed dimension to `0`, so a pre-layout read stayed finite. This was safer than leaking `NaN`, but `0` still overloaded a legitimate zero-size result, a detached target, and a not-yet-painted target.
 - **Current F5 disposition:** `measureElement()` is removed. `useElementGeometry()` publishes explicit `detached`, `pending`, `hidden`, and `zero-size` states and publishes rectangles only from an authoritative paint generation. The earlier sentinel behavior remains decision history rather than a current contract.
 
-### Out-of-type style values are forwarded, not defensively coerced
+### Historical: out-of-type style values were forwarded instead of defensively coerced
 
 - **Ink:** several flex/align setters coerce an invalid runtime value to a default:
   `flexShrink` non-number -> `1`; `alignItems`/`alignSelf`/`alignContent`/
   `justifyContent` falsy (`""`) -> their default (STRETCH / AUTO / FLEX_START); and an
   out-of-set value matches none of Ink's `if`-chain branches, so no setter runs and the
   previous/default value persists.
-- **vue-tui:** these setters trust the typed prop surface and forward the raw value to
+- **Historical vue-tui behavior:** these setters trusted the typed prop surface and forwarded the raw value to
   yoga: a non-number `flexShrink` is passed through; `toAlign("")`/`toJustify("")` look up
   `""` and pass `undefined` to the setter; and out-of-set values that yoga happens to
   accept (`space-*`/`auto` on `alignItems`) reach yoga rather than being ignored.
-- **Why:** every one of these is reachable **only** via a TS-bypass. The public prop types
+- **Historical rationale:** every one of these was reachable **only** via a TS-bypass. The public prop types
   forbid them. Within the typed contract Ink and vue-tui are identical. Ink's per-value
   coercion is defensive code for runtime values vue-tui's types already exclude. Duplicating
   those `typeof`/falsy guards would add checks for inputs the public types reject.
   (`flexGrow` is not in this set: both only coerce null/undefined -> `0`.) If a reviewer
   shows any case is reachable in-type, it becomes a bug to fix, not a divergence.
+- **Current disposition:** the closed `Box` component validates every retained enum and numeric
+  domain at render time, and rejects undeclared removed props such as `alignSelf` and
+  `alignContent`; a TS bypass no longer reaches Yoga through the public component. The private
+  raw `tui-box` host still keeps broader defensive renderer mechanics for existing internal
+  paths, but those mechanics are not a public input contract. This entry is historical rather
+  than a current divergence; the exact current evidence is
+  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
 
 ### Composables throw outside a render tree
 
@@ -833,29 +846,34 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
 - **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useRenderSession`,
   `useLayoutSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `/fullscreen`'s `useMouseEvent` and `useMouseDrag`, and
-  `useCaret` **throw** when their required context is absent. `useElementGeometry` and `useAnimation` do **not** throw:
-  geometry reports `unavailable`, and animation drives a standalone scheduler. See the additive entry.
+  `useCaret` **throw** when their required context is absent. `useElementGeometry` does **not** throw:
+  geometry reports `unavailable`. The removed `useAnimation` also used to avoid throwing by
+  creating a standalone scheduler; that behavior is recorded in the historical entry above.
 - **Why:** a composable used in the wrong place is usually a bug, and a thrown error names it at
   the call site instead of returning a context that quietly does nothing. Geometry is different:
   availability is already part of its explicit state model, so `unavailable` truthfully represents
-  a standalone or non-visual host without manufacturing a rectangle. Animation has a useful
-  standalone scheduler. Required app, terminal, focus, and input context still fail fast; no-op
+  a standalone or non-visual host without manufacturing a rectangle. Required app, terminal,
+  focus, and input context still fail fast; no-op
   defaults would hide bugs. The F5 geometry exception is unstamped.
 
-### Invalid input is validated at the component layer, not the paint layer
+### Box and Text validate their closed public contracts at the component layer
 
-- **Principle:** vue-tui validates the covered invalid render inputs — a
-  chalk-**modifier** `backgroundColor` like `"bold"`, a foreground color key that exists
-  on chalk but is not callable like `"level"`, and an unknown `borderStyle` — at the
-  **component-render layer** (`box-validate.ts` for `<Box>`, `text.vue` for `<Text>`), not
-  down at the **paint layer**. A bad
-  value therefore throws where the **error boundary** catches it -> `ErrorOverview` -> a
-  clean `reject` of `waitUntilExit()`, exactly like any other component error. The app
-  reports the error instead of crashing.
-- **Ink:** validates the same covered inputs **lazily at paint** (`colorize` /
-  `render-border`, run from the reconciler's commit hook): **outside** React's
+- **Current contract:** `Box` and `Text` have a closed declared-prop surface. Their component
+  render validates every retained structural value, including numeric domains, canonical
+  percentage width, enum values, offset/position coupling, accessibility state, booleans, and
+  the two public Text wrap modes. Undeclared attributes are rejected instead of falling through
+  to a raw host. Visual-only colors and border style are validated when a visual frame can use
+  them. The exact accepted and rejected values are locked by
+  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
+- **Layer:** `box-validate.ts`, `text-validate.ts`, and `unsupported-attrs.ts` run from the
+  `Box` / `Text` component render before Vue patches a host node. A bad value therefore throws
+  where the error boundary can produce `ErrorOverview` and reject `waitUntilExit()`, exactly
+  like another component error, instead of crashing or wedging the later paint callback.
+- **Ink visual-input comparison:** Ink validates the overlapping color and border inputs
+  **lazily at paint** (`colorize` / `render-border`, run from the reconciler's commit hook):
+  **outside** React's
   ErrorBoundary, so a bad value is an uncaught crash, not a recoverable error.
-- **Why:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
+- **Why for visual inputs:** the key constraint is where paint runs. vue-tui's paint runs in a Vue
   **post-flush callback** (`queuePostFlushCb`, decoupled from render), so a throw there
   escapes `onErrorCaptured` and wedges the scheduler. Unlike a component error, it cannot
   be made recoverable. The escape itself is symmetric, not a Vue weakness: a component
@@ -870,15 +888,15 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   input (paint's `if (!chars) return;` border fallback intercepts an invalid `borderStyle`
   that bypasses component validation), so it stands on that prior record, not an in-audit
   reproduction.
-- **Cost:** the component-layer check is eager (no paint-time layout/squash info), so it
+- **Historical vouched visual-validation cost:** the component-layer check is eager (no paint-time layout/squash info), so it
   over-throws in a few degenerate, invalid-input-only cases Ink never reaches. For the
   covered public inputs in normal reachable cases, both libraries error; only the channel
   (recoverable reject vs crash) differs. KEEP. [VOUCHED @hyf0] vue-tui
   makes the more reliable library choice here: reject the same invalid input with a
   recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
-  chalk implementation message. Tests: `background-color.test.tsx`, plus the `borderStyle`
-  validation tests.
-- **Text validates regardless of content:** `<Text>` now
+  chalk implementation message. The current exact evidence is
+  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
+- **Historical vouched Text color rule:** `<Text>` then
   validates `color` and `backgroundColor` on every render, not only when its content is
   non-empty — matching `<Box>`, which already validates its own colors unconditionally. Ink
   does not throw for empty text only because its colorize call is lazy (an incidental
@@ -886,19 +904,22 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   content, and content-gated validation is a latent footgun. Principle: reasonable behavior
   over incidental Ink parity. The former `wouldRenderNonEmptyText` gate was removed.
   Screen-reader-hidden Text still returns before validation (matches Box). [VOUCHED @hyf0]
-- **Global screen-reader mode is carved out (skipped) — ALIGNS to Ink, not a new
-  divergence:** all of the above validation is paint-time VISUAL input (color / bg /
-  border), and under GLOBAL screen-reader mode (`isScreenReaderEnabled`;
-  `INK_SCREEN_READER=true`) vue-tui — like Ink — linearizes the whole tree to PLAIN TEXT
+- **Current screen-reader ordering:** structural validation now runs before hidden-content
+  branches, so an invalid width, wrap, or accessibility state is rejected even when that node
+  would be absent from the transcript. Only paint-time visual input (color / background /
+  border) is skipped under global screen-reader mode, whether selected explicitly or through
+  `INK_SCREEN_READER=true`. There vue-tui — like Ink — linearizes the whole tree to plain text
   and never colorizes / draws borders for any node. Ink's colorize path is bypassed
   entirely under SR, so it never throws on an invalid color (run-verified against Ink
   v7.0.4: `<Box backgroundColor="bold">` with `INK_SCREEN_READER=true` renders plain text
   and does NOT throw; without it Ink throws in `colorize.js`). vue-tui previously still ran
-  the eager validation for non-`ariaHidden` boxes under SR and threw — crashing a
+  the eager visual validation for non-`ariaHidden` boxes under SR and threw — crashing a
   screen-reader user out of accessible content over a paint-only prop value. The validation
-  is now skipped when global SR is on (`box.vue` / `text.vue` v-if gate on `srEnabled`),
-  matching Ink. This removes a vue-tui over-throw and so is an alignment fix, not a new
-  divergence. Tests: the "GLOBAL SR" cases in `background-color.test.tsx`.
+  is now split by `assertBoxValid(props, !srEnabled)` and
+  `assertTextValid(props, !srEnabled)`: structural checks still run and visual checks skip.
+  This matches Ink for unused paint values without allowing hidden invalid structure. Tests:
+  the screen-reader cases in
+  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
 
 ## Non-Behavioral Notes
 

@@ -1,12 +1,8 @@
 import BoxSfc from "./components/box.vue";
 import TextSfc from "./components/text.vue";
-import SpacerSfc from "./components/spacer.vue";
-import NewlineSfc from "./components/newline.vue";
-import type { PublicComponent, PublicLeafComponent } from "./components/with-children.ts";
+import type { PublicComponent } from "./components/with-children.ts";
 import type { BoxProps } from "./components/box-props.ts";
 import type { TextProps } from "./components/text-props.ts";
-import type { SpacerProps } from "./components/spacer-props.ts";
-import type { NewlineProps } from "./components/newline-props.ts";
 
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
 export { renderToString, type RenderToStringOptions } from "./render-to-string.ts";
@@ -25,27 +21,10 @@ export type {
 // generated `DefineComponent` type bakes the build-time Vue patch release's
 // private generic arity into our tarball and breaks other supported Vue patches.
 export const Box = BoxSfc as unknown as PublicComponent<BoxProps>;
-export type {
-  AriaRole,
-  AriaState,
-  BoxLayoutStyle,
-  BoxStyle,
-  BoxProps,
-} from "./components/box-props.ts";
+export type { AriaRole, AriaState, BoxProps } from "./components/box-props.ts";
+export type { Color } from "./components/color.ts";
 export const Text = TextSfc as unknown as PublicComponent<TextProps>;
 export type { TextProps } from "./components/text-props.ts";
-export const Newline = NewlineSfc as unknown as PublicLeafComponent<NewlineProps>;
-export type { NewlineProps } from "./components/newline-props.ts";
-// Spacer takes no props and no children; the `children?: never` cast makes
-// `<Spacer>x</Spacer>` a type error under the automatic JSX runtime (parity with
-// main's spacer.ts typing). `as unknown as` (like Static) REPLACES the SFC type:
-// the empty `.vue`'s DefineComponent carries an `any` that would make a `typeof
-// SpacerSfc & {…}` intersection redundant (lint: no-redundant-type-constituents).
-export const Spacer = SpacerSfc as unknown as {
-  new (): { $props: SpacerProps & { children?: never } };
-};
-export type { SpacerProps } from "./components/spacer-props.ts";
-export { Transform, type TransformProps } from "./components/transform.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
 export { useInput, type UseInputOptions } from "./composables/useInput.ts";
@@ -97,11 +76,6 @@ export {
   type UseCaretOptions,
   type UseCaretReturn,
 } from "./composables/useCaret.ts";
-export {
-  useAnimation,
-  type UseAnimationOptions,
-  type UseAnimationReturn,
-} from "./composables/useAnimation.ts";
 export {
   useElementGeometry,
   type CellPoint,

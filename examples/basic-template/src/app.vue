@@ -21,7 +21,7 @@ useInput((event) => {
 </script>
 
 <template>
-  <Box flexDirection="column" backgroundColor="blue" borderStyle="round" width="20">
+  <Box flexDirection="column" backgroundColor="blue" borderStyle="round" :width="20">
     <Text bold color="cyan">vue-tui basic (template)</Text>
     <Text dimColor>Try editing counter.vue or app.vue</Text>
     <Text dimColor>Press c=toggle clock, q=quit</Text>

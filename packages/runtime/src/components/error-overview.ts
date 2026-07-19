@@ -337,7 +337,11 @@ export const ErrorOverview = defineComponent({
       // the entire bounded Inline viewport when the terminal has one row,
       // leaving no observable error at all. Horizontal padding retains the
       // existing visual separation without weakening the renderer row bound.
-      return h(Box, { flexDirection: "column", paddingX: 1 }, { default: () => children });
+      return h(
+        Box,
+        { flexDirection: "column", paddingLeft: 1, paddingRight: 1 },
+        { default: () => children },
+      );
     };
   },
 });

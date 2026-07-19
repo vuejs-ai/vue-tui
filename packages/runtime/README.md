@@ -81,14 +81,27 @@ useInput((event) => {
 
 ## Components
 
-| Component     | Description                                                                                    |
-| ------------- | ---------------------------------------------------------------------------------------------- |
-| `<Box>`       | Flexbox container — direction, wrap, align, justify, gap, padding, margin, borders, background |
-| `<Text>`      | Styled text — color, bold, italic, underline, strikethrough, dimColor, wrap/truncate modes     |
-| `<Spacer>`    | Expands to fill available space (`flex-grow: 1`)                                               |
-| `<Newline>`   | Inserts line breaks (configurable `count`)                                                     |
-| `<Static>`    | Commits one mounted slot tree to terminal history; import from `@vue-tui/runtime/inline`       |
-| `<Transform>` | Applies a string transform function to each rendered line                                      |
+| Component  | Description                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `<Box>`    | Terminal layout container with the supported flex, size, spacing, border, clipping, visibility, and accessibility primitives |
+| `<Text>`   | Terminal text with foreground/background color, dim, bold, inverse, wrapping, truncation, and accessibility primitives       |
+| `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`                              |
+
+`Box` and `Text` have closed prop surfaces. The exported `BoxProps` type has these 28 fields:
+
+| Purpose        | Box props                                                                                     |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| Flex layout    | `flexDirection`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `justifyContent`, `gap` |
+| Size/position  | `width`, `height`, `minWidth`, `minHeight`, `position`, `top`, `left`                         |
+| Spacing        | `marginTop`, `paddingTop`, `paddingBottom`, `paddingLeft`, `paddingRight`                     |
+| Paint/clipping | `borderStyle`, `borderColor`, `backgroundColor`, `overflowY`, `display`                       |
+| Accessibility  | `ariaLabel`, `ariaHidden`, `ariaRole`, `ariaState`                                            |
+
+The exported `TextProps` type has exactly `color`, `backgroundColor`, `dimColor`, `bold`, `inverse`, `wrap`, `ariaLabel`, and `ariaHidden`. `wrap` accepts `"wrap"` or end `"truncate"`; `borderStyle` accepts `"single"` or `"round"`. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits. Text foreground additionally accepts `"revert"` and `"initial"`.
+
+Cell counts are integers from 0 through 65,535, signed `top`, `left`, and `marginTop` values range from -65,535 through 65,535, and flex factors are finite values from 0 through 65,535. Percentage width uses a plain decimal from 0% through 100%. Before allocating a visual grid, Runtime also limits the final surface to 1,048,576 cells, so individually valid width and height values are not a promise that every pair can be painted.
+
+Unknown attributes are errors rather than ignored browser-style fallthrough. This includes removed props, misspellings, `class`, `style`, `data-*`, and listener attributes such as `@click`; `key`, `ref`, and Vue vnode lifecycle hooks remain normal Vue component mechanics. Vue templates do not reliably type-check undeclared fallthrough attributes, so Runtime performs this check before creating a terminal host node.
 
 `Static` lives only on `@vue-tui/runtime/inline` and has no props or collection-specific named types:
 
@@ -105,11 +118,18 @@ Use ordinary Vue iteration and stable keys for a collection:
 </Static>
 ```
 
-Each mounted instance commits its current slot tree once. Acceptance releases the slot subtree but preserves the component instance as its write-once identity, so reactive updates and keyed reorder do not replay accepted history. An output-free first commit also accepts the instance; use an outer `v-if` if content is not ready. A Static below a Box hidden by `display="none"` or `v-show` remains open and commits once when that ancestor is shown. Do not nest Static inside another Static, Text, or Transform. Remounting creates a new history block. Open instances in one transaction commit in current tree order, but terminal history is irreversible: a new instance later inserted before an accepted sibling still appends physically. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`.
+Each mounted instance commits its current slot tree once. Acceptance releases the slot subtree but preserves the component instance as its write-once identity, so reactive updates and keyed reorder do not replay accepted history. An output-free first commit also accepts the instance; use an outer `v-if` if content is not ready. A Static below a Box hidden by `display="none"` or `v-show` remains open and commits once when that ancestor is shown. Do not nest Static inside another Static or Text. Remounting creates a new history block. Open instances in one transaction commit in current tree order, but terminal history is irreversible: a new instance later inserted before an accepted sibling still appends physically. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`.
 
-Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, focus, geometry, caret, and Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text`, `Transform`, or `Static` is not supported.
+Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, focus, geometry, caret, and Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text` or `Static` is not supported.
 
-Nested `<Text color="revert">` and `<Text color="initial">` spans reset only their foreground to the terminal default. Reset spans may nest and wrap; an enclosing foreground resumes after the span, while background, bold, underline, and the other independent text styles continue to apply.
+Nested `<Text color="revert">` and `<Text color="initial">` spans reset only their foreground to the terminal default. Reset spans may nest and wrap; an enclosing foreground resumes after the span, while background and the retained boolean text styles continue to apply.
+
+Runtime does not export layout conveniences as separate components. Write line breaks as text, and use an ordinary Box when a flex spacer is useful:
+
+```vue
+<Text>{{ "\n".repeat(count) }}</Text>
+<Box :flexGrow="1" :flexShrink="1" />
+```
 
 ## Composables
 
@@ -130,7 +150,6 @@ Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                  |
 | `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities                        |
 | `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                                        |
-| `useAnimation(opts?)`           | Frame-based animation loop — returns `{ frame, time, delta, reset }`                                        |
 | `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref                 |
 | `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state                            |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
@@ -182,7 +201,7 @@ useInput((event) => {
 
 `move()` accepts `backward`, `forward`, `up`, `down`, `line-start`, `line-end`, `document-start`, or `document-end`, with `{ extend: true }` retaining the anchor. Movement and pointer drag stop only at complete grapheme boundaries; up/down and line commands use visual rows, while soft wraps do not insert copied newlines. `selectAll()` and `clear()` return whether they changed the selection. `copy()` returns `{ status: "empty" }` when there is no range or the range is collapsed and otherwise returns the clipboard result with the exact selected text.
 
-Selection is built from semantic Text and successful final-paint provenance. Clipped or covered content remains part of command selection, but inverse highlighting appears only on target cells that survive final composition in the displayed frame. A failed write retains the preceding accepted mapping. Transform, truncation, or another source-to-cell mapping that cannot remain exact reports `mapping-unavailable` instead of approximating. Removing or retargeting the Text clears its range; several documents may register, but only one range remains active across the app.
+Selection is built from semantic Text and successful final-paint provenance. Clipped or covered content remains part of command selection, but inverse highlighting appears only on target cells that survive final composition in the displayed frame. A failed write retains the preceding accepted mapping. Private transformed text, truncation, or another source-to-cell mapping that cannot remain exact reports `mapping-unavailable` instead of approximating. Removing or retargeting the Text clears its range; several documents may register, but only one range remains active across the app.
 
 `isActive` and `pointer` both default to true. `{ pointer: false }` keeps command selection without acquiring mouse demand and allows command-only selection on a targetable Fullscreen output whose managed stdin is unavailable. The default active pointer path uses F6 preflight and fails rather than publishing a dead mouse route. Active visual Inline use throws because Inline has no stable targetable origin; final or non-terminal output reports `host-unavailable`, screen-reader output reports `screen-reader`, and string rendering reports `string-host`. Suspension preserves the accepted text and range with status `suspended`, then continuation makes it ready only after repaint.
 
@@ -275,7 +294,7 @@ import { renderToString } from "@vue-tui/runtime";
 const document = renderToString(App, { columns: 80 });
 ```
 
-The default width is 80 columns. Terminal mode and screen-reader presentation are deliberately not options on this public string API. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` or `useApp().waitUntilRenderFlush()` reports that the operation is unavailable.
+The default width is 80 columns. `columns` must be an integer from 1 through 65,535, and it is the only option; unknown keys and attempts to pass terminal mode, rows, or presentation controls fail before rendering. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` or `useApp().waitUntilRenderFlush()` reports that the operation is unavailable.
 
 ## Links
 

@@ -562,7 +562,7 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
     });
     return () => (
       <Box width={100} height={30} flexDirection="column">
-        <Box width={100} height={29} overflow="hidden">
+        <Box width={100} height={29} overflowY="hidden">
           <ScrollBox ref={scroll}>
             <Text ref={target}>{document}</Text>
           </ScrollBox>
@@ -698,7 +698,7 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
     return () => (
       <Box width={120} height={40} flexDirection="column">
         <Text>{marker("TOP")}</Text>
-        <Box width={120} height={38} flexDirection="column" overflow="hidden">
+        <Box width={120} height={38} flexDirection="column" overflowY="hidden">
           {rows.map((row) => (
             <Box key={row.id} width={120} height={1} flexDirection="row" flexShrink={0}>
               {[
@@ -844,7 +844,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
               height={19}
               flexDirection="column"
               flexShrink={0}
-              overflow="hidden"
+              overflowY="hidden"
             >
               <Text>{`${paneFocus[pane]!.isFocused.value ? ">" : " "} pane ${pane}`}</Text>
               <ScrollBox ref={paneScroll[pane]}>
@@ -934,13 +934,13 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       <Box width={120} height={40} flexDirection="column">
         <Text>{marker("TOP")}</Text>
         <Box width={120} height={38} flexDirection="row">
-          <Box width={leftWidth.value} height={38} flexShrink={0} overflow="hidden">
+          <Box width={leftWidth.value} height={38} flexShrink={0} overflowY="hidden">
             <PaneGroup group={0} />
           </Box>
           <Box ref={dividerTarget} width={1} height={38} flexShrink={0}>
             <Text>│</Text>
           </Box>
-          <Box width={119 - leftWidth.value} height={38} flexShrink={0} overflow="hidden">
+          <Box width={119 - leftWidth.value} height={38} flexShrink={0} overflowY="hidden">
             <PaneGroup group={1} />
           </Box>
         </Box>
@@ -1441,7 +1441,7 @@ async function runJ6Fullscreen(volume: CapacityVolume): Promise<JourneyExecution
     return () => (
       <Box width={120} height={40} flexDirection="column">
         <Text>{frameMarker("TOP")}</Text>
-        <Box width={120} height={38} flexDirection="column" overflow="hidden">
+        <Box width={120} height={38} flexDirection="column" overflowY="hidden">
           {rows.map((row) => (
             <Box key={row.id} width={120} height={1} flexDirection="row" flexShrink={0}>
               {[

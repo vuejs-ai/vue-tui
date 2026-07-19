@@ -9,14 +9,7 @@ import { buildNodeOps } from "./host/node-ops.ts";
 import { paint } from "./paint/paint.ts";
 import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { prepareStaticOutput } from "./paint/static-channel.ts";
-import {
-  AppContextKey,
-  StdinContextKey,
-  AnimationSchedulerKey,
-  type AppContext,
-  type StdinContext,
-} from "./context.ts";
-import { createNoOpAnimationScheduler } from "./animation-scheduler.ts";
+import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
 import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
 import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-availability.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
@@ -35,6 +28,7 @@ import { InternalClipboardServiceKey } from "./clipboard/context.ts";
 import { createStringClipboardService } from "./clipboard/clipboard-service.ts";
 import { createInternalTextSelectionController } from "./selection/selection-controller.ts";
 import { InternalTextSelectionControllerKey } from "./selection/context.ts";
+import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -162,7 +156,6 @@ function renderStringDocument(
     app.provide(InternalClipboardServiceKey, clipboard);
     app.provide(InternalTextSelectionControllerKey, textSelection);
     app.provide(StdinContextKey, stdinContext);
-    app.provide(AnimationSchedulerKey, createNoOpAnimationScheduler());
 
     // Capture the first uncaught error so we can re-throw after cleanup.
     // Vue's error handling catches component errors internally; for a
@@ -309,16 +302,38 @@ const hasOwn = (value: object, key: PropertyKey): boolean =>
 
 function normalizeColumns(value: unknown): number {
   if (value === undefined) return 80;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
-  throw new TypeError('renderToString option "columns" must be a positive safe integer.');
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value <= MAX_LAYOUT_VALUE
+  ) {
+    return value;
+  }
+  throw new TypeError(
+    `renderToString option "columns" must be an integer between 1 and ${MAX_LAYOUT_VALUE}.`,
+  );
 }
 
 function normalizeOptionsObject(options: unknown): Record<PropertyKey, unknown> {
   if (options === undefined) return {};
-  if (typeof options !== "object" || options === null) {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
     throw new TypeError("renderToString options must be an object or undefined.");
   }
   return options as Record<PropertyKey, unknown>;
+}
+
+function rejectUnknownOptions(
+  options: Record<PropertyKey, unknown>,
+  helper: "renderToString" | "renderToStringWithScreenReader",
+): void {
+  for (const key of Reflect.ownKeys(options)) {
+    if (key === "columns") continue;
+    if (typeof key === "symbol") {
+      throw new TypeError(`${helper} received an unknown symbol option.`);
+    }
+    throw new TypeError(`${helper} received an unknown option ${JSON.stringify(key)}.`);
+  }
 }
 
 function rejectModePassthrough(options: Record<PropertyKey, unknown>): void {
@@ -343,6 +358,7 @@ function normalizePublicOptions(options: unknown): { readonly columns: number } 
   // Recognizable attempts to select a terminal mode or the private transcript
   // renderer fail before any option getter can trigger rendering side effects.
   rejectModePassthrough(object);
+  rejectUnknownOptions(object, "renderToString");
   return { columns: normalizeColumns(object.columns) };
 }
 
@@ -360,6 +376,7 @@ function normalizeInternalOptions(options: unknown): { readonly columns: number 
       'renderToStringWithScreenReader no longer accepts "isScreenReaderEnabled"; the helper name selects that presentation.',
     );
   }
+  rejectUnknownOptions(object, "renderToStringWithScreenReader");
   return { columns: normalizeColumns(object.columns) };
 }
 

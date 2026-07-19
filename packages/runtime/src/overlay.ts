@@ -19,7 +19,8 @@ const ErrorDisplay = defineComponent({
           flexDirection: "column",
           borderStyle: "single",
           borderColor: "red",
-          paddingX: 1,
+          paddingLeft: 1,
+          paddingRight: 1,
         },
         // Pass children as a slot FUNCTION, not an array: a component (Box) that
         // receives array children triggers Vue's "Non-function value encountered

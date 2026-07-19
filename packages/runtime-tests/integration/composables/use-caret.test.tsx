@@ -29,8 +29,11 @@ describe("useCaret", () => {
         const focus = useFocus(focusTarget, { autoFocus: true });
         caret = useCaret(caretTarget, { focus, position: { x: 1, y: 0 } });
         return () => (
-          <Box ref={focusTarget} marginLeft={2} width={8} height={1}>
-            <Text ref={caretTarget}>abc</Text>
+          <Box flexDirection="row">
+            <Box width={2} height={1} flexShrink={0} />
+            <Box ref={focusTarget} width={8} height={1}>
+              <Text ref={caretTarget}>abc</Text>
+            </Box>
           </Box>
         );
       });

@@ -202,7 +202,8 @@ useFocusScopeInput(approvalScope, (event) => {
       ref="approvalHost"
       borderStyle="round"
       borderColor="yellow"
-      :paddingX="1"
+      :paddingLeft="1"
+      :paddingRight="1"
     >
       <Text color="yellow">{{ pendingCommand }}</Text>
       <Text dimColor>{{ "  [Enter] run / [Esc] skip" }}</Text>

@@ -33,7 +33,7 @@ import { Spinner } from "@vue-tui/components";
 | `type`     | preset name (e.g. `"dots"`, `"line"`) | `"dots"` | a built-in spinner animation               |
 | `frames`   | `string[]`                            | —        | custom animation frames (overrides `type`) |
 | `interval` | `number`                              | preset's | ms between frames                          |
-| `color`    | `string`                              | —        | chalk color for the spinner glyph          |
+| `color`    | `Color` from `@vue-tui/runtime`       | —        | terminal color for the spinner glyph       |
 | `label`    | `string`                              | —        | text shown next to the spinner             |
 
 ## ScrollBox
