@@ -1,25 +1,18 @@
 import assert from "node:assert/strict";
 import { PassThrough, Writable } from "node:stream";
 import { nextTick, type Component, type ComponentPublicInstance } from "vue";
-import {
-  createApp,
-  type ClipboardTransportResult,
-  type MountOptions,
-  type TuiApp,
-} from "@vue-tui/runtime";
+import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
-  INTERNAL_TEST_INPUT_HOST,
   createManualSuspensionHost,
   observeTuiNodeCreations,
   runtimeResourceTracker,
   yogaNodeTracker,
   type InternalMountOptions,
   type RuntimeResourceSnapshot,
-} from "@vue-tui/runtime/internal";
-import { createTestMouse, type TestMouse } from "../../testing/src/mouse.ts";
+} from "../../runtime/dist/internal.mjs";
 import { createCapacityTerminalEmulator } from "./emulator.ts";
 import { trackCapacityLeakTarget } from "./leak-probe.ts";
 
@@ -38,9 +31,6 @@ export interface CapacityHostOptions {
   /** Focused functional tests may opt out; capacity workloads require the default census. */
   readonly trackLifetime?: boolean;
   readonly maxFps?: number;
-  readonly clipboard?: (
-    text: string,
-  ) => ClipboardTransportResult | Promise<ClipboardTransportResult>;
   readonly onRender?: (renderTime: number) => void;
 }
 
@@ -81,9 +71,7 @@ export interface CapacityHost {
   readonly stdin: NodeJS.ReadStream;
   readonly stdout: NodeJS.WriteStream;
   readonly stderr: NodeJS.WriteStream;
-  readonly mouse: TestMouse;
   readonly rawMode: Readonly<{ current: boolean; history: readonly boolean[] }>;
-  readonly mouseReporting: TestMouse["reporting"];
   readonly writes: {
     readonly stdout: readonly string[];
     readonly stderr: readonly string[];
@@ -344,20 +332,10 @@ async function mountCapacityHostWithOutput(
   });
 
   const suspensionHost = createManualSuspensionHost();
-  let mounted = false;
   let disposed = false;
   let columns = options.columns;
   let rows = options.rows;
   let app!: TuiApp;
-  let flushMounted = async (): Promise<void> => undefined;
-  const mouseController = createTestMouse({
-    columns: () => columns,
-    rows: () => rows,
-    assertCanEmit() {
-      if (!mounted || disposed) throw new Error("The capacity host is not accepting mouse input");
-    },
-    flush: () => flushMounted(),
-  });
 
   // Arm the slow phase before mount and return without a flush below. The
   // producer therefore runs while the first setup/frame transaction owns the
@@ -384,12 +362,6 @@ async function mountCapacityHostWithOutput(
   trackLifetimeTarget?.("stdin", stdin);
   trackLifetimeTarget?.("stdout", stdout);
   trackLifetimeTarget?.("stderr", stderr);
-  const clipboard = options.clipboard
-    ? {
-        kind: "custom" as const,
-        writeText: options.clipboard,
-      }
-    : undefined;
   let rootProxy: ComponentPublicInstance;
   try {
     rootProxy = app.mount({
@@ -402,17 +374,14 @@ async function mountCapacityHostWithOutput(
       maxFps: options.maxFps,
       onRender: ({ renderTime }) => options.onRender?.(renderTime),
       [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-      clipboard,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-      [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
     } as InternalMountOptions);
   } catch (error) {
     stopTuiNodeObservation();
     throw error;
   }
   trackLifetimeTarget?.("root-proxy", rootProxy);
-  mounted = true;
 
   const privateApp = app as TuiApp & {
     readonly _instance?: object | null;
@@ -456,10 +425,6 @@ async function mountCapacityHostWithOutput(
     }
     return snapshot;
   }
-  flushMounted = async () => {
-    await flush();
-  };
-
   if (!slowOutput) {
     try {
       await flush();
@@ -474,9 +439,7 @@ async function mountCapacityHostWithOutput(
     stdin,
     stdout,
     stderr,
-    mouse: mouseController.mouse,
     rawMode,
-    mouseReporting: mouseController.mouse.reporting,
     writes: Object.freeze({ stdout: stdoutWrites, stderr: stderrWrites }),
     ...(slowOutput ? { backpressure: slowOutput.probe } : {}),
     resourceSnapshot: () => runtimeResourceTracker.snapshot(),
@@ -511,7 +474,6 @@ async function mountCapacityHostWithOutput(
       if (disposed) throw new Error("The capacity host was already disposed");
       disposed = true;
       try {
-        mouseController.clearPressedButtons();
         app.unmount();
         await app.waitUntilExit();
         await slowOutput?.probe.waitForIdle();
@@ -526,7 +488,6 @@ async function mountCapacityHostWithOutput(
         stderr.destroy();
         stdin.destroy();
         await emulator.dispose();
-        mounted = false;
         return Object.freeze({
           resources,
           yoga: Object.freeze({

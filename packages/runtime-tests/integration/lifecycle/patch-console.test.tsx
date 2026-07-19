@@ -1,7 +1,8 @@
 import { Console as NodeConsole } from "node:console";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp } from "@vue-tui/runtime";
+import { createApp, Text } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 // vitest's worker console is a custom Console instance that LACKS the
@@ -40,7 +41,7 @@ test("a [Vue warn] from the initial mount is filtered (patch installed before mo
 
   try {
     const app = createApp(SetupThrower);
-    app.mount({ stdout, stderr, stdin, maxFps: 0 });
+    app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions);
     await expect(app.waitUntilExit()).rejects.toThrow("setup boom");
   } finally {
     console.warn = realWarn;
@@ -78,10 +79,79 @@ test("console is restored when mount throws synchronously", () => {
   const warnBefore = console.warn;
 
   const app = createApp(ThrowOnPatchApp);
-  expect(() => app.mount({ stdout, stderr, stdin, maxFps: 0 })).toThrow(
+  expect(() => app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions)).toThrow(
     "boom from vnode type getter",
   );
 
   expect(console.log).toBe(logBefore);
   expect(console.warn).toBe(warnBefore);
+});
+
+test.sequential("a console record emitted while the output gate is busy is retained", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+  const originalWrite = stdout.write.bind(stdout);
+  let emittedFromInsideWrite = false;
+
+  stdout.write = ((...args: unknown[]) => {
+    const chunk = String(args[0]);
+    if (!emittedFromInsideWrite && chunk.includes("FRAME")) {
+      emittedFromInsideWrite = true;
+      console.log("CONSOLE-WHILE-BUSY");
+    }
+    return (originalWrite as Function)(...args);
+  }) as NodeJS.WriteStream["write"];
+
+  const App = defineComponent(() => () => <Text>FRAME</Text>);
+  const app = createApp(App);
+  app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions);
+  await app.waitUntilRenderFlush();
+
+  expect(emittedFromInsideWrite).toBe(true);
+  expect(writes.join("")).toContain("CONSOLE-WHILE-BUSY");
+
+  app.unmount();
+  await app.waitUntilExit();
+});
+
+test.sequential("unmounting one app does not remove another app's console sink", async () => {
+  const stdoutA = makeFakeWritable();
+  const stdoutB = makeFakeWritable();
+  const stderrA = makeFakeWritable();
+  const stderrB = makeFakeWritable();
+  const { stream: stdinA } = makeFakeStdin();
+  const { stream: stdinB } = makeFakeStdin();
+  const writesB = captureWrites(stdoutB);
+  const originalLog = console.log;
+
+  const App = defineComponent(() => () => <Text>FRAME</Text>);
+  const appA = createApp(App);
+  const appB = createApp(App);
+
+  appA.mount({
+    stdout: stdoutA,
+    stderr: stderrA,
+    stdin: stdinA,
+    maxFps: 0,
+  } as InternalMountOptions);
+  appB.mount({
+    stdout: stdoutB,
+    stderr: stderrB,
+    stdin: stdinB,
+    maxFps: 0,
+  } as InternalMountOptions);
+  await Promise.all([appA.waitUntilRenderFlush(), appB.waitUntilRenderFlush()]);
+
+  appA.unmount();
+  await appA.waitUntilExit();
+  console.log("SECOND-APP-STILL-OWNS-CONSOLE");
+  await appB.waitUntilRenderFlush();
+
+  expect(writesB.join("")).toContain("SECOND-APP-STILL-OWNS-CONSOLE");
+
+  appB.unmount();
+  await appB.waitUntilExit();
+  expect(console.log).toBe(originalLog);
 });

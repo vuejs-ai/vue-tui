@@ -147,7 +147,7 @@ export function isDevConnected(): boolean {
   return devConnected;
 }
 
-// Public dev entry point for @vue-tui/vite (exposed via @vue-tui/runtime/internal).
+// Public dev entry point for @vue-tui/vite (exposed via @vue-tui/runtime/devtools).
 // Hands a live Vite hot context to the HMR bridge and flips the dev flag.
 export function connectDevtools(hot: HotContext): void {
   devConnected = true;

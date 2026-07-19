@@ -1,5 +1,6 @@
 import { PassThrough } from "node:stream";
-import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
@@ -125,7 +126,7 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   app.unmount();
 

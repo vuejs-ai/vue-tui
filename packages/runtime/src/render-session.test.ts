@@ -22,7 +22,6 @@ function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
   return {
     requestedMode: "inline",
     liveUpdatesOverride: undefined,
-    isCI: false,
     presentation: "visual",
     suspensionSupported: false,
     stdout: { isTTY: true, columns: 100, rows: 30 },
@@ -281,13 +280,6 @@ test("visual Fullscreen owns an exact detected viewport and hit map", () => {
     elementHitTesting: true,
     suspension: false,
   });
-});
-
-test("CI changes only the default and an explicit override wins", () => {
-  expect(resolveLiveSurface(liveInput({ isCI: true })).kind).toBe("final-stream");
-  expect(resolveLiveSurface(liveInput({ isCI: true, liveUpdatesOverride: true })).kind).toBe(
-    "inline-terminal",
-  );
 });
 
 test("the reactive service keeps identity and replaces dimensions atomically", () => {

@@ -3,7 +3,8 @@ import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
-import { INTERNAL_TERMINAL_SIZE_PROBE } from "@vue-tui/runtime/internal";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const App = defineComponent(() => () => <Text>Hello</Text>);
@@ -63,6 +64,23 @@ test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode")
   },
 );
 
+test.each([null, false, true, "screenreader", 0, {}, [], () => {}, Symbol("presentation"), 1n])(
+  "invalid presentation %# fails before another mount option is read",
+  (presentation) => {
+    const options = Object.defineProperty({ presentation }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow(
+      'Mount option "presentation" must be "visual", "screen-reader", or undefined',
+    );
+  },
+);
+
 test.each([null, 0, "true", {}, []])(
   "invalid liveUpdates %# fails before another mount option is read",
   (liveUpdates) => {
@@ -110,9 +128,8 @@ test("screen-reader Fullscreen request stays on the main screen", async () => {
     stdin,
     stderr,
     mode: "fullscreen",
-    liveUpdates: true,
-    isScreenReaderEnabled: true,
-  } as never);
+    presentation: "screen-reader",
+  });
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -141,7 +158,7 @@ test("visual TTY without detected dimensions uses final stream output", async ()
     mode: "fullscreen",
     liveUpdates: true,
     [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-  } as Parameters<typeof app.mount>[0]);
+  } as InternalMountOptions);
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -167,7 +184,6 @@ test("a partial custom TTY size never borrows dimensions from the process termin
     stdin,
     stderr,
     mode: "fullscreen",
-    liveUpdates: true,
   });
 
   await nextTick();

@@ -45,7 +45,7 @@ test("capacity manifest keeps the fixed J1-J6 workload", () => {
       cellsPerLine: 72,
       scrollActions: 200,
       selectionMoves: 100,
-      pointerDrags: 1,
+      rangeUpdates: 1,
       copies: 1,
     },
     j4: {
@@ -63,7 +63,7 @@ test("capacity manifest keeps the fixed J1-J6 workload", () => {
       rowsPerPane: 100,
       sparseUpdates: 200,
       focusActions: 100,
-      wheelActions: 40,
+      scrollActions: 40,
       dividerMoves: 20,
       overlayCycles: 1,
     },
@@ -104,17 +104,21 @@ test("capacity manifest keeps the fixed J1-J6 workload", () => {
   });
 });
 
-test("workloads consume only public Runtime entry points", () => {
+test("workloads use public Runtime APIs except the explicit output-coordination stress seam", () => {
   const source = readFileSync(new URL("./workloads.tsx", import.meta.url), "utf8");
   const runtimeImports = [...source.matchAll(/from "(@vue-tui\/runtime[^"]*)"/g)].map(
     (match) => match[1],
   );
-  expect(runtimeImports).toStrictEqual([
-    "@vue-tui/runtime",
-    "@vue-tui/runtime/inline",
-    "@vue-tui/runtime/fullscreen",
+  expect(runtimeImports).toStrictEqual(["@vue-tui/runtime", "@vue-tui/runtime/inline"]);
+  const repositoryPrivateImports = [
+    ...source.matchAll(/from "(\.\.\/\.\.\/runtime\/dist\/internal\.mjs)"/g),
+  ].map((match) => match[1]);
+  expect(repositoryPrivateImports).toStrictEqual([
+    "../../runtime/dist/internal.mjs",
+    "../../runtime/dist/internal.mjs",
+    "../../runtime/dist/internal.mjs",
   ]);
-  expect(source).not.toContain("@vue-tui/runtime/internal");
+  expect(source).not.toContain("../../runtime/src/internal.ts");
   expect(source).not.toContain("@vue-tui/testing");
   expect(source).not.toMatch(/\.\.\/\.\.\/runtime\/src/);
 });

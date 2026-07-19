@@ -1,7 +1,7 @@
 import { test, expect } from "vite-plus/test";
 import { PassThrough } from "node:stream";
 import { connectDevtools, devState } from "./hmr.ts";
-import { createApp } from "./render.ts";
+import { createApp, type InternalMountOptions } from "./render.ts";
 import { Text } from "./index.ts";
 import { defineComponent, h } from "vue";
 
@@ -16,7 +16,7 @@ test("dev overlay activates when connectDevtools was called (no build-define)", 
   // stale state from a previous app instance; the overlay itself is reactive and
   // will render the error on the next paint cycle.
   devState.value = { type: "error", error: { message: "BUILD-FAIL-XYZ" } };
-  app.mount({ stdout, liveUpdates: true, patchConsole: false, maxFps: 0 });
+  app.mount({ stdout, liveUpdates: true, patchConsole: false, maxFps: 0 } as InternalMountOptions);
   await Promise.resolve();
   expect(out.join("")).toContain("BUILD-FAIL-XYZ"); // overlay rendered the error
   app.unmount();

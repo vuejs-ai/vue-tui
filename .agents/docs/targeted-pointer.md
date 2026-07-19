@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** selected unstamped F6 public contract, implemented and complete on the current foundation branch. Public exports, direct v1 removal, deterministic behavior, package consumption, HMR, real PTY, headless visual review, cleanup, full local repository gates, and a direct native macOS Terminal observation agree with this record. F6, F7 Scroll composition, and F8 selection plus clipboard are Done. No VOUCHED stamp changed. The historical v1 surface remains in [mouse-input.md](./mouse-input.md); pinned peer evidence remains in [terminal-ui-prior-art.md](./terminal-ui-prior-art.md#targeted-pointer-observations).
+> **Status:** historical unstamped F6 contract. The re-audit removed the `/fullscreen` package entry and public pointer hooks because the selected API exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence; targeted pointer behavior is explicitly outside the current foundation. No VOUCHED stamp changed. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
 
 ## Product boundary
 

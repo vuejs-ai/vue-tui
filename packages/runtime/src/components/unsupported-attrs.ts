@@ -29,7 +29,7 @@ export function assertNoUnsupportedAttrs(
     if (rejectedMouseListenerNames.has(key)) {
       throw new Error(
         `<${component}> does not accept the removed mouse listener "${key}". ` +
-          `Use the mouse composables from "@vue-tui/runtime/fullscreen".`,
+          `Targeted mouse input is outside the current Runtime foundation.`,
       );
     }
     throw new Error(

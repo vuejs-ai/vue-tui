@@ -1,5 +1,7 @@
 # Accessibility (ARIA + screen-reader) API
 
+> **Status:** current ARIA behavior with the minimum Runtime host boundary. Older references to `isScreenReaderEnabled` or a package `/internal` entry are superseded by `presentation: "screen-reader"` and source-private helpers. No VOUCHED stamp changed.
+
 How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the aria-camelCase vouched entry in [ink-divergences](./ink-divergences.md); `renderToString` being layout-only remains Ink parity. The former public render-session and layout-size projections are historical; current layout code uses `useLayoutWidth()` and the setup-time nullable `useViewportHeight()`. This file keeps the _why_ and the researched / run-verified findings those entries deliberately omit, so they are not re-derived expensively. The exported aria types are part of the public contract — see [api-contract](./api-contract.md).
 
 ## The constraint that shapes everything
@@ -69,10 +71,10 @@ sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` h
 
 ## SR rendering architecture
 
-- **Live path:** `app.mount({ isScreenReaderEnabled })` (or `INK_SCREEN_READER=true`) makes each
+- **Live path:** `app.mount({ presentation: "screen-reader" })` (or `INK_SCREEN_READER=true` when presentation is not explicit) makes each
   commit emit the linearized SR text instead of the ANSI frame.
 - **Component adaptation:** there is no generic public render-session projection. Common components express one semantic tree through the typed ARIA props and let Runtime choose visual paint or the linear transcript. No current consumer needs to branch on presentation inside setup; a future real task may justify a narrow presentation fact without restoring mode resolution, writer policy, dimensions, and capabilities as one object.
-- **`renderToString`:** public, **layout-only** (matches Ink). Its SR-capable variant is `renderToStringWithScreenReader` in `@vue-tui/runtime/internal`, used by the accessibility test suite — the public string API does not surface SR (Ink also keeps its SR-string rendering test-internal). F1.5 fixes these as separate visual and screen-reader document hosts: the public function rejects recognizable hidden presentation passthrough, the internal helper name selects SR without another flag, both provide truthful string-session facts, and both use isolated inert streams rather than process terminal state.
+- **`renderToString`:** public, **layout-only** (matches Ink). Its source-private SR-capable helper is used by the accessibility test suite; the public string API does not surface SR. The visual and screen-reader document hosts remain separate and use isolated inert streams rather than process terminal state.
 - **`renderScreenReaderOutput(node)`:** the linearizer that walks the host tree's
   `internal_accessibility`. **`/internal`-only** [VOUCHED @hyf0]. Ink keeps its
   counterpart (`renderNodeToScreenReaderOutput`) module-internal and never exports it; we match
@@ -81,7 +83,7 @@ sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` h
   consumer could not name or construct the argument. No example/README/user path used it; the live
   SR machinery (`render`, the internal `renderToStringWithScreenReader`, the `<Static>` channel)
   imports it from the source module, unaffected. Public SR output is reached via the `mount`
-  `isScreenReaderEnabled` option, not by calling this directly.
+  `presentation: "screen-reader"` mount option, not by calling this directly.
 
 ## Precedents (condensed) — cross-field consensus
 

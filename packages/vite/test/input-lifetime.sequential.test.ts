@@ -149,7 +149,7 @@ test("public input survives template, script, and full HMR lifetimes", async () 
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
-    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/devtools"] },
   });
   await server.listen();
   await waitFor(read, "INPUT-LABEL-A generation=1:A");

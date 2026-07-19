@@ -7,13 +7,13 @@ const leaf = <Spinner type="line" />;
 
 // The recognizable names are present only as rejected optional-never props.
 const rejectedProps: ScrollBoxProps = {};
-// @ts-expect-error Mouse behavior is registered with @vue-tui/runtime/fullscreen composables.
+// @ts-expect-error Targeted pointer behavior is outside the current Runtime foundation.
 rejectedProps.onMousedown = () => {};
-// @ts-expect-error Mouse behavior is registered with @vue-tui/runtime/fullscreen composables.
+// @ts-expect-error Targeted pointer behavior is outside the current Runtime foundation.
 rejectedProps.onMouseup = () => {};
-// @ts-expect-error Mouse behavior is registered with @vue-tui/runtime/fullscreen composables.
+// @ts-expect-error Targeted pointer behavior is outside the current Runtime foundation.
 rejectedProps.onClick = () => {};
-// @ts-expect-error Mouse behavior is registered with @vue-tui/runtime/fullscreen composables.
+// @ts-expect-error Targeted pointer behavior is outside the current Runtime foundation.
 rejectedProps.onWheel = () => {};
 // @ts-expect-error ScrollBox is passive; listeners cannot fall through to its viewport Box.
 const rejectedScrollBoxListener = <ScrollBox onClick={() => {}}>content</ScrollBox>;

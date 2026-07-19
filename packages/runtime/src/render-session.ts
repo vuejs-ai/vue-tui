@@ -111,7 +111,6 @@ export type InternalRenderSessionSnapshot = RenderSession;
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
   readonly liveUpdatesOverride: boolean | undefined;
-  readonly isCI: boolean;
   readonly presentation: RenderPresentation;
   /** Whether this live host can coordinate restore-before-stop and resume. */
   readonly suspensionSupported: boolean;
@@ -263,7 +262,7 @@ function unavailableCapabilities(suspension: boolean): RenderCapabilities {
 
 export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   const dimensions = resolveLiveDimensions(input.stdout, input.terminalProbe);
-  const liveUpdates = input.liveUpdatesOverride ?? (!input.isCI && input.stdout.isTTY);
+  const liveUpdates = input.liveUpdatesOverride ?? input.stdout.isTTY;
 
   if (!liveUpdates) {
     const reason = "live-updates-disabled" as const;

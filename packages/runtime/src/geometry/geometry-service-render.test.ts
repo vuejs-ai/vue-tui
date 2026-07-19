@@ -1,7 +1,7 @@
 import { PassThrough, Readable } from "node:stream";
-import { defineComponent, h, nextTick, ref, shallowRef, type ShallowRef } from "vue";
+import { defineComponent, h, nextTick, shallowRef, type ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { createApp, type MountOptions } from "../render.ts";
+import { createApp, type InternalMountOptions } from "../render.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import type { InternalElementGeometry } from "./geometry-service.ts";
 import { useInternalElementGeometry } from "./internal-use-element-geometry.ts";
@@ -17,46 +17,6 @@ function streams() {
 }
 
 describe("live geometry service wiring", () => {
-  test.each(["inline", "fullscreen"] as const)(
-    "%s app.clear invalidates the erased generation until a real repaint",
-    async (mode) => {
-      const host = streams();
-      const content = ref("first");
-      let geometry!: Readonly<ShallowRef<InternalElementGeometry>>;
-      let target!: ShallowRef<unknown>;
-      const Root = defineComponent(() => {
-        target = shallowRef<unknown>(null);
-        geometry = useInternalElementGeometry(target);
-        return () =>
-          h("tui-box", { ref: target, width: 6, height: 1 }, [h("tui-text", null, content.value)]);
-      });
-      const app = createApp(Root);
-      app.mount({ ...host, patchConsole: false, maxFps: 0, liveUpdates: true, mode });
-      await nextTick();
-      await app.waitUntilRenderFlush();
-      expect(target.value).not.toBeNull();
-      expect((target.value as { type?: string }).type).toBe("tui-box");
-      expect(geometry.value).toMatchObject({
-        status: "visible",
-        surface: { x: 0, y: 0, width: 6, height: 1 },
-      });
-
-      app.clear();
-      expect(geometry.value).toEqual({ status: "pending" });
-
-      content.value = "second";
-      await nextTick();
-      await app.waitUntilRenderFlush();
-      expect(geometry.value.status).toBe("visible");
-
-      app.unmount();
-      expect(geometry.value).toEqual({ status: "detached" });
-      host.stdout.destroy();
-      host.stderr.destroy();
-      host.stdin.destroy();
-    },
-  );
-
   test("screen-reader presentation never publishes visual geometry", async () => {
     const host = streams();
     let geometry!: Readonly<ShallowRef<InternalElementGeometry>>;
@@ -73,7 +33,7 @@ describe("live geometry service wiring", () => {
       liveUpdates: true,
       isScreenReaderEnabled: true,
       mode: "fullscreen",
-    });
+    } as InternalMountOptions);
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(geometry.value).toEqual({ status: "unavailable" });
@@ -100,7 +60,7 @@ describe("live geometry service wiring", () => {
       liveUpdates: true,
       mode: "fullscreen",
       [INTERNAL_SUSPENSION_HOST]: suspension,
-    } as MountOptions);
+    } as InternalMountOptions);
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(geometry.value.status).toBe("visible");
@@ -134,7 +94,7 @@ describe("live geometry service wiring", () => {
       liveUpdates: false,
       mode: "inline",
       [INTERNAL_SUSPENSION_HOST]: suspension,
-    } as MountOptions);
+    } as InternalMountOptions);
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(geometry.value).toMatchObject({
@@ -143,8 +103,6 @@ describe("live geometry service wiring", () => {
     });
 
     const beforeSuspension = geometry.value;
-    app.clear();
-    expect(geometry.value).toBe(beforeSuspension);
     await suspension.suspend();
     expect(geometry.value).toBe(beforeSuspension);
     await suspension.resume();

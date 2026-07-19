@@ -1,8 +1,8 @@
 import { expect, test } from "vite-plus/test";
 import * as api from "@vue-tui/runtime";
-import * as fullscreenApi from "@vue-tui/runtime/fullscreen";
+import * as devtoolsApi from "@vue-tui/runtime/devtools";
 import * as inlineApi from "@vue-tui/runtime/inline";
-import * as internalApi from "@vue-tui/runtime/internal";
+import * as testingApi from "@vue-tui/runtime/testing";
 
 // The EXACT public runtime (value) export surface of `@vue-tui/runtime`. The test below snapshots
 // it exhaustively: adding, removing, or renaming ANY value export fails — so every change to the
@@ -20,30 +20,29 @@ const PUBLIC_VALUE_EXPORTS = [
   "useApp",
   "useBoxPresence",
   "useBoxSize",
-  "useClipboard",
   "useInput",
   "useLayoutWidth",
-  "useStderr",
   "useStdin",
-  "useStdout",
   "useViewportHeight",
   // Rendering
   "renderToString",
 ];
 
-const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent", "useTextSelection"];
 const INLINE_VALUE_EXPORTS = ["Static"];
+const DEVTOOLS_VALUE_EXPORTS = ["connectDevtools"];
+const TESTING_VALUE_EXPORTS = ["createTestHostBridge"];
 
 test("public API surface is exactly the documented value-export set", () => {
   expect(Object.keys(api).sort()).toEqual([...PUBLIC_VALUE_EXPORTS].sort());
 });
 
-test("Fullscreen API surface is exactly the Fullscreen interaction value-export set", () => {
-  expect(Object.keys(fullscreenApi).sort()).toEqual(FULLSCREEN_VALUE_EXPORTS);
-});
-
 test("Inline API surface is exactly the terminal-history value-export set", () => {
   expect(Object.keys(inlineApi).sort()).toEqual(INLINE_VALUE_EXPORTS);
+});
+
+test("supported infrastructure subpaths stay narrow", () => {
+  expect(Object.keys(devtoolsApi).sort()).toEqual(DEVTOOLS_VALUE_EXPORTS);
+  expect(Object.keys(testingApi).sort()).toEqual(TESTING_VALUE_EXPORTS);
 });
 
 test("keeps Static on the Inline subpath without root API duplication", () => {
@@ -53,14 +52,9 @@ test("keeps Static on the Inline subpath without root API duplication", () => {
   expect(inlineApi).not.toHaveProperty("Box");
 });
 
-test("keeps clipboard common and selectable text Fullscreen-only", () => {
-  expect(api).toHaveProperty("useClipboard");
+test("keeps pointer, selection, and clipboard policy outside the Runtime foundation", () => {
+  expect(api).not.toHaveProperty("useClipboard");
   expect(api).not.toHaveProperty("useTextSelection");
-  expect(fullscreenApi).toHaveProperty("useTextSelection");
-  expect(fullscreenApi).not.toHaveProperty("useClipboard");
-});
-
-test("removes the superseded root mouse APIs without compatibility shims", () => {
   expect(api).not.toHaveProperty("useMouseInput");
   expect(api).not.toHaveProperty("useDraggable");
   expect(api).not.toHaveProperty("useMouseEvent");
@@ -114,7 +108,7 @@ test("publishes narrow layout facts without the internal session graph", () => {
   expect(api).not.toHaveProperty("useRenderSession");
 });
 
-test("withholds the old cell-coordinate caret until semantic Text mapping exists", () => {
+test("keeps physical caret placement outside the minimum foundation", () => {
   expect(api).not.toHaveProperty("useCaret");
   expect(api).not.toHaveProperty("useCursor");
 });
@@ -133,18 +127,16 @@ test("does not expose internal text-measurement helpers (Ink keeps them internal
 // module-internal and never re-exports it; we match that. It was never usefully
 // callable from the public barrel anyway: its only parameter type (`TuiNode`) and the
 // node-construction primitives needed to build one live only in
-// `@vue-tui/runtime/internal`. It moves there. See .agents/docs/accessibility-api.md.
+// `../../runtime/src/internal.ts`. It moves there. See .agents/docs/accessibility-api.md.
 test("does not expose the screen-reader linearizer publicly (Ink keeps it internal)", () => {
   expect(api).not.toHaveProperty("renderScreenReaderOutput");
-  expect(internalApi).toHaveProperty("renderScreenReaderOutput");
 });
 
 // Compile-time guard for the TYPE half of the contract (types are erased at runtime, so this
 // can't be an `expect()`): `ScreenReaderOptions` is internal-only too. Importing it from the
 // PUBLIC barrel must NOT type-check — if it is ever re-added there, this `@ts-expect-error` goes
 // unused and `tsc --noEmit` fails. Same idiom as the prop-type fixtures in integration/pty/fixtures.
-// It DOES type-check from `/internal`, which the runtime guard above already proves is the home.
-// @ts-expect-error - ScreenReaderOptions is exported only from @vue-tui/runtime/internal
+// @ts-expect-error - ScreenReaderOptions is private Runtime implementation detail.
 export type _ScreenReaderOptionsIsInternalOnly = import("@vue-tui/runtime").ScreenReaderOptions;
 
 // The parallel guard for the public `renderToString`'s dropped `isScreenReaderEnabled` OPTION lives

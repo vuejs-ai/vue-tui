@@ -2,7 +2,7 @@ import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useViewportHeight } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader as renderToString } from "@vue-tui/runtime/internal";
+import { renderToStringWithScreenReader as renderToString } from "../../../runtime/dist/internal.mjs";
 
 // NOTE: tests that auto-detect SR via the process-GLOBAL env var
 // `INK_SCREEN_READER` live in use-screen-reader-env.sequential.test.tsx (the

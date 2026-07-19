@@ -3,6 +3,7 @@ import { expect, test } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -33,7 +34,7 @@ test.sequential("live commit path emits linear screen-reader text (no border gly
     stdout,
     stdin,
     stderr,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
   });
 
   await nextTick();
@@ -70,8 +71,8 @@ test.sequential("forced live screen-reader output updates a non-TTY without alte
     stderr,
     liveUpdates: true,
     mode: "fullscreen",
-    isScreenReaderEnabled: true,
-  });
+    presentation: "screen-reader",
+  } as InternalMountOptions);
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -155,7 +156,7 @@ test.sequential("live static channel emits linear screen-reader text (no border 
     stdout,
     stdin,
     stderr,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
   });
 
   await nextTick();
@@ -197,7 +198,7 @@ test.sequential("empty SR frame does not write a spurious blank trailing line", 
     stdout,
     stdin,
     stderr,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
   });
 
   await nextTick();
@@ -242,7 +243,7 @@ test.sequential("non-empty multi-line SR frame appends no trailing newline and e
     stdout,
     stdin,
     stderr,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
   });
 
   await nextTick();
@@ -319,7 +320,7 @@ test.sequential("tall/overflowing SR transcript never clears terminal, replays s
     stdout,
     stdin,
     stderr,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
   });
 
   await nextTick();

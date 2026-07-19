@@ -7,6 +7,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable } from "./test-streams.ts";
 
 // A fake stdin that, like a real PTY, reflects the last setRawMode call in `isRaw`
@@ -69,7 +70,7 @@ test.sequential("swapping useInput components clears pending parser state (no le
   const { stream: stdin } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
   await nextTick();
 
   // Buffer a partial escape sequence (CSI start, no final byte). The parser
@@ -115,7 +116,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   const { stream: stdin, rawMode } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
   await nextTick();
 
   expect(rawMode.current).toBe(true);

@@ -1,6 +1,6 @@
 # Logical focus and focus scopes
 
-> **Status:** completed, unstamped F4 contract and implementation, reconfirmed by final Runtime foundation closure. Opaque ref-bound targets, scopes, focused and scope input, normalized external fallthrough, exact manager handles, renderer ownership, and direct removal of the prior registry/default/raw path agree. Final closure adds one internal correction: host-only rendered reconciliation reuses the accepted generation only for an exact semantic no-op with no logical mutation, while a real route or traversal change publishes a replacement. F3's stale-selected-path resolution remains fail-closed. Final evidence is recorded in [Runtime foundation closure](./runtime-foundation-closure.md#focus-pty-and-visual-evidence); no VOUCHED stamp is implied.
+> **Status:** historical unstamped F4 record. The re-audit withdrew focus targets, scopes, focused subscriptions, external forwarding, and the public manager because they bundle application policy. Their sound renderer and route mechanisms remain private evidence. Higher layers may compose focus from Vue state and one public `useInput()` subscription; a future real consumer may justify a smaller Runtime-only fact. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
 
 ## Product problem
 

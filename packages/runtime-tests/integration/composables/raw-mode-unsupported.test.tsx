@@ -52,7 +52,7 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   });
 
   try {
-    app.mount({ stdout, stdin, maxFps: 0 });
+    app.mount({ stdout, stdin });
   } catch (e) {
     error = e as Error;
   }
@@ -78,7 +78,7 @@ test("useStdin exposes only the exact custom stream mounted into the application
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0 });
+  app.mount({ stdout, stdin });
   try {
     expect(observed?.stdin).toBe(stdin);
     expect(Reflect.ownKeys(observed!)).toEqual(["stdin"]);
@@ -141,7 +141,7 @@ test.each(["inline", "fullscreen"] as const)(
     });
     const app = createApp(App);
 
-    app.mount({ mode, stdout, stderr, stdin, maxFps: 0 });
+    app.mount({ mode, stdout, stderr, stdin });
     await expect(app.waitUntilExit()).rejects.toThrow(
       "Managed input is unavailable because the mounted stdin is not a controllable TTY",
     );

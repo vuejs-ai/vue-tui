@@ -30,7 +30,9 @@ export type KittyKeyboardOptions = {
 };
 
 /** Repository-only mount override. Production mounts always use private auto negotiation. */
-export const INTERNAL_KITTY_KEYBOARD: unique symbol = Symbol("vue-tui.internal-kitty-keyboard");
+export const INTERNAL_KITTY_KEYBOARD: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-kitty-keyboard",
+);
 
 export interface InternalKittyKeyboardMountOptions {
   readonly mode: "auto" | "enabled" | "disabled";

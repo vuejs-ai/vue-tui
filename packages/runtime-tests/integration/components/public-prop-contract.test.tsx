@@ -6,7 +6,7 @@ import {
   observeTuiNodeCreations,
   renderToStringWithScreenReader,
   type TuiBox,
-} from "@vue-tui/runtime/internal";
+} from "../../../runtime/dist/internal.mjs";
 
 function renderBox(props: Record<string, unknown>): string {
   const App = defineComponent(

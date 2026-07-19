@@ -1,5 +1,7 @@
 # Mouse input — design & decision record
 
+> **Current status:** historical mouse design evidence only. The minimum Runtime foundation exposes no mouse hook or `/fullscreen` subpath; targeted pointer behavior remains explicitly outside the current foundation. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
+
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:
 > [#207](https://github.com/vuejs-ai/vue-tui/issues/207). Builds on the low-level stream

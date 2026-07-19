@@ -24,7 +24,7 @@ type _RemovedTransform = typeof import("@vue-tui/runtime").Transform;
 // Children are accepted (the shim's whole purpose under the automatic runtime).
 export const accepted = [
   <Text color="green">plain text child</Text>,
-  <Text color="initial" backgroundColor="#12abEF" inverse wrap="truncate">
+  <Text color="initial" backgroundColor="#12abEF" wrap="truncate">
     narrowed text props
   </Text>,
   <Box flexDirection="row">

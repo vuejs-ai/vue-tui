@@ -12,7 +12,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Vue SFC & JSX** — `<template>`, TSX, or render functions — your choice
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
 - **Normalized input primitive** — stable text, paste, and key facts without exposing terminal-protocol details
-- **Fullscreen selection and copy** — semantic Text ranges plus explicit custom or OSC 52 clipboard transport
+- **Small public foundation** — renderer-owned facts stay public only when application code cannot derive them safely
 - **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
 - **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
@@ -82,7 +82,7 @@ useInput((event) => {
 | Component  | Description                                                                                                                  |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `<Box>`    | Terminal layout container with the supported flex, size, spacing, border, clipping, visibility, and accessibility primitives |
-| `<Text>`   | Terminal text with foreground/background color, dim, bold, inverse, wrapping, truncation, and accessibility primitives       |
+| `<Text>`   | Terminal text with foreground/background color, dim, bold, wrapping, truncation, and accessibility primitives                |
 | `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`                              |
 
 `Box` and `Text` have closed prop surfaces. The exported `BoxProps` type has these 28 fields:
@@ -95,7 +95,7 @@ useInput((event) => {
 | Paint/clipping | `borderStyle`, `borderColor`, `backgroundColor`, `overflowY`, `display`                       |
 | Accessibility  | `ariaLabel`, `ariaHidden`, `ariaRole`, `ariaState`                                            |
 
-The exported `TextProps` type has exactly `color`, `backgroundColor`, `dimColor`, `bold`, `inverse`, `wrap`, `ariaLabel`, and `ariaHidden`. `wrap` accepts `"wrap"` or end `"truncate"`; `borderStyle` accepts `"single"` or `"round"`. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits. Text foreground additionally accepts `"revert"` and `"initial"`.
+The exported `TextProps` type has exactly `color`, `backgroundColor`, `dimColor`, `bold`, `wrap`, `ariaLabel`, and `ariaHidden`. `wrap` accepts `"wrap"` or end `"truncate"`; `borderStyle` accepts `"single"` or `"round"`. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits. Text foreground additionally accepts `"revert"` and `"initial"`.
 
 Cell counts are integers from 0 through 65,535, signed `top`, `left`, and `marginTop` values range from -65,535 through 65,535, and flex factors are finite values from 0 through 65,535. Percentage width uses a plain decimal from 0% through 100%. Before allocating a visual grid, Runtime also limits the final surface to 1,048,576 cells, so individually valid width and height values are not a promise that every pair can be painted.
 
@@ -131,21 +131,15 @@ Runtime does not export layout conveniences as separate components. Write line b
 
 ## Composables
 
-| Composable                      | Description                                                                                                 |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`      | Frozen insertion text, complete paste payloads, and finite key identities; `isActive` gates input demand    |
-| `useMouseEvent(ref, event, fn)` | Targeted Fullscreen `"click"` or `"wheel"`; import from `@vue-tui/runtime/fullscreen`                       |
-| `useMouseDrag(ref, fn, opts?)`  | One captured Fullscreen drag lifecycle; import from `@vue-tui/runtime/fullscreen`                           |
-| `useTextSelection(ref, opts?)`  | Command and pointer selection for exactly one top-level Fullscreen Text; import from the Fullscreen subpath |
-| `useClipboard()`                | Read and write through the one app-owned custom or OSC 52 clipboard transport                               |
-| `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                  |
-| `useLayoutWidth()`              | Readonly reactive width Runtime gives the root layout on every host                                         |
-| `useViewportHeight()`           | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
-| `useBoxSize(ref)`               | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
-| `useBoxPresence(ref)`           | Whether one directly referenced `<Box>` belongs to the last accepted live renderer tree                     |
-| `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
-| `useStdout()`                   | Commit geometry-safe styled lines with explicit flow control, or access the deliberately raw stdout stream  |
-| `useStderr()`                   | Commit geometry-safe styled lines with explicit flow control, or access the deliberately raw stderr stream  |
+| Composable                 | Description                                                                                                 |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)` | Frozen insertion text, complete paste payloads, and finite key identities; `isActive` gates input demand    |
+| `useApp()`                 | In-tree exit request — `{ exit(error?) }`; host-owned lifecycle barriers stay on the app handle             |
+| `useLayoutWidth()`         | Readonly reactive width Runtime gives the root layout on every host                                         |
+| `useViewportHeight()`      | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
+| `useBoxSize(ref)`          | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
+| `useBoxPresence(ref)`      | Whether one directly referenced `<Box>` belongs to the last accepted live renderer tree                     |
+| `useStdin()`               | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
 
 `useInput()` delivers a frozen event whose `kind` is `"text"`, `"paste"`, or `"key"`. Text and paste events contain `text`; a key event contains either a finite `name` or one shortcut `character`, plus top-level `shift`, `alt`, and `ctrl` booleans. Terminal protocol, byte sequence, codepoint, repeat/release, and uninterpreted-input details remain private. Handlers normally return nothing. The exact object `{ preventDefault: true }` suppresses only Runtime's delayed Ctrl+C default for that event; it does not stop other `useInput()` subscriptions. Unless a handler throws, every subscription captured for an event runs in registration order.
 
@@ -242,59 +236,15 @@ const graphWidth = computed(() => panelSize.value?.width ?? 24);
 
 During suspension, the numeric layout refs and each same-target accepted Box size and presence keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint; an invalid resize pair does not replace the last coherent dimensions. After unmount, layout refs keep their final values and stop updating, while Box size becomes `null` and Box presence becomes false when the target detaches. Calling any of these hooks outside a vue-tui render tree throws.
 
-These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output, terminal-cursor placement, and mouse behavior. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
+These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output and possible future terminal interaction primitives. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
 
 The earlier public focus-bound `useCaret()` experiment is withdrawn. Runtime still owns the private terminal cursor and its restoration, but a future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates. That decision belongs to the caret and editable-text review path; no current public caret API should be inferred from the private mechanism.
 
-### Fullscreen text selection and clipboard
+### Interaction capabilities outside this foundation
 
-`useTextSelection()` is exported from `@vue-tui/runtime/fullscreen`. It targets exactly one top-level `<Text>` and derives the copied semantic document from that Text tree, including nested styled Text. It does not accept a duplicate text value, a Box, a nested Text target, or a list of sources.
+Physical caret placement, targeted pointer routing, arbitrary-Text selection, and Runtime-owned clipboard transport are not public Runtime APIs in this foundation. Basic editable text and keyboard scrolling can be built from `useInput()`, Vue state, rendered glyphs, and component methods. A custom clipboard adapter is ordinary application dependency injection.
 
-```vue
-<script setup lang="ts">
-import { shallowRef, type ComponentPublicInstance } from "vue";
-import { Text, useInput } from "@vue-tui/runtime";
-import { useTextSelection } from "@vue-tui/runtime/fullscreen";
-
-const documentRef = shallowRef<ComponentPublicInstance | null>(null);
-const selection = useTextSelection(documentRef);
-
-useInput((event) => {
-  if (event.kind === "text" && event.text === "a") {
-    selection.selectAll();
-    return;
-  }
-  if (event.kind === "text" && event.text === "c") {
-    void selection.copy();
-  }
-});
-</script>
-
-<template>
-  <Text ref="documentRef"
-    >Select 你🙂 across <Text color="cyan">nested styles</Text> and wraps.</Text
-  >
-</template>
-```
-
-`move()` accepts `backward`, `forward`, `up`, `down`, `line-start`, `line-end`, `document-start`, or `document-end`, with `{ extend: true }` retaining the anchor. Movement and pointer drag stop only at complete grapheme boundaries; up/down and line commands use visual rows, while soft wraps do not insert copied newlines. `selectAll()` and `clear()` return whether they changed the selection. `copy()` returns `{ status: "empty" }` when there is no range or the range is collapsed and otherwise returns the clipboard result with the exact selected text.
-
-Selection is built from semantic Text and successful final-paint provenance. Clipped or covered content remains part of command selection, but inverse highlighting appears only on target cells that survive final composition in the displayed frame. A failed write retains the preceding accepted mapping. Private transformed text, truncation, or another source-to-cell mapping that cannot remain exact reports `mapping-unavailable` instead of approximating. Removing or retargeting the Text clears its range; several documents may register, but only one range remains active across the app.
-
-`isActive` and `pointer` both default to true. `{ pointer: false }` keeps command selection without acquiring mouse demand and allows command-only selection on a targetable Fullscreen output whose managed stdin is unavailable. The default active pointer path uses F6 preflight and fails rather than publishing a dead mouse route. Active visual Inline use throws because Inline has no stable targetable origin; final or non-terminal output reports `host-unavailable`, screen-reader output reports `screen-reader`, and string rendering reports `string-host`. Suspension preserves the accepted text and range with status `suspended`, then continuation makes it ready only after repaint.
-
-`useClipboard()` is exported from the common root and requires one explicit mount transport:
-
-```ts
-createApp(App).mount({
-  mode: "fullscreen",
-  clipboard: { kind: "osc52" },
-});
-```
-
-The OSC 52 adapter returns `requested` after writing the UTF-8 Base64 request; vue-tui cannot observe terminal acceptance and never reports `copied` for it. A custom adapter has the shape `{ kind: "custom", writeText }` and returns `copied`, `requested`, `unavailable`, or `rejected`. Calls run in FIFO order and recheck suspension or disposal before queued work starts. Every `ClipboardWriteResult` contains the exact requested text, so unavailable or rejected results can be shown as a manual fallback without retaining another copy source. The runtime supplies no default transport, operating-system command, payload-limit guess, or automatic fallback chain.
-
-`useClipboard().availability` distinguishes an `available` custom or OSC 52 transport from `not-configured`, `output-not-terminal`, `screen-reader`, `suspended`, `disposed`, or `string-host`. A custom adapter can work on Inline, Fullscreen, final, non-terminal, or screen-reader live hosts; when that adapter returns unavailable, the write result uses `transport-unavailable` and preserves its optional reason as `detail`. OSC 52 requires live visual terminal output.
+Exact terminal-caret placement, pointer hit testing and capture, and arbitrary existing Text selection need final-paint facts that application code cannot derive. The current internal mechanisms remain private implementation material while a smaller, stable Runtime-only primitive is proven. OSC 52 support is also deferred; no public `/fullscreen` interaction subpath or `MountOptions.clipboard` contract should be inferred from the private code.
 
 ## App Lifecycle
 
@@ -309,21 +259,29 @@ const app = createApp(App);
 app.mount();
 await app.waitUntilExit();
 
-// Custom streams (for testing):
-createApp(App).mount({ stdout, stdin, stderr });
+// Explicit host choices:
+const fullscreen = createApp(App);
+fullscreen.mount({
+  mode: "fullscreen",
+  presentation: "visual",
+  stdout,
+  stdin,
+  stderr,
+  patchConsole: true,
+});
 ```
 
-Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. `Box` and `Text` remain passive in both modes; attach targeted click, wheel, captured-drag, or top-level-Text selection behavior to an ordinary component ref through `useMouseEvent()`, `useMouseDrag()`, or `useTextSelection()` from `@vue-tui/runtime/fullscreen`. Active hooks reject an effective visual Inline surface instead of silently doing nothing. Expected non-targetable pointer presentations remain inert, while selection reports an explicit unavailable state. Because the alternate screen is a fixed application-owned viewport, an effective visual Fullscreen surface rejects `Static`; use application state and a viewport component for retained Fullscreen content.
+`mount()` has six public options: `stdout`, `stdin`, `stderr`, `mode`, `presentation`, and `patchConsole`. Output cadence, frame-rate tuning, renderer observation, terminal protocols, and clipboard transports are Runtime implementation choices rather than mount policy.
 
-Mouse reporting is demand-driven: only a visible target from an accepted Fullscreen frame acquires the minimum required SGR level, and removing the last target restores it. While reporting is active, the terminal normally gives mouse selection and wheel input to the application instead of its native selection or scrolling. `useTextSelection()` provides application-owned replacement selection for one Text document; leaving it and other mouse hooks inactive keeps terminal-native behavior in control.
+The returned app handle owns two barriers. `waitUntilRenderFlush()` is available only between a successful mount and teardown and resolves after queued Vue work, coordinated console output, and the current terminal write have settled. `waitUntilExit()` resolves with no value after normal restoration, rejects with the exact `Error` passed to `useApp().exit(error)`, and rejects with an `AggregateError` if an otherwise normal exit cannot completely restore terminal state. `unmount()` starts teardown but remains synchronous; await `waitUntilExit()` when later process work depends on restoration being complete.
 
-The live host requires controllable TTY input and an xterm-compatible SGR mouse profile; `TERM=dumb` is rejected when a visible target first demands reporting. SGR has no capability handshake, so a terminal that accepts the control bytes but silently ignores mouse reporting is indistinguishable from a user who sends no mouse input. In that case the hook receives no events and vue-tui does not guess or fall back to a different protocol.
+An app instance has one real mount attempt. A same-stdout ownership conflict is a call-scoped no-op and does not consume it, but a mount that proceeds into validation or acquisition cannot be retried after success or failure. Runtime composes a Vue error handler configured before mount rather than replacing it. Multiple mounted apps share one console patch safely; unmounting one app does not remove another app's sink.
+
+Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. `Box` and `Text` remain passive in both modes. Because the alternate screen is a fixed application-owned viewport, an effective visual Fullscreen surface rejects `Static`; use application state and a viewport component for retained Fullscreen content.
 
 Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use one keyed `<Static>` instance from `@vue-tui/runtime/inline` per completed history block, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback.
 
-Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>`, `useStdout().write()`, `useStderr().write()`, and patched console calls coordinate with the live region and commit their output once. On a TTY, the coordinated `write()` functions accept styled multiline text: they retain SGR, OSC 8 hyperlinks, and line feeds while removing cursor/erase sequences, other OSC commands, and geometry-changing control bytes. Redirected stderr and non-TTY streams remain byte-exact. The `stdout`/`stderr` streams returned by those composables, direct `process.stdout.write()`, and other raw stream writes deliberately bypass sanitization and ownership coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
-
-Each coordinated `write()` returns a `CoordinatedWriteResult`. `{ status: "accepted", writable: true }` means the complete transaction was accepted and another may start immediately. `{ status: "accepted", writable: false, ready }` means the bytes were accepted exactly once but the stream backpressured; await `ready` before starting another transaction. `{ status: "blocked", ready }` means an earlier transaction owns the output gate, the new bytes were not retained, and the caller may retry after `ready` only if they are still desired. A `false` Writable return is therefore acceptance with flow control, not a request to resend the same bytes.
+Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>` and patched `console.log()` / `console.error()` calls coordinate with the live region instead of corrupting it. Direct writes to `process.stdout` or a custom stream deliberately bypass Runtime's frame coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
 
 If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
@@ -348,7 +306,16 @@ import { renderToString } from "@vue-tui/runtime";
 const document = renderToString(App, { columns: 80 });
 ```
 
-The default width is 80 columns. `columns` must be an integer from 1 through 65,535, and it is the only option; unknown keys and attempts to pass terminal mode, rows, or presentation controls fail before rendering. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` or `useApp().waitUntilRenderFlush()` reports that the operation is unavailable.
+The default width is 80 columns. `columns` must be an integer from 1 through 65,535, and it is the only option; unknown keys and attempts to pass terminal mode, rows, or presentation controls fail before rendering. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components receive the deliberate document width and isolated inert streams; calling `useApp().exit()` reports that the operation is unavailable.
+
+## Package subpaths
+
+- `@vue-tui/runtime` is the common application surface.
+- `@vue-tui/runtime/inline` contains only `Static`, because terminal history is meaningful only for Inline applications.
+- `@vue-tui/runtime/devtools` contains only `connectDevtools()` for the official Vite integration.
+- `@vue-tui/runtime/testing` contains only the low-level test-host bridge used by `@vue-tui/testing`; it gives third-party test tools the same supported access.
+
+There is no supported `/internal` or `/fullscreen` import. Fullscreen is selected with `mount({ mode: "fullscreen" })`; private parser, renderer, terminal-protocol, mouse, selection, and clipboard mechanisms are not package contracts.
 
 ## Links
 

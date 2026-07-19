@@ -42,7 +42,9 @@ export interface ManualSuspensionHost extends SuspensionHost {
 }
 
 /** Internal mount-option key used by deterministic hosts to replace OS signals. */
-export const INTERNAL_SUSPENSION_HOST: unique symbol = Symbol("vue-tui:suspension-host");
+export const INTERNAL_SUSPENSION_HOST: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-suspension-host",
+);
 
 interface Registration {
   readonly hooks: SuspensionHooks;

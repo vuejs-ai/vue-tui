@@ -1,6 +1,6 @@
 # Fullscreen text selection and clipboard
 
-> **Status:** selected unstamped F8 public contract, first completed at `3d7e197` and reconfirmed by final Runtime foundation closure on local candidate implementation head `e31aa1a`. F8 is Done; Runtime closure no longer continues from this checkpoint. Final evidence is centralized in [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence). This record carries no VOUCHED stamp.
+> **Status:** historical unstamped F8 contract. The re-audit removed `/fullscreen`, public arbitrary-Text selection, clipboard hooks, clipboard mount options, and selection-only inverse styling. The mechanisms remain private evidence, but correct pointer targeting and arbitrary painted-Text selection are explicitly outside the minimum foundation until a smaller Runtime-only primitive is proven. Application-owned copy of an already known string remains ordinary dependency injection. No VOUCHED stamp changed. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
 
 ## Product boundary
 

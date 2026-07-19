@@ -7,7 +7,7 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useInput } from "@vue-tui/runtime";
-import { yogaNodeTracker } from "@vue-tui/runtime/internal";
+import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test.sequential("50 render/unmount cycles leak zero process listeners", async () => {
@@ -77,6 +77,8 @@ test.sequential("mount owns one beforeExit listener until unmount", async () => 
   app.unmount();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 
-  await app.waitUntilRenderFlush();
+  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
+    "waitUntilRenderFlush() is only available while the app is mounted",
+  );
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 });

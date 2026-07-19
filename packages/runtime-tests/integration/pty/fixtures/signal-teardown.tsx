@@ -1,7 +1,7 @@
 import process from "node:process";
 import { Box, createApp, Text } from "@vue-tui/runtime";
-import { useMouseDrag } from "@vue-tui/runtime/fullscreen";
-import { defineComponent, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
+import { defineComponent, onMounted } from "vue";
+import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 
 // Mounts a live interactive app in the alternate screen (cursor hidden), then
 // signals readiness on stderr. It deliberately NEVER unmounts/exits on its own
@@ -13,9 +13,6 @@ import { defineComponent, onMounted, shallowRef, type ComponentPublicInstance } 
 // normal unmount that would emit the same bytes. Mirrors Ink's
 // signalExit(this.unmount) wiring.
 const App = defineComponent(() => {
-  const mouseTarget = shallowRef<ComponentPublicInstance | null>(null);
-  useMouseDrag(mouseTarget, () => {});
-
   onMounted(() => {
     // Emit readiness on stderr so the marker is not swallowed by alt-screen
     // restore / final-frame writes on stdout, which the test asserts against.
@@ -27,7 +24,7 @@ const App = defineComponent(() => {
   });
 
   return () => (
-    <Box ref={mouseTarget}>
+    <Box>
       <Text>signal teardown fixture</Text>
     </Box>
   );
@@ -38,6 +35,9 @@ const App = defineComponent(() => {
 const unthrottled = process.argv.includes("--unthrottled");
 
 const app = createApp(App);
-app.mount({ mode: "fullscreen", maxFps: unthrottled ? 0 : undefined });
+app.mount({
+  mode: "fullscreen",
+  maxFps: unthrottled ? 0 : undefined,
+} as InternalMountOptions);
 
 await app.waitUntilExit();

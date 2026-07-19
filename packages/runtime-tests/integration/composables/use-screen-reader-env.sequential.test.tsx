@@ -97,7 +97,7 @@ test.sequential("INK_SCREEN_READER=true gates behavior that requires a finite vi
   app.unmount();
 });
 
-test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READER=true (?? only falls back when option is undefined)", async () => {
+test.sequential("presentation: visual overrides INK_SCREEN_READER=true", async () => {
   // Guards the `??` semantics: the env var is the FALLBACK, not an override.
   // A live app explicitly opting OUT must render the visual (bordered) frame
   // even when INK_SCREEN_READER=true.
@@ -120,7 +120,7 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   const writes = captureWrites(stdout);
 
   // Explicit false must win over the env var.
-  app.mount({ stdout, stdin, stderr, isScreenReaderEnabled: false });
+  app.mount({ stdout, stdin, stderr, presentation: "visual" });
 
   await nextTick();
   await nextTick();

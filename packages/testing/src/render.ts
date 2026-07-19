@@ -1,18 +1,9 @@
 import { PassThrough } from "node:stream";
+import { Console as NodeConsole } from "node:console";
 import { nextTick, readonly, type Component } from "vue";
 import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
-import {
-  INTERNAL_RENDER_OBSERVER,
-  INTERNAL_SUSPENSION_HOST,
-  INTERNAL_TERMINAL_SIZE_PROBE,
-  INTERNAL_TEST_INPUT_HOST,
-  INTERNAL_KITTY_KEYBOARD,
-  createManualSuspensionHost,
-  type InternalMountOptions,
-  type InternalRenderObserver,
-} from "@vue-tui/runtime/internal";
+import { createTestHostBridge, type TestContentFrame } from "@vue-tui/runtime/testing";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
-import { createTestMouse, type TestMouse } from "./mouse.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";
 
@@ -21,17 +12,13 @@ export interface TestHost {
   readonly mode?: NonNullable<MountOptions["mode"]>;
   /** Renderer presentation. @default "visual" */
   readonly presentation?: "visual" | "screen-reader";
-  /** Dynamic output cadence. Defaults to live for a TTY and at-teardown for a stream. */
-  readonly updates?: "live" | "at-teardown";
   /** Input stream class. @default "tty" */
   readonly stdin?: "tty" | "non-tty";
   /** Output stream class. @default "tty" */
   readonly stdout?: "tty" | "stream";
-  /** Modeled application clipboard result. Omission leaves clipboard unconfigured. */
-  readonly clipboard?: TestClipboardBehavior;
+  /** Route console output through the modeled Runtime writer. @default false */
+  readonly patchConsole?: boolean;
 }
-
-export type TestClipboardBehavior = "copied" | "requested" | "unavailable" | "rejected";
 
 export interface RenderOptions {
   readonly host?: TestHost;
@@ -42,18 +29,7 @@ export interface RenderOptions {
   readonly props?: Record<string, unknown>;
 }
 
-export interface ContentFrame {
-  /**
-   * Current dynamic region as emitted by the renderer. This may contain SGR
-   * styling, but excludes output-writer lifecycle and screen-update controls.
-   */
-  readonly dynamic: string;
-  /**
-   * New `<Static>` content produced by this commit. This may contain SGR
-   * styling, but excludes accumulated replay and output-writer controls.
-   */
-  readonly staticOutput: string;
-}
+export type ContentFrame = TestContentFrame;
 
 export interface Terminal {
   readonly columns: number;
@@ -78,33 +54,28 @@ export interface RenderResult {
   /** Snapshot terminal state after all currently queued host output. */
   screen(this: void): Promise<ScreenSnapshot>;
   readonly stdin: {
-    write(data: string): Promise<void>;
-  };
-  readonly mouse: TestMouse;
-  readonly clipboard: {
-    readonly requests: readonly string[];
+    write(data: string | Uint8Array): Promise<void>;
   };
   readonly terminal: Terminal;
   /** Tear down the app while retaining the emulator for restoration assertions. */
   unmount(this: void): void;
   /** Idempotently tear down the app and release every test-host resource. */
   dispose(this: void): void;
-  waitUntilExit(this: void): Promise<unknown>;
+  waitUntilExit(this: void): Promise<void>;
   waitUntilRenderFlush(this: void): Promise<void>;
 }
 
 interface NormalizedTestHost {
   readonly mode: NonNullable<MountOptions["mode"]>;
   readonly presentation: "visual" | "screen-reader";
-  readonly updates: "live" | "at-teardown";
   readonly stdin: "tty" | "non-tty";
   readonly stdout: {
     readonly kind: "tty" | "stream";
     readonly columns: number;
     readonly rows: number | undefined;
   };
+  readonly patchConsole: boolean;
   readonly emulatorRows: number;
-  readonly clipboard: TestClipboardBehavior | undefined;
 }
 
 const hasOwn = (value: object, key: PropertyKey): boolean =>
@@ -181,15 +152,14 @@ function normalizeOptions(options: RenderOptions): {
   const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
   rejectUnknownKeys(
     host,
-    ["mode", "presentation", "updates", "stdin", "stdout", "clipboard"],
+    ["mode", "presentation", "stdin", "stdout", "patchConsole"],
     "render host",
   );
   const modeOption = host.mode;
   const presentationOption = host.presentation;
-  const updatesOption = host.updates;
   const stdinOption = host.stdin;
   const stdoutOption = host.stdout;
-  const clipboardOption = host.clipboard;
+  const patchConsoleOption = host.patchConsole;
 
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
@@ -212,34 +182,21 @@ function normalizeOptions(options: RenderOptions): {
   const emulatorRows = dimension(rowsOption, 100, "render rows");
   assertModeledTerminalSurface(columns, emulatorRows);
   const rows = kind === "tty" ? emulatorRows : undefined;
-  const updates =
-    updatesOption === undefined ? (kind === "tty" ? "live" : "at-teardown") : updatesOption;
-  if (updates !== "live" && updates !== "at-teardown") {
-    throw new TypeError('render host updates must be "live" or "at-teardown".');
+  const patchConsole = patchConsoleOption === undefined ? false : patchConsoleOption;
+  if (typeof patchConsole !== "boolean") {
+    throw new TypeError("render host patchConsole must be a boolean.");
   }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
-  if (
-    clipboardOption !== undefined &&
-    clipboardOption !== "copied" &&
-    clipboardOption !== "requested" &&
-    clipboardOption !== "unavailable" &&
-    clipboardOption !== "rejected"
-  ) {
-    throw new TypeError(
-      'render host clipboard must be "copied", "requested", "unavailable", or "rejected".',
-    );
-  }
 
   return {
     props: propsOption as Record<string, unknown> | undefined,
     host: {
       mode,
       presentation,
-      updates,
       stdin,
       stdout: { kind, columns, rows },
+      patchConsole,
       emulatorRows,
-      clipboard: clipboardOption,
     },
   };
 }
@@ -273,21 +230,13 @@ export async function render(
   const emulator = createTerminalEmulator(host.stdout.columns, host.emulatorRows, {
     convertEol: host.stdout.kind === "tty",
   });
-  const suspensionHost = createManualSuspensionHost();
   const forwardOutput = (chunk: Buffer | string) => emulator.write(chunk);
   stdout.on("data", forwardOutput);
   stderr.on("data", forwardOutput);
 
   const frames: ContentFrame[] = [];
   const publicFrames = readonly(frames) as readonly ContentFrame[];
-  const clipboardRequests: string[] = [];
-  const publicClipboardRequests = readonly(clipboardRequests) as readonly string[];
-  const observer: InternalRenderObserver = {
-    onCommit(commit) {
-      if (commit.phase === "teardown") return;
-      frames.push(Object.freeze({ dynamic: commit.dynamic, staticOutput: commit.staticOutput }));
-    },
-  };
+  const bridge = createTestHostBridge({ onFrame: (frame) => frames.push(frame) });
 
   const app: TuiApp = createApp(component, normalized.props);
   let resourcesDisposed = false;
@@ -314,12 +263,9 @@ export async function render(
     }
   };
   let unmounted = false;
-  let terminalSuspended = false;
-  let clearPressedMouseButtons = (): void => undefined;
   const unmount = () => {
     if (unmounted) return;
     unmounted = true;
-    clearPressedMouseButtons();
     app.unmount();
   };
   let disposed = false;
@@ -345,10 +291,34 @@ export async function render(
   const assertActive = () => {
     if (disposed) throw new Error("Test host has been disposed.");
   };
-  const assertMouseCanEmit = () => {
-    assertActive();
-    if (unmounted) throw new Error("The test application has been unmounted.");
-    if (terminalSuspended) throw new Error("The modeled terminal is suspended.");
+  const flushEmulatorWhileAvailable = async (): Promise<void> => {
+    if (disposed) return;
+    try {
+      await emulator.flush();
+    } catch (error) {
+      // A waitUntilExit() call may already be waiting when test cleanup
+      // disposes the host. Preserve the Runtime exit outcome instead of
+      // replacing it with the emulator's later disposal error.
+      if (disposed) return;
+      throw error;
+    }
+  };
+  const settleRuntimeRender = async (): Promise<void> => {
+    try {
+      await app.waitUntilRenderFlush();
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "waitUntilRenderFlush() is only available while the app is mounted"
+      ) {
+        // A render error can tear the app down before this test-host barrier.
+        // waitUntilExit() carries the original application error (or the
+        // successful result of a deliberate early exit).
+        await app.waitUntilExit();
+        return;
+      }
+      throw error;
+    }
   };
   const failAfterDispose = (error: unknown): never => {
     try {
@@ -362,55 +332,30 @@ export async function render(
     throw error;
   };
 
-  async function flushInput(): Promise<void> {
-    await nextTick();
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await nextTick();
-    await waitUntilRenderFlush();
-  }
-
-  const mouseController = createTestMouse({
-    columns: () => emulatorColumns,
-    rows: () => emulatorRows,
-    assertCanEmit: assertMouseCanEmit,
-    flush: flushInput,
-  });
-  clearPressedMouseButtons = () => mouseController.clearPressedButtons();
-
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      mode: host.mode,
-      liveUpdates: host.updates === "live",
-      isScreenReaderEnabled: host.presentation === "screen-reader",
-      patchConsole: false,
-      maxFps: 0,
-      clipboard:
-        host.clipboard === undefined
-          ? undefined
-          : {
-              kind: "custom",
-              writeText(text: string) {
-                clipboardRequests.push(text);
-                if (host.clipboard === "copied" || host.clipboard === "requested") {
-                  return { status: host.clipboard };
-                }
-                if (host.clipboard === "unavailable") {
-                  return { status: "unavailable", reason: "modeled unavailable" };
-                }
-                return { status: "rejected", cause: new Error("modeled rejection") };
-              },
-            },
-      [INTERNAL_RENDER_OBSERVER]: observer,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-      [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
-      // The deterministic host models normalized input directly and must not
-      // emit a real terminal query that its in-memory streams cannot answer.
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-    } as InternalMountOptions);
+    const consoleDescriptor = Object.getOwnPropertyDescriptor(console, "Console");
+    if (host.patchConsole && typeof (console as { Console?: unknown }).Console !== "function") {
+      Object.defineProperty(console, "Console", {
+        configurable: true,
+        writable: true,
+        value: NodeConsole,
+      });
+    }
+    try {
+      bridge.mount(app, {
+        stdout,
+        stdin,
+        stderr,
+        mode: host.mode,
+        presentation: host.presentation,
+        patchConsole: host.patchConsole,
+      });
+    } finally {
+      if (host.patchConsole) {
+        if (consoleDescriptor) Object.defineProperty(console, "Console", consoleDescriptor);
+        else Reflect.deleteProperty(console, "Console");
+      }
+    }
   } catch (error) {
     failAfterDispose(error);
   }
@@ -429,7 +374,7 @@ export async function render(
     await Promise.resolve();
     await new Promise<void>((resolve) => setImmediate(resolve));
     await Promise.resolve();
-    await app.waitUntilRenderFlush();
+    await settleRuntimeRender();
     await emulator.flush();
 
     if (earlyError) throw earlyError;
@@ -459,26 +404,23 @@ export async function render(
       if (host.stdout.kind === "tty") stdout.rows = nextRows;
       stderr.columns = nextColumns;
       if (host.stdout.kind === "tty") stderr.rows = nextRows;
+      if (unmounted) return;
       (stdout as unknown as PassThrough).emit("resize");
       await nextTick();
-      await app.waitUntilRenderFlush();
+      if (unmounted) return;
+      await settleRuntimeRender();
       await emulator.flush();
     },
     async suspend() {
       assertActive();
-      terminalSuspended = true;
-      mouseController.clearPressedButtons();
-      await suspensionHost.suspend();
+      await bridge.suspend();
       await emulator.flush();
     },
     async resume() {
       assertActive();
-      await suspensionHost.resume();
-      await nextTick();
-      await app.waitUntilRenderFlush();
+      await bridge.resume();
       await emulator.flush();
       assertActive();
-      terminalSuspended = false;
     },
     rawMode: publicRawMode,
   };
@@ -508,22 +450,21 @@ export async function render(
       return await emulator.snapshot();
     },
     stdin: {
-      async write(data: string): Promise<void> {
+      async write(data: string | Uint8Array): Promise<void> {
         assertActive();
-        stdin.emit("data", data);
-        await flushInput();
+        await bridge.writeInput(data);
+        await emulator.flush();
       },
     },
-    mouse: mouseController.mouse,
-    clipboard: Object.freeze({ requests: publicClipboardRequests }),
     terminal,
     unmount,
     dispose,
     async waitUntilExit() {
+      assertActive();
       try {
         return await app.waitUntilExit();
       } finally {
-        await emulator.flush();
+        await flushEmulatorWhileAvailable();
       }
     },
     waitUntilRenderFlush,

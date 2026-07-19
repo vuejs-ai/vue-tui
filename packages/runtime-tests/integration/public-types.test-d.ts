@@ -7,25 +7,16 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import {
-  shallowRef,
-  type ComponentPublicInstance,
-  type MaybeRefOrGetter,
-  type Ref,
-  type ShallowRef,
-} from "vue";
+import { shallowRef, type ComponentPublicInstance, type MaybeRefOrGetter, type Ref } from "vue";
 import {
   Box,
   Text,
   useApp,
   useBoxPresence,
   useBoxSize,
-  useClipboard,
   useInput,
   useLayoutWidth,
   useStdin,
-  useStdout,
-  useStderr,
   useViewportHeight,
 } from "@vue-tui/runtime";
 import type {
@@ -33,69 +24,28 @@ import type {
   AriaState,
   BoxProps,
   BoxSize,
-  CellPoint,
-  ClipboardAvailability,
-  ClipboardTransport,
-  ClipboardTransportResult,
-  ClipboardUnavailableReason,
-  ClipboardWriteResult,
-  CoordinatedWriteResult,
   Color,
-  CustomClipboardTransport,
-  ElementTarget,
   TextProps,
-  Osc52ClipboardTransport,
   MountOptions,
   TuiInputEvent,
   TuiKeyName,
-  UseClipboardReturn,
   RenderMode,
+  RenderPresentation,
+  TuiApp,
   UseAppReturn,
   UseStdinReturn,
-  UseStdoutReturn,
-  UseStderrReturn,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { INTERNAL_KITTY_KEYBOARD } from "@vue-tui/runtime/internal";
-import { useMouseDrag, useMouseEvent, useTextSelection } from "@vue-tui/runtime/fullscreen";
-import type {
-  CellDelta,
-  MouseButton,
-  MouseDragHandler,
-  MouseEventHandler,
-  MouseHandlerResult,
-  MouseModifiers,
-  TuiMouseClickEvent,
-  TuiMouseDragEvent,
-  TuiMouseEventMap,
-  TuiMouseWheelEvent,
-  TextSelectionCommands,
-  TextSelectionCopyResult,
-  TextSelectionMove,
-  TextSelectionRange,
-  TextSelectionState,
-  TextSelectionUnavailableReason,
-  UseMouseDragOptions,
-  UseMouseDragReturn,
-  UseMouseEventOptions,
-  UseTextSelectionOptions,
-} from "@vue-tui/runtime/fullscreen";
 
 const defaultMountOptions: MountOptions = {};
-const inlineMountOptions: MountOptions = { mode: "inline", liveUpdates: false };
-const fullscreenMountOptions: MountOptions = { mode: "fullscreen", liveUpdates: true };
-const customClipboard: CustomClipboardTransport = {
-  kind: "custom",
-  writeText: async () => ({ status: "copied" }),
+const inlineMountOptions: MountOptions = { mode: "inline", presentation: "visual" };
+const fullscreenMountOptions: MountOptions = {
+  mode: "fullscreen",
+  presentation: "screen-reader",
 };
-const osc52Clipboard: Osc52ClipboardTransport = { kind: "osc52" };
-const clipboardMountOptions: MountOptions = { clipboard: customClipboard };
-const osc52MountOptions: MountOptions = { clipboard: osc52Clipboard };
 expectTypeOf(defaultMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(inlineMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(fullscreenMountOptions).toMatchTypeOf<MountOptions>();
-expectTypeOf(clipboardMountOptions).toMatchTypeOf<MountOptions>();
-expectTypeOf(osc52MountOptions).toMatchTypeOf<MountOptions>();
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -111,18 +61,16 @@ const removedRawModeOption: MountOptions = { rawMode: "auto" };
 const removedExitOnCtrlCOption: MountOptions = { exitOnCtrlC: false };
 // @ts-expect-error Runtime privately negotiates the keyboard protocol needed by public input facts.
 const removedKittyKeyboardOption: MountOptions = { kittyKeyboard: { mode: "enabled" } };
-const removedInternalKittyKeyboardOption: MountOptions = {
-  // @ts-expect-error Repository-only protocol controls are not part of public MountOptions.
-  [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-};
 // @ts-expect-error Only the two finite render-mode values are accepted.
 const invalidModeOption: MountOptions = { mode: "full-screen" };
-// @ts-expect-error liveUpdates is a boolean override.
-const invalidLiveUpdatesOption: MountOptions = { liveUpdates: "yes" };
-// @ts-expect-error A custom transport must provide writeText.
-const invalidCustomClipboardOption: MountOptions = { clipboard: { kind: "custom" } };
-// @ts-expect-error Clipboard transport kinds are finite.
-const invalidClipboardKindOption: MountOptions = { clipboard: { kind: "platform" } };
+// @ts-expect-error Output cadence is Runtime-owned rather than a mount policy.
+const removedLiveUpdatesOption: MountOptions = { liveUpdates: true };
+// @ts-expect-error Presentation has two finite public values.
+const invalidPresentationOption: MountOptions = { presentation: "screenreader" };
+const removedClipboardOption: MountOptions = {
+  // @ts-expect-error Clipboard transport injection is application policy, not a Runtime mount option.
+  clipboard: { kind: "custom", writeText: async () => ({ status: "copied" }) },
+};
 void removedFullscreenOption;
 void removedAlternateScreenOption;
 void removedInteractiveOption;
@@ -130,124 +78,17 @@ void removedDebugOption;
 void removedRawModeOption;
 void removedExitOnCtrlCOption;
 void removedKittyKeyboardOption;
-void removedInternalKittyKeyboardOption;
 void invalidModeOption;
-void invalidLiveUpdatesOption;
-void invalidCustomClipboardOption;
-void invalidClipboardKindOption;
+void removedLiveUpdatesOption;
+void invalidPresentationOption;
+void removedClipboardOption;
 
-expectTypeOf<ClipboardTransport>().toEqualTypeOf<
-  CustomClipboardTransport | Osc52ClipboardTransport
->();
-expectTypeOf<ClipboardTransportResult>().toEqualTypeOf<
-  | { readonly status: "copied" }
-  | { readonly status: "requested" }
-  | { readonly status: "unavailable"; readonly reason?: string }
-  | { readonly status: "rejected"; readonly cause?: unknown }
->();
-expectTypeOf<ClipboardUnavailableReason>().toEqualTypeOf<
-  | "not-configured"
-  | "output-not-terminal"
-  | "screen-reader"
-  | "suspended"
-  | "disposed"
-  | "string-host"
-  | "transport-unavailable"
->();
-expectTypeOf<ClipboardAvailability>().toEqualTypeOf<
-  | { readonly status: "available"; readonly transport: "custom" | "osc52" }
-  | { readonly status: "unavailable"; readonly reason: ClipboardUnavailableReason }
->();
-expectTypeOf<ClipboardWriteResult>().toEqualTypeOf<
-  | { readonly status: "copied"; readonly text: string }
-  | { readonly status: "requested"; readonly text: string }
-  | {
-      readonly status: "unavailable";
-      readonly text: string;
-      readonly reason: ClipboardUnavailableReason;
-      readonly detail?: string;
-    }
-  | { readonly status: "rejected"; readonly text: string; readonly cause: unknown }
->();
-expectTypeOf<ReturnType<typeof useClipboard>>().toEqualTypeOf<UseClipboardReturn>();
-expectTypeOf<UseClipboardReturn>().toEqualTypeOf<{
-  readonly availability: Readonly<ShallowRef<ClipboardAvailability>>;
-  readonly writeText: (text: string) => Promise<ClipboardWriteResult>;
-}>();
-declare const clipboardProjection: UseClipboardReturn;
-// @ts-expect-error Clipboard availability is renderer-owned and readonly.
-clipboardProjection.availability.value = { status: "unavailable", reason: "disposed" };
-// @ts-expect-error Clipboard payloads are exact strings.
-void clipboardProjection.writeText(new Uint8Array());
-
-expectTypeOf<TextSelectionMove>().toEqualTypeOf<
-  | "backward"
-  | "forward"
-  | "up"
-  | "down"
-  | "line-start"
-  | "line-end"
-  | "document-start"
-  | "document-end"
->();
-expectTypeOf<TextSelectionRange>().toEqualTypeOf<{
-  readonly anchor: number;
-  readonly extent: number;
-  readonly direction: "forward" | "backward";
-  readonly collapsed: boolean;
-}>();
-expectTypeOf<TextSelectionUnavailableReason>().toEqualTypeOf<
-  "host-unavailable" | "screen-reader" | "string-host" | "mapping-unavailable"
->();
-expectTypeOf<TextSelectionState>().toEqualTypeOf<
-  | { readonly status: "inactive" | "pending"; readonly range: null; readonly selectedText: "" }
-  | {
-      readonly status: "unavailable";
-      readonly reason: TextSelectionUnavailableReason;
-      readonly range: null;
-      readonly selectedText: "";
-    }
-  | {
-      readonly status: "ready" | "suspended";
-      readonly text: string;
-      readonly range: TextSelectionRange | null;
-      readonly selectedText: string;
-    }
->();
-expectTypeOf<TextSelectionCopyResult>().toEqualTypeOf<
-  { readonly status: "empty" } | ClipboardWriteResult
->();
-expectTypeOf<UseTextSelectionOptions>().toEqualTypeOf<{
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-  readonly pointer?: MaybeRefOrGetter<boolean>;
-}>();
-expectTypeOf<Parameters<typeof useTextSelection>>().toEqualTypeOf<
-  [target: ElementTarget, options?: UseTextSelectionOptions]
->();
-expectTypeOf<ReturnType<typeof useTextSelection>>().toEqualTypeOf<TextSelectionCommands>();
-expectTypeOf<TextSelectionCommands>().toEqualTypeOf<{
-  readonly state: Readonly<ShallowRef<TextSelectionState>>;
-  move(direction: TextSelectionMove, options?: { readonly extend?: boolean }): boolean;
-  selectAll(): boolean;
-  clear(): boolean;
-  copy(): Promise<TextSelectionCopyResult>;
-}>();
-const selectionTarget = shallowRef<ComponentPublicInstance | null>(null);
-const selectionProjection = useTextSelection(selectionTarget, {
-  isActive: shallowRef(true),
-  pointer: () => true,
-});
-selectionProjection.move("forward", { extend: true });
-// @ts-expect-error Selection state is renderer-owned and readonly.
-selectionProjection.state.value = { status: "inactive", range: null, selectedText: "" };
-// @ts-expect-error Movement names are semantic and finite.
-selectionProjection.move("left");
-// @ts-expect-error Pointer activation is boolean.
-useTextSelection(selectionTarget, { pointer: "yes" });
-// @ts-expect-error Fullscreen text selection is not duplicated on the common root.
-export type _UseTextSelectionIsFullscreenOnly = typeof import("@vue-tui/runtime").useTextSelection;
-// @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
-export type _UseClipboardIsCommonOnly = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
+// @ts-expect-error Clipboard policy is outside the Runtime foundation.
+export type _UseClipboardWasRemoved = typeof import("@vue-tui/runtime").useClipboard;
+// @ts-expect-error Runtime does not publish clipboard transport types.
+export type _ClipboardTransportWasRemoved = import("@vue-tui/runtime").ClipboardTransport;
+// @ts-expect-error Selection policy is outside the Runtime foundation.
+export type _UseTextSelectionWasRemoved = typeof import("@vue-tui/runtime").useTextSelection;
 // @ts-expect-error Static is exported only from the Inline history subpath.
 export type _StaticIsInlineOnly = typeof import("@vue-tui/runtime").Static;
 // @ts-expect-error The removed Static collection types are not exported from the root.
@@ -305,14 +146,7 @@ expectTypeOf<keyof BoxProps>().toEqualTypeOf<
   | "ariaState"
 >();
 expectTypeOf<keyof TextProps>().toEqualTypeOf<
-  | "color"
-  | "backgroundColor"
-  | "dimColor"
-  | "bold"
-  | "inverse"
-  | "wrap"
-  | "ariaLabel"
-  | "ariaHidden"
+  "color" | "backgroundColor" | "dimColor" | "bold" | "wrap" | "ariaLabel" | "ariaHidden"
 >();
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<"row" | "column" | undefined>();
 expectTypeOf<BoxProps["alignItems"]>().toEqualTypeOf<"center" | "stretch" | undefined>();
@@ -357,6 +191,8 @@ export type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
 export type _RemovedBoxOverflowX = BoxProps["overflowX"];
 // @ts-expect-error Unevidenced text decoration is not a Text prop.
 export type _RemovedTextUnderline = TextProps["underline"];
+// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
+export type _RemovedTextInverse = TextProps["inverse"];
 type StaticComponentProps = InstanceType<typeof Static>["$props"];
 // @ts-expect-error Static no longer owns an application collection.
 export type _RemovedStaticItemsProp = StaticComponentProps["items"];
@@ -379,6 +215,7 @@ export type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimation
 
 // Runtime publishes only the layout facts applications have demonstrated.
 expectTypeOf<RenderMode>().toEqualTypeOf<"inline" | "fullscreen">();
+expectTypeOf<RenderPresentation>().toEqualTypeOf<"visual" | "screen-reader">();
 expectTypeOf<ReturnType<typeof useLayoutWidth>>().toEqualTypeOf<Readonly<Ref<number>>>();
 expectTypeOf<ReturnType<typeof useViewportHeight>>().toEqualTypeOf<Readonly<Ref<number>> | null>();
 
@@ -409,15 +246,6 @@ export type _UseRenderSessionWasRemoved = typeof import("@vue-tui/runtime").useR
 // @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
 export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
 
-// Fullscreen pointer policy still uses one generic element target. Common Box
-// measurement and presence are deliberately narrower direct-Box refs.
-expectTypeOf<ElementTarget>().toEqualTypeOf<
-  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
->();
-expectTypeOf<CellPoint>().toEqualTypeOf<{
-  readonly x: number;
-  readonly y: number;
-}>();
 expectTypeOf<BoxSize>().toEqualTypeOf<{
   readonly width: number;
   readonly height: number;
@@ -501,33 +329,22 @@ publicStdin.setRawMode(false);
 // @ts-expect-error Raw-input availability belongs to the eventual semantic input API.
 void publicStdin.isRawModeSupported;
 
-expectTypeOf<UseStdoutReturn>().toEqualTypeOf<{
-  readonly stdout: NodeJS.WriteStream;
-  readonly write: (data: string) => CoordinatedWriteResult;
-}>();
-expectTypeOf<ReturnType<typeof useStdout>>().toEqualTypeOf<UseStdoutReturn>();
-
-expectTypeOf<UseStderrReturn>().toEqualTypeOf<{
-  readonly stderr: NodeJS.WriteStream;
-  readonly write: (data: string) => CoordinatedWriteResult;
-}>();
-expectTypeOf<ReturnType<typeof useStderr>>().toEqualTypeOf<UseStderrReturn>();
-
-expectTypeOf<CoordinatedWriteResult>().toEqualTypeOf<
-  | { readonly status: "accepted"; readonly writable: true }
-  | {
-      readonly status: "accepted";
-      readonly writable: false;
-      readonly ready: Promise<void>;
-    }
-  | { readonly status: "blocked"; readonly ready: Promise<void> }
->();
-
 expectTypeOf<UseAppReturn>().toEqualTypeOf<{
-  readonly exit: (errorOrResult?: unknown) => void;
-  readonly waitUntilRenderFlush: () => Promise<void>;
+  readonly exit: (error?: Error) => void;
 }>();
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
+expectTypeOf<ReturnType<TuiApp["waitUntilExit"]>>().toEqualTypeOf<Promise<void>>();
+expectTypeOf<ReturnType<TuiApp["waitUntilRenderFlush"]>>().toEqualTypeOf<Promise<void>>();
+// @ts-expect-error Host flush is app-owner lifecycle, not an in-tree control.
+export type _UseAppFlushWasRemoved = UseAppReturn["waitUntilRenderFlush"];
+// @ts-expect-error Imperative frame clearing is not a stable app contract.
+export type _AppClearWasRemoved = TuiApp["clear"];
+// @ts-expect-error Imperative stdout coordination is outside the minimum foundation.
+export type _UseStdoutWasRemoved = typeof import("@vue-tui/runtime").useStdout;
+// @ts-expect-error Imperative stderr coordination is outside the minimum foundation.
+export type _UseStderrWasRemoved = typeof import("@vue-tui/runtime").useStderr;
+// @ts-expect-error The output-gate result type is private.
+export type _CoordinatedWriteResultWasRemoved = import("@vue-tui/runtime").CoordinatedWriteResult;
 
 // Runtime publishes renderer presence, not one focus/scope/routing policy.
 // @ts-expect-error Focus policy can be composed above Runtime.
@@ -659,17 +476,16 @@ export type _UsePasteOptionsWereRemoved = import("@vue-tui/runtime").UsePasteOpt
 // @ts-expect-error Paste is observed through useInput(), not a separate public composable.
 export type _UsePasteWasRemoved = typeof import("@vue-tui/runtime").usePaste;
 
-// The old root mouse surface is removed directly; Fullscreen targeting is available only
-// through @vue-tui/runtime/fullscreen.
+// Pointer targeting and routing remain private until a smaller Runtime-only primitive is proven.
 // @ts-expect-error The terminal-wide v1 mouse hook was removed.
 export type _UseMouseInputWasRemoved = typeof import("@vue-tui/runtime").useMouseInput;
 // @ts-expect-error The v1 drag helper was removed.
 export type _UseDraggableWasRemoved = typeof import("@vue-tui/runtime").useDraggable;
-// @ts-expect-error Fullscreen mouse values are not duplicated at the root.
-export type _UseMouseEventIsFullscreenOnly = typeof import("@vue-tui/runtime").useMouseEvent;
-// @ts-expect-error Fullscreen mouse values are not duplicated at the root.
-export type _UseMouseDragIsFullscreenOnly = typeof import("@vue-tui/runtime").useMouseDrag;
-// @ts-expect-error MouseButton moved to the Fullscreen subpath.
+// @ts-expect-error Targeted mouse policy is outside the Runtime foundation.
+export type _UseMouseEventWasRemoved = typeof import("@vue-tui/runtime").useMouseEvent;
+// @ts-expect-error Drag policy is outside the Runtime foundation.
+export type _UseMouseDragWasRemoved = typeof import("@vue-tui/runtime").useMouseDrag;
+// @ts-expect-error Runtime does not publish mouse protocol types.
 export type _RootMouseButtonWasRemoved = import("@vue-tui/runtime").MouseButton;
 // @ts-expect-error The terminal-wide v1 mouse event was removed.
 export type _MouseInputEventWasRemoved = import("@vue-tui/runtime").MouseInputEvent;
@@ -697,73 +513,7 @@ export type _UseDraggablePositionWasRemoved = import("@vue-tui/runtime").UseDrag
 export type _UseDraggableReturnWasRemoved = import("@vue-tui/runtime").UseDraggableReturn;
 // @ts-expect-error The v1 duplicate target type was removed.
 export type _UseDraggableTargetWasRemoved = import("@vue-tui/runtime").UseDraggableTarget;
-
-// The Fullscreen subpath references common geometry types without re-exporting them.
-// @ts-expect-error CellPoint remains a root type.
-export type _CellPointIsNotDuplicated = import("@vue-tui/runtime/fullscreen").CellPoint;
-// @ts-expect-error ElementTarget remains a root type.
-export type _ElementTargetIsNotDuplicated = import("@vue-tui/runtime/fullscreen").ElementTarget;
-// @ts-expect-error Root application values are not duplicated in the Fullscreen entry point.
-export type _CreateAppIsNotDuplicated = typeof import("@vue-tui/runtime/fullscreen").createApp;
-
-expectTypeOf<MouseButton>().toEqualTypeOf<"left" | "middle" | "right">();
-expectTypeOf<MouseHandlerResult>().toEqualTypeOf<"continue" | "consume">();
-expectTypeOf<CellDelta>().toEqualTypeOf<{
-  readonly x: number;
-  readonly y: number;
-}>();
-expectTypeOf<MouseModifiers>().toEqualTypeOf<{
-  readonly shift: boolean;
-  readonly alt: boolean;
-  readonly ctrl: boolean;
-}>();
-expectTypeOf<TuiMouseClickEvent["type"]>().toEqualTypeOf<"click">();
-expectTypeOf<TuiMouseClickEvent["delivery"]>().toEqualTypeOf<"target" | "bubble">();
-expectTypeOf<TuiMouseClickEvent["surface"]>().toEqualTypeOf<CellPoint>();
-expectTypeOf<TuiMouseClickEvent["local"]>().toEqualTypeOf<CellPoint>();
-expectTypeOf<TuiMouseClickEvent["button"]>().toEqualTypeOf<MouseButton>();
-expectTypeOf<TuiMouseWheelEvent["type"]>().toEqualTypeOf<"wheel">();
-expectTypeOf<TuiMouseWheelEvent["delta"]>().toEqualTypeOf<CellDelta>();
-expectTypeOf<TuiMouseEventMap>().toEqualTypeOf<{
-  readonly click: TuiMouseClickEvent;
-  readonly wheel: TuiMouseWheelEvent;
-}>();
-expectTypeOf<MouseEventHandler<"click">>().toEqualTypeOf<
-  (event: TuiMouseClickEvent) => MouseHandlerResult
->();
-expectTypeOf<MouseDragHandler>().toEqualTypeOf<(event: TuiMouseDragEvent) => void>();
-expectTypeOf<
-  Exclude<TuiMouseDragEvent, { phase: "cancel" }>["movement"]
->().toEqualTypeOf<CellDelta>();
-expectTypeOf<Extract<TuiMouseDragEvent, { phase: "cancel" }>["reason"]>().toEqualTypeOf<
-  "deactivated" | "target-lost" | "suspended"
->();
-expectTypeOf<Extract<TuiMouseDragEvent, { phase: "cancel" }>["movement"]>().toEqualTypeOf<null>();
-expectTypeOf<UseMouseEventOptions>().toEqualTypeOf<{
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-}>();
-expectTypeOf<UseMouseDragOptions>().toEqualTypeOf<{
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-}>();
-expectTypeOf<UseMouseDragReturn>().toEqualTypeOf<{
-  readonly isDragging: Readonly<ShallowRef<boolean>>;
-}>();
-
-const mouseTarget = shallowRef<ComponentPublicInstance | null>(null);
-const clickHandler = shallowRef<MouseEventHandler<"click">>(() => "continue");
-useMouseEvent(mouseTarget, "click", clickHandler);
-useMouseEvent(mouseTarget, "wheel", (event) => {
-  expectTypeOf(event).toEqualTypeOf<TuiMouseWheelEvent>();
-  return "consume";
-});
-// @ts-expect-error The event key determines the handler payload.
-useMouseEvent(mouseTarget, "click", (_event: TuiMouseWheelEvent) => "continue");
-// @ts-expect-error A targeted mouse handler must return an explicit propagation result.
-useMouseEvent(mouseTarget, "click", () => undefined);
-
-const dragHandler = shallowRef<MouseDragHandler>(() => {});
-const drag = useMouseDrag(mouseTarget, dragHandler, { isActive: shallowRef(true) });
-expectTypeOf(drag).toEqualTypeOf<UseMouseDragReturn>();
-useMouseDrag(mouseTarget, (event) => {
-  expectTypeOf(event).toEqualTypeOf<TuiMouseDragEvent>();
-});
+// @ts-expect-error Cell coordinates are not a public Runtime contract.
+export type _CellPointWasRemoved = import("@vue-tui/runtime").CellPoint;
+// @ts-expect-error Component target wiring is not a public Runtime contract.
+export type _ElementTargetWasRemoved = import("@vue-tui/runtime").ElementTarget;

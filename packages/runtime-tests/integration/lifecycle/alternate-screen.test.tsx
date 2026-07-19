@@ -1,5 +1,6 @@
 import { defineComponent, nextTick, onMounted, onScopeDispose } from "vue";
-import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
@@ -39,7 +40,7 @@ test("alternate screen - disabled by default", async () => {
   const stdin = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr: makeTtyStream(), liveUpdates: true });
+  app.mount({ stdout, stdin, stderr: makeTtyStream() });
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -62,7 +63,7 @@ test("alternate screen - ignored when non-interactive", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: false,
-  });
+  } as InternalMountOptions);
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -107,7 +108,7 @@ test("alternate screen - ignored when isTTY is false even if interactive is true
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-  });
+  } as InternalMountOptions);
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -129,7 +130,6 @@ test("alternate screen - enters on mount and exits on unmount", async () => {
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -162,7 +162,6 @@ test("alternate screen - enters before setup-owned input modes", async () => {
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
     [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
   } as InternalMountOptions);
   await nextTick();
@@ -199,7 +198,6 @@ test("alternate screen - hides cursor as part of the enter sequence", async () =
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -230,7 +228,6 @@ test("alternate screen - content is rendered between enter and exit", async () =
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -260,7 +257,6 @@ test("alternate screen - unmount() exits the alternate screen", async () => {
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -284,7 +280,6 @@ test("alternate screen - cursor restored after exit", async () => {
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -314,7 +309,6 @@ test("alternate screen - restores the primary screen before writing a thrown err
     stdin,
     stderr: terminal,
     mode: "fullscreen",
-    liveUpdates: true,
   });
   const exited = app.waitUntilExit();
   await nextTick();
@@ -350,7 +344,6 @@ test("alternate screen - restores before reporting useApp().exit(error)", async 
     stdin,
     stderr: terminal,
     mode: "fullscreen",
-    liveUpdates: true,
   });
 
   await expect(app.waitUntilExit()).rejects.toThrow("PROGRAMMATIC_DONE");
@@ -373,7 +366,6 @@ test("alternate screen - does not replay teardown output on primary screen", asy
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
   });
   await nextTick();
 
@@ -411,7 +403,6 @@ test("alternate screen - cleanup console output does not leak into managed strea
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
     patchConsole: true,
   });
   await nextTick();
@@ -436,9 +427,8 @@ test("alternate screen - still activates with unthrottled commits", async () => 
     stdin,
     stderr: makeTtyStream(),
     mode: "fullscreen",
-    liveUpdates: true,
     maxFps: 0,
-  });
+  } as InternalMountOptions);
   await nextTick();
 
   const exited = app.waitUntilExit();

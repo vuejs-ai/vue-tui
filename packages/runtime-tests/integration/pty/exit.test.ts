@@ -32,16 +32,6 @@ it("exit on exit() with error with value property", async () => {
   expect(output).toContain("errored");
 });
 
-it("exit on exit() with result value", async () => {
-  const output = await run("exit-on-exit-with-result");
-  expect(output).toContain("result:hello from vue-tui");
-});
-
-it("exit on exit() with object result", async () => {
-  const output = await run("exit-on-exit-with-value-object");
-  expect(output).toContain("result:hello from vue-tui object");
-});
-
 it("exit on exit() with raw mode", async () => {
   const output = await run("exit-raw-on-exit");
   expect(output).toContain("exited");

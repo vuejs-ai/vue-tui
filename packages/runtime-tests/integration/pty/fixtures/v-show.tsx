@@ -1,6 +1,6 @@
 import process from "node:process";
 import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
-import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
+import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import {
   defineComponent,
   h,
@@ -11,7 +11,6 @@ import {
   vShow,
   watch,
   withDirectives,
-  type ComponentPublicInstance,
 } from "vue";
 
 const visible = shallowRef(true);
@@ -36,9 +35,7 @@ const VShowTarget = defineComponent({
     revision: { type: Number, required: true },
   },
   setup(props) {
-    const target = shallowRef<ComponentPublicInstance | null>(null);
     const value = shallowRef(props.revision);
-    useMouseEvent(target, "click", () => "consume");
     watch(
       () => props.revision,
       (nextRevision) => {
@@ -53,7 +50,7 @@ const VShowTarget = defineComponent({
     // `<Box v-show="visible">...</Box>` by Vue's SFC compiler.
     return () =>
       withDirectives(
-        h(Box, { ref: target, width: 12, height: 1, flexShrink: 0 }, () =>
+        h(Box, { width: 12, height: 1, flexShrink: 0 }, () =>
           h(Text, null, () => `probe:${value.value}`),
         ),
         [[vShow, props.visible]],
@@ -81,7 +78,7 @@ const App = defineComponent(() => {
       return;
     }
     if (event.text === "q") {
-      exit("v-show");
+      exit();
     }
   });
 
@@ -98,7 +95,7 @@ const App = defineComponent(() => {
 
 process.stdout.write("__READY__\n");
 const app = createApp(App);
-app.mount({ mode: "fullscreen", maxFps: 0 });
+app.mount({ mode: "fullscreen", maxFps: 0 } as InternalMountOptions);
 
 void app.waitUntilExit().then(() => {
   process.stdout.write(`__VSHOW_OK__:mounts=${mounts}:unmounts=${unmounts}\n`);

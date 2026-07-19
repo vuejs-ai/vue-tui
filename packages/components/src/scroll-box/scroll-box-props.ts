@@ -20,7 +20,7 @@ export function assertNoRejectedMouseListeners(rawProps: Record<string, unknown>
     if (rawProps && Object.prototype.hasOwnProperty.call(rawProps, name)) {
       throw new Error(
         `<ScrollBox> does not accept the removed mouse listener "${name}". ` +
-          `Use the mouse composables from "@vue-tui/runtime/fullscreen".`,
+          `Targeted mouse input is outside the current Runtime foundation.`,
       );
     }
   }

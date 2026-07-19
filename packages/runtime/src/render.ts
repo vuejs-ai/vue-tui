@@ -11,9 +11,7 @@ import {
 } from "vue";
 import { createRenderer } from "vue";
 import { writeSync as fsWriteSync } from "node:fs";
-import isInCi from "is-in-ci";
 import { onExit } from "signal-exit";
-import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
 import wrapAnsi from "wrap-ansi";
 import {
@@ -62,6 +60,7 @@ import {
   type CoordinatedWriteResult,
   type OutputCoordinator,
 } from "./io/output-coordinator.ts";
+import { registerConsoleSink, type ConsoleSinkRegistration } from "./io/console-manager.ts";
 import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
@@ -96,6 +95,7 @@ import {
   type InternalRenderSessionService,
   type ResolvedLiveDimensions,
   type RenderMode,
+  type RenderPresentation,
 } from "./render-session.ts";
 import {
   INTERNAL_TERMINAL_SIZE_PROBE,
@@ -135,12 +135,8 @@ import {
   type InternalPreparedCaretFrame,
 } from "./caret/caret-controller.ts";
 import { InternalCaretControllerKey } from "./caret/caret-context.ts";
-import {
-  ErrorOverview,
-  formatErrorForStderr,
-  isErrorInput,
-  messageForNonError,
-} from "./components/error-overview.ts";
+import { ErrorOverview } from "./components/error-overview.ts";
+import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
 import {
   INTERNAL_SUSPENSION_HOST,
   processSuspensionHost,
@@ -161,9 +157,9 @@ import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 import type { InternalSelectionPaintFrame } from "./selection/selection-paint.ts";
 
 export interface MountOptions {
-  stdout?: NodeJS.WriteStream;
-  stdin?: NodeJS.ReadStream;
-  stderr?: NodeJS.WriteStream;
+  readonly stdout?: NodeJS.WriteStream;
+  readonly stdin?: NodeJS.ReadStream;
+  readonly stderr?: NodeJS.WriteStream;
   /**
    * Select the terminal screen model requested by this application.
    * Omission requests Inline. A host that cannot acquire a live terminal
@@ -172,19 +168,9 @@ export interface MountOptions {
    *
    * @default 'inline'
    */
-  mode?: RenderMode;
-  /**
-   * Override whether the dynamic output region updates while the app is
-   * mounted. This is an output policy, not a statement about stdin or logical
-   * interaction support.
-   *
-   * By default, live updates are disabled in CI and when stdout is not a TTY.
-   * Setting this to true may emit ANSI update bytes to a non-TTY stream, but it
-   * cannot acquire a terminal screen mode there.
-   *
-   * @default true outside CI when stdout is a TTY; false otherwise
-   */
-  liveUpdates?: boolean;
+  readonly mode?: RenderMode;
+  /** Select visual terminal output or a linear screen-reader transcript. */
+  readonly presentation?: RenderPresentation;
   /**
    * Patch `console.*` methods to route output through the TUI frame
    * coordinator (writeToStdout / writeToStderr) so that console.log
@@ -192,46 +178,17 @@ export interface MountOptions {
    *
    * @default true
    */
-  patchConsole?: boolean;
-  /**
-   * Callback invoked after each render commit with timing information.
-   */
-  onRender?: (info: { renderTime: number }) => void;
-  /**
-   * Maximum frames per second. Controls the render-throttle window
-   * (`ceil(1000 / maxFps)` ms) used by the terminal commit scheduler.
-   * Defaults to 30 (approximately 34ms), matching Ink.
-   *
-   * Ignored in screen-reader mode and when non-positive (commits are immediate).
-   * @default 30
-   */
-  maxFps?: number;
-  /**
-   * Enable screen reader mode. When enabled, the commit scheduler bypasses
-   * throttling (immediate commits) so every frame is flushed without delay.
-   *
-   * @default true when `process.env["INK_SCREEN_READER"] === "true"`, otherwise false
-   */
-  isScreenReaderEnabled?: boolean;
-  /**
-   * Enable relative line-diffing for Inline rendering. Fullscreen instead
-   * replaces changed rows through automatic absolute cursor addressing after
-   * a valid baseline, independently of this option; lifecycle and uncertain
-   * output boundaries still repaint its complete fixed viewport.
-   *
-   * @default false
-   */
-  incrementalRendering?: boolean;
-  /**
-   * Configure the one clipboard transport owned by this mounted application.
-   * OSC 52 can report only that a request was written; a custom transport may
-   * report a confirmed copy.
-   */
-  clipboard?: ClipboardTransport;
+  readonly patchConsole?: boolean;
 }
 
 /** Repository-only mount controls used by Runtime tests and official test tooling. */
 export type InternalMountOptions = MountOptions & {
+  readonly liveUpdates?: boolean;
+  readonly onRender?: (info: { renderTime: number }) => void;
+  readonly maxFps?: number;
+  readonly isScreenReaderEnabled?: boolean;
+  readonly incrementalRendering?: boolean;
+  readonly clipboard?: ClipboardTransport;
   [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
   [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
   [INTERNAL_TEST_INPUT_HOST]?: InternalTestInputHost;
@@ -253,9 +210,8 @@ export type InternalMountOptions = MountOptions & {
 // re-flag this. See .agents/docs/api-contract.md.
 export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
   mount(options?: MountOptions): ComponentPublicInstance;
-  waitUntilExit(): Promise<unknown>;
+  waitUntilExit(): Promise<void>;
   waitUntilRenderFlush(): Promise<void>;
-  clear(): void;
 }
 
 type RootProps = Record<string, unknown>;
@@ -275,6 +231,16 @@ function supportsTerminalMouse(): boolean {
   return process.env["TERM"] !== "dumb";
 }
 
+function normalizeRequestedPresentation(options: object): RenderPresentation | undefined {
+  const presentation = (options as { readonly presentation?: unknown }).presentation;
+  if (presentation === undefined || presentation === "visual" || presentation === "screen-reader") {
+    return presentation;
+  }
+  throw new TypeError(
+    'Mount option "presentation" must be "visual", "screen-reader", or undefined.',
+  );
+}
+
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
 // that owns its renderer. Mirrors Ink's WeakMap<NodeJS.WriteStream, Ink> in
 // instances.ts. Keyed weakly so closed/GC'd streams don't leak memory.
@@ -282,9 +248,8 @@ function supportsTerminalMouse(): boolean {
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 
-// `isErrorInput` (the cross-realm Error brand check) now lives in
-// ./components/error-overview.ts, co-located with messageForNonError and shared
-// with render-to-string.ts so the classification is a single source of truth.
+// Error classification and fallback messages share one UI-independent source
+// with render-to-string so fatal settlement cannot diverge from presentation.
 
 type MaybeWritableStream = NodeJS.WriteStream & {
   writable?: boolean;
@@ -325,9 +290,9 @@ function isExpectedManagedInputUnavailableError(error: Error): boolean {
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
-  let exitResolve!: (result?: unknown) => void;
+  let exitResolve!: () => void;
   let exitReject!: (e: Error) => void;
-  const exitPromise = new Promise<unknown>((res, rej) => {
+  const exitPromise = new Promise<void>((res, rej) => {
     exitResolve = res;
     exitReject = rej;
   });
@@ -389,14 +354,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDevTeardown: (() => void) | null = null;
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedNeedsTerminalLineAdvance: (() => boolean) | null = null;
-  let mountedRestoreConsole: (() => void) | null = null;
+  let mountedConsoleSink: ConsoleSinkRegistration | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedOutputCoordinator: OutputCoordinator | null = null;
   let mountedCommit: (() => CoordinatedWriteResult) | null = null;
   let mountedCreateOutputStateRollback: (() => () => void) | null = null;
   let mountedAlternateScreen = false;
   let mountedFullscreenCursorHidden = false;
-  let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   let mountedEmergencyKittyController: ReturnType<typeof createKittyKeyboardController> | null =
     null;
@@ -473,7 +437,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // Pending exit state — stored so resolveExit() can flush stdout before
   // settling the exit promise.
   let pendingExitError: unknown = undefined;
-  let pendingExitResult: unknown = undefined;
   let pendingExitErrorIsSilent = false;
   let pendingExitErrorWasRendered = false;
   let pendingBoundaryError: Error | undefined;
@@ -481,6 +444,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let pendingBoundaryFrameWriteFailed = false;
   let pendingFatalReport: string | null = null;
   let settlementStarted = false;
+  const teardownErrors: unknown[] = [];
+
+  function recordTeardownError(error: unknown): void {
+    const nested = (error as { readonly errors?: unknown })?.errors;
+    if (Array.isArray(nested)) teardownErrors.push(...nested);
+    else teardownErrors.push(error);
+  }
 
   function resolveExit() {
     if (settlementStarted) return;
@@ -504,7 +474,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (isErrorInput(pendingExitError)) {
         exitReject(pendingExitError);
       } else {
-        exitResolve(pendingExitResult);
+        exitResolve();
       }
       return;
     }
@@ -516,7 +486,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       if (isErrorInput(pendingExitError)) {
         exitReject(pendingExitError);
       } else {
-        exitResolve(pendingExitResult);
+        exitResolve();
       }
     };
 
@@ -849,7 +819,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // tree remains mounted so one final commit can still read the newest state.
     scheduledCommit = () => {};
     mountedScheduler?.cancel();
-    mountedClear = null;
     if (!sync && !immediateTermination && coordinator?.isBlocked()) {
       waitForCoordinator();
       return;
@@ -900,6 +869,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedTerminalReconcile = null;
       closeOutstandingSynchronizedOutput();
       mountedSynchronizedOutputReleases = null;
+      if (pendingExitError === undefined && teardownErrors.length > 0) {
+        pendingExitError = new AggregateError(
+          [...teardownErrors],
+          "The application exited, but Runtime could not completely restore the terminal",
+        );
+      }
       teardownCompleted = true;
       flushDeferredLifecycle();
     };
@@ -925,13 +900,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       if (restoration.writable) completeTeardown();
       else {
-        void restoration.ready.then(completeTeardown, () => {
+        void restoration.ready.then(completeTeardown, (error) => {
+          recordTeardownError(error);
           rollbackRestoration?.();
           performEmergencyTerminalRestore();
           completeTeardown();
         });
       }
-    } catch {
+    } catch (error) {
+      recordTeardownError(error);
       // Restore the logical writer snapshot before using idempotent synchronous
       // terminal releases. A custom stream may throw before or after accepting
       // the captured restoration transaction, so the physical state is unknown.
@@ -950,8 +927,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const runBestEffort = (operation: () => void): void => {
         try {
           operation();
-        } catch {
-          // Continue through every remaining release.
+        } catch (error) {
+          recordTeardownError(error);
         }
       };
       const appContext = mountedAppContext!;
@@ -978,10 +955,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
         : false;
       // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
-      if (mountedRestoreConsole) {
-        const restoreConsole = mountedRestoreConsole;
-        mountedRestoreConsole = null;
-        runBestEffort(restoreConsole);
+      if (mountedConsoleSink) {
+        const consoleSink = mountedConsoleSink;
+        mountedConsoleSink = null;
+        runBestEffort(consoleSink.release);
       }
       if (mountedMouseController) {
         runBestEffort(() => mountedMouseController?.beginSilentTeardown());
@@ -1133,7 +1110,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const stdinController = mountedStdinController;
         mountedEmergencyStdinController = stdinController;
         mountedStdinController = null;
+        stdinController.setCleanupErrorSink(recordTeardownError);
         runBestEffort(() => stdinController.dispose(sync));
+        stdinController.setCleanupErrorSink(null);
       }
       if (mountedRenderSession) {
         const renderSession = mountedRenderSession;
@@ -1283,12 +1262,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const originalUnmount = baseApp.unmount.bind(baseApp);
 
   const app = baseApp as unknown as TuiApp;
+  let mountAttemptConsumed = false;
 
   app.mount = function mount(options: InternalMountOptions = {}): ComponentPublicInstance {
+    if (mountAttemptConsumed) {
+      throw new Error("A vue-tui app instance can only be mounted once");
+    }
     // The mount contract is validated before reading stream getters, checking
     // stream ownership, or mutating Vue/terminal state. Removed-option errors
     // deliberately win over an invalid mode value.
     const requestedMode = normalizeRequestedMode(options);
+    const requestedPresentation = normalizeRequestedPresentation(options);
     const liveUpdatesOverride = validateLiveUpdates(
       (options as { readonly liveUpdates?: unknown }).liveUpdates,
     );
@@ -1296,8 +1280,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       (options as { readonly clipboard?: unknown }).clipboard,
     );
     const stdout = options.stdout ?? process.stdout;
-    const stdin = options.stdin ?? process.stdin;
-    const stderr = options.stderr ?? process.stderr;
 
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
@@ -1350,8 +1332,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return {} as ComponentPublicInstance;
     }
 
+    // A busy-stdout guard above is call-scoped and does not consume this app.
+    // Every mount that proceeds beyond it is a single real attempt, even if a
+    // later stream getter, renderer hook, or terminal acquisition fails.
+    mountAttemptConsumed = true;
+    const stdin = options.stdin ?? process.stdin;
+    const stderr = options.stderr ?? process.stderr;
+
     const requestedScreenReaderPresentation =
-      options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
+      requestedPresentation !== undefined
+        ? requestedPresentation === "screen-reader"
+        : (options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true");
     const stdoutFacts = {
       isTTY: Boolean(stdout.isTTY),
       columns: stdout.columns,
@@ -1363,7 +1354,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const surface = resolveLiveSurface({
       requestedMode,
       liveUpdatesOverride,
-      isCI: isInCi,
       presentation: requestedScreenReaderPresentation ? "screen-reader" : "visual",
       suspensionSupported: suspensionHost.supported,
       stdout: stdoutFacts,
@@ -1888,8 +1878,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
         // the first content commit, the value the resize-boundary path assigns,
         // and what an empty screen-reader frame leaves — must fall
-        // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
-        // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
+        // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
+        // null/undefined, so an
         // empty string would pass through and restore nothing after an external write.
         withWriterCaretOwnership(caretPosition, () => {
           writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
@@ -1988,7 +1978,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       const appContext: AppContext = {
-        exit(errorOrResult?: unknown) {
+        exit(error?: Error) {
           // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
           // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
           // exit() captures its value/error and initiates teardown; any
@@ -1999,7 +1989,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // app.unmount() runs teardown()+resolveExit() WITHOUT setting
           // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
           // unmount teardown (or any exit() after unmount) would otherwise pass
-          // the exitInitiated check, overwrite pendingExitResult/pendingExitError
+          // the exitInitiated check, overwrite the selected exit error
           // and queue a microtask — letting that late value win over the unmount.
           // Gating on teardownStarted too makes exit() a no-op once unmount/
           // teardown is in progress. At the FIRST exit() both flags are false, so
@@ -2009,7 +1999,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // Record the FIRST value/error synchronously (before the deferred
           // teardown microtask) so a re-entrant exit() — which is blocked above
           // anyway — and the eventual resolveExit() always settle on this value.
-          if (isErrorInput(errorOrResult)) {
+          if (error !== undefined) {
+            const exitError = isErrorInput(error)
+              ? error
+              : new TypeError("useApp().exit() accepts only an Error or no argument");
             // Don't clobber an error already recorded synchronously by
             // recordExitError() (the boundary captured first): first-wins keeps the
             // displayed and rejected error the SAME. pendingExitError is undefined on
@@ -2020,9 +2013,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             // microtask runs — exitInitiated is still false so we reach here. `=` would
             // overwrite to Error2, making the overview show Error1 while waitUntilExit()
             // rejects Error2.)
-            pendingExitError ??= errorOrResult;
-          } else {
-            pendingExitResult = errorOrResult;
+            pendingExitError ??= exitError;
           }
           // Defer teardown to a microtask: exit() is frequently called from
           // inside the Vue update cycle (useInput handler, setup(), errorHandler)
@@ -2035,7 +2026,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             }
           });
         },
-        waitUntilRenderFlush,
         stdout,
         stderr,
         stdin,
@@ -2358,68 +2348,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return accepted;
       }
 
-      let blockedClearRetryPending = false;
-      mountedClear = () => {
-        const rollback = createOutputStateRollback();
-        let invalidateSurface = false;
-        const result = runOutputTransaction(
-          () => {
-            runLifecycleTransaction(() => {
-              if (!dynamicUpdatesLive || terminalSuspended) return;
-              if (fixedFullscreenSurface) {
-                fullscreenBaselineValid = false;
-                ensureFullscreenSurface();
-                runSynchronizedOutput(() => {
-                  writeRuntimeOutput(stdout, hideCursorEscape + ansiEscapes.clearViewport);
-                  writer.sync("", { cursor: false });
-                });
-                invalidateSurface = true;
-                return;
-              }
-              if (isScreenReaderEnabled) {
-                runSynchronizedOutput(() => {
-                  if (frameState.outputHeight > 0) {
-                    writeRuntimeOutput(stdout, ansiEscapes.eraseLines(frameState.outputHeight));
-                  }
-                  frameState.lastOutput = "";
-                  frameState.lastOutputToRender = "";
-                  frameState.outputHeight = 0;
-                });
-                invalidateSurface = true;
-                return;
-              }
-              writer.clear();
-              // The physical frame is now blank. Forget its row bookkeeping without
-              // writing anything: recording the erased frame as a live baseline would
-              // make a second clear/update walk upward into pre-app history. The logical
-              // frameState remains available for a coordinated write to restore later,
-              // while a real commit can paint it again from this owned origin.
-              writer.reset({ cursorDirty: false });
-              invalidateSurface = true;
-            });
-          },
-          {
-            onFullyHanded() {
-              if (!invalidateSurface) return;
-              mountedGeometry?.invalidateSurface();
-              mountedTextSelection?.invalidateSurface();
-            },
-            onUnhandedFailure: rollback,
-          },
-        );
-        if (result.status === "blocked" && !blockedClearRetryPending) {
-          blockedClearRetryPending = true;
-          void result.ready.then(
-            () => {
-              blockedClearRetryPending = false;
-              if (!teardownStarted) mountedClear?.();
-            },
-            () => {
-              blockedClearRetryPending = false;
-            },
-          );
-        }
-      };
       const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
 
       function runSynchronizedOutput(body: () => void): void {
@@ -3245,16 +3173,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // so a synchronous mount failure cannot leak a patched console.
       if (patchConsole !== false) {
         try {
-          mountedRestoreConsole = patchConsoleFn((stream, data) => {
+          mountedConsoleSink = registerConsoleSink((stream, data) => {
             if (stream === "stdout") {
-              appContext.writeToStdout(data);
+              return appContext.writeToStdout(data);
             }
             if (stream === "stderr") {
               // Filter Vue internal warnings
               if (!data.startsWith("[Vue warn]")) {
-                appContext.writeToStderr(data);
+                return appContext.writeToStderr(data);
               }
             }
+            return undefined;
           });
         } catch {
           // patch-console uses console.Console which may not be available in
@@ -3309,10 +3238,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         throw err;
       }
 
-      // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
-      // async errors in Vue's internal scheduler). The error boundary returns
-      // false to stop propagation, so caught errors won't reach here.
-      baseApp.config.errorHandler = (err) => {
+      // Compose the user's pre-mount Vue error handler with Runtime's fatal
+      // lifecycle fallback. A failure in the observer is secondary: it must not
+      // replace the application error or prevent terminal restoration.
+      const userErrorHandler = baseApp.config.errorHandler;
+      baseApp.config.errorHandler = (err, instance, info) => {
+        try {
+          userErrorHandler?.(err, instance, info);
+        } catch {
+          // Runtime still owns restoration and the authoritative application
+          // error, even when the user's diagnostic callback itself fails.
+        }
         // Preserve a genuine (incl. cross-realm) Error so the original survives to
         // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
         // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
@@ -3505,6 +3441,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   };
 
   app.unmount = function unmount(): void {
+    mountAttemptConsumed = true;
     try {
       teardown();
     } finally {
@@ -3512,21 +3449,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   };
 
-  app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
+  app.waitUntilExit = function waitUntilExit(): Promise<void> {
     return exitPromise;
   };
 
   // Hoisted so the injected appContext (built inside mount()) can expose the
-  // SAME implementation via useApp().waitUntilRenderFlush — both the
-  // TuiApp handle and the in-tree composable resolve identically.
+  // The app owner can wait for Vue, console, renderer, and stream work to settle.
   async function waitUntilRenderFlush(): Promise<void> {
-    const stream = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
+    if (!mountedAppContext || !vueMountStarted || teardownStarted) {
+      throw new Error("waitUntilRenderFlush() is only available while the app is mounted");
+    }
+    const stream = mountedAppContext.stdout as MaybeWritableStream;
     const coordinator = mountedOutputCoordinator;
 
     // A blocked commit resolves its scheduler turn immediately, then registers
     // exactly one retry for `drain`. Loop through both layers so a waiter cannot
     // observe the old frame between those two turns.
     while (true) {
+      await mountedConsoleSink?.waitForIdle();
       while (mountedResizeRefresh) await mountedResizeRefresh;
       const terminalReconcile = mountedTerminalReconcile;
       if (terminalReconcile) {
@@ -3554,10 +3494,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     await writeOutputBarrier(stream);
   }
   app.waitUntilRenderFlush = waitUntilRenderFlush;
-
-  app.clear = function clear(): void {
-    mountedClear?.();
-  };
 
   return app;
 }
@@ -3588,6 +3524,8 @@ interface StdinController extends StdinContext {
   setBracketedPasteMode: (enabled: boolean) => void;
   /** Deterministic host handoff after parser normalization, scoped to this app. */
   injectTestMouse: (event: InternalTestMouseEvent) => void;
+  /** Report independent cleanup failures without stopping later releases. */
+  setCleanupErrorSink: (sink: ((error: unknown) => void) | null) => void;
 }
 
 interface RawModeState {
@@ -3695,6 +3633,7 @@ function createStdinController(
     kind: "bootstrap",
     resolved: undefined,
   };
+  let cleanupErrorSink: ((error: unknown) => void) | null = null;
   let bracketedPasteModeCount = 0;
   let pendingBracketedPasteMode: { readonly enabled: boolean } | undefined;
   let reconcilingBracketedPaste = false;
@@ -3795,10 +3734,11 @@ function createStdinController(
   function runTerminalCleanup(operation: () => void): void {
     try {
       operation();
-    } catch {
+    } catch (error) {
       // Terminal restoration is a best-effort transaction. A failed write for
       // one mode must not prevent the remaining modes or raw stdin from being
       // restored.
+      cleanupErrorSink?.(error);
     }
   }
 
@@ -4618,6 +4558,9 @@ function createStdinController(
     isRawModeSupported: appCtx.isRawModeSupported,
     inputAvailability,
     internal_inputRouting: inputRouting,
+    setCleanupErrorSink(sink) {
+      cleanupErrorSink = sink;
+    },
     injectTestMouse(event) {
       acceptSharedInput(createInternalTestMouseFact(event), captureApplicationInputSnapshot());
     },

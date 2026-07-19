@@ -2,6 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, createApp, Text, useBoxSize } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -47,7 +48,14 @@ async function mountPlainApp(label: string): Promise<void> {
   const app = createApp(App);
 
   try {
-    app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false });
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    } as InternalMountOptions);
     await within(app.waitUntilRenderFlush(), `${label} render flush`);
   } finally {
     app.unmount();
@@ -87,7 +95,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-    });
+    } as InternalMountOptions);
     await owner.waitUntilRenderFlush();
 
     expect(() =>
@@ -98,7 +106,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
         liveUpdates: true,
         maxFps: 0,
         patchConsole: false,
-      }),
+      } as InternalMountOptions),
     ).not.toThrow();
     await expect(within(observer.waitUntilExit(), "foreign target exit")).rejects.toThrow(
       "useBoxSize() target belongs to a different vue-tui app",
@@ -131,7 +139,14 @@ test("rejects a mounted-time non-Box target without contaminating later apps", a
 
   try {
     expect(() =>
-      app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false }),
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      } as InternalMountOptions),
     ).not.toThrow();
     await expect(within(app.waitUntilExit(), "non-Box target exit")).rejects.toThrow(
       "useBoxSize() target must be a ref bound directly to <Box>",
@@ -167,7 +182,14 @@ test("rejects a dynamic non-Box retarget without contaminating later apps", asyn
   const app = createApp(Invalid);
 
   try {
-    app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false });
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     renderBox.value = false;
     await nextTick();

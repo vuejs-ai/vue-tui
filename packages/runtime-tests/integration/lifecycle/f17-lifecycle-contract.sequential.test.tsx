@@ -4,9 +4,11 @@ import { fileURLToPath } from "node:url";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useInput, useStdout } from "@vue-tui/runtime";
-import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
-import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { useStdout } from "../../../runtime/dist/internal.mjs";
+import { useInternalInputRoutingForTest } from "../../../runtime/dist/internal.mjs";
+import { bsu, esu } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyWritable(): NodeJS.WriteStream & { chunks: string[] } {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
@@ -62,7 +64,7 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-    });
+    } as InternalMountOptions);
   } catch (error) {
     mountError = error;
   }
@@ -102,7 +104,7 @@ test.sequential("raw-mode teardown restores a pre-existing raw stdin baseline", 
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   app.unmount();
 
   expect(stdin.isRaw).toBe(true);
@@ -145,7 +147,7 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   expect(selectRoute).toThrow("stdin.ref failed");
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
@@ -188,7 +190,7 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance, setEncodingCalls }).toEqual({
     isRaw: true,
@@ -229,7 +231,7 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   app.unmount();
 
   expect({ isRaw: stdin.isRaw, rawModeCalls }).toEqual({
@@ -257,7 +259,7 @@ test.sequential("exit settlement and beforeExit ownership are idempotent after t
     stdin,
     liveUpdates: false,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   app.unmount();
   app.unmount();
@@ -310,7 +312,7 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -371,7 +373,7 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -429,7 +431,7 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
     // queue and contaminating another test in this worker.
     maxFps: 1,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await app.waitUntilRenderFlush();
 
   content.value = "ORDINARY_RENDER_FAILURE";

@@ -3,7 +3,7 @@ import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { Text } from "../index.ts";
-import { createApp, type MountOptions } from "../render.ts";
+import { createApp, type InternalMountOptions } from "../render.ts";
 import type { TextSelectionCommands } from "./public-selection.ts";
 import { useTextSelection } from "../composables/useTextSelection.ts";
 import {
@@ -52,7 +52,7 @@ describe("public Fullscreen text selection", () => {
         liveUpdates: true,
         maxFps: 0,
         patchConsole: false,
-      });
+      } as InternalMountOptions);
       await nextTick();
       await app.waitUntilRenderFlush();
       expect(selection.state.value.status).toBe("ready");
@@ -87,12 +87,12 @@ describe("public Fullscreen text selection", () => {
         patchConsole: false,
         clipboard: {
           kind: "custom",
-          writeText(text) {
+          writeText(text: string) {
             copied.push(text);
             return { status: "copied" };
           },
         },
-      });
+      } as InternalMountOptions);
       await nextTick();
       await app.waitUntilRenderFlush();
       expect(selection.state.value).toMatchObject({ status: "ready", selectedText: "" });
@@ -144,7 +144,7 @@ describe("public Fullscreen text selection", () => {
         maxFps: 0,
         patchConsole: false,
         [INTERNAL_TEST_INPUT_HOST]: inputHost,
-      } as MountOptions);
+      } as InternalMountOptions);
       await nextTick();
       await app.waitUntilRenderFlush();
 

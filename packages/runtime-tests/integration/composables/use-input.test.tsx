@@ -236,7 +236,6 @@ describe("handler and activation contract", () => {
           stdin: streams.stdin,
           stdout: streams.stdout,
           stderr: streams.stderr,
-          maxFps: 0,
           patchConsole: false,
         });
         await expect(app.waitUntilExit()).rejects.toThrow("useInput() handler must be a function");
@@ -269,7 +268,6 @@ describe("handler and activation contract", () => {
         stdin: streams.stdin,
         stdout: streams.stdout,
         stderr: streams.stderr,
-        maxFps: 0,
         patchConsole: false,
       });
       await expect(app.waitUntilExit()).rejects.toThrow(/useInput\(\) options/);
@@ -302,7 +300,6 @@ describe("handler and activation contract", () => {
           stdin: streams.stdin,
           stdout: streams.stdout,
           stderr: streams.stderr,
-          maxFps: 0,
           patchConsole: false,
         });
         await expect(app.waitUntilExit()).rejects.toThrow(
@@ -333,7 +330,6 @@ describe("handler and activation contract", () => {
         stdin: streams.stdin,
         stdout: streams.stdout,
         stderr: streams.stderr,
-        maxFps: 0,
         patchConsole: false,
       });
       expect(streams.rawModeCalls).toEqual([true]);
@@ -471,14 +467,12 @@ describe("Ctrl+C delayed default", () => {
           stdin: streams.stdin,
           stdout: streams.stdout,
           stderr: streams.stderr,
-          maxFps: 0,
           patchConsole: false,
         });
         peer.mount({
           stdin: streams.stdin,
           stdout: peerStdout,
           stderr: peerStderr,
-          maxFps: 0,
           patchConsole: false,
         });
         const exited = failing.waitUntilExit();
@@ -523,7 +517,6 @@ describe("semantic input terminal ownership", () => {
         stdin: streams.stdin,
         stdout: streams.stdout,
         stderr: streams.stderr,
-        maxFps: 0,
         patchConsole: false,
       });
       await nextTick();

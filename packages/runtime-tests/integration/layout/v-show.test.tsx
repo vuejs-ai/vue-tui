@@ -21,7 +21,6 @@ test.each(["inline", "fullscreen"] as const)(
       <Box flexDirection="column">
         <VShowJourney
           visible={visible.value}
-          pointer={mode === "fullscreen"}
           revision={revision.value}
           targetKey={targetKey.value}
           authoredDisplay={authoredDisplay.value}
@@ -42,13 +41,6 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
       expect(vShowJourneyState.presence?.value).toBe(true);
 
-      if (mode === "fullscreen") {
-        expect(result.mouse.reporting.current).toBe("button");
-        await result.mouse.down({ x: 0, y: 0 });
-        await result.mouse.up({ x: 0, y: 0 });
-        expect(vShowJourneyState.clicks?.value).toBe(1);
-      }
-
       visible.value = false;
       await flushUpdate(result);
       expect(result.lastFrame()).toBe("tail");
@@ -56,10 +48,6 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(vShowJourneyState.presence?.value).toBe(false);
       expect(vShowJourneyState.size?.value).toBeNull();
-      if (mode === "fullscreen") {
-        expect(result.mouse.reporting.current).toBe("none");
-        await expect(result.mouse.down({ x: 0, y: 0 })).rejects.toThrow("without button reporting");
-      }
 
       // Box's authored display and v-show are independent layers. Updating the
       // prop while the directive remains false must not reveal the subtree.
@@ -80,25 +68,10 @@ test.each(["inline", "fullscreen"] as const)(
       expect(result.lastFrame()).toBe("    probe:2\ntail");
       expect(vShowJourneyState.presence?.value).toBe(true);
       expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
-      if (mode === "fullscreen") {
-        expect(result.mouse.reporting.history).toEqual(["button", "none", "button"]);
-        // The keyed replacement moved from x=0 to x=4. The old hit-map cell is
-        // inert; the current target receives exactly one click.
-        await result.mouse.down({ x: 0, y: 0 });
-        await result.mouse.up({ x: 0, y: 0 });
-        expect(vShowJourneyState.clicks?.value).toBe(1);
-        await result.mouse.down({ x: 4, y: 0 });
-        await result.mouse.up({ x: 4, y: 0 });
-        expect(vShowJourneyState.clicks?.value).toBe(2);
-      }
-
       result.unmount();
       expect(vShowJourneyState.unmounts).toBe(1);
       expect(vShowJourneyState.presence?.value).toBe(false);
       expect(vShowJourneyState.size?.value).toBeNull();
-      if (mode === "fullscreen") {
-        expect(result.mouse.reporting.history).toEqual(["button", "none", "button", "none"]);
-      }
     } finally {
       result.dispose();
     }

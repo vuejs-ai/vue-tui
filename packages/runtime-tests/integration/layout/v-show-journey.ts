@@ -12,12 +12,10 @@ import {
   type Ref,
 } from "vue";
 import { Box, Text, useBoxPresence, useBoxSize, type BoxSize } from "@vue-tui/runtime";
-import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
 interface VShowJourneyState {
   mounts: number;
   unmounts: number;
-  clicks: Ref<number> | null;
   value: Ref<number> | null;
   presence: Readonly<Ref<boolean>> | null;
   size: Readonly<Ref<BoxSize | null>> | null;
@@ -26,7 +24,6 @@ interface VShowJourneyState {
 export const vShowJourneyState: VShowJourneyState = {
   mounts: 0,
   unmounts: 0,
-  clicks: null,
   value: null,
   presence: null,
   size: null,
@@ -35,7 +32,6 @@ export const vShowJourneyState: VShowJourneyState = {
 export function resetVShowJourneyState(): void {
   vShowJourneyState.mounts = 0;
   vShowJourneyState.unmounts = 0;
-  vShowJourneyState.clicks = null;
   vShowJourneyState.value = null;
   vShowJourneyState.presence = null;
   vShowJourneyState.size = null;
@@ -50,7 +46,6 @@ export default defineComponent({
   name: "VShowJourney",
   props: {
     visible: { type: Boolean, required: true },
-    pointer: { type: Boolean, required: true },
     revision: { type: Number, required: true },
     targetKey: { type: Number, required: true },
     authoredDisplay: {
@@ -61,18 +56,8 @@ export default defineComponent({
   setup(props) {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
     const value = ref(props.revision);
-    const clicks = ref(0);
     const presence = useBoxPresence(target);
     const size = useBoxSize(target);
-    useMouseEvent(
-      target,
-      "click",
-      () => {
-        clicks.value++;
-        return "consume";
-      },
-      { isActive: () => props.pointer },
-    );
 
     watch(
       () => props.revision,
@@ -82,7 +67,6 @@ export default defineComponent({
       { flush: "sync" },
     );
 
-    vShowJourneyState.clicks = clicks;
     vShowJourneyState.value = value;
     vShowJourneyState.presence = presence;
     vShowJourneyState.size = size;

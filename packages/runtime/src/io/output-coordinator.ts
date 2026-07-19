@@ -1,8 +1,7 @@
 import { acquireRuntimeResource } from "../resource-tracker.ts";
 
 /**
- * Result of one geometry-safe `useStdout().write()` or `useStderr().write()`
- * transaction.
+ * Result of one Runtime-coordinated side-output transaction.
  *
  * A Node Writable accepts a chunk even when `write()` returns `false`. The
  * `writable` flag therefore reports whether another transaction may begin; it

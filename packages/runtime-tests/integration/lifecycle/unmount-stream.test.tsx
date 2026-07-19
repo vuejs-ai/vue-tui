@@ -4,6 +4,7 @@ import { expect, test } from "vite-plus/test";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import ansiEscapes from "ansi-escapes";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("unmount does not write to ended stdout stream", async () => {
@@ -23,7 +24,7 @@ test("unmount does not write to ended stdout stream", async () => {
   const stderr = makeFakeWritable({ columns: 100 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
   await nextTick();
   await nextTick();
 
@@ -71,7 +72,6 @@ test("non-interactive mode writes only last frame at unmount", async () => {
     stdout,
     stdin,
     stderr,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -162,7 +162,7 @@ test("explicit interactive override writes live frames to non-TTY without altern
     stderr,
     liveUpdates: true,
     mode: "fullscreen",
-  });
+  } as InternalMountOptions);
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -206,7 +206,6 @@ test("non-interactive empty final frame still writes trailing newline at unmount
     stdout,
     stdin,
     stderr,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -239,7 +238,6 @@ test("non-interactive unmount skips final frame when stdout is not writable", as
     stdout,
     stdin,
     stderr,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -272,7 +270,6 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
     stdout,
     stdin,
     stderr,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -317,7 +314,6 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
     stdout,
     stdin,
     stderr,
-    liveUpdates: false,
   });
 
   await nextTick();

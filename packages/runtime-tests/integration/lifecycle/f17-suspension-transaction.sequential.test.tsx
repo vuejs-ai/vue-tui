@@ -3,14 +3,14 @@ import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput, useLayoutWidth, type TuiApp } from "@vue-tui/runtime";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import {
-  INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
-  INTERNAL_TERMINAL_SIZE_PROBE,
   createManualSuspensionHost,
-  type InternalMountOptions,
   type SuspensionHost,
-} from "@vue-tui/runtime/internal";
+} from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
 
 function makeWritable(): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -427,7 +427,7 @@ test.sequential("a reentrant unmount cannot forward the initial Fullscreen paint
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-    });
+    } as InternalMountOptions);
     await app.waitUntilExit();
 
     expect(reenterOnFirstPaint).toBe(false);

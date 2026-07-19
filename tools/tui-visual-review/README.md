@@ -24,7 +24,7 @@ vp run visual:scroll-box
 
 Wait for several streamed lines, observe the sticky-bottom state, then use Up or Home to leave the bottom. Let more lines arrive and confirm the viewport keeps its chosen offset; use End to restore sticky-bottom following before quitting with `q` and checking terminal restoration.
 
-Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|target-lifetime|targeted-mouse|screen-reader>` after `--` to choose a focused state; `static` is the default.
+Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|screen-reader|foreground-reset>` after `--` to choose a focused state; `static` is the default.
 
 For the public Spinner component and its component-owned timer, use:
 
@@ -34,35 +34,9 @@ vp run visual:spinner
 
 Observe the `0 current glyph` line, wait for a visible revision, then observe again and confirm that the leading glyph advances while the label stays fixed. Load both PNGs. Quit with `q` from an observation (use `allowStale` with the reason that the animated glyph may advance), wait for `__VT_APP_EXIT__:0`, and observe the restored shell before closing the controller.
 
-Use `vp run visual:fullscreen-origin -- --scenario foreground-reset` to inspect the final nested `revert`/`initial` foreground behavior, wrapping, sibling colors, inherited background, literal private-use characters, and shell restoration. Use `vp run visual:inline-history` to inspect the final Inline committed `Static` history plus newest live tail, and `vp run visual:v-show` to inspect hide, hidden-state update, show-again, mouse-mode ownership, and restoration one observed action at a time.
+Use `vp run visual:fullscreen-origin -- --scenario foreground-reset` to inspect the final nested `revert`/`initial` foreground behavior, wrapping, sibling colors, inherited background, literal private-use characters, and shell restoration. Use `vp run visual:inline-history` to inspect the final Inline committed `Static` history plus newest live tail, and `vp run visual:v-show` to inspect hide, hidden-state update, show-again, measurement, and restoration one observed action at a time.
 
-For the Fullscreen targeted-mouse composition journey, use:
-
-```sh
-vp run visual:fullscreen-origin -- --scenario targeted-mouse
-```
-
-Observe the initial `targets=hidden` frame and confirm the structured screen reports no mouse tracking. Send `a`, wait for `targets=visible`, and observe the click, ScrollBox, divider, and clipped-target regions; the screen must now report button tracking. Send an SGR down/up pair at the `CLICK` row and confirm the child and parent dispatch markers, then send wheel-up over the ScrollBox and observe its content move. Send `d` to attach both divider drag registrations and confirm button-motion tracking, then send a down, movement outside the divider, and release. Send `g` to return to button tracking and `x` to remove the remaining targets and return to no mouse tracking. Quit with `q`, observe the restored shell, and verify `process.json` records normal-buffer, termios, and shell-input restoration. The real-PTY tests assert the exact dispatch markers and control-sequence order; the visual loop is for inspecting the user-visible regions and emulator modes.
-
-For nested ScrollBox keyboard and wheel composition in a real Inline or Fullscreen terminal, use:
-
-```sh
-vp run visual:scroll-composition -- --scenario inline
-vp run visual:scroll-composition -- --scenario fullscreen
-```
-
-The initial observation must show `input=application`, `route=ready`, `outer 1`, and inner lines 2–4. In either mode, observe between Down, End, Down, Up, Home, and Home: movement stays inside the inner viewport; Down at its bottom continues to and moves the outer viewport; reversing Up immediately returns movement to the inner viewport; the second Home continues at the inner top and moves the outer viewport home. In Fullscreen, additionally send raw SGR wheel-down `\x1b[<65;2;7M`, move the inner viewport to its bottom with End, send the same wheel-down again, and then wheel-up `\x1b[<64;2;7M`; the visible route must change from `inner:target:down:moved`, to `inner:target:down:unchanged > outer:bubble:down:moved`, and then to `inner:target:up:moved` while the visible lines agree. Quit from an observation, wait for `__VT_APP_EXIT__:0`, observe normal-buffer and disabled mouse modes, send `printf '__SCROLL_SHELL_OK__\n'\r` from that revision, and observe the shell marker. After closing, require `process.json` to report exit code 0, no controller errors, and restored termios; the final screen artifact proves successful shell input.
-
-For Fullscreen application-owned text selection and OSC 52 copy, use:
-
-```sh
-vp run visual:selection-copy
-vp run visual:selection-copy -- --scenario suspension
-```
-
-The default `shell` scenario proves selection, copy requests, and restoration into a usable parent shell. Observe the initial alternate-screen frame and load its PNG before acting. It must show the long-document excerpt, `selection=ready range=none selected=""`, and no highlighted cells. Send raw Shift+Right (`\x1b[1;2C`) from that observation, wait for a visible revision, and observe the one-character keyboard selection; repeat only after inspecting the new PNG. Send `c` from an observation, wait for `copy=requested`, and inspect the image plus structured cells rather than treating the OSC 52 request as proof that an external clipboard accepted it. Clear with `x`, then exercise the wrapped Unicode row with SGR coordinates: down `\x1b[<0;7;6M`, movement `\x1b[<32;5;7M`, and release `\x1b[<0;5;7m`. A mouse down arms capture without changing the screen, so observe it with `allowUnchanged: true` and an explicit reason before sending the movement. The movement observation must visibly highlight the complete `你🙂 beta gamma` graphemes across the soft wrap, and its structured cells must report inverse styling only for that range. Quit with `q`, wait for `__VT_APP_EXIT__:0`, observe the restored shell, send `printf '__SELECTION_SHELL_OK__\n'\r` from that revision, and observe the marker before closing. Require `process.json` to report application exit code 0, restored termios, and no controller errors.
-
-The `suspension` scenario runs the fixture directly because an interactive POSIX shell regains the foreground terminal when a job stops. Select text from an observed frame, send `SIGTSTP`, inspect the restored normal buffer and released modes, then send `SIGCONT` from that stopped-state observation and inspect the reacquired alternate screen with the same selection. Quit with `q`, poll `status` until `process.state` is `exited`, observe the final normal buffer, and then close. Require `process.json` to report process exit code 0 and no controller errors. Exact OSC 52 payload bytes, result status, suspension mode balance, and shell-input restoration are deterministic assertions in `packages/runtime-tests/integration/pty/selection-copy.test.ts`; together these two visual scenarios supply the required image-observed interaction pass and do not claim native-terminal clipboard acceptance.
+The former targeted-pointer, arbitrary-Text selection, and Runtime clipboard visual journeys are intentionally absent. Those capabilities are outside the current minimum public Runtime foundation; a future public journey should be added only after a smaller Runtime-only primitive is justified.
 
 The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 

@@ -1,12 +1,14 @@
 import { PassThrough } from "node:stream";
-import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { defineComponent, nextTick, ref, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useInput, useStdout, type MountOptions } from "@vue-tui/runtime";
+import { Box, Text, createApp, useInput } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { render, type ContentFrame } from "@vue-tui/testing";
+import { useStdout } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin } from "../lifecycle/test-streams.ts";
 
 function makeOutput(options: { readonly isTTY: boolean }): NodeJS.WriteStream {
@@ -56,7 +58,7 @@ const acceptanceHosts = [
   {
     name: "visual Inline",
     isTTY: true,
-    options: { mode: "inline", liveUpdates: true } satisfies Partial<MountOptions>,
+    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptions>,
   },
   {
     name: "Fullscreen request with screen-reader Inline fallback",
@@ -64,23 +66,23 @@ const acceptanceHosts = [
     options: {
       mode: "fullscreen",
       liveUpdates: true,
-      isScreenReaderEnabled: true,
-    } satisfies Partial<MountOptions>,
+      presentation: "screen-reader",
+    } satisfies Partial<InternalMountOptions>,
   },
   {
     name: "final non-TTY",
     isTTY: false,
-    options: { mode: "inline", liveUpdates: false } satisfies Partial<MountOptions>,
+    options: { mode: "inline", liveUpdates: false } satisfies Partial<InternalMountOptions>,
   },
   {
     name: "Fullscreen request with final non-TTY output",
     isTTY: false,
-    options: { mode: "fullscreen", liveUpdates: false } satisfies Partial<MountOptions>,
+    options: { mode: "fullscreen", liveUpdates: false } satisfies Partial<InternalMountOptions>,
   },
   {
     name: "Fullscreen request with live non-TTY output",
     isTTY: false,
-    options: { mode: "fullscreen", liveUpdates: true } satisfies Partial<MountOptions>,
+    options: { mode: "fullscreen", liveUpdates: true } satisfies Partial<InternalMountOptions>,
   },
 ] as const;
 
@@ -124,7 +126,7 @@ test.each(acceptanceHosts)(
         patchConsole: false,
         maxFps: 0,
         ...options,
-      });
+      } as InternalMountOptions);
       await app.waitUntilRenderFlush();
 
       live.value = "live-2";
@@ -171,7 +173,7 @@ test("effective visual Fullscreen rejects empty Static before terminal ownership
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await nextTick();
     await app.waitUntilRenderFlush();
 
@@ -309,7 +311,7 @@ test("inserting Static after a Fullscreen frame rejects before any replacement f
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     expect(stdoutChunks.join("")).toContain("FULLSCREEN_BEFORE_STATIC");
     const updateStart = stdoutChunks.length;
@@ -374,12 +376,13 @@ test("Static inserted while Fullscreen is suspended rejects before surface or in
 
     showStatic.value = true;
     await nextTick();
-    const exited = result.waitUntilExit();
-    await result.terminal.resume();
-
-    await expect(exited).rejects.toThrow(
+    const exited = expect(result.waitUntilExit()).rejects.toThrow(
       "<Static> cannot render on an effective visual Fullscreen surface",
     );
+    await expect(result.terminal.resume()).rejects.toThrow(
+      "<Static> cannot render on an effective visual Fullscreen surface",
+    );
+    await exited;
     expect(result.frames.length).toBe(framesBeforeSuspend);
     expect(result.terminal.rawMode.history).toEqual([true, false]);
     expect(result.terminal.rawMode.current).toBe(false);
@@ -431,7 +434,7 @@ test("a synchronous append during the Static write remains pending for the next 
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await nextTick();
     await app.waitUntilRenderFlush();
     app.unmount();
@@ -498,7 +501,7 @@ test("a throwing Static write abandons the instance before a synchronous slot re
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
 
     await app.waitUntilRenderFlush();
     showStatic.value = true;
@@ -563,7 +566,7 @@ test("accepted Static output is not replayed when the later dynamic write throws
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
@@ -627,7 +630,7 @@ test("a throwing Static write is indeterminate and is not retried during teardow
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
@@ -745,7 +748,7 @@ test("coordinated external output stays ordered between exact Static commits", a
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
 
     items.value = [{ id: 1, text: first }];
@@ -799,7 +802,7 @@ test("ordinary teardown commits one pending throttled Static append", async () =
       liveUpdates: true,
       patchConsole: false,
       maxFps: 1,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
 
     showStatic.value = true;

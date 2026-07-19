@@ -3,6 +3,7 @@ import { cwd } from "node:process";
 import { defineComponent, h, type PropType } from "vue";
 import StackUtils from "stack-utils";
 import codeExcerpt, { type CodeExcerpt } from "code-excerpt";
+import { messageForNonError } from "../error-value.ts";
 import Box from "./box.vue";
 import Text from "./text.vue";
 
@@ -21,94 +22,6 @@ const stackUtils = new StackUtils({
   cwd: cwd(),
   internals: StackUtils.nodeInternals(),
 });
-
-// String() coercion that can NEVER throw. A pathological thrown value can carry
-// a throwing Symbol.toPrimitive/toString/valueOf, so bare String(value) is not
-// safe here — and this feeds the error-display / reject path (render.ts's
-// onErrorCaptured wraps `new Error(messageForNonError(err))` with NO surrounding
-// try/catch). If coercion throws, fall back to a fixed placeholder so the caller
-// always gets a string.
-const safeString = (value: unknown): string => {
-  try {
-    return String(value);
-  } catch {
-    return "[unserializable value]";
-  }
-};
-
-// The user-facing message for a NON-Error thrown value. SINGLE source of truth
-// shared by the ErrorOverview header (what the user SEES) and render.ts's
-// reject-wrap (`new Error(messageForNonError(value))`, what waitUntilExit()
-// REJECTS with), so the displayed and rejected messages can never drift apart
-// (audit finding e17). Prefer a string `.message` (covers `throw {message:'x'}`
-// and a cross-realm Error read structurally); otherwise fall back to
-// `String(value)` (covers `throw 'boom'`, `throw 42`, a non-string `.message`).
-export function messageForNonError(value: unknown): string {
-  // Read `.message` exactly once: the typecheck and the returned value must see
-  // the SAME read, and the read is guarded because this feeds the error-display
-  // / reject path — it must not itself throw on a pathological thrown object
-  // (e.g. a `.message` getter that throws), which the old `String(value)` form
-  // never touched. Both String() fallbacks go through safeString: the coercion
-  // itself can also throw (a throwing Symbol.toPrimitive/toString), so guarding
-  // only the `.message` read left two unguarded throw sites that wedged the
-  // error boundary. This function must NEVER throw, per its contract above.
-  let message: unknown;
-  try {
-    message = (value as { message?: unknown })?.message;
-  } catch {
-    return safeString(value);
-  }
-  return typeof message === "string" ? message : safeString(value);
-}
-
-/**
- * Produce a durable plain-text fatal report without assuming that the rich
- * ErrorOverview viewport survives teardown. The read is defensive because an
- * Error-like value may expose throwing stack/name/message accessors.
- */
-export function formatErrorForStderr(value: unknown): string {
-  let stack: unknown;
-  try {
-    stack = (value as { stack?: unknown })?.stack;
-  } catch {
-    stack = undefined;
-  }
-  if (typeof stack === "string" && stack.trim() !== "") {
-    return `${stack.trimEnd()}\n`;
-  }
-  return `Error: ${messageForNonError(value)}\n`;
-}
-
-// Classify a thrown/exit() value as error-vs-result, matching Ink's isErrorInput
-// (ink.tsx:154-159 @ v7.0.4). Co-located with messageForNonError because the two
-// are always paired (a genuine Error is re-thrown/rejected as-is; a non-Error is
-// wrapped with messageForNonError) — shared by render.ts (exit/onErrorCaptured)
-// and render-to-string.ts (re-throw after cleanup) so the brand check is a SINGLE
-// source of truth. The plain `instanceof Error` check fails for a cross-realm
-// Error — one created in a different VM context (e.g.
-// `vm.runInNewContext("new Error()")`) has a prototype from the OTHER realm, so
-// it isn't an instance of THIS realm's Error even though it is a genuine Error.
-// The `[object Error]` brand (Symbol.toStringTag, not prototype-based) crosses
-// realms, so it catches those foreign Errors and they REJECT waitUntilExit()
-// (or re-throw from renderToString) instead of being silently swallowed as a
-// resolved result value. Non-Error result values (string/number/plain object)
-// brand as e.g. `[object String]`, so they still RESOLVE — exactly Ink's contract.
-export function isErrorInput(value: unknown): value is Error {
-  // Must NEVER throw: runs in the error-exit/capture path (onErrorCaptured,
-  // appContext.exit, resolveExit) with NO surrounding try/catch — an unguarded
-  // throw here wedges the boundary. BOTH checks can throw on a pathological thrown
-  // value, so BOTH are inside the try: `instanceof` invokes the value's
-  // [[GetPrototypeOf]] (a Proxy's throwing getPrototypeOf trap re-throws), and
-  // `Object.prototype.toString.call` READS a throwing `Symbol.toStringTag` getter.
-  // On any throw, treat the value as a non-Error (false) so it routes through
-  // messageForNonError. The brand check is the cross-realm-Error fallback (see
-  // the rationale above the function); `instanceof` short-circuits the common case.
-  try {
-    return value instanceof Error || Object.prototype.toString.call(value) === "[object Error]";
-  } catch {
-    return false;
-  }
-}
 
 export const ErrorOverview = defineComponent({
   name: "ErrorOverview",

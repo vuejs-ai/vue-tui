@@ -12,7 +12,7 @@ const App = defineComponent({
 
     useInput((event) => {
       if (event.kind !== "text" || event.text !== "q") return;
-      exit("spinner-visual-review");
+      exit();
     });
 
     return () =>

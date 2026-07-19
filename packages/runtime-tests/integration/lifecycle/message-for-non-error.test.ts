@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { messageForNonError } from "@vue-tui/runtime/internal";
+import { messageForNonError } from "../../../runtime/dist/internal.mjs";
 
 // messageForNonError feeds the error-display / reject path: render.ts's
 // onErrorCaptured wraps `new Error(messageForNonError(err))` with NO surrounding
@@ -7,9 +7,8 @@ import { messageForNonError } from "@vue-tui/runtime/internal";
 // promises it "must not itself throw on a pathological thrown object", so every
 // coercion inside it has to be throw-safe.
 //
-// Imported from the built `@vue-tui/runtime/internal` dist (not source): the
-// source module imports box.vue/text.vue, and the runtime-tests vitest config
-// has no @vitejs/plugin-vue, so a source-relative import fails to compile.
+// Import the pure helper directly so this internal contract test does not need
+// a public Runtime-internal package path or Vue SFC transformation.
 
 test("normal values coerce to their expected message", () => {
   expect(messageForNonError(42)).toBe("42");

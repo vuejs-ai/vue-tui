@@ -3,6 +3,7 @@ import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import stripAnsi from "strip-ansi";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   captureWrites,
   getContentWrites,
@@ -12,9 +13,7 @@ import {
 
 // A NON-TTY writable (isTTY=false). makeFakeWritable() forces isTTY=true, which
 // selects live output; for the final-stream race below we need
-// a piped stream so `interactive` derives false (render.ts:
-// `options.liveUpdates ?? (!isInCi && Boolean(stdout.isTTY))`). We also pass
-// `liveUpdates: false` explicitly so the case is deterministic regardless of CI.
+// a piped stream so Runtime selects final-stream output.
 function makeNonTtyWritable(): NodeJS.WriteStream {
   const s = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(s, { columns: 100, rows: 100, isTTY: false });
@@ -51,7 +50,7 @@ test("update-flush throw then synchronous unmount(): waitUntilExit REJECTS with 
   });
 
   const app = createApp(ThrowsOnUpdate);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -104,7 +103,7 @@ test("two sibling throws in one flush: displayed overview and rejected error AGR
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   type Reject = { kind: "rejected"; message: unknown } | { kind: "resolved" };
   const settled: Promise<Reject> = app.waitUntilExit().then(
@@ -156,7 +155,7 @@ test("captured throw then racing exit(err): displayed overview and rejected erro
   // Held in an object so TS doesn't narrow it to `never`: the assignment happens
   // inside Retainer's setup closure, which control-flow analysis can't see, so a
   // plain `let` read after the await would narrow to its `null` initializer.
-  const retainer: { exit: ((errorOrResult?: unknown) => void) | null } = { exit: null };
+  const retainer: { exit: ((error?: Error) => void) | null } = { exit: null };
   const Retainer = defineComponent(() => {
     retainer.exit = useApp().exit;
     return () => h(Text, null, "retainer");
@@ -174,7 +173,7 @@ test("captured throw then racing exit(err): displayed overview and rejected erro
   });
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -238,8 +237,8 @@ test("final stream: update-flush throw + synchronous unmount() still REJECTS", a
   });
 
   const app = createApp(ThrowsOnUpdate);
-  // A piped stdout with liveUpdates:false selects final-stream output.
-  app.mount({ stdout, stdin, stderr, liveUpdates: false });
+  // A piped stdout selects final-stream output.
+  app.mount({ stdout, stdin, stderr });
 
   type Settled = { kind: "rejected"; message: unknown } | { kind: "resolved"; value: unknown };
   const done: Promise<Settled> = app.waitUntilExit().then(
@@ -289,7 +288,7 @@ test("unthrottled live output still paints the ErrorOverview frame", async () =>
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));
@@ -316,7 +315,7 @@ test("final-stream errors are written durably to stderr without a stale stdout f
   });
 
   const app = createApp(Throws);
-  app.mount({ stdout, stdin, stderr, liveUpdates: false });
+  app.mount({ stdout, stdin, stderr });
   app.waitUntilExit().catch(() => {});
 
   await new Promise<void>((r) => setImmediate(r));

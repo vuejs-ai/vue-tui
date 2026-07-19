@@ -3,13 +3,13 @@ import { expect, test } from "vite-plus/test";
 import {
   Text,
   renderToString,
-  useStderr,
   useStdin,
-  useStdout,
   useLayoutWidth,
   useViewportHeight,
 } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import { useStderr } from "../../runtime/dist/internal.mjs";
+import { useStdout } from "../../runtime/dist/internal.mjs";
+import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
 
 test.sequential("both string hosts avoid process terminal streams", () => {
   const originals = {

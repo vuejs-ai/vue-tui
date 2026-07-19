@@ -2,7 +2,7 @@
 
 > **Early stage** — under active development. Bug reports are welcome, but the API may still change.
 
-Deterministic test host for Vue terminal applications. It mounts an application against modeled terminal or stream inputs, records renderer content, and applies the emitted bytes to an in-memory terminal emulator. The host never patches the process-global `console`.
+Deterministic test host for Vue terminal applications. It mounts an application against modeled terminal or stream inputs, records renderer content, and applies the emitted bytes to an in-memory terminal emulator. It leaves the process-global `console` alone by default; a focused test can opt into Runtime's production console routing.
 
 ## Install
 
@@ -63,7 +63,7 @@ The test host exposes two intentionally different views of one run:
 | `frames` / `lastFrame()` | Renderer commits before the output writer adds screen and lifecycle controls | Exact component output, renderer styling, and `<Static>` deltas                                                  |
 | `screen()`               | Cell surface after stdout and stderr bytes pass through a terminal emulator  | Alternate-screen behavior, cursor position and visibility, scrollback, external writes, and teardown restoration |
 
-Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, direct `useStdout()` writes, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
+Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, patched-console side output, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
 
 The test host deliberately does not republish Runtime's internal mode resolution, output policy, or capability objects. Configure a production-like host through `RenderOptions`, then assert what the application renders, what the modeled terminal contains, and how terminal ownership changes through suspension or teardown.
 
@@ -97,33 +97,27 @@ For a visual Inline TTY, `rows` is the production maximum live-region height: sh
 interface TestHost {
   readonly mode?: "inline" | "fullscreen";
   readonly presentation?: "visual" | "screen-reader";
-  readonly updates?: "live" | "at-teardown";
   readonly stdin?: "tty" | "non-tty";
   readonly stdout?: "tty" | "stream";
-  readonly clipboard?: TestClipboardBehavior;
+  readonly patchConsole?: boolean;
 }
-
-type TestClipboardBehavior = "copied" | "requested" | "unavailable" | "rejected";
 ```
 
-| Host field     | Default                                      | Meaning                                                          |
-| -------------- | -------------------------------------------- | ---------------------------------------------------------------- |
-| `mode`         | `"inline"`                                   | Requested production screen model                                |
-| `presentation` | `"visual"`                                   | Visual renderer or linear screen-reader transcript               |
-| `updates`      | `"live"` for TTY; `"at-teardown"` for stream | Dynamic-output cadence                                           |
-| `stdin`        | `"tty"`                                      | Whether input supports TTY behavior such as raw mode             |
-| `stdout`       | `"tty"`                                      | Whether output can acquire a terminal surface and dimensions     |
-| `clipboard`    | —                                            | Modeled custom clipboard result; omission leaves it unconfigured |
+| Host field     | Default    | Meaning                                                             |
+| -------------- | ---------- | ------------------------------------------------------------------- |
+| `mode`         | `"inline"` | Requested production screen model                                   |
+| `presentation` | `"visual"` | Visual renderer or linear screen-reader transcript                  |
+| `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                |
+| `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions        |
+| `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer |
 
 These controls model production facts rather than setting unrelated internal booleans. In particular:
 
 - a Fullscreen request on stream stdout has no effective terminal mode;
-- `updates: "live"` on a stream enables the live stream updater but does not create a stable viewport or terminal hit testing;
 - a Fullscreen screen-reader request resolves to an Inline transcript on the normal screen;
-- `updates: "at-teardown"` uses the final-stream policy even when the underlying output is a TTY.
-- `clipboard` models one app-owned custom transport and never reads or writes the ambient system clipboard.
+- TTY output updates live, while stream output follows Runtime's monotonic document policy.
 
-The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can suppress it for one event by returning the exact object `{ preventDefault: true }`; this does not stop other captured `useInput()` subscriptions from running.
+The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can suppress it for one event by returning the exact object `{ preventDefault: true }`; this does not stop other captured `useInput()` subscriptions from running.
 
 ### Examples
 
@@ -213,60 +207,20 @@ interface ScreenSnapshot {
 
 `lines` contains every visible row, including trailing cell spaces. `scrollback` contains rows above the normal buffer viewport. `cursor.visible` reports the terminal's current DECTCEM visibility mode after all pending output has been parsed; it does not model cursor blinking or whether a graphical terminal window has focus. Trim lines in the assertion when padding is irrelevant. A TTY host models the output line discipline that moves a line feed to column zero; a stream host preserves raw line-feed cursor movement because no TTY performs that conversion.
 
-### Input, clipboard, and terminal controls
+### Input and terminal controls
 
-| Property or method                   | Behavior                                                                                                                                                            |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stdin.write(data)`                  | Emits input, waits for the input parser, and waits for the resulting render and emulator writes                                                                     |
-| `mouse.reporting`                    | Runtime-readonly live view of modeled SGR button or button-motion ownership and its committed transition history                                                    |
-| `mouse.down(point, options?)`        | Injects one parsed physical button-down fact; the default button is left                                                                                            |
-| `mouse.move(point, modifiers?)`      | Injects one left-button motion fact while button-motion reporting and an unmatched left down are active                                                             |
-| `mouse.up(point, options?)`          | Injects one parsed physical button-up fact                                                                                                                          |
-| `mouse.wheel(point, direction, ...)` | Injects one parsed four-direction wheel fact                                                                                                                        |
-| `clipboard.requests`                 | Runtime-readonly exact text passed to the modeled custom transport, in call order                                                                                   |
-| `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
-| `terminal.resize(columns, rows)`     | Validates the same axis and emulator-cell limits as `render()`, resizes the modeled streams and emulator, emits resize, and waits for rendering                     |
-| `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
-| `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline/transcript region, Fullscreen viewport, or live stream before reacquiring requested input modes  |
-| `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                     |
+| Property or method                   | Behavior                                                                                                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stdin.write(data)`                  | Emits string or `Uint8Array` bytes through the production input stream and parser, settles finite Escape ambiguity, then waits for resulting rendering and emulator writes |
+| `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                                |
+| `terminal.resize(columns, rows)`     | Validates the same axis and emulator-cell limits as `render()`, resizes the modeled streams and emulator, emits resize, and waits for rendering                            |
+| `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame        |
+| `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline/transcript region or Fullscreen viewport before reacquiring requested input modes                       |
+| `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                            |
 
-The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes Runtime layout facts before repainting every live-update surface, including row-unbounded live streams, and then reacquires requested input modes. Final-output streams have no live frame to repaint.
+The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes Runtime layout facts before repainting a live terminal surface and then reacquires requested input modes. Stream hosts have no live frame to repaint.
 
-Mouse points are zero-based cells inside the current modeled terminal dimensions. The driver is available only while the Fullscreen application has acquired the reporting level needed for that physical fact. It injects `down`, `move`, `up`, and `wheel` after protocol parsing, then waits for the same application and emulator flush as `stdin.write()`. It deliberately has no `click()` helper: a down/up pair must pass through the production hit testing, click synthesis, propagation, and drag state machines.
-
-```tsx
-await result.mouse.down({ x: 2, y: 1 });
-await result.mouse.up({ x: 2, y: 1 });
-expect(clicks).toHaveLength(1);
-```
-
-The clipboard host returns exactly the selected behavior through the production `useClipboard()` service. `"unavailable"` becomes a `ClipboardWriteResult` with reason `"transport-unavailable"`; `"rejected"` returns the production rejected shape. Every call that reaches the modeled adapter is retained in the readonly requests list, including exact newlines and Unicode; an immediately unavailable call during suspension or after disposal does not invoke or record an adapter request:
-
-```tsx
-import { defineComponent } from "vue";
-import { expect } from "vitest";
-import { Text, useClipboard, type UseClipboardReturn } from "@vue-tui/runtime";
-import { render } from "@vue-tui/testing";
-
-let clipboard!: UseClipboardReturn;
-const Copy = defineComponent(() => {
-  clipboard = useClipboard();
-  return () => <Text>Copy</Text>;
-});
-
-const result = await render(Copy, { host: { clipboard: "copied" } });
-try {
-  await expect(clipboard.writeText("line\n你🙂")).resolves.toEqual({
-    status: "copied",
-    text: "line\n你🙂",
-  });
-  expect(result.clipboard.requests).toEqual(["line\n你🙂"]);
-} finally {
-  result.dispose();
-}
-```
-
-Fullscreen `useTextSelection()` uses the same modeled successful paint and the existing mouse driver. Drive a down/move/up sequence to test pointer selection, or call the public commands for application keyboard bindings; `selection.copy()` then records its exact non-empty `selectedText` in `clipboard.requests`. There is no test-only range setter, so tests do not bypass grapheme movement, paint provenance, drag capture, or the production copy bridge.
+Each `stdin.write()` must end on a complete input boundary. A lone Escape and other finite ambiguous prefixes wait for the production parser's timeout. A definite incomplete CSI, bracketed paste, or UTF-8 sequence rejects clearly while retaining the bytes, so a later write can complete it. Mouse and clipboard simulation are intentionally not part of this minimum test host.
 
 ### Lifecycle methods
 

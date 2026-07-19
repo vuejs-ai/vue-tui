@@ -7,8 +7,6 @@
   "scripts": {
     "start": "tsx controller.ts",
     "fullscreen-origin": "tsx controller.ts --target fullscreen-origin",
-    "scroll-composition": "tsx controller.ts --target scroll-composition",
-    "selection-copy": "tsx controller.ts --target selection-copy",
     "scroll-box": "tsx controller.ts --target scroll-box",
     "spinner": "tsx controller.ts --target spinner",
     "inline-history": "tsx controller.ts --target inline-history",

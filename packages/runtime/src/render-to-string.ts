@@ -17,7 +17,7 @@ import { createInternalFocusController } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
 import { createInternalCaretController } from "./caret/caret-controller.ts";
 import { InternalCaretControllerKey } from "./caret/caret-context.ts";
-import { isErrorInput, messageForNonError } from "./components/error-overview.ts";
+import { isErrorInput, messageForNonError } from "./error-value.ts";
 import {
   InternalRenderSessionKey,
   createStringRenderSessionService,
@@ -50,8 +50,8 @@ export interface RenderToStringOptions {
  *
  * Terminal-specific input, focus, and stream composables receive isolated inert
  * services because there is no terminal session. `useApp()` can be called while
- * sharing a component with a live tree, but invoking either lifecycle operation
- * reports that the operation is unavailable for synchronous string rendering.
+ * sharing a component with a live tree, but invoking `exit()` reports that the
+ * operation is unavailable for synchronous string rendering.
  *
  * The `<Static>` component is supported --- its output is prepended to the
  * dynamic output.
@@ -65,9 +65,9 @@ export function renderToString(component: Component, options?: RenderToStringOpt
 
 /**
  * Screen-reader-capable variant of {@link renderToString}, for the accessibility
- * test suite only (exported from `@vue-tui/runtime/internal`). The public
- * `renderToString` is layout-only, matching Ink, which keeps screen-reader
- * string rendering in a private test helper rather than its public API.
+ * test suite only. The public `renderToString` is layout-only, matching Ink,
+ * which keeps screen-reader string rendering in a private test helper rather
+ * than its public API.
  */
 export function renderToStringWithScreenReader(
   component: Component,
@@ -417,8 +417,6 @@ function createStringContexts(columns: number): {
     exit: () => {
       throw unavailableOperation("useApp().exit()");
     },
-    waitUntilRenderFlush: () =>
-      Promise.reject(unavailableOperation("useApp().waitUntilRenderFlush()")),
     stdout,
     stderr,
     stdin,

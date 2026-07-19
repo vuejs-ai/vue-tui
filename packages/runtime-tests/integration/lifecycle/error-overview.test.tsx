@@ -3,6 +3,7 @@ import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stripAnsi from "strip-ansi";
 import { createApp, Text } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   captureWrites,
   getContentWrites,
@@ -71,7 +72,7 @@ async function renderErrorFrame(component: Parameters<typeof createApp>[0]): Pro
   const writes = captureWrites(stdout);
 
   const app = createApp(component);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   // The exit promise rejects (component threw); swallow it. Then wait for the
   // boundary's onErrorCaptured → nextTick → ErrorOverview commit → exit chain.
@@ -101,7 +102,7 @@ async function renderFrameAndReject(component: Parameters<typeof createApp>[0]):
   const writes = captureWrites(stdout);
 
   const app = createApp(component);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   let reject: { kind: "rejected"; message: unknown; isError: boolean } | { kind: "resolved" } = {
     kind: "resolved",

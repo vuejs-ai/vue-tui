@@ -106,7 +106,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
-    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/devtools"] },
     server: { middlewareMode: true },
   });
   const env = server.environments.ssr as unknown as {

@@ -26,7 +26,16 @@ export default defineConfig({
     }),
   ],
   pack: {
-    entry: ["src/index.ts", "src/fullscreen.ts", "src/inline.ts", "src/internal.ts"],
+    entry: [
+      "src/index.ts",
+      "src/devtools.ts",
+      "src/inline.ts",
+      "src/testing.ts",
+      // Built for repository integration tests so private symbol and injection
+      // identities match the public bundle. It is not a package export and is
+      // excluded from the published tarball.
+      "src/internal.ts",
+    ],
     // Runtime and declaration output must use the consumer's one Vue instance.
     // Inlining Vue's internal types creates duplicate global declarations when
     // the consumer installs another supported Vue patch release.
@@ -42,6 +51,6 @@ export default defineConfig({
       }),
     ],
     dts: { vue: true },
-    exports: true,
+    exports: { exclude: ["internal"] },
   },
 });

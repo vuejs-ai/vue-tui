@@ -3,6 +3,7 @@ import { defineComponent, isReadonly, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useBoxSize, type BoxSize } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(columns = 20, rows = 4): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -223,28 +224,25 @@ test("a retained size becomes null when its setup scope is disposed", async () =
   expect(size.value).toBeNull();
 });
 
-test.each(["live", "at-teardown"] as const)(
-  "publishes accepted Box size for a visual non-TTY %s document host",
-  async (updates) => {
-    let size!: ReturnType<typeof useBoxSize>;
-    const App = defineComponent(() => {
-      const target = shallowRef<InstanceType<typeof Box> | null>(null);
-      size = useBoxSize(target);
-      return () => <Box ref={target} width={6} height={2} />;
-    });
+test("publishes accepted Box size for a visual non-TTY document host", async () => {
+  let size!: ReturnType<typeof useBoxSize>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    size = useBoxSize(target);
+    return () => <Box ref={target} width={6} height={2} />;
+  });
 
-    const result = await render(App, {
-      columns: 30,
-      rows: 8,
-      host: { stdout: "stream", updates },
-    });
-    try {
-      expect(size.value).toEqual({ width: 6, height: 2 });
-    } finally {
-      result.dispose();
-    }
-  },
-);
+  const result = await render(App, {
+    columns: 30,
+    rows: 8,
+    host: { stdout: "stream" },
+  });
+  try {
+    expect(size.value).toEqual({ width: 6, height: 2 });
+  } finally {
+    result.dispose();
+  }
+});
 
 test("retains accepted size while suspended and settles queued changes on resume", async () => {
   const width = shallowRef(4);
@@ -314,7 +312,14 @@ test("does not publish a candidate Box size before a failed output write is acce
 
   const app = createApp(App);
   try {
-    app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false });
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     const accepted = size.value;
     expect(accepted).toEqual({ width: 4, height: 1 });
@@ -351,7 +356,14 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
   const stdin = makeTtyInput();
   const app = createApp(App);
   try {
-    app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false });
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    } as InternalMountOptions);
     await expect(app.waitUntilExit()).rejects.toThrow(
       "useBoxSize() target must be a ref bound directly to <Box>",
     );

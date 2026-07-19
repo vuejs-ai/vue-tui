@@ -36,7 +36,6 @@ const completeBox = (
       backgroundColor="blue"
       dimColor
       bold
-      inverse
       wrap="truncate"
       ariaLabel="value"
       ariaHidden={false}
@@ -74,6 +73,8 @@ const textItalic = <Text italic>text</Text>;
 const textUnderline = <Text underline>text</Text>;
 // @ts-expect-error Text no longer publishes unevidenced decoration policy.
 const textStrikethrough = <Text strikethrough>text</Text>;
+// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
+const textInverse = <Text inverse>text</Text>;
 // @ts-expect-error The duplicate end-truncation spelling was removed.
 const textTruncateEnd = <Text wrap="truncate-end">text</Text>;
 // @ts-expect-error Foreground reset tokens do not apply to backgrounds.
@@ -91,11 +92,12 @@ void boxPercentageHeight;
 void textItalic;
 void textUnderline;
 void textStrikethrough;
+void textInverse;
 void textTruncateEnd;
 void textBackgroundReset;
 
-// Common visual components are passive. Fullscreen mouse behavior is attached
-// to a component ref with @vue-tui/runtime/fullscreen composables.
+// Common visual components are passive; targeted pointer behavior is outside
+// the current Runtime foundation.
 // @ts-expect-error Box rejects the removed mouse listener.
 const boxMousedown = <Box onMousedown={() => {}} />;
 // @ts-expect-error Box rejects the React-style casing too.

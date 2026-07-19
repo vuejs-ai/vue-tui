@@ -4,15 +4,15 @@ import { Box, Text, createApp, renderToString } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { render } from "@vue-tui/testing";
 import {
-  createRoot,
   createBox,
+  createRoot,
   createText,
   createTextLeaf,
-  attachYoga,
-  renderScreenReaderOutput,
-  renderToStringWithScreenReader,
-  type AppContext,
-} from "@vue-tui/runtime/internal";
+} from "../../../runtime/dist/internal.mjs";
+import { attachYoga } from "../../../runtime/dist/internal.mjs";
+import { renderScreenReaderOutput } from "../../../runtime/dist/internal.mjs";
+import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
+import type { AppContext } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -32,7 +32,6 @@ const DIRECTION_LTR = 0;
 function createTestAppContext(): AppContext {
   return {
     exit: () => {},
-    waitUntilRenderFlush: async () => {},
     stdout: process.stdout,
     stderr: process.stderr,
     stdin: process.stdin,
@@ -499,7 +498,7 @@ describe("screen reader enabled mode", () => {
     const output = renderToStringWithScreenReader(
       defineComponent(() => () => (
         <Box>
-          <Text bold color="green" inverse>
+          <Text bold color="green">
             Styled content
           </Text>
         </Box>
@@ -566,7 +565,7 @@ describe("screen reader enabled mode", () => {
       stdout,
       stdin,
       stderr,
-      isScreenReaderEnabled: true,
+      presentation: "screen-reader",
     });
 
     await nextTick();

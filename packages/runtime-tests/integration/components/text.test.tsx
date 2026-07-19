@@ -210,14 +210,6 @@ test("text with hex background color", async () => {
   expect(lastFrame()).toBe(chalk.bgHex("#FF8800")("Test"));
 });
 
-test("text with inversion", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text inverse>Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.inverse("Test"));
-});
-
 test("text with empty-to-nonempty sibling does not wrap", async () => {
   const show = shallowRef(false);
   const { lastFrame } = await render(

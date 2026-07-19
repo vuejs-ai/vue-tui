@@ -9,7 +9,6 @@ export const textProps = {
   backgroundColor: String as PropType<Color>,
   dimColor: Boolean,
   bold: Boolean,
-  inverse: Boolean,
   wrap: { type: String as PropType<WrapMode>, default: "wrap" },
   ariaLabel: String,
   ariaHidden: Boolean,

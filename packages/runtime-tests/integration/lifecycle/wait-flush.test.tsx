@@ -3,6 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeWritable,
   makeFakeStdin,
@@ -78,7 +79,7 @@ test("waitUntilRenderFlush flushes pending throttled render", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, maxFps: 1 });
+  app.mount({ stdout, stdin, stderr, maxFps: 1 } as InternalMountOptions);
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);
@@ -105,7 +106,7 @@ test("waitUntilRenderFlush resolves when stdout is not writable", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, maxFps: 1 });
+  app.mount({ stdout, stdin, stderr, maxFps: 1 } as InternalMountOptions);
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);
@@ -159,7 +160,7 @@ test("waitUntilExit waits for stdout barrier when only writableLength is exposed
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, liveUpdates: false, patchConsole: false });
+  app.mount({ stdout, stdin, stderr, patchConsole: false });
   await nextTick();
   await nextTick();
 
@@ -244,7 +245,7 @@ test("waitUntilRenderFlush waits for all concurrent waiters on the same rerender
   app.unmount();
 });
 
-test("waitUntilRenderFlush resolves after unmount", async () => {
+test("waitUntilRenderFlush rejects after unmount", async () => {
   const App = defineComponent(() => () => <Text>Hello</Text>);
   const app = createApp(App);
   const stdout = makeFakeWritable();
@@ -254,10 +255,12 @@ test("waitUntilRenderFlush resolves after unmount", async () => {
 
   app.unmount();
   await app.waitUntilExit();
-  await app.waitUntilRenderFlush();
+  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
+    "waitUntilRenderFlush() is only available while the app is mounted",
+  );
 });
 
-test("waitUntilRenderFlush waits for unmount write callback", async () => {
+test("waitUntilExit waits for the unmount write callback", async () => {
   let didUnmountWriteCallbackFire = false;
 
   const stdout = createDelayedWriteCallbackStdout({
@@ -274,12 +277,12 @@ test("waitUntilRenderFlush waits for unmount write callback", async () => {
   app.mount({ stdout, stdin, stderr });
 
   app.unmount();
-  await app.waitUntilRenderFlush();
+  await app.waitUntilExit();
 
   expect(didUnmountWriteCallbackFire).toBe(true);
 });
 
-test("waitUntilRenderFlush resolves after exit with error", async () => {
+test("waitUntilRenderFlush rejects after exit with error", async () => {
   let exitFn!: (err: Error) => void;
   const App = defineComponent(() => {
     const { exit } = useApp();
@@ -298,93 +301,9 @@ test("waitUntilRenderFlush resolves after exit with error", async () => {
   await nextTick();
   exitFn(new Error("boom"));
   await expect(app.waitUntilExit()).rejects.toThrow("boom");
-  await app.waitUntilRenderFlush();
-});
-
-// useApp-level waitUntilRenderFlush tests (Ink parity, ported from Ink
-// render.tsx "useApp waitUntilRenderFlush …"): waitUntilRenderFlush is reachable
-// from INSIDE a component via useApp() — Ink's useApp() returns the same
-// { exit, waitUntilRenderFlush } pair. Ink's third "queued in same effect tick"
-// test relies on React `concurrent: true` (concurrent mode is N/A in Vue — see
-// .agents/docs/ink-divergences.md), so only the first two are ported.
-
-test("useApp waitUntilRenderFlush resolves after the first frame write callback", async () => {
-  let didInitialWriteCallbackFire = false;
-  let didFlushResolve = false;
-
-  const stdout = createDelayedWriteCallbackStdout({
-    shouldDelay: (chunk) => !isWriteBarrierChunk(chunk),
-    onDelayElapsed: () => {
-      didInitialWriteCallbackFire = true;
-    },
-  });
-
-  const App = defineComponent(() => {
-    const { exit, waitUntilRenderFlush } = useApp();
-    onMounted(() => {
-      void (async () => {
-        await waitUntilRenderFlush();
-        didFlushResolve = true;
-        exit();
-      })();
-    });
-    return () => <Text>Hello</Text>;
-  });
-
-  const app = createApp(App);
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr });
-
-  await app.waitUntilExit();
-  expect(didInitialWriteCallbackFire).toBe(true);
-  expect(didFlushResolve).toBe(true);
-});
-
-test("useApp waitUntilRenderFlush waits for state update frame flush", async () => {
-  let didWorldWriteCallbackFire = false;
-  let didFlushResolve = false;
-
-  const stdout = createDelayedWriteCallbackStdout({
-    shouldDelay: (chunk) =>
-      !isWriteBarrierChunk(chunk) &&
-      stripAnsi(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)).includes(
-        "World",
-      ),
-    onDelayElapsed: () => {
-      didWorldWriteCallbackFire = true;
-    },
-  });
-
-  const text = shallowRef("Hello");
-  const App = defineComponent(() => {
-    const { exit, waitUntilRenderFlush } = useApp();
-    onMounted(() => {
-      void (async () => {
-        // Settle the initial "Hello" frame first (not delayed by the harness,
-        // which only delays the "World" chunk) so the subsequent "World" write
-        // is unambiguously a second, state-update frame — mirroring the stable
-        // app-level "waits for rerender write callback" test above.
-        await waitUntilRenderFlush();
-        text.value = "World";
-        await nextTick();
-        await nextTick();
-        await waitUntilRenderFlush();
-        didFlushResolve = true;
-        exit();
-      })();
-    });
-    return () => <Text>{text.value}</Text>;
-  });
-
-  const app = createApp(App);
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  app.mount({ stdout, stdin, stderr });
-
-  await app.waitUntilExit();
-  expect(didWorldWriteCallbackFire).toBe(true);
-  expect(didFlushResolve).toBe(true);
+  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
+    "waitUntilRenderFlush() is only available while the app is mounted",
+  );
 });
 
 // Port of Ink render.tsx:1528-1562 ("issue 596: useEffect can run before the
@@ -427,33 +346,4 @@ test("onMounted runs before the first frame write callback (issue 596)", async (
   app.unmount();
   await app.waitUntilExit();
   expect(didInitialWriteCallbackFire).toBe(true);
-});
-
-// --- clear() API test ---
-
-test("clear output", async () => {
-  const msg = shallowRef("A\nB\nC");
-  const App = defineComponent(() => () => <Text>{msg.value}</Text>);
-  const app = createApp(App);
-  const stdout = makeFakeWritable();
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-
-  app.mount({ stdout, stdin, stderr });
-  await nextTick();
-  await nextTick();
-  expect(writes.some((w) => w.includes("A"))).toBe(true);
-
-  app.clear();
-  msg.value = "D";
-  await nextTick();
-  await nextTick();
-  await app.waitUntilRenderFlush();
-
-  // After clear + rerender, "D" should appear in content writes
-  const contentWrites = getContentWrites(writes);
-  expect(contentWrites.some((w) => stripAnsi(w).includes("D"))).toBe(true);
-
-  app.unmount();
 });

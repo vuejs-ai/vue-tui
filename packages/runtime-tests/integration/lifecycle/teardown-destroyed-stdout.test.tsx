@@ -1,4 +1,5 @@
-import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 /**
  * Item 2.5b — every teardown stdout write must be skipped when stdout is already
  * destroyed/ended, not just gated on `isTTY`.

@@ -24,4 +24,6 @@ export interface InternalRenderObserver {
   onCommit?(frame: InternalContentFrame): void;
 }
 
-export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol("vue-tui.internal.renderObserver");
+export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-render-observer",
+);

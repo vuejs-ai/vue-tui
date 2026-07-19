@@ -65,7 +65,13 @@ export {
 // Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
 // runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
 // pure-function test of this helper must reach it through the built dist.
-export { messageForNonError } from "./components/error-overview.ts";
+export { messageForNonError } from "./error-value.ts";
+export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
+export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
+export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
+export { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
+export { nextLineEscape } from "./io/cursor-helpers.ts";
+export { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 // Private integration-test access for exercising F3's selected topology and
 // external fallthrough through a real outer terminal and a real child PTY.
 // Ordinary applications compose public focus targets, scopes, and external

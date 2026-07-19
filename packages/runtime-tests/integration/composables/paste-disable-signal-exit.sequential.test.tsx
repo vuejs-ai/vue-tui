@@ -97,9 +97,7 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    // Keep the live TTY path explicit; lifecycle cleanup now registers for every
-    // real mount regardless of output cadence.
-    app.mount({ stdout, stdin, liveUpdates: true });
+    app.mount({ stdout, stdin });
 
     // Let semantic input attachment enable bracketed paste (writes \x1b[?2004h, async).
     await new Promise<void>((r) => setTimeout(r, 60));
@@ -133,7 +131,7 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, liveUpdates: true });
+    app.mount({ stdout, stdin });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(PASTE_ON);

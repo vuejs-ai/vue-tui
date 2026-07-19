@@ -38,7 +38,6 @@ export function assertTextValid(props: TextProps, validatePaint: boolean): true 
     }
     assertBoolean(values["dimColor"], "dimColor");
     assertBoolean(values["bold"], "bold");
-    assertBoolean(values["inverse"], "inverse");
   }
 
   return true;

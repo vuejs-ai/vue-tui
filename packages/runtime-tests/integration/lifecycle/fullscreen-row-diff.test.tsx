@@ -4,7 +4,7 @@ import { expect, test } from "vite-plus/test";
 import { Box, Text } from "@vue-tui/runtime";
 import { mountCapacityHost } from "../../capacity/host.ts";
 
-test("Fullscreen rewrites changed rows absolutely and resets after clear or resize", async () => {
+test("Fullscreen rewrites changed rows absolutely and resets after resize", async () => {
   const middle = shallowRef("middle");
   const bottom = shallowRef("bottom");
   const App = defineComponent(() => () => (
@@ -44,12 +44,6 @@ test("Fullscreen rewrites changed rows absolutely and resets after clear or resi
     expect(exactWidthUpdate).toContain(ansiEscapes.cursorTo(0, 2));
     const exactWidthScreen = await host.screen();
     expect(exactWidthScreen.text).toContain("top       \nmid       \n1234567890");
-
-    host.app.clear();
-    offset = host.writes.stdout.length;
-    middle.value = "after";
-    await host.flush("after");
-    expect(host.writes.stdout.slice(offset).join("")).toContain(ansiEscapes.clearViewport);
 
     offset = host.writes.stdout.length;
     await host.resize(12, 4);

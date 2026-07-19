@@ -2,7 +2,7 @@ import { defineComponent, h, nextTick, shallowRef, type Component } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
 
 const removedListeners = [
   "onMousedown",
@@ -16,7 +16,7 @@ const removedListeners = [
 function rejection(component: "Box" | "Text", listener: (typeof removedListeners)[number]): RegExp {
   return new RegExp(
     `^<${component}> does not accept the removed mouse listener "${listener}"\\. ` +
-      `Use the mouse composables from "@vue-tui/runtime/fullscreen"\\.$`,
+      `Targeted mouse input is outside the current Runtime foundation\\.$`,
   );
 }
 

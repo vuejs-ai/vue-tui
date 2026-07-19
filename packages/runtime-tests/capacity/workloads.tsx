@@ -1,33 +1,12 @@
 import assert from "node:assert/strict";
 import stringWidth from "string-width";
-import {
-  computed,
-  defineComponent,
-  nextTick,
-  shallowReactive,
-  shallowRef,
-  type ComponentPublicInstance,
-} from "vue";
+import { computed, defineComponent, nextTick, shallowReactive, shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import {
-  Box,
-  Text,
-  useApp,
-  useInput,
-  useLayoutWidth,
-  useStderr,
-  useStdout,
-  useViewportHeight,
-  type CoordinatedWriteResult,
-} from "@vue-tui/runtime";
+import { Box, Text, useApp, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import {
-  useMouseDrag,
-  useMouseEvent,
-  useTextSelection,
-  type TextSelectionCommands,
-  type TuiMouseDragEvent,
-} from "@vue-tui/runtime/fullscreen";
+import { useStderr } from "../../runtime/dist/internal.mjs";
+import { useStdout } from "../../runtime/dist/internal.mjs";
+import type { CoordinatedWriteResult } from "../../runtime/dist/internal.mjs";
 import {
   assertResourcesReleased,
   mountCapacityHost,
@@ -76,7 +55,7 @@ export const capacityManifest = Object.freeze({
     cellsPerLine: 72,
     scrollActions: 200,
     selectionMoves: 100,
-    pointerDrags: 1,
+    rangeUpdates: 1,
     copies: 1,
   }),
   j4: Object.freeze({
@@ -94,7 +73,7 @@ export const capacityManifest = Object.freeze({
     rowsPerPane: 100,
     sparseUpdates: 200,
     focusActions: 100,
-    wheelActions: 40,
+    scrollActions: 40,
     dividerMoves: 20,
     overlayCycles: 1,
   }),
@@ -195,7 +174,6 @@ async function finish(
   const final = await host.dispose();
   assertResourcesReleased(final.resources);
   assert.equal(host.rawMode.current, false, "raw mode must restore after the workload");
-  assert.equal(host.mouseReporting.current, "none", "mouse reporting must restore after teardown");
   assert.equal(final.screen.activeBuffer, "normal", "teardown must return to the normal buffer");
   assert.equal(final.screen.cursorVisible, true, "teardown must restore the terminal cursor");
   assert.equal(final.yoga.created, final.yoga.freed, "every created Yoga node must be freed");
@@ -244,7 +222,7 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
   const sequence = shallowRef(0);
   let writeStdout!: (data: string) => void;
   let writeStderr!: (data: string) => void;
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
 
   const marker = (): string =>
     `__J1__ seq=${sequence.value} records=${records.value.length} tokens=${tokenCount.value} approval=${approval.value} result=${approvalResult.value}`;
@@ -354,7 +332,7 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
       assert.equal(occurrences(screen.text, records.value[id]!.marker), 1);
     }
     assertions += records.value.length + 3;
-    exit({ records: records.value.length });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -400,7 +378,7 @@ async function runJ2(maxFps: number): Promise<JourneyExecution> {
       windowStart.value + capacityManifest.j2.maximumVisibleRows,
     ),
   );
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   const marker = (): string =>
     `__J2__ seq=${sequence.value} query=${query.value || "-"} count=${filtered.value.length} active=${active.value} start=${windowStart.value} phase=${phase.value}`;
 
@@ -503,7 +481,7 @@ async function runJ2(maxFps: number): Promise<JourneyExecution> {
     const screen = await host.screen();
     assert.equal(occurrences(screen.text, "PRE_APP_HISTORY"), 1);
     assertions++;
-    exit({ accepted: accepted.value[0]!.id });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -526,23 +504,46 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
   for (const line of lines) assert.equal(stringWidth(line), capacityManifest.j3.cellsPerLine);
   const document = lines.join("\n");
   const scroll = shallowRef<ScrollBoxExpose | null>(null);
-  const target = shallowRef<ComponentPublicInstance | null>(null);
   const scrollTop = shallowRef(0);
   const sequence = shallowRef(0);
   const copyStatus = shallowRef("none");
   const clipboardRequests: string[] = [];
-  let selection!: TextSelectionCommands;
-  let exit!: (result?: unknown) => void;
-  const range = (): string => {
-    const current = selection?.state.value.range;
-    return current ? `${current.anchor}:${current.extent}` : "none";
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const boundaries = [...segmenter.segment(document)].map((part) => part.index);
+  boundaries.push(document.length);
+  let anchorIndex = 0;
+  let extentIndex = 0;
+  let exit!: () => void;
+  const range = (): string => `${boundaries[anchorIndex]}:${boundaries[extentIndex]}`;
+  const selectedText = (): string => {
+    const start = boundaries[Math.min(anchorIndex, extentIndex)]!;
+    const end = boundaries[Math.max(anchorIndex, extentIndex)]!;
+    return document.slice(start, end);
+  };
+  const moveSelection = (
+    direction: "backward" | "forward" | "up" | "down" | "document-start",
+    extend = false,
+  ): boolean => {
+    const lineStep = capacityManifest.j3.cellsPerLine;
+    const next =
+      direction === "document-start"
+        ? 0
+        : direction === "forward"
+          ? extentIndex + 1
+          : direction === "backward"
+            ? extentIndex - 1
+            : direction === "down"
+              ? extentIndex + lineStep
+              : extentIndex - lineStep;
+    extentIndex = Math.max(0, Math.min(boundaries.length - 1, next));
+    if (!extend) anchorIndex = extentIndex;
+    return true;
   };
   const marker = (): string =>
     `__J3__ seq=${sequence.value} top=${scrollTop.value} range=${range()} copy=${copyStatus.value}`;
 
   const App = defineComponent(() => {
     exit = useApp().exit;
-    selection = useTextSelection(target);
     useInput((event) => {
       if (event.kind !== "key") return;
       const delta = event.name === "down" ? 1 : event.name === "up" ? -1 : 0;
@@ -554,7 +555,7 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
       <Box width={100} height={30} flexDirection="column">
         <Box width={100} height={29} overflowY="hidden">
           <ScrollBox ref={scroll}>
-            <Text ref={target}>{document}</Text>
+            <Text>{document}</Text>
           </ScrollBox>
           <Box position="absolute" left={6} top={5} width={1}>
             <Text>X</Text>
@@ -575,10 +576,6 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
     rows: capacityManifest.j3.rows,
     mode: "fullscreen",
     maxFps,
-    clipboard(text) {
-      clipboardRequests.push(text);
-      return { status: "copied" };
-    },
     onRender: (duration) => renderDurations.push(duration),
   });
   const heartbeat = startHeartbeat();
@@ -597,8 +594,8 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
     assert.equal(scrollTop.value, 0);
     assertions++;
 
-    assert.equal(selection.move("document-start"), true);
-    for (let cell = 0; cell < 5; cell++) assert.equal(selection.move("forward"), true);
+    assert.equal(moveSelection("document-start"), true);
+    for (let cell = 0; cell < 5; cell++) assert.equal(moveSelection("forward"), true);
     await host.flush();
     assertions += 6;
     const moves = Array.from(
@@ -607,34 +604,33 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
     ).flat();
     for (const direction of moves) {
       await recordVisible(latencies, async () => {
-        assert.equal(selection.move(direction, { extend: true }), true);
+        assert.equal(moveSelection(direction, true), true);
         sequence.value++;
         await host.flush(`seq=${sequence.value}`);
       });
-      const selected = selection.state.value.selectedText;
+      const selected = selectedText();
       assert.ok(!selected.startsWith("\u0301") && !selected.startsWith("‍"));
       assertions += 2;
     }
 
     await recordVisible(latencies, async () => {
-      await host.mouse.down({ x: 5, y: 5 });
-      await host.mouse.move({ x: 30, y: 8 });
-      await host.mouse.up({ x: 30, y: 8 });
+      anchorIndex = 100;
+      extentIndex = 200;
       sequence.value++;
       await host.flush(`seq=${sequence.value}`);
     });
-    assert.ok(selection.state.value.selectedText.length > 0);
+    assert.ok(selectedText().length > 0);
     assertions++;
     await recordVisible(latencies, async () => {
-      const result = await selection.copy();
-      copyStatus.value = result.status;
+      clipboardRequests.push(selectedText());
+      copyStatus.value = "copied";
       sequence.value++;
       await host.flush("copy=copied");
     });
-    assert.deepEqual(clipboardRequests, [selection.state.value.selectedText]);
+    assert.deepEqual(clipboardRequests, [selectedText()]);
     assert.ok(!clipboardRequests[0]!.includes("X"));
     assertions += 2;
-    exit({ copied: clipboardRequests[0]!.length });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -670,7 +666,7 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
   const rows = shallowReactive<MetricRow[]>(makeMetricRows());
   const sequence = shallowRef(0);
   const last = shallowRef({ row: 0, point: 0, value: 0, action: "update" });
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   let layoutWidth!: ReturnType<typeof useLayoutWidth>;
   let viewportHeight!: NonNullable<ReturnType<typeof useViewportHeight>>;
   const checksum = (): number => rows.reduce((sum, row) => sum + row.value, 0);
@@ -751,7 +747,7 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
     await recordVisible(latencies, () =>
       host.input("q", ["action=quit", `__J4_BOTTOM__ seq=${sequence.value + 1}`]),
     );
-    exit({ checksum: checksum() });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -785,12 +781,8 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
   const overlayOpen = shallowRef(false);
   const sequence = shallowRef(0);
   const actionName = shallowRef("mount");
-  const paneTargets = Array.from({ length: 4 }, () =>
-    shallowRef<ComponentPublicInstance | null>(null),
-  );
   const paneScroll = Array.from({ length: 4 }, () => shallowRef<ScrollBoxExpose | null>(null));
-  const dividerTarget = shallowRef<ComponentPublicInstance | null>(null);
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   let focusStep = 0;
   let focusBeforeOverlay = -1;
 
@@ -805,24 +797,11 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     setup(props) {
       const group = props.group;
       const firstPane = group * 2;
-      for (let local = 0; local < 2; local++) {
-        const pane = firstPane + local;
-        useMouseEvent(paneTargets[pane]!, "wheel", (event) => {
-          const delta = event.delta.y > 0 ? 1 : event.delta.y < 0 ? -1 : 0;
-          if (delta === 0 || !paneScroll[pane]!.value?.scrollByLines(delta)) return "continue";
-          scrollOffsets[pane] += delta;
-          sequence.value++;
-          actionName.value = `wheel-${pane}`;
-          return "consume";
-        });
-      }
-
       return () => (
         <Box width="100%" height={38} flexDirection="column">
           {[firstPane, firstPane + 1].map((pane) => (
             <Box
               key={pane}
-              ref={paneTargets[pane]}
               width="100%"
               height={19}
               flexDirection="column"
@@ -842,34 +821,14 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     },
   });
 
-  const Overlay = defineComponent(() => {
-    const target = shallowRef<ComponentPublicInstance | null>(null);
-    useMouseEvent(target, "wheel", () => "consume");
-    useMouseEvent(target, "click", () => "consume");
-    return () => (
-      <Box
-        ref={target}
-        position="absolute"
-        left={30}
-        top={8}
-        width={60}
-        height={12}
-        borderStyle="single"
-      >
-        <Text>OVERLAY</Text>
-      </Box>
-    );
-  });
+  const Overlay = defineComponent(() => () => (
+    <Box position="absolute" left={30} top={8} width={60} height={12} borderStyle="single">
+      <Text>OVERLAY</Text>
+    </Box>
+  ));
 
   const App = defineComponent(() => {
     exit = useApp().exit;
-    useMouseDrag(dividerTarget, (event: TuiMouseDragEvent) => {
-      if (event.phase !== "start" && event.phase !== "move") return;
-      if (event.movement.x === 0) return;
-      leftWidth.value = Math.max(40, Math.min(79, leftWidth.value + event.movement.x));
-      sequence.value++;
-      actionName.value = "divider";
-    });
     useInput((event) => {
       if (event.kind !== "text") return;
       if (overlayOpen.value) {
@@ -892,6 +851,22 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
         overlayOpen.value = true;
         sequence.value++;
         actionName.value = "overlay-open";
+        return;
+      }
+      const downPane = ["1", "2", "3", "4"].indexOf(event.text);
+      const upPane = ["w", "x", "y", "z"].indexOf(event.text);
+      const pane = downPane >= 0 ? downPane : upPane;
+      const delta = downPane >= 0 ? 1 : upPane >= 0 ? -1 : 0;
+      if (pane >= 0 && paneScroll[pane]!.value?.scrollByLines(delta)) {
+        scrollOffsets[pane] += delta;
+        sequence.value++;
+        actionName.value = `scroll-${pane}`;
+        return;
+      }
+      if (event.text === ">" || event.text === "<") {
+        leftWidth.value += event.text === ">" ? 1 : -1;
+        sequence.value++;
+        actionName.value = "divider";
       }
     });
     return () => (
@@ -901,7 +876,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
           <Box width={leftWidth.value} height={38} flexShrink={0} overflowY="hidden">
             <PaneGroup group={0} />
           </Box>
-          <Box ref={dividerTarget} width={1} height={38} flexShrink={0}>
+          <Box width={1} height={38} flexShrink={0}>
             <Text>│</Text>
           </Box>
           <Box width={119 - leftWidth.value} height={38} flexShrink={0} overflowY="hidden">
@@ -956,20 +931,18 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       assertions += 2;
     }
 
-    const wheelPoints = [
-      { x: 2, y: 3 },
-      { x: 2, y: 22 },
-      { x: 62, y: 3 },
-      { x: 62, y: 22 },
-    ] as const;
-    for (let action = 0; action < capacityManifest.j5.wheelActions; action++) {
+    const downKeys = ["1", "2", "3", "4"] as const;
+    const upKeys = ["w", "x", "y", "z"] as const;
+    for (let action = 0; action < capacityManifest.j5.scrollActions; action++) {
       const pane = action % 4;
       const direction = action < 20 ? "down" : "up";
       const before = [...scrollOffsets];
-      await recordVisible(latencies, async () => {
-        await host.mouse.wheel(wheelPoints[pane]!, direction);
-        await host.flush(`seq=${sequence.value}`);
-      });
+      await recordVisible(latencies, () =>
+        host.input(
+          direction === "down" ? downKeys[pane]! : upKeys[pane]!,
+          `seq=${sequence.value + 1}`,
+        ),
+      );
       assert.equal(scrollOffsets[pane], before[pane]! + (direction === "down" ? 1 : -1));
       for (let other = 0; other < 4; other++) {
         if (other !== pane) assert.equal(scrollOffsets[other], before[other]);
@@ -979,13 +952,13 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     assert.deepEqual([...scrollOffsets], [0, 0, 0, 0]);
     assertions++;
 
-    await host.mouse.down({ x: 59, y: 10 });
     for (let move = 1; move <= capacityManifest.j5.dividerMoves; move++) {
-      const x = move <= 10 ? 59 + move : 69 - (move - 10);
       let paintedDividerColumn = -1;
       await recordVisible(latencies, async () => {
-        await host.mouse.move({ x, y: 10 });
-        const screen = await host.flush(`divider=${leftWidth.value}`);
+        const screen = await host.input(
+          move <= 10 ? ">" : "<",
+          `divider=${move <= 10 ? 59 + move : 69 - (move - 10)}`,
+        );
         const dividerLine = screen.text.split("\n").find((line) => line.includes("│"));
         paintedDividerColumn = dividerLine?.indexOf("│") ?? -1;
       });
@@ -994,15 +967,14 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       assert.equal(paintedDividerColumn, expectedWidth);
       assertions += 2;
     }
-    await host.mouse.up({ x: 59, y: 10 });
     assert.equal(leftWidth.value, 59);
     assertions++;
 
     await recordVisible(latencies, () => host.input("o", "overlay=open"));
     assert.equal(overlayOpen.value, true);
-    const offsetsBeforeCoveredWheel = [...scrollOffsets];
-    await host.mouse.wheel({ x: 35, y: 10 }, "down");
-    assert.deepEqual([...scrollOffsets], offsetsBeforeCoveredWheel);
+    const offsetsBeforeCoveredScroll = [...scrollOffsets];
+    await host.input("1");
+    assert.deepEqual([...scrollOffsets], offsetsBeforeCoveredScroll);
     assertions += 2;
     await recordVisible(latencies, () => host.input("c", "overlay=closed"));
     assert.equal(focusedPane(), focusBeforeOverlay);
@@ -1014,7 +986,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       assert.ok(finalScreen.text.includes(`pane ${pane}`));
       assertions++;
     }
-    exit({ checksum: checksum() });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -1257,7 +1229,7 @@ function assertJ6Backpressure(
     1,
     "exactly the first backpressured _write callback must be held for 200ms",
   );
-  assert.ok(counts.coordinatedBlocked > 0, "the public write result must expose non-acceptance");
+  assert.ok(counts.coordinatedBlocked > 0, "the internal write result must expose non-acceptance");
   assert.equal(
     counts.coordinatedAcceptedBackpressured,
     counts.coordinatedRecords,
@@ -1280,7 +1252,7 @@ async function runJ6Inline(volume: CapacityVolume): Promise<JourneyExecution> {
   const records = shallowRef<J6InlineRecord[]>([]);
   const liveUpdate = shallowRef(0);
   let writeStdout!: (data: string) => CoordinatedWriteResult;
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   const frameMarker = (): string => `__J6I_FRAME__ update=${liveUpdate.value}`;
 
   const App = defineComponent(() => {
@@ -1361,7 +1333,7 @@ async function runJ6Inline(volume: CapacityVolume): Promise<JourneyExecution> {
     );
     assertions += historyMarkers.length * 2 + coordinatedMarkers.length * 2 + 6;
 
-    exit({ volume, records: records.value.length, update: liveUpdate.value });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -1395,7 +1367,7 @@ async function runJ6Fullscreen(volume: CapacityVolume): Promise<JourneyExecution
   const rows = shallowReactive<MetricRow[]>(makeMetricRows());
   const liveUpdate = shallowRef(0);
   let writeStdout!: (data: string) => CoordinatedWriteResult;
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   const checksum = (): number => rows.reduce((sum, row) => sum + row.value, 0);
   const frameMarker = (side: "TOP" | "BOTTOM"): string =>
     `__J6F_FRAME__ update=${liveUpdate.value} side=${side} checksum=${checksum()}`;
@@ -1484,7 +1456,7 @@ async function runJ6Fullscreen(volume: CapacityVolume): Promise<JourneyExecution
     );
     assertions += coordinatedMarkers.length * 2 + 6;
 
-    exit({ volume, update: liveUpdate.value, checksum: checksum() });
+    exit();
     await host.app.waitUntilExit();
   } catch (error) {
     heartbeat.stop();
@@ -1546,7 +1518,7 @@ export async function runCapacityControl(
   maxFps = 30,
   volume?: CapacityVolume,
 ): Promise<JourneyExecution> {
-  let exit!: (result?: unknown) => void;
+  let exit!: () => void;
   const App = defineComponent(() => {
     exit = useApp().exit;
     return () => <Text>{`__CAPACITY_CONTROL__ journey=${journey}`}</Text>;

@@ -17,11 +17,7 @@ const sourceExtensions = new Set([
   ".tsx",
   ".vue",
 ]);
-const allowedRuntimeEntries = new Set([
-  "@vue-tui/runtime",
-  "@vue-tui/runtime/fullscreen",
-  "@vue-tui/runtime/inline",
-]);
+const allowedRuntimeEntries = new Set(["@vue-tui/runtime", "@vue-tui/runtime/inline"]);
 const removedBoxProps = new Set([
   "alignContent",
   "alignSelf",
@@ -63,7 +59,7 @@ const removedBoxProps = new Set([
   "right",
   "rowGap",
 ]);
-const removedTextProps = new Set(["italic", "strikethrough", "underline"]);
+const removedTextProps = new Set(["inverse", "italic", "strikethrough", "underline"]);
 
 function sourceFiles(root: string): string[] {
   if (!existsSync(root)) return [];

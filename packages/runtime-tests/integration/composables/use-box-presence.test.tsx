@@ -12,6 +12,7 @@ import {
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, renderToString, Text, useBoxPresence } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { Static } from "@vue-tui/runtime/inline";
 
 function makeTtyOutput(columns = 20, rows = 4): NodeJS.WriteStream {
@@ -149,12 +150,8 @@ test("uses effective self and ancestor display while keeping keyed retarget atom
   }
 });
 
-test("keeps Box presence for screen-reader and non-TTY live documents", async () => {
-  for (const host of [
-    { presentation: "screen-reader" as const },
-    { stdout: "stream" as const, updates: "live" as const },
-    { stdout: "stream" as const, updates: "at-teardown" as const },
-  ]) {
+test("keeps Box presence for screen-reader and non-TTY documents", async () => {
+  for (const host of [{ presentation: "screen-reader" as const }, { stdout: "stream" as const }]) {
     let presence!: ReturnType<typeof useBoxPresence>;
     const App = defineComponent(() => {
       const target = shallowRef<InstanceType<typeof Box> | null>(null);
@@ -269,7 +266,14 @@ test("does not publish candidate removal during a failed output write", async ()
 
   const app = createApp(App);
   try {
-    app.mount({ stdout, stderr, stdin, liveUpdates: true, maxFps: 0, patchConsole: false });
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     expect(presence.value).toBe(true);
 

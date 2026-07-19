@@ -23,7 +23,7 @@ test.each(removedListeners)(
     await expect(render(App)).rejects.toThrow(
       new RegExp(
         `^<ScrollBox> does not accept the removed mouse listener "${listener}"\\. ` +
-          `Use the mouse composables from "@vue-tui/runtime/fullscreen"\\.$`,
+          `Targeted mouse input is outside the current Runtime foundation\\.$`,
       ),
     );
   },

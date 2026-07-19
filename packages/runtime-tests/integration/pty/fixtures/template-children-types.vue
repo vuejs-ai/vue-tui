@@ -26,7 +26,7 @@ import { Static } from "@vue-tui/runtime/inline";
     border-color="gray"
     overflow-y="hidden"
   >
-    <Text color="initial" background-color="#12abEF" inverse wrap="truncate">narrowed props</Text>
+    <Text color="initial" background-color="#12abEF" wrap="truncate">narrowed props</Text>
   </Box>
   <Box v-show="true"><Text>v-show</Text></Box>
   <Static v-for="(item, index) in [1, 2, 3]" :key="item">

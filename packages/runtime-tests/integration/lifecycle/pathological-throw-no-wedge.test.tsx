@@ -1,6 +1,7 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable, makeFakeStdin } from "./test-streams.ts";
 
 // End-to-end proof that a PATHOLOGICAL non-Error throw never WEDGES the error
@@ -30,7 +31,7 @@ async function expectMountDoesNotWedge(thrown: unknown): Promise<void> {
   const { stream: stdin } = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 });
+  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
 
   const outcome = await Promise.race([
     app

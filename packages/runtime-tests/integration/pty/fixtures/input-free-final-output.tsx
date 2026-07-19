@@ -1,5 +1,6 @@
 import process from "node:process";
-import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import { writeSync } from "node:fs";
 import { createApp, Text } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";

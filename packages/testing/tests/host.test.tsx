@@ -1,15 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import {
-  Box,
-  Text,
-  useInput,
-  useLayoutWidth,
-  useStdin,
-  useStdout,
-  useViewportHeight,
-} from "@vue-tui/runtime";
-import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
+import { Box, Text, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 import { render, type RenderOptions } from "../src/index.ts";
 
 test("the default host renders a visual Inline surface", async () => {
@@ -43,26 +34,14 @@ test("stream omission selects production final-output cadence", async () => {
 
 test("a selected route owns deterministic TTY input independently from final output", async () => {
   const calls: string[] = [];
-  let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
   const App = defineComponent(() => {
-    routing = useInternalInputRoutingForTest();
-    const boundary = routing.registerSemantic({
-      id: "deterministic-boundary",
-      handle: (fact) => {
-        calls.push(fact.sequence);
-        return {
-          performed: true,
-          continue: true,
-          preventDefault: false,
-          blockExternal: false,
-        };
-      },
+    useInput((event) => {
+      if (event.kind === "text") calls.push(event.text);
     });
-    routing.select({ activeBoundary: boundary.lease });
     return () => <Text>selected input</Text>;
   });
   const result = await render(App, {
-    host: { stdin: "tty", stdout: "stream", updates: "at-teardown" },
+    host: { stdin: "tty", stdout: "stream" },
   });
 
   expect(result.terminal.rawMode.current).toBe(true);
@@ -71,118 +50,27 @@ test("a selected route owns deterministic TTY input independently from final out
 
   result.dispose();
   expect(result.terminal.rawMode.current).toBe(false);
-  expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
 });
 
-test("a modeled non-TTY excludes managed routing but keeps direct stdin bytes available", async () => {
-  const semanticCalls: string[] = [];
+test("a modeled non-TTY keeps direct stdin bytes available", async () => {
   const directCalls: string[] = [];
   let physicalStdin: NodeJS.ReadStream | undefined;
-  let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
-  let selectRoute!: () => () => void;
   const App = defineComponent(() => {
     physicalStdin = useStdin().stdin;
-    routing = useInternalInputRoutingForTest();
-    const boundary = routing.registerSemantic({
-      id: "deterministic-boundary",
-      handle: (fact) => {
-        semanticCalls.push(fact.sequence);
-        return {
-          performed: true,
-          continue: true,
-          preventDefault: false,
-          blockExternal: false,
-        };
-      },
-    });
-    selectRoute = () => routing!.select({ activeBoundary: boundary.lease });
     return () => <Text>non-tty</Text>;
   });
   const result = await render(App, { host: { stdin: "non-tty" } });
   const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
   physicalStdin!.on("data", directListener);
   try {
-    expect(selectRoute).toThrow(
-      "Managed input is unavailable because the mounted stdin is not a controllable TTY",
-    );
-    expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
     expect(result.terminal.rawMode.history).toEqual([]);
 
     await result.stdin.write("x");
     expect(directCalls).toEqual(["x"]);
-    expect(semanticCalls).toEqual([]);
   } finally {
     physicalStdin!.off("data", directListener);
     result.dispose();
   }
-});
-
-test("explicit live stream cannot manufacture a terminal mode", async () => {
-  const result = await render(() => <Text>stream</Text>, {
-    host: { stdout: "stream", updates: "live", mode: "fullscreen" },
-  });
-
-  expect(result.lastFrame()).toBe("stream");
-  const screen = await result.screen();
-  expect(screen.activeBuffer).toBe("normal");
-  expect([...screen.scrollback, ...screen.lines].join("\n")).toContain("stream");
-});
-
-test("forced live stream refreshes its public layout and frame before input resumes", async () => {
-  const rawModeSeenByFrame: boolean[] = [];
-  const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    const { stdin } = useStdin();
-    useInput(() => {});
-    const frame = () => {
-      rawModeSeenByFrame.push(Boolean((stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw));
-      return `stream:${width.value}x${viewportHeight?.value ?? "unbounded"}`;
-    };
-    return () => <Text>{frame()}</Text>;
-  });
-  const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { stdout: "stream", updates: "live" },
-  });
-
-  expect(result.lastFrame()).toBe("stream:30xunbounded");
-  await result.terminal.suspend();
-  await result.terminal.resize(24, 6);
-  expect(result.lastFrame()).toBe("stream:30xunbounded");
-
-  const resume = result.terminal.resume();
-  expect(result.terminal.rawMode.current).toBe(false);
-  await resume;
-
-  expect(result.lastFrame()).toBe("stream:24xunbounded");
-  expect(rawModeSeenByFrame.at(-1)).toBe(false);
-  expect(result.terminal.rawMode.current).toBe(true);
-  result.dispose();
-});
-
-test("a live resize never commits a frame derived from the previous layout", async () => {
-  const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    const frame = () => `stream:${width.value}x${viewportHeight?.value ?? "unbounded"}`;
-    return () => <Text>{frame()}</Text>;
-  });
-  const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { stdout: "stream", updates: "live" },
-  });
-  const resizeFrameOffset = result.frames.length;
-
-  await result.terminal.resize(24, 6);
-
-  const resizeFrames = result.frames.slice(resizeFrameOffset).map((frame) => frame.dynamic);
-  expect(resizeFrames.length).toBeGreaterThan(0);
-  expect(resizeFrames).not.toContain("stream:30xunbounded");
-  expect(resizeFrames.at(-1)).toBe("stream:24xunbounded");
-  result.dispose();
 });
 
 test("final stream keeps its mounted layout while suspended", async () => {
@@ -320,26 +208,23 @@ test("modeled screen-reader transcript suspends and resumes without acquiring Fu
   result.dispose();
 });
 
-test.each(["at-teardown", "live"] as const)(
-  "modeled %s stream restores input modes without manufacturing a terminal surface",
-  async (updates) => {
-    const App = defineComponent(() => {
-      useInput(() => {});
-      return () => <Text>{`stream:${updates}`}</Text>;
-    });
-    const result = await render(App, {
-      host: { stdout: "stream", updates, mode: "fullscreen" },
-    });
+test("modeled stream restores input modes without manufacturing a terminal surface", async () => {
+  const App = defineComponent(() => {
+    useInput(() => {});
+    return () => <Text>stream</Text>;
+  });
+  const result = await render(App, {
+    host: { stdout: "stream", mode: "fullscreen" },
+  });
 
-    expect(result.terminal.rawMode.current).toBe(true);
-    await result.terminal.suspend();
-    expect(result.terminal.rawMode.current).toBe(false);
-    await result.terminal.resume();
-    expect(result.terminal.rawMode.current).toBe(true);
-    expect((await result.screen()).activeBuffer).toBe("normal");
-    result.dispose();
-  },
-);
+  expect(result.terminal.rawMode.current).toBe(true);
+  await result.terminal.suspend();
+  expect(result.terminal.rawMode.current).toBe(false);
+  await result.terminal.resume();
+  expect(result.terminal.rawMode.current).toBe(true);
+  expect((await result.screen()).activeBuffer).toBe("normal");
+  result.dispose();
+});
 
 test("Inline clamps tall dynamic output without padding short output", async () => {
   const short = await render(() => <Text>short</Text>, { columns: 20, rows: 3 });
@@ -458,25 +343,6 @@ test("render and resize reject dimensions outside the modeled terminal envelope"
   }
 });
 
-test("resize reaches the emulator after output already accepted by the host", async () => {
-  let write: ((data: string) => void) | undefined;
-  const App = defineComponent(() => {
-    write = useStdout().write;
-    return () => null;
-  });
-  const result = await render(App, {
-    columns: 4,
-    rows: 2,
-    host: { stdout: "stream" },
-  });
-
-  write?.("\x1b[?1049h\x1b[2J\x1b[HABCDEFGH");
-  await result.terminal.resize(8, 2);
-
-  const screen = await result.screen();
-  expect(screen.lines.map((line) => line.trimEnd())).toEqual(["ABCD", "EFGH"]);
-});
-
 test("render snapshots every root and host accessor exactly once", async () => {
   const calls = new Map<string, number>();
   const getter = (name: string, first: unknown, later: unknown) => ({
@@ -492,10 +358,8 @@ test("render snapshots every root and host accessor exactly once", async () => {
     {
       mode: getter("mode", "inline", "sideways"),
       presentation: getter("presentation", "visual", "audio"),
-      updates: getter("updates", "live", "sometimes"),
       stdin: getter("stdin", "tty", "maybe"),
       stdout: getter("stdout", "tty", "file"),
-      clipboard: getter("clipboard", "copied", "invalid"),
     },
   );
   const options = Object.defineProperties(
@@ -519,10 +383,8 @@ test("render snapshots every root and host accessor exactly once", async () => {
     props: 1,
     mode: 1,
     presentation: 1,
-    updates: 1,
     stdin: 1,
     stdout: 1,
-    clipboard: 1,
   });
 });
 
@@ -553,14 +415,12 @@ test.each([
   [{ host: { mode: null } }, "render host mode"],
   [{ host: { presentation: "audio" } }, "render host presentation"],
   [{ host: { presentation: null } }, "render host presentation"],
-  [{ host: { updates: "sometimes" } }, "render host updates"],
-  [{ host: { updates: null } }, "render host updates"],
   [{ host: { stdin: "maybe" } }, "render host stdin"],
   [{ host: { stdin: null } }, "render host stdin"],
   [{ host: { stdout: "file" } }, "render host stdout"],
   [{ host: { stdout: null } }, "render host stdout"],
-  [{ host: { clipboard: "system" } }, "render host clipboard"],
-  [{ host: { clipboard: null } }, "render host clipboard"],
+  [{ host: { updates: "live" } }, 'Unknown render host option "updates"'],
+  [{ host: { clipboard: "copied" } }, 'Unknown render host option "clipboard"'],
   [{ columns: 0 }, "render columns"],
   [{ rows: Number.NaN }, "render rows"],
   [{ liveUpdates: false }, 'render option "liveUpdates" was removed'],

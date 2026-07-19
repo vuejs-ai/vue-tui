@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render, type ContentFrame, type RenderResult } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
 
 function staticTranscript(frames: readonly ContentFrame[]): string {
   return frames.map((frame) => frame.staticOutput).join("");

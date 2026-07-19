@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, renderToString, Text } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
 
 const Document = defineComponent(() => () => <Text>document</Text>);
 

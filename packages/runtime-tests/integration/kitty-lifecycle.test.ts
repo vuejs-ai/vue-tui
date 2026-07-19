@@ -1,10 +1,10 @@
 import { PassThrough } from "node:stream";
 import {
   createManualSuspensionHost,
-  INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
-  type InternalMountOptions,
-} from "@vue-tui/runtime/internal";
+} from "../../runtime/dist/internal.mjs";
+import { INTERNAL_KITTY_KEYBOARD } from "../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../runtime/dist/internal.mjs";
 import { createApp, useInput, type TuiApp, type TuiInputEvent } from "@vue-tui/runtime";
 import { defineComponent, h, nextTick, shallowRef, type ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
@@ -140,7 +140,13 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
     const app = createApp(defineComponent(() => () => h("tui-text", null, "idle")));
 
     try {
-      app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, maxFps: 0 });
+      app.mount({
+        stdout,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+      } as InternalMountOptions);
       expect(writes).not.toContain("\x1b[?u");
       expect(writes).not.toContain("\x1b[>1u");
       expectReleased(stdin, refBalance);
@@ -285,7 +291,13 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
     });
     const app = createApp(App);
 
-    app.mount({ stdout, stdin, patchConsole: false, liveUpdates: true, maxFps: 0 });
+    app.mount({
+      stdout,
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+    } as InternalMountOptions);
     await expect(app.waitUntilExit()).rejects.toThrow("query write rejected");
     await settleLifecycle();
     expect(rawModeCalls).toEqual([true, false]);

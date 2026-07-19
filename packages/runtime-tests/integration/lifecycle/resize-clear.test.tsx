@@ -7,7 +7,8 @@ import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Box, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
-import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
+import { nextLineEscape } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeWritable,
   makeFakeStdin,
@@ -36,9 +37,9 @@ async function mountInteractive(columns: number, rows: number) {
   });
 
   const app = createApp(App);
-  // liveUpdates: true forces the resize handler even in CI where isTTY alone
-  // would disable it. No managed input route is active, so the operating system owns Ctrl+C.
-  app.mount({ stdout, stdin, stderr, liveUpdates: true });
+  // A TTY output owns live resize behavior. No managed input route is active,
+  // so the operating system owns Ctrl+C.
+  app.mount({ stdout, stdin, stderr });
 
   // Flush initial render.
   await nextTick();
@@ -126,7 +127,7 @@ test("narrowing a tall Inline frame never clears terminal history", async () => 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true });
+  app.mount({ stdout, stdin, stderr });
 
   // Flush initial render.
   await nextTick();
@@ -167,7 +168,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
   await nextTick();
 
@@ -232,10 +233,9 @@ test("screen-reader resize uses a physical-bottom clamp when terminal rows are u
     stdout,
     stdin,
     stderr,
-    liveUpdates: true,
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
     maxFps: 0,
-  });
+  } as InternalMountOptions);
   await nextTick();
   const beforeResize = writes.length;
 

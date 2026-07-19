@@ -2,8 +2,6 @@
 // `*.test-d.ts` name keeps the file out of the runtime Vitest suite.
 import { expectTypeOf } from "vite-plus/test";
 import { defineComponent } from "vue";
-import type { CellPoint } from "@vue-tui/runtime";
-import type { MouseButton } from "@vue-tui/runtime/fullscreen";
 // @ts-expect-error The test package no longer aliases Runtime's broad session contract.
 import type { TestRenderSession } from "../src/index.ts";
 import {
@@ -13,12 +11,6 @@ import {
   type RenderResult,
   type ScreenSnapshot,
   type TestHost,
-  type TestClipboardBehavior,
-  type TestMouse,
-  type TestMouseButtonOptions,
-  type TestMouseModifiers,
-  type TestMouseReportingLevel,
-  type TestMouseReportingState,
 } from "../src/index.ts";
 
 const defaultOptions: RenderOptions = {};
@@ -29,18 +21,16 @@ const inlineTtyOptions: RenderOptions = {
   host: {
     mode: "inline",
     presentation: "visual",
-    updates: "live",
     stdin: "tty",
     stdout: "tty",
+    patchConsole: false,
   },
 };
 const fullscreenOptions: RenderOptions = { host: { mode: "fullscreen" } };
-const clipboardOptions: RenderOptions = { host: { clipboard: "copied" } };
 const transcriptStreamOptions: RenderOptions = {
   host: {
     mode: "fullscreen",
     presentation: "screen-reader",
-    updates: "at-teardown",
     stdin: "non-tty",
     stdout: "stream",
   },
@@ -49,14 +39,13 @@ const transcriptStreamOptions: RenderOptions = {
 expectTypeOf(defaultOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(inlineTtyOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(fullscreenOptions).toMatchTypeOf<RenderOptions>();
-expectTypeOf(clipboardOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(transcriptStreamOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf<NonNullable<RenderOptions["host"]>>().toEqualTypeOf<TestHost>();
 
 const TestComponent = defineComponent(() => () => null);
 expectTypeOf(render(TestComponent, inlineTtyOptions)).toEqualTypeOf<Promise<RenderResult>>();
 
-// @ts-expect-error Removed testing option; configure host.updates instead.
+// @ts-expect-error Removed testing option; output cadence follows the modeled stdout.
 const removedLiveUpdates: RenderOptions = { liveUpdates: true };
 // @ts-expect-error Removed testing implementation detail; observation is always available.
 const removedDebug: RenderOptions = { debug: true };
@@ -66,28 +55,18 @@ const removedExitOnCtrlC: RenderOptions = { exitOnCtrlC: false };
 const invalidMode: RenderOptions = { host: { mode: "full-screen" } };
 // @ts-expect-error Only visual and screen-reader presentations are modeled.
 const invalidPresentation: RenderOptions = { host: { presentation: "audio" } };
-// @ts-expect-error Only live and at-teardown update cadences are modeled.
-const invalidUpdates: RenderOptions = { host: { updates: "sometimes" } };
 // @ts-expect-error Only TTY and non-TTY input hosts are modeled.
 const invalidStdin: RenderOptions = { host: { stdin: "pipe" } };
 // @ts-expect-error Only TTY and stream output hosts are modeled.
 const invalidStdout: RenderOptions = { host: { stdout: "file" } };
-// @ts-expect-error Clipboard behavior is a finite deterministic result.
-const invalidClipboard: RenderOptions = { host: { clipboard: "system" } };
 void removedLiveUpdates;
 void removedDebug;
 void removedExitOnCtrlC;
 void invalidMode;
 void invalidPresentation;
-void invalidUpdates;
 void invalidStdin;
 void invalidStdout;
-void invalidClipboard;
 void (null as unknown as TestRenderSession);
-
-expectTypeOf<TestClipboardBehavior>().toEqualTypeOf<
-  "copied" | "requested" | "unavailable" | "rejected"
->();
 
 declare const result: RenderResult;
 declare const frame: ContentFrame;
@@ -96,27 +75,7 @@ declare const screen: ScreenSnapshot;
 expectTypeOf(result.frames).toEqualTypeOf<readonly ContentFrame[]>();
 expectTypeOf(result.lastFrame()).toEqualTypeOf<string>();
 expectTypeOf(result.screen()).toEqualTypeOf<Promise<ScreenSnapshot>>();
-expectTypeOf(result.mouse).toEqualTypeOf<TestMouse>();
-expectTypeOf(result.mouse.reporting).toEqualTypeOf<TestMouseReportingState>();
-expectTypeOf(result.mouse.reporting.current).toEqualTypeOf<TestMouseReportingLevel>();
-expectTypeOf(result.mouse.reporting.history).toEqualTypeOf<readonly TestMouseReportingLevel[]>();
-expectTypeOf(result.clipboard.requests).toEqualTypeOf<readonly string[]>();
-expectTypeOf<TestMouse["down"]>().toEqualTypeOf<
-  (point: CellPoint, options?: TestMouseButtonOptions) => Promise<void>
->();
-expectTypeOf<TestMouse["move"]>().toEqualTypeOf<
-  (point: CellPoint, modifiers?: TestMouseModifiers) => Promise<void>
->();
-expectTypeOf<TestMouse["up"]>().toEqualTypeOf<
-  (point: CellPoint, options?: TestMouseButtonOptions) => Promise<void>
->();
-expectTypeOf<TestMouse["wheel"]>().toEqualTypeOf<
-  (
-    point: CellPoint,
-    direction: "up" | "down" | "left" | "right",
-    modifiers?: TestMouseModifiers,
-  ) => Promise<void>
->();
+expectTypeOf(result.stdin.write("")).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.terminal.suspend()).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.terminal.resume()).toEqualTypeOf<Promise<void>>();
 expectTypeOf(result.dispose()).toEqualTypeOf<void>();
@@ -135,23 +94,3 @@ screen.cursor.column = 1;
 screen.cursor.visible = false;
 // @ts-expect-error Raw-mode state is a readonly live observation.
 result.terminal.rawMode.current = false;
-// @ts-expect-error Mouse-reporting state is a readonly live observation.
-result.mouse.reporting.current = "none";
-// @ts-expect-error Mouse-reporting history is a readonly live observation.
-result.mouse.reporting.history.push("button");
-// @ts-expect-error Clipboard requests are readonly observations.
-result.clipboard.requests.push("replacement");
-// @ts-expect-error TestMouse deliberately does not manufacture production clicks.
-result.mouse.click({ x: 0, y: 0 });
-// @ts-expect-error Physical test input uses the runtime's public mouse-button vocabulary.
-void result.mouse.down({ x: 0, y: 0 }, { button: "primary" });
-// @ts-expect-error Modifier flags are booleans.
-void result.mouse.move({ x: 0, y: 0 }, { shift: 1 });
-// @ts-expect-error Wheel input supports exactly four terminal directions.
-void result.mouse.wheel({ x: 0, y: 0 }, "forward");
-
-const leftButton: MouseButton = "left";
-const buttonOptions: TestMouseButtonOptions = { button: leftButton, alt: true };
-const modifiers: TestMouseModifiers = { shift: true, ctrl: false };
-void buttonOptions;
-void modifiers;

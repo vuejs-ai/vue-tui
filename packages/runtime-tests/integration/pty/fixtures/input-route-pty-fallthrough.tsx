@@ -1,11 +1,9 @@
 import { createRequire } from "node:module";
 import process from "node:process";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
-import {
-  INTERNAL_KITTY_KEYBOARD,
-  useInternalInputRoutingForTest,
-  type InternalMountOptions,
-} from "@vue-tui/runtime/internal";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../../runtime/dist/internal.mjs";
+import { useInternalInputRoutingForTest } from "../../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import { defineComponent, onMounted } from "vue";
 
 const require = createRequire(import.meta.url);

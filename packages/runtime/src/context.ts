@@ -7,8 +7,7 @@ import type { InputAvailability } from "./io/input-availability.ts";
 import type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 
 export interface AppContext {
-  exit: (errorOrResult?: unknown) => void;
-  waitUntilRenderFlush: () => Promise<void>;
+  exit: (error?: Error) => void;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
   stdin: NodeJS.ReadStream;

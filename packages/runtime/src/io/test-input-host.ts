@@ -33,7 +33,9 @@ export interface InternalTestInputHost {
   onMouseReportingChange(level: "button" | "drag" | undefined): void;
 }
 
-export const INTERNAL_TEST_INPUT_HOST: unique symbol = Symbol("vue-tui:test-input-host");
+export const INTERNAL_TEST_INPUT_HOST: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-test-input-host",
+);
 
 function buttonCode(button: SgrMouseButton): number {
   switch (button) {

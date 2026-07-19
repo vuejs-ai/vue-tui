@@ -10,14 +10,15 @@ test("lastFrame captures rendered output", async () => {
 
 test("frames accumulate on reactive updates", async () => {
   const message = shallowRef("first");
-  const { lastFrame, frames } = await render(() => <Text>{message.value}</Text>);
-  const initialCount = frames.length;
-  expect(lastFrame()).toContain("first");
+  const result = await render(() => <Text>{message.value}</Text>);
+  const initialCount = result.frames.length;
+  expect(result.lastFrame()).toContain("first");
 
   message.value = "second";
   await nextTick();
-  expect(lastFrame()).toContain("second");
-  expect(frames.length).toBeGreaterThan(initialCount);
+  await result.waitUntilRenderFlush();
+  expect(result.lastFrame()).toContain("second");
+  expect(result.frames.length).toBeGreaterThan(initialCount);
 });
 
 test("render with custom columns", async () => {
@@ -36,4 +37,14 @@ test("lastFrame trims trailing whitespace", async () => {
 test("auto cleanup — no manual unmount needed", async () => {
   const { lastFrame } = await render(() => <Text>auto</Text>);
   expect(lastFrame()).toContain("auto");
+});
+
+test("render preserves an initial application error", async () => {
+  const original = new Error("initial render failed");
+
+  await expect(
+    render(() => {
+      throw original;
+    }),
+  ).rejects.toBe(original);
 });

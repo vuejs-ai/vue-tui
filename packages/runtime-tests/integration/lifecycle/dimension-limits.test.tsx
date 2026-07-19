@@ -1,8 +1,9 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
-import { useInternalRenderSession } from "@vue-tui/runtime/internal";
-import { MAX_LAYOUT_VALUE } from "../../../runtime/src/numeric-limits.ts";
+import { useInternalRenderSession } from "../../../runtime/dist/internal.mjs";
+import { MAX_LAYOUT_VALUE } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("Inline does not reject a large terminal pair when the rendered region fits", async () => {
@@ -29,7 +30,7 @@ test("Inline does not reject a large terminal pair when the rendered region fits
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-    });
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     expect(observedSession!.dimensions).toEqual({
       terminal: { columns: 1_024, rows: 1_025 },
@@ -69,7 +70,7 @@ test.each(["inline", "fullscreen"] as const)(
         liveUpdates: true,
         maxFps: 0,
         patchConsole: false,
-      });
+      } as InternalMountOptions);
       await app.waitUntilRenderFlush();
       expect(observedSession!.dimensions).toEqual({
         terminal: { columns: 80, rows: 24 },

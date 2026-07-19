@@ -8,17 +8,15 @@ import {
   useInput,
   useApp,
   useStdin,
-  useStdout,
-  useStderr,
   useBoxSize,
   useLayoutWidth,
   useViewportHeight,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import {
-  renderToStringWithScreenReader,
-  useInternalInputRoutingForTest,
-} from "@vue-tui/runtime/internal";
+import { useStderr } from "../../runtime/dist/internal.mjs";
+import { useStdout } from "../../runtime/dist/internal.mjs";
+import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
+import { useInternalInputRoutingForTest } from "../../runtime/dist/internal.mjs";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -174,19 +172,6 @@ describe("renderToString", () => {
 
     expect(() => renderToString(App)).toThrow(
       "useApp().exit() is unavailable during renderToString()",
-    );
-  });
-
-  test("useApp render flush is explicitly unavailable in a string render", async () => {
-    let waitUntilRenderFlush: (() => Promise<void>) | undefined;
-    const App = defineComponent(() => {
-      waitUntilRenderFlush = useApp().waitUntilRenderFlush;
-      return () => <Text>document</Text>;
-    });
-
-    expect(renderToString(App)).toBe("document");
-    await expect(waitUntilRenderFlush?.()).rejects.toThrow(
-      "useApp().waitUntilRenderFlush() is unavailable during renderToString()",
     );
   });
 
@@ -632,8 +617,8 @@ describe("renderToString", () => {
   //
   // Ink composes nested <Text> by WRAPPING: squash-text-nodes.ts concatenates a
   // node's already-styled children, then the PARENT Text's internal_transform
-  // wraps the WHOLE concatenation. So a parent's retained styles (bold, inverse,
-  // and dim) stay OPEN across a nested child — the child only
+  // wraps the WHOLE concatenation. So a parent's retained styles (bold and dim)
+  // stay OPEN across a nested child — the child only
   // ADDS its own style on top. The Ink composition is literally
   // `chalk.<style>("A" + chalk.<childStyle>("B"))`, which is what we assert here.
   // (The earlier merge-down + per-leaf model closed the parent SGR at the nested
@@ -674,18 +659,6 @@ describe("renderToString", () => {
       </Text>
     ));
     expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B") + "C"));
-  });
-
-  test("deep nesting wraps each level's style around its already-styled children", () => {
-    const App = defineComponent(() => () => (
-      <Text bold>
-        A
-        <Text inverse>
-          B<Text color="green">C</Text>
-        </Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.inverse("B" + chalk.green("C"))));
   });
 
   test("nested child's own color composes on top of inherited bold (child stays bold too)", () => {

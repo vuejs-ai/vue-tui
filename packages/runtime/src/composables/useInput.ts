@@ -1,6 +1,6 @@
 import { inject, isRef, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
-import { isErrorInput, messageForNonError } from "../components/error-overview.ts";
+import { isErrorInput, messageForNonError } from "../error-value.ts";
 import type { NormalizedInputFact } from "../io/normalized-input.ts";
 import {
   normalizeInputHandlerResult,

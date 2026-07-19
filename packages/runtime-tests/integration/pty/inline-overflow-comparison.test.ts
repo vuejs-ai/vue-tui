@@ -124,15 +124,6 @@ test("screen-reader Inline also preserves a partially occupied pre-mount row", a
   expect(lines).toContain("TOP 2");
 });
 
-test("coordinated output can be the first managed write after a partial row", async () => {
-  const { lines, output } = await runScenario("partial-row-coordinated");
-
-  expectNoMainScreenReset(output);
-  expect(lines).toContain("PRE_APP_PARTIAL");
-  expect(lines).toContain("COMMITTED");
-  expect(lines).not.toContain("PRE_APP_PARTIALCOMMITTED");
-});
-
 test("Static can be the first managed write after a partial row", async () => {
   const { lines, output } = await runScenario("partial-row-static");
 

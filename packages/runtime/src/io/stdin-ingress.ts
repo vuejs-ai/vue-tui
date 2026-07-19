@@ -22,6 +22,13 @@ export interface SharedStdinIngress {
     onResult: (supported: boolean) => void,
     owner?: SharedStdinSubscription,
   ): (options?: { readonly discard?: boolean }) => void;
+  /**
+   * Repository testing bridge only. Route one complete physical input write
+   * through the production decoder and parser, then settle after its finite
+   * Escape ambiguity has resolved. Definite incomplete framing is retained for
+   * a later write and reported instead of being manufactured into an event.
+   */
+  writeForTest(data: Uint8Array | string): Promise<void>;
 }
 
 interface Subscriber {
@@ -116,6 +123,32 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   let flowReconcileRequested = false;
   let processing = false;
   let firstProcessingError: unknown;
+  const testInputWaiters = new Set<{
+    readonly resolve: () => void;
+    readonly reject: (error: unknown) => void;
+  }>();
+
+  function settleTestInputWaiters(): void {
+    if (
+      processing ||
+      chunkQueue.length > 0 ||
+      afterCurrentChunk.length > 0 ||
+      pendingFlushTimer !== undefined
+    ) {
+      return;
+    }
+
+    const waiters = [...testInputWaiters];
+    testInputWaiters.clear();
+    if (framingInProgress()) {
+      const error = new Error(
+        "Test input ended with an incomplete terminal protocol frame or UTF-8 sequence; write the remaining bytes in a later call.",
+      );
+      for (const waiter of waiters) waiter.reject(error);
+      return;
+    }
+    for (const waiter of waiters) waiter.resolve();
+  }
 
   function snapshotActiveRecipients(): RecipientSnapshot {
     const recipients: Recipient[] = [];
@@ -746,8 +779,13 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     if (firstProcessingError !== undefined) {
       const error = firstProcessingError;
       firstProcessingError = undefined;
+      const testWriteOwnsError = testInputWaiters.size > 0;
+      for (const waiter of testInputWaiters) waiter.reject(error);
+      testInputWaiters.clear();
+      if (testWriteOwnsError) return;
       throw error;
     }
+    settleTestInputWaiters();
   }
 
   function handleData(chunk: Uint8Array | string): void {
@@ -934,6 +972,19 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       }
       return (options) =>
         options?.discard ? abortDetection(detection) : cancelDetection(detection);
+    },
+    writeForTest(data) {
+      const hadRuntimeListener = inputListenerAttached;
+      try {
+        stdin.emit("data", typeof data === "string" ? data : Uint8Array.from(data));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      if (!hadRuntimeListener) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        testInputWaiters.add({ resolve, reject });
+        settleTestInputWaiters();
+      });
     },
   };
 

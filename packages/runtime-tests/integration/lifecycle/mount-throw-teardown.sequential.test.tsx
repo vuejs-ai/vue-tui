@@ -12,11 +12,9 @@ import { createRequire } from "node:module";
 import { defineComponent } from "vue";
 import { expect, test, vi, afterEach } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
-import {
-  INTERNAL_KITTY_KEYBOARD,
-  yogaNodeTracker,
-  type InternalMountOptions,
-} from "@vue-tui/runtime/internal";
+import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeWritable, makeFakeStdin } from "./test-streams.ts";
 
 afterEach(() => {
@@ -61,7 +59,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   // The component setup error is captured by vue-tui's boundary and rejects the
   // app lifetime after every partially acquired input resource is released.
   const app1 = createApp(App);
-  app1.mount({ stdout, stdin, stderr, liveUpdates: true });
+  app1.mount({ stdout, stdin, stderr, liveUpdates: true } as InternalMountOptions);
   await expect(app1.waitUntilExit()).rejects.toThrow("ERR_TTY_INIT_FAILED");
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
@@ -71,7 +69,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 } as InternalMountOptions);
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -122,7 +120,7 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 });
+  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 } as InternalMountOptions);
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();
@@ -158,9 +156,9 @@ test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga
 
   // (1) mount() rethrows the setWidth error.
   const app1 = createApp(App);
-  expect(() => app1.mount({ stdout, stdin, stderr, liveUpdates: false })).toThrow(
-    "YOGA_SET_WIDTH_FAILED",
-  );
+  expect(() =>
+    app1.mount({ stdout, stdin, stderr, liveUpdates: false } as InternalMountOptions),
+  ).toThrow("YOGA_SET_WIDTH_FAILED");
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   restore();

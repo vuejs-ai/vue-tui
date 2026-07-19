@@ -7,8 +7,6 @@ const ENTER_ALT_SCREEN = "\x1b[?1049h";
 const EXIT_ALT_SCREEN = "\x1b[?1049l";
 const ENABLE_BRACKETED_PASTE = "\x1b[?2004h";
 const DISABLE_BRACKETED_PASTE = "\x1b[?2004l";
-const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
 const SHOW_CURSOR = "\x1b[?25h";
 
 function occurrences(value: string, search: string): number {
@@ -40,7 +38,6 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     let lines = await visibleLines(throughMarker(ps.output, shownMarker));
     expect(lines).toContain("probe:0");
     expect(lines).toContain("visible=true revision=0");
-    expect(ps.output).toContain(ENABLE_MOUSE);
 
     let before = ps.output.length;
     ps.write("h");
@@ -50,7 +47,6 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     lines = await visibleLines(hiddenOutput);
     expect(lines).not.toContain("probe:0");
     expect(lines).toContain("visible=false revision=0");
-    expect(ps.output.slice(before)).toContain(DISABLE_MOUSE);
 
     before = ps.output.length;
     ps.write("u");
@@ -67,7 +63,6 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     lines = await visibleLines(throughMarker(ps.output, restoredMarker));
     expect(lines).toContain("probe:2");
     expect(lines).toContain("visible=true revision=2");
-    expect(ps.output.slice(before)).toContain(ENABLE_MOUSE);
 
     ps.write("q");
     await ps.waitForOutput((output) => output.includes("__VSHOW_OK__:mounts=1:unmounts=1"));
@@ -78,12 +73,9 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     expect(occurrences(ps.output, EXIT_ALT_SCREEN)).toBe(1);
     expect(occurrences(ps.output, ENABLE_BRACKETED_PASTE)).toBe(1);
     expect(occurrences(ps.output, DISABLE_BRACKETED_PASTE)).toBe(1);
-    expect(occurrences(ps.output, ENABLE_MOUSE)).toBe(2);
-    expect(occurrences(ps.output, DISABLE_MOUSE)).toBe(2);
     expect(ps.output.lastIndexOf(EXIT_ALT_SCREEN)).toBeGreaterThan(
       ps.output.lastIndexOf(ENTER_ALT_SCREEN),
     );
-    expect(ps.output.lastIndexOf(DISABLE_MOUSE)).toBeLessThan(ps.output.indexOf("__VSHOW_OK__"));
     expect(ps.output.lastIndexOf(SHOW_CURSOR)).toBeLessThan(ps.output.indexOf("__VSHOW_OK__"));
   } finally {
     if (!exited) ps.killNow("SIGTERM");

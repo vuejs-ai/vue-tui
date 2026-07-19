@@ -6,6 +6,7 @@ import stripAnsi from "strip-ansi";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin } from "./test-streams.ts";
 
 function captureStream(stream: NodeJS.WriteStream): { readonly chunks: string[] } {
@@ -57,7 +58,7 @@ test("one-row Inline leaves the first component error visible", async () => {
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-  });
+  } as InternalMountOptions);
 
   try {
     await expect(app.waitUntilExit()).rejects.toThrow(marker);
@@ -94,7 +95,7 @@ test.each([1, 4])(
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-    });
+    } as InternalMountOptions);
 
     try {
       await expect(app.waitUntilExit()).rejects.toThrow(marker);
@@ -127,11 +128,11 @@ test("a screen-reader Fullscreen request leaves its fatal transcript on the main
     stderr,
     stdin,
     mode: "fullscreen",
-    isScreenReaderEnabled: true,
+    presentation: "screen-reader",
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-  });
+  } as InternalMountOptions);
 
   try {
     await expect(app.waitUntilExit()).rejects.toThrow(marker);
@@ -168,7 +169,7 @@ test("a throttled Inline boundary error falls back to stderr when stdout is lost
     liveUpdates: true,
     patchConsole: false,
     maxFps: 1,
-  });
+  } as InternalMountOptions);
 
   try {
     await nextTick();
@@ -225,7 +226,7 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     // Keep the normal error repaint pending so the resize render barrier below
     // owns the first physical attempt after Vue produces the overview.
     maxFps: 1,
-  });
+  } as InternalMountOptions);
 
   try {
     await app.waitUntilRenderFlush();
@@ -279,7 +280,7 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     // The error update is then pending when teardown cancels the scheduler, so
     // this exercises whether fatal final-output can replay that prior success.
     maxFps: 1,
-  });
+  } as InternalMountOptions);
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -378,7 +379,7 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
     liveUpdates: true,
     patchConsole: false,
     maxFps: 0,
-  });
+  } as InternalMountOptions);
 
   let settlement: "pending" | "resolved" | "rejected" = "pending";
   const exited = app.waitUntilExit().then(

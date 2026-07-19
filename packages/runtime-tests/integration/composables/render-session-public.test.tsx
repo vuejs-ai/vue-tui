@@ -9,10 +9,9 @@ import {
   useLayoutWidth,
   useViewportHeight,
 } from "@vue-tui/runtime";
-import {
-  INTERNAL_TERMINAL_SIZE_PROBE,
-  renderToStringWithScreenReader,
-} from "@vue-tui/runtime/internal";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
+import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makePublicTty(columns?: number, rows?: number): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -65,15 +64,7 @@ const unboundedLiveCases: readonly {
     options: {
       columns: 80,
       rows: 24,
-      host: { mode: "fullscreen", stdout: "stream", updates: "at-teardown" },
-    },
-  },
-  {
-    name: "live stream",
-    options: {
-      columns: 80,
-      rows: 24,
-      host: { mode: "fullscreen", stdout: "stream", updates: "live" },
+      host: { mode: "fullscreen", stdout: "stream" },
     },
   },
 ];
@@ -120,7 +111,7 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
       maxFps: 0,
       patchConsole: false,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    } as Parameters<typeof app.mount>[0]);
+    } as InternalMountOptions);
 
     expect(width!.value).toBe(80);
     expect(viewportHeight).toBeNull();
@@ -155,7 +146,7 @@ test("disabling live updates makes the visual layout unbounded even when termina
       liveUpdates: false,
       maxFps: 0,
       patchConsole: false,
-    });
+    } as InternalMountOptions);
 
     expect(width!.value).toBe(80);
     expect(viewportHeight).toBeNull();

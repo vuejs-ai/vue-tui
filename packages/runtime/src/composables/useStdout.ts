@@ -2,7 +2,7 @@ import { inject } from "vue";
 import { AppContextKey } from "../context.ts";
 import type { CoordinatedWriteResult } from "../io/output-coordinator.ts";
 
-/** Coordinated styled-line output plus the deliberately raw stdout escape hatch. */
+/** Repository-only bridge for exercising Runtime's coordinated stdout mechanism. */
 export interface UseStdoutReturn {
   /** Raw stream; writes through it bypass frame coordination and output sanitization. */
   readonly stdout: NodeJS.WriteStream;

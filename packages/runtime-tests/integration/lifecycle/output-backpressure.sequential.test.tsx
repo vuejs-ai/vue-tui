@@ -2,22 +2,14 @@ import { Writable } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import {
-  Box,
-  createApp,
-  Text,
-  useInput,
-  useStdout,
-  type CoordinatedWriteResult,
-  type TuiInputEvent,
-} from "@vue-tui/runtime";
+import { Box, createApp, Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import {
-  INTERNAL_KITTY_KEYBOARD,
-  runtimeResourceTracker,
-  type InternalMountOptions,
-} from "@vue-tui/runtime/internal";
-import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
+import { useStdout } from "../../../runtime/dist/internal.mjs";
+import type { CoordinatedWriteResult } from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import { bsu, esu } from "../../../runtime/dist/internal.mjs";
+import { runtimeResourceTracker } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { createSlowWritable } from "./slow-writable.ts";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
@@ -75,7 +67,7 @@ test.sequential("an Inline transaction never writes again between write(false) a
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await new Promise((resolve) => setTimeout(resolve, 350));
   app.unmount();
   await slow.waitForIdle();
@@ -101,7 +93,7 @@ test.sequential("coordinated writes distinguish accepted backpressure from non-a
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   const first = write(`accepted:${"A".repeat(2_048)}\n`);
   const second = write("must-not-be-retained\n");
@@ -155,7 +147,7 @@ test.sequential("synchronized-output ownership follows physical BSU and ESU hand
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   const result = write("physical-lease\n");
 
   expect(result).toMatchObject({ status: "accepted", writable: false });
@@ -191,7 +183,7 @@ test.sequential("normal unmount waits for drain before final output and restorat
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   const writeResult = write(`record:${"R".repeat(2_048)}\n`);
   expect(writeResult).toMatchObject({ status: "accepted", writable: false });

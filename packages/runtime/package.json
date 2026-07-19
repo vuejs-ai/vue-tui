@@ -27,6 +27,7 @@
   },
   "files": [
     "dist",
+    "!dist/internal.*",
     "docs/visual-development-feedback-loops.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -35,9 +36,9 @@
   "type": "module",
   "exports": {
     ".": "./dist/index.mjs",
-    "./fullscreen": "./dist/fullscreen.mjs",
+    "./devtools": "./dist/devtools.mjs",
     "./inline": "./dist/inline.mjs",
-    "./internal": "./dist/internal.mjs",
+    "./testing": "./dist/testing.mjs",
     "./package.json": "./package.json"
   },
   "publishConfig": {

@@ -1,6 +1,6 @@
 import { PassThrough, Writable } from "node:stream";
-import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
-import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
+import { bsu, esu } from "../../../runtime/dist/internal.mjs";
+import { nextLineEscape } from "../../../runtime/dist/internal.mjs";
 
 export interface FakeWritableOptions {
   columns?: number;

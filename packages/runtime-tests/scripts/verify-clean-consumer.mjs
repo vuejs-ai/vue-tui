@@ -129,7 +129,6 @@ import {
   Text,
   useBoxPresence,
   useBoxSize,
-  useClipboard,
   useInput,
   useLayoutWidth,
   useStdin,
@@ -137,41 +136,21 @@ import {
   type BoxSize,
   type BoxProps,
   type Color,
-  type CellPoint,
-  type ClipboardAvailability,
-  type ClipboardTransport,
-  type ClipboardWriteResult,
-  type ElementTarget,
   type MountOptions,
   type RenderToStringOptions,
   type TuiInputEvent,
   type TextProps,
-  type UseClipboardReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
+import { connectDevtools } from "@vue-tui/runtime/devtools";
 import {
-  useMouseDrag,
-  useMouseEvent,
-  useTextSelection,
-  type CellDelta,
-  type MouseButton,
-  type MouseDragHandler,
-  type MouseEventHandler,
-  type MouseHandlerResult,
-  type MouseModifiers,
-  type TuiMouseClickEvent,
-  type TuiMouseDragEvent,
-  type TuiMouseEventMap,
-  type TuiMouseWheelEvent,
-  type TextSelectionCommands,
-  type TextSelectionState,
-  type UseMouseDragOptions,
-  type UseMouseDragReturn,
-  type UseMouseEventOptions,
-  type UseTextSelectionOptions,
-} from "@vue-tui/runtime/fullscreen";
-import type { RenderResult, TestClipboardBehavior, TestMouse } from "@vue-tui/testing";
-import type { ComponentPublicInstance, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
+  createTestHostBridge,
+  type TestContentFrame,
+  type TestHostBridge,
+  type TestHostBridgeOptions,
+} from "@vue-tui/runtime/testing";
+import type { RenderResult } from "@vue-tui/testing";
+import type { ComponentPublicInstance, MaybeRefOrGetter, Ref } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -220,7 +199,6 @@ type _ExactTextProps = Expect<
     | "backgroundColor"
     | "dimColor"
     | "bold"
-    | "inverse"
     | "wrap"
     | "ariaLabel"
     | "ariaHidden"
@@ -261,9 +239,6 @@ type _ExactInputOptions = Expect<
     { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
   >
 >;
-type _ExactElementTarget = Expect<
-  Equal<ElementTarget, MaybeRefOrGetter<ComponentPublicInstance | null | undefined>>
->;
 type _ExactBoxSize = Expect<
   Equal<BoxSize, { readonly width: number; readonly height: number }>
 >;
@@ -276,122 +251,19 @@ type _ExactLayoutWidth = Expect<
 type _ExactViewportHeight = Expect<
   Equal<ReturnType<typeof useViewportHeight>, Readonly<Ref<number>> | null>
 >;
-type _ExactMouseButton = Expect<Equal<MouseButton, "left" | "middle" | "right">>;
-type _ExactMouseHandlerResult = Expect<Equal<MouseHandlerResult, "continue" | "consume">>;
-type _ExactCellDelta = Expect<Equal<CellDelta, { readonly x: number; readonly y: number }>>;
-type _ExactMouseModifiers = Expect<
-  Equal<
-    MouseModifiers,
-    { readonly shift: boolean; readonly alt: boolean; readonly ctrl: boolean }
-  >
+type _ExactTestingBridge = Expect<
+  Equal<ReturnType<typeof createTestHostBridge>, TestHostBridge>
 >;
-type _ExactClickEvent = Expect<
-  Equal<
-    Pick<TuiMouseClickEvent, "type" | "delivery" | "surface" | "local" | "button">,
-    {
-      readonly type: "click";
-      readonly delivery: "target" | "bubble";
-      readonly surface: CellPoint;
-      readonly local: CellPoint;
-      readonly button: MouseButton;
-    }
-  >
->;
-type _ExactWheelEvent = Expect<
-  Equal<
-    Pick<TuiMouseWheelEvent, "type" | "delivery" | "surface" | "local" | "delta">,
-    {
-      readonly type: "wheel";
-      readonly delivery: "target" | "bubble";
-      readonly surface: CellPoint;
-      readonly local: CellPoint;
-      readonly delta: CellDelta;
-    }
-  >
->;
-type _ExactMouseEventMap = Expect<
-  Equal<
-    TuiMouseEventMap,
-    { readonly click: TuiMouseClickEvent; readonly wheel: TuiMouseWheelEvent }
-  >
->;
-type _ExactMouseEventHandler = Expect<
-  Equal<MouseEventHandler<"click">, (event: TuiMouseClickEvent) => MouseHandlerResult>
->;
-type _ExactMouseDragHandler = Expect<
-  Equal<MouseDragHandler, (event: TuiMouseDragEvent) => void>
->;
-type _ExactMouseDragMovement = Expect<
-  Equal<Exclude<TuiMouseDragEvent, { phase: "cancel" }>["movement"], CellDelta>
->;
-type _ExactMouseDragCancelReason = Expect<
-  Equal<
-    Extract<TuiMouseDragEvent, { phase: "cancel" }>["reason"],
-    "deactivated" | "target-lost" | "suspended"
-  >
->;
-type _ExactMouseEventOptions = Expect<
-  Equal<UseMouseEventOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
->;
-type _ExactMouseDragOptions = Expect<
-  Equal<UseMouseDragOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
->;
-type _ExactMouseDragReturn = Expect<
-  Equal<UseMouseDragReturn, { readonly isDragging: Readonly<ShallowRef<boolean>> }>
->;
-type _ExactPackagedTestMouse = Expect<Equal<RenderResult["mouse"], TestMouse>>;
-type _ExactClipboardTransport = Expect<
-  Equal<
-    ClipboardTransport,
-    | {
-        readonly kind: "custom";
-        readonly writeText: (
-          text: string,
-        ) => import("@vue-tui/runtime").ClipboardTransportResult | PromiseLike<import("@vue-tui/runtime").ClipboardTransportResult>;
-      }
-    | { readonly kind: "osc52" }
-  >
->;
-type _ExactClipboardReturn = Expect<
-  Equal<
-    UseClipboardReturn,
-    {
-      readonly availability: Readonly<ShallowRef<ClipboardAvailability>>;
-      readonly writeText: (text: string) => Promise<ClipboardWriteResult>;
-    }
-  >
->;
-type _ExactTestingClipboard = Expect<
-  Equal<TestClipboardBehavior, "copied" | "requested" | "unavailable" | "rejected">
->;
-type _ExactTestingClipboardRequests = Expect<
-  Equal<RenderResult["clipboard"]["requests"], readonly string[]>
->;
-type _ExactSelectionOptions = Expect<
-  Equal<
-    UseTextSelectionOptions,
-    {
-      readonly isActive?: MaybeRefOrGetter<boolean>;
-      readonly pointer?: MaybeRefOrGetter<boolean>;
-    }
-  >
->;
-type _ExactSelectionCommands = Expect<
-  Equal<
-    TextSelectionCommands,
-    {
-      readonly state: Readonly<ShallowRef<TextSelectionState>>;
-      move(
-        direction: import("@vue-tui/runtime/fullscreen").TextSelectionMove,
-        options?: { readonly extend?: boolean },
-      ): boolean;
-      selectAll(): boolean;
-      clear(): boolean;
-      copy(): Promise<import("@vue-tui/runtime/fullscreen").TextSelectionCopyResult>;
-    }
-  >
->;
-
+const observedTestFrame = (frame: TestContentFrame): void => {
+  frame.dynamic;
+  frame.staticOutput;
+};
+const testBridgeOptions: TestHostBridgeOptions = { onFrame: observedTestFrame };
+createTestHostBridge(testBridgeOptions);
+connectDevtools({
+  on(_event, _callback) {},
+  send(_event, _data) {},
+});
 const active = shallowRef(true);
 const screen = shallowRef<"editor" | "confirm">("editor");
 const handler = (event: TuiInputEvent): void | { readonly preventDefault: true } => {
@@ -410,7 +282,6 @@ useInput(handler, { isActive: () => active.value });
 // @ts-expect-error Parser packet metadata is not part of the public event.
 declare const removedSequence: TuiInputEvent["sequence"];
 
-declare const elementHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 // @ts-expect-error Runtime-owned layout width is readonly.
@@ -450,18 +321,6 @@ useBoxPresence(rawBoxHost);
 useBoxSize(() => boxHost.value);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
 useBoxPresence(() => boxHost.value);
-const clickHandler = shallowRef<MouseEventHandler<"click">>(() => "continue");
-useMouseEvent(elementHost, "click", clickHandler);
-useMouseEvent(elementHost, "wheel", (_event: TuiMouseWheelEvent) => "consume");
-const drag = useMouseDrag(elementHost, (_event: TuiMouseDragEvent) => {});
-drag.isDragging.value;
-const clipboard = useClipboard();
-clipboard.availability.value.status;
-clipboard.writeText("exact");
-const selection = useTextSelection(elementHost, { isActive: active, pointer: () => true });
-selection.move("forward", { extend: true });
-selection.copy();
-
 useStdin().stdin;
 // @ts-expect-error Raw-mode control is internal to semantic input routes.
 useStdin().setRawMode(false);
@@ -473,12 +332,8 @@ const removedRawMode: MountOptions = { rawMode: "auto" };
 const removedExitOnCtrlC: MountOptions = { exitOnCtrlC: false };
 // @ts-expect-error Runtime privately negotiates the keyboard protocol.
 const removedKittyKeyboard: MountOptions = { kittyKeyboard: { mode: "enabled" } };
-const customClipboardMount: MountOptions = {
-  clipboard: { kind: "custom", writeText: () => ({ status: "copied" }) },
-};
-const osc52ClipboardMount: MountOptions = { clipboard: { kind: "osc52" } };
-// @ts-expect-error A custom clipboard transport requires writeText.
-const invalidClipboardMount: MountOptions = { clipboard: { kind: "custom" } };
+// @ts-expect-error Clipboard transport injection is application policy.
+const removedClipboardMount: MountOptions = { clipboard: { kind: "osc52" } };
 const packedColor: Color = "gray";
 const packedRgbColor: Color = "#12abEF";
 // @ts-expect-error Runtime has one canonical gray spelling.
@@ -623,12 +478,18 @@ type _RemovedCursorPosition = import("@vue-tui/runtime").CursorPosition;
 type _RemovedUseMouseInput = typeof import("@vue-tui/runtime").useMouseInput;
 // @ts-expect-error The v1 drag helper was removed from the root.
 type _RemovedUseDraggable = typeof import("@vue-tui/runtime").useDraggable;
-// @ts-expect-error Fullscreen mouse values are available only from the subpath.
-type _RootUseMouseEvent = typeof import("@vue-tui/runtime").useMouseEvent;
-// @ts-expect-error Fullscreen mouse values are available only from the subpath.
-type _RootUseMouseDrag = typeof import("@vue-tui/runtime").useMouseDrag;
-// @ts-expect-error Fullscreen selection is available only from the subpath.
-type _RootUseTextSelection = typeof import("@vue-tui/runtime").useTextSelection;
+// @ts-expect-error Targeted mouse policy is outside the Runtime foundation.
+type _RemovedUseMouseEvent = typeof import("@vue-tui/runtime").useMouseEvent;
+// @ts-expect-error Drag policy is outside the Runtime foundation.
+type _RemovedUseMouseDrag = typeof import("@vue-tui/runtime").useMouseDrag;
+// @ts-expect-error Selection policy is outside the Runtime foundation.
+type _RemovedUseTextSelection = typeof import("@vue-tui/runtime").useTextSelection;
+// @ts-expect-error Clipboard policy is outside the Runtime foundation.
+type _RemovedUseClipboard = typeof import("@vue-tui/runtime").useClipboard;
+// @ts-expect-error Cell coordinates are not a public Runtime contract.
+type _RemovedCellPoint = import("@vue-tui/runtime").CellPoint;
+// @ts-expect-error Component target wiring is not a public Runtime contract.
+type _RemovedElementTarget = import("@vue-tui/runtime").ElementTarget;
 // @ts-expect-error Static is available only from the Inline history subpath.
 type _RootStatic = typeof import("@vue-tui/runtime").Static;
 // @ts-expect-error The removed Static collection types are not exported from the root.
@@ -653,9 +514,7 @@ type _RemovedInlineStaticSlotProps = import("@vue-tui/runtime/inline").StaticSlo
 type _RemovedInlineStaticStyle = import("@vue-tui/runtime/inline").StaticStyle;
 // @ts-expect-error Common component types are not duplicated on the Inline subpath.
 type _InlineBoxProps = import("@vue-tui/runtime/inline").BoxProps;
-// @ts-expect-error Common clipboard transport is not duplicated on the Fullscreen subpath.
-type _FullscreenUseClipboard = typeof import("@vue-tui/runtime/fullscreen").useClipboard;
-// @ts-expect-error MouseButton moved to the Fullscreen subpath.
+// @ts-expect-error Mouse protocol types are not public Runtime contracts.
 type _RemovedRootMouseButton = import("@vue-tui/runtime").MouseButton;
 // @ts-expect-error The terminal-wide v1 mouse event was removed.
 type _RemovedMouseInputEvent = import("@vue-tui/runtime").MouseInputEvent;
@@ -666,9 +525,7 @@ type _RemovedTuiMouseEvent = import("@vue-tui/runtime").TuiMouseEvent;
 void removedRawMode;
 void removedExitOnCtrlC;
 void removedKittyKeyboard;
-void customClipboardMount;
-void osc52ClipboardMount;
-void invalidClipboardMount;
+void removedClipboardMount;
 void packedColor;
 void packedRgbColor;
 void removedGreyColor;
@@ -677,10 +534,9 @@ void removedGreyColor;
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
     `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
-import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+import { Box, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
+import { defineComponent, shallowRef } from "vue";
 
 // @ts-expect-error Spinner is a leaf component and ignores child content.
 const unsupportedSpinnerChildren = <Spinner children="ignored" />;
@@ -703,24 +559,22 @@ const unsupportedBoxMarginLeft = <Box marginLeft={1}><Text>x</Text></Box>;
 const unsupportedBoxPaddingX = <Box paddingX={1}><Text>x</Text></Box>;
 // @ts-expect-error Unevidenced text decoration is not a Runtime primitive.
 const unsupportedTextUnderline = <Text underline>x</Text>;
+// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
+const unsupportedTextInverse = <Text inverse>x</Text>;
 void unsupportedStaticItems;
 void unsupportedStaticStyle;
 void unsupportedBoxMarginLeft;
 void unsupportedBoxPaddingX;
 void unsupportedTextUnderline;
+void unsupportedTextInverse;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<InstanceType<typeof Box> | null>(null);
-  const selectableText = shallowRef<ComponentPublicInstance | null>(null);
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const size = useBoxSize(host);
   const presence = useBoxPresence(host);
   const layoutWidth = useLayoutWidth();
   const viewportHeight = useViewportHeight();
-  const clipboard = useClipboard();
-  const selection = useTextSelection(selectableText, { pointer: false });
-  clipboard.availability.value.status;
-  selection.move("document-start");
   useInput(
     (event) => {
       if (event.kind === "key" && event.name === "enter") {
@@ -743,33 +597,27 @@ export const InputProbe = defineComponent(() => {
     scrollBox.value.scrollToLine(2, true);
     void movementResults;
   }
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text ref={selectableText}>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(presence.value)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(presence.value)}</Text></ScrollBox></Box>;
 });
 `,
   );
   writeFileSync(
     join(consumerDirectory, "App.vue"),
     `<script setup lang="ts">
-import { shallowRef, type ComponentPublicInstance } from "vue";
+import { shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
-import { useTextSelection } from "@vue-tui/runtime/fullscreen";
+import { Box, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 
 const host = shallowRef<InstanceType<typeof Box> | null>(null);
 const vShowVisible = shallowRef(true);
 const screen = shallowRef<"editor" | "confirm">("editor");
-const selectableText = shallowRef<ComponentPublicInstance | null>(null);
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const size = useBoxSize(host);
 const presence = useBoxPresence(host);
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 const mountedStdin = useStdin();
-const clipboard = useClipboard();
-const selection = useTextSelection(selectableText, { pointer: false });
-clipboard.availability.value.status;
-selection.move("document-start");
 useInput(
   (event) => {
     if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
@@ -802,7 +650,7 @@ mountedStdin.setRawMode(false);
       <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
-      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ presence }}</Text></ScrollBox>
+      <ScrollBox ref="scrollBox"><Text>{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ presence }}</Text></ScrollBox>
     </Box>
   </Box>
 </template>
@@ -837,16 +685,23 @@ const listener = () => {};
     `import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
-import * as fullscreen from "@vue-tui/runtime/fullscreen";
+import * as devtools from "@vue-tui/runtime/devtools";
+import * as runtimeTesting from "@vue-tui/runtime/testing";
 import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, isReadonly, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
-const { Box, createApp, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
-const { useMouseDrag, useMouseEvent, useTextSelection } = fullscreen;
-assert.deepEqual(Object.keys(fullscreen).sort(), ["useMouseDrag", "useMouseEvent", "useTextSelection"]);
+const { Box, createApp, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
+assert.deepEqual(Object.keys(devtools).sort(), ["connectDevtools"]);
+assert.deepEqual(Object.keys(runtimeTesting).sort(), ["createTestHostBridge"]);
+for (const unsupportedSubpath of ["internal", "fullscreen"]) {
+  await assert.rejects(import("@vue-tui/runtime/" + unsupportedSubpath), (error) => {
+    assert.equal(error?.code, "ERR_PACKAGE_PATH_NOT_EXPORTED");
+    return true;
+  });
+}
 assert.equal("Static" in runtime, false);
 assert.equal("usePaste" in runtime, false);
 assert.equal("useCursor" in runtime, false);
@@ -857,7 +712,7 @@ assert.equal("useDraggable" in runtime, false);
 assert.equal("useMouseEvent" in runtime, false);
 assert.equal("useMouseDrag" in runtime, false);
 assert.equal("useTextSelection" in runtime, false);
-assert.equal("useClipboard" in fullscreen, false);
+assert.equal("useClipboard" in runtime, false);
 assert.equal("Newline" in runtime, false);
 assert.equal("Spacer" in runtime, false);
 assert.equal("Transform" in runtime, false);
@@ -880,8 +735,6 @@ assert.equal(typeof useViewportHeight, "function");
 assert.equal(typeof useBoxSize, "function");
 assert.equal(typeof useBoxPresence, "function");
 assert.equal(typeof useInput, "function");
-assert.equal(typeof useClipboard, "function");
-assert.equal(typeof useTextSelection, "function");
 
 for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
   for (const listenerName of ["onMousedown", "onMouseDown", "onMouseup", "onMouseUp", "onClick", "onWheel"]) {
@@ -895,7 +748,7 @@ for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
         message:
           "<" + componentName + '> does not accept the removed mouse listener "' +
           listenerName +
-          '". Use the mouse composables from "@vue-tui/runtime/fullscreen".',
+          '". Targeted mouse input is outside the current Runtime foundation.',
       },
     );
   }
@@ -1216,96 +1069,6 @@ assert.throws(
 );
 assert.equal(movementHandle.value.scrollByLines(-1), true);
 movementApp.dispose();
-
-const clickEvents = [];
-const wheelEvents = [];
-const dragEvents = [];
-let mouseDrag;
-const MouseProbe = defineComponent(() => {
-  const host = shallowRef(null);
-  useMouseEvent(host, "click", (event) => {
-    clickEvents.push(event);
-    return "consume";
-  });
-  useMouseEvent(host, "wheel", (event) => {
-    wheelEvents.push(event);
-    return "consume";
-  });
-  mouseDrag = useMouseDrag(host, (event) => dragEvents.push(event));
-  return () => h(Box, { ref: host, width: 8, height: 2, flexShrink: 0 }, () =>
-    h(Text, null, () => "mouse target"),
-  );
-});
-const mouseApp = await render(MouseProbe, {
-  columns: 20,
-  rows: 6,
-  host: { mode: "fullscreen" },
-});
-assert.equal(mouseApp.mouse.reporting.current, "button-motion");
-assert.deepEqual([...mouseApp.mouse.reporting.history], ["button-motion"]);
-await mouseApp.mouse.down({ x: 1, y: 0 }, { button: "right", alt: true });
-await mouseApp.mouse.up({ x: 1, y: 0 }, { button: "right", alt: true });
-assert.equal(clickEvents.length, 1);
-assert.deepEqual(clickEvents[0], {
-  type: "click",
-  delivery: "target",
-  surface: { x: 1, y: 0 },
-  local: { x: 1, y: 0 },
-  modifiers: { shift: false, alt: true, ctrl: false },
-  button: "right",
-});
-await mouseApp.mouse.wheel({ x: 1, y: 0 }, "left", { ctrl: true });
-assert.equal(wheelEvents.length, 1);
-assert.deepEqual(wheelEvents[0], {
-  type: "wheel",
-  delivery: "target",
-  surface: { x: 1, y: 0 },
-  local: { x: 1, y: 0 },
-  modifiers: { shift: false, alt: false, ctrl: true },
-  delta: { x: -1, y: 0 },
-});
-await mouseApp.mouse.down({ x: 1, y: 0 });
-assert.equal(mouseDrag.isDragging.value, false);
-await mouseApp.mouse.move({ x: 3, y: 1 }, { shift: true });
-assert.equal(mouseDrag.isDragging.value, true);
-await mouseApp.mouse.up({ x: 3, y: 1 });
-assert.equal(mouseDrag.isDragging.value, false);
-assert.deepEqual(dragEvents.map((event) => event.phase), ["start", "end"]);
-mouseApp.dispose();
-assert.equal(mouseApp.mouse.reporting.current, "none");
-assert.deepEqual([...mouseApp.mouse.reporting.history], ["button-motion", "none"]);
-
-let packedSelection;
-let packedClipboard;
-const SelectionProbe = defineComponent(() => {
-  const target = shallowRef(null);
-  packedSelection = useTextSelection(target, { pointer: false });
-  packedClipboard = useClipboard();
-  return () => h(Text, { ref: target }, () => "packed\\n你🙂 selection");
-});
-const selectionApp = await render(SelectionProbe, {
-  columns: 12,
-  rows: 4,
-  host: { mode: "fullscreen", clipboard: "copied" },
-});
-assert.deepEqual(packedClipboard.availability.value, {
-  status: "available",
-  transport: "custom",
-});
-assert.equal(packedSelection.selectAll(), true);
-await selectionApp.waitUntilRenderFlush();
-assert.equal(packedSelection.state.value.selectedText, "packed\\n你🙂 selection");
-assert.deepEqual(await packedSelection.copy(), {
-  status: "copied",
-  text: "packed\\n你🙂 selection",
-});
-assert.deepEqual([...selectionApp.clipboard.requests], ["packed\\n你🙂 selection"]);
-assert.equal(selectionApp.lastFrame({ raw: true }).includes("\\u001b[7m"), true);
-selectionApp.dispose();
-assert.deepEqual(packedClipboard.availability.value, {
-  status: "unavailable",
-  reason: "disposed",
-});
 
 const events = [];
 const inputScreen = shallowRef("editor");

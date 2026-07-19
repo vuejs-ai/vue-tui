@@ -1,68 +1,21 @@
-import {
-  computed,
-  defineComponent,
-  nextTick,
-  onMounted,
-  shallowRef,
-  type ComponentPublicInstance,
-  type VNodeChild,
-} from "vue";
-import {
-  Box,
-  Text,
-  createApp,
-  useApp,
-  useBoxSize,
-  useInput,
-  useStderr,
-  useStdout,
-} from "@vue-tui/runtime";
+import { defineComponent, nextTick, onMounted, shallowRef, type VNodeChild } from "vue";
+import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { inputText } from "./input-event.js";
 
 type Scenario =
   | "static"
-  | "stdout"
-  | "stderr"
   | "console"
   | "rerender"
   | "overflow"
   | "horizontal-overflow"
   | "horizontal-left-wide"
   | "horizontal-wide"
-  | "target-lifetime"
-  | "targeted-mouse"
   | "screen-reader"
   | "foreground-reset";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
-const autoExitTargetLifetime = process.argv[4] === "auto-exit";
 const label = shallowRef("BUTTON");
-const targetPhase = shallowRef<"none" | "first" | "second">("none");
-const targetedTargetsVisible = shallowRef(false);
-const targetedDragActive = shallowRef(false);
-const targetedConsumeClick = shallowRef(false);
-const lifetimeBoxTarget = shallowRef<InstanceType<typeof Box> | null>(null);
-
-const LifetimeTarget = defineComponent(() => {
-  return () => {
-    if (targetPhase.value === "none") return null;
-    if (targetPhase.value === "first") {
-      return (
-        <Box ref={lifetimeBoxTarget} key="first" position="absolute" left={0} width={7} height={2}>
-          <Text>FIRST</Text>
-        </Box>
-      );
-    }
-    return (
-      <Box ref={lifetimeBoxTarget} key="second" position="absolute" left={5} width={11} height={1}>
-        <Text>TARGET-B</Text>
-      </Box>
-    );
-  };
-});
 
 // term() waits for this marker before sending input. Write it before entering
 // the alternate screen so it cannot move the fullscreen frame.
@@ -74,169 +27,18 @@ function markSettled(): void {
   process.stdout.write(`\x1b]0;__SETTLED__:${scenario}\x07`);
 }
 
-function markTargetPhase(): Promise<void> {
-  return nextTick()
-    .then(() => nextTick())
-    .then(() => {
-      process.stdout.write(`\x1b]0;__TARGET__:${targetPhase.value}\x07`);
-    });
-}
-
-function markTargetedState(state: string): Promise<void> {
-  return nextTick()
-    .then(() => nextTick())
-    .then(() => {
-      process.stdout.write(`\x1b]0;__TARGETED__:${state}\x07`);
-    });
-}
-
-function markTargetedEvent(event: string): void {
-  process.stdout.write(`\x1b]0;__MOUSE__:${event}\x07`);
-}
-
 const App = defineComponent(() => {
   const { exit } = useApp();
-  const { write } = useStdout();
-  const { write: writeError } = useStderr();
-  const clickTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedParent = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedChild = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedWheelTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedDivider = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedClippedTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const targetedScrollBox = shallowRef<ScrollBoxExpose | null>(null);
-  const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
-  const targetSize = useBoxSize(lifetimeBoxTarget);
-  const targetMetrics = computed(() => {
-    const size = targetSize.value;
-    if (size) {
-      return {
-        width: size.width,
-        height: size.height,
-        measured: true,
-      };
-    }
-    return { width: 0, height: 0, measured: false };
-  });
-  let dragStarts = 0;
-  const drag = useMouseDrag(target, (event) => {
-    if (event.phase === "start") dragStarts += 1;
-  });
-  useMouseEvent(clickTarget, "click", () => {
-    exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked");
-    return "consume";
-  });
-  useMouseEvent(targetedChild, "click", (event) => {
-    markTargetedEvent(
-      `click:child:${event.delivery}:consume=${String(targetedConsumeClick.value)}`,
-    );
-    return targetedConsumeClick.value ? "consume" : "continue";
-  });
-  useMouseEvent(targetedParent, "click", (event) => {
-    markTargetedEvent(`click:parent:${event.delivery}`);
-    return "continue";
-  });
-  useMouseEvent(targetedWheelTarget, "wheel", (event) => {
-    targetedScrollBox.value?.scrollByLines(event.delta.y);
-    void markTargetedState(`wheel:${event.delivery}:${event.delta.x},${event.delta.y}`);
-    return "consume";
-  });
-  useMouseEvent(targetedClippedTarget, "click", (event) => {
-    markTargetedEvent(`click:clipped:${event.delivery}:${event.local.x},${event.local.y}`);
-    return "consume";
-  });
-
-  const registerDividerDrag = (name: "a" | "b") =>
-    useMouseDrag(
-      targetedDivider,
-      (event) => {
-        const local = event.local === null ? "outside" : `${event.local.x},${event.local.y}`;
-        markTargetedEvent(`drag:${name}:${event.phase}:${local}`);
-      },
-      { isActive: () => targetedDragActive.value },
-    );
-  registerDividerDrag("a");
-  registerDividerDrag("b");
-
   const renderSurface = (content: VNodeChild) => <Box flexDirection="column">{content}</Box>;
 
   useInput((event) => {
     const input = inputText(event);
-    if (scenario === "targeted-mouse") {
-      if (input === "a") {
-        targetedTargetsVisible.value = true;
-        void markTargetedState("button");
-      } else if (input === "c") {
-        targetedConsumeClick.value = true;
-        void markTargetedState("consume");
-      } else if (input === "d") {
-        targetedDragActive.value = true;
-        void markTargetedState("drag");
-      } else if (input === "g") {
-        targetedDragActive.value = false;
-        void markTargetedState("button-after-drag");
-      } else if (input === "x") {
-        targetedTargetsVisible.value = false;
-        void markTargetedState("none");
-      } else if (input === "p") {
-        markTargetedEvent("probe");
-      } else if (input === "q") {
-        exit("targeted-mouse");
-      } else {
-        return;
-      }
-      return;
-    }
-    if (scenario === "target-lifetime") {
-      let exitAfterTransition = false;
-      if (input === "1") targetPhase.value = "first";
-      else if (input === "2") targetPhase.value = "second";
-      else if (input === "p") {
-        // PTY synchronization point: report the durable start count only after
-        // all input bytes before this key have been routed and rendered.
-        void nextTick().then(() => {
-          process.stdout.write(`\x1b]0;__DRAG_STARTS__:${dragStarts}\x07`);
-        });
-        return;
-      } else if (input === "x") {
-        targetPhase.value = "none";
-        exitAfterTransition = autoExitTargetLifetime;
-      } else if (input === "q") {
-        exit("target-lifetime");
-        return;
-      } else return;
-      const marked = markTargetPhase();
-      if (exitAfterTransition) {
-        void marked.then(() => {
-          setTimeout(() => exit("target-lifetime"), 20);
-        });
-      }
-      return;
-    }
-    if (scenario === "screen-reader" && input === "q") {
-      exit("screen-reader");
-      return;
-    }
-    if (scenario === "foreground-reset" && input === "q") {
-      exit("foreground-reset");
-    }
+    if (input === "q") exit();
   });
 
   onMounted(() => {
     if (scenario === "static") return;
     setTimeout(() => {
-      if (scenario === "stdout") {
-        write("LOG\n");
-        markSettled();
-        return;
-      }
-
-      if (scenario === "stderr") {
-        writeError("ERROR\n");
-        markSettled();
-        return;
-      }
-
       if (scenario === "console") {
         console.log("CONSOLE");
         markSettled();
@@ -254,59 +56,9 @@ const App = defineComponent(() => {
   });
 
   return () => {
-    if (scenario === "targeted-mouse") {
-      return renderSurface(
-        <Box flexDirection="column">
-          <Text>targets={targetedTargetsVisible.value ? "visible" : "hidden"}</Text>
-          {targetedTargetsVisible.value ? (
-            <>
-              <Box ref={targetedParent} width={12} height={1} flexShrink={0}>
-                <Box ref={targetedChild} width={5} height={1} flexShrink={0}>
-                  <Text>CLICK</Text>
-                </Box>
-              </Box>
-              <Box ref={targetedWheelTarget} width={8} height={2} flexShrink={0} overflowY="hidden">
-                <ScrollBox ref={targetedScrollBox}>
-                  {Array.from({ length: 5 }, (_, index) => (
-                    <Box key={index} height={1} flexShrink={0}>
-                      <Text>ITEM{index}</Text>
-                    </Box>
-                  ))}
-                </ScrollBox>
-              </Box>
-              <Box ref={targetedDivider} width={5} height={1} flexShrink={0}>
-                <Text>-----</Text>
-              </Box>
-              <Box flexDirection="row" width={105} height={1} flexShrink={0}>
-                <Box width={97} height={1} flexShrink={0} />
-                <Box ref={targetedClippedTarget} width={8} height={1} flexShrink={0}>
-                  <Text>CLIPPED</Text>
-                </Box>
-              </Box>
-            </>
-          ) : null}
-        </Box>,
-      );
-    }
-
-    if (scenario === "target-lifetime") {
-      return renderSurface(
-        <Box flexDirection="column">
-          <Text>phase={targetPhase.value}</Text>
-          <Box height={2} flexShrink={0}>
-            <LifetimeTarget ref={target} />
-          </Box>
-          <Text>
-            target={targetMetrics.value.width}x{targetMetrics.value.height}:
-            {String(targetMetrics.value.measured)} dragging={String(drag.isDragging.value)}
-          </Text>
-        </Box>,
-      );
-    }
-
     if (scenario === "horizontal-wide") {
       return renderSurface(
-        <Box ref={clickTarget} width={101} height={1} flexShrink={0}>
+        <Box width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => `${"X".repeat(99)}你` }}</Text> }}
         </Box>,
       );
@@ -314,7 +66,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-left-wide") {
       return renderSurface(
-        <Box ref={clickTarget} width={4} height={1} overflowY="hidden">
+        <Box width={4} height={1} overflowY="hidden">
           <Box position="absolute" left={-1} flexShrink={0}>
             <Text>中x</Text>
           </Box>
@@ -324,7 +76,7 @@ const App = defineComponent(() => {
 
     if (scenario === "horizontal-overflow") {
       return renderSurface(
-        <Box ref={clickTarget} width={101} height={1} flexShrink={0}>
+        <Box width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => "X".repeat(101) }}</Text> }}
         </Box>,
       );
@@ -336,12 +88,7 @@ const App = defineComponent(() => {
           {{
             default: () =>
               Array.from({ length: 10 }, (_, index) => (
-                <Box
-                  key={index}
-                  ref={index === 0 ? clickTarget : undefined}
-                  height={1}
-                  flexShrink={0}
-                >
+                <Box key={index} height={1} flexShrink={0}>
                   {{ default: () => <Text>{{ default: () => `LINE${index}` }}</Text> }}
                 </Box>
               )),
@@ -382,7 +129,7 @@ const App = defineComponent(() => {
             <Text>HISTORY</Text>
           </Static>
         ) : null}
-        <Box ref={clickTarget} width={7} height={1}>
+        <Box width={7} height={1}>
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
       </>,
@@ -393,14 +140,12 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   mode: "fullscreen",
-  isScreenReaderEnabled: scenario === "screen-reader",
-  incrementalRendering: scenario === "stdout",
-  maxFps: 0,
+  presentation: scenario === "screen-reader" ? "screen-reader" : "visual",
 });
 
 void app.waitUntilExit().then(
-  (result) => {
-    process.stdout.write(`__CLICKED__:${String(result)}\n`);
+  () => {
+    process.stdout.write(`__EXITED__:${scenario}\n`);
   },
   (error: unknown) => {
     if (scenario === "static") {
