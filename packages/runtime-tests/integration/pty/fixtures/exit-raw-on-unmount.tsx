@@ -2,7 +2,7 @@ import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { defineComponent } from "vue";
 
 const App = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => undefined);
 
   return () => <Text>Hello World</Text>;
 });

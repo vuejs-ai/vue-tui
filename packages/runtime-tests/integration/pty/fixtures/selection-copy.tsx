@@ -1,4 +1,5 @@
 import process from "node:process";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import { Box, Text, createApp, useApp, useInput, type TuiInputEvent } from "@vue-tui/runtime";
 import { useTextSelection, type TextSelectionMove } from "@vue-tui/runtime/fullscreen";
 import { defineComponent, h, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
@@ -19,8 +20,8 @@ function preview(text: string): string {
 }
 
 function keyboardMove(event: TuiInputEvent): TextSelectionMove | null {
-  if (event.kind !== "key" || event.key.phase === "release") return null;
-  switch (event.key.name) {
+  if (event.kind !== "key") return null;
+  switch (event.name) {
     case "left":
       return "backward";
     case "right":
@@ -56,42 +57,35 @@ const App = defineComponent(() => {
   useInput((event) => {
     const move = keyboardMove(event);
     if (move) {
-      const extend = event.kind === "key" && event.key.modifiers.shift;
+      const extend = event.kind === "key" && event.shift;
       const changed = selection.move(move, { extend });
       lastAction.value = `${extend ? "extend" : "move"}:${move}:${changed ? "changed" : "unchanged"}`;
-      return "consume";
+      return;
     }
 
-    if (
-      event.kind === "key" &&
-      event.key.name === "c" &&
-      event.key.modifiers.ctrl &&
-      event.key.modifiers.shift
-    ) {
+    if (event.kind === "key" && event.character === "c" && event.ctrl && event.shift) {
       lastAction.value = "copy:ctrl-shift-c";
       requestCopy();
-      return "consume";
+      return { preventDefault: true };
     }
 
-    if (event.kind !== "text") return "continue";
+    if (event.kind !== "text") return;
     switch (event.text) {
       case "a":
         lastAction.value = `select-all:${selection.selectAll() ? "changed" : "unchanged"}`;
-        return "consume";
+        return;
       case "c":
         lastAction.value = "copy:c";
         requestCopy();
-        return "consume";
+        return;
       case "x":
         lastAction.value = `clear:${selection.clear() ? "changed" : "unchanged"}`;
         copyResult.value = "not-requested";
-        return "consume";
+        return;
       case "q":
         lastAction.value = "exit:q";
         exit();
-        return "consume";
-      default:
-        return "continue";
+        return;
     }
   });
 
@@ -143,8 +137,8 @@ app.mount({
   mode: "fullscreen",
   maxFps: 0,
   patchConsole: false,
-  kittyKeyboard: { mode: "enabled" },
+  [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
   clipboard: { kind: "osc52" },
-});
+} as InternalMountOptions);
 await app.waitUntilExit();
 if (assertionRun) process.stdout.write("__SELECTION_COPY_OK__");

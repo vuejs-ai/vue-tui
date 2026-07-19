@@ -145,30 +145,21 @@ function restart(): void {
 }
 
 useInput((event) => {
-  const isCtrlC =
-    event.kind === "key" &&
-    event.key.name === "c" &&
-    event.key.modifiers.ctrl &&
-    event.key.phase !== "release";
-  if (isCtrlC || (event.kind === "text" && event.text === "q")) {
+  if (event.kind === "text" && event.text === "q") {
     exit();
-    return "consume";
+    return;
   }
   if (world.dead) {
     if (event.kind === "text" && event.text === "r") {
       restart();
-      return "consume";
     }
-    return "continue";
+    return;
   }
   const isFlapText = event.kind === "text" && (event.text === " " || event.text === "w");
-  const isUpArrow =
-    event.kind === "key" && event.key.name === "up" && event.key.phase !== "release";
+  const isUpArrow = event.kind === "key" && event.name === "up";
   if (isFlapText || isUpArrow) {
     flap();
-    return "consume";
   }
-  return "continue";
 });
 
 const tickId = setInterval(() => {

@@ -18,12 +18,12 @@ const PasteDemo = defineComponent({
 
       if (props.test === "basic" && event.text === "hello world") {
         exit();
-        return "consume";
+        return;
       }
 
       if (props.test === "escapeSequences" && event.text === "hello[Aworld") {
         exit();
-        return "consume";
+        return;
       }
 
       if (props.test === "singleFact" && event.text === "hello") {
@@ -31,7 +31,7 @@ const PasteDemo = defineComponent({
           if (receivedCount === 1) exit();
           else exit(new Error(`Expected one paste fact, received ${receivedCount}`));
         }, 30);
-        return "consume";
+        return;
       }
 
       throw new Error(`Unexpected paste payload: ${JSON.stringify(event.text)}`);
@@ -56,7 +56,6 @@ const MultipleHooksDemo = defineComponent(() => {
       }
       receivedCount++;
       if (receivedCount === 2) exit();
-      return "consume";
     });
   };
 

@@ -1,11 +1,9 @@
-import type { TuiInputEvent } from "@vue-tui/runtime";
+import type { TuiInputEvent, TuiKeyName } from "@vue-tui/runtime";
 
 export function inputText(event: TuiInputEvent): string | null {
-  if (event.kind === "text" || event.kind === "paste") return event.text;
-  if (event.kind !== "key") return null;
-  return event.key.reportedText;
+  return event.kind === "text" || event.kind === "paste" ? event.text : null;
 }
 
-export function isKey(event: TuiInputEvent, name: string): boolean {
-  return event.kind === "key" && event.key.name === name;
+export function isKey(event: TuiInputEvent, name: TuiKeyName): boolean {
+  return event.kind === "key" && event.name === name;
 }

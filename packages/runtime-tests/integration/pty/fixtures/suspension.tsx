@@ -1,4 +1,5 @@
 import process from "node:process";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import {
   Box,
   createApp,
@@ -27,9 +28,7 @@ const App = defineComponent(() => {
   useInput((event) => {
     if (inputText(event) === "q") {
       exit();
-      return "consume";
     }
-    return "continue";
   });
 
   onMounted(() => {
@@ -52,7 +51,7 @@ const app = createApp(App);
 app.mount({
   mode,
   maxFps: 0,
-  kittyKeyboard: { mode: "enabled" },
-});
+  [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+} as InternalMountOptions);
 
 await app.waitUntilExit();

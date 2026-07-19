@@ -134,7 +134,7 @@ afterEach(async () => {
   delete testGlobal().__VT_TEST_STDOUT__;
 });
 
-test("public global and focused input survive template, script, and full HMR lifetimes", async () => {
+test("public input survives template, script, and full HMR lifetimes", async () => {
   const { stdin, rawModeCalls, refBalance, trace } = createTrackedStdin();
   const { stdout, read } = createTrackedStdout(trace);
   Object.assign(testGlobal(), {
@@ -162,7 +162,7 @@ test("public global and focused input survive template, script, and full HMR lif
   });
   expect(testGlobal().__VT_INPUT_MOUNTS__).toBe(1);
   expect(testGlobal().__VT_INPUT_SETUPS__).toEqual(["1:A"]);
-  await emitAndWait(stdin, "x", ["1:A:global:x", "1:A:focus:x"]);
+  await emitAndWait(stdin, "x", ["1:A:global:x"]);
 
   const templateTraceStart = trace.length;
   const templateHot = origAppVue.replace("INPUT-LABEL-A", "INPUT-LABEL-B-HOT");
@@ -175,7 +175,7 @@ test("public global and focused input survive template, script, and full HMR lif
     refs: 1,
     listeners: 1,
   });
-  await emitAndWait(stdin, "y", ["1:A:global:x", "1:A:focus:x", "1:A:global:y", "1:A:focus:y"]);
+  await emitAndWait(stdin, "y", ["1:A:global:x", "1:A:global:y"]);
 
   const scriptTraceStart = trace.length;
   const scriptHot = templateHot.replace('const generation = "A";', 'const generation = "B";');
@@ -189,14 +189,7 @@ test("public global and focused input survive template, script, and full HMR lif
     refs: 1,
     listeners: 1,
   });
-  await emitAndWait(stdin, "z", [
-    "1:A:global:x",
-    "1:A:focus:x",
-    "1:A:global:y",
-    "1:A:focus:y",
-    "1:B:global:z",
-    "1:B:focus:z",
-  ]);
+  await emitAndWait(stdin, "z", ["1:A:global:x", "1:A:global:y", "1:B:global:z"]);
 
   // Stable physical state alone cannot reveal an old logical-demand leak. End
   // only the replacement route: every physical owner must disappear. Starting
@@ -225,24 +218,15 @@ test("public global and focused input survive template, script, and full HMR lif
     listeners: 1,
   });
   const reloadTrace = trace.slice(reloadTraceStart);
-  const releases = ["paste:off", "kitty:pop", "data:off", "raw:false", "unref"];
-  const acquisitions = ["kitty:push", "raw:true", "ref", "data:on", "paste:on"];
+  const releases = ["paste:off", "data:off", "raw:false", "unref"];
+  const acquisitions = ["raw:true", "ref", "data:on", "paste:on"];
   for (const event of [...releases, ...acquisitions]) {
     expect(reloadTrace.filter((entry) => entry === event)).toHaveLength(1);
   }
   expect(Math.max(...releases.map((event) => reloadTrace.indexOf(event)))).toBeLessThan(
     Math.min(...acquisitions.map((event) => reloadTrace.indexOf(event))),
   );
-  await emitAndWait(stdin, "q", [
-    "1:A:global:x",
-    "1:A:focus:x",
-    "1:A:global:y",
-    "1:A:focus:y",
-    "1:B:global:z",
-    "1:B:focus:z",
-    "2:B:global:q",
-    "2:B:focus:q",
-  ]);
+  await emitAndWait(stdin, "q", ["1:A:global:x", "1:A:global:y", "1:B:global:z", "2:B:global:q"]);
 
   testGlobal().__VT_TEST_APP__!.unmount();
   await waitUntil(() => stdin.listenerCount("data") === 0 && refBalance() === 0);

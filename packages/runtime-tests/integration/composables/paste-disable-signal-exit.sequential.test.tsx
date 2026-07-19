@@ -87,7 +87,7 @@ function makeFdBackedStdout(): {
 }
 
 const PasteApp = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => undefined);
   return () => <Text>paste</Text>;
 });
 

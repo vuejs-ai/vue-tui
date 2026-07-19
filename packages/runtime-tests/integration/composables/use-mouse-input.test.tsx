@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useInput, type TuiApp } from "@vue-tui/runtime";
+import { Box, Text, createApp, useInput, type TuiApp, type TuiInputEvent } from "@vue-tui/runtime";
 import {
   useMouseDrag,
   useMouseEvent,
@@ -41,6 +41,11 @@ function wheelDirection(event: TuiMouseWheelEvent): "up" | "down" | "left" | "ri
   if (event.delta.y < 0) return "up";
   if (event.delta.y > 0) return "down";
   return event.delta.x < 0 ? "left" : "right";
+}
+
+function inputValue(event: TuiInputEvent): string {
+  if (event.kind === "text" || event.kind === "paste") return event.text;
+  return event.name ?? event.character;
 }
 
 test("a visible targeted wheel hook owns SGR mouse mode and receives normalized events", async () => {
@@ -278,8 +283,7 @@ test("unsupported SGR mouse facts remain private from keyboard input", async () 
       return "continue";
     });
     useInput((event) => {
-      keyboardEvents.push(event.sequence);
-      return "continue";
+      keyboardEvents.push(inputValue(event));
     });
     return () => (
       <Box ref={target} width={20} height={6} flexShrink={0}>
@@ -315,8 +319,7 @@ test("bare CSI-like text is still delivered to keyboard input", async () => {
       return "continue";
     });
     useInput((event) => {
-      keyboardEvents.push(event.sequence);
-      return "continue";
+      keyboardEvents.push(inputValue(event));
     });
     return () => <Text ref={target}>listening</Text>;
   });

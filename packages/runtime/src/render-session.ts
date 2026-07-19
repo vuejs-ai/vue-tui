@@ -178,6 +178,11 @@ export function normalizeRequestedMode(options: object): RenderMode {
       'Mount option "exitOnCtrlC" was removed; Ctrl+C is a delayed input default that handlers can prevent per event.',
     );
   }
+  if (hasOwn(options, "kittyKeyboard")) {
+    throw new TypeError(
+      'Mount option "kittyKeyboard" was removed; Runtime privately negotiates the keyboard protocol required by public input facts.',
+    );
+  }
 
   const mode = (options as { readonly mode?: unknown }).mode;
   if (mode === undefined) return "inline";

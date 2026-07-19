@@ -176,7 +176,7 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
   }) as NodeJS.ReadStream["setEncoding"];
   const app = createApp(
     defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => undefined);
       return () => null;
     }),
   );
@@ -217,7 +217,7 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
   });
   const app = createApp(
     defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => undefined);
       return () => null;
     }),
   );

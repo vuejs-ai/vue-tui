@@ -1,5 +1,5 @@
 import process from "node:process";
-import { Box, Text, createApp, useApp, useCaret, useFocus, useInput } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import {
   defineComponent,
@@ -7,7 +7,6 @@ import {
   nextTick,
   onMounted,
   onUnmounted,
-  ref,
   shallowRef,
   vShow,
   watch,
@@ -38,9 +37,7 @@ const VShowTarget = defineComponent({
   },
   setup(props) {
     const target = shallowRef<ComponentPublicInstance | null>(null);
-    const value = ref(props.revision);
-    const focus = useFocus(target, { autoFocus: true });
-    useCaret(target, { focus, position: { x: 0, y: 0 } });
+    const value = shallowRef(props.revision);
     useMouseEvent(target, "click", () => "consume");
     watch(
       () => props.revision,
@@ -67,27 +64,25 @@ const VShowTarget = defineComponent({
 const App = defineComponent(() => {
   const { exit } = useApp();
   useInput((event) => {
-    if (event.kind !== "text") return "continue";
+    if (event.kind !== "text") return;
     if (event.text === "h") {
       visible.value = false;
       void markAfterCommit("hidden");
-      return "consume";
+      return;
     }
     if (event.text === "u") {
       revision.value = 2;
       void markAfterCommit("updated-hidden");
-      return "consume";
+      return;
     }
     if (event.text === "s") {
       visible.value = true;
       void markAfterCommit("shown-again");
-      return "consume";
+      return;
     }
     if (event.text === "q") {
       exit("v-show");
-      return "consume";
     }
-    return "continue";
   });
 
   onMounted(() => {

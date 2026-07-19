@@ -1,130 +1,180 @@
 import type { InternalInputRouteDecision } from "./input-route-policy.ts";
 import type { NormalizedInputFact } from "./normalized-input.ts";
 
-export interface TuiInputModifiers {
+export type TuiKeyName =
+  | "backspace"
+  | "delete"
+  | "down"
+  | "end"
+  | "enter"
+  | "escape"
+  | "home"
+  | "left"
+  | "page-down"
+  | "page-up"
+  | "right"
+  | "tab"
+  | "up";
+
+interface PublicKeyModifiers {
   readonly shift: boolean;
   readonly alt: boolean;
   readonly ctrl: boolean;
-  readonly super: boolean;
-  readonly hyper: boolean;
-  readonly meta: boolean;
-  readonly capsLock: boolean;
-  readonly numLock: boolean;
-}
-
-export type TuiInputPhase = "press" | "repeat" | "release";
-
-export interface TuiInputSource {
-  readonly sequence: string;
-  readonly fidelity: "normalized-utf8-sequence";
 }
 
 export type TuiInputEvent =
-  | (TuiInputSource & {
-      readonly kind: "key";
-      readonly key: {
-        readonly protocol: "legacy" | "kitty";
-        readonly name: string | null;
-        readonly code: string | null;
-        readonly primaryCodepoint: number | null;
-        readonly shiftedCodepoint: number | null;
-        readonly baseLayoutCodepoint: number | null;
-        readonly functionalCode: number | null;
-        readonly modifiers: TuiInputModifiers;
-        readonly phase: TuiInputPhase | null;
-        readonly printable: boolean;
-        readonly reportedText: string | null;
-      };
-    })
-  | (TuiInputSource & {
+  | {
       readonly kind: "text";
       readonly text: string;
-      readonly protocol: "plain" | "kitty";
-      readonly phase: TuiInputPhase | null;
-      readonly primaryCodepoint: number | null;
-      readonly textOrigin: "reported" | null;
-    })
-  | (TuiInputSource & {
+    }
+  | {
       readonly kind: "paste";
       readonly text: string;
+    }
+  | (PublicKeyModifiers & {
+      readonly kind: "key";
+      readonly name: TuiKeyName;
+      readonly character?: never;
     })
-  | (TuiInputSource & {
-      readonly kind: "uninterpreted";
+  | (PublicKeyModifiers & {
+      readonly kind: "key";
+      readonly character: string;
+      readonly name?: never;
     });
 
-export interface InputRouteDecision {
-  readonly action: "none" | "performed";
-  readonly routing: "continue" | "stop";
-  readonly defaultAction: "allow" | "prevent";
-  readonly external: "allow" | "block";
-}
-
-export type InputHandlerResult = "continue" | "consume" | InputRouteDecision;
+/**
+ * Source-private bridge for the focus composables that are removed later in
+ * Path 3. These supporting names must not remain package-root exports.
+ */
+export type InputHandlerResult = void | { readonly preventDefault: true };
 export type InputHandler = (event: TuiInputEvent) => InputHandlerResult;
 
 const publicInputCache = new WeakMap<NormalizedInputFact, TuiInputEvent | null>();
 
-const publicModifiers = (
-  modifiers: Extract<NormalizedInputFact, { readonly kind: "key" }>["key"]["modifiers"],
-): TuiInputModifiers =>
-  Object.freeze({
-    shift: modifiers.shift,
-    alt: modifiers.alt,
-    ctrl: modifiers.ctrl,
-    super: modifiers.super,
-    hyper: modifiers.hyper,
-    meta: modifiers.meta,
-    capsLock: modifiers.capsLock,
-    numLock: modifiers.numLock,
-  });
+const namedKeys = Object.freeze({
+  backspace: "backspace",
+  delete: "delete",
+  down: "down",
+  end: "end",
+  enter: "enter",
+  escape: "escape",
+  home: "home",
+  left: "left",
+  pagedown: "page-down",
+  pageup: "page-up",
+  return: "enter",
+  right: "right",
+  tab: "tab",
+  up: "up",
+  kpbackspace: "backspace",
+  kpdelete: "delete",
+  kpdown: "down",
+  kpend: "end",
+  kpenter: "enter",
+  kphome: "home",
+  kpleft: "left",
+  kppagedown: "page-down",
+  kppageup: "page-up",
+  kpright: "right",
+  kpup: "up",
+} as const satisfies Readonly<Record<string, TuiKeyName>>);
 
-/** Project one internal fact to the public F3 union. Pointer facts remain private until F6. */
+const normalizeNamedKey = (name: string | undefined): TuiKeyName | undefined => {
+  if (!name) return undefined;
+  return (namedKeys as Readonly<Record<string, TuiKeyName>>)[name];
+};
+
+const isOneUnicodeScalar = (value: string): boolean => {
+  const iterator = value[Symbol.iterator]();
+  return !iterator.next().done && iterator.next().done === true;
+};
+
+const normalizeShortcutCharacter = (value: string | undefined): string | undefined => {
+  if (!value || !isOneUnicodeScalar(value)) return undefined;
+  const codepoint = value.codePointAt(0)!;
+  if (codepoint >= 0x41 && codepoint <= 0x5a) return value.toLowerCase();
+  return value;
+};
+
+const hasLegacyEscapePrefixAlt = (
+  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
+): boolean => {
+  if (fact.key.protocol !== "legacy" || !fact.key.modifiers.meta) return false;
+  if (fact.sequence.startsWith("\x1b\x1b")) return true;
+  // A legacy ESC-prefixed printable/control key has no parsed CSI/SS3 code.
+  // A single CSI carrying the explicit Meta bit does, and must stay filtered.
+  return fact.key.code === undefined;
+};
+
+const publicModifiers = (
+  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
+): PublicKeyModifiers | undefined => {
+  const { modifiers } = fact.key;
+  const legacyEscapeAlt = hasLegacyEscapePrefixAlt(fact);
+  if (modifiers.super || modifiers.hyper || (modifiers.meta && !legacyEscapeAlt)) {
+    return undefined;
+  }
+  return {
+    shift: modifiers.shift,
+    alt: modifiers.alt || legacyEscapeAlt,
+    ctrl: modifiers.ctrl,
+  };
+};
+
+const shortcutCharacter = (
+  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
+): string | undefined => {
+  const { key } = fact;
+  if (key.protocol === "kitty") {
+    const codepoint = key.baseLayoutCodepoint ?? key.primaryCodepoint;
+    return codepoint === undefined
+      ? undefined
+      : normalizeShortcutCharacter(String.fromCodePoint(codepoint));
+  }
+  if (key.name === "space") return " ";
+  if (key.name === "number") {
+    const scalars = Array.from(fact.sequence);
+    return normalizeShortcutCharacter(scalars.at(-1));
+  }
+  return normalizeShortcutCharacter(key.name);
+};
+
+const projectKey = (
+  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
+): TuiInputEvent | null => {
+  if (fact.key.phase === "release") return null;
+  const modifiers = publicModifiers(fact);
+  if (!modifiers) return null;
+
+  if (fact.key.printable && fact.key.text && !modifiers.ctrl && !modifiers.alt) {
+    return Object.freeze({ kind: "text", text: fact.key.text.value });
+  }
+
+  const name = normalizeNamedKey(fact.key.name);
+  if (name) return Object.freeze({ kind: "key", name, ...modifiers });
+  if (!fact.key.printable) return null;
+
+  const character = shortcutCharacter(fact);
+  return character ? Object.freeze({ kind: "key", character, ...modifiers }) : null;
+};
+
+/** Project one private normalized fact to the minimum public input union. */
 export function projectPublicInputEvent(fact: NormalizedInputFact): TuiInputEvent | null {
   if (publicInputCache.has(fact)) return publicInputCache.get(fact)!;
 
-  const source = {
-    sequence: fact.sequence,
-    fidelity: "normalized-utf8-sequence" as const,
-  };
   let event: TuiInputEvent | null;
   switch (fact.kind) {
     case "key":
-      event = Object.freeze({
-        ...source,
-        kind: "key",
-        key: Object.freeze({
-          protocol: fact.key.protocol,
-          name: fact.key.name ?? null,
-          code: fact.key.code ?? null,
-          primaryCodepoint: fact.key.primaryCodepoint ?? null,
-          shiftedCodepoint: fact.key.shiftedCodepoint ?? null,
-          baseLayoutCodepoint: fact.key.baseLayoutCodepoint ?? null,
-          functionalCode: fact.key.functionalCode ?? null,
-          modifiers: publicModifiers(fact.key.modifiers),
-          phase: fact.key.phase ?? null,
-          printable: fact.key.printable,
-          reportedText: fact.key.text?.value ?? null,
-        }),
-      });
+      event = projectKey(fact);
       break;
     case "text":
-      event = Object.freeze({
-        ...source,
-        kind: "text",
-        text: fact.text,
-        protocol: fact.protocol,
-        phase: fact.phase ?? null,
-        primaryCodepoint: fact.primaryCodepoint ?? null,
-        textOrigin: fact.textOrigin ?? null,
-      });
+      event = fact.phase === "release" ? null : Object.freeze({ kind: "text", text: fact.text });
       break;
     case "paste":
-      event = Object.freeze({ ...source, kind: "paste", text: fact.text });
-      break;
-    case "uninterpreted":
-      event = Object.freeze({ ...source, kind: "uninterpreted" });
+      event = Object.freeze({ kind: "paste", text: fact.text });
       break;
     case "pointer":
+    case "uninterpreted":
       event = null;
       break;
   }
@@ -139,44 +189,33 @@ const continuedDecision: InternalInputRouteDecision = Object.freeze({
   preventDefault: false,
   blockExternal: false,
 });
-const consumedDecision: InternalInputRouteDecision = Object.freeze({
-  performed: true,
-  continue: false,
+const preventedDecision: InternalInputRouteDecision = Object.freeze({
+  performed: false,
+  continue: true,
   preventDefault: true,
-  blockExternal: true,
+  blockExternal: false,
 });
 
 const invalidResult = (): TypeError =>
   new TypeError(
-    'useInput() handlers must synchronously return "continue", "consume", or a complete InputRouteDecision.',
+    "useInput() handlers must synchronously return undefined or the exact object { preventDefault: true }.",
   );
 
-/** Validate and translate one public handler result into the private monotonic decision model. */
+/** Validate the one public default-control result and keep all routing private. */
 export function normalizeInputHandlerResult(result: unknown): InternalInputRouteDecision {
-  if (result === "continue") return continuedDecision;
-  if (result === "consume") return consumedDecision;
-  if (typeof result !== "object" || result === null || Array.isArray(result)) {
-    throw invalidResult();
-  }
-
-  const value = result as Record<PropertyKey, unknown>;
-  const action = value.action;
-  const routing = value.routing;
-  const defaultAction = value.defaultAction;
-  const external = value.external;
+  if (result === undefined) return continuedDecision;
   if (
-    (action !== "none" && action !== "performed") ||
-    (routing !== "continue" && routing !== "stop") ||
-    (defaultAction !== "allow" && defaultAction !== "prevent") ||
-    (external !== "allow" && external !== "block")
+    typeof result !== "object" ||
+    result === null ||
+    Object.getPrototypeOf(result) !== Object.prototype
   ) {
     throw invalidResult();
   }
 
-  return Object.freeze({
-    performed: action === "performed",
-    continue: routing === "continue",
-    preventDefault: defaultAction === "prevent",
-    blockExternal: external === "block",
-  });
+  const keys = Reflect.ownKeys(result);
+  if (keys.length !== 1 || keys[0] !== "preventDefault") throw invalidResult();
+  if ((result as { readonly preventDefault?: unknown }).preventDefault !== true) {
+    throw invalidResult();
+  }
+  return preventedDecision;
 }

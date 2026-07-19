@@ -46,7 +46,7 @@ index 755dcd2..737cf12 100644
  const contentRows = computed(() => (width.value >= 100 ? WIDE_CONTENT_ROWS : NARROW_CONTENT_ROWS));
  // Centre vertically only when the viewport is genuinely taller than the content — a short terminal
  // keeps today's top-anchored layout and never clips.
-@@ -92,24 +93,33 @@ const effectiveMode = computed(() =>
+@@ -92,24 +93,19 @@ const effectiveMode = computed(() =>
  );
  watchEffect(() => setThemeMode(effectiveMode.value));
 
@@ -72,33 +72,19 @@ index 755dcd2..737cf12 100644
 +// String rendering provides inert app and input services, so this same setup also works for --once.
 +const { exit } = useApp();
 +useInput((event) => {
-+  const input =
-+    event.kind === "text"
-+      ? event.text
-+      : event.kind === "key" &&
-+          event.key.reportedText !== null &&
-+          event.key.phase !== "release" &&
-+          !event.key.modifiers.ctrl &&
-+          !event.key.modifiers.alt &&
-+          !event.key.modifiers.meta &&
-+          !event.key.modifiers.super &&
-+          !event.key.modifiers.hyper
-+        ? event.key.reportedText
-+        : "";
-+  if (input === "q") {
++  if (event.kind !== "text") return;
++  if (event.text === "q") {
 +    exit();
-+    return "consume";
++    return;
 +  }
-+  if (input === "t") {
++  if (event.text === "t") {
 +    themeOverride.value = nextThemeMode(themeOverride.value);
-+    return "consume";
 +  }
-+  return "continue";
 +});
  </script>
 
  <template>
-@@ -119,7 +129,7 @@ try {
+@@ -119,7 +115,7 @@ useInput((event) => {
    <Box
      flexDirection="column"
 -    :width="isLive ? columns : contentWidth"
@@ -107,7 +93,7 @@ index 755dcd2..737cf12 100644
      :alignItems="isLive ? 'center' : undefined"
      :justifyContent="framed ? 'center' : undefined"
    >
-@@ -148,7 +158,7 @@ try {
+@@ -148,7 +144,7 @@ useInput((event) => {
 
        <NarrowView v-else :m="m" />
 

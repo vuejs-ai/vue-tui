@@ -1,6 +1,6 @@
 import process from "node:process";
 import { defineComponent, h, nextTick } from "vue";
-import { createApp, Text, useInput, useInputAvailability } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 
 const kind = process.argv[2];
 if (kind !== "input-free" && kind !== "active-input") {
@@ -12,13 +12,14 @@ const streams = {
   stdoutIsTTY: process.stdout.isTTY === true,
   stderrIsTTY: process.stderr.isTTY === true,
 };
+const stdinObservation = streams.stdinIsTTY
+  ? { status: "available" }
+  : { status: "unavailable", reason: "stdin-not-tty" };
 
-let availability;
 const App = defineComponent({
   name: "ForkStdinFixture",
   setup() {
-    availability = useInputAvailability().availability.value;
-    if (kind === "active-input") useInput(() => "consume");
+    if (kind === "active-input") useInput(() => {});
     const text = kind === "input-free" ? "__FORK_OUTPUT_OK__" : "__ACTIVE_INPUT__";
     return () => h(Text, null, () => text);
   },
@@ -49,7 +50,7 @@ try {
     await nextTick();
     await app.waitUntilRenderFlush();
     app.unmount();
-    await send({ kind, status: "rendered", availability, streams });
+    await send({ kind, status: "rendered", availability: stdinObservation, streams });
   } else {
     let failure = mountFailure;
     if (!failure) {
@@ -72,10 +73,10 @@ try {
     if (message !== expected) {
       throw new Error(`Unexpected managed-input failure: ${JSON.stringify(message)}`);
     }
-    if (availability?.status !== "unavailable" || availability.reason !== "stdin-not-tty") {
-      throw new Error(`Unexpected input availability: ${JSON.stringify(availability)}`);
+    if (streams.stdinIsTTY) {
+      throw new Error("The fork non-TTY contract was exercised with a TTY stdin.");
     }
-    await send({ kind, status: "rejected", availability, message, streams });
+    await send({ kind, status: "rejected", availability: stdinObservation, message, streams });
   }
 } catch (error) {
   try {

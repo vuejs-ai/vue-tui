@@ -25,9 +25,9 @@ const App = defineComponent(() => {
   });
 
   useInput((event) => {
-    if (event.kind === "key" && event.key.name === "return") {
+    if (event.kind === "key" && event.name === "enter") {
       if (done) {
-        return "consume";
+        return;
       }
 
       done = true;
@@ -35,15 +35,12 @@ const App = defineComponent(() => {
         `\nFINAL query:${JSON.stringify(query.value)} deferred:${JSON.stringify(deferredQuery.value)}\n`,
       );
       exit();
-      return "consume";
+      return;
     }
 
-    if (event.kind === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
+    if (event.kind === "key" && (event.name === "backspace" || event.name === "delete")) {
       query.value = query.value.slice(0, -1);
-      return "consume";
     }
-
-    return "continue";
   });
 
   const filteredResult = computed(() => {

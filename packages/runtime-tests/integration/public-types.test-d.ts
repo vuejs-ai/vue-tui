@@ -10,7 +10,6 @@ import { expectTypeOf } from "vite-plus/test";
 import {
   shallowRef,
   type ComponentPublicInstance,
-  type MaybeRef,
   type MaybeRefOrGetter,
   type Ref,
   type ShallowRef,
@@ -19,17 +18,10 @@ import {
   Box,
   Text,
   useApp,
+  useBoxPresence,
   useBoxSize,
-  useCaret,
   useClipboard,
-  useExternalInput,
-  useFocus,
-  useFocusedInput,
-  useFocusManager,
-  useFocusScope,
-  useFocusScopeInput,
   useInput,
-  useInputAvailability,
   useLayoutWidth,
   useStdin,
   useStdout,
@@ -41,7 +33,6 @@ import type {
   AriaState,
   BoxProps,
   BoxSize,
-  CaretState,
   CellPoint,
   ClipboardAvailability,
   ClipboardTransport,
@@ -52,36 +43,20 @@ import type {
   Color,
   CustomClipboardTransport,
   ElementTarget,
-  ExternalInputHandler,
-  ExternalInputSource,
-  InputAvailability,
-  InputHandler,
-  InputHandlerResult,
-  InputRouteDecision,
   TextProps,
   Osc52ClipboardTransport,
   MountOptions,
   TuiInputEvent,
-  TuiInputModifiers,
-  TuiInputPhase,
-  TuiInputSource,
-  UseCaretOptions,
-  UseCaretReturn,
+  TuiKeyName,
   UseClipboardReturn,
-  UseFocusManagerReturn,
-  UseFocusOptions,
-  UseFocusReturn,
-  UseFocusScopeOptions,
-  UseFocusScopeReturn,
   RenderMode,
-  UseInputAvailabilityReturn,
-  UseInputOptions,
   UseAppReturn,
   UseStdinReturn,
   UseStdoutReturn,
   UseStderrReturn,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
+import { INTERNAL_KITTY_KEYBOARD } from "@vue-tui/runtime/internal";
 import { useMouseDrag, useMouseEvent, useTextSelection } from "@vue-tui/runtime/fullscreen";
 import type {
   CellDelta,
@@ -134,6 +109,12 @@ const removedDebugOption: MountOptions = { debug: true };
 const removedRawModeOption: MountOptions = { rawMode: "auto" };
 // @ts-expect-error Ctrl+C is an input default that handlers prevent per event, not a mount policy.
 const removedExitOnCtrlCOption: MountOptions = { exitOnCtrlC: false };
+// @ts-expect-error Runtime privately negotiates the keyboard protocol needed by public input facts.
+const removedKittyKeyboardOption: MountOptions = { kittyKeyboard: { mode: "enabled" } };
+const removedInternalKittyKeyboardOption: MountOptions = {
+  // @ts-expect-error Repository-only protocol controls are not part of public MountOptions.
+  [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+};
 // @ts-expect-error Only the two finite render-mode values are accepted.
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error liveUpdates is a boolean override.
@@ -148,6 +129,8 @@ void removedInteractiveOption;
 void removedDebugOption;
 void removedRawModeOption;
 void removedExitOnCtrlCOption;
+void removedKittyKeyboardOption;
+void removedInternalKittyKeyboardOption;
 void invalidModeOption;
 void invalidLiveUpdatesOption;
 void invalidCustomClipboardOption;
@@ -426,8 +409,8 @@ export type _UseRenderSessionWasRemoved = typeof import("@vue-tui/runtime").useR
 // @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
 export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
 
-// Ref-bound focus, caret, and mouse primitives share one ordinary target type.
-// Measurement is deliberately narrower: only the nominal public Box instance.
+// Fullscreen pointer policy still uses one generic element target. Common Box
+// measurement and presence are deliberately narrower direct-Box refs.
 expectTypeOf<ElementTarget>().toEqualTypeOf<
   MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
 >();
@@ -442,21 +425,33 @@ expectTypeOf<BoxSize>().toEqualTypeOf<{
 
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
 const boxSize = useBoxSize(boxHost);
+const boxPresence = useBoxPresence(boxHost);
 expectTypeOf(boxSize).toEqualTypeOf<Readonly<Ref<BoxSize | null>>>();
+expectTypeOf(boxPresence).toEqualTypeOf<Readonly<Ref<boolean>>>();
 // @ts-expect-error The accepted Box measurement is readonly.
 boxSize.value = { width: 1, height: 1 };
+// @ts-expect-error Accepted Box presence is renderer-owned and readonly.
+boxPresence.value = false;
 
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has separate semantics and is not a Box size target.
 useBoxSize(textHost);
+// @ts-expect-error Text is not a direct Box-presence target.
+useBoxPresence(textHost);
 const customHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error Arbitrary component refs do not mean one measurable Box.
 useBoxSize(customHost);
+// @ts-expect-error Arbitrary component refs do not mean one direct Box.
+useBoxPresence(customHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
 useBoxSize(rawBoxHost);
+// @ts-expect-error A raw component value cannot represent target attachment and detachment.
+useBoxPresence(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
 useBoxSize(() => boxHost.value);
+// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
+useBoxPresence(() => boxHost.value);
 
 // @ts-expect-error Rich paint geometry is private.
 export type _UseElementGeometryWasRemoved = typeof import("@vue-tui/runtime").useElementGeometry;
@@ -477,34 +472,16 @@ export type _BoxMetricsWasRemoved = import("@vue-tui/runtime").BoxMetrics;
 // @ts-expect-error Imperative Yoga measurement has no semantic geometry contract.
 export type _MeasureElementWasRemoved = typeof import("@vue-tui/runtime").measureElement;
 
-expectTypeOf<CaretState>().toEqualTypeOf<
-  | { readonly status: "unavailable" }
-  | { readonly status: "inactive" }
-  | {
-      readonly status: "hidden";
-      readonly reason:
-        | "unavailable"
-        | "detached"
-        | "pending"
-        | "hidden"
-        | "clipped"
-        | "outside"
-        | "invalid-position"
-        | "unrelated";
-    }
-  | { readonly status: "visible"; readonly surface: CellPoint }
->();
-expectTypeOf<UseCaretOptions>().toEqualTypeOf<{
-  readonly focus: UseFocusReturn;
-  readonly position: MaybeRefOrGetter<CellPoint | null | undefined>;
-}>();
-expectTypeOf<Parameters<typeof useCaret>>().toEqualTypeOf<
-  [target: ElementTarget, options: UseCaretOptions]
->();
-expectTypeOf<ReturnType<typeof useCaret>>().toEqualTypeOf<UseCaretReturn>();
-expectTypeOf<UseCaretReturn>().toEqualTypeOf<{
-  readonly state: Readonly<ShallowRef<CaretState>>;
-}>();
+// The old focus-bound, cell-coordinate caret is withdrawn. Path 4 may publish
+// a semantic Text-position primitive without retaining these contracts.
+// @ts-expect-error Cell-coordinate caret ownership is not public.
+export type _OldUseCaretWasRemoved = typeof import("@vue-tui/runtime").useCaret;
+// @ts-expect-error Renderer diagnostic state is not an application contract.
+export type _OldCaretStateWasRemoved = import("@vue-tui/runtime").CaretState;
+// @ts-expect-error The old focus-plus-cell options were removed with useCaret().
+export type _OldUseCaretOptionsWereRemoved = import("@vue-tui/runtime").UseCaretOptions;
+// @ts-expect-error The old state wrapper was removed with useCaret().
+export type _OldUseCaretReturnWasRemoved = import("@vue-tui/runtime").UseCaretReturn;
 // @ts-expect-error Targetless cursor ownership was removed rather than aliased.
 export type _UseCursorWasRemoved = typeof import("@vue-tui/runtime").useCursor;
 // @ts-expect-error Output-origin CursorPosition was removed with useCursor.
@@ -552,200 +529,128 @@ expectTypeOf<UseAppReturn>().toEqualTypeOf<{
 }>();
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
 
-// Logical focus is ref-bound and opaque. Targets and scopes compose input
-// without exposing renderer nodes, string IDs, or a second event model.
-expectTypeOf<Parameters<typeof useFocus>[0]>().toEqualTypeOf<
-  MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
->();
-expectTypeOf<ReturnType<typeof useFocus>>().toEqualTypeOf<UseFocusReturn>();
-expectTypeOf<UseFocusReturn["isFocused"]>().toEqualTypeOf<Readonly<ShallowRef<boolean>>>();
-expectTypeOf<UseFocusOptions["scope"]>().toEqualTypeOf<UseFocusScopeReturn | undefined>();
-expectTypeOf<UseFocusOptions["disabled"]>().toEqualTypeOf<MaybeRefOrGetter<boolean> | undefined>();
-expectTypeOf<UseFocusOptions["tabIndex"]>().toEqualTypeOf<MaybeRefOrGetter<0 | -1> | undefined>();
-expectTypeOf<UseFocusOptions["autoFocus"]>().toEqualTypeOf<MaybeRefOrGetter<boolean> | undefined>();
-expectTypeOf<ReturnType<typeof useFocusScope>>().toEqualTypeOf<UseFocusScopeReturn>();
-expectTypeOf<UseFocusScopeReturn["containsFocus"]>().toEqualTypeOf<Readonly<ShallowRef<boolean>>>();
-expectTypeOf<UseFocusScopeOptions>().toEqualTypeOf<{
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-  readonly trapped?: MaybeRefOrGetter<boolean>;
-}>();
-expectTypeOf<ReturnType<typeof useFocusManager>>().toEqualTypeOf<UseFocusManagerReturn>();
-expectTypeOf<UseFocusManagerReturn["focusedTarget"]>().toEqualTypeOf<
-  Readonly<ShallowRef<UseFocusReturn | null>>
->();
-expectTypeOf<Parameters<typeof useFocusedInput>>().toEqualTypeOf<
-  [target: UseFocusReturn, handler: MaybeRef<InputHandler>]
->();
-expectTypeOf<Parameters<typeof useFocusScopeInput>>().toEqualTypeOf<
-  [scope: UseFocusScopeReturn, handler: MaybeRef<InputHandler>]
->();
-expectTypeOf<ExternalInputSource>().toEqualTypeOf<{
-  readonly event: TuiInputEvent;
-  readonly sequence: string;
-  readonly fidelity: "normalized-utf8-sequence";
-}>();
-expectTypeOf<ExternalInputHandler>().toEqualTypeOf<(source: ExternalInputSource) => void>();
-expectTypeOf<Parameters<typeof useExternalInput>>().toEqualTypeOf<
-  [target: UseFocusReturn, handler: MaybeRef<ExternalInputHandler>]
->();
+// Runtime publishes renderer presence, not one focus/scope/routing policy.
+// @ts-expect-error Focus policy can be composed above Runtime.
+export type _UseFocusWasRemoved = typeof import("@vue-tui/runtime").useFocus;
+// @ts-expect-error Scope policy can be composed above Runtime.
+export type _UseFocusScopeWasRemoved = typeof import("@vue-tui/runtime").useFocusScope;
+// @ts-expect-error Focused routing can be composed above Runtime's one global subscription.
+export type _UseFocusedInputWasRemoved = typeof import("@vue-tui/runtime").useFocusedInput;
+// @ts-expect-error Scope routing can be composed above Runtime's one global subscription.
+export type _UseFocusScopeInputWasRemoved = typeof import("@vue-tui/runtime").useFocusScopeInput;
+// @ts-expect-error Runtime does not publish a global focus manager.
+export type _UseFocusManagerWasRemoved = typeof import("@vue-tui/runtime").useFocusManager;
+// @ts-expect-error Normalized external forwarding was not a lossless terminal transport.
+export type _UseExternalInputWasRemoved = typeof import("@vue-tui/runtime").useExternalInput;
+// @ts-expect-error Focus supporting types were removed with the policy API.
+export type _UseFocusReturnWasRemoved = import("@vue-tui/runtime").UseFocusReturn;
+// @ts-expect-error Focus supporting types were removed with the policy API.
+export type _UseFocusScopeReturnWasRemoved = import("@vue-tui/runtime").UseFocusScopeReturn;
+// @ts-expect-error External routing supporting types were removed with the policy API.
+export type _ExternalInputSourceWasRemoved = import("@vue-tui/runtime").ExternalInputSource;
 
-const focusHost = shallowRef<ComponentPublicInstance | null>(null);
-const focusScope = useFocusScope({ isActive: true, trapped: false });
-const focusTarget = useFocus(focusHost, {
-  scope: focusScope,
-  disabled: shallowRef(false),
-  tabIndex: () => 0,
-  autoFocus: true,
-});
-const focusedInputHandler = shallowRef<InputHandler>(() => "continue");
-const externalInputHandler = shallowRef<ExternalInputHandler>(() => {});
-useFocusedInput(focusTarget, focusedInputHandler);
-useFocusScopeInput(focusScope, focusedInputHandler);
-useExternalInput(focusTarget, externalInputHandler);
-
-// @ts-expect-error A rendered target ref is required; setup identity is not focus identity.
-useFocus();
-// @ts-expect-error String IDs were removed in favor of opaque target handles.
-useFocus(focusHost, { id: "legacy" });
-// @ts-expect-error Target activity is disabled; region activity belongs to useFocusScope().
-useFocus(focusHost, { isActive: true });
-// @ts-expect-error Only sequential and programmatic-only traversal values exist.
-useFocus(focusHost, { tabIndex: 1 });
-// @ts-expect-error Public focus refs are readonly.
-focusTarget.isFocused.value = false;
-declare const focusManager: UseFocusManagerReturn;
-// @ts-expect-error String lookup was removed from the boundary-level manager.
-focusManager.focus("legacy");
-// @ts-expect-error The manager exposes the exact handle rather than a string ID.
-void focusManager.activeId;
-
-// Semantic input is one normalized, readonly event union. Public handlers must make an explicit
-// synchronous routing decision; paste is a union member rather than a separate composable.
-expectTypeOf<TuiInputPhase>().toEqualTypeOf<"press" | "repeat" | "release">();
-expectTypeOf<TuiInputSource>().toEqualTypeOf<{
-  readonly sequence: string;
-  readonly fidelity: "normalized-utf8-sequence";
-}>();
-expectTypeOf<TuiInputModifiers>().toEqualTypeOf<{
-  readonly shift: boolean;
-  readonly alt: boolean;
-  readonly ctrl: boolean;
-  readonly super: boolean;
-  readonly hyper: boolean;
-  readonly meta: boolean;
-  readonly capsLock: boolean;
-  readonly numLock: boolean;
-}>();
-expectTypeOf<TuiInputEvent>().toEqualTypeOf<
-  | (TuiInputSource & {
+// Semantic input exposes only insertion text, complete paste, and a finite key fact.
+expectTypeOf<TuiKeyName>().toEqualTypeOf<
+  | "backspace"
+  | "delete"
+  | "down"
+  | "end"
+  | "enter"
+  | "escape"
+  | "home"
+  | "left"
+  | "page-down"
+  | "page-up"
+  | "right"
+  | "tab"
+  | "up"
+>();
+type ExpectedTuiInputEvent =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "paste"; readonly text: string }
+  | {
       readonly kind: "key";
-      readonly key: {
-        readonly protocol: "legacy" | "kitty";
-        readonly name: string | null;
-        readonly code: string | null;
-        readonly primaryCodepoint: number | null;
-        readonly shiftedCodepoint: number | null;
-        readonly baseLayoutCodepoint: number | null;
-        readonly functionalCode: number | null;
-        readonly modifiers: TuiInputModifiers;
-        readonly phase: TuiInputPhase | null;
-        readonly printable: boolean;
-        readonly reportedText: string | null;
-      };
-    })
-  | (TuiInputSource & {
-      readonly kind: "text";
-      readonly text: string;
-      readonly protocol: "plain" | "kitty";
-      readonly phase: TuiInputPhase | null;
-      readonly primaryCodepoint: number | null;
-      readonly textOrigin: "reported" | null;
-    })
-  | (TuiInputSource & {
-      readonly kind: "paste";
-      readonly text: string;
-    })
-  | (TuiInputSource & {
-      readonly kind: "uninterpreted";
-    })
+      readonly name: TuiKeyName;
+      readonly character?: never;
+      readonly shift: boolean;
+      readonly alt: boolean;
+      readonly ctrl: boolean;
+    }
+  | {
+      readonly kind: "key";
+      readonly character: string;
+      readonly name?: never;
+      readonly shift: boolean;
+      readonly alt: boolean;
+      readonly ctrl: boolean;
+    };
+expectTypeOf<TuiInputEvent>().toMatchTypeOf<ExpectedTuiInputEvent>();
+expectTypeOf<ExpectedTuiInputEvent>().toMatchTypeOf<TuiInputEvent>();
+expectTypeOf<Parameters<typeof useInput>[0]>().toEqualTypeOf<
+  (event: TuiInputEvent) => void | { readonly preventDefault: true }
+>();
+expectTypeOf<Parameters<typeof useInput>[1]>().toEqualTypeOf<
+  { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
 >();
 
-expectTypeOf<InputRouteDecision>().toEqualTypeOf<{
-  readonly action: "none" | "performed";
-  readonly routing: "continue" | "stop";
-  readonly defaultAction: "allow" | "prevent";
-  readonly external: "allow" | "block";
-}>();
-expectTypeOf<InputHandlerResult>().toEqualTypeOf<"continue" | "consume" | InputRouteDecision>();
-expectTypeOf<InputHandler>().toEqualTypeOf<(event: TuiInputEvent) => InputHandlerResult>();
-expectTypeOf<Parameters<typeof useInput>[0]>().toEqualTypeOf<MaybeRef<InputHandler>>();
-expectTypeOf<UseInputOptions>().toEqualTypeOf<{
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-}>();
-
-const inputHandler = shallowRef<InputHandler>((event) => {
-  if (event.kind === "paste") return "consume";
-  return "continue";
-});
+const inputHandler = (event: TuiInputEvent): void | { readonly preventDefault: true } => {
+  if (event.kind === "key" && event.character === "c" && event.ctrl) {
+    return { preventDefault: true };
+  }
+};
 const inputActive = shallowRef(true);
 useInput(inputHandler, { isActive: inputActive });
 useInput(inputHandler, { isActive: () => inputActive.value });
 
 declare const inputEvent: TuiInputEvent;
-// @ts-expect-error Normalized input source facts are readonly.
-inputEvent.sequence = "replacement";
 if (inputEvent.kind === "key") {
-  expectTypeOf(inputEvent.key.name).toEqualTypeOf<string | null>();
-  expectTypeOf(inputEvent.key.reportedText).toEqualTypeOf<string | null>();
-  if (inputEvent.key.name !== null) {
-    expectTypeOf(inputEvent.key.name).toEqualTypeOf<string>();
+  expectTypeOf(inputEvent.shift).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.alt).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.ctrl).toEqualTypeOf<boolean>();
+  if (inputEvent.name !== undefined) {
+    expectTypeOf(inputEvent.name).toEqualTypeOf<TuiKeyName>();
+  } else {
+    expectTypeOf(inputEvent.character).toEqualTypeOf<string>();
   }
-  // @ts-expect-error Nested normalized key facts are readonly.
-  inputEvent.key.name = "replacement";
-} else if (inputEvent.kind === "text") {
-  expectTypeOf(inputEvent.textOrigin).toEqualTypeOf<"reported" | null>();
-} else if (inputEvent.kind === "paste") {
-  expectTypeOf(inputEvent.text).toEqualTypeOf<string>();
-}
-
-// Every handler must return a supported synchronous decision.
-// @ts-expect-error A void handler leaves routing ambiguous.
-useInput((_event) => {});
-// @ts-expect-error Promise results are not part of synchronous input dispatch.
-useInput(async (_event) => "continue");
-// @ts-expect-error A structured routing decision must contain all four fields.
-useInput((_event) => ({
-  action: "performed",
-  routing: "stop",
-  defaultAction: "prevent",
-}));
-// @ts-expect-error Arbitrary result strings are not input decisions.
-useInput((_event) => "handled");
-
-expectTypeOf<InputAvailability>().toEqualTypeOf<
-  | { readonly status: "available" }
-  | {
-      readonly status: "unavailable";
-      readonly reason: "string-host" | "stdin-not-tty" | "stdin-not-controllable";
-    }
->();
-expectTypeOf<UseInputAvailabilityReturn>().toEqualTypeOf<{
-  readonly availability: Readonly<Ref<InputAvailability>>;
-}>();
-expectTypeOf<ReturnType<typeof useInputAvailability>>().toEqualTypeOf<UseInputAvailabilityReturn>();
-
-const inputAvailability = useInputAvailability();
-declare const availability: InputAvailability;
-if (availability.status === "available") {
-  // @ts-expect-error Available input has no unavailability reason.
-  void availability.reason;
+  // @ts-expect-error Normalized key facts are readonly.
+  inputEvent.ctrl = false;
 } else {
-  expectTypeOf(availability.reason).toEqualTypeOf<
-    "string-host" | "stdin-not-tty" | "stdin-not-controllable"
-  >();
+  expectTypeOf(inputEvent.text).toEqualTypeOf<string>();
+  // @ts-expect-error Normalized text and paste payloads are readonly.
+  inputEvent.text = "replacement";
 }
-// @ts-expect-error Input availability cannot be replaced through the readonly ref.
-inputAvailability.availability.value = { status: "available" };
+
+useInput(() => undefined);
+useInput(() => ({ preventDefault: true }));
+// @ts-expect-error Handler refs are unnecessary; close over a ref when callback identity is reactive.
+useInput(shallowRef(inputHandler));
+// @ts-expect-error Activation must resolve to a boolean.
+useInput(inputHandler, { isActive: "yes" });
+
+// @ts-expect-error Parser-shaped handler aliases are not public supporting types.
+export type _InputHandlerWasRemoved = import("@vue-tui/runtime").InputHandler;
+// @ts-expect-error Route-result aliases are not public supporting types.
+export type _InputHandlerResultWasRemoved = import("@vue-tui/runtime").InputHandlerResult;
+// @ts-expect-error Runtime does not publish routing policy through input results.
+export type _InputRouteDecisionWasRemoved = import("@vue-tui/runtime").InputRouteDecision;
+// @ts-expect-error The inline options shape needs no public supporting name.
+export type _UseInputOptionsWasRemoved = import("@vue-tui/runtime").UseInputOptions;
+// @ts-expect-error Parser phase is not an application fact.
+export type _TuiInputPhaseWasRemoved = import("@vue-tui/runtime").TuiInputPhase;
+// @ts-expect-error Parser source/fidelity is not an application fact.
+export type _TuiInputSourceWasRemoved = import("@vue-tui/runtime").TuiInputSource;
+// @ts-expect-error Modifiers live directly on key events without another named type.
+export type _TuiInputModifiersWasRemoved = import("@vue-tui/runtime").TuiInputModifiers;
+type RuntimePublicModule = typeof import("@vue-tui/runtime");
+export type _UseInputAvailabilityWasRemoved =
+  // @ts-expect-error Availability is established by activating a subscription, not a speculative hook.
+  RuntimePublicModule["useInputAvailability"];
+// @ts-expect-error Input availability supporting types were removed with the hook.
+export type _InputAvailabilityWasRemoved = import("@vue-tui/runtime").InputAvailability;
+// @ts-expect-error Kitty negotiation is Runtime-owned protocol machinery.
+export type _KittyKeyboardOptionsWasRemoved = import("@vue-tui/runtime").KittyKeyboardOptions;
+// @ts-expect-error Kitty flags are Runtime-owned protocol machinery.
+export type _KittyFlagNameWasRemoved = import("@vue-tui/runtime").KittyFlagName;
 
 // @ts-expect-error Key was replaced by the normalized TuiInputEvent union.
 export type _LegacyKeyWasRemoved = import("@vue-tui/runtime").Key;

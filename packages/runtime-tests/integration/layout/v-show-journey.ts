@@ -11,16 +11,7 @@ import {
   type PropType,
   type Ref,
 } from "vue";
-import {
-  Box,
-  Text,
-  useBoxSize,
-  useCaret,
-  useFocus,
-  type BoxSize,
-  type CaretState,
-  type UseFocusReturn,
-} from "@vue-tui/runtime";
+import { Box, Text, useBoxPresence, useBoxSize, type BoxSize } from "@vue-tui/runtime";
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
 interface VShowJourneyState {
@@ -28,9 +19,8 @@ interface VShowJourneyState {
   unmounts: number;
   clicks: Ref<number> | null;
   value: Ref<number> | null;
-  focus: UseFocusReturn | null;
+  presence: Readonly<Ref<boolean>> | null;
   size: Readonly<Ref<BoxSize | null>> | null;
-  caret: Readonly<Ref<CaretState>> | null;
 }
 
 export const vShowJourneyState: VShowJourneyState = {
@@ -38,9 +28,8 @@ export const vShowJourneyState: VShowJourneyState = {
   unmounts: 0,
   clicks: null,
   value: null,
-  focus: null,
+  presence: null,
   size: null,
-  caret: null,
 };
 
 export function resetVShowJourneyState(): void {
@@ -48,9 +37,8 @@ export function resetVShowJourneyState(): void {
   vShowJourneyState.unmounts = 0;
   vShowJourneyState.clicks = null;
   vShowJourneyState.value = null;
-  vShowJourneyState.focus = null;
+  vShowJourneyState.presence = null;
   vShowJourneyState.size = null;
-  vShowJourneyState.caret = null;
 }
 
 // Vue's SFC compiler lowers `v-show="visible"` to this exact
@@ -74,12 +62,8 @@ export default defineComponent({
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
     const value = ref(props.revision);
     const clicks = ref(0);
-    const focus = useFocus(target);
+    const presence = useBoxPresence(target);
     const size = useBoxSize(target);
-    const { state: caret } = useCaret(target, {
-      focus,
-      position: () => ({ x: 0, y: 0 }),
-    });
     useMouseEvent(
       target,
       "click",
@@ -100,9 +84,8 @@ export default defineComponent({
 
     vShowJourneyState.clicks = clicks;
     vShowJourneyState.value = value;
-    vShowJourneyState.focus = focus;
+    vShowJourneyState.presence = presence;
     vShowJourneyState.size = size;
-    vShowJourneyState.caret = caret;
 
     onMounted(() => {
       vShowJourneyState.mounts++;

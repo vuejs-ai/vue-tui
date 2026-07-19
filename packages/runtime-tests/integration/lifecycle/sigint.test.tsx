@@ -8,7 +8,6 @@ test("Ctrl+C reaches useInput before its delayed exit default", async () => {
   const App = defineComponent(() => {
     useInput((event) => {
       events.push(event);
-      return "continue";
     });
     return () => <Text>x</Text>;
   });
@@ -18,8 +17,10 @@ test("Ctrl+C reaches useInput before its delayed exit default", async () => {
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({
     kind: "key",
-    sequence: "\x03",
-    key: { name: "c", modifiers: { ctrl: true } },
+    character: "c",
+    shift: false,
+    alt: false,
+    ctrl: true,
   });
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });
@@ -29,12 +30,7 @@ test("a handler can prevent the Ctrl+C default for one event", async () => {
   const App = defineComponent(() => {
     useInput((event) => {
       events.push(event);
-      return {
-        action: "performed",
-        routing: "continue",
-        defaultAction: "prevent",
-        external: "block",
-      };
+      return { preventDefault: true };
     });
     return () => <Text>x</Text>;
   });
@@ -46,11 +42,10 @@ test("a handler can prevent the Ctrl+C default for one event", async () => {
 });
 
 test("Ctrl+C with another command modifier is not the exit shortcut", async () => {
-  const sequences: string[] = [];
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
     useInput((event) => {
-      sequences.push(event.sequence);
-      return "continue";
+      events.push(event);
     });
     return () => <Text>x</Text>;
   });
@@ -58,9 +53,16 @@ test("Ctrl+C with another command modifier is not the exit shortcut", async () =
 
   for (const encodedModifiers of [7, 13, 21, 37]) {
     await stdin.write(`\x1b[99;${encodedModifiers}u`);
+    await stdin.write("x");
   }
 
-  expect(sequences).toEqual(["\x1b[99;7u", "\x1b[99;13u", "\x1b[99;21u", "\x1b[99;37u"]);
+  expect(events).toEqual([
+    { kind: "key", character: "c", shift: false, alt: true, ctrl: true },
+    { kind: "text", text: "x" },
+    { kind: "text", text: "x" },
+    { kind: "text", text: "x" },
+    { kind: "text", text: "x" },
+  ]);
   unmount();
 });
 
@@ -69,7 +71,6 @@ test("Ctrl+C recognizes a Kitty base-layout codepoint", async () => {
   const App = defineComponent(() => {
     useInput((event) => {
       events.push(event);
-      return "continue";
     });
     return () => <Text>x</Text>;
   });
@@ -79,7 +80,10 @@ test("Ctrl+C recognizes a Kitty base-layout codepoint", async () => {
 
   expect(events[0]).toMatchObject({
     kind: "key",
-    key: { primaryCodepoint: 1089, baseLayoutCodepoint: 99, modifiers: { ctrl: true } },
+    character: "c",
+    shift: false,
+    alt: false,
+    ctrl: true,
   });
   await expect(waitUntilExit()).resolves.toBeUndefined();
 });

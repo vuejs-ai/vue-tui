@@ -1,16 +1,8 @@
 import process from "node:process";
 import ansiEscapes from "ansi-escapes";
-import { Box, Text, createApp, useApp, useCaret, useFocus, useStdout } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp, useStdout } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import {
-  defineComponent,
-  nextTick,
-  onMounted,
-  onScopeDispose,
-  shallowRef,
-  watch,
-  type ComponentPublicInstance,
-} from "vue";
+import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type Scenario =
   | "current-full"
@@ -22,13 +14,9 @@ type Scenario =
   | "explicit-preclear"
   | "partial-row"
   | "partial-row-screen-reader"
-  | "partial-row-empty-caret"
   | "partial-row-coordinated"
   | "partial-row-static"
-  | "post-teardown"
-  | "post-teardown-caret"
-  | "post-teardown-caret-incremental"
-  | "post-teardown-short-caret";
+  | "post-teardown";
 
 const rows = Number(process.argv[2]) || 6;
 const scenario = (process.argv[3] ?? "current-full") as Scenario;
@@ -40,15 +28,6 @@ if (scenario === "explicit-preclear") process.stdout.write(ansiEscapes.clearTerm
 
 const App = defineComponent(() => {
   const { exit, waitUntilRenderFlush } = useApp();
-  const usesCaret =
-    scenario === "partial-row-empty-caret" ||
-    (scenario.startsWith("post-teardown") && scenario.includes("caret"));
-  const focusTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const caretTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const caretFocus = usesCaret ? useFocus(focusTarget, { autoFocus: true, tabIndex: -1 }) : null;
-  const caret = caretFocus
-    ? useCaret(caretTarget, { focus: caretFocus, position: { x: 0, y: 0 } })
-    : null;
   const coordinated = scenario === "partial-row-coordinated" ? useStdout() : null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -74,28 +53,10 @@ const App = defineComponent(() => {
   onMounted(() => {
     coordinated?.write("COMMITTED");
     process.stdout.write("\x1b]0;INLINE_OVERFLOW_MOUNTED\x07");
-    if (scenario === "partial-row-empty-caret") {
-      void nextTick()
-        .then(() => waitUntilRenderFlush())
-        .then(() => {
-          const state = caret!.state.value;
-          process.stdout.write(
-            `\x1b]0;EMPTY_CARET:${state.status}${state.status === "hidden" ? `:${state.reason}` : ""}\x07`,
-          );
-        });
-    }
   });
   onScopeDispose(() => clearTimeout(timer));
 
   return () => {
-    if (scenario === "partial-row-empty-caret") {
-      return (
-        <Box ref={focusTarget} height={1}>
-          <Box ref={caretTarget} width={1} height={1} />
-        </Box>
-      );
-    }
-
     if (scenario === "partial-row-coordinated") {
       return null;
     }
@@ -144,17 +105,12 @@ const App = defineComponent(() => {
       );
     }
 
-    const targetHeight =
-      scenario === "post-teardown-short-caret"
-        ? 2
-        : scenario === "current-shrink" && revision.value > 0
-          ? rows - 1
-          : rows + 1;
+    const targetHeight = scenario === "current-shrink" && revision.value > 0 ? rows - 1 : rows + 1;
     const height = scenario === "current-full" ? rows : targetHeight;
 
     return (
-      <Box ref={usesCaret ? focusTarget : undefined} height={height} flexDirection="column">
-        <Text ref={usesCaret ? caretTarget : undefined}>TOP {revision.value}</Text>
+      <Box height={height} flexDirection="column">
+        <Text>TOP {revision.value}</Text>
         <Box flexGrow={1} />
         <Text>BOTTOM {revision.value}</Text>
       </Box>
@@ -167,7 +123,6 @@ app.mount({
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
   isScreenReaderEnabled: scenario === "partial-row-screen-reader",
   maxFps: 0,
-  incrementalRendering: scenario === "post-teardown-caret-incremental",
 });
 
 if (scenario.startsWith("post-teardown")) {

@@ -1,4 +1,5 @@
 import { expect, test } from "vite-plus/test";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import { Box, Text, createApp } from "@vue-tui/runtime";
 import { useMouseDrag, useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
@@ -95,8 +96,8 @@ test("SGR mouse replacement disables every possibly owned mode when stdout throw
       liveUpdates: true,
       maxFps: 0,
       mode: "fullscreen",
-      kittyKeyboard: { mode: "disabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+    } as InternalMountOptions);
     await waitForWrite(writes, SGR_MOUSE_ENABLE);
     const exited = app.waitUntilExit();
     failReplacement = true;

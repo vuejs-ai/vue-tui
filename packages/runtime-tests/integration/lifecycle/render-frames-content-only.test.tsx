@@ -14,7 +14,7 @@ import { render } from "@vue-tui/testing";
 // belongs only to terminal output; `frames[]` contains rendered content.
 test("render() frames exclude bracketed-paste lifecycle escapes", async () => {
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>content</Text>;
   });
 

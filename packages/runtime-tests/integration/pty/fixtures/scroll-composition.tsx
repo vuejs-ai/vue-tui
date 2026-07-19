@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import process from "node:process";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 import {
@@ -7,19 +8,13 @@ import {
   createApp,
   useApp,
   useBoxSize,
-  useFocus,
-  useFocusedInput,
-  useFocusScope,
-  useFocusScopeInput,
   useInput,
-  type InputHandlerResult,
-  type InputRouteDecision,
   type TuiInputEvent,
 } from "@vue-tui/runtime";
 import { useMouseEvent, type TuiMouseWheelEvent } from "@vue-tui/runtime/fullscreen";
 import { defineComponent, h, nextTick, shallowRef, watch } from "vue";
 
-type ScrollOperation = "up" | "down" | "pageup" | "pagedown" | "home" | "end";
+type ScrollOperation = "up" | "down" | "page-up" | "page-down" | "home" | "end";
 type AssertionJourney = "keyboard" | "wheel";
 
 const requestedMode = process.argv[2] === "fullscreen" ? "fullscreen" : "inline";
@@ -49,30 +44,18 @@ const expectedCalls: Readonly<Record<AssertionJourney, readonly string[]>> = {
     "inner:target:up:moved",
   ],
 };
-const continueOwnedKey: InputRouteDecision = Object.freeze({
-  action: "none",
-  routing: "continue",
-  defaultAction: "prevent",
-  external: "block",
-});
-const stopOwnedKey: InputRouteDecision = Object.freeze({
-  action: "none",
-  routing: "stop",
-  defaultAction: "prevent",
-  external: "block",
-});
 let completedCalls: readonly string[] = [];
 
 function keyOperation(event: TuiInputEvent): ScrollOperation | null {
-  if (event.kind !== "key" || event.key.phase === "release") return null;
-  switch (event.key.name) {
+  if (event.kind !== "key") return null;
+  switch (event.name) {
     case "up":
     case "down":
-    case "pageup":
-    case "pagedown":
+    case "page-up":
+    case "page-down":
     case "home":
     case "end":
-      return event.key.name;
+      return event.name;
     default:
       return null;
   }
@@ -84,9 +67,9 @@ function perform(handle: ScrollBoxExpose, operation: ScrollOperation, pageLines:
       return handle.scrollByLines(-1);
     case "down":
       return handle.scrollByLines(1);
-    case "pageup":
+    case "page-up":
       return handle.scrollByLines(-pageLines);
-    case "pagedown":
+    case "page-down":
       return handle.scrollByLines(pageLines);
     case "home":
       return handle.scrollToTop();
@@ -103,12 +86,6 @@ const App = defineComponent(() => {
   const innerTarget = shallowRef<InstanceType<typeof Box> | null>(null);
   const outerSize = useBoxSize(outerTarget);
   const innerSize = useBoxSize(innerTarget);
-  const outerScope = useFocusScope();
-  const innerFocus = useFocus(innerTarget, {
-    scope: outerScope,
-    autoFocus: true,
-    tabIndex: -1,
-  });
   const initialized = shallowRef(false);
   let initializing = false;
   const source = shallowRef("initial");
@@ -128,29 +105,37 @@ const App = defineComponent(() => {
   };
 
   useInput((event) => {
-    if (event.kind !== "text" || event.text !== "q") return "continue";
-    if (assertionJourney) assert.deepEqual(calls, expectedCalls[assertionJourney]);
-    completedCalls = [...calls];
-    exit();
-    return "consume";
-  });
-  useFocusedInput(innerFocus, (event): InputHandlerResult => {
+    if (event.kind === "text" && event.text === "q") {
+      if (assertionJourney) assert.deepEqual(calls, expectedCalls[assertionJourney]);
+      completedCalls = [...calls];
+      exit();
+      return;
+    }
+
     const operation = keyOperation(event);
-    if (!operation) return "continue";
-    const handle = inner.value;
-    if (!handle) throw new Error("inner ScrollBox handle must be available before input delivery");
-    const moved = perform(handle, operation, measuredHeight(innerSize, "inner"));
-    record(`inner:${operation}:${moved ? "moved" : "unchanged"}`, `keyboard:${operation}`, true);
-    return moved ? "consume" : continueOwnedKey;
-  });
-  useFocusScopeInput(outerScope, (event): InputHandlerResult => {
-    const operation = keyOperation(event);
-    if (!operation) return "continue";
-    const handle = outer.value;
-    if (!handle) throw new Error("outer ScrollBox handle must be available before input delivery");
-    const moved = perform(handle, operation, measuredHeight(outerSize, "outer"));
-    record(`outer:${operation}:${moved ? "moved" : "unchanged"}`, `keyboard:${operation}`, false);
-    return moved ? "consume" : stopOwnedKey;
+    if (!operation) return;
+    const innerHandle = inner.value;
+    if (!innerHandle) {
+      throw new Error("inner ScrollBox handle must be available before input delivery");
+    }
+    const innerMoved = perform(innerHandle, operation, measuredHeight(innerSize, "inner"));
+    record(
+      `inner:${operation}:${innerMoved ? "moved" : "unchanged"}`,
+      `keyboard:${operation}`,
+      true,
+    );
+    if (innerMoved) return;
+
+    const outerHandle = outer.value;
+    if (!outerHandle) {
+      throw new Error("outer ScrollBox handle must be available before input delivery");
+    }
+    const outerMoved = perform(outerHandle, operation, measuredHeight(outerSize, "outer"));
+    record(
+      `outer:${operation}:${outerMoved ? "moved" : "unchanged"}`,
+      `keyboard:${operation}`,
+      false,
+    );
   });
 
   const wheel = (
@@ -216,7 +201,7 @@ const App = defineComponent(() => {
           h(Text, { bold: true }, { default: () => `Scroll composition (${requestedMode})` }),
           h(Text, null, {
             default: () =>
-              `focus=${innerFocus.isFocused.value ? "inner" : "none"} mouse=${requestedMode === "fullscreen" ? "button" : "off"}`,
+              `input=application mouse=${requestedMode === "fullscreen" ? "button" : "off"}`,
           }),
           h(Text, null, { default: () => `source=${source.value}` }),
           h(Text, null, { default: () => `route=${route.value.join(" > ")}` }),
@@ -266,8 +251,8 @@ app.mount({
   mode: requestedMode,
   maxFps: 0,
   patchConsole: false,
-  kittyKeyboard: { mode: "enabled" },
-});
+  [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+} as InternalMountOptions);
 await app.waitUntilExit();
 if (assertionJourney) {
   process.stdout.write(`__TRACE__${JSON.stringify(completedCalls)}__`);

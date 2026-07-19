@@ -289,6 +289,23 @@ describe("shared stdin normalization", () => {
     stdin.destroy();
   });
 
+  test("disposing an application removes its unresolved Kitty query tombstones", () => {
+    const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
+    const ingress = getSharedStdinIngress(stdin);
+    const subscription = ingress.subscribe(
+      () => undefined,
+      () => {},
+    );
+    const cancel = ingress.startKittyQueryResponseDetection(() => {}, subscription);
+
+    cancel();
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    subscription.dispose();
+    expect(stdin.listenerCount("data")).toBe(0);
+    stdin.destroy();
+  });
+
   test("keeps batched text and C0 controls as separate semantic facts", () => {
     const facts = collect(["a\x03\t\r"]);
     expect(facts.map((inputFact) => inputFact.kind)).toEqual(["text", "key", "key", "key"]);

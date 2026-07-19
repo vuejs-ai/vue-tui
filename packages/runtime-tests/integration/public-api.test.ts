@@ -18,17 +18,10 @@ const PUBLIC_VALUE_EXPORTS = [
   "Text",
   // Composables
   "useApp",
+  "useBoxPresence",
   "useBoxSize",
-  "useCaret",
   "useClipboard",
-  "useExternalInput",
-  "useFocus",
-  "useFocusedInput",
-  "useFocusManager",
-  "useFocusScope",
-  "useFocusScopeInput",
   "useInput",
-  "useInputAvailability",
   "useLayoutWidth",
   "useStderr",
   "useStdin",
@@ -36,9 +29,6 @@ const PUBLIC_VALUE_EXPORTS = [
   "useViewportHeight",
   // Rendering
   "renderToString",
-  // Kitty keyboard
-  "kittyFlags",
-  "kittyModifiers",
 ];
 
 const FULLSCREEN_VALUE_EXPORTS = ["useMouseDrag", "useMouseEvent", "useTextSelection"];
@@ -86,6 +76,23 @@ test("does not retain the superseded split input API", () => {
   expect(api).not.toHaveProperty("usePaste");
 });
 
+test("keeps normalized subscription in Runtime without publishing interaction policy", () => {
+  expect(api).toHaveProperty("useInput");
+  expect(api).toHaveProperty("useBoxPresence");
+  expect(api).not.toHaveProperty("useInputAvailability");
+  expect(api).not.toHaveProperty("useExternalInput");
+  expect(api).not.toHaveProperty("useFocus");
+  expect(api).not.toHaveProperty("useFocusedInput");
+  expect(api).not.toHaveProperty("useFocusManager");
+  expect(api).not.toHaveProperty("useFocusScope");
+  expect(api).not.toHaveProperty("useFocusScopeInput");
+});
+
+test("keeps Kitty protocol controls private", () => {
+  expect(api).not.toHaveProperty("kittyFlags");
+  expect(api).not.toHaveProperty("kittyModifiers");
+});
+
 test("does not publish application-level rendering conveniences", () => {
   expect(api).not.toHaveProperty("Newline");
   expect(api).not.toHaveProperty("Spacer");
@@ -107,8 +114,8 @@ test("publishes narrow layout facts without the internal session graph", () => {
   expect(api).not.toHaveProperty("useRenderSession");
 });
 
-test("replaces targetless cursor ownership with focus-bound caret composition", () => {
-  expect(api).toHaveProperty("useCaret");
+test("withholds the old cell-coordinate caret until semantic Text mapping exists", () => {
+  expect(api).not.toHaveProperty("useCaret");
   expect(api).not.toHaveProperty("useCursor");
 });
 

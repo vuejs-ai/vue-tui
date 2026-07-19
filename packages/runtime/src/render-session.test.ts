@@ -60,7 +60,7 @@ test("reports host suspension independently from output cadence and effective mo
   ]);
 });
 
-test.each(["fullscreen", "alternateScreen"] as const)(
+test.each(["fullscreen", "alternateScreen", "kittyKeyboard"] as const)(
   "rejects own removed %s before mode validation",
   (key) => {
     expect(() => normalizeRequestedMode({ [key]: undefined, mode: null })).toThrow(

@@ -127,30 +127,16 @@ try {
 import {
   Box,
   Text,
+  useBoxPresence,
   useBoxSize,
-  useCaret,
   useClipboard,
-  useExternalInput,
-  useFocus,
-  useFocusedInput,
-  useFocusManager,
-  useFocusScope,
-  useFocusScopeInput,
   useInput,
-  useInputAvailability,
   useLayoutWidth,
   useStdin,
   useViewportHeight,
   type BoxSize,
   type BoxProps,
   type Color,
-  type ExternalInputHandler,
-  type ExternalInputSource,
-  type InputAvailability,
-  type InputHandler,
-  type InputHandlerResult,
-  type InputRouteDecision,
-  type CaretState,
   type CellPoint,
   type ClipboardAvailability,
   type ClipboardTransport,
@@ -160,16 +146,7 @@ import {
   type RenderToStringOptions,
   type TuiInputEvent,
   type TextProps,
-  type UseFocusManagerReturn,
-  type UseFocusOptions,
-  type UseFocusReturn,
-  type UseFocusScopeOptions,
-  type UseFocusScopeReturn,
-  type UseCaretOptions,
-  type UseCaretReturn,
   type UseClipboardReturn,
-  type UseInputAvailabilityReturn,
-  type UseInputOptions,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
 import {
@@ -194,7 +171,7 @@ import {
   type UseTextSelectionOptions,
 } from "@vue-tui/runtime/fullscreen";
 import type { RenderResult, TestClipboardBehavior, TestMouse } from "@vue-tui/testing";
-import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
+import type { ComponentPublicInstance, MaybeRefOrGetter, Ref, ShallowRef } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
@@ -272,92 +249,17 @@ type _ExactColor = Expect<
   >
 >;
 type _ExactRenderToStringOptions = Expect<Equal<keyof RenderToStringOptions, "columns">>;
-type _ExactDecision = Expect<
-  Equal<
-    InputRouteDecision,
-    {
-      readonly action: "none" | "performed";
-      readonly routing: "continue" | "stop";
-      readonly defaultAction: "allow" | "prevent";
-      readonly external: "allow" | "block";
-    }
-  >
->;
-type _ExactResult = Expect<
-  Equal<InputHandlerResult, "continue" | "consume" | InputRouteDecision>
->;
-type _ExactHandler = Expect<
-  Equal<InputHandler, (event: TuiInputEvent) => InputHandlerResult>
->;
 type _ExactHandlerInput = Expect<
-  Equal<Parameters<typeof useInput>[0], MaybeRef<InputHandler>>
+  Equal<
+    Parameters<typeof useInput>[0],
+    (event: TuiInputEvent) => void | { readonly preventDefault: true }
+  >
 >;
 type _ExactInputOptions = Expect<
-  Equal<UseInputOptions, { readonly isActive?: MaybeRefOrGetter<boolean> }>
->;
-type _ExactAvailability = Expect<
   Equal<
-    InputAvailability,
-    | { readonly status: "available" }
-    | {
-        readonly status: "unavailable";
-        readonly reason: "string-host" | "stdin-not-tty" | "stdin-not-controllable";
-      }
+    Parameters<typeof useInput>[1],
+    { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
   >
->;
-type _ExactAvailabilityReturn = Expect<
-  Equal<
-    UseInputAvailabilityReturn,
-    { readonly availability: Readonly<Ref<InputAvailability>> }
-  >
->;
-type _ExactFocusTarget = Expect<
-  Equal<
-    Parameters<typeof useFocus>[0],
-    MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
-  >
->;
-type _ExactFocusOptions = Expect<
-  Equal<
-    UseFocusOptions,
-    {
-      readonly scope?: UseFocusScopeReturn;
-      readonly disabled?: MaybeRefOrGetter<boolean>;
-      readonly tabIndex?: MaybeRefOrGetter<0 | -1>;
-      readonly autoFocus?: MaybeRefOrGetter<boolean>;
-    }
-  >
->;
-type _ExactFocusState = Expect<
-  Equal<UseFocusReturn["isFocused"], Readonly<ShallowRef<boolean>>>
->;
-type _ExactScopeOptions = Expect<
-  Equal<
-    UseFocusScopeOptions,
-    {
-      readonly isActive?: MaybeRefOrGetter<boolean>;
-      readonly trapped?: MaybeRefOrGetter<boolean>;
-    }
-  >
->;
-type _ExactFocusManager = Expect<
-  Equal<
-    UseFocusManagerReturn["focusedTarget"],
-    Readonly<ShallowRef<UseFocusReturn | null>>
-  >
->;
-type _ExactExternalSource = Expect<
-  Equal<
-    ExternalInputSource,
-    {
-      readonly event: TuiInputEvent;
-      readonly sequence: string;
-      readonly fidelity: "normalized-utf8-sequence";
-    }
-  >
->;
-type _ExactExternalHandler = Expect<
-  Equal<ExternalInputHandler, (source: ExternalInputSource) => void>
 >;
 type _ExactElementTarget = Expect<
   Equal<ElementTarget, MaybeRefOrGetter<ComponentPublicInstance | null | undefined>>
@@ -365,25 +267,14 @@ type _ExactElementTarget = Expect<
 type _ExactBoxSize = Expect<
   Equal<BoxSize, { readonly width: number; readonly height: number }>
 >;
+type _ExactBoxPresence = Expect<
+  Equal<ReturnType<typeof useBoxPresence>, Readonly<Ref<boolean>>>
+>;
 type _ExactLayoutWidth = Expect<
   Equal<ReturnType<typeof useLayoutWidth>, Readonly<Ref<number>>>
 >;
 type _ExactViewportHeight = Expect<
   Equal<ReturnType<typeof useViewportHeight>, Readonly<Ref<number>> | null>
->;
-type _ExactCaretOptions = Expect<
-  Equal<
-    UseCaretOptions,
-    {
-      readonly focus: UseFocusReturn;
-      readonly position: MaybeRefOrGetter<
-        { readonly x: number; readonly y: number } | null | undefined
-      >;
-    }
-  >
->;
-type _ExactCaretReturn = Expect<
-  Equal<UseCaretReturn, { readonly state: Readonly<ShallowRef<CaretState>> }>
 >;
 type _ExactMouseButton = Expect<Equal<MouseButton, "left" | "middle" | "right">>;
 type _ExactMouseHandlerResult = Expect<Equal<MouseHandlerResult, "continue" | "consume">>;
@@ -502,23 +393,24 @@ type _ExactSelectionCommands = Expect<
 >;
 
 const active = shallowRef(true);
-const handler = shallowRef<InputHandler>((event) => {
-  if (event.kind === "key") {
-    const name: string | null = event.key.name;
-    const reportedText: string | null = event.key.reportedText;
-    void name;
-    void reportedText;
-  } else if (event.kind === "text") {
-    const origin: "reported" | null = event.textOrigin;
-    void origin;
-  } else if (event.kind === "paste") {
+const screen = shallowRef<"editor" | "confirm">("editor");
+const handler = (event: TuiInputEvent): void | { readonly preventDefault: true } => {
+  if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
     event.text;
+    return;
   }
-  return "continue";
-});
+  if (event.kind === "key" && event.name === "enter") {
+    screen.value = screen.value === "editor" ? "confirm" : "editor";
+  }
+  if (event.kind === "key" && event.character === "c" && event.ctrl) {
+    return { preventDefault: true };
+  }
+};
 useInput(handler, { isActive: () => active.value });
+// @ts-expect-error Parser packet metadata is not part of the public event.
+declare const removedSequence: TuiInputEvent["sequence"];
 
-declare const focusHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
+declare const elementHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 // @ts-expect-error Runtime-owned layout width is readonly.
@@ -529,9 +421,12 @@ if (viewportHeight) {
 }
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
 const boxSize = useBoxSize(boxHost);
+const boxPresence = useBoxPresence(boxHost);
 const measuredSize: BoxSize | null = boxSize.value;
 // @ts-expect-error Accepted Box size is readonly.
 boxSize.value = { width: 1, height: 1 };
+// @ts-expect-error Accepted Box presence is readonly.
+boxPresence.value = false;
 if (measuredSize) {
   // @ts-expect-error Accepted Box size fields are readonly.
   measuredSize.width = 2;
@@ -539,59 +434,33 @@ if (measuredSize) {
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has different semantics and is not a Box target.
 useBoxSize(textHost);
+// @ts-expect-error Text is not a direct Box-presence target.
+useBoxPresence(textHost);
 const arbitraryHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error An arbitrary component ref does not identify one measurable Box.
 useBoxSize(arbitraryHost);
+// @ts-expect-error An arbitrary component ref does not identify one direct Box.
+useBoxPresence(arbitraryHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
 useBoxSize(rawBoxHost);
+// @ts-expect-error A raw component value cannot represent target attachment and detachment.
+useBoxPresence(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
 useBoxSize(() => boxHost.value);
-const focusScope = useFocusScope({ trapped: true });
-const focusTarget = useFocus(focusHost, { scope: focusScope, autoFocus: true });
-const caret = useCaret(focusHost, {
-  focus: focusTarget,
-  position: { x: 0, y: 0 },
-});
-caret.state.value.status;
-const focusManager = useFocusManager();
-useFocusedInput(focusTarget, handler);
-useFocusScopeInput(focusScope, handler);
-useExternalInput(focusTarget, (_source) => {});
+// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
+useBoxPresence(() => boxHost.value);
 const clickHandler = shallowRef<MouseEventHandler<"click">>(() => "continue");
-useMouseEvent(focusHost, "click", clickHandler);
-useMouseEvent(focusHost, "wheel", (_event: TuiMouseWheelEvent) => "consume");
-const drag = useMouseDrag(focusHost, (_event: TuiMouseDragEvent) => {});
+useMouseEvent(elementHost, "click", clickHandler);
+useMouseEvent(elementHost, "wheel", (_event: TuiMouseWheelEvent) => "consume");
+const drag = useMouseDrag(elementHost, (_event: TuiMouseDragEvent) => {});
 drag.isDragging.value;
 const clipboard = useClipboard();
 clipboard.availability.value.status;
 clipboard.writeText("exact");
-const selection = useTextSelection(focusHost, { isActive: active, pointer: () => true });
+const selection = useTextSelection(elementHost, { isActive: active, pointer: () => true });
 selection.move("forward", { extend: true });
 selection.copy();
-const focusResult: boolean = focusTarget.focus();
-const blurResult: boolean = focusTarget.blur();
-const nextResult: boolean = focusManager.focusNext();
-const previousResult: boolean = focusManager.focusPrevious();
-const managerBlurResult: boolean = focusManager.blur();
-void focusResult;
-void blurResult;
-void nextResult;
-void previousResult;
-void managerBlurResult;
-// @ts-expect-error Focus IDs were replaced by opaque ref-bound handles.
-useFocus(focusHost, { id: "legacy" });
-// @ts-expect-error The manager exposes the exact focused handle, not an ID.
-focusManager.focus("legacy");
-// @ts-expect-error Global focus enable/disable was removed with the flat registry.
-focusManager.disableFocus();
-
-const inputAvailability = useInputAvailability();
-if (inputAvailability.availability.value.status === "unavailable") {
-  inputAvailability.availability.value.reason;
-}
-// @ts-expect-error Availability is a runtime-readonly ref.
-inputAvailability.availability.value = { status: "available" };
 
 useStdin().stdin;
 // @ts-expect-error Raw-mode control is internal to semantic input routes.
@@ -602,6 +471,8 @@ useStdin().isRawModeSupported;
 const removedRawMode: MountOptions = { rawMode: "auto" };
 // @ts-expect-error Ctrl+C policy is expressed by an input result, not a mount option.
 const removedExitOnCtrlC: MountOptions = { exitOnCtrlC: false };
+// @ts-expect-error Runtime privately negotiates the keyboard protocol.
+const removedKittyKeyboard: MountOptions = { kittyKeyboard: { mode: "enabled" } };
 const customClipboardMount: MountOptions = {
   clipboard: { kind: "custom", writeText: () => ({ status: "copied" }) },
 };
@@ -612,12 +483,64 @@ const packedColor: Color = "gray";
 const packedRgbColor: Color = "#12abEF";
 // @ts-expect-error Runtime has one canonical gray spelling.
 const removedGreyColor: Color = "grey";
-// @ts-expect-error A void handler does not make an input routing decision.
 useInput((_event) => {});
-// @ts-expect-error Input routing is synchronous.
-useInput(async (_event) => "continue");
-// @ts-expect-error Structured decisions require every field.
+useInput((_event) => ({ preventDefault: true }));
+// @ts-expect-error Handler refs are unnecessary; close over reactive state instead.
+useInput(shallowRef(handler));
+// @ts-expect-error Activation must resolve to a boolean.
+useInput(handler, { isActive: "yes" });
+// @ts-expect-error Input decisions are synchronous.
+useInput(async (_event) => undefined);
+// @ts-expect-error "continue" was removed; ordinary handlers return undefined.
+useInput((_event) => "continue");
+// @ts-expect-error "consume" bundled unrelated routing policy and was removed.
+useInput((_event) => "consume");
+// @ts-expect-error Runtime does not publish higher-level routing decisions.
 useInput((_event) => ({ action: "none", routing: "continue", defaultAction: "allow" }));
+// @ts-expect-error Parser-shaped handler aliases are not public.
+type _RemovedInputHandler = import("@vue-tui/runtime").InputHandler;
+// @ts-expect-error Route-result aliases are not public.
+type _RemovedInputHandlerResult = import("@vue-tui/runtime").InputHandlerResult;
+// @ts-expect-error Runtime input results do not expose routing policy.
+type _RemovedInputRouteDecision = import("@vue-tui/runtime").InputRouteDecision;
+// @ts-expect-error The inline options shape needs no supporting public type.
+type _RemovedUseInputOptions = import("@vue-tui/runtime").UseInputOptions;
+// @ts-expect-error Parser phase is not an application fact.
+type _RemovedTuiInputPhase = import("@vue-tui/runtime").TuiInputPhase;
+// @ts-expect-error Parser source and fidelity are not application facts.
+type _RemovedTuiInputSource = import("@vue-tui/runtime").TuiInputSource;
+// @ts-expect-error Key modifiers live directly on the finite key event.
+type _RemovedTuiInputModifiers = import("@vue-tui/runtime").TuiInputModifiers;
+// @ts-expect-error Availability is established by activating a subscription.
+type _RemovedUseInputAvailability = typeof import("@vue-tui/runtime").useInputAvailability;
+// @ts-expect-error Availability supporting types were removed with the hook.
+type _RemovedInputAvailability = import("@vue-tui/runtime").InputAvailability;
+// @ts-expect-error Focus policy is composed above Runtime.
+type _RemovedUseFocus = typeof import("@vue-tui/runtime").useFocus;
+// @ts-expect-error Scope policy is composed above Runtime.
+type _RemovedUseFocusScope = typeof import("@vue-tui/runtime").useFocusScope;
+// @ts-expect-error Focused routing is composed above one public subscription.
+type _RemovedUseFocusedInput = typeof import("@vue-tui/runtime").useFocusedInput;
+// @ts-expect-error Scope routing is composed above one public subscription.
+type _RemovedUseFocusScopeInput = typeof import("@vue-tui/runtime").useFocusScopeInput;
+// @ts-expect-error Runtime does not publish a global focus manager.
+type _RemovedUseFocusManager = typeof import("@vue-tui/runtime").useFocusManager;
+// @ts-expect-error Normalized external forwarding was not lossless transport.
+type _RemovedUseExternalInput = typeof import("@vue-tui/runtime").useExternalInput;
+// @ts-expect-error Focus supporting types were removed with the policy API.
+type _RemovedUseFocusReturn = import("@vue-tui/runtime").UseFocusReturn;
+// @ts-expect-error Focus scope supporting types were removed with the policy API.
+type _RemovedUseFocusScopeReturn = import("@vue-tui/runtime").UseFocusScopeReturn;
+// @ts-expect-error External forwarding supporting types were removed.
+type _RemovedExternalInputSource = import("@vue-tui/runtime").ExternalInputSource;
+// @ts-expect-error Kitty negotiation options are private Runtime machinery.
+type _RemovedKittyKeyboardOptions = import("@vue-tui/runtime").KittyKeyboardOptions;
+// @ts-expect-error Kitty flag names are private Runtime machinery.
+type _RemovedKittyFlagName = import("@vue-tui/runtime").KittyFlagName;
+// @ts-expect-error Kitty flag values are private Runtime machinery.
+type _RemovedKittyFlags = typeof import("@vue-tui/runtime").kittyFlags;
+// @ts-expect-error Kitty modifier values are private Runtime machinery.
+type _RemovedKittyModifiers = typeof import("@vue-tui/runtime").kittyModifiers;
 // @ts-expect-error Key was replaced by TuiInputEvent.
 type _RemovedKey = import("@vue-tui/runtime").Key;
 // @ts-expect-error Paste is a TuiInputEvent member, not a separate composable.
@@ -692,6 +615,8 @@ type _RemovedBoxMetrics = import("@vue-tui/runtime").BoxMetrics;
 type _RemovedUseBoxMetricsReturn = import("@vue-tui/runtime").UseBoxMetricsReturn;
 // @ts-expect-error Targetless terminal cursor ownership was removed.
 type _RemovedUseCursor = typeof import("@vue-tui/runtime").useCursor;
+// @ts-expect-error The old focus-bound, cell-coordinate caret was withdrawn.
+type _RemovedUseCaret = typeof import("@vue-tui/runtime").useCaret;
 // @ts-expect-error Output-origin cursor coordinates were removed with useCursor().
 type _RemovedCursorPosition = import("@vue-tui/runtime").CursorPosition;
 // @ts-expect-error The terminal-wide v1 mouse hook was removed from the root.
@@ -740,6 +665,7 @@ type _RemovedMouseTarget = import("@vue-tui/runtime").MouseTarget;
 type _RemovedTuiMouseEvent = import("@vue-tui/runtime").TuiMouseEvent;
 void removedRawMode;
 void removedExitOnCtrlC;
+void removedKittyKeyboard;
 void customClipboardMount;
 void osc52ClipboardMount;
 void invalidClipboardMount;
@@ -751,7 +677,7 @@ void removedGreyColor;
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
     `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
 import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
@@ -787,30 +713,25 @@ export const InputProbe = defineComponent(() => {
   const host = shallowRef<InstanceType<typeof Box> | null>(null);
   const selectableText = shallowRef<ComponentPublicInstance | null>(null);
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
-  const scope = useFocusScope({ trapped: true });
-  const target = useFocus(host, { scope, autoFocus: true });
-  const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
   const size = useBoxSize(host);
+  const presence = useBoxPresence(host);
   const layoutWidth = useLayoutWidth();
   const viewportHeight = useViewportHeight();
-  const manager = useFocusManager();
-  const { availability } = useInputAvailability();
   const clipboard = useClipboard();
   const selection = useTextSelection(selectableText, { pointer: false });
   clipboard.availability.value.status;
   selection.move("document-start");
   useInput(
     (event) => {
-      if (event.kind === "key" && event.key.name !== null) {
-        event.key.name.toUpperCase();
+      if (event.kind === "key" && event.name === "enter") {
+        event.name.toUpperCase();
       }
-      return "continue";
+      if (event.kind === "key" && event.character === "c" && event.ctrl) {
+        return { preventDefault: true };
+      }
     },
-    { isActive: () => availability.value.status === "available" },
+    { isActive: presence },
   );
-  useFocusedInput(target, () => "continue");
-  useFocusScopeInput(scope, () => "continue");
-  useExternalInput(target, () => {});
   if (scrollBox.value) {
     const movementResults: readonly boolean[] = [
       scrollBox.value.scrollByLines(1),
@@ -822,7 +743,7 @@ export const InputProbe = defineComponent(() => {
     scrollBox.value.scrollToLine(2, true);
     void movementResults;
   }
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text ref={selectableText}>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{caret.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text ref={selectableText}>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(presence.value)}</Text></ScrollBox></Box>;
 });
 `,
   );
@@ -831,37 +752,34 @@ export const InputProbe = defineComponent(() => {
     `<script setup lang="ts">
 import { shallowRef, type ComponentPublicInstance } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
 import { Static } from "@vue-tui/runtime/inline";
 
 const host = shallowRef<InstanceType<typeof Box> | null>(null);
 const vShowVisible = shallowRef(true);
+const screen = shallowRef<"editor" | "confirm">("editor");
 const selectableText = shallowRef<ComponentPublicInstance | null>(null);
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
-const scope = useFocusScope({ trapped: true });
-const target = useFocus(host, { scope, autoFocus: true });
-const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
 const size = useBoxSize(host);
+const presence = useBoxPresence(host);
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
-const manager = useFocusManager();
 const mountedStdin = useStdin();
-const { availability } = useInputAvailability();
 const clipboard = useClipboard();
 const selection = useTextSelection(selectableText, { pointer: false });
 clipboard.availability.value.status;
 selection.move("document-start");
 useInput(
   (event) => {
-    if (event.kind === "paste") event.text.toUpperCase();
-    return "continue";
+    if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
+      event.text.toUpperCase();
+    } else if (event.kind === "key" && event.name === "enter") {
+      screen.value = screen.value === "editor" ? "confirm" : "editor";
+    }
   },
-  { isActive: () => availability.value.status === "available" },
+  { isActive: presence },
 );
-useFocusedInput(target, () => "continue");
-useFocusScopeInput(scope, () => "continue");
-useExternalInput(target, () => {});
 mountedStdin.stdin;
 if (scrollBox.value) {
   const movementResults: readonly boolean[] = [
@@ -884,7 +802,7 @@ mountedStdin.setRawMode(false);
       <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
-      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox>
+      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ presence }}</Text></ScrollBox>
     </Box>
   </Box>
 </template>
@@ -925,7 +843,7 @@ import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, isReadonly, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
-const { Box, createApp, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useStdin, useViewportHeight } = runtime;
+const { Box, createApp, Text, useBoxPresence, useBoxSize, useClipboard, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 const { useMouseDrag, useMouseEvent, useTextSelection } = fullscreen;
 assert.deepEqual(Object.keys(fullscreen).sort(), ["useMouseDrag", "useMouseEvent", "useTextSelection"]);
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
@@ -947,14 +865,21 @@ assert.equal("useAnimation" in runtime, false);
 assert.equal("useLayoutSize" in runtime, false);
 assert.equal("useRenderSession" in runtime, false);
 assert.equal("useElementGeometry" in runtime, false);
+assert.equal("useCaret" in runtime, false);
+assert.equal("useInputAvailability" in runtime, false);
+assert.equal("useExternalInput" in runtime, false);
+assert.equal("useFocus" in runtime, false);
+assert.equal("useFocusedInput" in runtime, false);
+assert.equal("useFocusManager" in runtime, false);
+assert.equal("useFocusScope" in runtime, false);
+assert.equal("useFocusScopeInput" in runtime, false);
+assert.equal("kittyFlags" in runtime, false);
+assert.equal("kittyModifiers" in runtime, false);
 assert.equal(typeof useLayoutWidth, "function");
 assert.equal(typeof useViewportHeight, "function");
 assert.equal(typeof useBoxSize, "function");
-assert.equal(typeof useCaret, "function");
-assert.equal(typeof useFocusScope, "function");
-assert.equal(typeof useFocusedInput, "function");
-assert.equal(typeof useFocusScopeInput, "function");
-assert.equal(typeof useExternalInput, "function");
+assert.equal(typeof useBoxPresence, "function");
+assert.equal(typeof useInput, "function");
 assert.equal(typeof useClipboard, "function");
 assert.equal(typeof useTextSelection, "function");
 
@@ -1159,13 +1084,8 @@ packedNestedReset.dispose();
 const stdin = new PassThrough();
 const stdout = new PassThrough();
 let observedStdin;
-let observedAvailability;
 const Probe = defineComponent(() => {
   observedStdin = useStdin();
-  const firstAvailability = useInputAvailability();
-  const secondAvailability = useInputAvailability();
-  assert.equal(firstAvailability.availability, secondAvailability.availability);
-  observedAvailability = firstAvailability;
   return () => h(Text, null, () => "probe");
 });
 const live = createApp(Probe);
@@ -1174,10 +1094,6 @@ assert.equal(observedStdin.stdin, stdin);
 assert.deepEqual(Reflect.ownKeys(observedStdin), ["stdin"]);
 assert.equal("setRawMode" in observedStdin, false);
 assert.equal("isRawModeSupported" in observedStdin, false);
-assert.deepEqual(observedAvailability.availability.value, {
-  status: "unavailable",
-  reason: "stdin-not-tty",
-});
 live.unmount();
 
 function assertRemovedMountOption(name, value, message) {
@@ -1196,6 +1112,11 @@ function assertRemovedMountOption(name, value, message) {
 
 assertRemovedMountOption("rawMode", "always", /Mount option "rawMode" was removed/);
 assertRemovedMountOption("exitOnCtrlC", false, /Mount option "exitOnCtrlC" was removed/);
+assertRemovedMountOption(
+  "kittyKeyboard",
+  { mode: "enabled" },
+  /Mount option "kittyKeyboard" was removed/,
+);
 
 const NoInput = defineComponent(() => () => h(Text, null, () => "idle"));
 const idle = await render(NoInput);
@@ -1206,7 +1127,7 @@ idle.dispose();
 let layoutWidthProjection;
 let viewportHeightProjection;
 let boxSizeProjection;
-let caretProjection;
+let boxPresenceProjection;
 let scrollBoxHandle;
 const LayoutProbe = defineComponent(() => {
   const host = shallowRef(null);
@@ -1214,8 +1135,7 @@ const LayoutProbe = defineComponent(() => {
   layoutWidthProjection = useLayoutWidth();
   viewportHeightProjection = useViewportHeight();
   boxSizeProjection = useBoxSize(host);
-  const focus = useFocus(host, { autoFocus: true });
-  caretProjection = useCaret(host, { focus, position: { x: 0, y: 0 } });
+  boxPresenceProjection = useBoxPresence(host);
   return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
     h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed size") }),
   );
@@ -1224,7 +1144,7 @@ const layoutApp = await render(LayoutProbe, { columns: 20, rows: 5 });
 assert.equal(layoutWidthProjection.value, 20);
 assert.equal(viewportHeightProjection.value, 5);
 assert.deepEqual(boxSizeProjection.value, { width: 8, height: 3 });
-assert.deepEqual(caretProjection.state.value, { status: "visible", surface: { x: 0, y: 0 } });
+assert.equal(boxPresenceProjection.value, true);
 assert.deepEqual(Reflect.ownKeys(boxSizeProjection.value), ["width", "height"]);
 assert.equal(isReadonly(layoutWidthProjection), true);
 assert.equal(isReadonly(viewportHeightProjection), true);
@@ -1246,7 +1166,6 @@ layoutApp.dispose();
 assert.equal(layoutWidthProjection.value, 24);
 assert.equal(viewportHeightProjection.value, 6);
 assert.equal(boxSizeProjection.value, null);
-assert.deepEqual(caretProjection.state.value, { status: "inactive" });
 
 let streamLayoutWidth;
 let streamViewportHeight;
@@ -1389,91 +1308,67 @@ assert.deepEqual(packedClipboard.availability.value, {
 });
 
 const events = [];
-let activeAvailability;
+const inputScreen = shallowRef("editor");
+let inputPresence;
 const WithInput = defineComponent(() => {
-  activeAvailability = useInputAvailability();
-  useInput((event) => {
-    events.push(event);
-    return {
-      action: "performed",
-      routing: "stop",
-      defaultAction: "prevent",
-      external: "block",
-    };
-  });
-  return () => h(Text, null, () => "active");
+  const host = shallowRef(null);
+  inputPresence = useBoxPresence(host);
+  useInput(
+    (event) => {
+      events.push(event);
+      if (inputScreen.value === "editor" && event.kind === "text") {
+        inputScreen.value = "confirm";
+      } else if (inputScreen.value === "confirm" && event.kind === "key" && event.name === "enter") {
+        inputScreen.value = "editor";
+      }
+      if (event.kind === "key" && event.character === "c" && event.ctrl) {
+        return { preventDefault: true };
+      }
+    },
+    { isActive: inputPresence },
+  );
+  return () => h(Box, { ref: host }, () => h(Text, null, () => "active"));
 });
 const active = await render(WithInput);
-assert.deepEqual(activeAvailability.availability.value, { status: "available" });
+assert.equal(inputPresence.value, true);
 assert.equal(active.terminal.rawMode.current, true);
 await active.stdin.write("a");
-assert.equal(events.length, 1);
+await active.stdin.write("\\r");
+await active.stdin.write("\\x03");
+assert.equal(events.length, 3);
 assert.deepEqual(events[0], {
   kind: "text",
-  sequence: "a",
-  fidelity: "normalized-utf8-sequence",
   text: "a",
-  protocol: "plain",
-  phase: null,
-  primaryCodepoint: null,
-  textOrigin: null,
 });
-assert.equal(Object.isFrozen(events[0]), true);
+assert.deepEqual(events[1], {
+  kind: "key",
+  name: "enter",
+  shift: false,
+  alt: false,
+  ctrl: false,
+});
+assert.deepEqual(events[2], {
+  kind: "key",
+  character: "c",
+  shift: false,
+  alt: false,
+  ctrl: true,
+});
+assert.equal(events.every(Object.isFrozen), true);
+assert.equal(inputScreen.value, "editor");
 active.dispose();
 assert.equal(active.terminal.rawMode.current, false);
 
 const InvalidResult = defineComponent(() => {
-  useInput(() => undefined);
+  useInput(() => "consume");
   return () => h(Text, null, () => "invalid");
 });
 const invalidResult = await render(InvalidResult);
 await assert.rejects(
   invalidResult.stdin.write("x"),
-  /handlers must synchronously return "continue", "consume", or a complete InputRouteDecision/,
+  /handlers must synchronously return undefined or the exact object { preventDefault: true }/,
 );
 invalidResult.dispose();
-
-const focusCalls = [];
-let firstTarget;
-let secondTarget;
-let focusScope;
-let focusManager;
-const FocusProbe = defineComponent(() => {
-  const firstHost = shallowRef(null);
-  const secondHost = shallowRef(null);
-  focusScope = useFocusScope();
-  firstTarget = useFocus(firstHost, { scope: focusScope, autoFocus: true });
-  secondTarget = useFocus(secondHost, { scope: focusScope });
-  focusManager = useFocusManager();
-  useFocusedInput(firstTarget, (event) => {
-    focusCalls.push("target:" + event.sequence);
-    return "continue";
-  });
-  useFocusScopeInput(focusScope, (event) => {
-    focusCalls.push("scope:" + event.sequence);
-    return "continue";
-  });
-  useExternalInput(firstTarget, ({ sequence }) => focusCalls.push("external:" + sequence));
-  return () => h(Box, null, () => [
-    h(Box, { ref: firstHost }, () => h(Text, null, () => "first")),
-    h(Box, { ref: secondHost }, () => h(Text, null, () => "second")),
-  ]);
-});
-const focusApp = await render(FocusProbe);
-assert.equal(firstTarget.isFocused.value, true);
-assert.equal(focusScope.containsFocus.value, true);
-assert.equal(focusManager.focusedTarget.value, firstTarget);
-await focusApp.stdin.write("x");
-assert.deepEqual(focusCalls, ["target:x", "scope:x", "external:x"]);
-await focusApp.stdin.write("\t");
-assert.equal(focusManager.focusedTarget.value, secondTarget);
-await focusApp.stdin.write("\x1b");
-assert.equal(focusManager.focusedTarget.value, secondTarget);
-focusApp.dispose();
-assert.equal(firstTarget.isFocused.value, false);
-assert.equal(firstTarget.focus(), false);
-assert.equal(firstTarget.blur(), false);
-assert.equal(focusApp.terminal.rawMode.current, false);
 `,
   );
 

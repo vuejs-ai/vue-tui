@@ -25,35 +25,8 @@ export const Text = TextSfc as unknown as PublicComponent<TextProps>;
 export type { TextProps } from "./components/text-props.ts";
 
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
-export { useInput, type UseInputOptions } from "./composables/useInput.ts";
-export {
-  type InputHandler,
-  type InputHandlerResult,
-  type InputRouteDecision,
-  type TuiInputEvent,
-  type TuiInputModifiers,
-  type TuiInputPhase,
-  type TuiInputSource,
-} from "./io/public-input.ts";
-export {
-  useInputAvailability,
-  type UseInputAvailabilityReturn,
-} from "./composables/useInputAvailability.ts";
-export type { InputAvailability } from "./io/input-availability.ts";
-export { useFocus, type UseFocusOptions, type UseFocusReturn } from "./composables/useFocus.ts";
-export {
-  useFocusScope,
-  type UseFocusScopeOptions,
-  type UseFocusScopeReturn,
-} from "./composables/useFocusScope.ts";
-export { useFocusedInput } from "./composables/useFocusedInput.ts";
-export { useFocusScopeInput } from "./composables/useFocusScopeInput.ts";
-export {
-  useExternalInput,
-  type ExternalInputHandler,
-  type ExternalInputSource,
-} from "./composables/useExternalInput.ts";
-export { useFocusManager, type UseFocusManagerReturn } from "./composables/useFocusManager.ts";
+export { useInput } from "./composables/useInput.ts";
+export type { TuiInputEvent, TuiKeyName } from "./io/public-input.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
@@ -61,20 +34,9 @@ export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 export { useLayoutWidth } from "./composables/use-layout-width.ts";
 export { useViewportHeight } from "./composables/use-viewport-height.ts";
 export { useBoxSize, type BoxSize } from "./composables/use-box-size.ts";
+export { useBoxPresence } from "./composables/use-box-presence.ts";
 export type { RenderMode } from "./render-session.ts";
-export {
-  useCaret,
-  type CaretState,
-  type UseCaretOptions,
-  type UseCaretReturn,
-} from "./composables/useCaret.ts";
 export type { CellPoint, ElementTarget } from "./element-target.ts";
-export {
-  kittyFlags,
-  kittyModifiers,
-  type KittyKeyboardOptions,
-  type KittyFlagName,
-} from "./io/kitty-keyboard.ts";
 // `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
 // its `measure-text` module internal, and so do we. They remain internal helpers
 // (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.

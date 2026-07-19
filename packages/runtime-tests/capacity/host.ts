@@ -8,6 +8,7 @@ import {
   type TuiApp,
 } from "@vue-tui/runtime";
 import {
+  INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
   INTERNAL_TEST_INPUT_HOST,
@@ -15,7 +16,7 @@ import {
   observeTuiNodeCreations,
   runtimeResourceTracker,
   yogaNodeTracker,
-  type InternalTestInputHost,
+  type InternalMountOptions,
   type RuntimeResourceSnapshot,
 } from "@vue-tui/runtime/internal";
 import { createTestMouse, type TestMouse } from "../../testing/src/mouse.ts";
@@ -400,16 +401,12 @@ async function mountCapacityHostWithOutput(
       patchConsole: false,
       maxFps: options.maxFps,
       onRender: ({ renderTime }) => options.onRender?.(renderTime),
-      kittyKeyboard: { mode: "disabled" },
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
       clipboard,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
       [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
-    } as MountOptions & {
-      readonly [INTERNAL_SUSPENSION_HOST]: typeof suspensionHost;
-      readonly [INTERNAL_TERMINAL_SIZE_PROBE]: () => { readonly kind: "unavailable" };
-      readonly [INTERNAL_TEST_INPUT_HOST]: InternalTestInputHost;
-    });
+    } as InternalMountOptions);
   } catch (error) {
     stopTuiNodeObservation();
     throw error;

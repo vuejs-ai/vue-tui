@@ -21,12 +21,16 @@ export { renderToStringWithScreenReader } from "./render-to-string.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
 export { connectDevtools, isDevConnected } from "./hmr.ts";
 export type { AppContext } from "./context.ts";
+export type { InternalMountOptions } from "./render.ts";
 export {
+  INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
   matchKittyQueryResponse,
   hasCompleteKittyQueryResponse,
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
+  type InternalKittyKeyboardMountOptions,
+  type KittyKeyboardOptions,
   type KittyKeyboardController,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";

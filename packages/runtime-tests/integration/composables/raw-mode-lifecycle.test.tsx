@@ -58,11 +58,11 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const which = shallowRef<"a" | "b">("a");
 
   const A = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -109,14 +109,12 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const A = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") aKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") bKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>b</Text>;
   });
@@ -156,7 +154,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
 // was [true] at this point and only became [true, false] after a drain.
 test("teardown disables raw mode synchronously so a signal exit can't leave the terminal raw (Ink parity)", async () => {
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>listening</Text>;
   });
 
@@ -203,14 +201,12 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
   const AppA = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") aKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>a</Text>;
   });
   const AppB = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") bKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>b</Text>;
   });
@@ -279,7 +275,7 @@ test("a no-input app never enables raw mode or holds stdin", async () => {
 test("useInput acquires raw on mount and releases it on unmount", async () => {
   const showInput = shallowRef(true);
   const Child = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>input</Text>;
   });
   const App = defineComponent(() => () => (showInput.value ? <Child /> : <Text>idle</Text>));
@@ -315,7 +311,7 @@ test("useInput acquires raw on mount and releases it on unmount", async () => {
 test("useInput isActive=false releases raw mode and true re-acquires it", async () => {
   const active = shallowRef(true);
   const App = defineComponent(() => {
-    useInput(() => "continue", { isActive: () => active.value });
+    useInput(() => undefined, { isActive: () => active.value });
     return () => <Text>listening</Text>;
   });
 
@@ -353,13 +349,12 @@ test("a pending partial escape does not bleed across a useInput swap", async () 
   const which = shallowRef<"a" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") bKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>b</Text>;
   });
@@ -389,13 +384,12 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   const screen = shallowRef<"a" | "idle" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") bKeys.push(event.text);
-      return "continue";
     });
     return () => <Text>b</Text>;
   });
@@ -404,7 +398,7 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   );
 
   const stdout = makeFakeWritable();
-  const { stream: stdin } = makeSpyStdin();
+  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
   const app = createApp(App);
   app.mount({ stdout, stdin, maxFps: 0 });
   await settle();
@@ -412,7 +406,14 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   // Navigate to the idle (no-input) screen; A's useInput unmounts.
   screen.value = "idle";
   await settle();
-  expect(stdin.listenerCount("data")).toBe(0);
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
+
+  // Runtime may briefly retain its shared listener as a finite tombstone for
+  // the already-written Kitty capability query. The tombstone owns no
+  // application route; it only prevents a late, untagged protocol reply from
+  // becoming input for a later screen.
+  expect(stdin.listenerCount("data")).toBe(1);
 
   // Type a partial escape while idle. No framework listener owns it.
   (stdin as unknown as PassThrough).emit("data", "\x1b[");
@@ -424,4 +425,6 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   expect(bKeys).toEqual([]); // the idle-typed escape must not reach B
 
   app.unmount();
+  await app.waitUntilExit();
+  expect(stdin.listenerCount("data")).toBe(0);
 });

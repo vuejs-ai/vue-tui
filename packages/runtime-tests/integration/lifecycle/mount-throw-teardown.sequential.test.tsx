@@ -12,7 +12,11 @@ import { createRequire } from "node:module";
 import { defineComponent } from "vue";
 import { expect, test, vi, afterEach } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
-import { yogaNodeTracker } from "@vue-tui/runtime/internal";
+import {
+  INTERNAL_KITTY_KEYBOARD,
+  yogaNodeTracker,
+  type InternalMountOptions,
+} from "@vue-tui/runtime/internal";
 import { captureWrites, makeFakeWritable, makeFakeStdin } from "./test-streams.ts";
 
 afterEach(() => {
@@ -36,7 +40,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   const liveBefore = yogaNodeTracker.snapshot().live;
 
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => <Text>hello</Text>;
   });
   const PlainApp = defineComponent(() => () => <Text>hello</Text>);
@@ -82,7 +86,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
 
 test.sequential("a Kitty push failure during first semantic demand tears down without poisoning stdout", async () => {
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => <Text>kitty</Text>;
   });
   const PlainApp = defineComponent(() => () => <Text>kitty</Text>);
@@ -108,8 +112,8 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
     stdin,
     stderr,
     liveUpdates: true,
-    kittyKeyboard: { mode: "enabled" },
-  });
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+  } as InternalMountOptions);
   await expect(app1.waitUntilExit()).rejects.toThrow("BROKEN_STREAM_ON_KITTY_ENABLE");
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 

@@ -71,8 +71,6 @@ async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
       expect(lines.slice(1)).not.toContain("BUTTON");
       expect(lines.slice(1)).not.toContain("UPDATED");
     }
-    expect(terminal.buffer.active.cursorX).toBe(3);
-    expect(terminal.buffer.active.cursorY).toBe(0);
     expect(ps.output).toContain("\x1b[?25l\x1b[2J\x1b[H");
 
     const sideChannels: Partial<Record<SurfaceScenario, string>> = {
@@ -243,7 +241,7 @@ test("fullscreen target behavior follows a stable component ref's rendered host 
   }
 });
 
-test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping, and drag demand", async () => {
+test("fullscreen targeted mouse composes scrolling, propagation, clipping, and drag demand", async () => {
   const rows = 12;
   const ps = term("fullscreen-origin", [String(rows), "targeted-mouse"]);
   let exited = false;
@@ -254,7 +252,7 @@ test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping
     expect(ps.output).not.toContain("\x1b[?1002h");
     expect(ps.output).not.toContain("\x1b[?1006h");
     let terminal = await emulate(ps.output, rows);
-    expect(visibleLines(terminal)).toContain("targets=hidden focused=false");
+    expect(visibleLines(terminal)).toContain("targets=hidden");
 
     let before = ps.output.length;
     ps.write("a");
@@ -263,18 +261,17 @@ test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping
     expect(buttonEnable).toContain("\x1b[?1000h\x1b[?1006h");
     expect(buttonEnable).not.toContain("\x1b[?1002h");
     terminal = await emulate(ps.output, rows);
-    expect(visibleLines(terminal)[0]).toBe("targets=visible focused=false");
+    expect(visibleLines(terminal)[0]).toBe("targets=visible");
     expect(visibleLines(terminal)).toContain("CLICK");
     expect(visibleLines(terminal)).toContain("-----");
     expect(visibleLines(terminal).some((line) => line.endsWith("CLI"))).toBe(true);
 
-    // The child first continues, so the parent receives a bubble delivery. The
-    // child also focuses itself through the F4 ref-bound focus handle.
+    // The child first continues, so the parent receives a bubble delivery.
     before = ps.output.length;
     ps.write("\x1b[<0;1;2M\x1b[<0;1;2mp");
     await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
     const bubblingClick = ps.output.slice(before);
-    const childMarker = "__MOUSE__:click:child:target:focused=true:consume=false";
+    const childMarker = "__MOUSE__:click:child:target:consume=false";
     const parentMarker = "__MOUSE__:click:parent:bubble";
     expect(bubblingClick).toContain(childMarker);
     expect(bubblingClick).toContain(parentMarker);
@@ -287,7 +284,7 @@ test("fullscreen targeted mouse composes focus, scrolling, propagation, clipping
     ps.write("\x1b[<0;1;2M\x1b[<0;1;2mp");
     await ps.waitForOutput((output) => output.slice(before).includes("__MOUSE__:probe"));
     const consumedClick = ps.output.slice(before);
-    expect(consumedClick).toContain("__MOUSE__:click:child:target:focused=true:consume=true");
+    expect(consumedClick).toContain("__MOUSE__:click:child:target:consume=true");
     expect(consumedClick).not.toContain(parentMarker);
 
     // ScrollBox itself remains passive. A wheel hook on its wrapper drives the

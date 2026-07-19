@@ -24,16 +24,14 @@ const Counter = defineComponent(() => {
   const count = shallowRef(0);
 
   useInput((event) => {
-    if (event.kind !== "text") return "continue";
+    if (event.kind !== "text") return;
     if (event.text === "+") {
       count.value++;
-      return "consume";
+      return;
     }
     if (event.text === "-") {
       count.value--;
-      return "consume";
     }
-    return "continue";
   });
 
   return () => (
@@ -125,7 +123,7 @@ These controls model production facts rather than setting unrelated internal boo
 - `updates: "at-teardown"` uses the final-stream policy even when the underlying output is a TTY.
 - `clipboard` models one app-owned custom transport and never reads or writes the ambient system clipboard.
 
-The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can prevent it for one event by returning `"consume"` or a complete decision whose `defaultAction` is `"prevent"`.
+The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Use `host.updates` for cadence; content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can suppress it for one event by returning the exact object `{ preventDefault: true }`; this does not stop other captured `useInput()` subscriptions from running.
 
 ### Examples
 

@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
-import {
-  Box,
-  Text,
-  useBoxSize,
-  useCaret,
-  useFocus,
-  useLayoutWidth,
-  useViewportHeight,
-} from "@vue-tui/runtime";
+import { Box, Text, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import Target from "./target.vue";
 
 const label = "LABEL-A";
@@ -23,8 +15,6 @@ const acceptedBoxSize = computed(() => {
   return size === null ? "pending" : `${size.width}x${size.height}`;
 });
 const target = shallowRef<InstanceType<typeof Target> | null>(null);
-const focus = useFocus(target, { autoFocus: true });
-const { state: caretState } = useCaret(target, { focus, position: { x: 0, y: 0 } });
 const targetGlobal = globalThis as {
   __VT_TARGET_INSTANCE__?: object;
   __VT_TARGET_CURRENT__?: object | null;
@@ -49,6 +39,5 @@ onUnmounted(() => clearInterval(t));
     <Box ref="boxTarget" :width="7" :height="2"><Text>BOX</Text></Box>
     <Text>box={{ acceptedBoxSize }}</Text>
     <Target ref="target" />
-    <Text>caret={{ caretState.status }}</Text>
   </Box>
 </template>

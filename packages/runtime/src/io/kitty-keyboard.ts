@@ -29,6 +29,13 @@ export type KittyKeyboardOptions = {
   flags?: KittyFlagName[];
 };
 
+/** Repository-only mount override. Production mounts always use private auto negotiation. */
+export const INTERNAL_KITTY_KEYBOARD: unique symbol = Symbol("vue-tui.internal-kitty-keyboard");
+
+export interface InternalKittyKeyboardMountOptions {
+  readonly mode: "auto" | "enabled" | "disabled";
+}
+
 export function resolveFlags(flags: KittyFlagName[]): number {
   let result = 0;
   for (const flag of flags) {
@@ -156,9 +163,7 @@ export function createKittyKeyboardController(
   let enabled = false;
   let disposed = false;
   let suspended = false;
-  const configuredMode: "auto" | "enabled" | "disabled" = options
-    ? (options.mode ?? "auto")
-    : "disabled";
+  const configuredMode: "auto" | "enabled" | "disabled" = options?.mode ?? "auto";
   const configuredFlags: KittyFlagName[] = options?.flags ?? ["disambiguateEscapeCodes"];
   let autoSupport: "unknown" | "supported" | "unsupported" = "unknown";
   let demandCount = 0;
@@ -446,9 +451,11 @@ export function createKittyKeyboardController(
       let cancellationError: unknown;
       if (activeDetection) {
         try {
-          // A handed query keeps its finite ingress tombstone. An unhanded query
-          // can be discarded because the terminal could not have replied.
-          cancelDetection({ discard: !activeDetection.queryHanded });
+          // A handed query keeps its finite ingress tombstone while the app is
+          // still mounted. Whole-app disposal must release every owned stream
+          // listener immediately; an unhanded query can always be discarded
+          // because the terminal could not have replied.
+          cancelDetection({ discard: disposed || !activeDetection.queryHanded });
         } catch (error) {
           cancellationError = error;
         }

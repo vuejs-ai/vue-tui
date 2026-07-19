@@ -1,312 +1,116 @@
-import { test as it, expect } from "vite-plus/test";
+import { expect, test as it } from "vite-plus/test";
 import term from "./helpers/term.ts";
-// ---------------------------------------------------------------------------
-// useInput — basic character input
-// ---------------------------------------------------------------------------
 
-it("useInput - handle lowercase character", async () => {
-  const ps = term("use-input", ["lowercase"]);
-  ps.write("q");
+async function expectInput(test: string, input: string): Promise<void> {
+  const ps = term("use-input", [test]);
+  ps.write(input);
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
+}
+
+it.each([
+  ["lowercase insertion text", "lowercase", "q"],
+  ["uppercase insertion text", "uppercase", "Q"],
+  ["Enter key", "enter", "\r"],
+  [
+    "bracketed paste containing carriage return",
+    "pastedCarriageReturn",
+    "\x1b[200~\rtest\x1b[201~",
+  ],
+  ["bracketed paste containing Tab", "pastedTab", "\x1b[200~\ttest\x1b[201~"],
+  ["complete bracketed paste", "bracketedPaste", "\x1b[200~hello\x1b[201~"],
+] as const)("useInput - handles %s", async (_label, test, input) => {
+  await expectInput(test, input);
 });
 
-it("useInput - preserves uppercase plain text", async () => {
-  const ps = term("use-input", ["uppercase"]);
-  ps.write("Q");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
+it.each([
+  ["Escape", "escape", "\x1b"],
+  ["Ctrl+F character shortcut", "ctrl", "\x06"],
+  ["Alt+M character shortcut", "alt", "\x1bm"],
+  ["Alt+Backspace", "altBackspace", "\x1b\x7f"],
+  ["Alt+Enter", "altEnter", "\x1b\r"],
+] as const)("useInput - handles %s", async (_label, test, input) => {
+  await expectInput(test, input);
 });
 
-it("useInput - reports return as a key instead of uppercase text", async () => {
-  const ps = term("use-input", ["uppercase"]);
-  ps.write("\r");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
+it.each([
+  ["Up", "upArrow", "\x1b[A"],
+  ["Down", "downArrow", "\x1b[B"],
+  ["Left", "leftArrow", "\x1b[D"],
+  ["Right", "rightArrow", "\x1b[C"],
+  ["Alt+Up", "upArrowAlt", "\x1b\x1b[A"],
+  ["Alt+Down", "downArrowAlt", "\x1b\x1b[B"],
+  ["Alt+Left", "leftArrowAlt", "\x1b\x1b[D"],
+  ["Alt+Right", "rightArrowAlt", "\x1b\x1b[C"],
+  ["Ctrl+Up", "upArrowCtrl", "\x1b[1;5A"],
+  ["Ctrl+Down", "downArrowCtrl", "\x1b[1;5B"],
+  ["Ctrl+Left", "leftArrowCtrl", "\x1b[1;5D"],
+  ["Ctrl+Right", "rightArrowCtrl", "\x1b[1;5C"],
+  ["Page Down", "pageDown", "\x1b[6~"],
+  ["Page Up", "pageUp", "\x1b[5~"],
+  ["Home", "home", "\x1b[H"],
+  ["End", "end", "\x1b[F"],
+  ["Tab", "tab", "\t"],
+  ["Shift+Tab", "shiftTab", "\x1b[Z"],
+  ["Backspace", "backspace", "\b"],
+  ["Delete", "delete", "\x1b[3~"],
+] as const)("useInput - handles the finite %s key", async (_label, test, input) => {
+  await expectInput(test, input);
 });
 
-it("useInput - bracketed paste preserves carriage return", async () => {
-  const ps = term("use-input", ["pastedCarriageReturn"]);
-  ps.write("\x1b[200~\rtest\x1b[201~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
+it("useInput - handles rapid arrows and Enter in one chunk", async () => {
+  await expectInput("rapidArrowsEnter", "\x1b[B\x1b[B\x1b[B\r");
 });
 
-it("useInput - bracketed paste preserves tab", async () => {
-  const ps = term("use-input", ["pastedTab"]);
-  ps.write("\x1b[200~\ttest\x1b[201~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
+it.each([
+  ["unsupported F1", "dropUnsupported", "\x1bOPq"],
+  ["complete uninterpreted control sequence", "dropUninterpreted", "\x1b[?25hq"],
+] as const)("useInput - drops %s", async (_label, test, input) => {
+  await expectInput(test, input);
 });
 
-it("useInput - receives bracketed paste as a paste event", async () => {
-  const ps = term("use-input", ["bracketedPaste"]);
-  ps.write("[200~hello[201~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-// ---------------------------------------------------------------------------
-// useInput — escape / ctrl / meta
-// ---------------------------------------------------------------------------
-
-it("useInput - handle escape", async () => {
-  const ps = term("use-input", ["escape"]);
-  ps.write("");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - escape does not set meta", async () => {
-  const ps = term("use-input", ["escapeNoMeta"]);
-  ps.write("");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle ctrl", async () => {
-  const ps = term("use-input", ["ctrl"]);
-  ps.write("");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta", async () => {
-  const ps = term("use-input", ["meta"]);
-  ps.write("m");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + backspace (0x7F)", async () => {
-  const ps = term("use-input", ["metaBackspace"]);
-  ps.write("");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - preserves an uninterpreted ESC[ sequence", async () => {
-  const ps = term("use-input", ["escapeBracketPrefix"]);
-  ps.write("[");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + O with pending flush", async () => {
-  const ps = term("use-input", ["metaUpperO"]);
-  ps.write("O");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle option + return (macOS)", async () => {
-  const ps = term("use-input", ["returnMeta"]);
-  ps.write("\r");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle Ctrl+F1 without crashing", async () => {
-  const ps = term("use-input", ["ctrlF1"]);
-  ps.write("[1;5P");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle unmapped ctrl escape sequence without crashing", async () => {
-  const ps = term("use-input", ["unmappedCtrlSequence"]);
-  // ESC [ 1 ; 5 I — focus-in with ctrl modifier, not in keyName map
-  ps.write("[1;5I");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-// ---------------------------------------------------------------------------
-// useInput — navigation keys
-// ---------------------------------------------------------------------------
-
-it("useInput - handle up arrow", async () => {
-  const ps = term("use-input", ["upArrow"]);
-  ps.write("[A");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle down arrow", async () => {
-  const ps = term("use-input", ["downArrow"]);
-  ps.write("[B");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle left arrow", async () => {
-  const ps = term("use-input", ["leftArrow"]);
-  ps.write("[D");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle right arrow", async () => {
-  const ps = term("use-input", ["rightArrow"]);
-  ps.write("[C");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handles rapid arrows and enter in one chunk", async () => {
-  const ps = term("use-input", ["rapidArrowsEnter"]);
-  ps.write("[B[B[B\r");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + up arrow", async () => {
-  const ps = term("use-input", ["upArrowMeta"]);
-  ps.write("[A");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + down arrow", async () => {
-  const ps = term("use-input", ["downArrowMeta"]);
-  ps.write("[B");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + left arrow", async () => {
-  const ps = term("use-input", ["leftArrowMeta"]);
-  ps.write("[D");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle meta + right arrow", async () => {
-  const ps = term("use-input", ["rightArrowMeta"]);
-  ps.write("[C");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle ctrl + up arrow", async () => {
-  const ps = term("use-input", ["upArrowCtrl"]);
-  ps.write("[1;5A");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle ctrl + down arrow", async () => {
-  const ps = term("use-input", ["downArrowCtrl"]);
-  ps.write("[1;5B");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle ctrl + left arrow", async () => {
-  const ps = term("use-input", ["leftArrowCtrl"]);
-  ps.write("[1;5D");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle ctrl + right arrow", async () => {
-  const ps = term("use-input", ["rightArrowCtrl"]);
-  ps.write("[1;5C");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle page down", async () => {
-  const ps = term("use-input", ["pageDown"]);
-  ps.write("[6~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle page up", async () => {
-  const ps = term("use-input", ["pageUp"]);
-  ps.write("[5~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle home", async () => {
-  const ps = term("use-input", ["home"]);
-  ps.write("[H");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle end", async () => {
-  const ps = term("use-input", ["end"]);
-  ps.write("[F");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-// ---------------------------------------------------------------------------
-// useInput — tab / backspace / delete
-// ---------------------------------------------------------------------------
-
-it("useInput - handle tab", async () => {
-  const ps = term("use-input", ["tab"]);
-  ps.write("\t");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle shift + tab", async () => {
-  const ps = term("use-input", ["shiftTab"]);
-  ps.write("[Z");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle backspace", async () => {
-  const ps = term("use-input", ["backspace"]);
-  ps.write("");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle delete", async () => {
-  const ps = term("use-input", ["delete"]);
-  ps.write("[3~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-it("useInput - handle remove (delete)", async () => {
-  const ps = term("use-input", ["remove"]);
-  ps.write("[3~");
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
-
-// ---------------------------------------------------------------------------
-// useInput — Ctrl+C default prevention
-// ---------------------------------------------------------------------------
-
-it("useInput - a consuming handler can handle legacy Ctrl+C", async () => {
+it.each([
+  ["legacy", "\x03"],
+  ["Kitty", "\x1b[99;5u"],
+] as const)("useInput - preventDefault handler can own %s Ctrl+C", async (_label, input) => {
   const ps = term("use-input-ctrl-c");
-  ps.write("");
+  ps.write(input);
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - a consuming handler can handle Kitty Ctrl+C", async () => {
-  const ps = term("use-input-ctrl-c");
-  // Kitty reports the printable key codepoint plus the Ctrl modifier.
-  ps.write("[99;5u");
+it.each([
+  ["legacy", "\x03"],
+  ["Kitty", "\x1b[99;5u"],
+] as const)("useInput - Runtime exits on unprevented %s Ctrl+C", async (_label, input) => {
+  const ps = term("input-default-ctrl-c");
+  ps.write(input);
+  await ps.waitForOutput((output) => output.includes("exited"));
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-// ---------------------------------------------------------------------------
-// useInput — multiple hooks / many hooks
-// ---------------------------------------------------------------------------
+it("useInput - private keyboard negotiation owns its reply and preserves adjacent input", async () => {
+  const ps = term("input-auto-negotiation");
+  await ps.waitForOutput((output) => output.includes("__READY__") && output.includes("\x1b[?u"));
+  ps.write("a\x1b[?1ub");
+  await ps.waitForOutput(
+    (output) =>
+      output.includes('__AUTO_INPUTS__:["a","b"]') &&
+      output.includes("\x1b[>1u") &&
+      output.includes("\x1b[<u") &&
+      output.includes("exited"),
+  );
+  await ps.waitForExit();
 
-it("useInput - ignore input if not active", async () => {
+  expect(ps.output.split("\x1b[>1u")).toHaveLength(2);
+  expect(ps.output.split("\x1b[<u")).toHaveLength(2);
+  expect(ps.output.lastIndexOf("\x1b[<u")).toBeGreaterThan(ps.output.lastIndexOf("\x1b[>1u"));
+  expect(ps.output).toContain('__AUTO_INPUTS__:["a","b"]');
+  expect(ps.output).toContain("exited");
+});
+
+it("useInput - ignores input while inactive", async () => {
   const ps = term("use-input-multiple");
   ps.write("x");
   await ps.waitForExit();
@@ -315,39 +119,25 @@ it("useInput - ignore input if not active", async () => {
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - no MaxListenersExceededWarning with many useInput hooks", async () => {
+it("useInput - does not add one stdin listener per hook", async () => {
   const ps = term("use-input-many");
   await ps.waitForExit();
   expect(ps.output).not.toContain("MaxListenersExceededWarning");
   expect(ps.output).toContain("exited");
 });
 
-// ---------------------------------------------------------------------------
-// useInput — discrete priority (rapid input + deferred state)
-// ---------------------------------------------------------------------------
-
 it("useInput - discrete priority keeps states in sync during rapid input", async () => {
   const ps = term("use-input-discrete-priority");
-
-  // Start the timing below only after the fixture can receive input. Otherwise,
-  // a slow process startup lets every delayed write queue behind readiness and
-  // then sends Enter before Vue can flush the deferred watcher.
   await ps.waitForOutput((output) => output.includes("__READY__"));
 
   const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  // Simulate rapid delete key repeat at ~30ms intervals.
-  // State starts pre-populated with "abcde". Send 5 rapid deletes
-  // to clear it, then wait for transitions to settle and check state.
   for (const delayMilliseconds of [0, 30, 60, 90, 120]) {
     setTimeout(() => {
-      ps.write("[3~");
+      ps.write("\x1b[3~");
     }, delayMilliseconds);
   }
 
   await delay(200);
-
-  // Wait for all transitions to settle, then press Enter to report state
   await delay(2000);
   ps.write("\r");
   await ps.waitForExit();
@@ -356,36 +146,32 @@ it("useInput - discrete priority keeps states in sync during rapid input", async
   expect(ps.output).toContain('FINAL query:"" deferred:""');
 });
 
-// ---------------------------------------------------------------------------
-// Normalized paste input
-// ---------------------------------------------------------------------------
-
 it("useInput - receives bracketed paste as one normalized event", async () => {
   const ps = term("normalized-paste", ["basic"]);
-  ps.write("[200~hello world[201~");
+  ps.write("\x1b[200~hello world\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
-  expect(ps.output).toContain("[?2004h");
-  expect(ps.output).toContain("[?2004l");
+  expect(ps.output).toContain("\x1b[?2004h");
+  expect(ps.output).toContain("\x1b[?2004l");
 });
 
-it("useInput - paste content with escape sequences is delivered verbatim", async () => {
+it("useInput - preserves escape sequences inside paste", async () => {
   const ps = term("normalized-paste", ["escapeSequences"]);
-  ps.write("[200~hello[Aworld[201~");
+  ps.write("\x1b[200~hello\x1b[Aworld\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - bracketed paste is not split into text or key events", async () => {
+it("useInput - does not split one bracketed paste into multiple facts", async () => {
   const ps = term("normalized-paste", ["singleFact"]);
-  ps.write("[200~hello[201~");
+  ps.write("\x1b[200~hello\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });
 
-it("useInput - all simultaneous global hooks receive the same paste event", async () => {
+it("useInput - delivers one paste fact to every captured global hook", async () => {
   const ps = term("normalized-paste", ["multipleHooks"]);
-  ps.write("[200~hello[201~");
+  ps.write("\x1b[200~hello\x1b[201~");
   await ps.waitForExit();
   expect(ps.output).toContain("exited");
 });

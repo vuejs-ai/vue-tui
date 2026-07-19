@@ -97,7 +97,7 @@ test("raw mode is disabled on the thrown-error cleanup path", async () => {
   Object.assign(stderr, { isTTY: true, columns: 80, rows: 24 });
 
   const Boom = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     onMounted(() => {
       throw new Error("Error after raw mode enabled");
     });

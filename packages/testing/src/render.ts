@@ -6,7 +6,9 @@ import {
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
   INTERNAL_TEST_INPUT_HOST,
+  INTERNAL_KITTY_KEYBOARD,
   createManualSuspensionHost,
+  type InternalMountOptions,
   type InternalRenderObserver,
 } from "@vue-tui/runtime/internal";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
@@ -405,7 +407,10 @@ export async function render(
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
       [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
       [INTERNAL_TEST_INPUT_HOST]: mouseController.host,
-    } as Parameters<TuiApp["mount"]>[0]);
+      // The deterministic host models normalized input directly and must not
+      // emit a real terminal query that its in-memory streams cannot answer.
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+    } as InternalMountOptions);
   } catch (error) {
     failAfterDispose(error);
   }

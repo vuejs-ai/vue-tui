@@ -4,9 +4,11 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput, useLayoutWidth, type TuiApp } from "@vue-tui/runtime";
 import {
+  INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
   createManualSuspensionHost,
+  type InternalMountOptions,
   type SuspensionHost,
 } from "@vue-tui/runtime/internal";
 
@@ -66,7 +68,7 @@ test.sequential("registers suspension before the first terminal acquisition", ()
       maxFps: 0,
       patchConsole: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    } as InternalMountOptions);
 
     expect(stateAtRegistration).toEqual({ writes: [], isRaw: false });
   } finally {
@@ -90,7 +92,7 @@ test.sequential("activating managed input while Fullscreen is suspended defers e
     return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
   }) as NodeJS.WriteStream["write"];
   const App = defineComponent(() => {
-    useInput(() => "continue", { isActive: active });
+    useInput(() => {}, { isActive: active });
     return () => <Text>frame</Text>;
   });
   const app = createApp(App);
@@ -104,9 +106,9 @@ test.sequential("activating managed input while Fullscreen is suspended defers e
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
-      kittyKeyboard: { mode: "enabled" },
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
@@ -146,7 +148,7 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     const suspensionHost = createManualSuspensionHost();
     const content = shallowRef("before-suspend");
     const App = defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => {});
       return () => <Text>{content.value}</Text>;
     });
     const app = createApp(App);
@@ -182,7 +184,7 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
         maxFps: 0,
         patchConsole: false,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      } as Parameters<TuiApp["mount"]>[0]);
+      } as InternalMountOptions);
       expect(stdin.isRaw).toBe(true);
 
       await suspensionHost.suspend();
@@ -247,7 +249,7 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
       maxFps: 0,
       patchConsole: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    } as InternalMountOptions);
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
 
@@ -280,7 +282,7 @@ test.sequential("a resize reported by the continued frame is repainted before in
   const renderedFacts: string[] = [];
   const App = defineComponent(() => {
     const width = useLayoutWidth();
-    useInput(() => "continue");
+    useInput(() => {});
     const frame = () => {
       const facts = `${width.value}:raw=${String(stdin.isRaw)}`;
       renderedFacts.push(facts);
@@ -312,7 +314,7 @@ test.sequential("a resize reported by the continued frame is repainted before in
       maxFps: 0,
       patchConsole: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
@@ -366,7 +368,7 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
       maxFps: 0,
       patchConsole: false,
       [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    } as InternalMountOptions);
     await suspensionHost.suspend();
 
     const resumeOffset = events.length;
@@ -475,7 +477,7 @@ test.sequential.each(["inline", "fullscreen"] as const)(
         patchConsole: false,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-      } as Parameters<TuiApp["mount"]>[0]);
+      } as InternalMountOptions);
 
       await suspensionHost.suspend();
       (stdout as { columns?: number }).columns = undefined;

@@ -13,19 +13,12 @@ import {
   Box,
   Text,
   useApp,
-  useFocus,
-  useFocusedInput,
-  useFocusManager,
-  useFocusScope,
-  useFocusScopeInput,
   useInput,
   useLayoutWidth,
   useStderr,
   useStdout,
   useViewportHeight,
   type CoordinatedWriteResult,
-  type UseFocusReturn,
-  type UseFocusScopeReturn,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import {
@@ -249,8 +242,6 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
   const approval = shallowRef<"closed" | "accept" | "reject">("closed");
   const approvalResult = shallowRef<"none" | "accepted" | "rejected">("none");
   const sequence = shallowRef(0);
-  let composer!: UseFocusReturn;
-  let approvalTarget!: UseFocusReturn;
   let writeStdout!: (data: string) => void;
   let writeStderr!: (data: string) => void;
   let exit!: (result?: unknown) => void;
@@ -259,35 +250,29 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
     `__J1__ seq=${sequence.value} records=${records.value.length} tokens=${tokenCount.value} approval=${approval.value} result=${approvalResult.value}`;
 
   const App = defineComponent(() => {
-    const composerHost = shallowRef<ComponentPublicInstance | null>(null);
-    const approvalHost = shallowRef<ComponentPublicInstance | null>(null);
-    composer = useFocus(composerHost, { autoFocus: true });
-    const approvalScope = useFocusScope({
-      isActive: computed(() => approval.value !== "closed"),
-      trapped: true,
-    });
-    approvalTarget = useFocus(approvalHost, { scope: approvalScope, autoFocus: true });
     writeStdout = useStdout().write;
     writeStderr = useStderr().write;
     exit = useApp().exit;
 
-    useFocusedInput(composer, (event) => {
-      if (event.sequence !== "a" && event.sequence !== "r") return "continue";
-      approval.value = event.sequence === "a" ? "accept" : "reject";
-      sequence.value++;
-      return "consume";
-    });
-    useFocusScopeInput(approvalScope, (event) => {
-      if (approval.value === "accept" && event.sequence === "\r") {
+    // The approval overlay owns input by application state. Runtime only
+    // supplies normalized facts; no renderer-owned focus policy is required.
+    useInput((event) => {
+      if (
+        approval.value === "closed" &&
+        event.kind === "text" &&
+        (event.text === "a" || event.text === "r")
+      ) {
+        approval.value = event.text === "a" ? "accept" : "reject";
+      } else if (approval.value === "accept" && event.kind === "key" && event.name === "enter") {
         approvalResult.value = "accepted";
-      } else if (approval.value === "reject" && event.sequence === "\x1b") {
+        approval.value = "closed";
+      } else if (approval.value === "reject" && event.kind === "key" && event.name === "escape") {
         approvalResult.value = "rejected";
+        approval.value = "closed";
       } else {
-        return "continue";
+        return;
       }
-      approval.value = "closed";
       sequence.value++;
-      return "consume";
     });
 
     return () => (
@@ -300,12 +285,12 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
         <Text>{marker()}</Text>
         <Text>{`response ${"x".repeat(tokenCount.value)}`}</Text>
         {approval.value === "closed" ? null : (
-          <Box ref={approvalHost}>
+          <Box>
             <Text>{`approval ${approval.value}`}</Text>
           </Box>
         )}
-        <Box ref={composerHost}>
-          <Text>{composer.isFocused.value ? "> composer" : "  composer"}</Text>
+        <Box>
+          <Text>{approval.value === "closed" ? "> composer" : "  composer"}</Text>
         </Box>
       </Box>
     );
@@ -322,7 +307,7 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
   const heartbeat = startHeartbeat();
   let assertions = 0;
   try {
-    assert.equal(composer.isFocused.value, true);
+    assert.equal(approval.value, "closed");
     assertions++;
     for (let id = 0; id < capacityManifest.j1.completedRecords; id++) {
       const record = Object.freeze({ id, marker: `J1-REC-${id.toString().padStart(3, "0")}` });
@@ -340,20 +325,20 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
     }
 
     await host.input("a", "approval=accept");
-    assert.equal(approvalTarget.isFocused.value, true);
+    assert.equal(approval.value, "accept");
     await host.input("\r", "result=accepted");
-    assert.equal(composer.isFocused.value, true);
+    assert.equal(approval.value, "closed");
     await host.input("r", "approval=reject");
-    assert.equal(approvalTarget.isFocused.value, true);
+    assert.equal(approval.value, "reject");
     await host.input("\x1b", "result=rejected");
-    assert.equal(composer.isFocused.value, true);
+    assert.equal(approval.value, "closed");
     assertions += 5;
 
     await host.resize(72, 20, "result=rejected");
     await host.resize(100, 30, "result=rejected");
     await host.suspend();
     await host.resume("result=rejected");
-    assert.equal(composer.isFocused.value, true);
+    assert.equal(approval.value, "closed");
     assertions++;
 
     writeStdout("J1-COORDINATED-STDOUT\n");
@@ -422,26 +407,33 @@ async function runJ2(maxFps: number): Promise<JourneyExecution> {
   const App = defineComponent(() => {
     exit = useApp().exit;
     useInput((event) => {
-      if (phase.value !== "open") return "continue";
+      if (phase.value !== "open") return;
       if (event.kind === "text" && /^[a-z]$/.test(event.text)) {
         query.value += event.text;
-      } else if (event.sequence === "\x7f") {
+      } else if (event.kind === "key" && event.name === "backspace") {
         query.value = query.value.slice(0, -1);
-      } else if (event.kind === "key" && event.key.name === "down") {
+      } else if (event.kind === "key" && event.name === "down") {
         active.value = Math.min(filtered.value.length - 1, active.value + 1);
-      } else if (event.kind === "key" && event.key.name === "up") {
+      } else if (event.kind === "key" && event.name === "up") {
         active.value = Math.max(0, active.value - 1);
-      } else if (event.sequence === "\r") {
+      } else if (event.kind === "key" && event.name === "enter") {
         const selected = filtered.value[active.value];
         if (selected) accepted.value = [...accepted.value, selected];
         phase.value = "accepted";
-      } else if (event.sequence === "\x03") {
+      } else if (
+        event.kind === "key" &&
+        event.character === "c" &&
+        event.ctrl &&
+        !event.alt &&
+        !event.shift
+      ) {
         phase.value = "cancelled";
+        sequence.value++;
+        return { preventDefault: true };
       } else {
-        return "continue";
+        return;
       }
       sequence.value++;
-      return "consume";
     });
     return () => (
       <Box width={100} height={30} flexDirection="column">
@@ -552,12 +544,11 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
     exit = useApp().exit;
     selection = useTextSelection(target);
     useInput((event) => {
-      if (event.kind !== "key" || event.key.phase === "release") return "continue";
-      const delta = event.key.name === "down" ? 1 : event.key.name === "up" ? -1 : 0;
-      if (delta === 0 || !scroll.value?.scrollByLines(delta)) return "continue";
+      if (event.kind !== "key") return;
+      const delta = event.name === "down" ? 1 : event.name === "up" ? -1 : 0;
+      if (delta === 0 || !scroll.value?.scrollByLines(delta)) return;
       scrollTop.value += delta;
       sequence.value++;
-      return "consume";
     });
     return () => (
       <Box width={100} height={30} flexDirection="column">
@@ -695,10 +686,9 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
     }
     viewportHeight = resolvedViewportHeight;
     useInput((event) => {
-      if (event.sequence !== "q") return "continue";
+      if (event.kind !== "text" || event.text !== "q") return;
       sequence.value++;
       last.value = { ...last.value, action: "quit" };
-      return "consume";
     });
     return () => (
       <Box width={120} height={40} flexDirection="column">
@@ -789,7 +779,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
   const paneRows = Array.from({ length: 4 }, (_, pane) =>
     shallowReactive<WorkbenchRow[]>(makeWorkbenchRows(pane)),
   );
-  const scopeActive = [shallowRef(true), shallowRef(false)];
+  const activePane = shallowRef(0);
   const leftWidth = shallowRef(59);
   const scrollOffsets = shallowReactive([0, 0, 0, 0]);
   const overlayOpen = shallowRef(false);
@@ -799,15 +789,12 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     shallowRef<ComponentPublicInstance | null>(null),
   );
   const paneScroll = Array.from({ length: 4 }, () => shallowRef<ScrollBoxExpose | null>(null));
-  const paneFocus: Array<UseFocusReturn | undefined> = Array.from({ length: 4 });
-  const scopes: Array<UseFocusScopeReturn | undefined> = Array.from({ length: 2 });
   const dividerTarget = shallowRef<ComponentPublicInstance | null>(null);
-  let overlayFocus: UseFocusReturn | undefined;
   let exit!: (result?: unknown) => void;
   let focusStep = 0;
   let focusBeforeOverlay = -1;
 
-  const focusedPane = (): number => paneFocus.findIndex((focus) => focus?.isFocused.value === true);
+  const focusedPane = (): number => activePane.value;
   const checksum = (): number =>
     paneRows.reduce((total, rows) => total + rows.reduce((sum, row) => sum + row.value, 0), 0);
   const marker = (side: "TOP" | "BOTTOM"): string =>
@@ -817,15 +804,9 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     props: { group: { type: Number, required: true } },
     setup(props) {
       const group = props.group;
-      const scope = useFocusScope({ isActive: scopeActive[group], trapped: false });
-      scopes[group] = scope;
       const firstPane = group * 2;
       for (let local = 0; local < 2; local++) {
         const pane = firstPane + local;
-        paneFocus[pane] = useFocus(paneTargets[pane]!, {
-          scope,
-          autoFocus: local === 0,
-        });
         useMouseEvent(paneTargets[pane]!, "wheel", (event) => {
           const delta = event.delta.y > 0 ? 1 : event.delta.y < 0 ? -1 : 0;
           if (delta === 0 || !paneScroll[pane]!.value?.scrollByLines(delta)) return "continue";
@@ -848,7 +829,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
               flexShrink={0}
               overflowY="hidden"
             >
-              <Text>{`${paneFocus[pane]!.isFocused.value ? ">" : " "} pane ${pane}`}</Text>
+              <Text>{`${activePane.value === pane ? ">" : " "} pane ${pane}`}</Text>
               <ScrollBox ref={paneScroll[pane]}>
                 {paneRows[pane]!.map((row) => (
                   <Text key={row.id}>{`${row.id} value=${row.value}`}</Text>
@@ -863,15 +844,6 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
 
   const Overlay = defineComponent(() => {
     const target = shallowRef<ComponentPublicInstance | null>(null);
-    const scope = useFocusScope({ trapped: true });
-    overlayFocus = useFocus(target, { scope, autoFocus: true });
-    useFocusScopeInput(scope, (event) => {
-      if (event.sequence !== "c") return "continue";
-      overlayOpen.value = false;
-      sequence.value++;
-      actionName.value = "overlay-close";
-      return "consume";
-    });
     useMouseEvent(target, "wheel", () => "consume");
     useMouseEvent(target, "click", () => "consume");
     return () => (
@@ -891,7 +863,6 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
 
   const App = defineComponent(() => {
     exit = useApp().exit;
-    useFocusManager();
     useMouseDrag(dividerTarget, (event: TuiMouseDragEvent) => {
       if (event.phase !== "start" && event.phase !== "move") return;
       if (event.movement.x === 0) return;
@@ -900,36 +871,28 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       actionName.value = "divider";
     });
     useInput((event) => {
-      if (event.sequence === "f" && !overlayOpen.value) {
-        switch (focusStep % 4) {
-          case 0:
-            (paneFocus[0]!.isFocused.value ? paneFocus[1] : paneFocus[0])!.focus();
-            break;
-          case 1:
-            scopeActive[0]!.value = false;
-            scopeActive[1]!.value = true;
-            break;
-          case 2:
-            (paneFocus[2]!.isFocused.value ? paneFocus[3] : paneFocus[2])!.focus();
-            break;
-          case 3:
-            scopeActive[1]!.value = false;
-            scopeActive[0]!.value = true;
-            break;
-        }
+      if (event.kind !== "text") return;
+      if (overlayOpen.value) {
+        if (event.text !== "c") return;
+        overlayOpen.value = false;
+        activePane.value = focusBeforeOverlay;
+        sequence.value++;
+        actionName.value = "overlay-close";
+        return;
+      }
+      if (event.text === "f") {
+        activePane.value = (activePane.value + 1) % 4;
         focusStep++;
         sequence.value++;
         actionName.value = "focus";
-        return "consume";
+        return;
       }
-      if (event.sequence === "o" && !overlayOpen.value) {
+      if (event.text === "o") {
         focusBeforeOverlay = focusedPane();
         overlayOpen.value = true;
         sequence.value++;
         actionName.value = "overlay-open";
-        return "consume";
       }
-      return "continue";
     });
     return () => (
       <Box width={120} height={40} flexDirection="column">
@@ -989,7 +952,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
       );
       const expectedGroup = focusStep % 4 === 0 || focusStep % 4 === 1 ? 0 : 1;
       assert.equal(Math.floor(focusedPane() / 2), expectedGroup);
-      assert.equal(paneFocus.filter((focus) => focus?.isFocused.value).length, 1);
+      assert.equal(focusedPane(), focusStep % 4);
       assertions += 2;
     }
 
@@ -1036,14 +999,14 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     assertions++;
 
     await recordVisible(latencies, () => host.input("o", "overlay=open"));
-    assert.equal(overlayFocus?.isFocused.value, true);
+    assert.equal(overlayOpen.value, true);
     const offsetsBeforeCoveredWheel = [...scrollOffsets];
     await host.mouse.wheel({ x: 35, y: 10 }, "down");
     assert.deepEqual([...scrollOffsets], offsetsBeforeCoveredWheel);
     assertions += 2;
     await recordVisible(latencies, () => host.input("c", "overlay=closed"));
     assert.equal(focusedPane(), focusBeforeOverlay);
-    assert.equal(overlayFocus?.isFocused.value, false);
+    assert.equal(overlayOpen.value, false);
     assertions += 2;
 
     const finalScreen = await host.screen();

@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
-import { nextTick, defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
+import { nextTick, defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, createApp, Text, useFocus, useInput, useStdin } from "@vue-tui/runtime";
+import { Box, createApp, Text, useInput, useStdin } from "@vue-tui/runtime";
 import { makeFakeWritable } from "../lifecycle/test-streams.ts";
 
 // Builds a stdin that is NOT a TTY, so isRawModeSupported is false. This mirrors
@@ -95,7 +95,7 @@ test("useStdin exposes only the exact custom stream mounted into the application
 
 test("useInput on a non-TTY stdin explains the managed-input boundary", async () => {
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>listening</Text>;
   });
 
@@ -128,7 +128,7 @@ test.each(["inline", "fullscreen"] as const)(
     const stdoutData = captureData(stdout);
     const stderrData = captureData(stderr);
     const FailingInput = defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => undefined);
       return () => <Text>late</Text>;
     });
     const App = defineComponent(() => {
@@ -142,52 +142,6 @@ test.each(["inline", "fullscreen"] as const)(
     const app = createApp(App);
 
     app.mount({ mode, stdout, stderr, stdin, maxFps: 0 });
-    await expect(app.waitUntilExit()).rejects.toThrow(
-      "Managed input is unavailable because the mounted stdin is not a controllable TTY",
-    );
-
-    expect(setRawModeCalls).toEqual([]);
-    expect(refCalls).toEqual([]);
-    expect(stdin.listenerCount("data")).toBe(0);
-    expect(stdoutData).toEqual([]);
-    expect(stderrData).toEqual([]);
-    app.unmount();
-    stdin.destroy();
-    stdout.destroy();
-    stderr.destroy();
-  },
-);
-
-test.each(["inline", "fullscreen"] as const)(
-  "a rendered sequential focus target fails through the %s app lifetime before output",
-  async (mode) => {
-    const setRawModeCalls: boolean[] = [];
-    const refCalls: string[] = [];
-    const stdin = makeNonTtyStdin(setRawModeCalls);
-    stdin.ref = () => {
-      refCalls.push("ref");
-      return stdin;
-    };
-    stdin.unref = () => {
-      refCalls.push("unref");
-      return stdin;
-    };
-    const stdout = makeFakeWritable();
-    const stderr = makeFakeWritable();
-    const stdoutData = captureData(stdout);
-    const stderrData = captureData(stderr);
-    const App = defineComponent(() => {
-      const host = shallowRef<ComponentPublicInstance | null>(null);
-      useFocus(host);
-      return () => (
-        <Box ref={host}>
-          <Text>focusable</Text>
-        </Box>
-      );
-    });
-    const app = createApp(App);
-
-    expect(() => app.mount({ mode, stdout, stderr, stdin, maxFps: 0 })).not.toThrow();
     await expect(app.waitUntilExit()).rejects.toThrow(
       "Managed input is unavailable because the mounted stdin is not a controllable TTY",
     );

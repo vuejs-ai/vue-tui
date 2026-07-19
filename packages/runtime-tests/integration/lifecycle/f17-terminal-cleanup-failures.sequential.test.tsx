@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
@@ -46,7 +47,7 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
 
   const { stream: stdin, calls: rawModeCalls } = makeRawTrackingStdin();
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => null;
   });
   const app = createApp(App);
@@ -58,10 +59,10 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
     stdin,
     mode: "fullscreen",
     liveUpdates: true,
-    kittyKeyboard: { mode: "enabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
 
   let unmountError: unknown;
   try {
@@ -113,7 +114,7 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
 
   const { stream: stdin, calls: rawModeCalls } = makeRawTrackingStdin();
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => null;
   });
   const app = createApp(App);

@@ -1,4 +1,5 @@
 import { expect, test } from "vite-plus/test";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import { Text, createApp } from "@vue-tui/runtime";
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
@@ -84,8 +85,8 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
       liveUpdates: true,
       maxFps: 0,
       mode: "fullscreen",
-      kittyKeyboard: { mode: "disabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+    } as InternalMountOptions);
     await waitForWrite(writes, "x");
     const exited = app.waitUntilExit();
     failEnable = true;

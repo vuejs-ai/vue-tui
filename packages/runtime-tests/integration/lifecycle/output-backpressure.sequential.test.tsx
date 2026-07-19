@@ -9,15 +9,25 @@ import {
   useInput,
   useStdout,
   type CoordinatedWriteResult,
+  type TuiInputEvent,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { runtimeResourceTracker } from "@vue-tui/runtime/internal";
+import {
+  INTERNAL_KITTY_KEYBOARD,
+  runtimeResourceTracker,
+  type InternalMountOptions,
+} from "@vue-tui/runtime/internal";
 import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
 import { createSlowWritable } from "./slow-writable.ts";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l";
+
+function inputLabel(event: TuiInputEvent): string {
+  if (event.kind === "text" || event.kind === "paste") return event.text;
+  return event.name ?? event.character;
+}
 
 function makeTrackedStdin(): {
   readonly stream: NodeJS.ReadStream;
@@ -205,8 +215,7 @@ test.sequential("Fullscreen managed input waits through initial output backpress
   const inputs: string[] = [];
   const Root = defineComponent(() => {
     useInput((event) => {
-      inputs.push(event.sequence);
-      return "continue";
+      inputs.push(inputLabel(event));
     });
     return () => h(Text, null, () => "ready");
   });
@@ -225,10 +234,10 @@ test.sequential("Fullscreen managed input waits through initial output backpress
     stderr,
     mode: "fullscreen",
     liveUpdates: true,
-    kittyKeyboard: { mode: "disabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   stdin.emit("data", "early");
   await app.waitUntilRenderFlush();
   await flushInputTurn();
@@ -261,8 +270,7 @@ test.sequential("Inline Kitty and paste activation reconcile one handed control 
   const inputs: string[] = [];
   const Root = defineComponent(() => {
     useInput((event) => {
-      inputs.push(event.sequence);
-      return "continue";
+      inputs.push(inputLabel(event));
     });
     return () => h(Text, null, () => "kitty-ready");
   });
@@ -280,10 +288,10 @@ test.sequential("Inline Kitty and paste activation reconcile one handed control 
     stdout: slow.stream,
     stderr,
     liveUpdates: true,
-    kittyKeyboard: { mode: "enabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   stdin.emit("data", "early");
   await app.waitUntilRenderFlush();
   await flushInputTurn();
@@ -311,7 +319,7 @@ test.sequential("a semantic-input release during public output backpressure rest
   let write!: (data: string) => CoordinatedWriteResult;
   const Root = defineComponent(() => {
     write = useStdout().write;
-    useInput(() => "continue", { isActive: active });
+    useInput(() => {}, { isActive: active });
     return () => h(Text, null, () => "active");
   });
   const slow = createSlowWritable({
@@ -327,10 +335,10 @@ test.sequential("a semantic-input release during public output backpressure rest
     stdout: slow.stream,
     stderr,
     liveUpdates: true,
-    kittyKeyboard: { mode: "disabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await app.waitUntilRenderFlush();
 
   const result = write("block-release\n");
@@ -364,8 +372,7 @@ test.sequential("blocked semantic-input changes retain only the final active sta
     write = useStdout().write;
     useInput(
       (event) => {
-        inputs.push(event.sequence);
-        return "continue";
+        inputs.push(inputLabel(event));
       },
       { isActive: active },
     );
@@ -384,10 +391,10 @@ test.sequential("blocked semantic-input changes retain only the final active sta
     stdout: slow.stream,
     stderr,
     liveUpdates: true,
-    kittyKeyboard: { mode: "disabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
     maxFps: 0,
     patchConsole: false,
-  });
+  } as InternalMountOptions);
   await app.waitUntilRenderFlush();
 
   const baselineOn = slow.deliveredOutput.split(PASTE_ON).length - 1;

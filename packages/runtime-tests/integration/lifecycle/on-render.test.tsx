@@ -183,7 +183,6 @@ test("onRender fires on input-triggered state update", async () => {
   const App = defineComponent(() => {
     useInput((event) => {
       if (event.kind === "text") received.value = event.text;
-      return "continue";
     });
     return () => <Text>{received.value}</Text>;
   });

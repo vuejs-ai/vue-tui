@@ -11,7 +11,7 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 
 - **Vue SFC & JSX** — `<template>`, TSX, or render functions — your choice
 - **Yoga flexbox** — the same layout engine behind React Native, not a CSS-subset hack
-- **Built-in input system** — keyboard handling, focus management, Tab navigation
+- **Normalized input primitive** — stable text, paste, and key facts without exposing terminal-protocol details
 - **Fullscreen selection and copy** — semantic Text ranges plus explicit custom or OSC 52 clipboard transport
 - **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
 - **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
@@ -57,16 +57,14 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((event) => {
-  if (event.kind !== "text") return "continue";
+  if (event.kind !== "text") return;
   if (event.text === "+") {
     count.value++;
-    return "consume";
+    return;
   }
   if (event.text === "-") {
     count.value--;
-    return "consume";
   }
-  return "continue";
 });
 </script>
 
@@ -120,7 +118,7 @@ Use ordinary Vue iteration and stable keys for a collection:
 
 Each mounted instance commits its current slot tree once. Acceptance releases the slot subtree but preserves the component instance as its write-once identity, so reactive updates and keyed reorder do not replay accepted history. An output-free first commit also accepts the instance; use an outer `v-if` if content is not ready. A Static below a Box hidden by `display="none"` or `v-show` remains open and commits once when that ancestor is shown. Do not nest Static inside another Static or Text. Remounting creates a new history block. Open instances in one transaction commit in current tree order, but terminal history is irreversible: a new instance later inserted before an accepted sibling still appends physically. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`.
 
-Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, focus, geometry, caret, and Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text` or `Static` is not supported.
+Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, accepted Box presence, Box size, and Runtime-private Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text` or `Static` is not supported.
 
 Nested `<Text color="revert">` and `<Text color="initial">` spans reset only their foreground to the terminal default. Reset spans may nest and wrap; an enclosing foreground resumes after the span, while background and the retained boolean text styles continue to apply.
 
@@ -135,32 +133,58 @@ Runtime does not export layout conveniences as separate components. Write line b
 
 | Composable                      | Description                                                                                                 |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`      | Normalized key, text, paste, and uninterpreted input with an explicit routing result                        |
-| `useInputAvailability()`        | Readonly managed-input availability for the current host                                                    |
+| `useInput(handler, opts?)`      | Frozen insertion text, complete paste payloads, and finite key identities; `isActive` gates input demand    |
 | `useMouseEvent(ref, event, fn)` | Targeted Fullscreen `"click"` or `"wheel"`; import from `@vue-tui/runtime/fullscreen`                       |
 | `useMouseDrag(ref, fn, opts?)`  | One captured Fullscreen drag lifecycle; import from `@vue-tui/runtime/fullscreen`                           |
 | `useTextSelection(ref, opts?)`  | Command and pointer selection for exactly one top-level Fullscreen Text; import from the Fullscreen subpath |
 | `useClipboard()`                | Read and write through the one app-owned custom or OSC 52 clipboard transport                               |
-| `useFocus(ref, opts?)`          | Opaque ref-bound focus target with rendered-order traversal and boolean `focus()` / `blur()`                |
-| `useFocusScope(opts?)`          | Nested active region or hard trapped boundary provided to descendants                                       |
-| `useFocusedInput(target, fn)`   | Normalized input attached to one exact focused target                                                       |
-| `useFocusScopeInput(scope, fn)` | Normalized input attached to a boundary or ancestor scope                                                   |
-| `useExternalInput(target, fn)`  | One normalized external fallthrough receiver for an exact focused target                                    |
-| `useFocusManager()`             | Exact focused-target observation plus boundary traversal and blur                                           |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                  |
 | `useLayoutWidth()`              | Readonly reactive width Runtime gives the root layout on every host                                         |
 | `useViewportHeight()`           | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
 | `useBoxSize(ref)`               | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
-| `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state                            |
+| `useBoxPresence(ref)`           | Whether one directly referenced `<Box>` belongs to the last accepted live renderer tree                     |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
 | `useStdout()`                   | Commit geometry-safe styled lines with explicit flow control, or access the deliberately raw stdout stream  |
 | `useStderr()`                   | Commit geometry-safe styled lines with explicit flow control, or access the deliberately raw stderr stream  |
 
-`useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event. For advanced routing, return a complete `InputRouteDecision` to choose action reporting, later routing, terminal defaults, and external forwarding independently. All application-global handlers run in registration order for each event before their decisions are merged.
+`useInput()` delivers a frozen event whose `kind` is `"text"`, `"paste"`, or `"key"`. Text and paste events contain `text`; a key event contains either a finite `name` or one shortcut `character`, plus top-level `shift`, `alt`, and `ctrl` booleans. Terminal protocol, byte sequence, codepoint, repeat/release, and uninterpreted-input details remain private. Handlers normally return nothing. The exact object `{ preventDefault: true }` suppresses only Runtime's delayed Ctrl+C default for that event; it does not stop other `useInput()` subscriptions. Unless a handler throws, every subscription captured for an event runs in registration order.
 
 Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()`.
 
-`useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed handler fails before publishing a route or changing terminal state. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected before terminal mutation.
+`useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active `useInput()` subscription acquires raw mode, bracketed-paste reporting, an application input route, and Runtime-private Kitty keyboard negotiation. The last active subscription immediately releases raw mode, paste reporting, and that route. If Runtime already sent a Kitty capability query, it may retain the shared listener and a bounded timer briefly only to filter the late protocol reply; disposing the app releases that reply filter immediately. `isActive` is a ref, getter, or boolean that gates this demand. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed subscription fails before dispatching an event or changing terminal state. Mount options containing the removed `rawMode`, `exitOnCtrlC`, or public Kitty configuration fields are rejected before terminal mutation.
+
+### Focus and routing above Runtime
+
+Focus identity, Tab order, nested scopes, modal traps, and propagation are application policy. Runtime therefore does not export a focus manager or targeted input hooks. An application or third-party library can keep that policy in Vue state, use `useBoxPresence()` for the renderer fact it cannot derive, and subscribe once to public input:
+
+```ts
+// Application code, not an @vue-tui/runtime API.
+import { provide, shallowReactive, shallowRef, type Ref } from "vue";
+import { useInput, type TuiInputEvent } from "@vue-tui/runtime";
+
+type Target = {
+  present: Readonly<Ref<boolean>>;
+  handle: (event: TuiInputEvent) => boolean; // true stops this application route
+};
+
+const FocusHubKey = Symbol("FocusHub");
+const focused = shallowRef<string | null>(null);
+const targets = shallowReactive(new Map<string, Target>());
+provide(FocusHubKey, { focused, targets });
+
+useInput(
+  (event) => {
+    const id = focused.value; // Snapshot the route before calling application code.
+    const target = id === null ? undefined : targets.get(id);
+    const stopped = target?.present.value ? target.handle(event) : false;
+    if (!stopped) handleApplicationShortcut(event);
+    if (shouldPreventRuntimeCtrlC(event)) return { preventDefault: true };
+  },
+  { isActive: () => targets.size > 0 },
+);
+```
+
+A child can inject this application-owned hub, register its handler together with `useBoxPresence(boxRef)`, remove that registration on scope disposal, and change `focused`. A reusable implementation can add nested providers, explicit traversal order, or a local `stopPropagation()` object without asking Runtime to own those policies. Only `{ preventDefault: true }` crosses back into Runtime, and only when the application wants to suppress Runtime's Ctrl+C default. This example does not promise that an `@vue-tui/use` package exists.
 
 ### Layout and Box measurement
 
@@ -169,13 +193,21 @@ Use the narrow fact that matches the application task:
 ```vue
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
-import { Box, Text, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  useBoxPresence,
+  useBoxSize,
+  useLayoutWidth,
+  useViewportHeight,
+} from "@vue-tui/runtime";
 
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 
 const panel = shallowRef<InstanceType<typeof Box> | null>(null);
 const panelSize = useBoxSize(panel);
+const panelPresence = useBoxPresence(panel);
 
 const canCenterVertically = computed(() => viewportHeight !== null && viewportHeight.value > 20);
 const graphWidth = computed(() => panelSize.value?.width ?? 24);
@@ -185,6 +217,7 @@ const graphWidth = computed(() => panelSize.value?.width ?? 24);
   <Box ref="panel" flexGrow="1">
     <Text>Root width: {{ layoutWidth }}</Text>
     <Text>Panel width: {{ graphWidth }}</Text>
+    <Text>Panel is in the accepted tree: {{ panelPresence ? "yes" : "no" }}</Text>
     <Text>Can center: {{ canCenterVertically ? "yes" : "no" }}</Text>
   </Box>
 </template>
@@ -196,20 +229,22 @@ const graphWidth = computed(() => panelSize.value?.width ?? 24);
 
 `useBoxSize()` accepts only a Vue ref bound directly to the exported `<Box>` component in the current vue-tui app. A raw component value, getter, non-Box target, or Box owned by another app is rejected instead of publishing a misleading size; callers that need a derived target can create a `computed()` ref themselves. The hook returns a readonly ref containing a frozen `{ width, height }` from the last accepted visual paint. Before the first accepted paint, after the target detaches, after retargeting, or while the Box is hidden, its value is `null`. A legitimate zero-sized Box is `{ width: 0, height: 0 }`, and a fully clipped Box still reports its full size. A failed output attempt or suspension does not replace the last accepted size for the same target; queued changes settle after resume and a successful repaint. Screen-reader and string rendering return `null` because they do not publish visual Box geometry.
 
-| Render host                                       | `useLayoutWidth()`                    | `useViewportHeight()`          | `useBoxSize()`                                   |
-| ------------------------------------------------- | ------------------------------------- | ------------------------------ | ------------------------------------------------ |
-| Live visual Inline TTY                            | Reactive numeric layout width         | Reactive maximum visual height | `null` before paint, then accepted full Box size |
-| Live visual Fullscreen TTY                        | Reactive numeric viewport width       | Reactive exact viewport height | `null` before paint, then accepted full Box size |
-| Screen-reader transcript                          | Numeric transcript layout width       | `null`                         | `null`                                           |
-| Live visual non-TTY stream                        | Reactive numeric width, defaulting 80 | `null`                         | Accepted document-paint size when available      |
-| Final-output stream, including a TTY forced final | Fixed numeric width, defaulting 80    | `null`                         | Accepted document-paint size when available      |
-| Synchronous string rendering                      | Option width, defaulting 80           | `null`                         | `null`                                           |
+`useBoxPresence()` accepts the same direct current-app Box ref and returns a readonly boolean ref. It is false before the first accepted live render, while the Box or one of its ancestors is hidden, after detachment, and for string rendering. It is true for a present Box even when the Box has zero size or is fully clipped, and it works for visual, non-TTY, final-output, and screen-reader live hosts. Suspension and failed candidate renders retain the last accepted value.
 
-During suspension, the numeric layout refs and each same-target accepted Box size keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint; an invalid resize pair does not replace the last coherent dimensions. After unmount, layout refs keep their final values and stop updating, while the Box-size ref becomes `null` when its target detaches. Calling any of these hooks outside a vue-tui render tree throws.
+| Render host                                       | `useLayoutWidth()`                    | `useViewportHeight()`          | `useBoxSize()`                                   | `useBoxPresence()`          |
+| ------------------------------------------------- | ------------------------------------- | ------------------------------ | ------------------------------------------------ | --------------------------- |
+| Live visual Inline TTY                            | Reactive numeric layout width         | Reactive maximum visual height | `null` before paint, then accepted full Box size | Accepted live-tree presence |
+| Live visual Fullscreen TTY                        | Reactive numeric viewport width       | Reactive exact viewport height | `null` before paint, then accepted full Box size | Accepted live-tree presence |
+| Screen-reader transcript                          | Numeric transcript layout width       | `null`                         | `null`                                           | Accepted live-tree presence |
+| Live visual non-TTY stream                        | Reactive numeric width, defaulting 80 | `null`                         | Accepted document-paint size when available      | Accepted live-tree presence |
+| Final-output stream, including a TTY forced final | Fixed numeric width, defaulting 80    | `null`                         | Accepted document-paint size when available      | Accepted live-tree presence |
+| Synchronous string rendering                      | Option width, defaulting 80           | `null`                         | `null`                                           | Always false                |
 
-These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output, caret, and mouse behavior. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
+During suspension, the numeric layout refs and each same-target accepted Box size and presence keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint; an invalid resize pair does not replace the last coherent dimensions. After unmount, layout refs keep their final values and stop updating, while Box size becomes `null` and Box presence becomes false when the target detaches. Calling any of these hooks outside a vue-tui render tree throws.
 
-`useCaret(ref, { focus, position })` connects one rendered element to one exact `useFocus()` result. `position` is a zero-based rendered cell local to `ref`; the editor remains responsible for converting its logical insertion point to that cell. The runtime publishes a frozen readonly `state` and maps a visible request through paint into the current mode writer. It emits no targeted terminal-cursor controls for inactive, clipped, detached, invalid, non-TTY, screen-reader, or string-host requests. The public caret describes an editor's insertion marker; the private terminal cursor is only the physical transport used to display it.
+These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output, terminal-cursor placement, and mouse behavior. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
+
+The earlier public focus-bound `useCaret()` experiment is withdrawn. Runtime still owns the private terminal cursor and its restoration, but a future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates. That decision belongs to the caret and editable-text review path; no current public caret API should be inferred from the private mechanism.
 
 ### Fullscreen text selection and clipboard
 
@@ -227,13 +262,11 @@ const selection = useTextSelection(documentRef);
 useInput((event) => {
   if (event.kind === "text" && event.text === "a") {
     selection.selectAll();
-    return "consume";
+    return;
   }
   if (event.kind === "text" && event.text === "c") {
     void selection.copy();
-    return "consume";
   }
-  return "continue";
 });
 </script>
 

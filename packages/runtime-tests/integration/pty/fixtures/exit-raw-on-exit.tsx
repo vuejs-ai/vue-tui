@@ -3,7 +3,7 @@ import { defineComponent, onMounted } from "vue";
 
 const App = defineComponent(() => {
   const { exit } = useApp();
-  useInput(() => "continue");
+  useInput(() => undefined);
 
   onMounted(() => {
     setTimeout(exit, 500);

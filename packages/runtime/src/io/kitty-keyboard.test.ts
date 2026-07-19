@@ -38,6 +38,26 @@ function createEnabledController(writeOutput?: WriteKittyOutput, onStateChange?:
 }
 
 describe("Kitty keyboard output handoff", () => {
+  test("discards an unresolved query detector when the application is disposed", () => {
+    const cancel = vi.fn();
+    const controller = createKittyKeyboardController(
+      createFakeStdin(),
+      createFakeStdout().stdout,
+      () => cancel,
+      { mode: "auto" },
+      (_data, onHandoff) => {
+        onHandoff?.();
+        return true;
+      },
+    );
+
+    controller.acquireDemand();
+    controller.dispose();
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledWith({ discard: true });
+  });
+
   test("does not own or pop a PUSH abandoned before handoff", async () => {
     const writes: string[] = [];
     const handoffs: Array<() => void> = [];

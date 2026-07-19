@@ -42,7 +42,7 @@ test.sequential("raw mode stays on when one of two useInput components unmounts"
   const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => undefined);
     return () => <Text>x</Text>;
   });
 

@@ -47,37 +47,30 @@ async function copySelection() {
 }
 
 useInput((event) => {
-  if (event.kind === "key" && event.key.phase !== "release") {
-    const direction = event.key.name === null ? undefined : selectionMoves[event.key.name];
+  if (event.kind === "key") {
+    const direction = event.name === undefined ? undefined : selectionMoves[event.name];
     if (direction) {
-      selection.move(direction, { extend: event.key.modifiers.shift });
-      return "consume";
+      selection.move(direction, { extend: event.shift });
+      return;
     }
-    if (event.key.name === "escape") {
+    if (event.name === "escape") {
       selection.clear();
-      return "consume";
+      return;
     }
   }
 
-  const text =
-    event.kind === "text"
-      ? event.text
-      : event.kind === "key" && event.key.phase !== "release"
-        ? event.key.reportedText
-        : null;
+  const text = event.kind === "text" ? event.text : null;
   if (text === "q") {
     process.exit(0);
-    return "consume";
+    return;
   }
   if (text === "a") {
     selection.selectAll();
-    return "consume";
+    return;
   }
   if (text === "c") {
     void copySelection();
-    return "consume";
   }
-  return "continue";
 });
 
 function onPanelClick(event: TuiMouseClickEvent) {

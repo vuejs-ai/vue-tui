@@ -134,7 +134,7 @@ test("forced live stream refreshes its public layout and frame before input resu
     const width = useLayoutWidth();
     const viewportHeight = useViewportHeight();
     const { stdin } = useStdin();
-    useInput(() => "continue");
+    useInput(() => {});
     const frame = () => {
       rawModeSeenByFrame.push(Boolean((stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw));
       return `stream:${width.value}x${viewportHeight?.value ?? "unbounded"}`;
@@ -227,7 +227,7 @@ test("modeled Inline suspension releases input and repaints at the continued siz
   const App = defineComponent(() => {
     const width = useLayoutWidth();
     const viewportHeight = useViewportHeight();
-    useInput(() => "continue");
+    useInput(() => {});
     return () => <Text>{`inline:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });
@@ -298,7 +298,7 @@ test("modeled screen-reader transcript suspends and resumes without acquiring Fu
   const App = defineComponent(() => {
     const width = useLayoutWidth();
     const viewportHeight = useViewportHeight();
-    useInput(() => "continue");
+    useInput(() => {});
     return () => <Text>{`transcript:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, {
@@ -324,7 +324,7 @@ test.each(["at-teardown", "live"] as const)(
   "modeled %s stream restores input modes without manufacturing a terminal surface",
   async (updates) => {
     const App = defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => {});
       return () => <Text>{`stream:${updates}`}</Text>;
     });
     const result = await render(App, {

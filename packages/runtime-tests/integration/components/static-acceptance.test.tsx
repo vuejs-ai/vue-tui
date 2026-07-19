@@ -1,4 +1,5 @@
 import { PassThrough } from "node:stream";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { defineComponent, nextTick, ref, shallowRef } from "vue";
@@ -193,7 +194,7 @@ test("effective visual Fullscreen rejects empty Static before terminal ownership
 test("visual Fullscreen rolls back setup-owned input before reporting Static rejection", async () => {
   const dynamicMarker = "ACQUIRED_FULLSCREEN_FRAME_MUST_NOT_RENDER";
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => (
       <Box flexDirection="column">
         <Static />
@@ -219,8 +220,8 @@ test("visual Fullscreen rolls back setup-owned input before reporting Static rej
       liveUpdates: true,
       patchConsole: false,
       maxFps: 0,
-      kittyKeyboard: { mode: "enabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    } as InternalMountOptions);
 
     await expect(exited).rejects.toThrow(
       "<Static> cannot render on an effective visual Fullscreen surface",
@@ -350,7 +351,7 @@ test("Static inserted while Fullscreen is suspended rejects before surface or in
   const showStatic = shallowRef(false);
   const staticMarker = "SUSPENDED_STATIC_MUST_NOT_RENDER";
   const App = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => (
       <Box flexDirection="column">
         {showStatic.value ? (

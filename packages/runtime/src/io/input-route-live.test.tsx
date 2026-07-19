@@ -1,16 +1,17 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { Text, useInput, useStdin } from "../index.ts";
+import { Text, useInput, useStdin, type TuiInputEvent } from "../index.ts";
 import { StdinContextKey, type StdinContext } from "../context.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
-import { createApp, type MountOptions } from "../render.ts";
+import { createApp, type InternalMountOptions } from "../render.ts";
 import type { RenderMode } from "../render-session.ts";
 import type { InternalInputRouteDecision } from "./input-route-policy.ts";
 import type {
   InternalInputActivationRegistration,
   InternalInputRoutingRuntime,
 } from "./input-route-runtime.ts";
+import { INTERNAL_KITTY_KEYBOARD } from "./kitty-keyboard.ts";
 
 const modes = ["inline", "fullscreen"] as const satisfies readonly RenderMode[];
 
@@ -20,6 +21,11 @@ const continueRoute = (): InternalInputRouteDecision => ({
   preventDefault: false,
   blockExternal: false,
 });
+
+function publicEventLabel(event: TuiInputEvent): string {
+  if (event.kind === "text" || event.kind === "paste") return event.text;
+  return event.name ?? event.character;
+}
 
 function createStdin(): NodeJS.ReadStream {
   const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
@@ -92,7 +98,7 @@ function createWritable(isTTY = true): NodeJS.WriteStream {
   return stream;
 }
 
-function mountOptions(mode: RenderMode, stdin = createStdin()): MountOptions {
+function mountOptions(mode: RenderMode, stdin = createStdin()): InternalMountOptions {
   return {
     mode,
     stdin,
@@ -101,7 +107,7 @@ function mountOptions(mode: RenderMode, stdin = createStdin()): MountOptions {
     liveUpdates: true,
     maxFps: 0,
     patchConsole: false,
-    kittyKeyboard: { mode: "disabled" },
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
   };
 }
 
@@ -141,8 +147,8 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     app.mount({
       ...mountOptions(mode, stdin),
       stdout,
-      kittyKeyboard: { mode: "enabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    } as InternalMountOptions);
     try {
       expect(() => stdinContext.acquireRawMode()).toThrow("outer raw-on failed");
       expect({
@@ -210,8 +216,8 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     app.mount({
       ...mountOptions(mode, stdin),
       stdout,
-      kittyKeyboard: { mode: "auto" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
+    } as InternalMountOptions);
     const directCalls: string[] = [];
     const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
     try {
@@ -785,8 +791,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     const App = defineComponent(() => {
       const routing = requireRouting();
       useInput((event) => {
-        calls.push(`application-global:${event.sequence}`);
-        return "continue";
+        calls.push(`application-global:${publicEventLabel(event)}`);
       });
       onUnmounted(() => calls.push("unmounted"));
 
@@ -868,18 +873,17 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     await exited;
 
     expect(calls).toEqual([
-      "application-global:\x1b[15~",
       "modal:\x1b[15~",
-      "application-global:\x1b",
+      "application-global:escape",
       "modal:\x1b",
-      "application-global:\t",
+      "application-global:tab",
       "pane:tab",
-      "application-global:\x03",
+      "application-global:c",
       "pane:ctrl-c:prevent",
       "application-global:z",
       "pane:z",
       "pane-default:z",
-      "application-global:\x03",
+      "application-global:c",
       "pane:ctrl-c:allow",
       "pane-default:\x03",
       "unmounted",
@@ -924,8 +928,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
     const ReceivingApp = defineComponent(() => {
       useInput((event) => {
-        secondCalls.push(event.sequence);
-        return "continue";
+        secondCalls.push(publicEventLabel(event));
       });
       return () => <Text>second</Text>;
     });
@@ -966,7 +969,7 @@ test("selected topology composes across shared stdin suspension and teardown", a
   first.mount({
     ...mountOptions("inline", stdin),
     [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-  } as MountOptions);
+  } as InternalMountOptions);
   second.mount(mountOptions("fullscreen", stdin));
   try {
     expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
@@ -1047,8 +1050,8 @@ test.each([
       stdin,
       maxFps: 0,
       patchConsole: false,
-      kittyKeyboard: { mode: "disabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+    } as InternalMountOptions);
     try {
       stdin.emit("data", "x");
       expect(calls).toEqual(["x"]);

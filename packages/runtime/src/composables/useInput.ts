@@ -1,28 +1,57 @@
-import {
-  inject,
-  onScopeDispose,
-  toValue,
-  unref,
-  watch,
-  type MaybeRef,
-  type MaybeRefOrGetter,
-} from "vue";
-import { StdinContextKey } from "../context.ts";
+import { inject, isRef, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
+import { AppContextKey, StdinContextKey } from "../context.ts";
+import { isErrorInput, messageForNonError } from "../components/error-overview.ts";
 import type { NormalizedInputFact } from "../io/normalized-input.ts";
 import {
   normalizeInputHandlerResult,
   projectPublicInputEvent,
-  type InputHandler,
+  type TuiInputEvent,
 } from "../io/public-input.ts";
 import type { InternalInputApplicationGlobalRegistration } from "../io/input-route-runtime.ts";
 
-export interface UseInputOptions {
-  readonly isActive?: MaybeRefOrGetter<boolean>;
+function validateHandler(
+  handler: unknown,
+): asserts handler is (event: TuiInputEvent) => void | { readonly preventDefault: true } {
+  if (typeof handler !== "function") {
+    throw new TypeError("useInput() handler must be a function");
+  }
 }
 
-export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptions = {}): void {
+function validateOptions(
+  options: unknown,
+): asserts options is { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined {
+  if (options === undefined) return;
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Object.getPrototypeOf(options) !== Object.prototype
+  ) {
+    throw new TypeError("useInput() options must be a plain object");
+  }
+  const keys = Reflect.ownKeys(options);
+  if (keys.some((key) => key !== "isActive")) {
+    throw new TypeError('useInput() options only supports the "isActive" property');
+  }
+}
+
+function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
+  const value: unknown = toValue(source);
+  if (typeof value !== "boolean") {
+    throw new TypeError("useInput() isActive must resolve to a boolean");
+  }
+  return value;
+}
+
+export function useInput(
+  handler: (event: TuiInputEvent) => void | { readonly preventDefault: true },
+  options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
+): void {
+  validateHandler(handler);
+  validateOptions(options);
+  const app = inject(AppContextKey);
   const stdin = inject(StdinContextKey);
-  if (!stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
+  if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
+  const application = app;
 
   let desiredActive = false;
   let attached = false;
@@ -31,9 +60,15 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
   let reconcileRequested = false;
 
   function listener(fact: NormalizedInputFact) {
-    const event = projectPublicInputEvent(fact);
-    if (!event) return normalizeInputHandlerResult("continue");
-    return normalizeInputHandlerResult(unref(handler)(event));
+    try {
+      const event = projectPublicInputEvent(fact);
+      if (!event) return normalizeInputHandlerResult(undefined);
+      return normalizeInputHandlerResult(handler(event));
+    } catch (error) {
+      const fatalError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+      application.exit(fatalError);
+      throw fatalError;
+    }
   }
 
   function reconcileAttachment() {
@@ -73,7 +108,7 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     if (hasError) throw firstError;
   }
 
-  const isActive = options.isActive ?? true;
+  const isActive = options?.isActive === undefined ? true : options.isActive;
   // Register cleanup before the immediate watcher can activate managed input.
   // Vue clears the current setup scope while handling a synchronous watcher
   // failure, so registering afterward would itself warn and write to stderr on
@@ -83,10 +118,35 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     reconcileAttachment();
   });
 
+  if (typeof isActive !== "function" && !isRef(isActive)) {
+    desiredActive = readIsActive(isActive);
+    reconcileAttachment();
+    return;
+  }
+
   watch(
-    () => toValue(isActive),
-    (value) => {
-      desiredActive = value;
+    () => {
+      try {
+        return { ok: true, value: readIsActive(isActive) } as const;
+      } catch (error) {
+        return { ok: false, error } as const;
+      }
+    },
+    (resolution) => {
+      if (!resolution.ok) {
+        desiredActive = false;
+        try {
+          reconcileAttachment();
+        } finally {
+          app.exit(
+            isErrorInput(resolution.error)
+              ? resolution.error
+              : new Error(messageForNonError(resolution.error)),
+          );
+        }
+        return;
+      }
+      desiredActive = resolution.value;
       reconcileAttachment();
     },
     { immediate: true, flush: "sync" },

@@ -871,6 +871,13 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
           subscriber.requestedActive = false;
           subscriber.generation++;
           subscribers.delete(subscriber);
+          // Query replies have no request id, so a live application keeps a
+          // cancelled query as a short tombstone. Once that application is
+          // disposed, the tombstone must not retain the shared stdin listener
+          // or its timer beyond the application's resource lifetime.
+          for (const detection of detections) {
+            if (detection.owner === subscriber) abortDetection(detection);
+          }
           releaseSubscriberRetentions(subscriber);
           discardOrphanedPendingFraming();
           reconcilePendingFlush();

@@ -6,7 +6,7 @@ import { defineComponent, onMounted } from "vue";
 // handler that allows the delayed default therefore exits on both legacy and
 // Kitty Ctrl+C encodings without a separate mount option.
 const DefaultCtrlC = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => undefined);
 
   onMounted(() => {
     process.stdout.write("__READY__");

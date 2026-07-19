@@ -11,9 +11,8 @@ const App = defineComponent({
     const { exit } = useApp();
 
     useInput((event) => {
-      if (event.kind !== "text" || event.text !== "q") return "continue";
+      if (event.kind !== "text" || event.text !== "q") return;
       exit("spinner-visual-review");
-      return "consume";
     });
 
     return () =>

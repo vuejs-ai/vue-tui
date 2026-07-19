@@ -5,16 +5,14 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((event) => {
-  if (event.kind !== "text") return "continue";
+  if (event.kind !== "text") return;
   if (event.text === "+") {
     count.value++;
-    return "consume";
+    return;
   }
   if (event.text === "-") {
     count.value--;
-    return "consume";
   }
-  return "continue";
 });
 </script>
 

@@ -1,4 +1,5 @@
 import process from "node:process";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import { writeSync } from "node:fs";
 import { createApp, Text } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
@@ -68,6 +69,6 @@ process.on("exit", () => {
 app.mount({
   liveUpdates: false,
   patchConsole: false,
-  kittyKeyboard: { mode: "auto" },
-});
+  [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
+} as InternalMountOptions);
 await app.waitUntilExit();

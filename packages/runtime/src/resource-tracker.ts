@@ -12,6 +12,7 @@ export const runtimeResourceKinds = [
   "streamListeners",
   "focusTargets",
   "focusScopes",
+  "boxPresenceBindings",
   "geometryBindings",
   "caretOwners",
   "pointerHosts",

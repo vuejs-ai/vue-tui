@@ -1,108 +1,77 @@
 diff --git a/src/components/selector.vue b/src/components/selector.vue
-index f8d650e..51823f8 100644
+index f8d650e..0000000 100644
 --- a/src/components/selector.vue
 +++ b/src/components/selector.vue
-@@ -95,61 +95,86 @@ const footerText = computed(() =>
+@@ -95,61 +95,61 @@ const footerText = computed(() =>
  )
  const showBody = computed(() => state.value === 'list' || state.value === 'search')
 
 -useInput((input, key) => {
 +useInput(event => {
    if (state.value === 'succeed' || state.value === 'error') {
--    return
-+    return 'consume'
+     return
    }
 
 -  if (key.ctrl && input === 'c') {
-+  if (
-+    event.kind === 'key' &&
-+    event.key.name === 'c' &&
-+    event.key.modifiers.ctrl &&
-+    event.key.phase !== 'release'
-+  ) {
++  if (event.kind === 'key' && event.character === 'c' && event.ctrl) {
      cancel()
 -    return
-+    return 'consume'
++    return { preventDefault: true }
    }
 
 -  if (key.escape) {
-+  if (event.kind === 'key' && event.key.name === 'escape' && event.key.phase !== 'release') {
++  if (event.kind === 'key' && event.name === 'escape') {
      if (query.value) {
        query.value = ''
        resetCursor(listItems.value)
      } else {
        cancel()
      }
--    return
-+    return 'consume'
+     return
    }
 
 -  if (key.return) {
-+  if (event.kind === 'key' && event.key.name === 'return' && event.key.phase !== 'release') {
++  if (event.kind === 'key' && event.name === 'enter') {
      if (currentPath.value) {
        state.value = 'succeed'
        selectedPath.value = currentPath.value
        onSelect(currentPath.value)
      }
--    return
-+    return 'consume'
+     return
    }
 
 -  if (key.upArrow) {
-+  if (event.kind === 'key' && event.key.name === 'up' && event.key.phase !== 'release') {
++  if (event.kind === 'key' && event.name === 'up') {
      moveCursor(-1)
--    return
-+    return 'consume'
+     return
    }
 
 -  if (key.downArrow) {
-+  if (event.kind === 'key' && event.key.name === 'down' && event.key.phase !== 'release') {
++  if (event.kind === 'key' && event.name === 'down') {
      moveCursor(1)
--    return
-+    return 'consume'
+     return
    }
 
 -  if (key.tab) {
--    return
-+  if (event.kind === 'key' && event.key.name === 'tab' && event.key.phase !== 'release') {
-+    return 'consume'
++  if (event.kind === 'key' && event.name === 'tab') {
+     return
    }
 
 -  if (key.backspace || key.delete) {
-+  if (
-+    event.kind === 'key' &&
-+    (event.key.name === 'backspace' || event.key.name === 'delete') &&
-+    event.key.phase !== 'release'
-+  ) {
++  if (event.kind === 'key' && (event.name === 'backspace' || event.name === 'delete')) {
      const newQuery = query.value.slice(0, -1)
      query.value = newQuery
      resetCursor(newQuery ? searchItems(newQuery, groups, root) : listItems.value)
--    return
-+    return 'consume'
+     return
    }
 
 -  if (input && !key.ctrl && !key.meta) {
-+  const input =
-+    event.kind === 'text' || event.kind === 'paste'
-+      ? event.text
-+      : event.kind === 'key' &&
-+          event.key.reportedText !== null &&
-+          event.key.phase !== 'release' &&
-+          !event.key.modifiers.ctrl &&
-+          !event.key.modifiers.alt &&
-+          !event.key.modifiers.meta &&
-+          !event.key.modifiers.super &&
-+          !event.key.modifiers.hyper
-+        ? event.key.reportedText
-+        : ''
-+  if (input) {
-     const newQuery = query.value + input
+-    const newQuery = query.value + input
++  if (event.kind === 'text' || event.kind === 'paste') {
++    const newQuery = query.value + event.text
      query.value = newQuery
      resetCursor(searchItems(newQuery, groups, root))
-+    return 'consume'
    }
-+
-+  return 'continue'
  })
 
  function buildListItems(root: string, groups: RepoGroup[]): ListItem[] {

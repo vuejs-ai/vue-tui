@@ -5,12 +5,7 @@ import {
   Box,
   Text,
   useBoxSize,
-  useFocus,
-  useFocusedInput,
-  useFocusScope,
-  useFocusScopeInput,
-  type InputHandlerResult,
-  type InputRouteDecision,
+  useInput,
   type RenderMode,
   type TuiInputEvent,
 } from "@vue-tui/runtime";
@@ -28,29 +23,18 @@ const modes = ["inline", "fullscreen"] as const satisfies readonly RenderMode[];
 const innerLines = Array.from({ length: 8 }, (_, index) => `inner ${index}`);
 const outerLines = Array.from({ length: 6 }, (_, index) => `outer ${index}`);
 
-const continueOwnedKey: InputRouteDecision = Object.freeze({
-  action: "none",
-  routing: "continue",
-  defaultAction: "prevent",
-  external: "block",
-});
-const stopOwnedKey: InputRouteDecision = Object.freeze({
-  action: "none",
-  routing: "stop",
-  defaultAction: "prevent",
-  external: "block",
-});
-
 function keyOperation(event: TuiInputEvent): ScrollOperation | null {
-  if (event.kind !== "key" || event.key.phase === "release") return null;
-  switch (event.key.name) {
+  if (event.kind !== "key") return null;
+  switch (event.name) {
     case "up":
     case "down":
-    case "pageup":
-    case "pagedown":
     case "home":
     case "end":
-      return event.key.name;
+      return event.name;
+    case "page-up":
+      return "pageup";
+    case "page-down":
+      return "pagedown";
     default:
       return null;
   }
@@ -132,26 +116,18 @@ for (const mode of modes) {
       const innerTarget = shallowRef<Target>(null);
       const outerSize = useBoxSize(outerTarget);
       const innerSize = useBoxSize(innerTarget);
-      const outerScope = useFocusScope();
-      const innerFocus = useFocus(innerTarget, {
-        scope: outerScope,
-        autoFocus: true,
-        tabIndex: -1,
-      });
 
-      useFocusedInput(innerFocus, (event): InputHandlerResult => {
+      // Scroll routing is application policy: try the inner component first,
+      // then continue to the outer component only when the inner one reports
+      // that it was already at its edge.
+      useInput((event) => {
         const operation = keyOperation(event);
-        if (!operation) return "continue";
-        const moved = perform(inner.value, operation, measuredHeight(innerSize, "inner"));
-        trace.push(`inner:${operation}:${moved ? "moved" : "unchanged"}`);
-        return moved ? "consume" : continueOwnedKey;
-      });
-      useFocusScopeInput(outerScope, (event): InputHandlerResult => {
-        const operation = keyOperation(event);
-        if (!operation) return "continue";
-        const moved = perform(outer.value, operation, measuredHeight(outerSize, "outer"));
-        trace.push(`outer:${operation}:${moved ? "moved" : "unchanged"}`);
-        return moved ? "consume" : stopOwnedKey;
+        if (!operation) return;
+        const innerMoved = perform(inner.value, operation, measuredHeight(innerSize, "inner"));
+        trace.push(`inner:${operation}:${innerMoved ? "moved" : "unchanged"}`);
+        if (innerMoved) return;
+        const outerMoved = perform(outer.value, operation, measuredHeight(outerSize, "outer"));
+        trace.push(`outer:${operation}:${outerMoved ? "moved" : "unchanged"}`);
       });
 
       return () => scrollLayout(outer, inner, outerTarget, innerTarget);

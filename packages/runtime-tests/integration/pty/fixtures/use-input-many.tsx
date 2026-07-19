@@ -10,7 +10,7 @@ process.on("warning", (warning: Error) => {
 });
 
 const InputHandler = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => undefined);
   return () => null;
 });
 

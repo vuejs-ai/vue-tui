@@ -1,4 +1,5 @@
 import { defineComponent, nextTick, onMounted, onScopeDispose } from "vue";
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
@@ -151,7 +152,7 @@ test("alternate screen - enters before setup-owned input modes", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();
   const InputApp = defineComponent(() => {
-    useInput(() => "continue");
+    useInput(() => {});
     return () => <Text>Hello</Text>;
   });
 
@@ -162,8 +163,8 @@ test("alternate screen - enters before setup-owned input modes", async () => {
     stderr: makeTtyStream(),
     mode: "fullscreen",
     liveUpdates: true,
-    kittyKeyboard: { mode: "enabled" },
-  });
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+  } as InternalMountOptions);
   await nextTick();
 
   const output = stdout.chunks.join("");

@@ -1,3 +1,4 @@
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 // SEQUENTIAL: mutates process.env.TERM and deliberately exercises a mount-time failure.
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
 import { expect, test } from "vite-plus/test";
@@ -42,8 +43,8 @@ test("a visible live target rejects a terminal profile without SGR mouse support
       patchConsole: false,
       liveUpdates: true,
       maxFps: 0,
-      kittyKeyboard: { mode: "disabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+    } as InternalMountOptions);
     await expect(app.waitUntilExit()).rejects.toThrow(
       "Fullscreen mouse input is unavailable because the terminal does not advertise an xterm-compatible SGR mouse protocol.",
     );

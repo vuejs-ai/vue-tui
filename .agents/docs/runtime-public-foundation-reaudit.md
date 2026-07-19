@@ -418,7 +418,7 @@ Implementation now uses an `open | accepted | abandoned` state on each internal 
 
 ### Current user code
 
-The coding-agent example needs a focused text composer, a trapped approval dialog, and one application-wide quit command. Its simple editing path currently has to understand parser output and four-way routing:
+The coding-agent example needs a text composer, an approval dialog, and one application-wide quit command. Its simple editing path currently has to understand parser output, a Runtime focus graph, and four-way routing:
 
 ```ts
 useFocusedInput(composer, (event) => {
@@ -447,25 +447,21 @@ useFocusedInput(composer, (event) => {
 });
 ```
 
-The mo and machud consumer patches repeat the same reconstruction of application text from `text`, Kitty `reportedText`, key phase, and modifier fields. No real consumer uses protocol identity, sequence fidelity, codepoints, functional codes, lock modifiers, or uninterpreted facts as an application feature.
+The mo and machud consumer patches repeat the same reconstruction of application text from `text`, Kitty `reportedText`, key phase, and modifier fields. No real consumer uses protocol identity, sequence fidelity, codepoints, functional codes, lock modifiers, uninterpreted facts, public input availability, external forwarding, handler refs, Kitty flags, or Runtime focus traversal as an application feature.
 
 ### Actual user problem
 
-Applications need Runtime to turn terminal byte chunks into three stable facts: typed text, pasted text, or a recognized non-text key. They also need subscriptions that remain attached to the correct Vue lifetime and, for interactive components, the correct rendered focus target or nested focus scope.
+Applications need Runtime to turn terminal byte chunks into three stable facts: typed text, pasted text, or a recognized non-text key. Active subscriptions must own exactly the terminal resources they require, follow their Vue lifetime, survive suspension correctly, and receive a fact against the subscription set captured when that fact begins.
 
-A third party cannot build this correctly from `useStdin().stdin`. Runtime owns UTF-8 and escape-sequence framing across chunks, bracketed paste, Kitty query replies, raw and protocol modes, shared listeners, suspend and resume, and the snapshot that prevents one input fact from changing routes halfway through a Vue update. Conversely, parser metadata and application policies such as hotkeys, text editing, Tab navigation, list movement, and PTY key encoding do not become Runtime primitives merely because the internal parser can support them.
+A third party cannot build that subscription from `useStdin().stdin`. Runtime owns UTF-8 and escape-sequence framing across chunks, bracketed paste, Kitty query replies, raw and protocol modes, shared listeners, suspend and resume, and fact-start subscription capture. Moving `useInput()` above Runtime would require publishing an equivalent managed normalized subscription under another name.
+
+Focus selection, scope trees, modal traps, restoration, Tab order, and propagation are different. One higher-level provider can register exactly one application-wide Runtime subscription, snapshot its own route when the normalized callback begins, and dispatch through its own Vue `provide`/`inject` graph. Independent focused handlers do not need privileged Runtime registrations. The one renderer fact that such a provider cannot derive is whether a direct Box ref is part of the last accepted live renderer tree and outside every `display:none` ancestor. `useBoxSize()` cannot supply that fact because screen-reader output has no visual geometry and clipping or zero size does not make a logical control absent.
 
 ### Proposed Runtime primitives
 
-The exact public names remain subject to the path review, but the supported semantics are deliberately small:
+The supported surface is deliberately small:
 
 ```ts
-interface TuiKeyModifiers {
-  readonly shift: boolean;
-  readonly alt: boolean;
-  readonly ctrl: boolean;
-}
-
 type TuiKeyName =
   | "backspace"
   | "delete"
@@ -488,161 +484,166 @@ type TuiInputEvent =
       readonly kind: "key";
       readonly name: TuiKeyName;
       readonly character?: never;
-      readonly modifiers: TuiKeyModifiers;
+      readonly shift: boolean;
+      readonly alt: boolean;
+      readonly ctrl: boolean;
     }
   | {
       readonly kind: "key";
       readonly character: string;
       readonly name?: never;
-      readonly modifiers: TuiKeyModifiers;
+      readonly shift: boolean;
+      readonly alt: boolean;
+      readonly ctrl: boolean;
     };
 
-type InputHandler = (event: TuiInputEvent) => void | {
-  readonly stopPropagation?: true;
-  readonly preventDefault?: true;
-};
+function useInput(
+  handler: (event: TuiInputEvent) => void | { readonly preventDefault: true },
+  options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
+): void;
 
-interface UseInputBaseOptions {
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-}
-
-type UseInputOptions =
-  | (UseInputBaseOptions & { readonly focus?: never; readonly scope?: never })
-  | (UseInputBaseOptions & { readonly focus: UseFocusReturn; readonly scope?: never })
-  | (UseInputBaseOptions & { readonly scope: UseFocusScopeReturn; readonly focus?: never });
-
-function useInput(handler: MaybeRef<InputHandler>, options?: UseInputOptions): void;
+function useBoxPresence<T extends PublicBoxInstance>(
+  target: Readonly<Ref<T | null | undefined>>,
+): Readonly<Ref<boolean>>;
 ```
 
-The options union rejects `focus` and `scope` together at type level, and Runtime also rejects that shape at runtime. With neither, the subscription is application-wide. `stopPropagation` prevents delivery to the next focus target or ancestor scope; it does not silently report that an action occurred, change Runtime defaults, or control an unrelated external sink. `preventDefault` suppresses the Runtime default for that fact. Handlers at the same attachment point all run; no `stopImmediatePropagation` primitive is added without a demonstrated need.
+`useInput()` is application-wide. Active subscriptions captured for one fact all run; one result never stops a peer. Most handlers return nothing. The only special result, `{ preventDefault: true }`, suppresses Runtime's default for that fact without reporting an action or controlling higher-level propagation. A plain handler is sufficient: a reactive callback can close over a ref or call `handler.value(event)`, so Runtime does not publish `MaybeRef<InputHandler>`, `InputHandler`, `InputHandlerResult`, or a named options wrapper.
 
-Every event and modifier object is frozen. `text` is insertion-ready text exactly as reported by the terminal and may contain more than one Unicode scalar because a byte chunk does not prove physical key boundaries. `paste` is one complete bracketed-paste payload whose contents are never reinterpreted as keys. A named key uses only the finite vocabulary above. A character key carries one Unicode scalar representing the unshifted shortcut identity and is not insertion text; ASCII `A` through `Z` normalize to lowercase. This separation lets an editor append every `text` or `paste` without reconstructing `reportedText`, while Ctrl+C remains a key with `character: "c"`.
+Every event is frozen. `text` is insertion-ready text exactly as reported by the terminal and may contain more than one Unicode scalar because a byte chunk does not prove physical key boundaries. `paste` is one complete bracketed-paste payload whose contents are never reinterpreted as keys. A named key uses only the finite vocabulary above. A character key carries one Unicode scalar representing the unshifted shortcut identity and is not insertion text; ASCII `A` through `Z` normalize to lowercase. Modifiers live directly on the key event so ordinary code reads `event.ctrl` without a parser-shaped nested object or another named public type. This separation lets an editor append every `text` or `paste` without reconstructing `reportedText`, while Ctrl+C remains a key with `character: "c"`.
 
 The projection is explicit:
 
-- Plain UTF-8 becomes `text`, preserving actual case and content without inventing Shift. Kitty pure or associated text becomes `text` only for a printable non-release report with no Ctrl, Alt, Kitty Meta, Super, or Hyper; Shift and lock state may already be reflected in that text.
-- A printable Ctrl or Alt chord becomes a character key. Kitty uses `baseLayoutCodepoint` when available and otherwise its primary codepoint, so a physical Latin shortcut can remain stable across a non-Latin layout. Legacy ESC-prefix Meta is the terminal convention for Alt and projects as public `alt`.
+- Plain UTF-8 becomes `text`, preserving actual case and content without inventing Shift. Kitty associated text becomes `text` only for a printable non-release report with no Ctrl, Alt, Kitty Meta, Super, or Hyper; Shift and lock state may already be reflected in that terminal-supplied text. Runtime never synthesizes insertion text from a Kitty key code alone: under the privately selected disambiguation mode, the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) sends text-producing input as plain UTF-8 and uses `CSI u` for keys that did not produce text.
+- A printable key without safe associated text becomes a character key when Runtime can resolve one Unicode scalar shortcut identity. Kitty uses `baseLayoutCodepoint` when available and otherwise its primary codepoint, so a physical Latin shortcut can remain stable across a non-Latin layout. Legacy ESC-prefix Meta is the terminal convention for Alt and projects as public `alt`.
 - Kitty Meta, Super, or Hyper chords are not projected until one of those modifiers has an evidenced public contract; dropping the bit while delivering the key would turn a modified action into an unmodified one. Caps Lock and Num Lock are not public chord modifiers and do not by themselves suppress text or a supported key.
 - Carriage return, line feed, and keypad Enter normalize to `enter`; supported keypad navigation normalizes to its ordinary direction, Home, End, Page, Backspace, or Delete identity; `pageup` and `pagedown` normalize to `page-up` and `page-down`.
 - Press and repeat produce the same public shape, so a repeat is another event. Release-only, function, Insert, Clear, media, standalone modifier, complete-but-unsupported, invalid, and uninterpreted facts are not projected. A finite pending standalone Escape becomes `escape`; incomplete protocol frames remain pending rather than leaking partial bytes.
 
 Bytes remain observable through the raw `useStdin()` escape hatch, but that does not provide semantic framing. Runtime internally requests only the protocol facts required for this projection; alternate-layout key information does not become a public parser field.
 
-The only valid results are `undefined` or a plain object containing no keys other than `stopPropagation: true` and `preventDefault: true`; `{}` is a no-op. Runtime snapshots the result once. Same-point peers run in accepted registration order and their two flags are merged independently before the route proceeds.
+The only valid results are `undefined` or the exact plain object `{ preventDefault: true }`. Runtime reads the result once. A Promise, another primitive, `false`, `{}`, `preventDefault: false`, an inherited field, or an additional field is a programming error. The application fact fails closed, the ordinary fatal lifecycle restores the terminal, and another app sharing the physical stdin is not cancelled.
 
-Runtime keeps exactly one application default: an unshifted, non-Alt character key `c` with `ctrl: true` exits the app after semantic routing unless any delivered handler requested `preventDefault`. Kitty Meta, Super, and Hyper were already filtered; Caps Lock and Num Lock do not alter the default. Legacy terminals cannot distinguish Ctrl+C from Ctrl+Shift+C, which remains an explicit protocol limitation, while Kitty's distinguishable Ctrl+Shift+C does not exit. An application using Ctrl+C for copy or another action explicitly prevents it; `stopPropagation` alone never prevents the default. Runtime removes automatic Tab traversal because terminals have no native Tab-focus behavior that Runtime must restore; Tab navigation is application policy.
+Runtime keeps exactly one application default: an unshifted, non-Alt character key `c` with `ctrl: true` exits the app after every captured Runtime subscription has run unless any delivered handler requested `preventDefault`. Kitty Meta, Super, and Hyper were already filtered; Caps Lock and Num Lock do not alter the default. Legacy terminals cannot distinguish Ctrl+C from Ctrl+Shift+C, which remains an explicit protocol limitation, while Kitty's distinguishable Ctrl+Shift+C does not exit. An application using Ctrl+C for copy or another action explicitly prevents it. Stopping a route inside a higher-level hub does not implicitly prevent the Runtime default. Runtime removes automatic Tab traversal because terminals have no native Tab-focus behavior that Runtime must restore; Tab navigation is application policy.
 
-Focus remains tied to rendered Vue targets because only Runtime knows whether a ref resolves to a committed, visible host, its actual rendered preorder after `v-if` and `v-show`, scope ancestry, and when a trapped scope must restore focus. The retained public shape is:
-
-```ts
-function useFocus(
-  target,
-  options?: {
-    readonly scope?: UseFocusScopeReturn;
-    readonly disabled?: MaybeRefOrGetter<boolean>;
-    readonly autoFocus?: MaybeRefOrGetter<boolean>;
-  },
-): UseFocusReturn; // isFocused + focus()
-
-function useFocusScope(options?: {
-  readonly isActive?: MaybeRefOrGetter<boolean>;
-  readonly trapped?: MaybeRefOrGetter<boolean>;
-}): UseFocusScopeReturn;
-```
-
-`useFocus()` returns only a readonly focused fact and `focus()`. The call fails if a supplied scope belongs to another Runtime app; `focus()` returns `false` while the target is detached, hidden, disabled, outside the active trapped boundary, or disposed, and otherwise makes that rendered target current. Suspension stops physical delivery but does not forbid a logical focus update that should take effect after repaint and reacquisition. `autoFocus` is attempted when a target first becomes eligible and after an explicit false-to-true transition, chooses the first eligible rendered request, and never steals an already effective focus.
-
-Focus loss remains a Runtime concern only to the extent that input routing cannot point at a stale renderer host. A temporarily hidden, disabled, detached, or trap-excluded owner leaves the route targetless; Runtime remembers that exact handle and restores it when it becomes eligible again only if no later explicit `focus()` or scope transition won. Permanent removal forgets the handle and leaves focus targetless. Runtime does not choose an unrelated successor or predecessor merely because it knows rendered order. Atomic retargeting of one handle is not an unavailable interval.
-
-Eligibility follows the accepted rendered tree: a direct or inherited `display: none`, inactive containing scope, or active trapped boundary excludes a target. Clipping, zero size, and ScrollBox off-viewport state do not silently move logical focus; the component that owns scrolling may respond to `isFocused` and bring its target into view.
-
-An active trapped scope constrains focus and input routing to descendants. Activation chooses its remembered eligible descendant, then the first eligible `autoFocus` request in accepted rendered order, and otherwise remains targetless. A targetless trapped scope still receives its scope input handler, which is necessary while the approval dialog in the coding-agent mounts. Deactivation restores the exact remembered outer owner when eligible and otherwise remains targetless; opening from no outer focus closes back to no focus unless another explicit request won. Nested traps restore exact handles in activation order. A non-trapped scope groups routing and memory only; it does not move focus merely by becoming active.
-
-Generic next/previous traversal is deliberately not published in this foundation. No real consumer currently needs it, and a correct generic contract would immediately require policy for sequential eligibility, initial focus, wraparound, disabled targets, nested scopes, and ordering. An application with known controls can retain their public focus handles and choose the next one directly. The current numeric `tabIndex`, target `blur()`, scope `containsFocus`, manager `focusedTarget`, manager-wide `blur()`, and `useFocusManager()` all remain private or are removed. A later form or menu can justify a small traversal primitive without changing Runtime's existing rendered-order mechanism.
+`useBoxPresence()` is the accepted renderer fact needed by any alternative focus implementation. It is `true` only when the direct same-app Box belongs to the last accepted live renderer tree, is outside Static history, and neither it nor an ancestor has `display:none`. It is `false` before the first accepted live render, after a candidate containing detach, removal, or hiding is accepted, at app teardown, and throughout string rendering. A zero-sized, completely clipped, overlapped, or scrolled-out Box remains present: those conditions affect visual reachability, not logical interaction ownership. Live screen-reader presentation and mounted non-TTY output publish presence even though neither supplies visual interaction geometry. Suspension and a discarded or failed candidate retain the last accepted value. A same-logical-target keyed replacement is one transaction and does not publish a false interval. Disposing a binding during candidate removal retires it until that candidate is accepted instead of publishing an unaccepted false value. Non-Box and cross-app refs fail with the same direct-Box rules as `useBoxSize()`.
 
 ### Public-only higher-layer composition
 
-A form with known controls can choose its own order using only public focus handles:
+A replaceable focus package can create one provider using only Vue, `useInput()`, and `useBoxPresence()`:
 
 ```ts
-const fields = [nameFocus, commandFocus, confirmFocus];
+const FocusHubKey = Symbol();
 
-useInput(
-  (event) => {
-    if (event.kind !== "key" || event.name !== "tab") return;
-    const current = fields.findIndex((field) => field.isFocused.value);
-    const step = event.modifiers.shift ? -1 : 1;
-    const start = current < 0 ? (step < 0 ? 0 : -1) : current;
-    for (let offset = 1; offset <= fields.length; offset++) {
-      const candidate = fields[(start + step * offset + fields.length) % fields.length];
-      if (candidate?.focus()) break;
-    }
-    return { stopPropagation: true };
+const FocusProvider = defineComponent({
+  setup(_, { slots }) {
+    const hub = createFocusHub();
+    provide(FocusHubKey, hub);
+    useInput(
+      (event) => {
+        const route = hub.snapshotRoute();
+        const result = route.dispatch(event);
+        return result.preventDefault ? { preventDefault: true } : undefined;
+      },
+      { isActive: () => hub.hasActiveHandlers() },
+    );
+    return () => slots.default?.();
   },
-  { isActive: formActive },
-);
+});
+
+function useFocusTarget(box, options = {}) {
+  const hub = inject(FocusHubKey)!;
+  const present = useBoxPresence(box);
+  const eligible = computed(() => present.value && !toValue(options.disabled ?? false));
+  const target = hub.registerTarget({ eligible });
+  onScopeDispose(() => hub.unregisterTarget(target));
+  return target;
+}
 ```
 
-The application-wide handler is explicitly gated by the form's own state, so it can establish initial focus even when no target currently owns the route. A trapped modal may instead attach the same known-target policy to its scope because a targetless trapped scope is routable. This is intentionally not presented as a generic `@vue-tui/use` utility: real practice has not yet established its wrap, initial-focus, or nested-scope policy. The example proves only that current application needs do not require private focus-manager access.
+The hub freezes its target, scope, trap, and handler route before invoking any of its callbacks. It can implement focused handlers, nearest-to-farthest logical scopes through Vue providers, targetless traps, exact-handle restoration, explicit application order, and its own `stopPropagation` result. None of those decisions enter Runtime. A form with known controls keeps its handles in the desired order; no renderer-preorder or wrap policy is required. This is proof of replaceability, not an official `@vue-tui/use` deliverable.
 
-A focused text editor is equally direct:
+The coding-agent does not need a generic focus package at all. Its product states already determine the one valid input owner:
 
 ```ts
-useInput(
-  (event) => {
+useInput((event) => {
+  if (state.value === "approving") {
+    if (event.kind === "key" && (event.name === "enter" || event.name === "escape")) {
+      finishApproval(event.name === "enter");
+    }
+    return;
+  }
+
+  if (state.value === "idle") {
     if (event.kind === "text" || event.kind === "paste") {
       inputText.value += event.text;
-      return { stopPropagation: true };
+      return;
     }
     if (event.kind === "key" && event.name === "backspace") {
       eraseLastGrapheme();
-      return { stopPropagation: true };
-    }
-    if (event.kind === "key" && event.name === "enter") {
+    } else if (event.kind === "key" && event.name === "enter") {
       void submit();
-      return { stopPropagation: true };
     }
-  },
-  { focus: composer },
-);
+  }
+});
 ```
 
-This is the boundary expected of a future `@vue-tui/use`: it can package these policies, but it receives exactly the same public facts and handles as any third party.
+Ordinary handled input returns nothing. A component that repurposes Ctrl+C for copy is the exceptional case:
+
+```ts
+useInput((event) => {
+  if (event.kind === "key" && event.character === "c" && event.ctrl) {
+    copySelection();
+    return { preventDefault: true };
+  }
+});
+```
 
 ### Host and lifecycle semantics
 
-- Inline and Fullscreen use the same normalized keyboard input and focus rules.
+- Inline and Fullscreen use the same normalized keyboard input rules. Runtime does not define focus rules.
 - Screen-reader transcript output remains interactive when the supplied stdin can be safely managed.
 - A non-TTY stdout does not by itself disable input when stdin is a controllable TTY.
 - Registering active managed input against an uncontrollable stdin fails before Runtime changes any terminal state. A dormant subscription does not acquire input until activated.
-- String rendering has no live input or focus; the hooks are inert in that host so reusable render-only components can still render.
-- Suspension retains logical subscriptions and focus state while releasing physical input resources; resume reacquires the resources before delivery continues.
-- Declaring a focus target alone does not acquire raw input. Only an active input subscription does.
-
-The route is application-wide handlers as one all-run global layer, then the focused target, then nearest-to-farthest ancestor scopes up to the active trapped boundary, then Runtime defaults. A global stop prevents entry into the focused route but not peer global handlers; a target or scope stop prevents only later route positions. A trapped scope prevents routing to outer scopes. A targetless active trapped scope substitutes as the selected route boundary and can still receive its scope handler, which is required while a modal's first focusable target is mounting.
-
-Handlers are synchronous. Supplying both `focus` and `scope`, a foreign or already disposed handle, a non-function initial handler, or an invalid initial activation fails before registration or terminal mutation. Disposing the owning Vue scope or supplied focus/scope handle ends its subscription. A thrown handler, a returned Promise, or any result other than `undefined` or the exact decision object is a programming error: this application's fact fails closed, no later peer, route layer, or Runtime default receives it, and the ordinary fatal lifecycle restores the terminal. Other applications that independently received the same shared-stdin fact are not cancelled. The handler ref and `isActive` input are validated before a replacement route is published; an invalid reactive replacement leaves the prior accepted route intact only long enough for fatal cleanup rather than publishing a partially updated owner. A fact-start snapshot resolves each live handler ref once, so a synchronous replacement cannot inherit the rest of the current fact.
+- String rendering has no live input; `useInput()` and `useBoxPresence()` remain inert so shared render-only components can render without acquiring resources.
+- A mounted non-TTY document is still a live Vue renderer tree, so it publishes Box presence even when its mutable output is deferred until teardown.
+- Suspension retains logical subscriptions and the last Box-presence map while releasing physical input resources; resume reacquires resources before delivery and updates presence only with an accepted live render.
+- `useBoxPresence()` alone never creates input demand. A higher-level provider gates one `useInput()` registration according to its own active routes.
+- Vue scope disposal and HMR end the corresponding Runtime subscription. One fact always uses the subscription membership captured at its start, even when an earlier handler changes another subscription's reactive activation.
 
 ### Retained internal mechanisms
 
 - The streaming parser, UTF-8 and escape framing, normalized internal fact model, Kitty negotiation and reply ownership, bracketed-paste framing, and raw-mode lifecycle.
-- Snapshot-based dispatch, renderer-derived focus order, focus target and scope lifetime, trapped-scope restoration, and suspend/resume state.
+- Shared-stdin application snapshots, all-run subscription capture, delayed Runtime defaults, and suspend/resume resource state.
+- Rendered-target lifetime, synchronous subtree invalidation, inherited `display:none` scanning, accepted-frame transactions, and atomic target replacement needed to publish one complete Box-presence map.
 - Internal protocol facts needed for terminal resource management, even though they are no longer projected to ordinary applications.
 
 ### Public contracts changed or removed
 
-- Redesign `TuiInputEvent` to three top-level application facts: insertion `text`, complete `paste`, and `key`. A key uses exactly one of the finite named-key identity or one-Unicode-scalar shortcut-character identity shown above. Retain only `TuiKeyName` and `TuiKeyModifiers` as supporting names; remove protocol, sequence, fidelity, codepoint, phase, release, parser-origin, lock-modifier, and uninterpreted fields from the ordinary public projection. Key repeats arrive as repeated events; release events are not projected until a real application need establishes stable semantics.
-- Replace `"continue"`, `"consume"`, and the four-field `InputRouteDecision` with optional explicit `stopPropagation` and `preventDefault` decisions. The current `action: "performed"` is removed because production code never reads it.
-- Fold `useFocusedInput()` and `useFocusScopeInput()` into `useInput(..., { focus })` and `useInput(..., { scope })`.
-- Remove or keep private `useExternalInput()`. Semantic PTY forwarding can subscribe at a focused target and encode for the child terminal; lossless passthrough of unknown escape sequences is explicitly outside this foundation until a real terminal-pane design proves a suitable contract.
+- Redesign `TuiInputEvent` to insertion `text`, complete `paste`, and the finite `key` projection shown above. Retain only `TuiInputEvent` and `TuiKeyName`; remove protocol, sequence, fidelity, codepoint, phase, release, parser-origin, nested modifier, lock-modifier, and uninterpreted fields. Key repeats arrive as repeated events; release events are not projected until a real application need establishes stable semantics.
+- Replace `"continue"`, `"consume"`, the four-field `InputRouteDecision`, `InputHandler`, `InputHandlerResult`, and `UseInputOptions` with an inline ordinary handler, reactive activation, and the one exact `preventDefault` result.
+- Add `useBoxPresence()` as the single accepted live renderer fact needed by replaceable interaction layers.
+- Remove `useFocus()`, `useFocusScope()`, `useFocusedInput()`, `useFocusScopeInput()`, `useFocusManager()`, all supporting public focus types, Runtime Tab traversal, public focus routing, and propagation policy.
+- Remove `useExternalInput()`. Its normalized Unicode `sequence` is not lossless child-PTY input and therefore does not solve terminal-pane forwarding. Transparent terminal transport remains explicitly outside this foundation until a real pane design establishes ownership, encoding, exclusivity, and protocol semantics.
 - Remove `useInputAvailability()` for now. Active subscriptions already fail before mutation when managed input is unavailable; a public capability fact can be added when a real application must render one live tree differently based on that availability.
-- Remove `useFocusManager()`, `tabIndex`, and automatic Tab traversal. Applications with known targets retain their public focus handles; generic renderer-order traversal remains deferred until a real form, menu, or component establishes its policy.
+- Remove public `MountOptions.kittyKeyboard`, `kittyFlags`, `kittyModifiers`, `KittyKeyboardOptions`, and `KittyFlagName`. They are protocol controls with no real consumer, and application-selected flags would make the stable projection depend on parser configuration. Runtime privately probes a demanded TTY pair, uses only the protocol facts needed by the public projection, falls back to legacy input, and restores its stack on suspend, signal, HMR, and teardown.
 
-### Alternatives and evidence still required
+### Alternatives, implementation, and evidence
 
-Moving `useInput()` itself above Runtime was rejected because Runtime would still have to expose an equivalent managed normalized subscription service, merely under a less usable name. Publishing the entire focus tree was rejected because it exposes renderer structure only to let third parties rebuild routing that Runtime already has to keep coherent. Keeping `"consume"` was rejected because it combines route stopping, default prevention, external blocking, and an unused action report.
+Moving `useInput()` itself above Runtime was rejected because Runtime would still have to expose an equivalent managed normalized subscription service. Retaining focus attachment inside `useInput()` was rejected after the single-hub composition proved that third parties do not need independent focused Runtime registrations. Reusing `useBoxSize()` for eligibility was rejected because it is absent in live screen-reader presentation and makes clipping or zero size look like logical absence. Keeping `"consume"` was rejected because it combines route stopping, default prevention, external blocking, and an unused action report.
 
-Before implementation is accepted, tests must fix the route order when a focused target and trapped scope both subscribe, verify that same-point listeners all run, verify independent stop/default decisions, and cover explicit focus-handle navigation, non-TTY stdin combinations, activation failure before terminal mutation, string rendering, suspension, HMR, delayed modal targets, `v-if`, and `v-show`. The coding-agent, mo, and machud paths must compile using only the proposed projection without reconstructing text from parser fields.
+The accepted limitation is explicit: Runtime does not impose one modal boundary across multiple unrelated third-party routers, does not expose parser-byte-start ownership to a high-level router, and does not publish renderer-preorder traversal. One chosen provider can give its own application a complete normalized-event-start snapshot, targetless modal isolation, and explicit target order. A later real need may add a narrower renderer-order or hard-boundary fact without changing the primitives above. Transparent child-terminal forwarding remains outside the foundation rather than being approximated by normalized Unicode.
+
+Path 3 now implements the reduced surface above. The common root exports only `useInput()`, `TuiInputEvent`, `TuiKeyName`, and `useBoxPresence()` from this path. Public focus and scope values, input availability and external forwarding, parser-shaped event fields, routing decisions, public Kitty controls, and the old cell-coordinate caret are absent rather than retained as compatibility aliases. Repository examples, capacity workloads, ScrollBox composition, and the packed clean consumer use the reduced contract. The clean consumer's focus hub imports only Vue and the common Runtime root; package checks also reject the removed names and both the string-keyed and repository-symbol Kitty mount controls. The repository-only symbol is accepted only through an `InternalMountOptions` intersection on `/internal`, and generated root declarations contain neither that symbol nor its protocol option type.
+
+The retained input implementation still owns streaming UTF-8 and escape framing, bracketed paste, shared-stdin snapshots, raw mode, and private Kitty negotiation. Production starts negotiation only for semantic input demand, requests only disambiguation, falls back without changing the public event shape, and restores or abandons its protocol ownership on every lifecycle path. A cancelled in-flight query may keep a finite reply tombstone while the app remains mounted, but dropping the owning application now removes that tombstone, timer, and shared listener immediately. Reactive `isActive` validation no longer throws from a Vue watch source: an invalid replacement first withdraws the subscription and then enters the ordinary fatal Runtime lifecycle exactly once. A thrown handler or invalid handler result likewise enters that lifecycle while the shared ingress still delivers the same fact to another mounted application; tests prove rejection, raw-mode release, listener ownership, and continued peer input.
+
+Box presence is published from the accepted renderer transaction rather than inferred from Yoga dimensions. The implementation covers direct and inherited `display:none`, removal, Static history, zero size and clipping, screen-reader and non-TTY live trees, string absence, suspension, failed candidates, atomic retargeting, cross-app validation, binding disposal, and teardown. The public-only focus proof covers focus, nested scopes, a targetless trap, restoration, route snapshots, and provider-local propagation without any Runtime internal import.
+
+Focused local evidence is green: five Runtime files pass 154 tests, the Path 3 integration set includes the 29-test public input suite, and the ScrollBox composition passes 14 tests. The retained real-PTY input file passes 46 tests, while the seven other migrated PTY files pass 36; these include legacy and Kitty Ctrl+C defaults, private automatic negotiation, query-reply filtering, adjacent ordinary input, one push/pop lifetime, paste, scrolling, suspension, rendering, mouse, and selection paths. The complete local `vp run ready` gate passes: Runtime 810 tests, testing 89, components 34, Runtime integration 1,025, Vite 30, PTY 138, and example PTY smoke 6, together with builds, formatting, zero-warning lint, repository and fixture type checks, and the packed clean consumer on Vue 3.4.38 with TypeScript 6.0.3. Fresh packed-source verification of the pinned coding-agent, mo, and machud revisions passes their builds, tests or format gates, and real PTY journeys using only the reduced public input contract. Global scans find no stale focus APIs, nested parser fields, handler phases, or `consume`/`continue` results in those patches.
+
+The bounded Path 3 adversarial review used two independent reviewers. They found four acceptance blockers: handler failures did not initiate fatal cleanup, the internal Kitty symbol leaked through public `MountOptions`, the exhaustive ledger contradicted the accepted focus removal, and README release wording ignored the bounded Kitty-reply tombstone. The implementation, declaration guard, lifecycle regression tests, ledger, and README now close those four findings. The reviewers found no other blocking defect in the normalized facts, Ctrl+C behavior, host matrix, resource ownership, Box-presence contract, or public-only focus proof. No GitHub workflow or Docker run was used for this evidence.
+
+Path 3 withdraws the old public cell-coordinate `useCaret()` together with public focus; it retains the private writer and restoration mechanism as implementation material. Path 4 may republish a caret primitive only if the semantic Text contract below survives its own boundary audit, so no transitional focus-free cell API is introduced.
 
 ## Path 4: editable text and the terminal caret
 
@@ -694,16 +695,13 @@ interface TextLayout {
   ): TextPosition | null;
 }
 
-function useTextLayout(
-  target: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>,
+function useTextLayout<T extends PublicTextInstance>(
+  target: Readonly<Ref<T | null | undefined>>,
 ): Readonly<Ref<TextLayout | null>>;
 
-function useCaret(
-  target: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>,
-  options: {
-    readonly focus: UseFocusReturn;
-    readonly position: MaybeRefOrGetter<TextPosition | null | undefined>;
-  },
+function useCaret<T extends PublicTextInstance>(
+  target: Readonly<Ref<T | null | undefined>>,
+  position: MaybeRefOrGetter<TextPosition | null | undefined>,
 ): void;
 ```
 
@@ -711,9 +709,9 @@ function useCaret(
 
 `positionAt()` defaults both `nearest` and `visibleOnly` to false. An exact point on the first cell of a double-width grapheme maps to the boundary before it; its second cell maps to the boundary after it. If a terminal-width implementation ever produces an exact midpoint, the later document position wins. With `nearest: true`, candidates are ordered first by absolute row distance, then column distance, then later document position, so a captured drag outside the target clamps deterministically. `visibleOnly: true` filters out insertion positions whose associated painted cells did not survive clipping or later overlap; it does not alter tie-breaking.
 
-The supported target is one top-level, non-transformed, non-truncated Text. Nested styled Text belongs to that semantic document when Runtime can preserve its grapheme ownership; splitting one grapheme across independently owned nested Text makes the mapping unavailable. This deliberate boundary supports TextInput and owned selectable text without pretending Runtime can truthfully map every arbitrary transformed subtree.
+Both hooks accept only a Vue ref bound directly to one top-level, non-transformed, non-truncated Text in the same Runtime app. They do not accept a generic component, Box, raw host node, or getter. Nested styled Text belongs to that semantic document when Runtime can preserve its grapheme ownership; splitting one grapheme across independently owned nested Text makes the mapping unavailable. This deliberate boundary supports TextInput and owned selectable text without pretending Runtime can truthfully map every arbitrary transformed subtree. The nominal `PublicTextInstance` constraint is carried by the exported Text component type and does not require another root convenience export.
 
-`useCaret()` accepts the semantic position, not a cell copied from a previous frame. Runtime resolves it against the candidate accepted paint, ties it to the exact focus handle, hides it when the position or target is not visible, and restores the one physical cursor after every successful commit. The focus handle must belong to the same app, and the Text target must be that focused host or a rendered descendant; an unrelated, detached, or hidden Text remains logically registered but cannot own the physical caret. At most one non-null eligible caret may claim one focused handle in an accepted frame; competing claims are a programming error rather than paint-order arbitration. It returns no diagnostic state. A generic Box or grid caret is withheld because no real consumer requires it.
+`useCaret()` accepts the semantic position, not a cell copied from a previous frame. Runtime resolves it against the candidate paint, hides it when the position or target did not survive the final paint, and restores the one physical cursor after every successful commit. Focus is not an argument: a higher interaction layer makes an inactive editor's position `null`. Runtime therefore owns only the terminal constraint that at most one non-null, resolvable caret declaration may survive one accepted frame; competing declarations are a programming error rather than paint-order arbitration. It returns no diagnostic state. A generic Box or grid caret is withheld because no real consumer requires it.
 
 ### Public-only higher-layer composition
 
@@ -721,7 +719,10 @@ The supported target is one top-level, non-transformed, non-truncated Text. Nest
 const layout = useTextLayout(textRef);
 const cursor = shallowRef<TextPosition>({ offset: 0, affinity: "forward" });
 
-useCaret(textRef, { focus, position: cursor });
+useCaret(
+  textRef,
+  computed(() => (focus.isFocused.value ? cursor.value : null)),
+);
 
 function moveDown() {
   const current = layout.value?.resolve(cursor.value);
@@ -741,12 +742,12 @@ A third-party TextInput can use the same queries for left, right, vertical, and 
 - `useTextLayout()` is `null` before the first accepted paint, after detach or retarget, after an accepted hidden frame, and whenever a truthful mapping is unsupported. Empty Text is a valid document with offset `0`.
 - A failed output attempt retains the previous accepted layout. Suspension retains that snapshot but hides the physical caret; resume publishes the refreshed mapping only with a successful repaint.
 - Live visual Inline and Fullscreen hosts expose the mapping. Final-output, screen-reader, and string hosts expose `null` and emit no caret controls.
-- A malformed initial point, position, option, or cross-app focus handle throws synchronously before registration. A malformed reactive replacement enters the ordinary fatal lifecycle without publishing a partial caret intent. A structurally valid safe-integer offset that is temporarily out of range or not a grapheme boundary simply does not resolve and therefore hides the caret.
+- A malformed initial target or position throws synchronously before registration. A malformed reactive replacement enters the ordinary fatal lifecycle without publishing a partial caret intent. A structurally valid safe-integer offset that is temporarily out of range or not a grapheme boundary simply does not resolve and therefore hides the caret.
 - Runtime retains the same query object when text mapping and final visibility are unchanged, so selection-only styling does not create a reactive render loop.
 
 ### Retained internals and removed contracts
 
-Retain the grapheme trace, wrap and provenance caches, nested-owner mapping, clipping and overlap data, accepted-frame transaction, caret arbiter, terminal cursor ownership, failed-frame rollback, sibling repaint correction, and suspend/resume restoration. Remove public `CaretState`, geometry fragments, hidden reasons, and the current cell-coordinate caret input. Remove the public `useTextSelection()` controller and all of its command, range, state, copy, movement, and unavailability types; those are one high-level selection policy. Do not publish the raw cells/stops draft.
+Retain the grapheme trace, wrap and provenance caches, nested-owner mapping, clipping and overlap data, accepted-frame transaction, caret arbiter, terminal cursor ownership, failed-frame rollback, sibling repaint correction, and suspend/resume restoration. The current caret slots account for clipping but not later sibling overwrite; Path 4 must reuse or generalize the private selection provenance that already records surviving painted cells, and must add frame-final provenance for empty and trailing insertion stops. Remove public `CaretState`, geometry fragments, hidden reasons, the focus dependency, and the current cell-coordinate caret input. Remove the public `useTextSelection()` controller and all of its command, range, state, copy, movement, and unavailability types; those are one high-level selection policy. Do not publish the raw cells/stops draft.
 
 Before acceptance, prove the query and semantic caret on ASCII, wide and combining graphemes, explicit newlines, soft-wrap affinity, nested styles, empty Text, clipping, overlap, retargeting, `v-show`, failure, resize, suspension, final output, screen reader, string rendering, unsupported transform/truncation, stable query identity, and a bounded long document. A representative third-party-style TextInput and owned selectable-text fixture must use only supported entry points.
 
@@ -1114,12 +1115,12 @@ This ledger names every currently exported value and named type. “Replace” m
 | `Transform`            | Keep private, defer public contract | Requires painter access but has no application evidence; Path 0.                                                                                                                                        |
 | `useAnimation`         | Remove                              | Ordinary Vue timer policy, moved into its sole Spinner consumer; Path 0.                                                                                                                                |
 | `useApp`               | Narrow                              | Retain only component-initiated `exit()`; flush stays on the externally owned `TuiApp` and mounted terminal handoff is deferred; Path 5.                                                                |
-| `useInput`             | Redesign                            | Keep the Runtime-owned normalized subscription with smaller facts and explicit route/default decisions; Path 3.                                                                                         |
+| `useInput`             | Redesign                            | Keep the Runtime-owned normalized subscription with smaller facts and one explicit Runtime-default prevention result; routing remains above Runtime; Path 3.                                            |
 | `useInputAvailability` | Remove for now                      | No evidenced adaptive consumer; active managed input has explicit failure and string reuse is inert; Path 3.                                                                                            |
-| `useFocus`             | Redesign                            | Keep the ref-bound target, focused fact, and explicit focus operation; remove numeric ordering and unsupported target policy; Path 3.                                                                   |
-| `useFocusScope`        | Redesign                            | Keep active/trapped renderer-bound scope ownership; Path 3.                                                                                                                                             |
-| `useFocusedInput`      | Fold into `useInput`                | Same subscription primitive with `{ focus }`; Path 3.                                                                                                                                                   |
-| `useFocusScopeInput`   | Fold into `useInput`                | Same subscription primitive with `{ scope }`; Path 3.                                                                                                                                                   |
+| `useFocus`             | Remove                              | Focus identity and eligibility compose above Runtime from Vue state plus the accepted-tree fact exposed by `useBoxPresence()`; Path 3.                                                                  |
+| `useFocusScope`        | Remove                              | Scope and modal-trap ownership are higher-level routing policy demonstrably composable through one application-wide subscription; Path 3.                                                               |
+| `useFocusedInput`      | Remove                              | A higher-level focus provider routes one public `useInput()` subscription; Runtime does not need one registration per focus target; Path 3.                                                             |
+| `useFocusScopeInput`   | Remove                              | Scope-local handler routing belongs to the same replaceable higher-level provider; Path 3.                                                                                                              |
 | `useFocusManager`      | Remove                              | No consumer needs generic renderer-order traversal; applications with known targets use their focus handles, while the internal focus policy remains available for a later evidenced primitive; Path 3. |
 | `useExternalInput`     | Keep private, defer public contract | Current child-PTY fallthrough exposes normalized-source/router policy with no supported pane consumer; Path 3.                                                                                          |
 | `useStdin`             | Retain unchanged                    | Vouched exact mounted raw stream escape hatch; Paths 3 and 5.                                                                                                                                           |
@@ -1152,8 +1153,8 @@ This ledger names every currently exported value and named type. “Replace” m
 | App hook                      | `UseAppReturn`                                                                                                                                                                                               | Narrow to component-initiated `exit()`; Path 5.                                                                                                                                                                                                                                                         |
 | Clipboard                     | `ClipboardAvailability`, `ClipboardTransport`, `ClipboardTransportResult`, `ClipboardUnavailableReason`, `ClipboardWriteResult`, `CustomClipboardTransport`, `Osc52ClipboardTransport`, `UseClipboardReturn` | Remove all eight; Path 6.                                                                                                                                                                                                                                                                               |
 | Input availability            | `InputAvailability`, `UseInputAvailabilityReturn`                                                                                                                                                            | Remove both; Path 3.                                                                                                                                                                                                                                                                                    |
-| Input facts and routing       | `InputHandler`, `InputHandlerResult`, `InputRouteDecision`, `TuiInputEvent`, `TuiInputModifiers`, `TuiInputPhase`, `TuiInputSource`, `UseInputOptions`                                                       | Retain and redesign `InputHandler`, `TuiInputEvent`, and `UseInputOptions`; replace `TuiInputModifiers` with the exact `TuiKeyModifiers` and `TuiKeyName` support types; remove the separate result, four-field decision, phase, and source types; Path 3.                                              |
-| Focus and external forwarding | `ExternalInputHandler`, `ExternalInputSource`, `UseFocusManagerReturn`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`                                                   | Retain and narrow the four focus target/scope types; remove manager traversal and the two external types; Path 3.                                                                                                                                                                                       |
+| Input facts and routing       | `InputHandler`, `InputHandlerResult`, `InputRouteDecision`, `TuiInputEvent`, `TuiInputModifiers`, `TuiInputPhase`, `TuiInputSource`, `UseInputOptions`                                                       | Retain and redesign only `TuiInputEvent`, plus the finite `TuiKeyName` support type. Inline the ordinary handler and reactive activation option; remove the named handler/result/options wrappers, routing decision, nested modifiers, phase, source, and parser facts; Path 3.                         |
+| Focus and external forwarding | `ExternalInputHandler`, `ExternalInputSource`, `UseFocusManagerReturn`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`                                                   | Remove all seven. A public-only proof composes focus, scopes, traps, restoration, and propagation from Vue state, `useInput()`, and `useBoxPresence()`; normalized external forwarding is not transparent child-terminal transport; Path 3.                                                             |
 | Streams                       | `CoordinatedWriteResult`, `UseStderrReturn`, `UseStdinReturn`, `UseStdoutReturn`                                                                                                                             | Retain only `UseStdinReturn`; Path 5.                                                                                                                                                                                                                                                                   |
 | Layout and session            | `RenderLayoutSize`, `RenderModeResolution`, `RenderOutput`, `RenderSession`, `RenderSize`, `UseLayoutSizeReturn`                                                                                             | Remove the session graph and old return. The new width and optional-height projections need no named type; Path 1.                                                                                                                                                                                      |
 | Caret                         | `CaretState`, `UseCaretOptions`, `UseCaretReturn`                                                                                                                                                            | Retain and redesign only `UseCaretOptions`; remove diagnostic state and return wrapper; add semantic text query types; Path 4.                                                                                                                                                                          |
@@ -1202,7 +1203,7 @@ This ledger names every currently exported value and named type. “Replace” m
 
 | Current or proposed subpath     | Decision                                                                                                                                                                                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@vue-tui/runtime`              | Retain as the common minimum renderer, lifecycle, layout, input, focus, and text-editing primitives.                                                                                                                                                    |
+| `@vue-tui/runtime`              | Retain as the common minimum renderer, lifecycle, layout, normalized-input, and accepted-renderer-fact primitives. Higher-level focus policy remains replaceable.                                                                                       |
 | `@vue-tui/runtime/inline`       | Retain only the redesigned single-slot `Static`.                                                                                                                                                                                                        |
 | `@vue-tui/runtime/fullscreen`   | Retain only the physical targeted `useMouse` primitive and its small types.                                                                                                                                                                             |
 | `@vue-tui/runtime/internal`     | Remove from the published export map and tarball contract.                                                                                                                                                                                              |
@@ -1212,8 +1213,8 @@ This ledger names every currently exported value and named type. “Replace” m
 
 ### Proposed target surface
 
-The target is intentionally smaller than the current 31 values and 87 named types. The common root has fourteen values: `Box`, `Text`, `createApp`, `renderToString`, `useApp`, `useInput`, `useFocus`, `useFocusScope`, `useStdin`, `useLayoutWidth`, `useViewportHeight`, `useBoxSize`, `useTextLayout`, and `useCaret`. `/inline` has `Static`; `/fullscreen` has `useMouse`; `/devtools` has `connectDevtools`; `/testing` has `createTestHostBridge`.
+The target is intentionally smaller than the current 31 values and 87 named types. After the accepted Path 3 decision, the working common-root target has thirteen values: `Box`, `Text`, `createApp`, `renderToString`, `useApp`, `useInput`, `useStdin`, `useLayoutWidth`, `useViewportHeight`, `useBoxSize`, `useBoxPresence`, `useTextLayout`, and `useCaret`. `/inline` has `Static`; `/fullscreen` has `useMouse`; `/devtools` has `connectDevtools`; `/testing` has `createTestHostBridge`. The later-path names remain proposals until those paths pass their own evidence gates.
 
-The intended common named contracts are `MountOptions`, `TuiApp`, `RenderMode`, `RenderToStringOptions`, `AriaRole`, `AriaState`, `BoxProps`, `TextProps`, `UseAppReturn`, `TuiInputEvent`, `TuiKeyName`, `TuiKeyModifiers`, `InputHandler`, `UseInputOptions`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`, `UseStdinReturn`, `BoxSize`, `CellPoint`, `ElementTarget`, `TextPosition`, `ResolvedTextPosition`, `TextLayout`, and `UseCaretOptions`. `/fullscreen` adds `CellDelta`, `MouseButton`, `MouseModifiers`, `TuiMouseEvent`, `MouseEventControls`, `MouseHandler`, and `UseMouseOptions`. `/inline` adds no named type. `/devtools` may name only the small structural hot-context input if declaration generation cannot keep it inline. `/testing` adds `TestContentFrame`, `TestHostBridgeOptions`, and `TestHostBridge`.
+The intended common named contracts after Path 3 are `MountOptions`, `TuiApp`, `RenderMode`, `RenderToStringOptions`, `AriaRole`, `AriaState`, `BoxProps`, `TextProps`, `UseAppReturn`, `TuiInputEvent`, `TuiKeyName`, `UseStdinReturn`, `BoxSize`, `CellPoint`, `ElementTarget`, `TextPosition`, `ResolvedTextPosition`, `TextLayout`, and `UseCaretOptions`. `/fullscreen` adds `CellDelta`, `MouseButton`, `MouseModifiers`, `TuiMouseEvent`, `MouseEventControls`, `MouseHandler`, and `UseMouseOptions`. `/inline` adds no named type. `/devtools` may name only the small structural hot-context input if declaration generation cannot keep it inline. `/testing` adds `TestContentFrame`, `TestHostBridgeOptions`, and `TestHostBridge`. Names belonging to Paths 4 through 6 remain provisional here.
 
 This proposed list is not accepted by enumeration alone. Each name points to the concrete code, host semantics, absence behavior, composition proof, and evidence gate in Paths 0–6.

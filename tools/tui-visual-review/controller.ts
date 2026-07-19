@@ -7,8 +7,6 @@ import {
   parseFullscreenOriginScenario,
   startFullscreenOriginSession,
 } from "./fullscreen-origin.ts";
-import { parseFocusRoutingScenario, startFocusRoutingSession } from "./focus-routing.ts";
-import { parseInputRoutingScenario, startInputRoutingSession } from "./input-routing.ts";
 import { startScrollBoxSession } from "./scroll-box.ts";
 import { startSpinnerSession } from "./spinner.ts";
 import {
@@ -23,8 +21,6 @@ import { startVShowSession } from "./v-show.ts";
 type ReviewTarget =
   | "basic-template"
   | "fullscreen-origin"
-  | "input-routing"
-  | "focus-routing"
   | "scroll-composition"
   | "selection-copy"
   | "scroll-box"
@@ -62,8 +58,6 @@ function reviewTarget(args: string[]): ReviewTarget {
   if (
     value === "basic-template" ||
     value === "fullscreen-origin" ||
-    value === "input-routing" ||
-    value === "focus-routing" ||
     value === "scroll-composition" ||
     value === "selection-copy" ||
     value === "scroll-box" ||
@@ -74,7 +68,7 @@ function reviewTarget(args: string[]): ReviewTarget {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, input-routing, focus-routing, scroll-composition, selection-copy, scroll-box, spinner, inline-history, or v-show, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, scroll-composition, selection-copy, scroll-box, spinner, inline-history, or v-show, received ${value}`,
   );
 }
 
@@ -183,38 +177,27 @@ async function main(): Promise<void> {
   const scenario =
     target === "fullscreen-origin"
       ? parseFullscreenOriginScenario(option(args, "--scenario"))
-      : target === "input-routing"
-        ? parseInputRoutingScenario(option(args, "--scenario"))
-        : target === "focus-routing"
-          ? parseFocusRoutingScenario(option(args, "--scenario"))
-          : target === "scroll-composition"
-            ? parseScrollCompositionScenario(option(args, "--scenario"))
-            : target === "selection-copy"
-              ? parseSelectionCopyScenario(option(args, "--scenario"))
-              : undefined;
+      : target === "scroll-composition"
+        ? parseScrollCompositionScenario(option(args, "--scenario"))
+        : target === "selection-copy"
+          ? parseSelectionCopyScenario(option(args, "--scenario"))
+          : undefined;
   const { session, mode } =
     target === "fullscreen-origin"
       ? await startFullscreenOriginSession(outputDir, parseFullscreenOriginScenario(scenario))
-      : target === "input-routing"
-        ? await startInputRoutingSession(outputDir, parseInputRoutingScenario(scenario))
-        : target === "focus-routing"
-          ? await startFocusRoutingSession(outputDir, parseFocusRoutingScenario(scenario))
-          : target === "scroll-composition"
-            ? await startScrollCompositionSession(
-                outputDir,
-                parseScrollCompositionScenario(scenario),
-              )
-            : target === "selection-copy"
-              ? await startSelectionCopySession(outputDir, parseSelectionCopyScenario(scenario))
-              : target === "scroll-box"
-                ? await startScrollBoxSession(outputDir)
-                : target === "spinner"
-                  ? await startSpinnerSession(outputDir)
-                  : target === "inline-history"
-                    ? await startInlineHistorySession(outputDir)
-                    : target === "v-show"
-                      ? await startVShowSession(outputDir)
-                      : await startBasicTemplateSession(outputDir);
+      : target === "scroll-composition"
+        ? await startScrollCompositionSession(outputDir, parseScrollCompositionScenario(scenario))
+        : target === "selection-copy"
+          ? await startSelectionCopySession(outputDir, parseSelectionCopyScenario(scenario))
+          : target === "scroll-box"
+            ? await startScrollBoxSession(outputDir)
+            : target === "spinner"
+              ? await startSpinnerSession(outputDir)
+              : target === "inline-history"
+                ? await startInlineHistorySession(outputDir)
+                : target === "v-show"
+                  ? await startVShowSession(outputDir)
+                  : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

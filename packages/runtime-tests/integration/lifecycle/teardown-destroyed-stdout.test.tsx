@@ -1,3 +1,4 @@
+import { INTERNAL_KITTY_KEYBOARD, type InternalMountOptions } from "@vue-tui/runtime/internal";
 /**
  * Item 2.5b — every teardown stdout write must be skipped when stdout is already
  * destroyed/ended, not just gated on `isTTY`.
@@ -93,7 +94,7 @@ function makeFakeStdin(): NodeJS.ReadStream {
 
 const PlainApp = defineComponent(() => () => <Text>plain</Text>);
 const InputApp = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => {});
   return () => <Text>plain</Text>;
 });
 
@@ -133,8 +134,8 @@ describe("teardown stdout writes on destroyed stdout", () => {
       stdin,
       stderr,
       // Force kitty enabled so dispose() attempts the disable-kitty escape.
-      kittyKeyboard: { mode: "enabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    } as InternalMountOptions);
 
     await new Promise<void>((r) => setTimeout(r, 60));
     // Kitty enable escape should have gone out on the live stream.
@@ -176,8 +177,8 @@ describe("teardown stdout writes on destroyed stdout", () => {
       stdout,
       stdin,
       stderr,
-      kittyKeyboard: { mode: "enabled" },
-    });
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    } as InternalMountOptions);
 
     await new Promise<void>((r) => setTimeout(r, 60));
 

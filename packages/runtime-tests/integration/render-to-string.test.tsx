@@ -1,11 +1,4 @@
-import {
-  defineComponent,
-  onMounted,
-  onScopeDispose,
-  shallowRef,
-  watchSyncEffect,
-  type ComponentPublicInstance,
-} from "vue";
+import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
 import {
@@ -14,16 +7,9 @@ import {
   Text,
   useInput,
   useApp,
-  useFocus,
-  useFocusManager,
-  useFocusedInput,
-  useFocusScope,
-  useFocusScopeInput,
-  useExternalInput,
   useStdin,
   useStdout,
   useStderr,
-  useCaret,
   useBoxSize,
   useLayoutWidth,
   useViewportHeight,
@@ -134,7 +120,7 @@ describe("renderToString", () => {
 
   test("useInput does not throw in renderToString", () => {
     const App = defineComponent(() => {
-      useInput(() => "continue");
+      useInput(() => undefined);
       return () => <Text>with input</Text>;
     });
     const output = renderToString(App);
@@ -202,38 +188,6 @@ describe("renderToString", () => {
     await expect(waitUntilRenderFlush?.()).rejects.toThrow(
       "useApp().waitUntilRenderFlush() is unavailable during renderToString()",
     );
-  });
-
-  test("focus targets, scopes, handlers, and manager stay inert in renderToString", () => {
-    let target!: ReturnType<typeof useFocus>;
-    let scope!: ReturnType<typeof useFocusScope>;
-    let manager!: ReturnType<typeof useFocusManager>;
-    const calls: string[] = [];
-    const App = defineComponent(() => {
-      const host = shallowRef<ComponentPublicInstance | null>(null);
-      scope = useFocusScope({ trapped: true });
-      target = useFocus(host, { scope, autoFocus: true });
-      manager = useFocusManager();
-      useFocusedInput(target, () => (calls.push("target"), "continue"));
-      useFocusScopeInput(scope, () => (calls.push("scope"), "continue"));
-      useExternalInput(target, () => calls.push("external"));
-      return () => (
-        <Box ref={host}>
-          <Text>
-            focused:{String(target.isFocused.value)} scope:{String(scope.containsFocus.value)}
-          </Text>
-        </Box>
-      );
-    });
-    const output = renderToString(App);
-    expect(output).toContain("focused:false scope:false");
-    expect(manager.focusedTarget.value).toBeNull();
-    expect(manager.focusNext()).toBe(false);
-    expect(manager.focusPrevious()).toBe(false);
-    expect(manager.blur()).toBe(false);
-    expect(target.focus()).toBe(false);
-    expect(target.blur()).toBe(false);
-    expect(calls).toEqual([]);
   });
 
   test("useStdin does not throw in renderToString", () => {
@@ -751,32 +705,17 @@ describe("renderToString", () => {
   //
   // renderToString runs with NO terminal session: it provides no-op AppContext +
   // StdinContext. The
-  // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
-  // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCaret, semantic input, and useBoxSize — so that
+  // existing suite covers useInput/useApp/useStdin/useStdout/useStderr. These
+  // pin the remaining common terminal composables — semantic input and
+  // useBoxSize — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
-    test("useCaret reports unavailable in renderToString", () => {
-      let caretStatus = "unset";
-      const App = defineComponent(() => {
-        const target = shallowRef<ComponentPublicInstance | null>(null);
-        const focus = useFocus(target, { autoFocus: true });
-        const { state } = useCaret(target, { focus, position: { x: 2, y: 0 } });
-        caretStatus = state.value.status;
-        return () => <Text ref={target}>with caret</Text>;
-      });
-      const output = renderToString(App);
-      expect(output).toBe("with caret");
-      expect(caretStatus).toBe("unavailable");
-    });
-
     test("paste handling through useInput stays inert in renderToString", () => {
       let pasted = "";
       const App = defineComponent(() => {
         useInput((event) => {
           if (event.kind === "paste") pasted = event.text;
-          return "continue";
         });
         return () => <Text>with paste</Text>;
       });
@@ -800,14 +739,10 @@ describe("renderToString", () => {
       expect(output).toContain("unavailable");
     });
 
-    test("caret, input, and box size render together without throwing", () => {
-      let caretStatus = "unset";
+    test("input and box size render together without throwing", () => {
       const App = defineComponent(() => {
-        useInput(() => "continue");
+        useInput(() => undefined);
         const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
-        const focus = useFocus(boxRef, { autoFocus: true });
-        const { state } = useCaret(boxRef, { focus, position: { x: 1, y: 0 } });
-        caretStatus = state.value.status;
         useBoxSize(boxRef);
         return () => (
           <Box ref={boxRef}>
@@ -817,7 +752,6 @@ describe("renderToString", () => {
       });
       const output = renderToString(App, { columns: 40 });
       expect(output).toContain("all");
-      expect(caretStatus).toBe("unavailable");
     });
   });
 });

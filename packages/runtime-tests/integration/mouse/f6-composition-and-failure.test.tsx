@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, useFocus, type UseFocusReturn } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
 import {
   useMouseDrag,
   useMouseEvent,
@@ -35,43 +35,6 @@ function captureExit(result: RenderResult) {
     (error: unknown) => ({ status: "rejected", error }) as const,
   );
 }
-
-test("a click handler composes with an opaque focus handle", async () => {
-  let firstFocus!: UseFocusReturn;
-  let secondFocus!: UseFocusReturn;
-  const App = defineComponent(() => {
-    const first = shallowRef<Target>(null);
-    const second = shallowRef<Target>(null);
-    firstFocus = useFocus(first, { autoFocus: true });
-    secondFocus = useFocus(second);
-    useMouseEvent(second, "click", () => (secondFocus.focus() ? "consume" : "continue"));
-
-    return () => (
-      <Box width={12} height={2} flexDirection="column">
-        <Box ref={first} width={12} height={1} flexShrink={0}>
-          <Text>first</Text>
-        </Box>
-        <Box ref={second} width={12} height={1} flexShrink={0}>
-          <Text>second</Text>
-        </Box>
-      </Box>
-    );
-  });
-  const result = await renderFullscreen(App);
-
-  try {
-    expect(firstFocus.isFocused.value).toBe(true);
-    expect(secondFocus.isFocused.value).toBe(false);
-
-    await result.mouse.down({ x: 0, y: 1 });
-    await result.mouse.up({ x: 0, y: 1 });
-
-    expect(firstFocus.isFocused.value).toBe(false);
-    expect(secondFocus.isFocused.value).toBe(true);
-  } finally {
-    result.dispose();
-  }
-});
 
 test("a wheel handler drives a passive ScrollBox through its imperative handle", async () => {
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);

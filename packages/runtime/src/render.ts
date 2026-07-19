@@ -37,8 +37,9 @@ import {
   createInputAvailabilityRef,
 } from "./io/input-availability.ts";
 import {
+  INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
-  type KittyKeyboardOptions,
+  type InternalKittyKeyboardMountOptions,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
 import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
@@ -118,6 +119,11 @@ import {
   setInternalGeometryService,
   type InternalGeometryPaintFrame,
 } from "./geometry/geometry-service.ts";
+import {
+  createInternalBoxPresenceService,
+  setInternalBoxPresenceService,
+  type InternalBoxPresenceFrame,
+} from "./box-presence/box-presence-service.ts";
 import {
   createInternalFocusController,
   type InternalFocusController,
@@ -217,20 +223,21 @@ export interface MountOptions {
    */
   incrementalRendering?: boolean;
   /**
-   * Configure kitty keyboard protocol support for enhanced keyboard input.
-   * Enables additional modifiers (super, hyper, capsLock, numLock) and
-   * disambiguated key events in terminals that support the protocol.
-   *
-   * @see https://sw.kovidgoyal.net/kitty/keyboard-protocol/
-   */
-  kittyKeyboard?: KittyKeyboardOptions;
-  /**
    * Configure the one clipboard transport owned by this mounted application.
    * OSC 52 can report only that a request was written; a custom transport may
    * report a confirmed copy.
    */
   clipboard?: ClipboardTransport;
 }
+
+/** Repository-only mount controls used by Runtime tests and official test tooling. */
+export type InternalMountOptions = MountOptions & {
+  [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
+  [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
+  [INTERNAL_TEST_INPUT_HOST]?: InternalTestInputHost;
+  [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
+  [INTERNAL_SUSPENSION_HOST]?: SuspensionHost;
+};
 
 // Extends `App<TuiNode>` (the renderer's real app type) so `TuiApp` inherits Vue's full app
 // surface — `use`/`component`/`provide`/`config`/… — for free.
@@ -366,6 +373,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
+  let mountedBoxPresence: ReturnType<typeof createInternalBoxPresenceService> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
   let mountedMouseController: FullscreenMouseController | null = null;
   let mountedTestInputHostDetach: (() => void) | null = null;
@@ -997,6 +1005,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
+      if (mountedBoxPresence) {
+        const boxPresence = mountedBoxPresence;
+        mountedBoxPresence = null;
+        setInternalBoxPresenceService(appContext, null);
+        runBestEffort(() => boxPresence.dispose());
+      }
       if (mountedCaretController) {
         const caretController = mountedCaretController;
         mountedCaretController = null;
@@ -1270,7 +1284,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   const app = baseApp as unknown as TuiApp;
 
-  app.mount = function mount(options: MountOptions = {}): ComponentPublicInstance {
+  app.mount = function mount(options: InternalMountOptions = {}): ComponentPublicInstance {
     // The mount contract is validated before reading stream getters, checking
     // stream ownership, or mutating Vue/terminal state. Removed-option errors
     // deliberately win over an invalid mode value.
@@ -1287,18 +1301,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
-    const renderObserver = (options as { [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver })[
-      INTERNAL_RENDER_OBSERVER
-    ];
-    const testInputHost = (options as { [INTERNAL_TEST_INPUT_HOST]?: InternalTestInputHost })[
-      INTERNAL_TEST_INPUT_HOST
-    ];
-    const configuredTerminalSizeProbe = (
-      options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
-    )[INTERNAL_TERMINAL_SIZE_PROBE];
-    const suspensionHost =
-      (options as { [INTERNAL_SUSPENSION_HOST]?: SuspensionHost })[INTERNAL_SUSPENSION_HOST] ??
-      processSuspensionHost;
+    const renderObserver = options[INTERNAL_RENDER_OBSERVER];
+    const testInputHost = options[INTERNAL_TEST_INPUT_HOST];
+    const kittyKeyboard = options[INTERNAL_KITTY_KEYBOARD];
+    const configuredTerminalSizeProbe = options[INTERNAL_TERMINAL_SIZE_PROBE];
+    const suspensionHost = options[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
     // Process-global fallbacks describe the process's controlling terminal, not
     // an arbitrary custom WriteStream. A custom TTY must provide a complete
     // columns/rows pair; deterministic hosts can supply the internal modeled
@@ -1410,7 +1417,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const onRender = options.onRender;
     const incrementalRendering = options.incrementalRendering;
     const patchConsole = options.patchConsole;
-    const kittyKeyboard = options.kittyKeyboard;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
     // the render throttle engages by default — without this the animation
     // coalescing (G02) never kicks in on an unthrottled path.
@@ -1560,6 +1566,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let resizeEventGeneration = 0;
       let resizeHandledGeneration = 0;
       let resizePaintPending = false;
+      let preparingBoxPresenceCandidate = false;
       let requestPendingResizeRefresh: () => void = () => {};
       let prepareResumeSurface: (() => (() => CoordinatedWriteResult) | null) | null = null;
       let suspendedFullscreenSurface = false;
@@ -2199,6 +2206,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           requestPaint: () => scheduledCommit(),
         });
         mountedCaretController = caretController;
+        const boxPresence = createInternalBoxPresenceService(tuiRoot, () => {
+          // Reconciliation at the start of this very commit is already covered
+          // by the frame about to begin. Ref-only retargets outside that window
+          // still need to schedule an otherwise output-identical transaction.
+          if (!preparingBoxPresenceCandidate) scheduledCommit();
+        });
+        mountedBoxPresence = boxPresence;
+        setInternalBoxPresenceService(appContext, boxPresence);
         const geometry = createInternalGeometryService(tuiRoot, () => scheduledCommit());
         mountedGeometry = geometry;
         if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
@@ -2887,6 +2902,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (rejectUnsupportedFullscreenStatic(staticNodes)) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         const releasePreparedFrame = acquireRuntimeResource("preparedFrames");
+        let boxPresenceFrame: InternalBoxPresenceFrame | undefined;
         let geometryFrame: InternalGeometryPaintFrame | undefined;
         let selectionFrame: InternalSelectionPaintFrame | undefined;
         let caretFrame: InternalPreparedCaretFrame | undefined;
@@ -2901,6 +2917,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             mouseFrame?.discard();
             selectionFrame?.discard();
             geometryFrame?.discard();
+            boxPresenceFrame?.discard();
           } finally {
             releasePreparedFrame();
             leaveLifecycleTransaction();
@@ -2910,6 +2927,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (settled) return;
           settled = true;
           try {
+            boxPresenceFrame?.commit();
             geometryFrame?.commit();
             selectionFrame?.accept();
             mouseFrame?.accept();
@@ -2943,7 +2961,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         hooks.register(accept, abandon);
 
         const start = onRender ? performance.now() : 0;
-        mountedRenderedTargets?.reconcile();
+        preparingBoxPresenceCandidate = true;
+        try {
+          mountedRenderedTargets?.reconcile();
+          boxPresenceFrame = mountedBoxPresence?.beginFrame();
+        } finally {
+          preparingBoxPresenceCandidate = false;
+        }
 
         // Prepare Static output without settling its mounted host instances. The
         // transaction is accepted only after its physical stdout write returns

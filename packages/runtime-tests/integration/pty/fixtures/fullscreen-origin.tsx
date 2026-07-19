@@ -13,8 +13,6 @@ import {
   createApp,
   useApp,
   useBoxSize,
-  useCaret,
-  useFocus,
   useInput,
   useStderr,
   useStdout,
@@ -98,9 +96,6 @@ function markTargetedEvent(event: string): void {
 
 const App = defineComponent(() => {
   const { exit } = useApp();
-  const caretTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const caretFocus = useFocus(caretTarget, { autoFocus: true, tabIndex: -1 });
-  useCaret(caretTarget, { focus: caretFocus, position: { x: 3, y: 0 } });
   const { write } = useStdout();
   const { write: writeError } = useStderr();
   const clickTarget = shallowRef<ComponentPublicInstance | null>(null);
@@ -110,7 +105,6 @@ const App = defineComponent(() => {
   const targetedDivider = shallowRef<ComponentPublicInstance | null>(null);
   const targetedClippedTarget = shallowRef<ComponentPublicInstance | null>(null);
   const targetedScrollBox = shallowRef<ScrollBoxExpose | null>(null);
-  const targetedChildFocus = useFocus(targetedChild);
   const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
   const targetSize = useBoxSize(lifetimeBoxTarget);
   const targetMetrics = computed(() => {
@@ -133,9 +127,8 @@ const App = defineComponent(() => {
     return "consume";
   });
   useMouseEvent(targetedChild, "click", (event) => {
-    targetedChildFocus.focus();
     markTargetedEvent(
-      `click:child:${event.delivery}:focused=${String(targetedChildFocus.isFocused.value)}:consume=${String(targetedConsumeClick.value)}`,
+      `click:child:${event.delivery}:consume=${String(targetedConsumeClick.value)}`,
     );
     return targetedConsumeClick.value ? "consume" : "continue";
   });
@@ -165,11 +158,7 @@ const App = defineComponent(() => {
   registerDividerDrag("a");
   registerDividerDrag("b");
 
-  const renderSurface = (content: VNodeChild) => (
-    <Box ref={caretTarget} flexDirection="column">
-      {content}
-    </Box>
-  );
+  const renderSurface = (content: VNodeChild) => <Box flexDirection="column">{content}</Box>;
 
   useInput((event) => {
     const input = inputText(event);
@@ -194,9 +183,9 @@ const App = defineComponent(() => {
       } else if (input === "q") {
         exit("targeted-mouse");
       } else {
-        return "continue";
+        return;
       }
-      return "consume";
+      return;
     }
     if (scenario === "target-lifetime") {
       let exitAfterTransition = false;
@@ -208,31 +197,29 @@ const App = defineComponent(() => {
         void nextTick().then(() => {
           process.stdout.write(`\x1b]0;__DRAG_STARTS__:${dragStarts}\x07`);
         });
-        return "consume";
+        return;
       } else if (input === "x") {
         targetPhase.value = "none";
         exitAfterTransition = autoExitTargetLifetime;
       } else if (input === "q") {
         exit("target-lifetime");
-        return "consume";
-      } else return "continue";
+        return;
+      } else return;
       const marked = markTargetPhase();
       if (exitAfterTransition) {
         void marked.then(() => {
           setTimeout(() => exit("target-lifetime"), 20);
         });
       }
-      return "consume";
+      return;
     }
     if (scenario === "screen-reader" && input === "q") {
       exit("screen-reader");
-      return "consume";
+      return;
     }
     if (scenario === "foreground-reset" && input === "q") {
       exit("foreground-reset");
-      return "consume";
     }
-    return "continue";
   });
 
   onMounted(() => {
@@ -270,10 +257,7 @@ const App = defineComponent(() => {
     if (scenario === "targeted-mouse") {
       return renderSurface(
         <Box flexDirection="column">
-          <Text>
-            targets={targetedTargetsVisible.value ? "visible" : "hidden"} focused=
-            {String(targetedChildFocus.isFocused.value)}
-          </Text>
+          <Text>targets={targetedTargetsVisible.value ? "visible" : "hidden"}</Text>
           {targetedTargetsVisible.value ? (
             <>
               <Box ref={targetedParent} width={12} height={1} flexShrink={0}>

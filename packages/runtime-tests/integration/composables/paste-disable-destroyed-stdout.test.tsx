@@ -87,7 +87,7 @@ function makeFakeStdin(): NodeJS.ReadStream {
 }
 
 const PasteApp = defineComponent(() => {
-  useInput(() => "continue");
+  useInput(() => undefined);
   return () => <Text>paste</Text>;
 });
 

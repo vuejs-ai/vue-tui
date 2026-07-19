@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { createServer, type ViteDevServer } from "vite";
 import { vueTui } from "../src/index.ts";
-import { capture, waitFor } from "./helpers.ts";
+import { capture, waitFor, waitUntil } from "./helpers.ts";
 
 const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
 const targetVue = fileURLToPath(new URL("./fixtures/overlay/src/target.vue", import.meta.url));
@@ -26,10 +26,11 @@ afterEach(async () => {
   delete testGlobal.__VT_TEST_STDOUT__;
   delete testGlobal.__VT_TARGET_INSTANCE__;
   delete testGlobal.__VT_TARGET_CURRENT__;
+  delete testGlobal.__VT_TARGET_PRESENCE__;
   delete testGlobal.__VT_TEST_APP__;
 });
 
-test("HMR follows a component's rendered target across rerender and reload", async () => {
+test("HMR keeps component identity while Box presence follows replacement and reload", async () => {
   const read = capture({ terminal: true });
   server = await createServer({
     root,
@@ -39,20 +40,20 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   });
   await server.listen();
   await waitFor(read, "box=7x2");
-  await waitFor(read, "caret=visible");
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__ === true);
   const targetInstance = (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   expect(targetInstance).toBeDefined();
 
   writeFileSync(
     targetVue,
     origTargetVue.replace(
-      '<Box :width="7" :height="2">\n    <Text>TARGET-A</Text>\n  </Box>',
+      '<Box ref="targetBox" :width="7" :height="2">\n    <Text>TARGET-A</Text>\n  </Box>',
       "<Text>TARGET-B-HOT</Text>",
     ),
   );
   await waitFor(read, "TARGET-B-HOT");
   await waitFor(read, "box=7x2");
-  await waitFor(read, "caret=visible");
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__ === false);
 
   expect((globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__).toBe(targetInstance);
   expect((globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__).toBe(targetInstance);
@@ -69,6 +70,5 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   const reloadedTarget = (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
   expect(reloadedTarget).toBeDefined();
   expect(reloadedTarget).not.toBe(targetInstance);
-  const reloadedOutput = read().slice(read().lastIndexOf("TARGET-C-RELOAD"));
-  expect(reloadedOutput).toContain("caret=visible");
+  expect((globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__).toBe(false);
 });

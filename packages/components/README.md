@@ -1,7 +1,6 @@
 # @vue-tui/components
 
-High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), composed from
-`@vue-tui/runtime` primitives.
+High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), composed from `@vue-tui/runtime` primitives.
 
 > Early days — the component set is small and growing. Currently: `ScrollBox`, `Spinner`.
 
@@ -38,42 +37,27 @@ import { Spinner } from "@vue-tui/components";
 
 ## ScrollBox
 
-A bounded viewport that follows the bottom of its content. The core behavior — clip overflow and
-stick to the latest line as content grows — needs no props. It listens to **no** input itself:
-scroll it through the exposed imperative handle, and bind your own keys / mouse to that.
+A bounded viewport that follows the bottom of its content. The core behavior — clip overflow and stick to the latest line as content grows — needs no props. It listens to **no** input itself: scroll it through the exposed imperative handle, and bind your own keys or mouse to that.
 
 ```vue
 <script setup lang="ts">
-import { shallowRef, type ComponentPublicInstance } from "vue";
+import { shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useFocus, useFocusedInput, type InputRouteDecision } from "@vue-tui/runtime";
+import { Box, Text, useInput } from "@vue-tui/runtime";
 
-const box = shallowRef<ScrollBoxExpose>();
-const target = shallowRef<ComponentPublicInstance | null>(null);
-const focus = useFocus(target, { autoFocus: true });
-const continueAtEdge: InputRouteDecision = {
-  action: "none",
-  routing: "continue",
-  defaultAction: "prevent",
-  external: "block",
-};
+const box = shallowRef<ScrollBoxExpose | null>(null);
 
-// A moved inner viewport consumes the key. At an edge, its focus-scope
-// ancestor can try the same key instead.
-useFocusedInput(focus, (event) => {
-  if (event.kind !== "key" || event.key.phase === "release") return "continue";
+useInput((event) => {
+  if (event.kind !== "key") return;
   const handle = box.value;
-  if (!handle) return continueAtEdge;
-  let moved: boolean;
-  if (event.key.name === "up") moved = handle.scrollByLines(-1);
-  else if (event.key.name === "down") moved = handle.scrollByLines(1);
-  else return "continue";
-  return moved ? "consume" : continueAtEdge;
+  if (!handle) return;
+  if (event.name === "up") handle.scrollByLines(-1);
+  else if (event.name === "down") handle.scrollByLines(1);
 });
 </script>
 
 <template>
-  <Box ref="target" :height="6" flexDirection="column">
+  <Box :height="6" flexDirection="column">
     <ScrollBox ref="box">
       <Text v-for="line in lines" :key="line">{{ line }}</Text>
     </ScrollBox>
@@ -92,17 +76,9 @@ useFocusedInput(focus, (event) => {
 | `scrollToTop()`        | `boolean` | jump to the top                                                                |
 | `scrollToBottom()`     | `boolean` | jump to the bottom and resume following new content                            |
 
-Every method returns `true` only when the effective top content line changes synchronously. A
-repeated edge operation returns `false`. `scrollToBottom()` can also return `false` while re-arming
-following when the viewport is already at the bottom. JavaScript calls with a non-finite line value
-throw a `TypeError` before changing scroll state.
+Every method returns `true` only when the effective top content line changes synchronously. A repeated edge operation returns `false`. `scrollToBottom()` can also return `false` while re-arming following when the viewport is already at the bottom. JavaScript calls with a non-finite line value throw a `TypeError` before changing scroll state. If an application owns nested routing, it can try an inner ScrollBox first and call the outer one only when the inner method returns `false`; this is application policy, not a `useInput()` propagation result.
 
-Why no built-in `wheel` / `keyboard`: the mouse wheel needs terminal mouse tracking, which breaks
-native text selection window-wide; keyboard input is global and collides with a focused field. So
-input policy is the app's to decide. For Inline streaming output, wrap each completed keyed entry in
-its own `Static` from `@vue-tui/runtime/inline` and let that one-time output flow into terminal scrollback. Effective
-visual Fullscreen rejects `Static`; keep that history in application state inside a bounded
-`ScrollBox` instead.
+Why no built-in `wheel` or `keyboard`: the mouse wheel needs terminal mouse tracking, which breaks native text selection window-wide; keyboard input is application-wide and can collide with an editor. The application therefore decides input policy. For Inline streaming output, wrap each completed keyed entry in its own `Static` from `@vue-tui/runtime/inline` and let that one-time output flow into terminal scrollback. Effective visual Fullscreen rejects `Static`; keep that history in application state inside a bounded `ScrollBox` instead.
 
 ## License
 
