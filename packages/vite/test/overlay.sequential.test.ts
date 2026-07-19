@@ -33,13 +33,12 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
-  delete (globalThis as Record<string, unknown>).__VT_RENDER_SESSION__;
   delete (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   delete (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
   delete (globalThis as Record<string, unknown>).__VT_TEST_APP__;
 });
 
-test("a script hot update preserves the render-session object", async () => {
+test("a script hot update preserves public layout observations", async () => {
   const read = capture();
   server = await createServer({
     root,
@@ -48,7 +47,7 @@ test("a script hot update preserves the render-session object", async () => {
     plugins: [vue(), vueTui()],
   });
   await server.listen();
-  await waitFor(read, "session=stable");
+  await waitFor(read, "box=7x2");
 
   writeFileSync(
     appVue,
@@ -57,8 +56,9 @@ test("a script hot update preserves the render-session object", async () => {
   await waitFor(read, "LABEL-B-HOT");
 
   const updatedOutput = read().slice(read().lastIndexOf("LABEL-B-HOT"));
-  expect(updatedOutput).toContain("session=stable");
-  expect(updatedOutput).not.toContain("session=changed");
+  expect(updatedOutput).toMatch(/layout=\d+xunbounded/);
+  expect(updatedOutput).toContain("box=7x2");
+  expect(updatedOutput).not.toContain("box=pending");
 });
 
 test("a build error renders the in-process dev overlay", async () => {

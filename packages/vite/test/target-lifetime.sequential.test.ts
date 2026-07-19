@@ -24,7 +24,6 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(targetVue, origTargetVue);
   delete testGlobal.__VT_TEST_STDOUT__;
-  delete testGlobal.__VT_RENDER_SESSION__;
   delete testGlobal.__VT_TARGET_INSTANCE__;
   delete testGlobal.__VT_TARGET_CURRENT__;
   delete testGlobal.__VT_TEST_APP__;
@@ -39,7 +38,7 @@ test("HMR follows a component's rendered target across rerender and reload", asy
     plugins: [vue(), vueTui()],
   });
   await server.listen();
-  await waitFor(read, "target=7x2:true");
+  await waitFor(read, "box=7x2");
   await waitFor(read, "caret=visible");
   const targetInstance = (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   expect(targetInstance).toBeDefined();
@@ -51,9 +50,8 @@ test("HMR follows a component's rendered target across rerender and reload", asy
       "<Text>TARGET-B-HOT</Text>",
     ),
   );
-  // Text participates in the parent's stretch layout, so its parent-relative width is
-  // the 16-column content width rather than the 12 glyphs in its label.
-  await waitFor(read, "target=16x1:true");
+  await waitFor(read, "TARGET-B-HOT");
+  await waitFor(read, "box=7x2");
   await waitFor(read, "caret=visible");
 
   expect((globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__).toBe(targetInstance);
@@ -72,6 +70,5 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   expect(reloadedTarget).toBeDefined();
   expect(reloadedTarget).not.toBe(targetInstance);
   const reloadedOutput = read().slice(read().lastIndexOf("TARGET-C-RELOAD"));
-  expect(reloadedOutput).toMatch(/target=\d+x1:true/);
   expect(reloadedOutput).toContain("caret=visible");
 });

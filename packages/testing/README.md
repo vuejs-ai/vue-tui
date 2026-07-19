@@ -56,17 +56,18 @@ test("the counter responds to input", async () => {
 });
 ```
 
-## Three observations
+## Output observations
 
-The test host exposes three intentionally different views of one run:
+The test host exposes two intentionally different views of one run:
 
 | Observation              | Meaning                                                                      | Use it for                                                                                                       |
 | ------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `session`                | Readonly production-like facts visible to the component                      | Requested and effective mode, fallback, output policy, dimensions, and capabilities                              |
 | `frames` / `lastFrame()` | Renderer commits before the output writer adds screen and lifecycle controls | Exact component output, renderer styling, and `<Static>` deltas                                                  |
 | `screen()`               | Cell surface after stdout and stderr bytes pass through a terminal emulator  | Alternate-screen behavior, cursor position and visibility, scrollback, external writes, and teardown restoration |
 
 Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, direct `useStdout()` writes, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
+
+The test host deliberately does not republish Runtime's internal mode resolution, output policy, or capability objects. Configure a production-like host through `RenderOptions`, then assert what the application renders, what the modeled terminal contains, and how terminal ownership changes through suspension or teardown.
 
 ## `render(component, options?)`
 
@@ -88,7 +89,7 @@ interface RenderOptions {
 | `rows`       | `100`     | Emulator height and TTY height                  |
 | `props`      | —         | Props passed to the root component              |
 
-`columns` and `rows` must be positive safe integers. They set both the modeled output dimensions and the emulator dimensions. `rows` still controls the emulator when `host.stdout` is `"stream"`, but a stream does not claim physical terminal rows in `session`.
+`columns` and `rows` must be positive safe integers no greater than 65535. They set both the modeled output dimensions and the emulator dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. `rows` still controls the emulator when `host.stdout` is `"stream"`, while the Runtime layout remains row-unbounded because a stream does not own a finite visual viewport.
 
 For a visual Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. Screen-reader and stream presentations remain row-unbounded. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
 
@@ -138,7 +139,6 @@ const result = await render(Dashboard, {
   host: { mode: "fullscreen" },
 });
 try {
-  expect(result.session.mode.effective).toBe("fullscreen");
   expect((await result.screen()).activeBuffer).toBe("alternate");
 
   result.unmount();
@@ -156,7 +156,6 @@ const result = await render(FinalResult, {
   host: { stdout: "stream" },
 });
 try {
-  expect(result.session.output.dynamicUpdates).toBe("at-teardown");
   expect((await result.screen()).lines.join("\n")).not.toContain("Final result");
 
   result.unmount();
@@ -167,24 +166,6 @@ try {
 ```
 
 ## `RenderResult`
-
-### `session`
-
-`session` is the deeply readonly live-session snapshot exposed to the component tree. Its identity remains stable while reactive facts such as dimensions update. Runtime mutation is rejected; readonly is not only a TypeScript annotation.
-
-| Field          | Meaning                                                                                                   |
-| -------------- | --------------------------------------------------------------------------------------------------------- |
-| `host`         | Always `"live"`; tests model a live production host rather than exposing a test-only branch to components |
-| `mode`         | Requested mode, effective mode, and a detectable fallback reason                                          |
-| `output`       | Destination (`"terminal"` or `"stream"`), update cadence, and presentation                                |
-| `dimensions`   | Physical terminal dimensions when acquired, plus effective layout dimensions                              |
-| `capabilities` | Availability of stable origin, renderer-owned element hit testing, and suspension                         |
-
-Test-only observation remains on `RenderResult`; it does not change the component's `session.host`.
-
-Components read this same object through the public `useRenderSession()` composable and can use `useLayoutSize()` for destructurable readonly `columns` and `rows` refs. `rows` is `null` for an unbounded stream or screen-reader transcript and numeric for a bounded visual TTY layout. The modeled `mode`, `output`, and `capabilities` are immutable for one render session; resize and continuation update only its dimensions.
-
-The deterministic host reports `session.capabilities.suspension: true` for every modeled live surface. This is an immutable host-lifecycle capability, not a claim that the selected output owns a terminal screen.
 
 ### `frames`
 
@@ -246,12 +227,12 @@ interface ScreenSnapshot {
 | `mouse.wheel(point, direction, ...)` | Injects one parsed four-direction wheel fact                                                                                                                        |
 | `clipboard.requests`                 | Runtime-readonly exact text passed to the modeled custom transport, in call order                                                                                   |
 | `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                         |
-| `terminal.resize(columns, rows)`     | Validates two positive safe integers, resizes the modeled streams and emulator, emits resize, and waits for rendering                                               |
+| `terminal.resize(columns, rows)`     | Validates the same axis and emulator-cell limits as `render()`, resizes the modeled streams and emulator, emits resize, and waits for rendering                     |
 | `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame |
 | `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline/transcript region, Fullscreen viewport, or live stream before reacquiring requested input modes  |
 | `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                     |
 
-The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes the public session dimensions before repainting every live-update surface, including row-unbounded live streams, and then reacquires requested input modes. Final-output streams have no live frame to repaint.
+The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes Runtime layout facts before repainting every live-update surface, including row-unbounded live streams, and then reacquires requested input modes. Final-output streams have no live frame to repaint.
 
 Mouse points are zero-based cells inside the current modeled terminal dimensions. The driver is available only while the Fullscreen application has acquired the reporting level needed for that physical fact. It injects `down`, `move`, `up`, and `wheel` after protocol parsing, then waits for the same application and emulator flush as `stdin.write()`. It deliberately has no `click()` helper: a down/up pair must pass through the production hit testing, click synthesis, propagation, and drag state machines.
 
@@ -298,7 +279,7 @@ Fullscreen `useTextSelection()` uses the same modeled successful paint and the e
 | `waitUntilExit()`        | Settles with the application exit result and rejects for `exit(error)`                                |
 | `waitUntilRenderFlush()` | Waits for the runtime render queue and pending emulator writes                                        |
 
-After `dispose()`, retained content facts such as `session`, `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, `suspend()`, `resume()`, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
+After `dispose()`, retained content facts such as `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, `suspend()`, `resume()`, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
 
 ## Cleanup
 

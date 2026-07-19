@@ -75,7 +75,7 @@ and fixed at the root:
   screen-reader-hidden, which needs a conditional root; a root `v-if` makes the component's
   `$el` a fragment boundary anchor (empty `text-leaf`, no renderer element). The shared
   rendered-target resolver drills the component `subTree` to the first real host node, skipping
-  comment/empty-`text-leaf` anchors (verified to resolve each ref'd Box to its **own** node, never a sibling's). Public `useElementGeometry()` consumes that resolver and derives its result from paint rather than reading Yoga through `$el`.
+  comment/empty-`text-leaf` anchors (verified to resolve each ref'd Box to its **own** node, never a sibling's). Public `useBoxSize()` consumes that resolver only for a direct same-app Box and derives its result from accepted paint rather than reading Yoga through `$el`.
 - **A component ref is not a rendered-lifetime signal.** A public component instance may remain identical while a root `v-if`, keyed root, or HMR rerender replaces its `$el`. Internal behaviors bound to that ref must use the per-render-root contract in [rendered-target-lifetime.md](./rendered-target-lifetime.md), not add another watcher of the component proxy. Rendered lifetime and focus eligibility remain separate contracts: F2 owns attachment identity and cleanup, while completed F4 derives hidden, disabled, scope, and traversal eligibility from the current rendered tree.
 
 ## Pitfalls (for adding or editing component SFCs)

@@ -62,12 +62,13 @@ test("SGR mouse replacement disables every possibly owned mode when stdout throw
     return stdin;
   };
   const originalWrite = stdout.write.bind(stdout);
+  const replacementError = new Error("replacement failed after write");
   stdout.write = ((...args: unknown[]) => {
     const value = String(args[0]);
     const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
     if (failReplacement && value === SGR_BUTTON_TO_DRAG) {
       failReplacement = false;
-      throw new Error("replacement failed after write");
+      throw replacementError;
     }
     return result;
   }) as NodeJS.WriteStream["write"];
@@ -97,9 +98,11 @@ test("SGR mouse replacement disables every possibly owned mode when stdout throw
       kittyKeyboard: { mode: "disabled" },
     });
     await waitForWrite(writes, SGR_MOUSE_ENABLE);
+    const exited = app.waitUntilExit();
     failReplacement = true;
     dragActive.value = true;
-    await expect(flushRenderedTarget()).rejects.toThrow("replacement failed after write");
+    await flushRenderedTarget();
+    await expect(exited).rejects.toBe(replacementError);
 
     const output = writes.join("");
     const replacementIndex = output.indexOf(SGR_BUTTON_TO_DRAG);

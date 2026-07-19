@@ -1,10 +1,10 @@
-import { defineComponent, shallowRef, type ComponentPublicInstance, type ShallowRef } from "vue";
+import { defineComponent, shallowRef, type ShallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 import {
   Box,
   Text,
-  useElementGeometry,
+  useBoxSize,
   useFocus,
   useFocusedInput,
   useFocusScope,
@@ -13,7 +13,6 @@ import {
   type InputRouteDecision,
   type RenderMode,
   type TuiInputEvent,
-  type UseElementGeometryReturn,
 } from "@vue-tui/runtime";
 import {
   useMouseEvent,
@@ -22,7 +21,7 @@ import {
 } from "@vue-tui/runtime/fullscreen";
 import { render, type RenderResult } from "@vue-tui/testing";
 
-type Target = ComponentPublicInstance | null;
+type Target = InstanceType<typeof Box> | null;
 type ScrollOperation = "up" | "down" | "pageup" | "pagedown" | "home" | "end";
 
 const modes = ["inline", "fullscreen"] as const satisfies readonly RenderMode[];
@@ -57,12 +56,11 @@ function keyOperation(event: TuiInputEvent): ScrollOperation | null {
   }
 }
 
-function visibleHeight(projection: UseElementGeometryReturn, owner: string): number {
-  const geometry = projection.geometry.value;
-  if (geometry.status !== "visible") {
-    throw new Error(`${owner} scroll target must be visible before page input`);
+function measuredHeight(size: ReturnType<typeof useBoxSize>, owner: string): number {
+  if (!size.value) {
+    throw new Error(`${owner} scroll target must have an accepted size before page input`);
   }
-  return geometry.parent.height;
+  return size.value.height;
 }
 
 function perform(
@@ -132,8 +130,8 @@ for (const mode of modes) {
     const App = defineComponent(() => {
       const outerTarget = shallowRef<Target>(null);
       const innerTarget = shallowRef<Target>(null);
-      const outerGeometry = useElementGeometry(outerTarget);
-      const innerGeometry = useElementGeometry(innerTarget);
+      const outerSize = useBoxSize(outerTarget);
+      const innerSize = useBoxSize(innerTarget);
       const outerScope = useFocusScope();
       const innerFocus = useFocus(innerTarget, {
         scope: outerScope,
@@ -144,14 +142,14 @@ for (const mode of modes) {
       useFocusedInput(innerFocus, (event): InputHandlerResult => {
         const operation = keyOperation(event);
         if (!operation) return "continue";
-        const moved = perform(inner.value, operation, visibleHeight(innerGeometry, "inner"));
+        const moved = perform(inner.value, operation, measuredHeight(innerSize, "inner"));
         trace.push(`inner:${operation}:${moved ? "moved" : "unchanged"}`);
         return moved ? "consume" : continueOwnedKey;
       });
       useFocusScopeInput(outerScope, (event): InputHandlerResult => {
         const operation = keyOperation(event);
         if (!operation) return "continue";
-        const moved = perform(outer.value, operation, visibleHeight(outerGeometry, "outer"));
+        const moved = perform(outer.value, operation, measuredHeight(outerSize, "outer"));
         trace.push(`outer:${operation}:${moved ? "moved" : "unchanged"}`);
         return moved ? "consume" : stopOwnedKey;
       });
@@ -200,11 +198,9 @@ test("nested workbench wheel scrolling bubbles only at an inner edge", async () 
   const outer = shallowRef<ScrollBoxExpose | null>(null);
   const inner = shallowRef<ScrollBoxExpose | null>(null);
   const trace: string[] = [];
-  let innerGeometry!: UseElementGeometryReturn;
   const App = defineComponent(() => {
     const outerTarget = shallowRef<Target>(null);
     const innerTarget = shallowRef<Target>(null);
-    innerGeometry = useElementGeometry(innerTarget);
 
     const scroll = (
       owner: "inner" | "outer",
@@ -230,11 +226,12 @@ test("nested workbench wheel scrolling bubbles only at an inner edge", async () 
   });
 
   const wheelAtInner = async (direction: "up" | "down") => {
-    const geometry = innerGeometry.geometry.value;
-    if (geometry.status !== "visible") throw new Error("inner scroll target must be visible");
-    const visible = geometry.fragments.find((fragment) => fragment.visibleSurface)?.visibleSurface;
-    if (!visible) throw new Error("inner scroll target needs a visible fragment");
-    await result.mouse.wheel({ x: visible.x, y: visible.y }, direction);
+    const y = result
+      .lastFrame()
+      .split("\n")
+      .findIndex((line) => line.startsWith("inner "));
+    if (y < 0) throw new Error("inner scroll target must have visible content");
+    await result.mouse.wheel({ x: 0, y }, direction);
   };
 
   try {

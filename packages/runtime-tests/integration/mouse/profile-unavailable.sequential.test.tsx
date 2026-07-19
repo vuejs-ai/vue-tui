@@ -5,7 +5,7 @@ import { Box, Text, createApp } from "@vue-tui/runtime";
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
-test("a visible live target rejects a terminal profile without SGR mouse support", () => {
+test("a visible live target rejects a terminal profile without SGR mouse support", async () => {
   const previousTerm = process.env.TERM;
   process.env.TERM = "dumb";
   const { stream: stdin } = makeFakeStdin();
@@ -19,6 +19,7 @@ test("a visible live target rejects a terminal profile without SGR mouse support
     return stdin;
   };
   const stdout = makeFakeWritable({ columns: 20, rows: 5 });
+  const stderr = makeFakeWritable({ columns: 20, rows: 5 });
   const writes = captureWrites(stdout);
 
   const App = defineComponent(() => {
@@ -33,17 +34,17 @@ test("a visible live target rejects a terminal profile without SGR mouse support
   const app = createApp(App);
 
   try {
-    expect(() =>
-      app.mount({
-        mode: "fullscreen",
-        stdin,
-        stdout,
-        patchConsole: false,
-        liveUpdates: true,
-        maxFps: 0,
-        kittyKeyboard: { mode: "disabled" },
-      }),
-    ).toThrow(
+    app.mount({
+      mode: "fullscreen",
+      stdin,
+      stdout,
+      stderr,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      kittyKeyboard: { mode: "disabled" },
+    });
+    await expect(app.waitUntilExit()).rejects.toThrow(
       "Fullscreen mouse input is unavailable because the terminal does not advertise an xterm-compatible SGR mouse protocol.",
     );
 
@@ -53,8 +54,10 @@ test("a visible live target rejects a terminal profile without SGR mouse support
     expect(stdin.listenerCount("data")).toBe(0);
   } finally {
     app.unmount();
+    await app.waitUntilExit().catch(() => {});
     stdin.destroy();
     stdout.destroy();
+    stderr.destroy();
     if (previousTerm === undefined) delete process.env.TERM;
     else process.env.TERM = previousTerm;
   }

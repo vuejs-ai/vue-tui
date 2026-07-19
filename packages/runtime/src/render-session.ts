@@ -1,4 +1,5 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
+import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
 
 /** The terminal screen model requested when an application mounts. */
@@ -191,7 +192,12 @@ export function validateLiveUpdates(value: unknown): boolean | undefined {
 }
 
 function positiveCellCount(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAX_LAYOUT_VALUE
+    ? value
+    : null;
 }
 
 export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean {

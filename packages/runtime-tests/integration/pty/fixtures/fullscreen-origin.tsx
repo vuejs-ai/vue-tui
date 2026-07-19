@@ -12,8 +12,8 @@ import {
   Text,
   createApp,
   useApp,
+  useBoxSize,
   useCaret,
-  useElementGeometry,
   useFocus,
   useInput,
   useStderr,
@@ -46,19 +46,20 @@ const targetPhase = shallowRef<"none" | "first" | "second">("none");
 const targetedTargetsVisible = shallowRef(false);
 const targetedDragActive = shallowRef(false);
 const targetedConsumeClick = shallowRef(false);
+const lifetimeBoxTarget = shallowRef<InstanceType<typeof Box> | null>(null);
 
 const LifetimeTarget = defineComponent(() => {
   return () => {
     if (targetPhase.value === "none") return null;
     if (targetPhase.value === "first") {
       return (
-        <Box key="first" position="absolute" left={0} width={7} height={2}>
+        <Box ref={lifetimeBoxTarget} key="first" position="absolute" left={0} width={7} height={2}>
           <Text>FIRST</Text>
         </Box>
       );
     }
     return (
-      <Box key="second" position="absolute" left={5} width={11} height={1}>
+      <Box ref={lifetimeBoxTarget} key="second" position="absolute" left={5} width={11} height={1}>
         <Text>TARGET-B</Text>
       </Box>
     );
@@ -111,17 +112,13 @@ const App = defineComponent(() => {
   const targetedScrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const targetedChildFocus = useFocus(targetedChild);
   const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
-  const { geometry: targetGeometry } = useElementGeometry(target);
+  const targetSize = useBoxSize(lifetimeBoxTarget);
   const targetMetrics = computed(() => {
-    const geometry = targetGeometry.value;
-    if (
-      geometry.status === "zero-size" ||
-      geometry.status === "fully-clipped" ||
-      geometry.status === "visible"
-    ) {
+    const size = targetSize.value;
+    if (size) {
       return {
-        width: geometry.parent.width,
-        height: geometry.parent.height,
+        width: size.width,
+        height: size.height,
         measured: true,
       };
     }

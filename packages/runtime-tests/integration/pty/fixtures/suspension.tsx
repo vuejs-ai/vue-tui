@@ -1,5 +1,14 @@
 import process from "node:process";
-import { Box, createApp, Text, useApp, useInput, useLayoutSize, useStderr } from "@vue-tui/runtime";
+import {
+  Box,
+  createApp,
+  Text,
+  useApp,
+  useInput,
+  useLayoutWidth,
+  useStderr,
+  useViewportHeight,
+} from "@vue-tui/runtime";
 import { useMouseDrag } from "@vue-tui/runtime/fullscreen";
 import { defineComponent, onMounted, shallowRef, type ComponentPublicInstance } from "vue";
 import { inputText } from "./input-event.js";
@@ -10,7 +19,8 @@ const marker = mode === "fullscreen" ? "FULLSCREEN_SNAPSHOT" : "INLINE_SNAPSHOT"
 const App = defineComponent(() => {
   const { exit } = useApp();
   const { write } = useStderr();
-  const { columns, rows } = useLayoutSize();
+  const width = useLayoutWidth();
+  const viewportHeight = useViewportHeight();
   const mouseTarget = shallowRef<ComponentPublicInstance | null>(null);
   useMouseDrag(mouseTarget, () => {}, { isActive: mode === "fullscreen" });
 
@@ -30,8 +40,8 @@ const App = defineComponent(() => {
 
   return () => (
     <Box ref={mouseTarget} flexDirection="column" width="100%">
-      <Text>{`${marker}:${columns.value}x${rows.value ?? "unbounded"}`}</Text>
-      {Array.from({ length: Math.max(0, (rows.value ?? 1) - 1) }, (_, index) => (
+      <Text>{`${marker}:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>
+      {Array.from({ length: Math.max(0, (viewportHeight?.value ?? 1) - 1) }, (_, index) => (
         <Text key={index}>{`row-${String(index + 2).padStart(2, "0")}`}</Text>
       ))}
     </Box>

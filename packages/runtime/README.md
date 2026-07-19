@@ -148,9 +148,9 @@ Runtime does not export layout conveniences as separate components. Write line b
 | `useExternalInput(target, fn)`  | One normalized external fallthrough receiver for an exact focused target                                    |
 | `useFocusManager()`             | Exact focused-target observation plus boundary traversal and blur                                           |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                  |
-| `useRenderSession()`            | Readonly reactive host facts — mode resolution, output, dimensions, and capabilities                        |
-| `useLayoutSize()`               | Reactive root layout dimensions — readonly refs with nullable `rows`                                        |
-| `useElementGeometry(ref)`       | Atomic paint-derived parent/surface/visible-surface geometry for a normal Vue component ref                 |
+| `useLayoutWidth()`              | Readonly reactive width Runtime gives the root layout on every host                                         |
+| `useViewportHeight()`           | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
+| `useBoxSize(ref)`               | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
 | `useCaret(ref, opts)`           | Focus-bound caret at an element-local rendered cell with explicit reactive state                            |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
 | `useStdout()`                   | Commit geometry-safe styled lines with explicit flow control, or access the deliberately raw stdout stream  |
@@ -162,7 +162,52 @@ Raw stdin runs in parallel with vue-tui's managed input route. It may include te
 
 `useInputAvailability()` reports whether managed input can be activated without acquiring any terminal resource. `useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active managed input consumer acquires raw mode, bracketed-paste reporting, the shared listener, stdin ref state, and configured Kitty keyboard negotiation; the last consumer releases them. While that demand is active, an exact Ctrl+C is a delayed framework default that a handler can prevent for that event. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed handler fails before publishing a route or changing terminal state. Mount options containing the removed `rawMode` or `exitOnCtrlC` fields are rejected before terminal mutation.
 
-`useElementGeometry(ref)` reports one frozen, readonly geometry generation derived from what paint actually mapped. Resolved states expose full parent-relative and dynamic-render-surface bounds plus exact fragments whose `visibleSurface` is the clipped surface-coordinate rectangle or `null`; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` are separate states. It supports both rendering modes without exposing Inline's unstable physical terminal row, and reports `unavailable` when a visual 2D target surface does not exist.
+### Layout and Box measurement
+
+Use the narrow fact that matches the application task:
+
+```vue
+<script setup lang="ts">
+import { computed, shallowRef } from "vue";
+import { Box, Text, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+
+const layoutWidth = useLayoutWidth();
+const viewportHeight = useViewportHeight();
+
+const panel = shallowRef<InstanceType<typeof Box> | null>(null);
+const panelSize = useBoxSize(panel);
+
+const canCenterVertically = computed(() => viewportHeight !== null && viewportHeight.value > 20);
+const graphWidth = computed(() => panelSize.value?.width ?? 24);
+</script>
+
+<template>
+  <Box ref="panel" flexGrow="1">
+    <Text>Root width: {{ layoutWidth }}</Text>
+    <Text>Panel width: {{ graphWidth }}</Text>
+    <Text>Can center: {{ canCenterVertically ? "yes" : "no" }}</Text>
+  </Box>
+</template>
+```
+
+`useLayoutWidth()` always returns a numeric readonly ref. It is the width Runtime actually gives the root layout, not an independent reading of `process.stdout.columns`. It reacts whenever a live host accepts a new layout width; string rendering uses the requested document width or 80 by default, and a stream without a usable width also falls back to 80.
+
+`useViewportHeight()` is for code that specifically needs a finite visual row bound. It returns a readonly numeric ref on live visual Inline and Fullscreen TTY surfaces. It returns `null` at setup for an unbounded stream, screen-reader transcript, or string document. The presence or absence of that ref is fixed for the render tree; when present, its number reacts to accepted resizes. Check for `null` once instead of carrying `number | null` through every width calculation.
+
+`useBoxSize()` accepts only a Vue ref bound directly to the exported `<Box>` component in the current vue-tui app. A raw component value, getter, non-Box target, or Box owned by another app is rejected instead of publishing a misleading size; callers that need a derived target can create a `computed()` ref themselves. The hook returns a readonly ref containing a frozen `{ width, height }` from the last accepted visual paint. Before the first accepted paint, after the target detaches, after retargeting, or while the Box is hidden, its value is `null`. A legitimate zero-sized Box is `{ width: 0, height: 0 }`, and a fully clipped Box still reports its full size. A failed output attempt or suspension does not replace the last accepted size for the same target; queued changes settle after resume and a successful repaint. Screen-reader and string rendering return `null` because they do not publish visual Box geometry.
+
+| Render host                                       | `useLayoutWidth()`                    | `useViewportHeight()`          | `useBoxSize()`                                   |
+| ------------------------------------------------- | ------------------------------------- | ------------------------------ | ------------------------------------------------ |
+| Live visual Inline TTY                            | Reactive numeric layout width         | Reactive maximum visual height | `null` before paint, then accepted full Box size |
+| Live visual Fullscreen TTY                        | Reactive numeric viewport width       | Reactive exact viewport height | `null` before paint, then accepted full Box size |
+| Screen-reader transcript                          | Numeric transcript layout width       | `null`                         | `null`                                           |
+| Live visual non-TTY stream                        | Reactive numeric width, defaulting 80 | `null`                         | Accepted document-paint size when available      |
+| Final-output stream, including a TTY forced final | Fixed numeric width, defaulting 80    | `null`                         | Accepted document-paint size when available      |
+| Synchronous string rendering                      | Option width, defaulting 80           | `null`                         | `null`                                           |
+
+During suspension, the numeric layout refs and each same-target accepted Box size keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint; an invalid resize pair does not replace the last coherent dimensions. After unmount, layout refs keep their final values and stop updating, while the Box-size ref becomes `null` when its target detaches. Calling any of these hooks outside a vue-tui render tree throws.
+
+These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output, caret, and mouse behavior. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
 
 `useCaret(ref, { focus, position })` connects one rendered element to one exact `useFocus()` result. `position` is a zero-based rendered cell local to `ref`; the editor remains responsible for converting its logical insertion point to that cell. The runtime publishes a frozen readonly `state` and maps a visible request through paint into the current mode writer. It emits no targeted terminal-cursor controls for inactive, clipped, detached, invalid, non-TTY, screen-reader, or string-host requests. The public caret describes an editor's insertion marker; the private terminal cursor is only the physical transport used to display it.
 
@@ -218,30 +263,6 @@ The OSC 52 adapter returns `requested` after writing the UTF-8 Base64 request; v
 
 `useClipboard().availability` distinguishes an `available` custom or OSC 52 transport from `not-configured`, `output-not-terminal`, `screen-reader`, `suspended`, `disposed`, or `string-host`. A custom adapter can work on Inline, Fullscreen, final, non-terminal, or screen-reader live hosts; when that adapter returns unavailable, the write result uses `transport-unavailable` and preserves its optional reason as `detail`. OSC 52 requires live visual terminal output.
 
-### Render-session facts
-
-`useRenderSession()` returns the authoritative readonly facts for the current render tree. The object identity stays stable for that tree. Its `host`, requested/effective `mode`, `output`, and `capabilities` are immutable session facts; `dimensions` is replaced atomically when the live host accepts a resize or refreshes dimensions after continuation. Use `session.output.presentation === "screen-reader"` when a component needs to adapt to the active linear presentation.
-
-| Session field         | Meaning                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `host`                | `"live"` for a mounted or modeled live app; `"string"` for synchronous document rendering               |
-| `mode`                | Requested mode, effective mode, and fallback for a live host; `null` for a string document              |
-| `output`              | Destination, dynamic-update cadence, and visual or screen-reader presentation                           |
-| `dimensions.terminal` | One coherent physical or modeled terminal size, or `null` when the host owns no terminal viewport       |
-| `dimensions.layout`   | Root layout columns and the numeric enforced row bound or `null` for unbounded height                   |
-| `capabilities`        | Immutable availability of stable origin, renderer-owned element hit testing, and coordinated suspension |
-
-`useLayoutSize()` derives readonly `columns` and `rows` refs from the same session, so destructuring preserves Vue reactivity. `rows.value` is `number | null`: a number is the enforced root layout bound, while `null` means the stream, transcript, or string document has no row bound. These composables must be called inside a vue-tui render tree.
-
-```ts
-import { useLayoutSize, useRenderSession } from "@vue-tui/runtime";
-
-const session = useRenderSession();
-const { columns, rows } = useLayoutSize();
-
-const isScreenReaderPresentation = session.output.presentation === "screen-reader";
-```
-
 ## App Lifecycle
 
 ```ts
@@ -273,7 +294,7 @@ Each coordinated `write()` returns a `CoordinatedWriteResult`. `{ status: "accep
 
 If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
-On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that the session acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes the public session dimensions when available, otherwise keeps the last coherent size, starts a fresh Inline or transcript region, transactionally re-enters and repaints Fullscreen, or repaints a live stream using its refreshed unbounded layout, then restores still-requested input modes. This does not reserve the Ctrl+Z input byte.
+On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that Runtime acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes its coherent internal dimensions when available, otherwise keeps the last coherent size. `useLayoutWidth()` and an available `useViewportHeight()` ref update with the resumed layout. Runtime then starts a fresh Inline or transcript region, transactionally re-enters and repaints Fullscreen, or repaints a live stream using its refreshed unbounded layout before restoring still-requested input modes. This does not reserve the Ctrl+Z input byte.
 
 Normal Inline output remains on the main screen. Normal Fullscreen exit restores the previous main screen and does not replay the last viewport. Fatal exit is different: a durably painted Inline or transcript error remains visible, with a sanitized stderr report when that rich error was clipped, stdout was lost, or its first physical write failed; Fullscreen restores first and then writes the report to stderr. Final-stream fatal exit never prints a stale successful dynamic frame and writes the error to stderr.
 

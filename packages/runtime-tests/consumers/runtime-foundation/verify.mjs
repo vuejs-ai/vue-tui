@@ -52,7 +52,7 @@ const consumers = {
     repository: "https://github.com/hyf0/machud.git",
     pin: "a51a6853686eb818471d0027d2549e6e664c9b36",
     patch: "machud.patch",
-    patchSha256: "b32649affb0013a99b57c7c766b47d5abf87e2802533024f9b0ea0dfc1e6b700",
+    patchSha256: "766a6ef7c955f9edccb0441488c745ef14e61bc4ab448ec7401ae85a8b45f010",
     changedPaths: [
       "src/App.vue",
       "src/components/Bar.vue",

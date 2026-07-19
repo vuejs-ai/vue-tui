@@ -1,6 +1,19 @@
 # Readonly render session
 
-> **Status:** completed F1 contract, unstamped. F1.3 selected the public API, F1.4 implemented the private live source, F1.5 completed deterministic-test/string-host authority, F1.6 completed Inline ownership, F1.7 completed lifecycle behavior, and F1.8 published the verified public projection and focused layout hook. No VOUCHED stamp was added.
+> **Status:** historical unstamped F1 record. The internal resolver, coherent dimension updates, host matrix, and lifecycle evidence remain implementation material. The active Runtime-foundation re-audit supersedes this record's public `useRenderSession()` / `useLayoutSize()` conclusion with the smaller Path 1 boundary below. No VOUCHED stamp was added.
+
+## Superseding Path 1 public boundary
+
+The current public Runtime surface does not expose the render-session graph. Applications read only the layout facts they can act on:
+
+```ts
+const width = useLayoutWidth(); // Readonly<Ref<number>> on every host
+const viewportHeight = useViewportHeight(); // Readonly<Ref<number>> | null
+```
+
+`useLayoutWidth()` reports the numeric width Runtime actually gives the root layout. `useViewportHeight()` returns a numeric ref only when the render tree has a finite live visual row bound; an unbounded stream, screen-reader transcript, or string document receives `null` at setup. Boundedness is fixed for the render tree, while both numeric refs react to accepted live resizes. The old `useRenderSession()`, `useLayoutSize()`, `RenderSession`, `RenderModeResolution`, `RenderOutput`, `RenderSize`, `RenderLayoutSize`, and `UseLayoutSizeReturn` are not current public contracts. Runtime retains the broader resolver privately because layout, writers, lifecycle, caret, and mouse still need one coherent internal authority.
+
+Everything below records the earlier experiment and the evidence that made the internal mechanism reliable. Its public examples and completion claims are historical and must not be used as current authoring guidance.
 
 ## Outcome and scope
 

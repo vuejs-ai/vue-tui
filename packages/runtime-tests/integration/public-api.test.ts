@@ -18,9 +18,9 @@ const PUBLIC_VALUE_EXPORTS = [
   "Text",
   // Composables
   "useApp",
+  "useBoxSize",
   "useCaret",
   "useClipboard",
-  "useElementGeometry",
   "useExternalInput",
   "useFocus",
   "useFocusedInput",
@@ -29,11 +29,11 @@ const PUBLIC_VALUE_EXPORTS = [
   "useFocusScopeInput",
   "useInput",
   "useInputAvailability",
-  "useLayoutSize",
-  "useRenderSession",
+  "useLayoutWidth",
   "useStderr",
   "useStdin",
   "useStdout",
+  "useViewportHeight",
   // Rendering
   "renderToString",
   // Kitty keyboard
@@ -93,10 +93,18 @@ test("does not publish application-level rendering conveniences", () => {
   expect(api).not.toHaveProperty("useAnimation");
 });
 
-test("replaces the superseded Yoga measurement APIs with semantic geometry", () => {
-  expect(api).toHaveProperty("useElementGeometry");
+test("replaces broad geometry with accepted Box size", () => {
+  expect(api).toHaveProperty("useBoxSize");
+  expect(api).not.toHaveProperty("useElementGeometry");
   expect(api).not.toHaveProperty("useBoxMetrics");
   expect(api).not.toHaveProperty("measureElement");
+});
+
+test("publishes narrow layout facts without the internal session graph", () => {
+  expect(api).toHaveProperty("useLayoutWidth");
+  expect(api).toHaveProperty("useViewportHeight");
+  expect(api).not.toHaveProperty("useLayoutSize");
+  expect(api).not.toHaveProperty("useRenderSession");
 });
 
 test("replaces targetless cursor ownership with focus-bound caret composition", () => {

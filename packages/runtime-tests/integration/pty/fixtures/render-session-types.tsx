@@ -1,9 +1,9 @@
 import { defineComponent } from "vue";
-import { Text, useLayoutSize, useRenderSession, useStdin } from "@vue-tui/runtime";
+import { Text, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 
 export default defineComponent(() => {
-  const session = useRenderSession();
-  const { columns, rows } = useLayoutSize();
+  const width = useLayoutWidth();
+  const viewportHeight = useViewportHeight();
   const { stdin } = useStdin();
   void stdin;
   // @ts-expect-error Raw-mode control is internal to semantic input demand.
@@ -11,8 +11,7 @@ export default defineComponent(() => {
 
   return () => (
     <Text>
-      {session.host === "live" ? (session.mode.effective ?? "stream") : "document"}:{columns.value}x
-      {rows.value ?? "unbounded"}
+      {width.value}x{viewportHeight?.value ?? "unbounded"}
     </Text>
   );
 });

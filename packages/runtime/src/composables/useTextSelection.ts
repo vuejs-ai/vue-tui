@@ -4,7 +4,7 @@ import { InternalTextSelectionControllerKey } from "../selection/context.ts";
 import type { TextSelectionCommands, TextSelectionMove } from "../selection/public-selection.ts";
 import { useRenderedTargetRegistration } from "../rendered-target.ts";
 import { useInternalRenderSession } from "../render-session.ts";
-import type { ElementTarget } from "./useElementGeometry.ts";
+import type { ElementTarget } from "../element-target.ts";
 import { useMouseDrag } from "./use-mouse-drag.ts";
 import { useMouseEvent } from "./use-mouse-event.ts";
 

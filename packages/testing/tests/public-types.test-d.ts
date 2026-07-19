@@ -2,8 +2,10 @@
 // `*.test-d.ts` name keeps the file out of the runtime Vitest suite.
 import { expectTypeOf } from "vite-plus/test";
 import { defineComponent } from "vue";
-import type { CellPoint, RenderSession } from "@vue-tui/runtime";
+import type { CellPoint } from "@vue-tui/runtime";
 import type { MouseButton } from "@vue-tui/runtime/fullscreen";
+// @ts-expect-error The test package no longer aliases Runtime's broad session contract.
+import type { TestRenderSession } from "../src/index.ts";
 import {
   render,
   type ContentFrame,
@@ -17,7 +19,6 @@ import {
   type TestMouseModifiers,
   type TestMouseReportingLevel,
   type TestMouseReportingState,
-  type TestRenderSession,
 } from "../src/index.ts";
 
 const defaultOptions: RenderOptions = {};
@@ -82,6 +83,7 @@ void invalidUpdates;
 void invalidStdin;
 void invalidStdout;
 void invalidClipboard;
+void (null as unknown as TestRenderSession);
 
 expectTypeOf<TestClipboardBehavior>().toEqualTypeOf<
   "copied" | "requested" | "unavailable" | "rejected"
@@ -89,14 +91,9 @@ expectTypeOf<TestClipboardBehavior>().toEqualTypeOf<
 
 declare const result: RenderResult;
 declare const frame: ContentFrame;
-declare const session: TestRenderSession;
 declare const screen: ScreenSnapshot;
 
 expectTypeOf(result.frames).toEqualTypeOf<readonly ContentFrame[]>();
-expectTypeOf(result.session).toEqualTypeOf<TestRenderSession>();
-expectTypeOf<TestRenderSession>().toEqualTypeOf<
-  Extract<RenderSession, { readonly host: "live" }>
->();
 expectTypeOf(result.lastFrame()).toEqualTypeOf<string>();
 expectTypeOf(result.screen()).toEqualTypeOf<Promise<ScreenSnapshot>>();
 expectTypeOf(result.mouse).toEqualTypeOf<TestMouse>();
@@ -128,12 +125,8 @@ expectTypeOf(result.dispose()).toEqualTypeOf<void>();
 result.frames.push(frame);
 // @ts-expect-error Captured frame fields are readonly observations.
 frame.dynamic = "replacement";
-// @ts-expect-error The session reference cannot be replaced.
-result.session = session;
-// @ts-expect-error Nested session facts are readonly.
-result.session.output.presentation = "visual";
-// @ts-expect-error Nested session dimensions are readonly.
-result.session.dimensions.layout.columns = 120;
+// @ts-expect-error The test host does not republish Runtime session internals.
+void result.session;
 // @ts-expect-error Emulated screen rows are readonly observations.
 screen.lines.push("replacement");
 // @ts-expect-error Emulated cursor facts are readonly observations.

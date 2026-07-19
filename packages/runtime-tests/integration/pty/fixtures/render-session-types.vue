@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Text, useLayoutSize, useRenderSession, useStdin } from "@vue-tui/runtime";
+import { Text, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 
-const session = useRenderSession();
-const { columns, rows } = useLayoutSize();
+const width = useLayoutWidth();
+const viewportHeight = useViewportHeight();
 const { stdin } = useStdin();
 void stdin;
 // @ts-expect-error Raw-mode control is internal to semantic input demand.
@@ -10,9 +10,5 @@ useStdin().setRawMode(false);
 </script>
 
 <template>
-  <Text>
-    {{ session.host === "live" ? (session.mode.effective ?? "stream") : "document" }}:{{
-      columns
-    }}x{{ rows ?? "unbounded" }}
-  </Text>
+  <Text>{{ width }}x{{ viewportHeight ?? "unbounded" }}</Text>
 </template>

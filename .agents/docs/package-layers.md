@@ -12,11 +12,7 @@
 
 vue-tui is layered by responsibility; each layer may depend **only downward**.
 
-- **`@vue-tui/runtime`** — the engine: the Yoga-flexbox renderer, common primitive components
-  (`Box` and `Text`), the supported `/inline` terminal-history boundary (`Static`), and the terminal-I/O composables (e.g. `useInput`,
-  `useFocus`, `useCaret`, `useClipboard`, `/fullscreen`'s `useMouseEvent`/`useMouseDrag`/`useTextSelection`, `useStdout`, `useRenderSession`, `useLayoutSize`). The lean core
-  every app depends on; depends on nothing else in the family. What counts as runtime work
-  is the [runtime ↔ component boundary](./components-design-principles.md). `Static` remains Runtime work because its one-attempt acceptance and stream-commit ownership are renderer/output mechanics even though Vue owns collection iteration and its authoring path is surface-specific.
+- **`@vue-tui/runtime`** — the engine and only the public primitives whose correct behavior requires ownership of the terminal, renderer tree, accepted layout or paint, input protocol, lifecycle, or terminal resources. The implemented Path 0, Path 1, and Path 2 target set currently includes `createApp`, `renderToString`, `Box`, `Text`, direct root facts through `useLayoutWidth()` and `useViewportHeight()`, last-accepted direct-Box measurement through `useBoxSize()`, and `/inline`'s `Static`. Rich render-session and paint-geometry state remains internal. Other experimental Runtime exports stay subject to their active path audits rather than being justified by this package list. Runtime depends on nothing else in the family. `Static` remains Runtime work because its one-attempt acceptance and stream-commit ownership are renderer/output mechanics even though Vue owns collection iteration and its authoring path is surface-specific.
 - **`@vue-tui/use`** — independent, reusable hooks that are **not tied to any single
   component** (shared headless behavior/logic). May depend on `runtime`; **must never depend
   on `components`.**
@@ -39,10 +35,7 @@ logic must not depend on rendered UI. (Mirrors VueUse, where `@vueuse/components
 
 Apply in order — first match wins:
 
-1. **Runtime work** — renderer or terminal I/O? → `@vue-tui/runtime`. The exact test lives
-   in the [runtime ↔ component boundary](./components-design-principles.md), not here. This
-   wins first: an I/O hook stays in `runtime` even though it is _also_ independent and
-   reusable (`useInput` / `useFocus` are exactly that).
+1. **Runtime work** — can the behavior be implemented correctly without Runtime-private ownership? If it needs the terminal, renderer tree, accepted layout or paint, input protocol, lifecycle, or terminal resources, identify the smallest stable fact or operation Runtime must expose. Being a composable, reading terminal-related state, or using an existing internal mechanism is not enough. A broader policy stays above Runtime when a third party can build it from smaller supported primitives.
 2. **The headless guts of — or a required companion to — one specific component we ship?**
    → `@vue-tui/components`, co-located with that component (e.g. `scroll-box/scroll-box.vue`
    beside `scroll-box/use-scroll.ts`), exported from the package root. Not a separate

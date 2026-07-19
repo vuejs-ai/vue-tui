@@ -40,6 +40,7 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
   const { stream: stdin } = makeFakeStdin();
   const input = stdin as WritableTestStdin;
   const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
   const writes = captureWrites(stdout);
   const active = shallowRef(false);
   let refBalance = 0;
@@ -58,12 +59,13 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
     return stdin;
   };
   const originalWrite = stdout.write.bind(stdout);
+  const enableError = new Error("enable failed after write");
   stdout.write = ((...args: unknown[]) => {
     const value = String(args[0]);
     const result = (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
     if (failEnable && value === SGR_MOUSE_ENABLE) {
       failEnable = false;
-      throw new Error("enable failed after write");
+      throw enableError;
     }
     return result;
   }) as NodeJS.WriteStream["write"];
@@ -76,6 +78,7 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
   try {
     app.mount({
       stdout,
+      stderr,
       stdin,
       patchConsole: false,
       liveUpdates: true,
@@ -84,9 +87,11 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
       kittyKeyboard: { mode: "disabled" },
     });
     await waitForWrite(writes, "x");
+    const exited = app.waitUntilExit();
     failEnable = true;
     active.value = true;
-    await expect(flushRenderedTarget()).rejects.toThrow("enable failed after write");
+    await flushRenderedTarget();
+    await expect(exited).rejects.toBe(enableError);
 
     expect(
       writes.filter((value) => value === SGR_MOUSE_ENABLE || value === SGR_MOUSE_DISABLE),
@@ -103,5 +108,6 @@ test("SGR mouse enable restores the terminal when stdout throws after the write"
     else process.env["TERM"] = previousTerm;
     stdin.destroy();
     stdout.destroy();
+    stderr.destroy();
   }
 });

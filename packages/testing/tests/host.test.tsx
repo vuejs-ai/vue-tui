@@ -4,40 +4,23 @@ import {
   Box,
   Text,
   useInput,
-  useLayoutSize,
-  useRenderSession,
+  useLayoutWidth,
   useStdin,
   useStdout,
-  type RenderSession,
+  useViewportHeight,
 } from "@vue-tui/runtime";
 import { useInternalInputRoutingForTest } from "@vue-tui/runtime/internal";
-import { render, type RenderOptions, type TestRenderSession } from "../src/index.ts";
+import { render, type RenderOptions } from "../src/index.ts";
 
-test("result.session is the exact public session object seen by the component", async () => {
-  let componentSession: RenderSession | undefined;
-  const App = defineComponent(() => {
-    componentSession = useRenderSession();
-    return () => <Text>default</Text>;
-  });
+test("the default host renders a visual Inline surface", async () => {
+  const result = await render(() => <Text>default</Text>);
 
-  const result = await render(App);
-  const publicLiveSession: TestRenderSession = result.session;
-  expect(result.session).toBe(componentSession);
-  expect(result.session).toBe(publicLiveSession);
-  expect(result.session).toEqual({
-    host: "live",
-    mode: { requested: "inline", effective: "inline", fallback: null },
-    output: { destination: "terminal", dynamicUpdates: "live", presentation: "visual" },
-    dimensions: {
-      terminal: { columns: 100, rows: 100 },
-      layout: { columns: 100, rows: 100 },
-    },
-    capabilities: {
-      stableOrigin: false,
-      elementHitTesting: false,
-      suspension: true,
-    },
-  });
+  expect(Object.hasOwn(result, "session")).toBe(false);
+  expect(result.lastFrame()).toBe("default");
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("normal");
+  expect(screen.dimensions).toEqual({ columns: 100, rows: 100 });
+  expect([...screen.scrollback, ...screen.lines].join("\n")).toContain("default");
 });
 
 test("stream omission selects production final-output cadence", async () => {
@@ -47,21 +30,15 @@ test("stream omission selects production final-output cadence", async () => {
     host: { stdout: "stream", mode: "fullscreen" },
   });
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: null,
-    fallback: "live-updates-disabled",
-  });
-  expect(result.session.output).toEqual({
-    destination: "stream",
-    dynamicUpdates: "at-teardown",
-    presentation: "visual",
-  });
-  expect(result.session.dimensions).toEqual({
-    terminal: null,
-    layout: { columns: 72, rows: null },
-  });
+  expect(result.lastFrame()).toBe("stream");
+  const beforeUnmount = await result.screen();
+  expect(beforeUnmount.activeBuffer).toBe("normal");
+  expect([...beforeUnmount.scrollback, ...beforeUnmount.lines].join("\n")).not.toContain("stream");
   expect(result.terminal.rows).toBe(16);
+
+  result.unmount();
+  const afterUnmount = await result.screen();
+  expect([...afterUnmount.scrollback, ...afterUnmount.lines].join("\n")).toContain("stream");
 });
 
 test("a selected route owns deterministic TTY input independently from final output", async () => {
@@ -88,7 +65,6 @@ test("a selected route owns deterministic TTY input independently from final out
     host: { stdin: "tty", stdout: "stream", updates: "at-teardown" },
   });
 
-  expect(result.session.output.dynamicUpdates).toBe("at-teardown");
   expect(result.terminal.rawMode.current).toBe(true);
   await result.stdin.write("x");
   expect(calls).toEqual(["x"]);
@@ -146,24 +122,22 @@ test("explicit live stream cannot manufacture a terminal mode", async () => {
     host: { stdout: "stream", updates: "live", mode: "fullscreen" },
   });
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: null,
-    fallback: "stdout-not-tty",
-  });
-  expect(result.session.output.dynamicUpdates).toBe("live");
-  expect(result.session.capabilities.stableOrigin).toBe(false);
+  expect(result.lastFrame()).toBe("stream");
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("normal");
+  expect([...screen.scrollback, ...screen.lines].join("\n")).toContain("stream");
 });
 
 test("forced live stream refreshes its public layout and frame before input resumes", async () => {
   const rawModeSeenByFrame: boolean[] = [];
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
     const { stdin } = useStdin();
     useInput(() => "continue");
     const frame = () => {
       rawModeSeenByFrame.push(Boolean((stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw));
-      return `stream:${columns.value}x${rows.value ?? "unbounded"}`;
+      return `stream:${width.value}x${viewportHeight?.value ?? "unbounded"}`;
     };
     return () => <Text>{frame()}</Text>;
   });
@@ -173,17 +147,15 @@ test("forced live stream refreshes its public layout and frame before input resu
     host: { stdout: "stream", updates: "live" },
   });
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
+  expect(result.lastFrame()).toBe("stream:30xunbounded");
   await result.terminal.suspend();
   await result.terminal.resize(24, 6);
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
+  expect(result.lastFrame()).toBe("stream:30xunbounded");
 
   const resume = result.terminal.resume();
-  expect(result.session.dimensions.layout).toEqual({ columns: 24, rows: null });
   expect(result.terminal.rawMode.current).toBe(false);
   await resume;
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 24, rows: null });
   expect(result.lastFrame()).toBe("stream:24xunbounded");
   expect(rawModeSeenByFrame.at(-1)).toBe(false);
   expect(result.terminal.rawMode.current).toBe(true);
@@ -192,8 +164,9 @@ test("forced live stream refreshes its public layout and frame before input resu
 
 test("a live resize never commits a frame derived from the previous layout", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    const frame = () => `stream:${columns.value}x${rows.value ?? "unbounded"}`;
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    const frame = () => `stream:${width.value}x${viewportHeight?.value ?? "unbounded"}`;
     return () => <Text>{frame()}</Text>;
   });
   const result = await render(App, {
@@ -214,8 +187,9 @@ test("a live resize never commits a frame derived from the previous layout", asy
 
 test("final stream keeps its mounted layout while suspended", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`final:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    return () => <Text>{`final:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -227,36 +201,34 @@ test("final stream keeps its mounted layout while suspended", async () => {
   await result.terminal.resize(24, 6);
   await result.terminal.resume();
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
   expect(result.lastFrame()).toBe("final:30xunbounded");
   result.dispose();
 });
 
 test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
-  const result = await render(() => <Text>full</Text>, {
+  const App = defineComponent(() => {
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    return () => <Text>{`full:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+  });
+  const result = await render(App, {
     columns: 30,
     rows: 8,
     host: { mode: "fullscreen" },
   });
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: "fullscreen",
-    fallback: null,
-  });
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: 8 });
-  expect(result.session.capabilities).toEqual({
-    stableOrigin: true,
-    elementHitTesting: true,
-    suspension: true,
-  });
+  expect(result.lastFrame()).toBe("full:30x8");
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("alternate");
+  expect(screen.dimensions).toEqual({ columns: 30, rows: 8 });
 });
 
 test("modeled Inline suspension releases input and repaints at the continued size", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
     useInput(() => "continue");
-    return () => <Text>{`inline:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    return () => <Text>{`inline:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });
 
@@ -282,8 +254,9 @@ test("modeled Inline suspension releases input and repaints at the continued siz
 
 test("modeled Fullscreen suspension restores and reacquires the alternate screen", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`fullscreen:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    return () => <Text>{`fullscreen:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -305,25 +278,28 @@ test("modeled Fullscreen suspension restores and reacquires the alternate screen
 });
 
 test("Fullscreen screen-reader request resolves to an Inline transcript", async () => {
-  const result = await render(() => <Text>transcript</Text>, {
-    host: { mode: "fullscreen", presentation: "screen-reader" },
-  });
+  const result = await render(
+    () => (
+      <Box ariaLabel="screen-reader transcript">
+        <Text>visual child</Text>
+      </Box>
+    ),
+    {
+      host: { mode: "fullscreen", presentation: "screen-reader" },
+    },
+  );
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: "inline",
-    fallback: "screen-reader-transcript",
-  });
-  expect(result.session.output.presentation).toBe("screen-reader");
-  expect(result.session.dimensions.layout).toEqual({ columns: 100, rows: null });
+  expect(result.lastFrame()).toContain("screen-reader transcript");
+  expect(result.lastFrame()).not.toContain("visual child");
   expect((await result.screen()).activeBuffer).toBe("normal");
 });
 
 test("modeled screen-reader transcript suspends and resumes without acquiring Fullscreen", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
     useInput(() => "continue");
-    return () => <Text>{`transcript:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    return () => <Text>{`transcript:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -355,8 +331,6 @@ test.each(["at-teardown", "live"] as const)(
       host: { stdout: "stream", updates, mode: "fullscreen" },
     });
 
-    expect(result.session.mode.effective).toBeNull();
-    expect(result.session.capabilities.suspension).toBe(true);
     expect(result.terminal.rawMode.current).toBe(true);
     await result.terminal.suspend();
     expect(result.terminal.rawMode.current).toBe(false);
@@ -410,22 +384,24 @@ test("Inline hard-clips a non-shrinking wide child before terminal wrapping", as
   }
 });
 
-test("resize updates the same session before the resulting frame is observed", async () => {
-  const result = await render(() => {
-    const session = useRenderSession();
-    return (
-      <Text>
-        {session.dimensions.layout.columns}x{session.dimensions.layout.rows}
-      </Text>
-    );
+test("resize updates public layout facts before the resulting frame is observed", async () => {
+  let observedWidth = 0;
+  let observedHeight = 0;
+  const App = defineComponent(() => {
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    return () => {
+      observedWidth = width.value;
+      observedHeight = viewportHeight?.value ?? 0;
+      return <Text>{`${observedWidth}x${observedHeight}`}</Text>;
+    };
   });
-  const session = result.session;
+  const result = await render(App);
 
   await result.terminal.resize(64, 12);
 
-  expect(result.session).toBe(session);
-  expect(session.dimensions.terminal).toEqual({ columns: 64, rows: 12 });
-  expect(session.dimensions.layout).toEqual({ columns: 64, rows: 12 });
+  expect(observedWidth).toBe(64);
+  expect(observedHeight).toBe(12);
   expect(result.lastFrame()).toBe("64x12");
 });
 
@@ -450,7 +426,35 @@ test("resize rejects invalid dimensions without partially changing the host", as
     );
     expect(result.terminal.columns).toBe(40);
     expect(result.terminal.rows).toBe(10);
-    expect(result.session.dimensions.terminal).toEqual({ columns: 40, rows: 10 });
+  }
+});
+
+test("render and resize reject dimensions outside the modeled terminal envelope", async () => {
+  await expect(render(() => <Text>too wide</Text>, { columns: 65_536, rows: 1 })).rejects.toThrow(
+    "render columns must be no greater than 65535",
+  );
+  await expect(render(() => <Text>too tall</Text>, { columns: 1, rows: 65_536 })).rejects.toThrow(
+    "render rows must be no greater than 65535",
+  );
+  await expect(
+    render(() => <Text>too many cells</Text>, { columns: 2_048, rows: 1_024 }),
+  ).rejects.toThrow("modeled terminal 2048x1024 exceeds the 1048576-cell test-host limit");
+
+  const result = await render(() => <Text>resize</Text>, { columns: 40, rows: 10 });
+  try {
+    await expect(result.terminal.resize(65_536, 1)).rejects.toThrow(
+      "terminal columns must be no greater than 65535",
+    );
+    await expect(result.terminal.resize(1, 65_536)).rejects.toThrow(
+      "terminal rows must be no greater than 65535",
+    );
+    await expect(result.terminal.resize(2_048, 1_024)).rejects.toThrow(
+      "modeled terminal 2048x1024 exceeds the 1048576-cell test-host limit",
+    );
+    expect(result.terminal.columns).toBe(40);
+    expect(result.terminal.rows).toBe(10);
+  } finally {
+    result.dispose();
   }
 });
 

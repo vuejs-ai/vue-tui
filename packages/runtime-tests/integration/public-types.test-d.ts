@@ -1,9 +1,7 @@
 // Type-level guarantees for the public *named* type surface.
 //
-// Component props and framework-neutral cursor data retain the stable names that
-// vue-tui shares with Ink. The render-session types below are vue-tui's own truthful
-// host/surface contract. This test guards both groups without treating the session
-// design as Ink parity.
+// Component props, narrow layout/measurement facts, and framework-neutral cursor
+// data retain stable public names. Internal session and paint graphs do not.
 //
 // These assertions are erased at runtime; the real gate is `tsc --noEmit` (the package's
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
@@ -18,10 +16,12 @@ import {
   type ShallowRef,
 } from "vue";
 import {
+  Box,
+  Text,
   useApp,
+  useBoxSize,
   useCaret,
   useClipboard,
-  useElementGeometry,
   useExternalInput,
   useFocus,
   useFocusedInput,
@@ -30,19 +30,19 @@ import {
   useFocusScopeInput,
   useInput,
   useInputAvailability,
-  useLayoutSize,
-  useRenderSession,
+  useLayoutWidth,
   useStdin,
   useStdout,
   useStderr,
+  useViewportHeight,
 } from "@vue-tui/runtime";
 import type {
   AriaRole,
   AriaState,
   BoxProps,
+  BoxSize,
   CaretState,
   CellPoint,
-  CellRect,
   ClipboardAvailability,
   ClipboardTransport,
   ClipboardTransportResult,
@@ -51,8 +51,6 @@ import type {
   CoordinatedWriteResult,
   Color,
   CustomClipboardTransport,
-  ElementGeometry,
-  ElementGeometryFragment,
   ElementTarget,
   ExternalInputHandler,
   ExternalInputSource,
@@ -70,19 +68,12 @@ import type {
   UseCaretOptions,
   UseCaretReturn,
   UseClipboardReturn,
-  UseElementGeometryReturn,
   UseFocusManagerReturn,
   UseFocusOptions,
   UseFocusReturn,
   UseFocusScopeOptions,
   UseFocusScopeReturn,
-  RenderLayoutSize,
   RenderMode,
-  RenderModeResolution,
-  RenderOutput,
-  RenderSession,
-  RenderSize,
-  UseLayoutSizeReturn,
   UseInputAvailabilityReturn,
   UseInputOptions,
   UseAppReturn,
@@ -403,110 +394,40 @@ export type _RemovedUseAnimationOptions = import("@vue-tui/runtime").UseAnimatio
 // @ts-expect-error Animation scheduling is ordinary Vue timer policy.
 export type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimationReturn;
 
-// Public render-session facts and projections.
+// Runtime publishes only the layout facts applications have demonstrated.
 expectTypeOf<RenderMode>().toEqualTypeOf<"inline" | "fullscreen">();
-expectTypeOf<RenderSize>().toEqualTypeOf<{
-  readonly columns: number;
-  readonly rows: number;
-}>();
-expectTypeOf<RenderLayoutSize>().toEqualTypeOf<{
-  readonly columns: number;
-  readonly rows: number | null;
-}>();
-expectTypeOf<RenderModeResolution>().toEqualTypeOf<
-  | { readonly requested: "inline"; readonly effective: "inline"; readonly fallback: null }
-  | { readonly requested: "fullscreen"; readonly effective: "fullscreen"; readonly fallback: null }
-  | {
-      readonly requested: "fullscreen";
-      readonly effective: "inline";
-      readonly fallback: "screen-reader-transcript";
-    }
-  | {
-      readonly requested: RenderMode;
-      readonly effective: null;
-      readonly fallback: "live-updates-disabled" | "stdout-not-tty" | "terminal-size-unavailable";
-    }
->();
-expectTypeOf<RenderOutput>().toEqualTypeOf<
-  | {
-      readonly destination: "terminal";
-      readonly dynamicUpdates: "live";
-      readonly presentation: "visual" | "screen-reader";
-    }
-  | {
-      readonly destination: "stream";
-      readonly dynamicUpdates: "live" | "at-teardown";
-      readonly presentation: "visual" | "screen-reader";
-    }
-  | {
-      readonly destination: "document";
-      readonly dynamicUpdates: "none";
-      readonly presentation: "visual" | "screen-reader";
-    }
->();
-expectTypeOf<ReturnType<typeof useRenderSession>>().toEqualTypeOf<RenderSession>();
-expectTypeOf<UseLayoutSizeReturn>().toEqualTypeOf<{
-  readonly columns: Readonly<Ref<number>>;
-  readonly rows: Readonly<Ref<number | null>>;
-}>();
-expectTypeOf<ReturnType<typeof useLayoutSize>>().toEqualTypeOf<UseLayoutSizeReturn>();
+expectTypeOf<ReturnType<typeof useLayoutWidth>>().toEqualTypeOf<Readonly<Ref<number>>>();
+expectTypeOf<ReturnType<typeof useViewportHeight>>().toEqualTypeOf<Readonly<Ref<number>> | null>();
 
-declare const session: RenderSession;
-if (session.host === "string") {
-  expectTypeOf(session.mode).toEqualTypeOf<null>();
-  expectTypeOf(session.output.destination).toEqualTypeOf<"document">();
-  expectTypeOf(session.output.dynamicUpdates).toEqualTypeOf<"none">();
-  expectTypeOf(session.dimensions.terminal).toEqualTypeOf<null>();
-  expectTypeOf(session.dimensions.layout.rows).toEqualTypeOf<null>();
-  expectTypeOf(session.capabilities.stableOrigin).toEqualTypeOf<false>();
-} else {
-  expectTypeOf(session.mode).toEqualTypeOf<RenderModeResolution>();
-  expectTypeOf(session.output.destination).toEqualTypeOf<"terminal" | "stream">();
-  expectTypeOf(session.dimensions.terminal).toEqualTypeOf<RenderSize | null>();
-  expectTypeOf(session.dimensions.layout).toEqualTypeOf<RenderLayoutSize>();
+const layoutWidth = useLayoutWidth();
+const viewportHeight = useViewportHeight();
+// @ts-expect-error Runtime-owned layout facts are readonly.
+layoutWidth.value = 40;
+if (viewportHeight) {
+  // @ts-expect-error Runtime-owned viewport facts are readonly.
+  viewportHeight.value = 24;
 }
 
-declare const resolution: RenderModeResolution;
-if (resolution.effective === "fullscreen") {
-  expectTypeOf(resolution.requested).toEqualTypeOf<"fullscreen">();
-  expectTypeOf(resolution.fallback).toEqualTypeOf<null>();
-} else if (resolution.fallback === "screen-reader-transcript") {
-  expectTypeOf(resolution.requested).toEqualTypeOf<"fullscreen">();
-  expectTypeOf(resolution.effective).toEqualTypeOf<"inline">();
-}
-
-const impossibleInlineFallback: RenderModeResolution = {
-  requested: "inline",
-  effective: "inline",
-  // @ts-expect-error Inline requests cannot carry a Fullscreen-only transcript fallback.
-  fallback: "screen-reader-transcript",
-};
-const impossibleStreamMode: RenderModeResolution = {
-  requested: "fullscreen",
-  effective: "fullscreen",
-  // @ts-expect-error A stream fallback cannot claim an effective terminal mode.
-  fallback: "stdout-not-tty",
-};
-void impossibleInlineFallback;
-void impossibleStreamMode;
-
-declare const size: RenderSize;
-declare const layoutSize: RenderLayoutSize;
-declare const layoutProjection: UseLayoutSizeReturn;
-// @ts-expect-error Render-session facts are readonly.
-size.columns = 40;
-// @ts-expect-error Render-session facts are readonly.
-layoutSize.rows = 24;
-// @ts-expect-error Session facts cannot be mutated through the public union.
-session.dimensions.layout.columns = 40;
-// @ts-expect-error The derived layout refs are readonly.
-layoutProjection.rows.value = 24;
+// @ts-expect-error The broad Runtime session graph is private.
+export type _RenderSessionWasRemoved = import("@vue-tui/runtime").RenderSession;
+// @ts-expect-error Requested/effective mode resolution is private.
+export type _RenderModeResolutionWasRemoved = import("@vue-tui/runtime").RenderModeResolution;
+// @ts-expect-error Output writer policy is private.
+export type _RenderOutputWasRemoved = import("@vue-tui/runtime").RenderOutput;
+// @ts-expect-error Physical terminal dimensions are not a public Runtime type.
+export type _RenderSizeWasRemoved = import("@vue-tui/runtime").RenderSize;
+// @ts-expect-error The old combined layout wrapper was removed.
+export type _RenderLayoutSizeWasRemoved = import("@vue-tui/runtime").RenderLayoutSize;
+// @ts-expect-error The old combined layout hook was removed.
+export type _UseLayoutSizeWasRemoved = typeof import("@vue-tui/runtime").useLayoutSize;
+// @ts-expect-error The broad session hook was removed.
+export type _UseRenderSessionWasRemoved = typeof import("@vue-tui/runtime").useRenderSession;
 
 // @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
 export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
 
-// Semantic element geometry is one atomic, readonly paint generation. It uses
-// ordinary Vue component refs and never exposes renderer or Yoga nodes.
+// Ref-bound focus, caret, and mouse primitives share one ordinary target type.
+// Measurement is deliberately narrower: only the nominal public Box instance.
 expectTypeOf<ElementTarget>().toEqualTypeOf<
   MaybeRefOrGetter<ComponentPublicInstance | null | undefined>
 >();
@@ -514,43 +435,39 @@ expectTypeOf<CellPoint>().toEqualTypeOf<{
   readonly x: number;
   readonly y: number;
 }>();
-expectTypeOf<CellRect>().toEqualTypeOf<{
-  readonly x: number;
-  readonly y: number;
+expectTypeOf<BoxSize>().toEqualTypeOf<{
   readonly width: number;
   readonly height: number;
 }>();
-expectTypeOf<ElementGeometryFragment>().toEqualTypeOf<{
-  readonly local: CellRect;
-  readonly parent: CellRect;
-  readonly surface: CellRect;
-  readonly visibleSurface: CellRect | null;
-}>();
-expectTypeOf<ElementGeometry>().toEqualTypeOf<
-  | { readonly status: "unavailable" }
-  | { readonly status: "detached" }
-  | { readonly status: "pending" }
-  | { readonly status: "hidden" }
-  | ({
-      readonly parent: CellRect;
-      readonly surface: CellRect;
-      readonly fragments: readonly ElementGeometryFragment[];
-    } & {
-      readonly status: "zero-size" | "fully-clipped" | "visible";
-    })
->();
-expectTypeOf<Parameters<typeof useElementGeometry>>().toEqualTypeOf<[target: ElementTarget]>();
-expectTypeOf<ReturnType<typeof useElementGeometry>>().toEqualTypeOf<UseElementGeometryReturn>();
-expectTypeOf<UseElementGeometryReturn>().toEqualTypeOf<{
-  readonly geometry: Readonly<ShallowRef<ElementGeometry>>;
-}>();
 
-const geometryHost = shallowRef<ComponentPublicInstance | null>(null);
-const geometryProjection = useElementGeometry(geometryHost);
-// @ts-expect-error The public geometry ref is readonly.
-geometryProjection.geometry.value = { status: "detached" };
-// @ts-expect-error Renderer-owned caret slots are not part of public geometry.
-void geometryProjection.geometry.value.caretSlots;
+const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
+const boxSize = useBoxSize(boxHost);
+expectTypeOf(boxSize).toEqualTypeOf<Readonly<Ref<BoxSize | null>>>();
+// @ts-expect-error The accepted Box measurement is readonly.
+boxSize.value = { width: 1, height: 1 };
+
+const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
+// @ts-expect-error Text layout has separate semantics and is not a Box size target.
+useBoxSize(textHost);
+const customHost = shallowRef<ComponentPublicInstance | null>(null);
+// @ts-expect-error Arbitrary component refs do not mean one measurable Box.
+useBoxSize(customHost);
+declare const rawBoxHost: InstanceType<typeof Box>;
+// @ts-expect-error A raw component value cannot represent target attachment and detachment.
+useBoxSize(rawBoxHost);
+// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
+useBoxSize(() => boxHost.value);
+
+// @ts-expect-error Rich paint geometry is private.
+export type _UseElementGeometryWasRemoved = typeof import("@vue-tui/runtime").useElementGeometry;
+// @ts-expect-error Rich paint geometry status and fragments are private.
+export type _ElementGeometryWasRemoved = import("@vue-tui/runtime").ElementGeometry;
+// @ts-expect-error Paint rectangles are private.
+export type _CellRectWasRemoved = import("@vue-tui/runtime").CellRect;
+// @ts-expect-error Paint fragments are private.
+export type _ElementGeometryFragmentWasRemoved = import("@vue-tui/runtime").ElementGeometryFragment;
+// @ts-expect-error The old geometry wrapper type was removed.
+export type _OldGeometryReturn = import("@vue-tui/runtime").UseElementGeometryReturn;
 // @ts-expect-error useBoxMetrics was replaced, not retained as an alias.
 export type _UseBoxMetricsWasRemoved = typeof import("@vue-tui/runtime").useBoxMetrics;
 // @ts-expect-error Its named return type was removed with the composable.

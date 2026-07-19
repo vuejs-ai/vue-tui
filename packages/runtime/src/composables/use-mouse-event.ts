@@ -9,7 +9,7 @@ import type {
 } from "../mouse/public-events.ts";
 import { useInternalRenderSession } from "../render-session.ts";
 import { useRenderedTargetRegistration } from "../rendered-target.ts";
-import type { ElementTarget } from "./useElementGeometry.ts";
+import type { ElementTarget } from "../element-target.ts";
 
 function requireAppContext(): AppContext {
   const app = hasInjectionContext() ? inject(AppContextKey, null) : null;

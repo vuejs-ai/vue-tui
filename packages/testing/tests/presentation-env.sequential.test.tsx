@@ -11,7 +11,6 @@ test.sequential("default test presentation ignores ambient INK_SCREEN_READER", a
         <Text>visual child</Text>
       </Box>
     ));
-    expect(result.session.output.presentation).toBe("visual");
     expect(result.lastFrame()).toContain("visual child");
     expect(result.lastFrame()).not.toContain("transcript label");
   } finally {

@@ -39,23 +39,12 @@ async function run(observer?: InternalRenderObserver): Promise<string> {
 
 test("observing commits does not change the production output path", async () => {
   const frames: InternalContentFrame[] = [];
-  let sessionSeen = false;
   const observed = await run({
-    onSession(session) {
-      sessionSeen = true;
-      expect(session.host).toBe("live");
-      expect(session.mode).toEqual({
-        requested: "inline",
-        effective: null,
-        fallback: "stdout-not-tty",
-      });
-    },
     onCommit(frame) {
       frames.push(frame);
     },
   });
 
-  expect(sessionSeen).toBe(true);
   expect(frames.some((frame) => frame.dynamic === "observed")).toBe(true);
   expect(observed).toBe(await run());
 });

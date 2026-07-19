@@ -13,18 +13,17 @@ import {
   Box,
   Text,
   useApp,
-  useElementGeometry,
   useFocus,
   useFocusedInput,
   useFocusManager,
   useFocusScope,
   useFocusScopeInput,
   useInput,
-  useLayoutSize,
+  useLayoutWidth,
   useStderr,
   useStdout,
+  useViewportHeight,
   type CoordinatedWriteResult,
-  type UseElementGeometryReturn,
   type UseFocusReturn,
   type UseFocusScopeReturn,
 } from "@vue-tui/runtime";
@@ -681,14 +680,20 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
   const sequence = shallowRef(0);
   const last = shallowRef({ row: 0, point: 0, value: 0, action: "update" });
   let exit!: (result?: unknown) => void;
-  let layout!: ReturnType<typeof useLayoutSize>;
+  let layoutWidth!: ReturnType<typeof useLayoutWidth>;
+  let viewportHeight!: NonNullable<ReturnType<typeof useViewportHeight>>;
   const checksum = (): number => rows.reduce((sum, row) => sum + row.value, 0);
   const marker = (side: "TOP" | "BOTTOM"): string =>
     `__J4_${side}__ seq=${sequence.value} action=${last.value.action} row=${last.value.row} value=${last.value.value} point=${last.value.point} checksum=${checksum()}`;
 
   const App = defineComponent(() => {
     exit = useApp().exit;
-    layout = useLayoutSize();
+    layoutWidth = useLayoutWidth();
+    const resolvedViewportHeight = useViewportHeight();
+    if (!resolvedViewportHeight) {
+      throw new Error("J4 requires the bounded Fullscreen viewport configured by its host");
+    }
+    viewportHeight = resolvedViewportHeight;
     useInput((event) => {
       if (event.sequence !== "q") return "continue";
       sequence.value++;
@@ -750,8 +755,8 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
       assertions++;
     }
     assert.equal(rows.length, 120);
-    assert.equal(layout.columns.value, 120);
-    assert.equal(layout.rows.value, 40);
+    assert.equal(layoutWidth.value, 120);
+    assert.equal(viewportHeight.value, 40);
     assertions += 3;
     await recordVisible(latencies, () =>
       host.input("q", ["action=quit", `__J4_BOTTOM__ seq=${sequence.value + 1}`]),
@@ -795,10 +800,8 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
   );
   const paneScroll = Array.from({ length: 4 }, () => shallowRef<ScrollBoxExpose | null>(null));
   const paneFocus: Array<UseFocusReturn | undefined> = Array.from({ length: 4 });
-  const paneGeometry: Array<UseElementGeometryReturn | undefined> = Array.from({ length: 4 });
   const scopes: Array<UseFocusScopeReturn | undefined> = Array.from({ length: 2 });
   const dividerTarget = shallowRef<ComponentPublicInstance | null>(null);
-  let dividerGeometry!: UseElementGeometryReturn;
   let overlayFocus: UseFocusReturn | undefined;
   let exit!: (result?: unknown) => void;
   let focusStep = 0;
@@ -823,7 +826,6 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
           scope,
           autoFocus: local === 0,
         });
-        paneGeometry[pane] = useElementGeometry(paneTargets[pane]!);
         useMouseEvent(paneTargets[pane]!, "wheel", (event) => {
           const delta = event.delta.y > 0 ? 1 : event.delta.y < 0 ? -1 : 0;
           if (delta === 0 || !paneScroll[pane]!.value?.scrollByLines(delta)) return "continue";
@@ -890,7 +892,6 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
   const App = defineComponent(() => {
     exit = useApp().exit;
     useFocusManager();
-    dividerGeometry = useElementGeometry(dividerTarget);
     useMouseDrag(dividerTarget, (event: TuiMouseDragEvent) => {
       if (event.phase !== "start" && event.phase !== "move") return;
       if (event.movement.x === 0) return;
@@ -1018,19 +1019,17 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     await host.mouse.down({ x: 59, y: 10 });
     for (let move = 1; move <= capacityManifest.j5.dividerMoves; move++) {
       const x = move <= 10 ? 59 + move : 69 - (move - 10);
+      let paintedDividerColumn = -1;
       await recordVisible(latencies, async () => {
         await host.mouse.move({ x, y: 10 });
-        await host.flush(`divider=${leftWidth.value}`);
+        const screen = await host.flush(`divider=${leftWidth.value}`);
+        const dividerLine = screen.text.split("\n").find((line) => line.includes("│"));
+        paintedDividerColumn = dividerLine?.indexOf("│") ?? -1;
       });
       const expectedWidth = move <= 10 ? 59 + move : 69 - (move - 10);
       assert.equal(leftWidth.value, expectedWidth);
-      const geometry = dividerGeometry.geometry.value;
-      assert.equal(geometry.status, "visible");
-      if (geometry.status === "visible") {
-        assert.equal(geometry.surface.x, leftWidth.value);
-        assert.equal(geometry.surface.width, 1);
-      }
-      assertions += 4;
+      assert.equal(paintedDividerColumn, expectedWidth);
+      assertions += 2;
     }
     await host.mouse.up({ x: 59, y: 10 });
     assert.equal(leftWidth.value, 59);
@@ -1047,8 +1046,11 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
     assert.equal(overlayFocus?.isFocused.value, false);
     assertions += 2;
 
-    for (const geometry of paneGeometry) assert.equal(geometry?.geometry.value.status, "visible");
-    assertions += paneGeometry.length;
+    const finalScreen = await host.screen();
+    for (let pane = 0; pane < 4; pane++) {
+      assert.ok(finalScreen.text.includes(`pane ${pane}`));
+      assertions++;
+    }
     exit({ checksum: checksum() });
     await host.app.waitUntilExit();
   } catch (error) {

@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useInput, useLayoutSize, type TuiApp } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useLayoutWidth, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_SUSPENSION_HOST,
   INTERNAL_TERMINAL_SIZE_PROBE,
@@ -279,10 +279,10 @@ test.sequential("a resize reported by the continued frame is repainted before in
   const suspensionHost = createManualSuspensionHost();
   const renderedFacts: string[] = [];
   const App = defineComponent(() => {
-    const { columns } = useLayoutSize();
+    const width = useLayoutWidth();
     useInput(() => "continue");
     const frame = () => {
-      const facts = `${columns.value}:raw=${String(stdin.isRaw)}`;
+      const facts = `${width.value}:raw=${String(stdin.isRaw)}`;
       renderedFacts.push(facts);
       return facts;
     };

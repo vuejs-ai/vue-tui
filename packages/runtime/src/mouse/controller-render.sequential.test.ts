@@ -3,7 +3,7 @@ import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef, type ShallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { useMouseEvent } from "../composables/use-mouse-event.ts";
-import type { ElementTarget } from "../composables/useElementGeometry.ts";
+import type { ElementTarget } from "../element-target.ts";
 import { INTERNAL_TEST_INPUT_HOST, type InternalTestInputHost } from "../io/test-input-host.ts";
 import { createApp, type MountOptions } from "../render.ts";
 

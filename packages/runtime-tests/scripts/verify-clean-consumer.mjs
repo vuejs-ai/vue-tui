@@ -125,10 +125,12 @@ try {
     join(consumerDirectory, "consumer.ts"),
     `import { shallowRef } from "vue";
 import {
+  Box,
+  Text,
+  useBoxSize,
   useCaret,
   useClipboard,
   useExternalInput,
-  useElementGeometry,
   useFocus,
   useFocusedInput,
   useFocusManager,
@@ -136,7 +138,10 @@ import {
   useFocusScopeInput,
   useInput,
   useInputAvailability,
+  useLayoutWidth,
   useStdin,
+  useViewportHeight,
+  type BoxSize,
   type BoxProps,
   type Color,
   type ExternalInputHandler,
@@ -150,7 +155,6 @@ import {
   type ClipboardAvailability,
   type ClipboardTransport,
   type ClipboardWriteResult,
-  type ElementGeometry,
   type ElementTarget,
   type MountOptions,
   type RenderToStringOptions,
@@ -166,7 +170,6 @@ import {
   type UseClipboardReturn,
   type UseInputAvailabilityReturn,
   type UseInputOptions,
-  type UseElementGeometryReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
 import {
@@ -359,11 +362,14 @@ type _ExactExternalHandler = Expect<
 type _ExactElementTarget = Expect<
   Equal<ElementTarget, MaybeRefOrGetter<ComponentPublicInstance | null | undefined>>
 >;
-type _ExactElementGeometryReturn = Expect<
-  Equal<
-    UseElementGeometryReturn,
-    { readonly geometry: Readonly<ShallowRef<ElementGeometry>> }
-  >
+type _ExactBoxSize = Expect<
+  Equal<BoxSize, { readonly width: number; readonly height: number }>
+>;
+type _ExactLayoutWidth = Expect<
+  Equal<ReturnType<typeof useLayoutWidth>, Readonly<Ref<number>>>
+>;
+type _ExactViewportHeight = Expect<
+  Equal<ReturnType<typeof useViewportHeight>, Readonly<Ref<number>> | null>
 >;
 type _ExactCaretOptions = Expect<
   Equal<
@@ -513,11 +519,34 @@ const handler = shallowRef<InputHandler>((event) => {
 useInput(handler, { isActive: () => active.value });
 
 declare const focusHost: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>;
-const geometryResult = useElementGeometry(focusHost);
-// @ts-expect-error Semantic geometry generations are readonly.
-geometryResult.geometry.value = { status: "detached" };
-// @ts-expect-error Sparse caret slots are private renderer data.
-geometryResult.geometry.value.caretSlots;
+const layoutWidth = useLayoutWidth();
+const viewportHeight = useViewportHeight();
+// @ts-expect-error Runtime-owned layout width is readonly.
+layoutWidth.value = 40;
+if (viewportHeight) {
+  // @ts-expect-error Runtime-owned viewport height is readonly.
+  viewportHeight.value = 24;
+}
+const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
+const boxSize = useBoxSize(boxHost);
+const measuredSize: BoxSize | null = boxSize.value;
+// @ts-expect-error Accepted Box size is readonly.
+boxSize.value = { width: 1, height: 1 };
+if (measuredSize) {
+  // @ts-expect-error Accepted Box size fields are readonly.
+  measuredSize.width = 2;
+}
+const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
+// @ts-expect-error Text layout has different semantics and is not a Box target.
+useBoxSize(textHost);
+const arbitraryHost = shallowRef<ComponentPublicInstance | null>(null);
+// @ts-expect-error An arbitrary component ref does not identify one measurable Box.
+useBoxSize(arbitraryHost);
+declare const rawBoxHost: InstanceType<typeof Box>;
+// @ts-expect-error A raw component value cannot represent target attachment and detachment.
+useBoxSize(rawBoxHost);
+// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
+useBoxSize(() => boxHost.value);
 const focusScope = useFocusScope({ trapped: true });
 const focusTarget = useFocus(focusHost, { scope: focusScope, autoFocus: true });
 const caret = useCaret(focusHost, {
@@ -595,6 +624,36 @@ type _RemovedKey = import("@vue-tui/runtime").Key;
 type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
 // @ts-expect-error The separate paste options were removed with usePaste().
 type _RemovedUsePasteOptions = import("@vue-tui/runtime").UsePasteOptions;
+// @ts-expect-error The combined layout hook was replaced by separate width and height primitives.
+type _RemovedUseLayoutSize = typeof import("@vue-tui/runtime").useLayoutSize;
+// @ts-expect-error The old combined layout wrapper was removed with its hook.
+type _RemovedUseLayoutSizeReturn = import("@vue-tui/runtime").UseLayoutSizeReturn;
+// @ts-expect-error The broad render-session hook is private Runtime machinery.
+type _RemovedUseRenderSession = typeof import("@vue-tui/runtime").useRenderSession;
+// @ts-expect-error The broad render-session graph is private Runtime machinery.
+type _RemovedRenderSession = import("@vue-tui/runtime").RenderSession;
+// @ts-expect-error Requested/effective mode resolution is private Runtime machinery.
+type _RemovedRenderModeResolution = import("@vue-tui/runtime").RenderModeResolution;
+// @ts-expect-error Output writer strategy is private Runtime machinery.
+type _RemovedRenderOutput = import("@vue-tui/runtime").RenderOutput;
+// @ts-expect-error Physical terminal dimensions are not a public Runtime contract.
+type _RemovedRenderSize = import("@vue-tui/runtime").RenderSize;
+// @ts-expect-error The old combined layout snapshot is not a public Runtime contract.
+type _RemovedRenderLayoutSize = import("@vue-tui/runtime").RenderLayoutSize;
+// @ts-expect-error Rich accepted-paint geometry is private Runtime machinery.
+type _RemovedUseElementGeometry = typeof import("@vue-tui/runtime").useElementGeometry;
+// @ts-expect-error The broad geometry wrapper was removed with its hook.
+type _RemovedUseElementGeometryReturn = import("@vue-tui/runtime").UseElementGeometryReturn;
+// @ts-expect-error Rich geometry states and fragments are private Runtime machinery.
+type _RemovedElementGeometry = import("@vue-tui/runtime").ElementGeometry;
+// @ts-expect-error Paint rectangles are private Runtime machinery.
+type _RemovedCellRect = import("@vue-tui/runtime").CellRect;
+// @ts-expect-error Paint fragments are private Runtime machinery.
+type _RemovedElementGeometryFragment = import("@vue-tui/runtime").ElementGeometryFragment;
+// @ts-expect-error The test package no longer aliases Runtime's broad session graph.
+type _RemovedTestRenderSession = import("@vue-tui/testing").TestRenderSession;
+// @ts-expect-error The test result does not republish Runtime session internals.
+type _RemovedRenderResultSession = RenderResult["session"];
 // @ts-expect-error Removed Box props are absent rather than never tombstones.
 type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
 // @ts-expect-error Removed spacing shorthands are absent rather than never tombstones.
@@ -692,7 +751,7 @@ void removedGreyColor;
   writeFileSync(
     join(consumerDirectory, "consumer.tsx"),
     `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability } from "@vue-tui/runtime";
+import { Box, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
 import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, shallowRef, type ComponentPublicInstance } from "vue";
@@ -725,13 +784,15 @@ void unsupportedBoxPaddingX;
 void unsupportedTextUnderline;
 
 export const InputProbe = defineComponent(() => {
-  const host = shallowRef<ComponentPublicInstance | null>(null);
+  const host = shallowRef<InstanceType<typeof Box> | null>(null);
   const selectableText = shallowRef<ComponentPublicInstance | null>(null);
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const scope = useFocusScope({ trapped: true });
   const target = useFocus(host, { scope, autoFocus: true });
   const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
-  const { geometry } = useElementGeometry(host);
+  const size = useBoxSize(host);
+  const layoutWidth = useLayoutWidth();
+  const viewportHeight = useViewportHeight();
   const manager = useFocusManager();
   const { availability } = useInputAvailability();
   const clipboard = useClipboard();
@@ -761,7 +822,7 @@ export const InputProbe = defineComponent(() => {
     scrollBox.value.scrollToLine(2, true);
     void movementResults;
   }
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text ref={selectableText}>{geometry.value.status}:{caret.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text ref={selectableText}>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{caret.value.status}:{String(manager.focusedTarget.value === target)}</Text></ScrollBox></Box>;
 });
 `,
   );
@@ -770,18 +831,20 @@ export const InputProbe = defineComponent(() => {
     `<script setup lang="ts">
 import { shallowRef, type ComponentPublicInstance } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } from "@vue-tui/runtime";
+import { Box, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 import { useTextSelection } from "@vue-tui/runtime/fullscreen";
 import { Static } from "@vue-tui/runtime/inline";
 
-const host = shallowRef<ComponentPublicInstance | null>(null);
+const host = shallowRef<InstanceType<typeof Box> | null>(null);
 const vShowVisible = shallowRef(true);
 const selectableText = shallowRef<ComponentPublicInstance | null>(null);
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const scope = useFocusScope({ trapped: true });
 const target = useFocus(host, { scope, autoFocus: true });
 const { state: caret } = useCaret(host, { focus: target, position: { x: 0, y: 0 } });
-const { geometry } = useElementGeometry(host);
+const size = useBoxSize(host);
+const layoutWidth = useLayoutWidth();
+const viewportHeight = useViewportHeight();
 const manager = useFocusManager();
 const mountedStdin = useStdin();
 const { availability } = useInputAvailability();
@@ -821,7 +884,7 @@ mountedStdin.setRawMode(false);
       <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
-      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ geometry.status }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox>
+      <ScrollBox ref="scrollBox"><Text ref="selectableText">{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ caret.status }}:{{ manager.focusedTarget.value === target }}</Text></ScrollBox>
     </Box>
   </Box>
 </template>
@@ -860,9 +923,9 @@ import * as fullscreen from "@vue-tui/runtime/fullscreen";
 import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
-import { defineComponent, h, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
+import { defineComponent, h, isReadonly, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
-const { Box, createApp, Text, useCaret, useClipboard, useElementGeometry, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useStdin } = runtime;
+const { Box, createApp, Text, useBoxSize, useCaret, useClipboard, useExternalInput, useFocus, useFocusedInput, useFocusManager, useFocusScope, useFocusScopeInput, useInput, useInputAvailability, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 const { useMouseDrag, useMouseEvent, useTextSelection } = fullscreen;
 assert.deepEqual(Object.keys(fullscreen).sort(), ["useMouseDrag", "useMouseEvent", "useTextSelection"]);
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
@@ -881,7 +944,12 @@ assert.equal("Newline" in runtime, false);
 assert.equal("Spacer" in runtime, false);
 assert.equal("Transform" in runtime, false);
 assert.equal("useAnimation" in runtime, false);
-assert.equal(typeof useElementGeometry, "function");
+assert.equal("useLayoutSize" in runtime, false);
+assert.equal("useRenderSession" in runtime, false);
+assert.equal("useElementGeometry" in runtime, false);
+assert.equal(typeof useLayoutWidth, "function");
+assert.equal(typeof useViewportHeight, "function");
+assert.equal(typeof useBoxSize, "function");
 assert.equal(typeof useCaret, "function");
 assert.equal(typeof useFocusScope, "function");
 assert.equal(typeof useFocusedInput, "function");
@@ -1135,40 +1203,70 @@ assert.equal(idle.terminal.rawMode.current, false);
 assert.deepEqual(idle.terminal.rawMode.history, []);
 idle.dispose();
 
-let geometryProjection;
+let layoutWidthProjection;
+let viewportHeightProjection;
+let boxSizeProjection;
 let caretProjection;
 let scrollBoxHandle;
-const GeometryProbe = defineComponent(() => {
+const LayoutProbe = defineComponent(() => {
   const host = shallowRef(null);
   scrollBoxHandle = shallowRef(null);
-  geometryProjection = useElementGeometry(host);
+  layoutWidthProjection = useLayoutWidth();
+  viewportHeightProjection = useViewportHeight();
+  boxSizeProjection = useBoxSize(host);
   const focus = useFocus(host, { autoFocus: true });
   caretProjection = useCaret(host, { focus, position: { x: 0, y: 0 } });
   return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
-    h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed geometry") }),
+    h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed size") }),
   );
 });
-const geometryApp = await render(GeometryProbe, { columns: 20, rows: 5 });
-assert.equal(geometryProjection.geometry.value.status, "visible");
+const layoutApp = await render(LayoutProbe, { columns: 20, rows: 5 });
+assert.equal(layoutWidthProjection.value, 20);
+assert.equal(viewportHeightProjection.value, 5);
+assert.deepEqual(boxSizeProjection.value, { width: 8, height: 3 });
 assert.deepEqual(caretProjection.state.value, { status: "visible", surface: { x: 0, y: 0 } });
-assert.deepEqual(Reflect.ownKeys(geometryProjection.geometry.value), [
-  "status",
-  "parent",
-  "surface",
-  "fragments",
-]);
-assert.equal("caretSlots" in geometryProjection.geometry.value, false);
-assert.equal(Object.isFrozen(geometryProjection), true);
-assert.equal(Object.isFrozen(geometryProjection.geometry.value), true);
+assert.deepEqual(Reflect.ownKeys(boxSizeProjection.value), ["width", "height"]);
+assert.equal(isReadonly(layoutWidthProjection), true);
+assert.equal(isReadonly(viewportHeightProjection), true);
+assert.equal(isReadonly(boxSizeProjection), true);
+assert.equal(Object.isFrozen(boxSizeProjection.value), true);
 assert.equal(typeof scrollBoxHandle.value.scrollByLines, "function");
 assert.equal(typeof scrollBoxHandle.value.scrollToLine, "function");
 assert.equal(typeof scrollBoxHandle.value.scrollToTop, "function");
 assert.equal(typeof scrollBoxHandle.value.scrollToBottom, "function");
-assert.equal(geometryApp.lastFrame().includes("packed"), true);
-assert.equal(geometryApp.lastFrame().includes("geometry"), true);
-geometryApp.dispose();
-assert.deepEqual(geometryProjection.geometry.value, { status: "detached" });
+assert.equal(layoutApp.lastFrame().includes("packed"), true);
+assert.equal(layoutApp.lastFrame().includes("size"), true);
+assert.equal("session" in layoutApp, false);
+const acceptedBoxSize = boxSizeProjection.value;
+await layoutApp.terminal.resize(24, 6);
+assert.equal(layoutWidthProjection.value, 24);
+assert.equal(viewportHeightProjection.value, 6);
+assert.equal(boxSizeProjection.value, acceptedBoxSize);
+layoutApp.dispose();
+assert.equal(layoutWidthProjection.value, 24);
+assert.equal(viewportHeightProjection.value, 6);
+assert.equal(boxSizeProjection.value, null);
 assert.deepEqual(caretProjection.state.value, { status: "inactive" });
+
+let streamLayoutWidth;
+let streamViewportHeight;
+const UnboundedLayoutProbe = defineComponent(() => {
+  streamLayoutWidth = useLayoutWidth();
+  streamViewportHeight = useViewportHeight();
+  return () => h(Text, null, () =>
+    String(streamLayoutWidth.value) + "x" + (streamViewportHeight?.value ?? "unbounded"),
+  );
+});
+const unboundedLayoutApp = await render(UnboundedLayoutProbe, {
+  columns: 30,
+  rows: 8,
+  host: { stdout: "stream" },
+});
+assert.equal(streamLayoutWidth.value, 30);
+assert.equal(streamViewportHeight, null);
+assert.equal(unboundedLayoutApp.lastFrame(), "30xunbounded");
+assert.equal("session" in unboundedLayoutApp, false);
+unboundedLayoutApp.dispose();
 
 let movementHandle;
 const MovementProbe = defineComponent(() => {

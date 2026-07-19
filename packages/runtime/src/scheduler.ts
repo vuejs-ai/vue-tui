@@ -22,6 +22,8 @@ export interface CommitSchedulerOptions {
    */
   throttleMs: number;
   now?: () => number;
+  /** Report a commit failure without letting it escape the async scheduler boundary. */
+  onError: (error: unknown) => void;
 }
 
 export function createCommitScheduler(
@@ -74,6 +76,12 @@ export function createCommitScheduler(
     pendingAt = null;
     try {
       commit();
+    } catch (error) {
+      // Vue's post-flush queue and the native trailing timer are both shared
+      // async boundaries. An exception escaping either callback can strand
+      // later work (including commits from unrelated apps), so the owning app
+      // must receive the failure through its lifecycle instead.
+      options.onError(error);
     } finally {
       drainFlushResolvers();
     }

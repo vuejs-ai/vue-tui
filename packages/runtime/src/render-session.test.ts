@@ -1,7 +1,9 @@
 import { expect, test } from "vite-plus/test";
+import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 import {
   createLiveRenderSessionService,
   createStringRenderSessionService,
+  needsTerminalSizeProbe,
   normalizeRequestedMode,
   resolveLiveDimensions,
   resolveLiveSurface,
@@ -105,6 +107,66 @@ test("resolves one dimensions snapshot with source provenance", () => {
   expect(resolveLiveDimensions({ isTTY: false, columns: 120, rows: 40 }, detected80x24)).toEqual({
     terminal: null,
     layout: { columns: 120, rows: null },
+  });
+});
+
+test("rejects terminal axes outside Runtime's accepted layout range", () => {
+  const outsideLayoutRange = MAX_LAYOUT_VALUE + 1;
+
+  expect(needsTerminalSizeProbe({ isTTY: true, columns: outsideLayoutRange, rows: 24 })).toBe(true);
+  expect(needsTerminalSizeProbe({ isTTY: true, columns: 80, rows: outsideLayoutRange })).toBe(true);
+
+  expect(
+    resolveLiveDimensions({ isTTY: true, columns: outsideLayoutRange, rows: 24 }, unavailable),
+  ).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: null },
+  });
+  expect(
+    resolveLiveDimensions({ isTTY: true, columns: outsideLayoutRange, rows: 24 }, detected80x24),
+  ).toEqual({
+    terminal: { columns: 80, rows: 24 },
+    layout: { columns: 80, rows: null },
+  });
+  expect(
+    resolveLiveDimensions({ isTTY: true, columns: 120, rows: outsideLayoutRange }, unavailable),
+  ).toEqual({
+    terminal: null,
+    layout: { columns: 120, rows: null },
+  });
+  expect(
+    resolveLiveDimensions({ isTTY: false, columns: outsideLayoutRange, rows: 24 }, unavailable),
+  ).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: null },
+  });
+  expect(
+    resolveLiveDimensions(
+      { isTTY: true, columns: undefined, rows: undefined },
+      {
+        kind: "detected",
+        source: "controlling-tty",
+        size: { columns: outsideLayoutRange, rows: 24 },
+      },
+    ),
+  ).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: null },
+  });
+});
+
+test("accepts the maximum layout value on either terminal axis", () => {
+  expect(
+    resolveLiveDimensions({ isTTY: true, columns: MAX_LAYOUT_VALUE, rows: 1 }, unavailable),
+  ).toEqual({
+    terminal: { columns: MAX_LAYOUT_VALUE, rows: 1 },
+    layout: { columns: MAX_LAYOUT_VALUE, rows: null },
+  });
+  expect(
+    resolveLiveDimensions({ isTTY: true, columns: 1, rows: MAX_LAYOUT_VALUE }, unavailable),
+  ).toEqual({
+    terminal: { columns: 1, rows: MAX_LAYOUT_VALUE },
+    layout: { columns: 1, rows: null },
   });
 });
 

@@ -8,19 +8,17 @@ import {
   vShow,
   watch,
   withDirectives,
-  type ComponentPublicInstance,
   type PropType,
   type Ref,
-  type ShallowRef,
 } from "vue";
 import {
   Box,
   Text,
+  useBoxSize,
   useCaret,
-  useElementGeometry,
   useFocus,
+  type BoxSize,
   type CaretState,
-  type ElementGeometry,
   type UseFocusReturn,
 } from "@vue-tui/runtime";
 import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
@@ -31,8 +29,8 @@ interface VShowJourneyState {
   clicks: Ref<number> | null;
   value: Ref<number> | null;
   focus: UseFocusReturn | null;
-  geometry: Readonly<ShallowRef<ElementGeometry>> | null;
-  caret: Readonly<ShallowRef<CaretState>> | null;
+  size: Readonly<Ref<BoxSize | null>> | null;
+  caret: Readonly<Ref<CaretState>> | null;
 }
 
 export const vShowJourneyState: VShowJourneyState = {
@@ -41,7 +39,7 @@ export const vShowJourneyState: VShowJourneyState = {
   clicks: null,
   value: null,
   focus: null,
-  geometry: null,
+  size: null,
   caret: null,
 };
 
@@ -51,7 +49,7 @@ export function resetVShowJourneyState(): void {
   vShowJourneyState.clicks = null;
   vShowJourneyState.value = null;
   vShowJourneyState.focus = null;
-  vShowJourneyState.geometry = null;
+  vShowJourneyState.size = null;
   vShowJourneyState.caret = null;
 }
 
@@ -73,11 +71,11 @@ export default defineComponent({
     },
   },
   setup(props) {
-    const target = shallowRef<ComponentPublicInstance | null>(null);
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
     const value = ref(props.revision);
     const clicks = ref(0);
     const focus = useFocus(target);
-    const { geometry } = useElementGeometry(target);
+    const size = useBoxSize(target);
     const { state: caret } = useCaret(target, {
       focus,
       position: () => ({ x: 0, y: 0 }),
@@ -103,7 +101,7 @@ export default defineComponent({
     vShowJourneyState.clicks = clicks;
     vShowJourneyState.value = value;
     vShowJourneyState.focus = focus;
-    vShowJourneyState.geometry = geometry;
+    vShowJourneyState.size = size;
     vShowJourneyState.caret = caret;
 
     onMounted(() => {

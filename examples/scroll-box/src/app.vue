@@ -1,24 +1,25 @@
 <script setup lang="ts">
-import { shallowRef, onMounted, onUnmounted, type ComponentPublicInstance } from "vue";
+import { computed, shallowRef, onMounted, onUnmounted } from "vue";
 import {
   Box,
   Text,
   useApp,
-  useElementGeometry,
+  useBoxSize,
   useFocus,
   useFocusedInput,
-  useLayoutSize,
+  useViewportHeight,
   type InputRouteDecision,
 } from "@vue-tui/runtime";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 
 const { exit } = useApp();
-const { rows } = useLayoutSize();
+const viewportHeight = useViewportHeight();
+const rootHeight = computed(() => viewportHeight?.value);
 
 const box = shallowRef<ScrollBoxExpose>();
-const scrollTarget = shallowRef<ComponentPublicInstance | null>(null);
+const scrollTarget = shallowRef<InstanceType<typeof Box> | null>(null);
 const focus = useFocus(scrollTarget, { autoFocus: true });
-const { geometry } = useElementGeometry(scrollTarget);
+const scrollTargetSize = useBoxSize(scrollTarget);
 const lastRoute = shallowRef("ready");
 const stopAtEdge: InputRouteDecision = {
   action: "none",
@@ -49,8 +50,7 @@ onUnmounted(() => {
 });
 
 function pageLines(): number {
-  const current = geometry.value;
-  return current.status === "visible" ? Math.max(1, current.parent.height) : 1;
+  return Math.max(1, scrollTargetSize.value?.height ?? 1);
 }
 
 useFocusedInput(focus, (event) => {
@@ -75,7 +75,7 @@ useFocusedInput(focus, (event) => {
 </script>
 
 <template>
-  <Box flexDirection="column" :height="rows ?? undefined">
+  <Box flexDirection="column" :height="rootHeight">
     <Box borderStyle="round" :paddingLeft="1" :paddingRight="1">
       <Text bold color="cyan">ScrollBox demo</Text>
       <Text dimColor> — ↑/↓ · PageUp/PageDown · Home/End · q</Text>

@@ -1,10 +1,10 @@
 # Runtime foundation closure
 
-> **Status:** Runtime foundation closure is complete on local candidate implementation head `e31aa1ae0dd69cb46e31416eb02a77ce83e4d491`. F1 through F8 are Done, and R1 through R12 are Closed on that local candidate. R13 through R17 retain their original classifications and are explicitly Non-blocking. No successor foundation is active or queued automatically. This status does not imply that the implementation head has been pushed, merged, or verified by remote CI. This record is unstamped and adds no VOUCHED decision.
+> **Status:** historical unstamped closure record for local candidate `e31aa1ae0dd69cb46e31416eb02a77ce83e4d491`. The active [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) supersedes its “foundation complete,” F1–F8 Done, and R1–R12 Closed conclusions. Its packed-consumer, capacity, PTY, visual, restoration, and implementation results remain evidence rather than protection for the former public API. This does not imply that the candidate was pushed, merged, released, or verified by remote CI.
 
 ## Outcome and boundary
 
-`@vue-tui/runtime` is now closed as the minimum complete library foundation for the recorded conversational, monitoring, and multi-region workbench journeys. Those journeys use packed public Runtime entry points for renderer and terminal behavior, every blocking row below passes, every other row has an evidence-backed non-blocking disposition, and no remaining in-scope requirement would change Runtime ownership, package direction, or the core rendering, input, layout, output, or lifecycle architecture.
+This record previously classified `@vue-tui/runtime` as the minimum complete library foundation for the recorded conversational, monitoring, and multi-region workbench journeys. The active re-audit withdraws that unstamped conclusion while retaining the journeys and checks below as evidence about the existing mechanisms.
 
 This is a bounded conclusion for the recorded scenarios. It does not claim that an unrelated future product can never require another Runtime change. Component-catalog breadth, editing and collection helpers, application data models, releases, compatibility work, 1.0 planning, and speculative optimization do not block closure.
 

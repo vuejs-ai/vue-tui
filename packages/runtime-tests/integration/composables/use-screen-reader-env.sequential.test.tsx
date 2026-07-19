@@ -10,7 +10,7 @@
 
 import { defineComponent, nextTick } from "vue";
 import { afterEach, beforeEach, expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useRenderSession } from "@vue-tui/runtime";
+import { Box, Text, createApp, useViewportHeight } from "@vue-tui/runtime";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -73,12 +73,12 @@ test.sequential("INK_SCREEN_READER=true auto-detects SR mode at mount (no explic
   app.unmount();
 });
 
-test.sequential("the render session reports screen-reader presentation under INK_SCREEN_READER=true auto-detection", async () => {
+test.sequential("INK_SCREEN_READER=true gates behavior that requires a finite visual viewport", async () => {
   process.env["INK_SCREEN_READER"] = "true";
 
-  let observed: "visual" | "screen-reader" | undefined;
+  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
   const App = defineComponent(() => {
-    observed = useRenderSession().output.presentation;
+    viewportHeight = useViewportHeight();
     return () => <Text>flag</Text>;
   });
 
@@ -92,7 +92,7 @@ test.sequential("the render session reports screen-reader presentation under INK
   await nextTick();
   await nextTick();
 
-  expect(observed).toBe("screen-reader");
+  expect(viewportHeight).toBeNull();
 
   app.unmount();
 });
@@ -103,9 +103,9 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   // even when INK_SCREEN_READER=true.
   process.env["INK_SCREEN_READER"] = "true";
 
-  let observed: "visual" | "screen-reader" | undefined;
+  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
   const App = defineComponent(() => {
-    observed = useRenderSession().output.presentation;
+    viewportHeight = useViewportHeight();
     return () => (
       <Box borderStyle="round">
         <Text>Visible</Text>
@@ -125,7 +125,7 @@ test.sequential("explicit isScreenReaderEnabled:false overrides INK_SCREEN_READE
   await nextTick();
   await nextTick();
 
-  expect(observed).toBe("visual");
+  expect(viewportHeight?.value).toBe(100);
   const content = getContentWrites(writes).join("");
   expect(content).toContain("Visible");
   // The visual (non-SR) path DOES emit border glyphs.

@@ -4,6 +4,20 @@ import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
+async function within<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out`)), 500);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 test("onRender callback is called with renderTime on each commit", async () => {
   const renderTimes: number[] = [];
 
@@ -212,4 +226,66 @@ test("onRender fires on input-triggered state update", async () => {
   expect(renderTimes.length).toBe(initialCount + 2);
 
   app.unmount();
+});
+
+test("an onRender failure exits only its app and does not block later commits", async () => {
+  const failure = new Error("onRender failure");
+  const Broken = defineComponent(() => () => <Text>broken</Text>);
+  const brokenStdout = makeFakeWritable({ columns: 80, rows: 24 });
+  const brokenStderr = makeFakeWritable({ columns: 80, rows: 24 });
+  const { stream: brokenStdin } = makeFakeStdin();
+  const broken = createApp(Broken);
+
+  let synchronousMountError: unknown;
+  let exitError: unknown;
+  try {
+    try {
+      broken.mount({
+        stdout: brokenStdout,
+        stderr: brokenStderr,
+        stdin: brokenStdin,
+        maxFps: 0,
+        onRender() {
+          throw failure;
+        },
+      });
+    } catch (error) {
+      synchronousMountError = error;
+    }
+    if (synchronousMountError === undefined) {
+      try {
+        await within(broken.waitUntilExit(), "onRender failure exit");
+      } catch (error) {
+        exitError = error;
+      }
+    }
+  } finally {
+    broken.unmount();
+    await Promise.allSettled([broken.waitUntilExit()]);
+  }
+
+  const Healthy = defineComponent(() => () => <Text>healthy</Text>);
+  const healthyStdout = makeFakeWritable({ columns: 80, rows: 24 });
+  const healthyStderr = makeFakeWritable({ columns: 80, rows: 24 });
+  const { stream: healthyStdin } = makeFakeStdin();
+  const healthy = createApp(Healthy);
+  let laterError: unknown;
+  try {
+    healthy.mount({
+      stdout: healthyStdout,
+      stderr: healthyStderr,
+      stdin: healthyStdin,
+      maxFps: 0,
+    });
+    await within(healthy.waitUntilRenderFlush(), "healthy render flush").catch((error) => {
+      laterError = error;
+    });
+  } finally {
+    healthy.unmount();
+    await Promise.allSettled([healthy.waitUntilExit()]);
+  }
+
+  expect(synchronousMountError).toBeUndefined();
+  expect(exitError).toBe(failure);
+  expect(laterError).toBeUndefined();
 });

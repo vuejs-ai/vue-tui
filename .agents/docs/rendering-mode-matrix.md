@@ -1,6 +1,6 @@
 # Rendering mode and host behavior matrix
 
-> **Status:** completed F1 surface model and implementation: accepted F1.2 mount and non-TTY contract, completed unstamped F1.3 readonly-session proposal, completed F1.4 private live-mount implementation, completed F1.5 deterministic-test/string-host authority, completed F1.6 Inline ownership, completed F1.7 lifecycle behavior, and completed F1.8 public-session publication and verification. The Inline invariant plus application-side escape-hatch requirement and the finite clean-slate mount behavior were accepted on 2026-07-11; no VOUCHED stamp was added to the later implementation choices.
+> **Status:** current host-behavior evidence with a historical F1 public-projection layer. The internal surface resolver, Inline invariant, application-side escape-hatch requirement, and finite clean-slate mount behavior remain applicable. The active Runtime-foundation re-audit removes the unstamped broad public render-session conclusion and exposes only capability-specific facts such as `useLayoutWidth()` and `useViewportHeight()`.
 
 ## Why the matrix has more than two rows
 
@@ -13,7 +13,7 @@ The matrix therefore keeps four questions separate:
 3. **Effective surface:** main-screen live region, alternate-screen viewport, linear transcript, final stream output, static string, or test observation.
 4. **Independent I/O facts:** live-update policy, stdout and stdin TTY state, screen-reader path, and terminal protocol availability.
 
-This matrix is the source behavior model rather than the public type definition. F1.2 settled the mount shape; F1.3 maps these axes into the selected [`useRenderSession()` contract](./render-session.md).
+This matrix is the source behavior model rather than a public type definition. The internal resolver still maps these axes into one coherent session, but applications do not receive that whole graph. The current Path 1 projection exposes root width on every host and an optional bounded visual height.
 
 ## Current resolution rules
 
@@ -36,9 +36,9 @@ Box-rooted `v-show` also does not add a surface-resolution branch. Vue's directi
 
 `mode` accepts only `"inline"`, `"fullscreen"`, or `undefined`; omission becomes an Inline request. Own `fullscreen`, `alternateScreen`, `interactive`, or `debug` keys fail synchronously, including when their value is `undefined`. `liveUpdates` accepts only a boolean or `undefined`. These checks run before stream getters, stdout ownership, terminal probing, raw mode, listeners, Vue setup, or terminal writes. The removed-key error wins when an old key and invalid `mode` appear together.
 
-`liveUpdates` is an output-cadence request, not a statement that the application can receive input. CI and stdout TTY state only choose its default; an explicit value wins. The session records requested/effective mode, output, dimensions, and structural capabilities separately, and F1.8 exposes its readonly projection through `useRenderSession()`. F3 still owns the public raw-input contract; F1.4 temporarily preserves the prior default input-acquisition timing from the resolved live-update request rather than publishing it as a session fact.
+`liveUpdates` is an output-cadence request, not a statement that the application can receive input. CI and stdout TTY state only choose its default; an explicit value wins. Runtime records requested/effective mode, output, dimensions, and structural capabilities in its private coherent session. Public Path 1 code receives only the width and optional bounded height it can act on. F3 still owns the public raw-input contract; F1.4 temporarily preserves the prior default input-acquisition timing from the resolved live-update request rather than publishing it as a session fact.
 
-Terminal dimensions carry provenance. A complete positive stdout pair wins. If it is incomplete, one complete positive pair from process stdout/stderr, `COLUMNS`/`LINES`, a controlling-terminal ioctl, `tput`, or Linux `resize` replaces it atomically; fields from two sources are never spliced into a claimed viewport. Process-global fallback is used only for the process's own stdout/stderr, not an arbitrary custom TTY. Probe failure returns unavailable instead of manufacturing `80×24`. A valid partial width may still inform an unbounded layout, but it cannot acquire a visual terminal mode. The renderer may choose 80 layout columns, but that default never establishes `dimensions.terminal`; `useLayoutSize().rows` remains `null` whenever the effective layout is unbounded.
+Terminal dimensions carry provenance. A complete positive stdout pair wins. If it is incomplete, one complete positive pair from process stdout/stderr, `COLUMNS`/`LINES`, a controlling-terminal ioctl, `tput`, or Linux `resize` replaces it atomically; fields from two sources are never spliced into a claimed viewport. Process-global fallback is used only for the process's own stdout/stderr, not an arbitrary custom TTY. Probe failure returns unavailable instead of manufacturing `80×24`. A valid partial width may still inform an unbounded layout, but it cannot acquire a visual terminal mode. The renderer may choose 80 layout columns, but that default never establishes terminal dimensions; `useViewportHeight()` returns `null` whenever the effective layout is unbounded.
 
 ## Current live-host matrix
 
@@ -190,7 +190,7 @@ F1 needs enough authoritative state for later APIs to tell the truth, but not ev
 
 Stdout TTY, stdin TTY, raw-input support, live-update request, and terminal protocol results remain separate resolver inputs. They are not broad public “interactivity” fields; the F1 session exposes only its selected semantic output or capability results, while F3 owns public input availability. Deterministic testing presents modeled production facts to the component and keeps structured observation on `RenderResult`; the internal observer is not a resolver input.
 
-The removed `interactive` boolean is not replaced by a broad “the application is interactive” fact. F1.3 selects one structured readonly reactive session with small discriminated mode/output values, semantic structural capabilities, and distinct terminal-versus-layout dimensions. F1.4 implements its live source and the narrowly named `liveUpdates` override; F3 still owns input availability and acquisition. Exact types, the derived `useLayoutSize()` projection, mappings, lifecycle, current-API dispositions, and rejected alternatives live in [render-session.md](./render-session.md).
+The removed `interactive` boolean is not replaced by a broad “the application is interactive” fact. Historical F1.3 selected a structured readonly session projection; the active Path 1 review keeps that coherent session private and exposes only `useLayoutWidth()` plus setup-time nullable `useViewportHeight()`. F1.4's live resolver and the narrowly named `liveUpdates` override remain implementation evidence, while input availability and acquisition stay separate. The former types, mappings, lifecycle, and rejected alternatives live in the historical [render-session record](./render-session.md).
 
 ## F1.1 conclusions
 

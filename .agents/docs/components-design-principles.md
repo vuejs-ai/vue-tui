@@ -48,13 +48,13 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 - emit a new escape sequence, or flip a terminal mode;
 - hook the terminal commit scheduler _directly_; an ordinary component-owned timer, such as
   Spinner's frame counter, is not Runtime work;
-- require geometry that the runtime's semantic `useElementGeometry()` snapshots do not already expose.
+- require terminal, renderer-tree, or accepted-paint facts that cannot be implemented from Runtime's supported public primitives such as `useLayoutWidth()`, `useViewportHeight()`, and direct-Box `useBoxSize()`.
 
 Otherwise it is a component. The clean illustration: **targeted mouse input is runtime work** —
 input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime. The selected
 implemented F6 contract supplies `useMouseEvent()` and `useMouseDrag()` from the Fullscreen semantic subpath;
 see [targeted-pointer.md](./targeted-pointer.md). Anything driven by existing keyboard input plus
-measured layout is a pure composition.
+the accepted public layout and Box-size facts is a pure composition.
 (`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)

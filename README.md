@@ -111,9 +111,9 @@ createApp(App).mount();
 
 | Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, composables for input, focus, geometry, selection, clipboard, and lifecycle, and yoga-based flexbox layout. _API stabilizing._                                              |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box-size facts, input, focus, selection, clipboard, lifecycle, and yoga-based flexbox layout. _API stabilizing._                                   |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect resolved session facts and content commits, and assert the terminal-emulated screen                                                                                                                                                         |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                    |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
 
 ## Examples
@@ -184,12 +184,12 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useExternalInput(target, fn)`  | Attach one normalized external fallthrough receiver to an exact focused target                                                      |
 | `useFocusManager()`             | Observe the exact focused target and traverse or blur the current boundary                                                          |
 | `useApp()`                      | App lifecycle — `{ exit(error?), waitUntilRenderFlush() }`                                                                          |
-| `useRenderSession()`            | Readonly reactive facts for the current render host — mode resolution, output, dimensions, and structural capabilities              |
-| `useLayoutSize()`               | Reactive root layout dimensions — readonly `{ columns, rows }` refs; `rows` is `null` when layout is unbounded                      |
+| `useLayoutWidth()`              | Read the reactive numeric width Runtime gives the root layout on every host                                                         |
+| `useViewportHeight()`           | Read the reactive visual viewport height, or get `null` at setup when the document is not row-bounded                               |
 | `useStdin()`                    | Access the actual mounted stdin as a raw byte-stream escape hatch                                                                   |
 | `useStdout()`                   | Commit geometry-safe styled lines with explicit acceptance and flow control, or access raw stdout                                   |
 | `useStderr()`                   | Commit geometry-safe styled lines with explicit acceptance and flow control, or access raw stderr                                   |
-| `useElementGeometry(ref)`       | Observe one atomic paint-derived geometry snapshot with parent, render-surface, exact fragment, clipping, and availability facts    |
+| `useBoxSize(ref)`               | Observe the last accepted full width and height of a directly referenced `<Box>`, or `null` when unavailable                        |
 | `useCaret(ref, opts)`           | Declare a focus-bound caret at an element-local rendered cell and observe whether it is visible                                     |
 
 `useInput()` delivers a frozen event whose `kind` is `"key"`, `"text"`, `"paste"`, or `"uninterpreted"`. Return `"continue"` when the handler did nothing and `"consume"` after it handled the event; use a complete `InputRouteDecision` only when action reporting, later routing, terminal defaults, and external forwarding need independent choices. All application-global input handlers run in registration order for each event before their decisions are merged.
@@ -246,9 +246,19 @@ createApp(App).mount({
 
 OSC 52 returns `requested` after vue-tui writes the request; it cannot prove that the terminal accepted it. A `{ kind: "custom", writeText }` adapter may instead return `copied`, `requested`, `unavailable`, or `rejected`. Every non-empty write result includes the exact text so the application can show a manual fallback. No transport is configured by default, and vue-tui does not choose an operating-system command or automatic fallback chain.
 
-`useRenderSession()` is the authoritative way for a component to inspect what rendering surface actually became effective. The session object keeps one identity for the render tree; mode, output, host, and capabilities are immutable for that session, while a live-update surface refreshes `dimensions` reactively on accepted resize and continuation events. A final-output surface retains the dimensions resolved at mount because it has no runtime resize lifecycle. Use `session.output.presentation === "screen-reader"` to adapt to the active linear presentation. `useLayoutSize()` derives from that same session and keeps destructured dimensions reactive; its `rows` ref is `null` for a row-unbounded stream, transcript, or string document.
+Layout and measurement are deliberately split by task. `useLayoutWidth()` always returns a numeric readonly ref. `useViewportHeight()` returns a readonly numeric ref only for a finite live visual viewport and returns `null` once at setup for an unbounded stream, screen-reader transcript, or string document. `useBoxSize()` accepts a ref bound directly to `<Box>` in the current app and returns its last accepted full `{ width, height }`, or `null` before paint, while hidden or detached, and on hosts without visual Box geometry. A non-Box or foreign-app target throws.
 
-`useElementGeometry(ref)` follows the rendered host under a normal Vue component ref and replaces its readonly `geometry` ref only with a complete paint generation. Resolved states expose full `parent` and dynamic-render-surface bounds plus exact local/parent/surface/`visibleSurface` fragment mappings; `unavailable`, `detached`, `pending`, `hidden`, `zero-size`, `fully-clipped`, and `visible` remain distinct. Inline surface coordinates are relative to vue-tui's current managed region, not a stable physical terminal row. Screen-reader and string presentations report `unavailable`.
+```ts
+import { shallowRef } from "vue";
+import { Box, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+
+const layoutWidth = useLayoutWidth();
+const viewportHeight = useViewportHeight();
+const panel = shallowRef<InstanceType<typeof Box> | null>(null);
+const panelSize = useBoxSize(panel);
+```
+
+The broad render-session and public paint-fragment projections are not application contracts. Runtime keeps session resolution, clipping fragments, surface coordinates, and renderer nodes private, while public code consumes the narrower facts above. See [`@vue-tui/runtime`](./packages/runtime/README.md#layout-and-box-measurement) for the exact host and lifecycle behavior.
 
 `useCaret(ref, { focus, position })` declares a caret for one exact `useFocus()` target. `position` is a zero-based rendered cell local to `ref`, not a string index or physical terminal coordinate. The application retains its logical insertion state and converts it to that cell; the runtime maps the cell through the accepted paint generation and lets the Inline or Fullscreen writer place the terminal cursor. The readonly `state` distinguishes `visible`, `inactive`, `unavailable`, and explicit hidden reasons; non-TTY, screen-reader, string, detached, clipped, and invalid positions never emit targeted cursor controls. The caret is the semantic insertion marker requested by the application; the terminal cursor is the physical terminal mechanism used to display the selected visible caret.
 

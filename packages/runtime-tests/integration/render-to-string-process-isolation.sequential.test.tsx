@@ -6,7 +6,8 @@ import {
   useStderr,
   useStdin,
   useStdout,
-  useLayoutSize,
+  useLayoutWidth,
+  useViewportHeight,
 } from "@vue-tui/runtime";
 import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
 
@@ -38,13 +39,14 @@ test.sequential("both string hosts avoid process terminal streams", () => {
     useStdin();
     useStdout();
     useStderr();
-    const { columns } = useLayoutSize();
-    return () => <Text>{columns.value}</Text>;
+    const width = useLayoutWidth();
+    const viewportHeight = useViewportHeight();
+    return () => <Text>{`${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
   });
 
   try {
-    expect(renderToString(App, { columns: 41 })).toBe("41");
-    expect(renderToStringWithScreenReader(App, { columns: 42 })).toBe("42");
+    expect(renderToString(App, { columns: 41 })).toBe("41xunbounded");
+    expect(renderToStringWithScreenReader(App, { columns: 42 })).toBe("42xunbounded");
     expect(reads).toEqual({ stdin: 0, stdout: 0, stderr: 0 });
   } finally {
     for (const key of ["stdin", "stdout", "stderr"] as const) {

@@ -39,12 +39,7 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.mounts).toBe(1);
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(result.lastFrame()).toBe("probe:0\ntail");
-      expect(vShowJourneyState.geometry?.value.status).toBe("visible");
-      expect(
-        vShowJourneyState.geometry?.value.status === "visible"
-          ? vShowJourneyState.geometry.value.surface.x
-          : null,
-      ).toBe(0);
+      expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
       expect(vShowJourneyState.focus?.focus()).toBe(true);
       await flushUpdate(result);
       expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
@@ -63,7 +58,7 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.mounts).toBe(1);
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
-      expect(vShowJourneyState.geometry?.value.status).toBe("hidden");
+      expect(vShowJourneyState.size?.value).toBeNull();
       expect(vShowJourneyState.caret?.value.status).not.toBe("visible");
       if (mode === "fullscreen") {
         expect(result.mouse.reporting.current).toBe("none");
@@ -88,12 +83,7 @@ test.each(["inline", "fullscreen"] as const)(
       await flushUpdate(result);
       expect(result.lastFrame()).toBe("    probe:2\ntail");
       expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
-      expect(vShowJourneyState.geometry?.value.status).toBe("visible");
-      expect(
-        vShowJourneyState.geometry?.value.status === "visible"
-          ? vShowJourneyState.geometry.value.surface.x
-          : null,
-      ).toBe(4);
+      expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
       expect(vShowJourneyState.caret?.value).toEqual({
         status: "visible",
         surface: { x: 4, y: 0 },
@@ -112,7 +102,7 @@ test.each(["inline", "fullscreen"] as const)(
 
       result.unmount();
       expect(vShowJourneyState.unmounts).toBe(1);
-      expect(vShowJourneyState.geometry?.value).toEqual({ status: "detached" });
+      expect(vShowJourneyState.size?.value).toBeNull();
       expect(vShowJourneyState.caret?.value).toEqual({ status: "inactive" });
       if (mode === "fullscreen") {
         expect(result.mouse.reporting.history).toEqual(["button", "none", "button", "none"]);

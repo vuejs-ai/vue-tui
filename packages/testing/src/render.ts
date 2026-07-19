@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { nextTick, readonly, type Component } from "vue";
-import { createApp, type MountOptions, type RenderSession, type TuiApp } from "@vue-tui/runtime";
+import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
 import {
   INTERNAL_RENDER_OBSERVER,
   INTERNAL_SUSPENSION_HOST,
@@ -13,8 +13,6 @@ import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { createTestMouse, type TestMouse } from "./mouse.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";
-
-export type TestRenderSession = Extract<RenderSession, { readonly host: "live" }>;
 
 export interface TestHost {
   /** Requested production screen model. @default "inline" */
@@ -72,8 +70,6 @@ export interface LastFrameOptions {
 }
 
 export interface RenderResult {
-  /** Deeply readonly production-like facts visible to the component. */
-  readonly session: TestRenderSession;
   /** Runtime-readonly rendering-phase content observations. */
   readonly frames: readonly ContentFrame[];
   lastFrame(this: void, options?: LastFrameOptions): string;
@@ -130,9 +126,31 @@ function rejectUnknownKeys(
   }
 }
 
+// Match Runtime's accepted terminal-axis envelope before constructing xterm.
+// This remains private because applications should not branch on an
+// implementation safety limit.
+const MAX_MODELED_TERMINAL_AXIS = 65_535;
+// xterm allocates storage for the complete modeled viewport even when Runtime's
+// Inline renderer would paint only a few rows. Keep that test-only allocation
+// bounded independently from Runtime's paint surface.
+const MAX_MODELED_TERMINAL_CELLS = 1_048_576;
+
 function positiveDimension(value: unknown, name: string): number {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
-  throw new TypeError(`${name} must be a positive safe integer.`);
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive safe integer.`);
+  }
+  if (value > MAX_MODELED_TERMINAL_AXIS) {
+    throw new RangeError(`${name} must be no greater than ${MAX_MODELED_TERMINAL_AXIS}.`);
+  }
+  return value;
+}
+
+function assertModeledTerminalSurface(columns: number, rows: number): void {
+  if (columns > Math.floor(MAX_MODELED_TERMINAL_CELLS / rows)) {
+    throw new RangeError(
+      `modeled terminal ${columns}x${rows} exceeds the ${MAX_MODELED_TERMINAL_CELLS}-cell test-host limit.`,
+    );
+  }
 }
 
 function dimension(value: unknown, fallback: number, name: string): number {
@@ -190,6 +208,7 @@ function normalizeOptions(options: RenderOptions): {
   }
   const columns = dimension(columnsOption, 100, "render columns");
   const emulatorRows = dimension(rowsOption, 100, "render rows");
+  assertModeledTerminalSurface(columns, emulatorRows);
   const rows = kind === "tty" ? emulatorRows : undefined;
   const updates =
     updatesOption === undefined ? (kind === "tty" ? "live" : "at-teardown") : updatesOption;
@@ -261,11 +280,7 @@ export async function render(
   const publicFrames = readonly(frames) as readonly ContentFrame[];
   const clipboardRequests: string[] = [];
   const publicClipboardRequests = readonly(clipboardRequests) as readonly string[];
-  let session: TestRenderSession | undefined;
   const observer: InternalRenderObserver = {
-    onSession(value) {
-      session = value;
-    },
     onCommit(commit) {
       if (commit.phase === "teardown") return;
       frames.push(Object.freeze({ dynamic: commit.dynamic, staticOutput: commit.staticOutput }));
@@ -413,15 +428,9 @@ export async function render(
     await emulator.flush();
 
     if (earlyError) throw earlyError;
-    if (!session) {
-      throw new Error("The deterministic render host did not receive a render session.");
-    }
   } catch (error) {
     failAfterDispose(error);
   }
-  const resolvedSession: TestRenderSession =
-    session ??
-    failAfterDispose(new Error("The deterministic render host did not receive a render session."));
 
   let emulatorColumns = host.stdout.columns;
   let emulatorRows = host.emulatorRows;
@@ -436,6 +445,7 @@ export async function render(
       assertActive();
       const nextColumns = positiveDimension(columns, "terminal columns");
       const nextRows = positiveDimension(rows, "terminal rows");
+      assertModeledTerminalSurface(nextColumns, nextRows);
       await emulator.resize(nextColumns, nextRows);
       assertActive();
       emulatorColumns = nextColumns;
@@ -476,7 +486,6 @@ export async function render(
   };
 
   return {
-    session: resolvedSession,
     frames: publicFrames,
     lastFrame: (frameOptions?: LastFrameOptions) => {
       const frame = frames.at(-1)?.dynamic ?? "";

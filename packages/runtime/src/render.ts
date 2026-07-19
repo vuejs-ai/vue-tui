@@ -1363,7 +1363,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       terminalProbe,
     });
     const renderSession = createLiveRenderSessionService(surface);
-    renderObserver?.onSession?.(renderSession.session);
     const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
     const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
@@ -3144,6 +3143,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const scheduler = createCommitScheduler(commit, {
         immediate: unthrottled,
         throttleMs: renderThrottleMs,
+        onError(error) {
+          if (!teardownStarted) {
+            appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
+          }
+        },
       });
       mountedScheduler = scheduler;
       mountedCommit = commit;

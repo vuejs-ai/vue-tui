@@ -8,7 +8,7 @@ import {
 } from "vue";
 import { InternalCaretControllerKey } from "../caret/caret-context.ts";
 import { useInternalElementGeometry } from "../geometry/internal-use-element-geometry.ts";
-import type { CellPoint, ElementTarget } from "./useElementGeometry.ts";
+import type { CellPoint, ElementTarget } from "../element-target.ts";
 import type { UseFocusReturn } from "./useFocus.ts";
 
 export type CaretHiddenReason =

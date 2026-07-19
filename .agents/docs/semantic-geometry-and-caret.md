@@ -1,6 +1,19 @@
 # Semantic geometry and caret
 
-> **Status:** completed unstamped F5 contract and implementation. Paint produces frozen atomic geometry generations with exact complete-grapheme ownership, wrapped fragments, sparse caret slots, F2 lifetime, both-mode surface coordinates, clear/suspend invalidation, resize recovery, and honest unavailable states. Geometry tracing remains demand-driven. `useElementGeometry()` publishes only the public projection, while `useCaret(target, { focus, position })` joins an element-local rendered cell to one exact F4 focus owner and publishes frozen semantic state. The selected surface point reaches the private mode writer only inside the corresponding frame transaction; failed writes retain the last successful frame and caret baselines for retry. The former scalar/Yoga measurement APIs, targetless `useCursor()`, and their named legacy types are removed. Public/type, lifecycle, package, HMR, both-mode PTY/visual, restoration, full-repository, fresh-CI, and independent-review gates pass. No VOUCHED stamp is implied.
+> **Status:** historical unstamped F5 record. Its accepted-paint geometry generations, grapheme provenance, rendered-target lifetime, clipping data, caret arbitration, writer transaction, and failure recovery remain necessary internal mechanisms. The active Runtime-foundation re-audit supersedes the broad public `useElementGeometry()` contract with Path 1's direct-Box size projection; Path 4 separately re-derives the public text and caret contract. No VOUCHED stamp is implied.
+
+## Superseding Path 1 measurement boundary
+
+Current application measurement is deliberately smaller:
+
+```ts
+const box = shallowRef<InstanceType<typeof Box> | null>(null);
+const size = useBoxSize(box); // Readonly<Ref<BoxSize | null>>
+```
+
+The target must be directly bound to the exported `Box` in the current vue-tui app. A non-Box or foreign-app target throws. The frozen non-null value is only the last accepted full width and height: it does not expose parent or surface coordinates, fragments, clipping provenance, paint order, or caret slots. Before accepted paint, after detach or retarget, and while hidden, the value is `null`; a zero-sized Box is `{ width: 0, height: 0 }`, while a fully clipped Box retains its full size. Failed output and suspension retain the last accepted size for the same target. Screen-reader and string hosts have no visual Box measurement and return `null`.
+
+`useElementGeometry()`, `CellRect`, `ElementGeometryFragment`, `ElementGeometry`, and `UseElementGeometryReturn` are no longer public. Runtime retains the richer private geometry service for caret, mouse, clipping, and text mapping. Everything below records the earlier public experiment and the implementation evidence it produced; its authoring examples, naming selection, and completion claims are historical rather than current guidance.
 
 ## User capability
 

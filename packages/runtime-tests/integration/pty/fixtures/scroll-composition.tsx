@@ -6,7 +6,7 @@ import {
   Text,
   createApp,
   useApp,
-  useElementGeometry,
+  useBoxSize,
   useFocus,
   useFocusedInput,
   useFocusScope,
@@ -17,7 +17,7 @@ import {
   type TuiInputEvent,
 } from "@vue-tui/runtime";
 import { useMouseEvent, type TuiMouseWheelEvent } from "@vue-tui/runtime/fullscreen";
-import { defineComponent, h, nextTick, shallowRef, watch, type ComponentPublicInstance } from "vue";
+import { defineComponent, h, nextTick, shallowRef, watch } from "vue";
 
 type ScrollOperation = "up" | "down" | "pageup" | "pagedown" | "home" | "end";
 type AssertionJourney = "keyboard" | "wheel";
@@ -99,10 +99,10 @@ const App = defineComponent(() => {
   const { exit } = useApp();
   const outer = shallowRef<ScrollBoxExpose | null>(null);
   const inner = shallowRef<ScrollBoxExpose | null>(null);
-  const outerTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const innerTarget = shallowRef<ComponentPublicInstance | null>(null);
-  const outerGeometry = useElementGeometry(outerTarget);
-  const innerGeometry = useElementGeometry(innerTarget);
+  const outerTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+  const innerTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+  const outerSize = useBoxSize(outerTarget);
+  const innerSize = useBoxSize(innerTarget);
   const outerScope = useFocusScope();
   const innerFocus = useFocus(innerTarget, {
     scope: outerScope,
@@ -115,12 +115,11 @@ const App = defineComponent(() => {
   const route = shallowRef<readonly string[]>(["ready"]);
   const calls: string[] = [];
 
-  const visibleHeight = (projection: typeof innerGeometry, owner: "inner" | "outer"): number => {
-    const geometry = projection.geometry.value;
-    if (geometry.status !== "visible") {
-      throw new Error(`${owner} scroll target must be visible before input delivery`);
+  const measuredHeight = (size: typeof innerSize, owner: "inner" | "outer"): number => {
+    if (!size.value) {
+      throw new Error(`${owner} scroll target must have an accepted size before input delivery`);
     }
-    return geometry.parent.height;
+    return size.value.height;
   };
   const record = (entry: string, nextSource: string, reset: boolean): void => {
     source.value = nextSource;
@@ -140,7 +139,7 @@ const App = defineComponent(() => {
     if (!operation) return "continue";
     const handle = inner.value;
     if (!handle) throw new Error("inner ScrollBox handle must be available before input delivery");
-    const moved = perform(handle, operation, visibleHeight(innerGeometry, "inner"));
+    const moved = perform(handle, operation, measuredHeight(innerSize, "inner"));
     record(`inner:${operation}:${moved ? "moved" : "unchanged"}`, `keyboard:${operation}`, true);
     return moved ? "consume" : continueOwnedKey;
   });
@@ -149,7 +148,7 @@ const App = defineComponent(() => {
     if (!operation) return "continue";
     const handle = outer.value;
     if (!handle) throw new Error("outer ScrollBox handle must be available before input delivery");
-    const moved = perform(handle, operation, visibleHeight(outerGeometry, "outer"));
+    const moved = perform(handle, operation, measuredHeight(outerSize, "outer"));
     record(`outer:${operation}:${moved ? "moved" : "unchanged"}`, `keyboard:${operation}`, false);
     return moved ? "consume" : stopOwnedKey;
   });
@@ -176,13 +175,13 @@ const App = defineComponent(() => {
   }
 
   watch(
-    [outerGeometry.geometry, innerGeometry.geometry],
+    [outerSize, innerSize],
     ([nextOuter, nextInner]) => {
       if (
         initialized.value ||
         initializing ||
-        nextOuter.status !== "visible" ||
-        nextInner.status !== "visible" ||
+        !nextOuter ||
+        !nextInner ||
         !outer.value ||
         !inner.value
       ) {

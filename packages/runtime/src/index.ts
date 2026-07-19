@@ -1,7 +1,5 @@
-import BoxSfc from "./components/box.vue";
 import TextSfc from "./components/text.vue";
 import type { PublicComponent } from "./components/with-children.ts";
-import type { BoxProps } from "./components/box-props.ts";
 import type { TextProps } from "./components/text-props.ts";
 
 export { createApp, type TuiApp, type MountOptions } from "./render.ts";
@@ -20,7 +18,7 @@ export type {
 // Publish only the stable author-facing constructor shape. Exposing the SFC's
 // generated `DefineComponent` type bakes the build-time Vue patch release's
 // private generic arity into our tarball and breaks other supported Vue patches.
-export const Box = BoxSfc as unknown as PublicComponent<BoxProps>;
+export { Box } from "./components/public-box.ts";
 export type { AriaRole, AriaState, BoxProps } from "./components/box-props.ts";
 export type { Color } from "./components/color.ts";
 export const Text = TextSfc as unknown as PublicComponent<TextProps>;
@@ -60,31 +58,17 @@ export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
 export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
-export { useLayoutSize, type UseLayoutSizeReturn } from "./composables/useLayoutSize.ts";
-export { useRenderSession } from "./composables/useRenderSession.ts";
-export type {
-  RenderLayoutSize,
-  RenderMode,
-  RenderModeResolution,
-  RenderOutput,
-  RenderSession,
-  RenderSize,
-} from "./render-session.ts";
+export { useLayoutWidth } from "./composables/use-layout-width.ts";
+export { useViewportHeight } from "./composables/use-viewport-height.ts";
+export { useBoxSize, type BoxSize } from "./composables/use-box-size.ts";
+export type { RenderMode } from "./render-session.ts";
 export {
   useCaret,
   type CaretState,
   type UseCaretOptions,
   type UseCaretReturn,
 } from "./composables/useCaret.ts";
-export {
-  useElementGeometry,
-  type CellPoint,
-  type CellRect,
-  type ElementGeometry,
-  type ElementGeometryFragment,
-  type ElementTarget,
-  type UseElementGeometryReturn,
-} from "./composables/useElementGeometry.ts";
+export type { CellPoint, ElementTarget } from "./element-target.ts";
 export {
   kittyFlags,
   kittyModifiers,

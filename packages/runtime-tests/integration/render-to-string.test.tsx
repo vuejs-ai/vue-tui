@@ -24,10 +24,9 @@ import {
   useStdout,
   useStderr,
   useCaret,
-  useLayoutSize,
-  useRenderSession,
-  useElementGeometry,
-  type RenderSession,
+  useBoxSize,
+  useLayoutWidth,
+  useViewportHeight,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import {
@@ -100,25 +99,18 @@ describe("renderToString", () => {
   test.each([
     ["visual", renderToString],
     ["screen-reader", renderToStringWithScreenReader],
-  ] as const)("provides one truthful %s string session", (presentation, renderDocument) => {
-    let captured: RenderSession | undefined;
+  ] as const)("provides truthful %s string layout facts", (_presentation, renderDocument) => {
+    let width: ReturnType<typeof useLayoutWidth> | undefined;
+    let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
     const App = defineComponent(() => {
-      captured = useRenderSession();
-      return () => <Text>session</Text>;
+      width = useLayoutWidth();
+      viewportHeight = useViewportHeight();
+      return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
     });
 
-    expect(renderDocument(App, { columns: 37 })).toContain("session");
-    expect(captured).toEqual({
-      host: "string",
-      mode: null,
-      output: { destination: "document", dynamicUpdates: "none", presentation },
-      dimensions: { terminal: null, layout: { columns: 37, rows: null } },
-      capabilities: {
-        stableOrigin: false,
-        elementHitTesting: false,
-        suspension: false,
-      },
-    });
+    expect(renderDocument(App, { columns: 37 })).toBe("37xunbounded");
+    expect(width!.value).toBe(37);
+    expect(viewportHeight).toBeNull();
   });
 
   test("rethrows component errors after cleanup", () => {
@@ -761,7 +753,7 @@ describe("renderToString", () => {
   // StdinContext. The
   // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
   // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCaret, semantic input, and useElementGeometry — so that
+  // useCaret, semantic input, and useBoxSize — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -794,25 +786,13 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useLayoutSize reads the unbounded document layout from the shared session", () => {
+    test("useBoxSize reports null in renderToString", () => {
       const App = defineComponent(() => {
-        const { columns, rows } = useLayoutSize();
-        return () => (
-          <Text>
-            {columns.value}x{rows.value ?? "unbounded"}
-          </Text>
-        );
-      });
-      expect(renderToString(App, { columns: 13 })).toBe("13xunbounded");
-    });
-
-    test("useElementGeometry reports unavailable in renderToString", () => {
-      const App = defineComponent(() => {
-        const boxRef = shallowRef<ComponentPublicInstance | null>(null);
-        const { geometry } = useElementGeometry(boxRef);
+        const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
+        const size = useBoxSize(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{geometry.value.status}</Text>
+            <Text>{size.value === null ? "unavailable" : "measured"}</Text>
           </Box>
         );
       });
@@ -820,15 +800,15 @@ describe("renderToString", () => {
       expect(output).toContain("unavailable");
     });
 
-    test("caret, input, and geometry render together without throwing", () => {
+    test("caret, input, and box size render together without throwing", () => {
       let caretStatus = "unset";
       const App = defineComponent(() => {
         useInput(() => "continue");
-        const boxRef = shallowRef<ComponentPublicInstance | null>(null);
+        const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
         const focus = useFocus(boxRef, { autoFocus: true });
         const { state } = useCaret(boxRef, { focus, position: { x: 1, y: 0 } });
         caretStatus = state.value.status;
-        useElementGeometry(boxRef);
+        useBoxSize(boxRef);
         return () => (
           <Box ref={boxRef}>
             <Text>all</Text>

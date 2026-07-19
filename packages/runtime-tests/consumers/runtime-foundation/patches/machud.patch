@@ -6,20 +6,47 @@ index 755dcd2..737cf12 100644
  <script setup lang="ts">
  import { computed, ref, watchEffect } from "vue";
 -import { Box, Text, useWindowSize, useInput, useApp } from "@vue-tui/runtime";
-+import { Box, Text, useLayoutSize, useInput, useApp } from "@vue-tui/runtime";
++import { Box, Text, useLayoutWidth, useViewportHeight, useInput, useApp } from "@vue-tui/runtime";
  import { useMetrics } from "./composables/useMetrics";
  import { emptyMetrics } from "./lib/empty";
  import { theme, setThemeMode, nextThemeMode, type ThemeOverride } from "./theme";
-@@ -22,7 +22,7 @@ import NarrowView from "./components/NarrowView.vue";
+@@ -19,4 +19,4 @@ import NarrowView from "./components/NarrowView.vue";
+ // `snapshot`, `columns`, `rows` are supplied only by the one-shot `--once` render. `columns`/`rows`
+ // let the verify gate drive the responsive width AND the framed-layout height (the --once path has no
+-// TTY size); live, the poller + useWindowSize (reactive) drive everything.
++// TTY size); live, the poller + Runtime's reactive layout facts drive everything.
  const props = defineProps<{ snapshot?: Metrics; columns?: number; rows?: number }>();
+@@ -23,6 +23,7 @@
 
  const { metrics, history, now } = useMetrics();
 -const { columns, rows } = useWindowSize();
-+const { columns, rows } = useLayoutSize();
++const layoutWidth = useLayoutWidth();
++const viewportHeight = useViewportHeight();
 
  const m = computed<Metrics>(() => props.snapshot ?? metrics.value ?? emptyMetrics());
  const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now() : now.value));
-@@ -92,24 +92,33 @@ const effectiveMode = computed(() =>
+@@ -29,5 +30,5 @@ const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now()
+ // Responsive width seam (D4/RD5): prefer the explicit prop (gate / --once), else the live terminal
+ // width. The v-if below branches on THIS, so a breakpoint asserted at COLUMNS=40/120 is the width the
+ // code actually branches on.
+-const width = computed(() => props.columns || columns.value || 120);
++const width = computed(() => props.columns || layoutWidth.value);
+
+@@ -44,10 +45,10 @@ const WIDE_CONTENT_ROWS = 36;
+ const NARROW_CONTENT_ROWS = 10;
+ const isLive = computed(() => !props.snapshot);
+ const contentWidth = computed(() => Math.min(width.value, MAX_CONTENT_WIDTH));
+-// Viewport height. Live: the reactive useWindowSize reading. --once: ONLY the threaded `rows` prop
+-// (the gate drives it via LINES) — never useWindowSize's fallback, so a piped snapshot with unknown
++// Viewport height. Live: Runtime's bounded visual viewport. --once: ONLY the threaded `rows` prop
++// (the gate drives it via LINES), so a piped snapshot with unknown
+ // height (rows=0) stays top-anchored rather than centring against a made-up 24.
+-const vh = computed(() => (isLive.value ? rows.value || 24 : props.rows || 0));
++const vh = computed(() => (isLive.value ? (viewportHeight?.value ?? 0) : props.rows || 0));
+ const contentRows = computed(() => (width.value >= 100 ? WIDE_CONTENT_ROWS : NARROW_CONTENT_ROWS));
+ // Centre vertically only when the viewport is genuinely taller than the content — a short terminal
+ // keeps today's top-anchored layout and never clips.
+@@ -92,24 +93,33 @@ const effectiveMode = computed(() =>
  );
  watchEffect(() => setThemeMode(effectiveMode.value));
 
@@ -71,7 +98,16 @@ index 755dcd2..737cf12 100644
  </script>
 
  <template>
-@@ -148,7 +157,7 @@ try {
+@@ -119,7 +129,7 @@ try {
+   <Box
+     flexDirection="column"
+-    :width="isLive ? columns : contentWidth"
++    :width="isLive ? layoutWidth : contentWidth"
+     :height="framed ? vh : undefined"
+     :alignItems="isLive ? 'center' : undefined"
+     :justifyContent="framed ? 'center' : undefined"
+   >
+@@ -148,7 +158,7 @@ try {
 
        <NarrowView v-else :m="m" />
 
@@ -121,12 +157,12 @@ diff --git a/src/components/Graph.vue b/src/components/Graph.vue
 index 288b1fe..0b4ef6c 100644
 --- a/src/components/Graph.vue
 +++ b/src/components/Graph.vue
-@@ -1,20 +1,28 @@
+@@ -1,20 +1,21 @@
  <script setup lang="ts">
 -import { ref, computed } from "vue";
 -import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
-+import { computed, shallowRef, type ComponentPublicInstance } from "vue";
-+import { Box, Text, useElementGeometry, type Color } from "@vue-tui/runtime";
++import { computed, shallowRef } from "vue";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
  import { brailleArea } from "../lib/sparkline";
  import { ramp, supportsTruecolor } from "../lib/color";
  import { theme } from "../theme";
@@ -140,16 +176,9 @@ index 288b1fe..0b4ef6c 100644
  // Measure our own width so the graph always fills the panel, however flex sized it.
 -const box = ref();
 -const bm = useBoxMetrics(box);
-+const box = shallowRef<ComponentPublicInstance | null>(null);
-+const { geometry } = useElementGeometry(box);
-+const width = computed(() => {
-+  const value = geometry.value;
-+  return value.status === "zero-size" ||
-+    value.status === "fully-clipped" ||
-+    value.status === "visible"
-+    ? value.parent.width || 24
-+    : 24;
-+});
++const box = shallowRef<InstanceType<typeof Box> | null>(null);
++const size = useBoxSize(box);
++const width = computed(() => size.value?.width || 24);
  const rows = computed(() =>
 -  brailleArea(props.values, Math.max(1, bm.width.value || 24), props.height, props.max),
 +  brailleArea(props.values, Math.max(1, width.value), props.height, props.max),
@@ -208,12 +237,12 @@ diff --git a/src/components/Sparkline.vue b/src/components/Sparkline.vue
 index 4a3bbf5..d6d9e36 100644
 --- a/src/components/Sparkline.vue
 +++ b/src/components/Sparkline.vue
-@@ -1,19 +1,27 @@
+@@ -1,19 +1,20 @@
  <script setup lang="ts">
 -import { ref, computed } from "vue";
 -import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
-+import { computed, shallowRef, type ComponentPublicInstance } from "vue";
-+import { Box, Text, useElementGeometry, type Color } from "@vue-tui/runtime";
++import { computed, shallowRef } from "vue";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
  import { sparkline } from "../lib/sparkline";
  import { theme } from "../theme";
 
@@ -228,16 +257,9 @@ index 4a3bbf5..d6d9e36 100644
 -const box = ref();
 -const bm = useBoxMetrics(box);
 -const line = computed(() => sparkline(props.values, Math.max(1, bm.width.value || 24), props.max));
-+const box = shallowRef<ComponentPublicInstance | null>(null);
-+const { geometry } = useElementGeometry(box);
-+const width = computed(() => {
-+  const value = geometry.value;
-+  return value.status === "zero-size" ||
-+    value.status === "fully-clipped" ||
-+    value.status === "visible"
-+    ? value.parent.width || 24
-+    : 24;
-+});
++const box = shallowRef<InstanceType<typeof Box> | null>(null);
++const size = useBoxSize(box);
++const width = computed(() => size.value?.width || 24);
 +const line = computed(() => sparkline(props.values, Math.max(1, width.value), props.max));
  </script>
 

@@ -89,7 +89,7 @@ The exact Box ledger is:
 | `minWidth`                                       | Retain a non-negative cell count; omission/removal means no minimum.                                                                                                            | Machud prevents columns from collapsing below a usable width.                                                                                                                                                                                 |
 | `minHeight`                                      | Retain a non-negative cell count; omission/removal means no minimum.                                                                                                            | ScrollBox needs `0` so its viewport can shrink inside a flex column.                                                                                                                                                                          |
 | `maxWidth`                                       | Remove.                                                                                                                                                                         | No consumer needs it; machud already derives a numeric width from `useLayoutWidth()`.                                                                                                                                                         |
-| `maxHeight`                                      | Remove.                                                                                                                                                                         | No consumer needs it; a bounded host can derive a numeric height from `useViewportSize()`.                                                                                                                                                    |
+| `maxHeight`                                      | Remove.                                                                                                                                                                         | No consumer needs it; a bounded host can read the numeric height from `useViewportHeight()`.                                                                                                                                                  |
 | `aspectRatio`                                    | Remove.                                                                                                                                                                         | It is supported only by tests and hypothetical examples.                                                                                                                                                                                      |
 | `alignContent`                                   | Remove.                                                                                                                                                                         | It only affects a multi-line wrapped flex container, while `flexWrap` is also removed.                                                                                                                                                        |
 | `position`                                       | Retain only `"absolute"`; omission/removal means normal flow. Remove explicit `"relative"` and `"static"`.                                                                      | The mouse example and overlays need out-of-flow placement; spelling normal flow as a second value adds no capability.                                                                                                                         |
@@ -205,15 +205,15 @@ Runtime retained the existing Yoga, paint, ANSI, screen-reader, nested-Text, geo
 
 The required one-round adversarial review used two fresh reviewers on the same Path 0 target. It found real acceptance blockers rather than merely test gaps: removed props could disappear through Vue `$attrs`, the numeric contract admitted values Runtime could not allocate, `marginLeft` had only test evidence, relative imports could bypass the package scan, and the private six-mode wrap plus all-comment Transform vouches had lost direct tests. It also found that `ariaState` could be read twice between validation and storage. The fixes closed all remaining attributes, bounded both dimensions and combined paint allocation, removed `marginLeft`, resolved relative-import targets and scanned executable fixtures for stale props, restored private-only evidence without public exports, and snapshot each accessibility entry from one read. This was the bounded review round for the phase; no second review round was added after the reported findings were fixed.
 
-Final local evidence is green through `vp run ready`: Runtime 47 files / 763 tests, testing 16 / 89, components 5 / 34, Runtime integration 128 / 1,220, PTY groups 15 / 30 and 23 / 173, and examples 1 / 6, together with all builds, formatting, zero-warning lint, repository type checks, PTY fixture type checks, and the clean packed consumer on Vue 3.4.38 plus TypeScript 6.0.3. Fixed capacity journeys J1 through both small and large J6 Inline/Fullscreen workloads pass, including release and retention checks. Fresh packed-source runs of coding-agent, mo, and machud pass their build or type gates and real PTY journeys. The earlier image-observed basic-template journey preserved the 20-column border, color, wrapping, counter update, normal-buffer exit, exact termios, and post-exit shell input; the Spinner journey showed only the colored glyph advancing while its label and layout remained stable, then restored the terminal and accepted a shell command. Post-review changes closed invalid-input, resource-limit, boundary-scan, and private-evidence paths without changing either valid visual fixture. No GitHub workflow was used to obtain this evidence.
+Final local evidence is green through `vp run ready`: Runtime, testing, components, integration, PTY, and example suites all pass together with every build, formatting, zero-warning lint, repository type check, PTY fixture type check, and the clean packed consumer on Vue 3.4.38 plus TypeScript 6.0.3. Fixed capacity journeys J1 through both small and large J6 Inline/Fullscreen workloads pass, including release and retention checks. Fresh packed-source runs of coding-agent, mo, and machud pass their build or type gates and real PTY journeys. The earlier image-observed basic-template journey preserved the 20-column border, color, wrapping, counter update, normal-buffer exit, exact termios, and post-exit shell input; the Spinner journey showed only the colored glyph advancing while its label and layout remained stable, then restored the terminal and accepted a shell command. Post-review changes closed invalid-input, resource-limit, boundary-scan, and private-evidence paths without changing either valid visual fixture. No GitHub workflow was used to obtain this evidence.
 
 One dependency remains deliberately open across paths: `Text.inverse` is retained provisionally because the Path 6 public-only selection composition needs a theme-independent highlight primitive. Path 6 must either prove that use through only the common public Text contract or remove `inverse`; its presence is not justified merely by the existing internal selection implementation.
 
 ## Path 1: rendering, layout, viewport, and element measurement
 
-### Current user code
+### Pre-Path 1 user code
 
-The machud consumer uses the current broad APIs this way:
+At the Path 1 audit baseline, the machud consumer used the broad APIs this way:
 
 ```ts
 const { columns, rows } = useLayoutSize();
@@ -232,13 +232,15 @@ const width = computed(() => {
 
 `ScrollBox` performs the same status test twice merely to obtain `parent.height`. No application consumer reads geometry fragments, visible rectangles, surface coordinates, or the distinction among the seven public geometry states. No application consumer reads the full render session.
 
+The only external product consumer is machud at pinned commit `a51a685`: its root reads width for a responsive breakpoint and rows only to decide whether a live dashboard has enough vertical space to center; its `Graph` and `Sparkline` read the width assigned by flex layout. The pinned coding-agent and mo consumers read none of the three baseline APIs. Repository tests read geometry positions and fragments to locate fixture cells, and the baseline `@vue-tui/testing` exposed the exact broad session object through an internal observer, but those were test instrumentation and implementation coupling rather than application tasks.
+
 ### Actual user problem
 
 Applications need three different facts, and combining them makes the common case harder:
 
 - Every host has a numeric root layout width, including string and unbounded stream rendering.
-- Only a finite visual layout has a numeric viewport height. Absence is a property of the whole viewport, not a nullable field that every width consumer must carry.
-- A rendered element may not have an accepted measurement yet. When it does, current consumers need its final full width and height, including a fully clipped element, not the complete paint provenance used internally for hit testing and caret placement.
+- Only a finite visual layout has a numeric viewport height. That absence belongs on the height-specific hook, not on the universally available width path.
+- A rendered Box may not have an accepted measurement yet. When it does, current consumers need its final full width and height, including a fully clipped Box, not the complete paint provenance used internally for hit testing and caret placement.
 
 The physical stream's `columns` and `rows` are not substitutes. Runtime resolves custom streams, terminal probing, Inline versus Fullscreen allocation, screen-reader transcript fallback, non-TTY output, resize, and string rendering before it knows the layout facts it can promise.
 
@@ -255,52 +257,47 @@ The migration must preserve that task without treating an unbounded one-shot str
 
 ```ts
 const layoutWidth = useLayoutWidth();
-const viewport = useViewportSize();
-const width = computed(() => props.columns || layoutWidth.value || 120);
-const vh = computed(() => (isLive.value ? (viewport.value?.rows ?? 24) : props.rows || 0));
+const viewportHeight = useViewportHeight();
+const width = computed(() => props.columns || layoutWidth.value);
+const vh = computed(() => (isLive.value ? (viewportHeight?.value ?? 0) : props.rows || 0));
 ```
 
-ScrollBox independently needs the height of its finite visual viewport. These two consumers justify the optional whole-viewport fact; width-only consumers never inherit a nullable row.
+The zero fallback is deliberate: machud's one-shot path already top-aligns when no real row bound exists, and a non-TTY or fallback live host must not invent a 24-row viewport. The first-party scroll example independently needs the same finite-height fact to allocate a bounded scrolling region. No product consumer needs viewport columns separately from the root layout width.
 
 ### Proposed Runtime primitives
 
 ```ts
-interface CellSize {
-  readonly columns: number;
-  readonly rows: number;
-}
-
 function useLayoutWidth(): Readonly<Ref<number>>;
-function useViewportSize(): Readonly<Ref<CellSize | null>>;
+function useViewportHeight(): Readonly<Ref<number>> | null;
 
-interface ElementSize {
+interface BoxSize {
   readonly width: number;
   readonly height: number;
 }
 
-function useElementSize(
-  target: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>,
-): Readonly<Ref<ElementSize | null>>;
+function useBoxSize(
+  target: Readonly<Ref<InstanceType<typeof Box> | null | undefined>>,
+): Readonly<Ref<BoxSize | null>>;
 ```
 
-`useLayoutWidth()` is the unconditional path. `useViewportSize()` makes the finite-host decision once and projects the bounded layout dimensions, not the mere presence of physical terminal rows: a final-output or screen-reader TTY can report terminal rows while intentionally laying out an unbounded transcript. `useElementSize()` makes the inherent pre-paint or absent-target decision once. None of these APIs exposes requested/effective mode resolution, writer strategy, paint fragments, clipping provenance, or renderer nodes.
+`useLayoutWidth()` is the unconditional path. `useViewportHeight()` is the opt-in gate for code that really needs a row bound; it returns a numeric ref for a bounded visual layout and returns `null` once at setup for an unbounded document. Boundedness is fixed for a mounted render host, while the number inside a bounded ref remains reactive across resize. A final-output or screen-reader TTY can report physical terminal rows while intentionally laying out an unbounded document, so callers do not carry a nullable value through every width or height calculation. `useBoxSize()` makes the inherently dynamic pre-paint or absent-target decision in its value. It deliberately accepts only a Vue ref bound directly to `Box` in the current app: every real size consumer uses a template or shallow ref to measure a Box, while accepting raw values or getters adds no Runtime-only capability and calling the broader concept an element would prematurely commit Runtime to bounding fragmented nested Text and choosing one host from a multi-root component. A caller that needs a derived target can construct a `computed()` ref outside Runtime. A non-ref, non-Box, or foreign-app target is a programming error and is reported through the current render tree's error lifecycle rather than escaping Runtime's commit scheduler. None of these APIs exposes requested/effective mode resolution, writer strategy, paint fragments, clipping provenance, or renderer nodes.
 
 ### Resulting user code
 
 ```ts
 const columns = useLayoutWidth();
-const viewport = useViewportSize();
+const viewportHeight = useViewportHeight();
 
-const box = shallowRef<ComponentPublicInstance | null>(null);
-const size = useElementSize(box);
+const box = shallowRef<InstanceType<typeof Box> | null>(null);
+const size = useBoxSize(box);
 const graphWidth = computed(() => size.value?.width || 24);
 ```
 
-The common width path is always numeric. Code that genuinely requires a bounded two-dimensional viewport uses one explicit gate:
+The common width path is always numeric. Code that genuinely requires a bounded visual height opts into one explicit nullable fact:
 
 ```ts
-const viewport = useViewportSize();
-const visibleRows = computed(() => viewport.value?.rows ?? 8);
+const viewportHeight = useViewportHeight();
+const visibleRows = computed(() => viewportHeight?.value ?? 8);
 ```
 
 ### Public-only higher-layer composition
@@ -308,8 +305,8 @@ const visibleRows = computed(() => viewport.value?.rows ?? 8);
 `ScrollBox` needs no private geometry:
 
 ```ts
-const viewportSize = useElementSize(viewportRef);
-const contentSize = useElementSize(contentRef);
+const viewportSize = useBoxSize(viewportRef);
+const contentSize = useBoxSize(contentRef);
 
 const maxScroll = computed(() =>
   Math.max(0, (contentSize.value?.height ?? 0) - (viewportSize.value?.height ?? 0)),
@@ -320,15 +317,16 @@ This is sufficient for the current component and both real machud measurement co
 
 ### Host and lifecycle semantics
 
-| Host                                      | `useLayoutWidth()`                                             | `useViewportSize()`                  | `useElementSize()`                                                             |
-| ----------------------------------------- | -------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------ |
-| Live visual Inline TTY                    | Reactive numeric layout columns                                | Terminal-bounded maximum layout size | `null` before accepted paint; then full numeric size                           |
-| Live visual Fullscreen TTY                | Reactive numeric viewport columns                              | Exact fixed viewport size            | `null` before accepted paint; then full numeric size                           |
-| Screen-reader transcript, including a TTY | Numeric transcript layout columns                              | `null`                               | `null` because there is no visual paint geometry                               |
-| Visual non-TTY stream                     | Fixed resolved numeric columns, falling back to 80 when absent | `null`                               | Numeric only after that host accepts a visual document paint; otherwise `null` |
-| String rendering                          | Option columns, defaulting to 80                               | `null`                               | `null`; synchronous output must not depend on a later measurement render       |
+| Host                                              | `useLayoutWidth()`                                       | `useViewportHeight()`                   | `useBoxSize()`                                                                 |
+| ------------------------------------------------- | -------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
+| Live visual Inline TTY                            | Reactive numeric layout columns                          | Numeric terminal-bounded maximum height | `null` before accepted paint; then full numeric size                           |
+| Live visual Fullscreen TTY                        | Reactive numeric viewport columns                        | Numeric exact fixed height              | `null` before accepted paint; then full numeric size                           |
+| Screen-reader transcript, including a TTY         | Numeric transcript layout columns                        | `null`                                  | `null` because there is no visual paint geometry                               |
+| Live visual non-TTY stream                        | Reactive numeric columns, falling back to 80 when absent | `null`                                  | Numeric only after that host accepts a visual document paint; otherwise `null` |
+| Final-output stream, including a TTY forced final | Fixed numeric columns, falling back to 80 when absent    | `null`                                  | Numeric only after that host accepts a visual document paint; otherwise `null` |
+| String rendering                                  | Option columns, defaulting to 80                         | `null`                                  | `null`; synchronous output must not depend on a later measurement render       |
 
-For `useElementSize()`, a legitimate zero-sized element is `{ width: 0, height: 0 }`; a fully clipped element retains its full numeric size. A detached, hidden, or newly retargeted element becomes `null`. A failed output commit does not publish candidate geometry. Suspension preserves the last coherent width, viewport, and accepted element size; resume refreshes dimensions atomically before resumed paint. An invalid visual resize pair preserves the last coherent pair. After unmount the readonly refs retain their last values but stop updating.
+For `useBoxSize()`, a legitimate zero-sized Box is `{ width: 0, height: 0 }`; a fully clipped Box retains its full numeric size. An accepted detached, authored-hidden, or newly retargeted Box becomes `null`. Repeated accepted frames with the same dimensions retain the same frozen value. A failed output commit, output invalidation, or suspension does not replace the last accepted size for the same target. Vue updates may continue while the terminal is suspended, but Runtime has no accepted surface on which to publish a replacement size; resume settles the current tree and publishes a changed size only with the next accepted repaint. Layout width and viewport height retain their last coherent values while suspended, and an invalid visual resize pair preserves that pair. After unmount, the two layout refs retain their final values and stop updating, while a Box-size ref becomes `null` with its detached target. Calling any of the three hooks outside a vue-tui render tree fails clearly; string rendering supplies a real tree and therefore returns its width plus the documented null absences.
 
 ### Retained internal mechanisms
 
@@ -341,23 +339,32 @@ For `useElementSize()`, a legitimate zero-sized element is `{ width: 0, height: 
 
 ### Public contracts changed or removed
 
-- Replace `useLayoutSize()` and `UseLayoutSizeReturn` with `useLayoutWidth()`, `useViewportSize()`, and their small result types.
-- Replace `useElementGeometry()` and its public geometry/status/fragment types with `useElementSize()` and `ElementSize`.
+- Replace `useLayoutSize()` and `UseLayoutSizeReturn` with an unconditional readonly width ref from `useLayoutWidth()` and a one-time bounded-height gate from `useViewportHeight()`; no named wrapper or duplicate viewport-size type is added.
+- Replace `useElementGeometry()` and its public geometry/status/fragment types with Box-only `useBoxSize()` and `BoxSize`.
 - Remove `useRenderSession()` and the public render-session graph unless another audited path proves a narrower missing fact. The internal session remains authoritative.
+- Remove `@vue-tui/testing`'s public `TestRenderSession` and `RenderResult.session`: no consumer uses them, their fields repeat configured host inputs or internal resolution, and a test can observe the accepted narrow facts inside its component while asserting output and screen behavior outside.
 - Keep a small cell point type only if the accepted caret or pointer primitives require it; it is not justified by element size itself.
 
 ### Simpler alternatives considered
 
 - Keeping `{ columns, rows: number | null }` was rejected because every consumer of the universally available width inherits an unrelated absence state.
+- Returning `{ columns, rows } | null` from `useViewportSize()` was rejected because bounded viewport columns are always the same accepted root layout width and no product consumer needs a second copy. The height-specific hook is the smaller capability gate.
+- Naming the measurement `useElementSize()` was rejected because the evidenced targets are all Boxes. It would also promise unneeded and unstable rules for fragmented nested Text and multi-root component refs; Text mapping remains a separate Path 4 decision.
+- Accepting a raw Box or `MaybeRefOrGetter` was rejected because every real consumer already has a Vue ref, raw values cannot represent detachment or retargeting, and a caller can wrap a derived target in `computed()` without Runtime help.
 - Returning zero before measurement was rejected because it conflates a real zero-sized element with an unavailable measurement.
 - Returning Yoga layout directly was rejected because final paint, clipping, hidden state, target replacement, and failed commits can make it differ from the accepted interactive result.
 - Keeping the full session for capability checks was rejected because it exposes several internal decisions while granting no capability that the smaller hooks do not already provide.
 
-### Evidence still required before implementation is accepted
+### Implementation status and acceptance evidence
 
-- Focused tests for every host row above, retargeting, hidden state, clipping, resize, failed writes, and suspension.
+The worktree implementation follows this target boundary: the common root exports `useLayoutWidth()`, `useViewportHeight()`, `useBoxSize()`, and `BoxSize`; the broad session and geometry projections are no longer public; and `@vue-tui/testing` no longer publishes the session graph. The internal render-session resolver, accepted-paint geometry service, target-lifetime controller, and richer caret and mouse data remain in Runtime rather than being reconstructed above it. This implementation does not make Path 1 accepted by declaration alone; acceptance still requires all of the evidence below.
+
+Focused executable evidence lives in [`layout-size.test.tsx`](../../packages/runtime-tests/integration/composables/layout-size.test.tsx), [`use-box-size.test.tsx`](../../packages/runtime-tests/integration/composables/use-box-size.test.tsx), [`use-box-size-cross-app.test.tsx`](../../packages/runtime-tests/integration/composables/use-box-size-cross-app.test.tsx), and [`use-box-size-string-target.test.tsx`](../../packages/runtime-tests/integration/composables/use-box-size-string-target.test.tsx). Each live invalid-target case deliberately mounts and flushes a healthy app afterward. Together with the unrelated `onRender` failure regression, this proves that a component or commit failure is routed through only its owning app's lifecycle and cannot strand Vue's shared post-flush queue.
+
+- Focused tests for every host row above, retargeting, hidden state, clipping, resize, failed writes, suspension, non-Box misuse, and foreign-app rejection.
 - Migration of ScrollBox, the scroll example, machud's packed patch, public type tests, docs, and clean-consumer checks.
-- Proof that no first-party package reads full public geometry or render-session fields after migration.
+- Migration of geometry-dependent test instrumentation to known fixture coordinates, screen observations, or private mechanism tests without restoring public paint fragments.
+- Proof that no first-party application package reads full public geometry or render-session fields after migration, and that the testing package no longer publishes the session graph.
 - Terminal-visible review where the migrations change displayed behavior.
 
 ## Path 2: Inline history
@@ -1118,9 +1125,9 @@ This ledger names every currently exported value and named type. “Replace” m
 | `useStdin`             | Retain unchanged                    | Vouched exact mounted raw stream escape hatch; Paths 3 and 5.                                                                                                                                           |
 | `useStdout`            | Remove                              | Unevidenced imperative convenience with gate/backpressure result leakage; Path 5.                                                                                                                       |
 | `useStderr`            | Remove                              | Same; Path 5.                                                                                                                                                                                           |
-| `useLayoutSize`        | Replace                             | Split unconditional `useLayoutWidth()` from optional bounded `useViewportSize()`; Path 1.                                                                                                               |
+| `useLayoutSize`        | Replace                             | Split unconditional `useLayoutWidth()` from the one-time optional bounded `useViewportHeight()` gate; Path 1.                                                                                           |
 | `useRenderSession`     | Remove                              | Exposes host resolution, presentation, cadence, dimensions, and capabilities as one internal graph; Paths 1 and 5.                                                                                      |
-| `useElementGeometry`   | Replace                             | `useElementSize()` exposes the evidenced accepted full size; rich paint geometry stays private; Path 1.                                                                                                 |
+| `useElementGeometry`   | Replace                             | Box-only `useBoxSize()` exposes the evidenced accepted full size; rich paint geometry stays private; Path 1.                                                                                            |
 | `useCaret`             | Redesign                            | Keep focus-bound physical caret ownership but accept a semantic `TextPosition` and return no diagnostics; Path 4.                                                                                       |
 | `useClipboard`         | Remove                              | Custom transports and copy policy are externally composable; OSC 52 is explicitly deferred; Path 6.                                                                                                     |
 | `kittyFlags`           | Remove                              | Input-protocol negotiation detail; Paths 3 and 5.                                                                                                                                                       |
@@ -1148,10 +1155,10 @@ This ledger names every currently exported value and named type. “Replace” m
 | Input facts and routing       | `InputHandler`, `InputHandlerResult`, `InputRouteDecision`, `TuiInputEvent`, `TuiInputModifiers`, `TuiInputPhase`, `TuiInputSource`, `UseInputOptions`                                                       | Retain and redesign `InputHandler`, `TuiInputEvent`, and `UseInputOptions`; replace `TuiInputModifiers` with the exact `TuiKeyModifiers` and `TuiKeyName` support types; remove the separate result, four-field decision, phase, and source types; Path 3.                                              |
 | Focus and external forwarding | `ExternalInputHandler`, `ExternalInputSource`, `UseFocusManagerReturn`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`                                                   | Retain and narrow the four focus target/scope types; remove manager traversal and the two external types; Path 3.                                                                                                                                                                                       |
 | Streams                       | `CoordinatedWriteResult`, `UseStderrReturn`, `UseStdinReturn`, `UseStdoutReturn`                                                                                                                             | Retain only `UseStdinReturn`; Path 5.                                                                                                                                                                                                                                                                   |
-| Layout and session            | `RenderLayoutSize`, `RenderModeResolution`, `RenderOutput`, `RenderSession`, `RenderSize`, `UseLayoutSizeReturn`                                                                                             | Remove the session graph and old return. Add only `CellSize` and `ElementSize` for the new projections; Path 1.                                                                                                                                                                                         |
+| Layout and session            | `RenderLayoutSize`, `RenderModeResolution`, `RenderOutput`, `RenderSession`, `RenderSize`, `UseLayoutSizeReturn`                                                                                             | Remove the session graph and old return. The new width and optional-height projections need no named type; Path 1.                                                                                                                                                                                      |
 | Caret                         | `CaretState`, `UseCaretOptions`, `UseCaretReturn`                                                                                                                                                            | Retain and redesign only `UseCaretOptions`; remove diagnostic state and return wrapper; add semantic text query types; Path 4.                                                                                                                                                                          |
 | Animation                     | `UseAnimationOptions`, `UseAnimationReturn`                                                                                                                                                                  | Remove both; Path 0.                                                                                                                                                                                                                                                                                    |
-| Geometry                      | `CellPoint`, `CellRect`, `ElementGeometry`, `ElementGeometryFragment`, `ElementTarget`, `UseElementGeometryReturn`                                                                                           | Retain the small shared `CellPoint` and target alias; remove the rect, geometry, fragment, and old return; add `ElementSize`; Paths 1, 4, and 6.                                                                                                                                                        |
+| Geometry                      | `CellPoint`, `CellRect`, `ElementGeometry`, `ElementGeometryFragment`, `ElementTarget`, `UseElementGeometryReturn`                                                                                           | Retain the small shared `CellPoint` and target alias; remove the rect, geometry, fragment, and old return; add `BoxSize`; Paths 1, 4, and 6.                                                                                                                                                            |
 | Kitty                         | `KittyKeyboardOptions`, `KittyFlagName`                                                                                                                                                                      | Remove both; Paths 3 and 5.                                                                                                                                                                                                                                                                             |
 
 ### Fullscreen named types: 20 current
@@ -1205,8 +1212,8 @@ This ledger names every currently exported value and named type. “Replace” m
 
 ### Proposed target surface
 
-The target is intentionally smaller than the current 31 values and 87 named types. The common root has fourteen values: `Box`, `Text`, `createApp`, `renderToString`, `useApp`, `useInput`, `useFocus`, `useFocusScope`, `useStdin`, `useLayoutWidth`, `useViewportSize`, `useElementSize`, `useTextLayout`, and `useCaret`. `/inline` has `Static`; `/fullscreen` has `useMouse`; `/devtools` has `connectDevtools`; `/testing` has `createTestHostBridge`.
+The target is intentionally smaller than the current 31 values and 87 named types. The common root has fourteen values: `Box`, `Text`, `createApp`, `renderToString`, `useApp`, `useInput`, `useFocus`, `useFocusScope`, `useStdin`, `useLayoutWidth`, `useViewportHeight`, `useBoxSize`, `useTextLayout`, and `useCaret`. `/inline` has `Static`; `/fullscreen` has `useMouse`; `/devtools` has `connectDevtools`; `/testing` has `createTestHostBridge`.
 
-The intended common named contracts are `MountOptions`, `TuiApp`, `RenderMode`, `RenderToStringOptions`, `AriaRole`, `AriaState`, `BoxProps`, `TextProps`, `UseAppReturn`, `TuiInputEvent`, `TuiKeyName`, `TuiKeyModifiers`, `InputHandler`, `UseInputOptions`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`, `UseStdinReturn`, `CellPoint`, `CellSize`, `ElementSize`, `ElementTarget`, `TextPosition`, `ResolvedTextPosition`, `TextLayout`, and `UseCaretOptions`. `/fullscreen` adds `CellDelta`, `MouseButton`, `MouseModifiers`, `TuiMouseEvent`, `MouseEventControls`, `MouseHandler`, and `UseMouseOptions`. `/inline` adds no named type. `/devtools` may name only the small structural hot-context input if declaration generation cannot keep it inline. `/testing` adds `TestContentFrame`, `TestHostBridgeOptions`, and `TestHostBridge`.
+The intended common named contracts are `MountOptions`, `TuiApp`, `RenderMode`, `RenderToStringOptions`, `AriaRole`, `AriaState`, `BoxProps`, `TextProps`, `UseAppReturn`, `TuiInputEvent`, `TuiKeyName`, `TuiKeyModifiers`, `InputHandler`, `UseInputOptions`, `UseFocusOptions`, `UseFocusReturn`, `UseFocusScopeOptions`, `UseFocusScopeReturn`, `UseStdinReturn`, `BoxSize`, `CellPoint`, `ElementTarget`, `TextPosition`, `ResolvedTextPosition`, `TextLayout`, and `UseCaretOptions`. `/fullscreen` adds `CellDelta`, `MouseButton`, `MouseModifiers`, `TuiMouseEvent`, `MouseEventControls`, `MouseHandler`, and `UseMouseOptions`. `/inline` adds no named type. `/devtools` may name only the small structural hot-context input if declaration generation cannot keep it inline. `/testing` adds `TestContentFrame`, `TestHostBridgeOptions`, and `TestHostBridge`.
 
 This proposed list is not accepted by enumeration alone. Each name points to the concrete code, host semantics, absence behavior, composition proof, and evidence gate in Paths 0–6.

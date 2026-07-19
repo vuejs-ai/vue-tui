@@ -1,5 +1,5 @@
 import type { MaybeRefOrGetter, ShallowRef } from "vue";
-import type { CellPoint } from "../composables/useElementGeometry.ts";
+import type { CellPoint } from "../element-target.ts";
 
 export type MouseButton = "left" | "middle" | "right";
 export type MouseHandlerResult = "continue" | "consume";

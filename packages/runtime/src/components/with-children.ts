@@ -15,11 +15,13 @@ export type DefaultChildren = VNodeChild | DefaultSlot | { default: DefaultSlot 
  */
 export type PublicComponent<
   Props,
+  InstanceBrand extends object = object,
   Children = DefaultChildren,
   Slots = { default?: DefaultSlot },
 > = {
-  new (): ComponentPublicInstance<Props> & {
-    $props: Props & { children?: Children };
-    $slots: Slots;
-  };
+  new (): ComponentPublicInstance<Props> &
+    InstanceBrand & {
+      $props: Props & { children?: Children };
+      $slots: Slots;
+    };
 };

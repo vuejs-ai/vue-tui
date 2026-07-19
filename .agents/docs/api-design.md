@@ -1,10 +1,10 @@
 # Application API design
 
-> **Status:** unstamped design rationale for the completed Runtime application foundation. F1 through F8 are Done, and Runtime closure R1 through R12 is Closed on local candidate implementation head `e31aa1a`; R13 through R17 are explicitly Non-blocking higher-layer, additive, compatibility, release, or performance work. The component catalog and 1.0 surface remain incomplete, but they are not Runtime-foundation blockers. Final evidence is centralized in [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence). No VOUCHED stamp is implied.
+> **Status:** historical unstamped design rationale for the earlier Runtime application-foundation candidate. The active [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) supersedes this record's unstamped public shapes and completion conclusion while preserving its implementation and journey evidence. No VOUCHED stamp is implied.
 
-## Current conclusion
+## Historical conclusion and current authority
 
-The Runtime application foundation described here is complete. Positioning explains what the framework is, application scenarios provided product evidence, and the fixed capacity workloads accepted the current rendering architecture. Renderer-performance work remains parked until a later representative journey crosses a recorded reopen trigger.
+This record previously concluded that the Runtime application foundation was complete. The active re-audit withdraws that conclusion and decides the current target one complete vertical path at a time. For layout and measurement, its authoritative public boundary is `useLayoutWidth()`, setup-time nullable `useViewportHeight()`, and direct same-app Box-only `useBoxSize()`; the broad render-session and element-geometry projections described below are retained only as historical evidence for their internal mechanisms.
 
 Future application-layer work should continue to start with capability boundaries and state ownership, validate them through representative journeys, and only then stabilize reusable composables and components. The completed lower-layer contracts here are constraints for that work rather than an automatically active new design phase.
 
