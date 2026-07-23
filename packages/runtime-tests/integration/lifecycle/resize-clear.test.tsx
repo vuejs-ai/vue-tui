@@ -8,7 +8,6 @@ import { expect, test } from "vite-plus/test";
 import { createApp, Box, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
 import { nextLineEscape } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeWritable,
   makeFakeStdin,
@@ -217,35 +216,6 @@ test("consecutive dimension changes each establish exactly one fresh region", as
   await nextTick();
   await nextTick();
   expectFreshRegion(writes.slice(before).join(""), 24);
-
-  app.unmount();
-});
-
-test("screen-reader resize uses a physical-bottom clamp when terminal rows are unknown", async () => {
-  const stdout = makeFakeWritable({ columns: 80, rows: 80 });
-  delete (stdout as { rows?: number }).rows;
-  const stderr = makeFakeWritable({ columns: 80, rows: 80 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-  const app = createApp(() => <Text>transcript</Text>);
-
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    presentation: "screen-reader",
-    maxFps: 0,
-  } as InternalMountOptions);
-  await nextTick();
-  const beforeResize = writes.length;
-
-  stdout.emit("resize");
-  await nextTick();
-
-  const resizeOutput = writes.slice(beforeResize).join("");
-  expect(resizeOutput).toContain(ansiEscapes.cursorDown(9999) + nextLineEscape);
-  for (const reset of FORBIDDEN_MAIN_SCREEN_RESETS) expect(resizeOutput).not.toContain(reset);
-  expect(resizeOutput).not.toContain(ERASE_LINE);
 
   app.unmount();
 });

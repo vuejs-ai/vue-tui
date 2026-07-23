@@ -1,10 +1,10 @@
 # Application API design
 
-> **Status:** historical unstamped design rationale for the earlier Runtime application-foundation candidate. The active [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) supersedes this record's unstamped public shapes and completion conclusion while preserving its implementation and journey evidence. No VOUCHED stamp is implied.
+> **Status:** historical unstamped design rationale for the earlier Runtime application-foundation candidate. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes this record's unstamped public shapes and completion conclusion while preserving its implementation and journey evidence. The later implemented candidate is recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). No VOUCHED stamp is implied.
 
 ## Historical conclusion and current authority
 
-This record previously concluded that the Runtime application foundation was complete. The active re-audit withdraws that conclusion and decides the current target one complete vertical path at a time. For layout and measurement, its authoritative public boundary is `useLayoutWidth()`, setup-time nullable `useViewportHeight()`, and direct same-app Box-only `useBoxSize()`; the broad render-session and element-geometry projections described below are retained only as historical evidence for their internal mechanisms.
+This record previously concluded that the Runtime application foundation was complete. The current item-by-item review keeps that conclusion withdrawn. For layout and measurement, the implemented candidates are `useLayoutWidth()`, setup-time nullable `useViewportHeight()`, and direct same-app Box-only `useBoxSize()`; every projection remains Open rather than authoritative, and general accepted-tree presence is private. For Focus, the authoritative ledger now accepts only the two explicit `useFocus()` overloads and their shared readonly handle; implementation remains pending. The broad render-session, element-geometry, focus-manager, scope, traversal, routing, and restoration surfaces described below remain historical evidence for their internal mechanisms rather than current public direction.
 
 Future application-layer work should continue to start with capability boundaries and state ownership, validate them through representative journeys, and only then stabilize reusable composables and components. The completed lower-layer contracts here are constraints for that work rather than an automatically active new design phase.
 
@@ -117,7 +117,7 @@ Mouse reporting still changes terminal-native selection even on the alternate sc
 
 Its public type rejects targeted mouse listeners, and its SFC does not let them fall through accidentally to the internal viewport `Box`. Fullscreen wheel behavior composes by binding `useMouseEvent()` to an existing target and calling the `ScrollBox` handle; no mouse-specific `ScrollBox` component is needed.
 
-F7 retains the four imperative `ScrollBox` operations and replaces their `void` return directly with one synchronous boolean. `true` means only that the effective top line changed after flooring and clamping; a sticky-following re-arm without movement returns `false`. F4 focused-target-to-scope routing and F6 target-to-ancestor wheel routing now stop after inner movement and continue at an edge, and reverse-direction input returns immediately to the inner owner. Page commands reuse `scrollByLines()` with the accepted F5 wrapper height. The component remains common, passive, input-free, and the sole owner of its offset and sticky-following state. Public types, JavaScript validation, packed consumption, deterministic journeys, real PTYs, visual restoration, and the historical repository and CI gates agree, so F7 is Done.
+F7 retains the four imperative `ScrollBox` operations and replaces their `void` return directly with one synchronous boolean. `true` means only that the effective top line changed after flooring and clamping; a sticky-following re-arm without movement returns `false`. The earlier F4 and F6 routes demonstrated how a higher layer can stop after inner movement and continue at an edge, but those focus-scope and target-to-ancestor routes are not current Runtime APIs. Page commands reuse `scrollByLines()` with the accepted F5 wrapper height. The component remains common, passive, input-free, and the sole owner of its offset and sticky-following state. Public types, JavaScript validation, packed consumption, deterministic journeys, real PTYs, visual restoration, and the historical repository and CI gates agree, so F7 is Done.
 
 ### Fullscreen selection and clipboard remain separate owners
 
@@ -173,12 +173,12 @@ Framework-provided state should normally be exposed as readonly Vue refs plus se
 
 The working division to validate through the representative journeys is:
 
-| Application responsibility                                                                | Framework responsibility                                                                             | Controlled boundary                                                                           |
-| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Messages, tool calls, metrics, Git or database entities, workspace and PTY-session models | Terminal input parsing, mode ownership and restoration, output coordination                          | Current value, query, active key, selected or expanded keys, open state                       |
-| Search ranking, alert thresholds, approval policy, command execution, domain validation   | Input routing, focus order and scopes, modal input isolation, focus and cursor restoration           | Application supplies state and policy; framework supplies generic mechanics and emits changes |
-| Model requests, polling, filesystem and process side effects, PTY lifecycle               | Text-editing mechanics, collection navigation, scroll coordination, generic pending/cancel mechanics | Application decides what submit, accept, cancel, or retry means                               |
-| Product layout, fields, visual hierarchy, and domain-specific labels                      | Renderer primitives, geometry, clipping, targeted events, lifecycle cleanup                          | Components compose primitives without acquiring domain data or side effects                   |
+| Application responsibility                                                                | Framework responsibility                                                                             | Controlled boundary                                                                       |
+| ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Messages, tool calls, metrics, Git or database entities, workspace and PTY-session models | Terminal input parsing, mode ownership and restoration, output coordination                          | Current value, query, active key, selected or expanded keys, open state                   |
+| Search ranking, alert thresholds, approval policy, command execution, domain validation   | Unique focus ownership and rendered-target invalidation; input parsing and delivery                  | Application supplies ordering, scopes, modal policy, names, restoration, and route policy |
+| Model requests, polling, filesystem and process side effects, PTY lifecycle               | Text-editing mechanics, collection navigation, scroll coordination, generic pending/cancel mechanics | Application decides what submit, accept, cancel, or retry means                           |
+| Product layout, fields, visual hierarchy, and domain-specific labels                      | Renderer primitives, geometry, clipping, targeted events, lifecycle cleanup                          | Components compose primitives without acquiring domain data or side effects               |
 
 This boundary does not imply one large framework state machine. It says generic mechanics should not be rewritten in every application, while domain models and side effects should not enter vue-tui.
 
@@ -214,40 +214,34 @@ Public value exports, public types, lifecycle and cleanup, template and TSX infe
 
 ## Public layers
 
-| Layer                   | Responsibility                                                                                                                           | Stability rule                                                                                                       |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Vue platform contract   | Which Vue authoring and lifecycle behavior has terminal meaning                                                                          | Supported behavior is tested in templates and TSX; unsupported behavior is documented or rejected clearly            |
-| Runtime primitives      | Layout, text, clipping, measurement, hit testing, cursor and renderer-native surfaces                                                    | Small semantic surface; no Yoga, host-tree, cell-buffer, or ANSI implementation leakage                              |
-| App runtime services    | Session lifecycle, effective rendering mode, capabilities, input parsing and routing, focus scopes, terminal modes, scheduling and flush | One service set per mounted app, provided through typed Vue injection and exposed through focused public composables |
-| `@vue-tui/use`          | Independent headless behavior with no component or direct terminal dependency                                                            | Create the reserved package only when the first evidence-backed member is accepted                                   |
-| `@vue-tui/components`   | Rendered, typed Vue components and component-specific companion composables                                                              | Compose only public runtime/use APIs; use controlled-state conventions and semantic handles                          |
-| Testing and development | Deterministic semantic input, lifecycle, frames, PTY-visible acceptance, HMR and clean-consumer workflows                                | Test APIs track public behavior and distinguish content frames from final emulated terminal screens                  |
+| Layer                   | Responsibility                                                                                                                         | Stability rule                                                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Vue platform contract   | Which Vue authoring and lifecycle behavior has terminal meaning                                                                        | Supported behavior is tested in templates and TSX; unsupported behavior is documented or rejected clearly           |
+| Runtime primitives      | Layout, text, clipping, measurement, hit testing, cursor and renderer-native surfaces                                                  | Small semantic surface; no Yoga, host-tree, cell-buffer, or ANSI implementation leakage                             |
+| App runtime services    | Session lifecycle, effective rendering mode, capabilities, input parsing, unique focus ownership, terminal modes, scheduling and flush | One service set per mounted app, provided through typed Vue injection and exposed through narrow public composables |
+| `@vue-tui/use`          | Independent headless behavior with no component or direct terminal dependency                                                          | Create the reserved package only when the first evidence-backed member is accepted                                  |
+| `@vue-tui/components`   | Rendered, typed Vue components and component-specific companion composables                                                            | Compose only public runtime/use APIs; use controlled-state conventions and semantic handles                         |
+| Testing and development | Deterministic semantic input, lifecycle, frames, PTY-visible acceptance, HMR and clean-consumer workflows                              | Test APIs track public behavior and distinguish content frames from final emulated terminal screens                 |
 
 These are responsibility layers, not a requirement to split the renderer into framework-neutral packages. vue-tui is intentionally Vue-native.
 
-## Evidence from the current API
+## Evidence for the current target API
 
-### Application-global and focused input share one route
+### Broadcast input and minimal focus ownership compose without a routing graph
 
-[`useInput`](../../packages/runtime/src/composables/useInput.ts) attaches one non-reusable application-global registration and receives a cached readonly projection of the shared normalized key, text, paste, or uninterpreted fact. Every global captured for one fact runs in registration order, and its required result separately reports an action, later-route continuation, delayed-default prevention, and external permission. F4 connects opaque ref-bound targets and nested scopes to the same route: `useFocusedInput()` supplies the exact owner layer, `useFocusScopeInput()` supplies the active boundary or one ancestor layer, and `useExternalInput()` supplies one normalized fallthrough receiver. F3 captures one selected generation at fact start and resolves it once under both modes. A host-only post-commit reconciliation reuses that generation only when no logical mutation is pending and the route boundary, owner, ordered ancestors, external owner, complete rendered-target order, and eligible sequential-target order are identical. Any semantic change publishes a replacement; an old selected path then fails closed without suppressing independently captured application-global handlers for the same fact.
+The accepted `useInput()` subscription broadcasts normalized events independently of focus. The accepted `useFocus()` contract creates one opaque identity per call in a private per-app unique-owner controller; a valid `focus()` synchronously replaces the previous owner, `blur()` releases that handle, and readonly `isFocused` is the only public observation. Focused delivery is explicit composition through `useInput(handler, { isActive: focus.isFocused })`, so unrelated broadcast subscriptions continue to run and Runtime exposes no focused-input hook, priority graph, propagation result, or external-forwarding route.
 
-Application-global shortcuts remain independent, while local ownership now follows the target or scope lifetime instead of requiring a manual `useInput({ isActive })` bridge. [Issue #250](https://github.com/vuejs-ai/vue-tui/issues/250) remains the direct consumer evidence that selected local behavior must follow rendered and logical ownership rather than setup-time global registrations.
+The targetless overload follows only its Vue scope. The targeted overload additionally binds validity to a readonly ref for one current-app stateful component boundary, including stateful single-root chains and true Fragment boundaries. Hidden or detached ancestry, a Comment root, scope disposal, rollback, and app cleanup clear ownership without restoration. Unavailable, disposed, and string-rendering calls are inert and never queue later acquisition. [Issue #250](https://github.com/vuejs-ai/vue-tui/issues/250) remains evidence that renderer-owned target invalidation is necessary; it does not justify publishing a manager, scopes, traversal, string lookup, disabled policy, automatic focus, or routing.
 
-The normalized `TuiInputEvent` now exposes function-key identity, Insert, modifiers, reported text, and repeat or release phase without the removed boolean `Key` projection. Completed F4 reuses that event model directly instead of defining a focus-specific key shape.
+### Focus remains distinct from geometry and caret transport
 
-### Focus, geometry, and caret transport now compose without sharing state ownership
-
-Completed F4 replaces the former flat string-ID registry with opaque ref-bound targets, rendered eligibility, scopes, traps, centralized restoration, and exact F3 focused delivery. It deliberately exposes no layout, text insertion, selection, caret-request, terminal-cursor, or pointer state.
-
-[`useElementGeometry`](../../packages/runtime/src/composables/useElementGeometry.ts) follows a normal Vue target through F2 and publishes one atomic paint-derived result with explicit availability, full parent and render-surface bounds, exact rendered fragments, and clipping. [`useCaret`](../../packages/runtime/src/composables/useCaret.ts) accepts the same target model, one exact F4 focus handle, and an element-local rendered cell. One per-app arbiter selects only the effective focus owner after paint and lets the current mode writer perform the private surface-to-terminal translation. The former scalar Yoga hook, imperative measurement API, targetless `useCursor()`, output-origin `CursorPosition`, and `useDraggable()` are removed directly. F6's `useMouseEvent()` and `useMouseDrag()` now reuse the same F2 attachment lifetime and accepted F5 geometry without becoming caret state.
-
-The completed [F5 contract](./semantic-geometry-and-caret.md) covers multi-owner cleanup, hidden and clipped targets, wide-glyph edges, resize, non-TTY and screen-reader unavailability, nested virtual Text, HMR, host lifetime, and failed output. The caret controller and both writers accept a candidate only after the corresponding frame succeeds; a failed write keeps the last successful output and caret baselines so an identical retry is not deduplicated. `@vue-tui/testing` exposes both terminal-cursor position and visibility. Logical focus, collection active item, application-owned insertion state, selection, the focus-bound caret request, physical terminal cursor, and pointer target remain distinct concepts even when a component coordinates them. Both-mode visual behavior, full repository gates, fresh CI, and independent review passed.
+`useFocus(target)` uses a component boundary only to constrain one identity's validity. It exposes no layout, paint fragments, renderer nodes, text insertion, selection, caret request, terminal cursor, pointer state, focus ring, or target name. The removed public geometry, caret, pointer, selection, and clipboard experiments remain evidence for private mechanisms and later review, not part of the accepted Focus handle.
 
 ### Historical gap: modes existed without a public environment contract
 
 Before F1.8, [`MountOptions`](../../packages/runtime/src/render.ts) contained rendering-mode and lifecycle choices while [`useApp`](../../packages/runtime/src/composables/useApp.ts) exposed exit and flush but not effective Inline/Fullscreen mode, output cadence, or terminal capability. The internal session now resolves those facts once across live, deterministic-test, and string hosts, and F1.8's verified `useRenderSession()` gives a pure component the readonly public projection.
 
-[`renderToString`](../../packages/runtime/src/render-to-string.ts) provides a truthful string/document session, isolated inert terminal streams, no-op focus/input/animation mechanics, and explicitly unavailable app lifecycle operations. Public rendering is fixed visual; the internal helper is fixed screen-reader; neither reads process terminal state. Components in either string path now read that same public projection, with `layout.rows: null` and immutable unavailable capabilities.
+[`renderToString`](../../packages/runtime/src/render-to-string.ts) provides a truthful string/document session, isolated inert terminal streams, inert `useFocus()` handles, no input or animation mechanics, and explicitly unavailable app lifecycle operations. Public rendering is fixed visual; the historical internal screen-reader helper described here has since been removed. The string host never reads process terminal state, and `focus()` or `blur()` cannot queue ownership for a later live mount.
 
 ### Headless behaviors are repeatedly hand-written
 
@@ -255,7 +249,7 @@ The first-party [coding-agent example](../../examples/coding-agent/src/app.vue) 
 
 The pinned external [mo selector](https://github.com/liangmiQwQ/mo/blob/6bea467a6995f4912e809b417b5c56a3964cc556/src/components/selector.vue#L48-L124) independently implements query editing, enabled-item navigation, selection, accept/cancel and scroll calculations, while its [completion path](https://github.com/liangmiQwQ/mo/blob/6bea467a6995f4912e809b417b5c56a3964cc556/src/utils/selector.ts#L44-L59) waits an arbitrary 50 ms before unmounting instead of using the existing [`waitUntilRenderFlush()`](../../packages/runtime/src/composables/useApp.ts) contract. Search ranking and project data stay in mo; generic editing, collection movement and acceptance are product evidence for vue-tui. The timeout is evidence to validate the discoverability and sufficiency of the existing flush contract, not to add a second completion primitive.
 
-[`ScrollBox`](../../packages/components/src/scroll-box/scroll-box.vue) correctly owns a bounded viewport and follow-latest mechanism without choosing application keys. F3 and F4 removed the former routing blocker, so editor and collection helpers are now optional higher-layer composition rather than missing Runtime infrastructure.
+[`ScrollBox`](../../packages/components/src/scroll-box/scroll-box.vue) correctly owns a bounded viewport and follow-latest mechanism without choosing application keys. The accepted input broadcast and minimal focus handle let editor and collection helpers compose an active owner above Runtime, while traversal, scopes, routing, restoration, and collection policy remain optional higher-layer behavior rather than Runtime infrastructure.
 
 ### The modeled testing host and package closure are complete
 
@@ -269,7 +263,7 @@ The exact Runtime value exports, deliberate named types, declarations, packed co
 | ------------------------- | ----------------------------------------------------- | ------------------------------------------ | ------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
 | App/session environment   | inline transcript or full-screen conversation         | non-TTY snapshot and full-screen dashboard | persistent multi-region app                 | full-screen shell around PTYs          | runtime service                                      |
 | Input ownership           | composer, approval, interrupt                         | global shortcut and focused filter/action  | search, list, detail and overlay routes     | command scope or PTY fallthrough       | runtime service                                      |
-| Focus and scopes          | composer to approval and back                         | region or control focus                    | collection, preview, actions and modal      | nested pane focus and restoration      | runtime service                                      |
+| Focus ownership           | composer or approval owner                            | region or control owner                    | collection, preview, action, or modal owner | command or pane owner                  | minimal Runtime identity plus application policy     |
 | Text editing              | prompt, history, multiline, paste                     | filter or action parameter                 | search, rename and forms                    | search/rename outside the PTY          | headless behavior plus component                     |
 | Collection behavior       | history and action choices                            | process/job/log lists                      | list, tree, table and preview               | workspace/tab/pane navigator           | headless behavior plus components                    |
 | Viewport and scroll       | native inline scrollback or full-screen follow-latest | logs and follow/pause                      | keep active item visible and scroll preview | tab overflow and pane scrollback       | runtime geometry plus headless/component state       |
@@ -307,7 +301,7 @@ The following table is the completed public contract derived from the two vouche
 | Resize                       | The current live region can relayout and repaint, but the app cannot retroactively rewrite completed terminal history.                                                                                                                  | The target contract relayouts and repaints the full current viewport.                                                                                                                                                        | Resize contracts must say which state is recomputed and must not imply that inline history is still mounted or editable.                                |
 | Mouse and selection          | A terminal-wide raw-mouse API can receive absolute coordinates when the terminal and stdin support it, but the runtime cannot reliably map them to inline elements; tracking also suppresses native selection across the shared screen. | A live full-screen target composable can request targeted hit testing when stdin, the terminal, and the active render path support a hit map; the runtime captures only while a live target needs it.                        | Terminal-wide raw mouse and semantic element events are distinct capabilities. Targeted input remains full-screen-only unless the origin model changes. |
 | Cursor placement             | Cursor coordinates are relative to the current output origin, whose absolute screen row can move.                                                                                                                                       | The target contract lets a managed caret resolve through a stable viewport origin.                                                                                                                                           | A reusable editor should request a caret relative to a semantic element or managed region instead of computing physical screen cells itself.            |
-| Input and logical focus      | Rendering mode alone says nothing about stdin or raw-mode ownership. When live input is effective, inline uses the shared interaction model.                                                                                            | Rendering mode alone says nothing about stdin or raw-mode ownership. When live input is effective, full-screen uses the same interaction model.                                                                              | Logical focus, keyboard routing, paste, and focus scopes can share one semantic model; input availability remains a separately derived capability.      |
+| Input and logical focus      | Rendering mode alone says nothing about stdin or raw-mode ownership. When live input is effective, Inline uses the shared input and unique-focus primitives.                                                                            | Rendering mode alone says nothing about stdin or raw-mode ownership. When live input is effective, Fullscreen uses the same shared primitives.                                                                               | Runtime shares unique ownership across modes; applications separately compose routing, paste policy, scopes, traversal, and modal behavior.             |
 | Exit and restoration         | Current output remains on the main screen and can remain in shell history after terminal modes and cursor state are restored.                                                                                                           | Leaving the alternate screen restores the previous main-screen contents; the app viewport disappears.                                                                                                                        | Completion, suspension, final output, and teardown behavior must have explicit mode-specific contracts.                                                 |
 
 These are product constraints. Runtime closure turns the ownership distinction into an explicit authoring boundary: `/inline` `Static` owns terminal history and rejects effective visual Fullscreen, while common `ScrollBox` owns bounded application state and remains valid in either mode.
@@ -335,62 +329,58 @@ Future editor, overlay, viewport, or high-level component APIs must preserve thi
 
 ## Second design packet: focus and input inside the rendering-mode contract
 
-The complete F4 target contract is [logical focus and focus scopes](./focus-and-scopes.md). The maintainer accepted it on 2026-07-13 without adding a VOUCHED stamp. Its public runtime implements opaque ref-bound handles, rendered-preorder traversal, active and hard-trapped scopes, centralized restoration, focused-target and scope handlers with a trapped scope occupying the active-boundary layer once, focus-bound external fallthrough, direct replacement of the prior focus surfaces, and removal of the generic Escape blur. Public workflow, finder, independent-region, boundary, package, host, both-mode real-terminal, visual, exact-cleanup, full-gate, and independent-review evidence pass; this section remains the broader dependency rationale.
+The earlier F4 experiment in [logical focus and focus scopes](./focus-and-scopes.md) remains implementation and journey evidence, but its public manager, scopes, traversal, restoration, focused-input hooks, and external route are superseded. The authoritative contract is the vouched [`useFocus` review](./runtime-public-api-review.md#usefocus), and its implementation is pending.
 
-The completed F3 mechanism and accepted [public input contract](./input-routing.md#accepted-public-input-contract) exposed a dependency boundary that the earlier questions did not resolve. Normalized readonly facts, synchronous handler outcomes, one all-run application-global layer, delayed defaults, input availability, and current-hook dispositions could be selected before focus. A complete public `global → boundary → focused owner → ancestors → defaults → external` attachment could not be selected until F4: publishing it earlier would have exposed the private atomic topology or required applications to compute the focused owner and ancestor path manually. That would recreate issue #250 and make F4 a second state owner.
+```ts
+export type FocusTarget = Readonly<Ref<ComponentPublicInstance | null | undefined>>;
 
-The accepted boundary is therefore narrow. F3 publishes one normalized application-global layer and the handler/result types. Every global captured for one fact runs and the layer merges their results, so registration time is not hidden priority; numeric priority was explicitly rejected at this foundation. F4 selects the target-bound/local hook, one logical focus owner, ancestor derivation, modal boundary, restoration, and the public external-owner attachment using the same F3 result contract. This keeps implementation dependency order intact: F3 owns parsing and delivery semantics, while F4 owns which local rendered recipient becomes part of the route. The rejected exact low-level selection API and its costs remain in the decision record rather than hidden behind a role string or another `isActive` boolean.
+export interface UseFocusReturn {
+  readonly isFocused: Readonly<Ref<boolean>>;
+  focus(): void;
+  blur(): void;
+}
 
-Once the rendering-mode contract is explicit, input design can share what both modes actually have in common. The app runtime now maintains one effective logical-focus target, attaches it to rendered elements through F2, derives its active scope path, and supplies that owner to F3 without mode-specific focus semantics.
-
-Focus ownership and keyboard priority are separate questions:
-
-1. **Focused delivery:** a ref-bound opaque focus handle registers one rendered target, becomes the one effective focus owner, receives normalized events through `useFocusedInput`, and loses or restores focus under the accepted hidden, disabled, removal, and scope rules. `useFocusScopeInput` occupies either the current trapped boundary or one ancestor position exactly once.
-2. **Priority and fallthrough:** after framework-owned terminal-protocol replies have been removed, how an active overlay, app-level shortcut, active region, focused control, component default, and optional external owner such as a PTY get a chance to handle or pass on the same input. Typed commands or inspectable key bindings may help this layer, but they are not an alternative focus system.
-
-A candidate responsibility flow is:
-
-```text
-terminal bytes
-  -> route replies for active terminal protocol and capability queries
-  -> parse remaining bytes once into typed key / text / paste / mouse events
-     or explicit uninterpreted input
-  -> apply the active priority layers
-  -> deliver focused input to the one effective logical-focus owner
-  -> continue through explicitly defined outer or fallback handlers
-  -> optionally hand an unhandled event to an external owner such as a PTY pane
+export function useFocus(): UseFocusReturn;
+export function useFocus(target: FocusTarget): UseFocusReturn;
 ```
 
-The non-pointer portion of this flow is now the proved F3 route with completed F4 public attachment. The F3 public contract answers the first question, the application-global half of the second and sixth questions, and the input-availability half of the eighth question; the F4 public contract answers the target/local parts. The following questions remain useful dependency boundaries even where F3 and F4 have already answered them:
+Every call creates a distinct opaque identity in one private per-app controller. A valid `focus()` synchronously replaces the previous owner, and `blur()` releases only that handle. The targetless overload follows its Vue scope; the targeted overload additionally follows the current-app stateful component's normalized root boundary. Unavailable, disposed, and string-rendering calls are inert without queued acquisition. Target loss, hidden ancestry, scope disposal, rollback, and cleanup clear ownership without restoring that handle or a previous one; suspend and resume preserve a still-valid owner.
 
-1. How does a handler distinguish handled, continue routing, prevent a component default, and return input to an external owner?
-2. Which registrations follow setup-scope lifetime, and which must follow the actual rendered node or `v-if` branch lifetime required by #250?
-3. How are logical focus, active collection item, text insertion point, selection and terminal cursor kept separate and coordinated?
-4. How do nested focus scopes trap focus, derive traversal order, skip hidden or disabled targets, and restore focus after unmount?
-5. Are shortcuts expressed as normalized key events, typed commands and overridable bindings, or both? How can help or status UI inspect active bindings without stringly typed application actions?
-6. How does F4's target-bound input attachment compose with the accepted application-global `useInput`, and what purpose, if any, remains for terminal-wide raw mouse input? Direct stdin is retained under the vouched raw escape-hatch contract in [normalized input and routing](./input-routing.md#direct-stdin-is-a-parallel-escape-hatch-not-fallthrough).
-7. What semantic element or rectangle type lets focus, mouse, measurement, scrolling, and a rendered caret refer to the same rendered object without exposing a host node?
-8. Which shared focus and input operations remain meaningful in static, non-interactive and screen-reader environments, and how does each ineffective operation report itself?
+The target is not the identity and does not define delivery. Runtime does not expose disabled state, automatic focus, Tab order, traversal, scopes, modal policy, a manager, string lookup, restoration, geometry, or focused-input routing. Applications and higher layers compose those policies with Vue state. Explicit focused delivery uses the accepted broadcast primitive:
 
-F4 satisfied its completion gate with one implementation covering #250, a modal approval, a global app shortcut, two independently activated regions, unmount restoration, both rendering modes, and optional PTY fallthrough without manual boolean coordination. The application-global normalized fact and handler-result contract still does not expose the private selection graph.
+```ts
+const focus = useFocus(target);
+
+useInput(handler, {
+  isActive: focus.isFocused,
+});
+```
+
+This split leaves three clear owners:
+
+1. **Runtime unique ownership:** one current identity across targeted and targetless handles in one app.
+2. **Runtime rendered validity:** a targeted identity cannot remain focused after its normalized component boundary becomes unavailable or hidden.
+3. **Application interaction policy:** ordering, scopes, traps, disabled state, names, restoration, priority, propagation, external forwarding, and visual treatment.
+
+The implementation evidence must prove the two overloads, readonly declarations, valid replacement, no queued acquisition or restoration, component-root normalization, Vue 3.4 and 3.5 consumers, Inline, Fullscreen, non-TTY, string, suspension, cleanup, rollback, and composition with both gated and unrelated `useInput()` subscriptions. Until those checks land, the accepted design must not be described as implemented.
 
 ## Reference regression journeys for the completed foundations
 
 Use the smallest set of applications that exercises the shared contract when a change could regress F3 through F8 or Runtime closure:
 
-1. **Workflow:** a coding-agent composer streams output, accepts Unicode editing and paste, transfers ownership to an approval overlay, supports submit/cancel/interrupt, restores focus and caret, and runs in both inline and full-screen modes.
+1. **Workflow:** a coding-agent composer streams output, accepts Unicode editing and paste, explicitly transfers ownership to an approval overlay, supports submit/cancel/interrupt, and deliberately reacquires focus when the product wants it; caret behavior remains separate.
 2. **Finder:** a mo-like selector owns query text, stable item keys, disabled items, navigation, ensure-visible scrolling, accept and cancel; its search algorithm and domain records remain application-supplied.
 3. **Monitor/environment:** a machud-like app supports a non-interactive or static frame and a full-screen live dashboard without try/catch capability detection or hidden process-global assumptions.
-4. **Workbench:** two independently active regions plus an overlay prove scoped shortcuts, focus restoration and unhandled-event routing.
+4. **Workbench:** two independently active regions plus an overlay prove that application-owned ordering, scopes, and shortcuts can compose over unique Runtime focus handles without a public manager.
 5. **Terminal workspace stress:** a focused pane can pass unhandled keys to an external terminal session without making PTY or VT emulation a framework responsibility.
 
-F4's public validation combines the workflow composer and finder selector, then adds the independent-region workbench. Together they test text and paste delivery, controlled state, focus, commands, collection movement, modal isolation, removal, restoration, and completion without turning collection state into logical focus.
+The earlier F4 validation remains useful scenario evidence, but the accepted Runtime checks are narrower: unique ownership, explicit replacement and release, target invalidation without restoration, lifecycle cleanup, and `useInput(handler, { isActive: focus.isFocused })` composition. Commands, collection movement, modal isolation, traversal, restoration, and external fallthrough are higher-layer responsibilities.
 
 ## Completed work order
 
 The completed dependency order, at-most-one-active-item rule, and closure evidence are maintained in [the API foundation roadmap](./api-foundation-roadmap.md#priority-order). No foundation is currently Active or Queued, and R13 is not an automatic successor.
 
-The completed program order was rendering-mode session facts → rendered-target lifetime → normalized input and routing → logical focus and focus scopes → semantic geometry and caret → Fullscreen targeted pointer → evidence-driven scroll composition → Fullscreen selection and copy → finite Runtime closure. Future foundation work requires new representative evidence and an explicit ledger update; application and component work may now build on these contracts.
+The historical program order was rendering-mode session facts → rendered-target lifetime → normalized input and routing → the broader logical-focus experiment → semantic geometry and caret → Fullscreen targeted pointer → evidence-driven scroll composition → Fullscreen selection and copy → finite Runtime closure. The current item-by-item review supersedes those experimental public surfaces; application and component work may rely only on contracts accepted in the authoritative decision ledger.
 
 ## Review template for each proposed API
 
@@ -418,7 +408,7 @@ Every proposal should state:
 
 This record does not decide to:
 
-- publish a `useTerminal`, command, editor, list, overlay, or cell-surface API under any particular name; the accepted F4 focus/scope composables, F3 `TuiInputEvent` contract, and F1.3 `useRenderSession()` contract are the explicit named exceptions recorded in [focus-and-scopes.md](./focus-and-scopes.md#accepted-public-authoring-surface), [input-routing.md](./input-routing.md#accepted-public-input-contract), and [render-session.md](./render-session.md);
+- publish a `useTerminal`, command, editor, list, overlay, or cell-surface API under any particular name; the accepted minimal `useFocus()` handle and current input contract are the explicit interaction primitives recorded in the [Runtime public API review](./runtime-public-api-review.md#usefocus) and [decision ledger](./runtime-public-api-decisions.md);
 - add compatibility aliases for the directly replaced mount, targeted-listener, drag, input, focus, or raw-mouse APIs; the accepted F1 through F8 surfaces replace them cleanly under the experimental policy;
 - build a Table, TextInput, Dialog, Tree, Command Palette, TaskList or other catalog item merely because another framework has one;
 - create `@vue-tui/use` before an accepted independent behavior requires it;

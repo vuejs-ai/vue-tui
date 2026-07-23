@@ -15,7 +15,7 @@ Build with components, develop with HMR, test with confidence.
 - **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
 - **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`npm run dev`)
-- **Input primitives** — normalized text, paste, and key facts with managed terminal ownership; focus and routing remain application policy
+- **Input and focus primitives** — normalized text, paste, and key facts with managed terminal ownership, plus explicit unique focus handles that compose with input subscriptions
 - **Small public foundation** — renderer-owned facts stay public only when application code cannot derive them safely
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 - **Coding-agent visual development guide** — a version-matched method for running the real app, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees ([guide](./packages/runtime/docs/visual-development-feedback-loops.md))
@@ -109,7 +109,7 @@ createApp(App).mount();
 
 | Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box facts, normalized input, lifecycle, and yoga-based flexbox layout. _API stabilizing._                                                          |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box facts, normalized input, explicit unique focus ownership, lifecycle, and yoga-based flexbox layout. _API stabilizing._                         |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                    |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — currently `<ScrollBox>` and `<Spinner>`.                                                                                                                                                                                                                   |
@@ -126,11 +126,11 @@ createApp(App).mount();
 
 ## Components
 
-| Component                        | Description                                                                                                                  |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime)    | Terminal layout container with the supported flex, size, spacing, border, clipping, visibility, and accessibility primitives |
-| [`<Text>`](./packages/runtime)   | Terminal text with foreground/background color, dim, bold, wrapping, truncation, and accessibility primitives                |
-| [`<Static>`](./packages/runtime) | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`                              |
+| Component                        | Description                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime)    | Terminal layout container with the supported flex, size, spacing, border, clipping, and visibility primitives |
+| [`<Text>`](./packages/runtime)   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                           |
+| [`<Static>`](./packages/runtime) | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`               |
 
 `Static` is deliberately absent from the common root export and has no collection API. Import the component from `@vue-tui/runtime/inline`, then use ordinary Vue iteration and stable keys when committing a list:
 
@@ -142,7 +142,7 @@ createApp(App).mount();
 
 Each mounted instance commits its slot tree once, including an output-free first commit; gate the instance itself with `v-if` when its content is not ready. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. A Static below a hidden Box remains pending and commits once when that Box is shown. Do not nest Static inside another Static or Text. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
 
-Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, accepted Box presence, geometry, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text` and `Static` roots is not supported.
+Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, targeted focus availability, geometry, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text` and `Static` roots is not supported.
 
 Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the foreground to the terminal default. They can wrap across lines and nest safely inside a colored parent; the parent's foreground resumes after the span, while background and the retained boolean text styles continue to compose normally.
 
@@ -166,46 +166,39 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 
 ## Composables (Hooks)
 
-| Composable                 | Description                                                                                                                |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)` | Subscribe to normalized text, paste, and key facts; `opts.isActive` controls whether the subscription owns input resources |
-| `useApp()`                 | Request normal or error exit from inside the mounted Vue tree                                                              |
-| `useLayoutWidth()`         | Read the reactive numeric width Runtime gives the root layout on every host                                                |
-| `useViewportHeight()`      | Read the reactive visual viewport height, or get `null` at setup when the document is not row-bounded                      |
-| `useStdin()`               | Access the actual mounted stdin as a raw byte-stream escape hatch                                                          |
-| `useBoxSize(ref)`          | Observe the last accepted full width and height of a directly referenced `<Box>`, or `null` when unavailable               |
-| `useBoxPresence(ref)`      | Observe whether a directly referenced `<Box>` belongs to the last accepted live renderer tree                              |
+| Composable                        | Description                                                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`        | Subscribe to normalized text, paste, and key facts; `opts.isActive` controls whether the subscription owns input resources |
+| `useFocus()` / `useFocus(target)` | Create one explicit logical focus identity, optionally limited by a rendered component target                              |
+| `useApp()`                        | Request normal or error exit from inside the mounted Vue tree                                                              |
+| `useLayoutWidth()`                | Read the reactive numeric width Runtime gives the root layout on every host                                                |
+| `useViewportHeight()`             | Read the reactive visual viewport height, or get `null` at setup when the document is not row-bounded                      |
+| `useStdin()`                      | Access the actual mounted stdin as a raw byte-stream escape hatch                                                          |
+| `useBoxSize(ref)`                 | Observe the last accepted full width and height of a directly referenced `<Box>`, or `null` when unavailable               |
 
 `useInput()` delivers a frozen `text`, complete bracketed `paste`, or recognized `key` event. Named keys use a finite vocabulary such as `enter`, `escape`, `tab`, and the navigation keys; shortcut keys instead carry one `character`. Key modifiers are the top-level `shift`, `alt`, and `ctrl` booleans. Handlers normally return nothing. The only special result is the exact object `{ preventDefault: true }`, which suppresses Runtime's Ctrl+C default for that event; it does not stop another subscription or implement application propagation. Unless a handler throws, every subscription captured when the normalized fact begins runs in registration order.
 
-Focus, modal traps, Tab order, and propagation are higher-level application policy rather than Runtime contracts. A provider can keep its own target and scope graph with Vue `provide`/`inject`, subscribe once with `useInput()`, snapshot its route before callbacks, and use `useBoxPresence()` for the accepted renderer fact it cannot derive itself. This is a public composition pattern, not a promise that an `@vue-tui/use` package already exists. See the [Runtime guide](./packages/runtime/README.md#focus-and-routing-above-runtime) for a compact sketch.
+Every `useFocus()` call creates a distinct opaque identity in one private per-app controller. `focus()` synchronously replaces the previous owner when the handle is available, `blur()` releases that handle, and the readonly `isFocused` ref composes directly with `useInput(handler, { isActive: focus.isFocused })`. Pass no target for a logical identity whose validity follows its Vue scope, or pass a component ref when the rendered component boundary should clear focus after removal or hidden ancestry. Unavailable, disposed, and string-rendering operations are inert and never queue later acquisition; later availability never restores focus. Runtime exposes no focus manager, scope or traversal API, string lookup, automatic Tab handling, restoration, or input routing. See the [Runtime guide](./packages/runtime/README.md#focus-ownership-and-input-composition).
 
 The app owner returned by `createApp()` exposes `waitUntilRenderFlush()` while mounted and `waitUntilExit()` through complete terminal restoration. These coordination barriers are intentionally absent from `useApp()` so ordinary descendants receive only the `exit(error?)` operation they need.
 
 Physical caret placement, targeted pointer routing, arbitrary-Text selection, and Runtime-owned clipboard transport are intentionally outside this minimum public foundation. Basic editable text and keyboard scrolling can be composed from `useInput()`, Vue state, rendered glyphs, and component methods. Exact final-paint caret or selection mapping and terminal mouse ownership need a smaller Runtime-only primitive before they can be added without exposing renderer policy; operating-system or OSC 52 copy can remain an application dependency meanwhile.
 
-Layout and measurement are deliberately split by task. `useLayoutWidth()` always returns a numeric readonly ref. `useViewportHeight()` returns a readonly numeric ref only for a finite live visual viewport and returns `null` once at setup for an unbounded stream, screen-reader transcript, or string document. `useBoxSize()` accepts a ref bound directly to `<Box>` in the current app and returns its last accepted full `{ width, height }`, or `null` before paint, while hidden or detached, and on hosts without visual Box geometry. `useBoxPresence()` uses the same direct Box ref and reports whether it belongs to the last accepted live tree, including on live hosts without visual geometry. A non-Box or foreign-app target throws.
+Layout and measurement are deliberately split by task. `useLayoutWidth()` always returns a numeric readonly ref. `useViewportHeight()` returns a readonly numeric ref only for a finite live viewport and returns `null` once at setup for an unbounded stream or string document. `useBoxSize()` accepts a ref bound directly to `<Box>` in the current app and returns its last accepted full `{ width, height }`, or `null` before paint, while hidden or detached, and in string rendering. A non-Box or foreign-app target throws.
 
 ```ts
 import { shallowRef } from "vue";
-import {
-  Box,
-  useBoxPresence,
-  useBoxSize,
-  useLayoutWidth,
-  useViewportHeight,
-} from "@vue-tui/runtime";
+import { Box, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 const panel = shallowRef<InstanceType<typeof Box> | null>(null);
 const panelSize = useBoxSize(panel);
-const panelPresence = useBoxPresence(panel);
 ```
 
 The broad render-session and public paint-fragment projections are not application contracts. Runtime keeps session resolution, clipping fragments, surface coordinates, and renderer nodes private, while public code consumes the narrower facts above. See [`@vue-tui/runtime`](./packages/runtime/README.md#layout-and-box-measurement) for the exact host and lifecycle behavior.
 
-The previous focus-bound `useCaret()` contract has been withdrawn with the Runtime focus API. Runtime retains terminal-cursor transport internally, but physical caret placement is explicitly outside this minimum foundation until a semantic Text-position contract is proven without exposing renderer coordinates.
+The previous focus-bound `useCaret()` contract has been withdrawn. Runtime retains terminal-cursor transport internally, but `useFocus()` does not expose physical caret placement; that capability remains outside this minimum foundation until a semantic Text-position contract is proven without exposing renderer coordinates.
 
 There is no public input-availability hook. An active `useInput()` subscription is the gate: it acquires managed input only while `isActive` resolves to true and fails before terminal mutation when stdin is not a controllable TTY. `useStdin()` returns the mounted stream for applications that intentionally consume raw pipe bytes; those bytes may include terminal replies and paste framing and have no normalized-event or safe-composition guarantee. Runtime privately negotiates only the Kitty protocol support needed to produce the public event projection, falls back to legacy input, and restores what it acquired. Applications do not choose Kitty flags through mount options. The removed `rawMode`, `exitOnCtrlC`, and public `kittyKeyboard` controls are not supported.
 
@@ -256,7 +249,7 @@ test("counter responds to + and - keys", async () => {
 });
 ```
 
-The default host is a visual Inline TTY. Pass `host` options to model Fullscreen, a screen-reader transcript, final-stream output, live stream updates, or non-TTY input. `screen().cursor` reports the emulated terminal cursor's row, column, and visibility after control bytes are applied. `unmount()` preserves the emulated screen for restoration assertions; `dispose()` performs final resource cleanup. See the [`@vue-tui/testing` package guide](./packages/testing) for the complete matrix.
+The default host is an Inline TTY. Pass `host` options to model Fullscreen, final-stream output, live stream updates, or non-TTY input. `screen().cursor` reports the emulated terminal cursor's row, column, and visibility after control bytes are applied. `unmount()` preserves the emulated screen for restoration assertions; `dispose()` performs final resource cleanup. See the [`@vue-tui/testing` package guide](./packages/testing) for the complete matrix.
 
 ## Visual development with coding agents
 

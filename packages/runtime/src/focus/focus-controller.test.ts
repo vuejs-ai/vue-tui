@@ -1,869 +1,229 @@
-import { describe, expect, test } from "vite-plus/test";
-import { watch } from "vue";
+import { effectScope } from "vue";
+import { describe, expect, test, vi } from "vite-plus/test";
 import Yoga from "yoga-layout";
 import type { AppContext } from "../context.ts";
-import {
-  createBox,
-  createRoot,
-  type TuiBox,
-  type TuiContainer,
-  type TuiNode,
-} from "../host/nodes.ts";
-import {
-  captureInternalInputRoutePlan,
-  dispatchInternalInput,
-  type InternalInputRouteDecision,
-} from "../io/input-route-policy.ts";
-import { createInternalInputRoutingRuntime } from "../io/input-route-runtime.ts";
-import { normalizeInputEvent } from "../io/normalized-input.ts";
+import { createBox, createRoot, type TuiBox, type TuiRoot } from "../host/nodes.ts";
 import { createInternalFocusController } from "./focus-controller.ts";
 
-function connect(parent: TuiContainer, child: TuiBox): TuiBox {
+function connect(parent: TuiRoot | TuiBox, child: TuiBox): TuiBox {
   child.parent = parent;
-  (parent as { children: TuiNode[] }).children.push(child);
+  parent.children.push(child);
   return child;
 }
 
-function makeLayoutNode(node: TuiNode, display: () => number = () => Yoga.DISPLAY_FLEX): void {
-  (node as { yoga?: unknown }).yoga = { getDisplay: display };
-}
-
-function createTree() {
+function createFixture(inert = false) {
   const root = createRoot({} as AppContext);
-  makeLayoutNode(root);
-  return root;
+  const focus = createInternalFocusController({ root, inert });
+  return { root, focus };
 }
 
-const continueRoute = (): InternalInputRouteDecision => ({
-  performed: false,
-  continue: true,
-  preventDefault: false,
-  blockExternal: false,
-});
+describe("focus controller", () => {
+  test("gives every logical handle one distinct synchronously replaceable identity", () => {
+    const { focus } = createFixture();
+    const first = focus.createTarget();
+    const second = focus.createTarget();
 
-const stopRoute = (): InternalInputRouteDecision => ({
-  performed: true,
-  continue: false,
-  preventDefault: false,
-  blockExternal: false,
-});
+    expect(first.focus()).toBeUndefined();
+    expect(first.isFocused.value).toBe(true);
+    expect(second.isFocused.value).toBe(false);
 
-function createHarness(options: { failDemand?: () => boolean } = {}) {
-  const demand: string[] = [];
-  let lease = 0;
-  const routing = createInternalInputRoutingRuntime([], {
-    acquire() {
-      const id = ++lease;
-      demand.push(`acquire:${id}`);
-      if (options.failDemand?.()) throw new Error("input unavailable");
-      return {
-        activate() {
-          demand.push(`activate:${id}`);
-        },
-        release() {
-          demand.push(`release:${id}`);
-        },
-      };
-    },
-  });
-  const root = createTree();
-  const focus = createInternalFocusController({ root, inputRouting: routing });
+    expect(second.focus()).toBeUndefined();
+    expect(first.isFocused.value).toBe(false);
+    expect(second.isFocused.value).toBe(true);
+    expect(focus.effectiveTarget.value).toBe(second);
 
-  const dispatch = (sequence: string) => {
-    const fact = normalizeInputEvent(sequence);
-    if (!fact) throw new Error(`expected ${JSON.stringify(sequence)} to normalize`);
-    const resolution = routing.resolve(routing.capture());
-    return {
-      resolution,
-      result: dispatchInternalInput(fact, captureInternalInputRoutePlan(resolution.candidate)),
-    };
-  };
-
-  return { demand, dispatch, focus, root, routing };
-}
-
-describe("app-owned focus controller", () => {
-  test("does not displace an explicit F3 topology while no focus lifetime exists", () => {
-    const routing = createInternalInputRoutingRuntime();
-    const manual = routing.registerSemantic({ id: "manual", handle: stopRoute });
-    const endManual = routing.select({ focusedOwner: manual.lease });
-    const focus = createInternalFocusController({ root: createTree(), inputRouting: routing });
-
-    focus.reconcileRenderedTree();
-    expect(routing.resolve(routing.capture())).toMatchObject({
-      kind: "selected",
-      candidate: { focusedOwner: { id: "manual" } },
-    });
-
-    const target = focus.createTarget();
-    expect(routing.resolve(routing.capture()).candidate.focusedOwner).toBeUndefined();
-    focus.removeTarget(target);
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-
-    endManual();
-    manual.end();
+    expect(first.blur()).toBeUndefined();
+    expect(second.isFocused.value).toBe(true);
+    expect(second.blur()).toBeUndefined();
+    expect(second.isFocused.value).toBe(false);
     focus.dispose();
   });
 
-  test("uses rendered preorder, inherited display:none, and exact public handles", () => {
-    const { focus, root } = createHarness();
-    let hidden = false;
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost, () => (hidden ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX));
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
+  test("keeps an unavailable rendered handle inert without disturbing the owner", () => {
+    const { root, focus } = createFixture();
+    const logical = focus.createTarget();
+    const rendered = focus.createTarget({ requiresRenderedTarget: true });
+    logical.focus();
+
+    rendered.focus();
+    expect(logical.isFocused.value).toBe(true);
+    expect(rendered.isFocused.value).toBe(false);
+
+    const host = connect(root, createBox());
     focus.transaction("reconcile", () => {
-      focus.attachTarget(first, firstHost);
-      focus.attachTarget(second, secondHost);
+      focus.attachTarget(rendered, host);
     });
+    expect(rendered.isFocused.value).toBe(false);
 
-    expect(focus.focusedTarget.value).toBe(first);
-    expect(first.isFocused.value).toBe(true);
-    expect(second.isFocused.value).toBe(false);
-    expect(focus.focusNext()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(second);
-
-    hidden = true;
-    focus.reconcileRenderedTree();
-    expect(focus.focusedTarget.value).toBe(first);
-
-    hidden = false;
-    root.children.splice(0, 2, secondHost, firstHost);
-    focus.reconcileRenderedTree();
-    expect(focus.focusPrevious()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(second);
+    rendered.focus();
+    expect(logical.isFocused.value).toBe(false);
+    expect(rendered.isFocused.value).toBe(true);
+    focus.dispose();
   });
 
-  test("publishes accepted target hosts to private dependents after reconcile", () => {
-    const { focus, root } = createHarness();
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    const target = focus.createTarget({ autoFocus: true });
-    const hosts: Array<TuiNode | null> = [];
-    const dispose = focus.registerTargetDependent(target, {
-      hostChanged: (value) => hosts.push(value),
-      disposed: () => hosts.push(null),
-    });
-
-    expect(hosts).toEqual([null]);
+  test("preserves ownership across one valid-to-valid rendered reconciliation", () => {
+    const { root, focus } = createFixture();
+    const first = connect(root, createBox());
+    const second = connect(root, createBox());
+    const target = focus.createTarget({ requiresRenderedTarget: true });
     let detach = () => {};
-    focus.transaction("reconcile", () => {
-      detach = focus.attachTarget(target, host);
-      expect(hosts).toEqual([null]);
-    });
-    expect(hosts).toEqual([null, host]);
 
-    focus.reconcileRenderedTree();
-    expect(hosts).toEqual([null, host]);
+    focus.transaction("reconcile", () => {
+      detach = focus.attachTarget(target, first);
+    });
+    target.focus();
+    expect(target.isFocused.value).toBe(true);
 
     focus.transaction("reconcile", () => {
       detach();
-      expect(hosts).toEqual([null, host]);
+      detach = focus.attachTarget(target, second);
     });
-    expect(hosts).toEqual([null, host, null]);
-
-    dispose();
-    dispose();
-    focus.attachTarget(target, host);
-    expect(hosts).toEqual([null, host, null]);
+    expect(target.isFocused.value).toBe(true);
+    expect(focus.effectiveTarget.value).toBe(target);
+    focus.dispose();
   });
 
-  test("validates target dependents before mutation", () => {
-    const first = createHarness();
-    const second = createHarness();
-    const target = first.focus.createTarget();
-    const calls: string[] = [];
-    const dependent = {
-      hostChanged: () => calls.push("host"),
-      disposed: () => calls.push("disposed"),
-    };
-
-    expect(() => second.focus.registerTargetDependent(target, dependent)).toThrow(
-      "belongs to another application or has been disposed",
-    );
-    expect(calls).toEqual([]);
-
-    first.focus.removeTarget(target);
-    expect(() => first.focus.registerTargetDependent(target, dependent)).toThrow(
-      "belongs to another application or has been disposed",
-    );
-    expect(calls).toEqual([]);
-
-    first.focus.dispose();
-    second.focus.dispose();
-  });
-
-  test("disposes target dependents exactly once with their owning lifetime", () => {
-    const direct = createHarness();
-    const directTarget = direct.focus.createTarget();
-    const directCalls: string[] = [];
-    const stopDirect = direct.focus.registerTargetDependent(directTarget, {
-      hostChanged: () => {},
-      disposed: () => directCalls.push("disposed"),
-    });
-    direct.focus.removeTarget(directTarget);
-    stopDirect();
-    direct.focus.dispose();
-    expect(directCalls).toEqual(["disposed"]);
-
-    const recursive = createHarness();
-    const parent = recursive.focus.createScope();
-    const child = recursive.focus.createScope({ parent });
-    const scopedTarget = recursive.focus.createTarget({ scope: child });
-    const recursiveCalls: string[] = [];
-    const stopRecursive = recursive.focus.registerTargetDependent(scopedTarget, {
-      hostChanged: () => {},
-      disposed: () => recursiveCalls.push("disposed"),
-    });
-    recursive.focus.removeScope(parent);
-    stopRecursive();
-    recursive.focus.dispose();
-    expect(recursiveCalls).toEqual(["disposed"]);
-
-    const wholeController = createHarness();
-    const controllerTarget = wholeController.focus.createTarget();
-    const controllerCalls: string[] = [];
-    const stopController = wholeController.focus.registerTargetDependent(controllerTarget, {
-      hostChanged: () => {},
-      disposed: () => controllerCalls.push("disposed"),
-    });
-    wholeController.focus.dispose();
-    wholeController.focus.dispose();
-    stopController();
-    expect(controllerCalls).toEqual(["disposed"]);
-  });
-
-  test("publishes manager and target refs from one atomic snapshot", () => {
-    const { focus, root } = createHarness();
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost);
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
+  test("defers removal invalidation until reconciliation and never restores later", () => {
+    const { root, focus } = createFixture();
+    const host = connect(root, createBox());
+    const target = focus.createTarget({ requiresRenderedTarget: true });
+    let detach = () => {};
     focus.transaction("reconcile", () => {
-      focus.attachTarget(first, firstHost);
-      focus.attachTarget(second, secondHost);
+      detach = focus.attachTarget(target, host);
     });
-    const observations: Array<[boolean, boolean, boolean]> = [];
-    const observe = () => {
-      observations.push([
-        focus.focusedTarget.value === second,
-        first.isFocused.value,
-        second.isFocused.value,
-      ]);
-    };
-    const stops = [
-      watch(focus.focusedTarget, observe, { flush: "sync" }),
-      watch(first.isFocused, observe, { flush: "sync" }),
-      watch(second.isFocused, observe, { flush: "sync" }),
-    ];
+    target.focus();
 
-    focus.focusNext();
+    focus.transaction("cleanup", () => {
+      focus.beforeInvalidateSubtree(host);
+      detach();
+    });
+    expect(target.isFocused.value).toBe(true);
+    expect(focus.effectiveTarget.value).toBeNull();
 
-    expect(observations.length).toBeGreaterThan(0);
-    expect(observations.every((value) => value[0] && !value[1] && value[2])).toBe(true);
-    for (const stop of stops) stop();
+    focus.transaction("reconcile", () => {});
+    expect(target.isFocused.value).toBe(false);
+
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(target, host);
+    });
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
   });
 
-  test.each([
-    {
-      label: "attached sequential target",
-      attached: true,
-      tabIndex: 0 as const,
-      hidden: false,
-      disabled: false,
-      demanded: true,
-    },
-    {
-      label: "detached sequential target",
-      attached: false,
-      tabIndex: 0 as const,
-      hidden: false,
-      disabled: false,
-      demanded: false,
-    },
-    {
-      label: "programmatic-only target",
-      attached: true,
-      tabIndex: -1 as const,
-      hidden: false,
-      disabled: false,
-      demanded: false,
-    },
-    {
-      label: "hidden sequential target",
-      attached: true,
-      tabIndex: 0 as const,
-      hidden: true,
-      disabled: false,
-      demanded: false,
-    },
-    {
-      label: "disabled sequential target",
-      attached: true,
-      tabIndex: 0 as const,
-      hidden: false,
-      disabled: true,
-      demanded: false,
-    },
-  ])(
-    "derives demand from effective work: $label",
-    ({ attached, tabIndex, hidden, disabled, demanded }) => {
-      const { demand, focus, root, routing } = createHarness();
-      let displayNone = hidden;
-      const host = connect(root, createBox());
-      makeLayoutNode(host, () => (displayNone ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX));
-      const target = focus.createTarget({ autoFocus: true, tabIndex, disabled });
-      if (attached) focus.attachTarget(target, host);
-
-      expect(routing.resolve(routing.capture()).kind).toBe("selected");
-      expect(demand.some((event) => event.startsWith("acquire:"))).toBe(demanded);
-      displayNone = false;
-    },
-  );
-
-  test("validates duplicate hosts from the complete transaction and allows an atomic swap", () => {
-    const { focus, root } = createHarness();
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    const thirdHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost);
-    makeLayoutNode(thirdHost);
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
-    let detachFirst = () => {};
-    let detachSecond = () => {};
+  test("clears rendered focus when its own or an ancestor's display is none", () => {
+    const { root, focus } = createFixture();
+    const ancestor = connect(root, createBox());
+    const host = connect(ancestor, createBox());
+    const target = focus.createTarget({ requiresRenderedTarget: true });
     focus.transaction("reconcile", () => {
-      detachFirst = focus.attachTarget(first, firstHost);
-      detachSecond = focus.attachTarget(second, secondHost);
+      focus.attachTarget(target, host);
     });
+    target.focus();
 
+    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_NONE } as TuiBox["yoga"];
+    focus.transaction("reconcile", () => {});
+    expect(target.isFocused.value).toBe(false);
+
+    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_FLEX } as TuiBox["yoga"];
+    focus.transaction("reconcile", () => {});
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
+  });
+
+  test("preserves logical focus when rendered ancestry changes", () => {
+    const { root, focus } = createFixture();
+    const ancestor = connect(root, createBox());
+    const target = focus.createTarget();
+    target.focus();
+
+    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_NONE } as TuiBox["yoga"];
+    focus.transaction("reconcile", () => {});
+    expect(target.isFocused.value).toBe(true);
+    focus.dispose();
+  });
+
+  test("notifies private host dependents and disposes them with the identity", () => {
+    const { root, focus } = createFixture();
+    const host = connect(root, createBox());
+    const target = focus.createTarget({ requiresRenderedTarget: true });
+    const hostChanged = vi.fn();
+    const disposed = vi.fn();
+    focus.registerTargetDependent(target, { hostChanged, disposed });
+
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(target, host);
+    });
+    expect(hostChanged).toHaveBeenNthCalledWith(1, null);
+    expect(hostChanged).toHaveBeenNthCalledWith(2, host);
+
+    focus.removeTarget(target);
+    expect(disposed).toHaveBeenCalledOnce();
+    expect(target.focus()).toBeUndefined();
+    expect(target.blur()).toBeUndefined();
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
+  });
+
+  test("publishes false to a retained owner after its creating Vue scope stops", () => {
+    const { focus } = createFixture();
+    const scope = effectScope();
+    const target = scope.run(() => focus.createTarget())!;
+    target.focus();
+    expect(target.isFocused.value).toBe(true);
+
+    scope.stop();
+    focus.removeTarget(target);
+    expect(target.isFocused.value).toBe(false);
+    expect(target.focus()).toBeUndefined();
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
+  });
+
+  test("fails closed when rendered-target reconciliation rolls back", () => {
+    const { root, focus } = createFixture();
+    const first = connect(root, createBox());
+    const second = connect(root, createBox());
+    const target = focus.createTarget({ requiresRenderedTarget: true });
+    let detach = () => {};
+    let rejectHostChange = false;
+    focus.registerTargetDependent(target, {
+      hostChanged() {
+        if (rejectHostChange) throw new Error("dependent rejected host");
+      },
+      disposed() {},
+    });
+    focus.transaction("reconcile", () => {
+      detach = focus.attachTarget(target, first);
+    });
+    target.focus();
+    expect(target.isFocused.value).toBe(true);
+
+    rejectHostChange = true;
     expect(() =>
       focus.transaction("reconcile", () => {
-        detachFirst();
-        detachSecond();
-        focus.attachTarget(first, secondHost);
-        focus.attachTarget(second, firstHost);
+        detach();
+        focus.attachTarget(target, second);
       }),
-    ).not.toThrow();
-    expect(focus.focusedTarget.value).toBe(first);
-
-    const duplicate = focus.createTarget();
-    const duplicateHosts: Array<TuiNode | null> = [];
-    focus.registerTargetDependent(duplicate, {
-      hostChanged: (host) => duplicateHosts.push(host),
-      disposed: () => {},
-    });
-    expect(() => focus.attachTarget(duplicate, firstHost)).toThrow("more than one focus target");
-    expect(duplicateHosts).toEqual([null]);
-    expect(focus.focusedTarget.value).toBe(first);
-    expect(() => focus.attachTarget(duplicate, thirdHost)).not.toThrow();
-    expect(duplicateHosts).toEqual([null, thirdHost]);
-  });
-
-  test("freezes same-node handler membership for the current fact", () => {
-    const { dispatch, focus, root } = createHarness();
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    const target = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    focus.attachTarget(target, host);
-    const calls: string[] = [];
-    let disposeSecond = () => {};
-    let installedThird = false;
-    focus.registerTargetInput(target, () => {
-      calls.push("first");
-      disposeSecond();
-      if (!installedThird) {
-        installedThird = true;
-        focus.registerTargetInput(target, () => (calls.push("third"), continueRoute()));
-      }
-      return stopRoute();
-    });
-    disposeSecond = focus.registerTargetInput(target, () => {
-      calls.push("second");
-      return continueRoute();
-    });
-
-    dispatch("x");
-    expect(calls).toEqual(["first", "second"]);
-
-    calls.length = 0;
-    dispatch("x");
-    expect(calls).toEqual(["first", "third"]);
-  });
-
-  test("does not let an old Tab default traverse a scope opened by the same fact", () => {
-    const { dispatch, focus, root } = createHarness();
-    const composerHost = connect(root, createBox());
-    const firstApprovalHost = connect(root, createBox());
-    const secondApprovalHost = connect(root, createBox());
-    makeLayoutNode(composerHost);
-    makeLayoutNode(firstApprovalHost);
-    makeLayoutNode(secondApprovalHost);
-    const composer = focus.createTarget({ autoFocus: true });
-    const modal = focus.createScope({ active: false, trapped: true });
-    const firstApproval = focus.createTarget({ scope: modal, autoFocus: true });
-    const secondApproval = focus.createTarget({ scope: modal });
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(composer, composerHost);
-      focus.attachTarget(firstApproval, firstApprovalHost);
-      focus.attachTarget(secondApproval, secondApprovalHost);
-    });
-    focus.registerTargetInput(composer, (fact) => {
-      if (fact.kind === "key" && fact.key.name === "tab") {
-        focus.updateScope(modal, { active: true });
-      }
-      return continueRoute();
-    });
-
-    dispatch("\t");
-    expect(focus.focusedTarget.value).toBe(firstApproval);
-
-    dispatch("\t");
-    expect(focus.focusedTarget.value).toBe(secondApproval);
-  });
-
-  test("selects a reactivated trap target whose rendered host commits afterward", () => {
-    const { focus, root } = createHarness();
-    const composerHost = connect(root, createBox());
-    const approvalHost = connect(root, createBox());
-    makeLayoutNode(composerHost);
-    makeLayoutNode(approvalHost);
-    const composer = focus.createTarget({ autoFocus: true });
-    const modal = focus.createScope({ active: false, trapped: true });
-    const approval = focus.createTarget({ scope: modal, autoFocus: true });
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(composer, composerHost);
-      focus.attachTarget(approval, approvalHost);
-    });
-
-    focus.updateScope(modal, { active: true });
-    expect(focus.focusedTarget.value).toBe(approval);
-    focus.updateScope(modal, { active: false });
-    expect(focus.focusedTarget.value).toBe(composer);
-
-    root.children.splice(root.children.indexOf(approvalHost), 1);
-    approvalHost.parent = null;
-    focus.reconcileRenderedTree();
-    focus.updateScope(modal, { active: true });
-    expect(focus.focusedTarget.value).toBeNull();
-
-    connect(root, approvalHost);
-    focus.reconcileRenderedTree();
-    expect(focus.focusedTarget.value).toBe(approval);
-  });
-
-  test("keeps a targetless trapped scope selected and demands input only for its handler", () => {
-    const { demand, dispatch, focus, routing } = createHarness();
-    const modal = focus.createScope({ trapped: true });
-    const calls: string[] = [];
-    const release = focus.registerScopeInput(modal, () => {
-      calls.push("modal");
-      return continueRoute();
-    });
-
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-    expect(demand.some((event) => event.startsWith("acquire:"))).toBe(true);
-    dispatch("x");
-    expect(calls).toEqual(["modal"]);
-    expect(modal.containsFocus.value).toBe(false);
-
-    release();
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-    expect(demand.at(-1)?.startsWith("release:")).toBe(true);
-  });
-
-  test("keeps a split fact valid across a no-op rendered-target reconciliation", () => {
-    const { demand, focus, root, routing } = createHarness();
-    const approvalHost = connect(root, createBox());
-    makeLayoutNode(approvalHost);
-    const modal = focus.createScope({ trapped: true });
-    const approval = focus.createTarget({ scope: modal, autoFocus: true });
-    focus.registerScopeInput(modal, continueRoute);
-    focus.attachTarget(approval, approvalHost);
-    const captured = routing.capture();
-    const demandBeforeReconcile = [...demand];
-
-    focus.reconcileRenderedTree();
-
-    expect(routing.resolve(captured).kind).toBe("selected");
-    expect(focus.focusedTarget.value).toBe(approval);
-    expect(demand).toEqual(demandBeforeReconcile);
-
-    focus.updateScope(modal, { active: false });
-    expect(routing.resolve(captured).kind).toBe("stale");
-  });
-
-  test("replaces a captured generation when host reorder changes Tab traversal", () => {
-    const { focus, root, routing } = createHarness();
-    const ownerHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    const thirdHost = connect(root, createBox());
-    makeLayoutNode(ownerHost);
-    makeLayoutNode(secondHost);
-    makeLayoutNode(thirdHost);
-    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    const second = focus.createTarget();
-    const third = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(owner, ownerHost);
-      focus.attachTarget(second, secondHost);
-      focus.attachTarget(third, thirdHost);
-    });
-    const captured = routing.capture();
-
-    root.children.splice(0, 3, ownerHost, thirdHost, secondHost);
-    focus.reconcileRenderedTree();
-
-    expect(routing.resolve(captured).kind).toBe("stale");
-    expect(focus.focusedTarget.value).toBe(owner);
-    expect(focus.focusNext()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(third);
-  });
-
-  test("tracks a non-sequential owner position in the rendered Tab order", () => {
-    const { focus, root, routing } = createHarness();
-    const secondHost = connect(root, createBox());
-    const ownerHost = connect(root, createBox());
-    const thirdHost = connect(root, createBox());
-    makeLayoutNode(secondHost);
-    makeLayoutNode(ownerHost);
-    makeLayoutNode(thirdHost);
-    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    const second = focus.createTarget();
-    const third = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(owner, ownerHost);
-      focus.attachTarget(second, secondHost);
-      focus.attachTarget(third, thirdHost);
-    });
-    const captured = routing.capture();
-
-    root.children.splice(0, 3, secondHost, thirdHost, ownerHost);
-    focus.reconcileRenderedTree();
-
-    expect(routing.resolve(captured).kind).toBe("stale");
-    expect(focus.focusedTarget.value).toBe(owner);
-    expect(focus.focusNext()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(second);
-  });
-
-  test("replaces a captured generation when host visibility changes Tab traversal", () => {
-    const { focus, root, routing } = createHarness();
-    let secondHidden = false;
-    const ownerHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    const thirdHost = connect(root, createBox());
-    makeLayoutNode(ownerHost);
-    makeLayoutNode(secondHost, () => (secondHidden ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX));
-    makeLayoutNode(thirdHost);
-    const owner = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    const second = focus.createTarget();
-    const third = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(owner, ownerHost);
-      focus.attachTarget(second, secondHost);
-      focus.attachTarget(third, thirdHost);
-    });
-    const captured = routing.capture();
-
-    secondHidden = true;
-    focus.reconcileRenderedTree();
-
-    expect(routing.resolve(captured).kind).toBe("stale");
-    expect(focus.focusedTarget.value).toBe(owner);
-    expect(focus.focusNext()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(third);
-  });
-
-  test("does not count an off-path target handler as input demand", () => {
-    const { demand, focus, root } = createHarness();
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost);
-    const first = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    const second = focus.createTarget({ tabIndex: -1 });
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(first, firstHost);
-      focus.attachTarget(second, secondHost);
-    });
-    focus.registerTargetInput(second, continueRoute);
-
-    expect(demand.some((event) => event.startsWith("acquire:"))).toBe(false);
-    expect(second.focus()).toBe(true);
-    expect(demand.some((event) => event.startsWith("acquire:"))).toBe(true);
-  });
-
-  test("rolls back focus policy, public refs, and the selected route when demand fails", () => {
-    let failDemand = false;
-    const { demand, focus, root, routing } = createHarness({
-      failDemand: () => failDemand,
-    });
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    const target = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    focus.attachTarget(target, host);
-    const accepted = routing.resolve(routing.capture()).candidate;
-    expect(focus.focusedTarget.value).toBe(target);
-    expect(focus.effectiveTarget.value).toBe(target);
-
-    failDemand = true;
-    expect(() => focus.updateTarget(target, { tabIndex: 0 })).toThrow("input unavailable");
-
-    expect(focus.focusedTarget.value).toBe(target);
-    expect(focus.effectiveTarget.value).toBe(target);
-    expect(routing.resolve(routing.capture()).candidate).toEqual(accepted);
-    expect(focus.focusNext()).toBe(false);
-    expect(demand.filter((event) => event.startsWith("release:"))).toEqual([]);
-
-    failDemand = false;
-    focus.updateTarget(target, { tabIndex: 0 });
-    expect(focus.focusNext()).toBe(true);
-  });
-
-  test("restores the accepted route when a reentrant later candidate also fails", () => {
-    let focus!: ReturnType<typeof createInternalFocusController>;
-    let target!: ReturnType<typeof focus.createTarget>;
-    let acquireCount = 0;
-    let replacementAcquire = 0;
-    let reenter = false;
-    const releases: number[] = [];
-    const calls: string[] = [];
-    const routing = createInternalInputRoutingRuntime([], {
-      acquire() {
-        const id = ++acquireCount;
-        if (reenter) {
-          replacementAcquire++;
-          if (replacementAcquire === 1) {
-            focus.registerTargetInput(target, continueRoute);
-          } else if (replacementAcquire === 2) {
-            throw new Error("second candidate unavailable");
-          }
-        }
-        return { activate() {}, release: () => releases.push(id) };
-      },
-    });
-    const root = createTree();
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    focus = createInternalFocusController({ root, inputRouting: routing });
-    target = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    focus.attachTarget(target, host);
-    focus.registerTargetInput(target, () => (calls.push("accepted"), continueRoute()));
-    const accepted = routing.resolve(routing.capture()).candidate;
-    expect(acquireCount).toBe(1);
-
-    reenter = true;
-    expect(() => focus.updateTarget(target, { autoFocus: false })).toThrow(
-      "second candidate unavailable",
-    );
-
-    expect(focus.focusedTarget.value).toBe(target);
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-    expect(routing.resolve(routing.capture()).candidate).toEqual(accepted);
-    expect(releases).toEqual([2]);
-    const fact = normalizeInputEvent("x")!;
-    dispatchInternalInput(
-      fact,
-      captureInternalInputRoutePlan(routing.resolve(routing.capture()).candidate),
-    );
-    expect(calls).toEqual(["accepted"]);
-  });
-
-  test("rejects a second external owner without replacing the first", () => {
-    const { dispatch, focus, root } = createHarness();
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    const target = focus.createTarget({ autoFocus: true, tabIndex: -1 });
-    focus.attachTarget(target, host);
-    const sources: string[] = [];
-    focus.registerExternal(target, (source) => sources.push(source.sequence));
-
-    expect(() => focus.registerExternal(target, () => {})).toThrow(
-      "more than one external input receiver",
-    );
-    dispatch("x");
-    expect(sources).toEqual(["x"]);
-  });
-
-  test("invalidates removed generations and disposes retained handles idempotently", () => {
-    const { focus, root, routing } = createHarness();
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost);
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(first, firstHost);
-      focus.attachTarget(second, secondHost);
-    });
-    focus.registerTargetInput(first, continueRoute);
-    const captured = routing.capture();
-
-    focus.removeTarget(first);
-
-    expect(routing.resolve(captured).kind).toBe("stale");
-    expect(focus.focusedTarget.value).toBe(second);
-    expect(first.isFocused.value).toBe(false);
-    expect(first.focus()).toBe(false);
-    expect(first.blur()).toBe(false);
-
-    focus.dispose();
-    focus.dispose();
-    expect(focus.focusedTarget.value).toBeNull();
-    expect(second.isFocused.value).toBe(false);
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-  });
-
-  test("never revives an ended target lifetime when fallback acquisition fails", () => {
-    let failDemand = false;
-    const { focus, root, routing } = createHarness({ failDemand: () => failDemand });
-    const firstHost = connect(root, createBox());
-    const secondHost = connect(root, createBox());
-    makeLayoutNode(firstHost);
-    makeLayoutNode(secondHost);
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(first, firstHost);
-      focus.attachTarget(second, secondHost);
-    });
-    failDemand = true;
-
-    expect(() => focus.removeTarget(first)).toThrow("input unavailable");
-
-    expect(first.isFocused.value).toBe(false);
-    expect(first.focus()).toBe(false);
-    expect(focus.focusedTarget.value).toBeNull();
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-
-    failDemand = false;
-    focus.reconcileRenderedTree();
-    expect(focus.focusedTarget.value).toBe(second);
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-  });
-
-  test("fails a removed subtree route closed until the authoritative rendered commit", () => {
-    const { focus, root, routing } = createHarness();
-    const removedParent = connect(root, createBox());
-    const removedHost = connect(removedParent, createBox());
-    const fallbackHost = connect(root, createBox());
-    makeLayoutNode(removedParent);
-    makeLayoutNode(removedHost);
-    makeLayoutNode(fallbackHost);
-    const removed = focus.createTarget({ autoFocus: true });
-    const fallback = focus.createTarget();
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(removed, removedHost);
-      focus.attachTarget(fallback, fallbackHost);
-    });
-    focus.registerTargetInput(removed, continueRoute);
-    expect(focus.focusedTarget.value).toBe(removed);
-    expect(focus.effectiveTarget.value).toBe(removed);
-
-    focus.transaction("cleanup", () => focus.beforeInvalidateSubtree(removedParent));
-
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-    expect(focus.focusedTarget.value).toBe(removed);
+    ).toThrow("dependent rejected host");
+    expect(target.isFocused.value).toBe(false);
     expect(focus.effectiveTarget.value).toBeNull();
-    expect(removed.isFocused.value).toBe(true);
-    expect(removed.focus()).toBe(false);
-    expect(focus.focusNext()).toBe(true);
-    expect(focus.focusedTarget.value).toBe(removed);
 
-    root.children.splice(root.children.indexOf(removedParent), 1);
-    removedParent.parent = null;
-    focus.reconcileRenderedTree();
-
-    expect(focus.focusedTarget.value).toBe(fallback);
-    expect(focus.effectiveTarget.value).toBe(fallback);
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
+    rejectHostChange = false;
+    focus.transaction("reconcile", () => {});
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
   });
 
-  test("does not invalidate focus for an unrelated removed subtree", () => {
-    const { focus, root, routing } = createHarness();
-    const focusedHost = connect(root, createBox());
-    const unrelated = connect(root, createBox());
-    makeLayoutNode(focusedHost);
-    makeLayoutNode(unrelated);
-    const target = focus.createTarget({ autoFocus: true });
-    focus.attachTarget(target, focusedHost);
-    const before = routing.resolve(routing.capture()).candidate;
+  test("keeps every operation inert in the string host and after disposal", () => {
+    const { focus } = createFixture(true);
+    const target = focus.createTarget();
+    target.focus();
+    expect(target.isFocused.value).toBe(false);
+    expect(focus.effectiveTarget.value).toBeNull();
 
-    focus.beforeInvalidateSubtree(unrelated);
-
-    expect(focus.focusedTarget.value).toBe(target);
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-    expect(routing.resolve(routing.capture()).candidate).toEqual(before);
-  });
-
-  test("keeps one focused handle stable across subtree invalidation and keyed replacement", () => {
-    const { focus, root, routing } = createHarness();
-    const oldParent = connect(root, createBox());
-    const oldHost = connect(oldParent, createBox());
-    makeLayoutNode(oldParent);
-    makeLayoutNode(oldHost);
-    const target = focus.createTarget({ autoFocus: true });
-    focus.attachTarget(target, oldHost);
-    const focusChanges: boolean[] = [];
-    const stop = watch(target.isFocused, (value) => focusChanges.push(value), { flush: "sync" });
-
-    focus.beforeInvalidateSubtree(oldParent);
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-    expect(target.isFocused.value).toBe(true);
-
-    root.children.splice(root.children.indexOf(oldParent), 1);
-    oldParent.parent = null;
-    const replacement = connect(root, createBox());
-    makeLayoutNode(replacement);
-    focus.attachTarget(target, replacement);
-
-    expect(focus.focusedTarget.value).toBe(target);
-    expect(target.isFocused.value).toBe(true);
-    expect(focusChanges).toEqual([]);
-    expect(routing.resolve(routing.capture()).kind).toBe("selected");
-    stop();
-  });
-
-  test("keeps string-host focus services fully inert", () => {
-    let acquisitions = 0;
-    const routing = createInternalInputRoutingRuntime([], {
-      acquire() {
-        acquisitions++;
-        return { activate() {}, release() {} };
-      },
-    });
-    const root = createTree();
-    const host = connect(root, createBox());
-    makeLayoutNode(host);
-    const focus = createInternalFocusController({ root, inputRouting: routing, inert: true });
-    const first = focus.createTarget({ autoFocus: true });
-    const second = focus.createTarget();
-    const scope = focus.createScope({ trapped: true });
-    const calls: string[] = [];
-
-    expect(() => {
-      focus.attachTarget(first, host);
-      focus.attachTarget(second, host);
-      focus.registerTargetInput(first, () => (calls.push("target"), continueRoute()));
-      focus.registerScopeInput(scope, () => (calls.push("scope"), continueRoute()));
-      focus.registerExternal(first, () => calls.push("external"));
-    }).not.toThrow();
-
-    expect(first.focus()).toBe(false);
-    expect(focus.focusNext()).toBe(false);
-    expect(focus.blur()).toBe(false);
-    expect(first.isFocused.value).toBe(false);
-    expect(scope.containsFocus.value).toBe(false);
-    expect(focus.focusedTarget.value).toBeNull();
-    expect(routing.resolve(routing.capture()).kind).toBe("unselected");
-    expect(acquisitions).toBe(0);
-    expect(calls).toEqual([]);
+    focus.dispose();
+    target.focus();
+    target.blur();
+    expect(target.isFocused.value).toBe(false);
   });
 });

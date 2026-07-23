@@ -13,7 +13,6 @@ import { createRenderer } from "vue";
 import { writeSync as fsWriteSync } from "node:fs";
 import { onExit } from "signal-exit";
 import ansiEscapes from "ansi-escapes";
-import wrapAnsi from "wrap-ansi";
 import {
   getSharedStdinIngress,
   type SharedStdinIngress,
@@ -47,7 +46,6 @@ import { buildNodeOps } from "./host/node-ops.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { acquireRuntimeResource, changeRuntimeResource } from "./resource-tracker.ts";
 import { paint, releasePaintCaches } from "./paint/paint.ts";
-import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
 import {
   findStatics,
@@ -95,7 +93,6 @@ import {
   type InternalRenderSessionService,
   type ResolvedLiveDimensions,
   type RenderMode,
-  type RenderPresentation,
 } from "./render-session.ts";
 import {
   INTERNAL_TERMINAL_SIZE_PROBE,
@@ -119,11 +116,6 @@ import {
   setInternalGeometryService,
   type InternalGeometryPaintFrame,
 } from "./geometry/geometry-service.ts";
-import {
-  createInternalBoxPresenceService,
-  setInternalBoxPresenceService,
-  type InternalBoxPresenceFrame,
-} from "./box-presence/box-presence-service.ts";
 import {
   createInternalFocusController,
   type InternalFocusController,
@@ -169,8 +161,6 @@ export interface MountOptions {
    * @default 'inline'
    */
   readonly mode?: RenderMode;
-  /** Select visual terminal output or a linear screen-reader transcript. */
-  readonly presentation?: RenderPresentation;
   /**
    * Patch `console.*` methods to route output through the TUI frame
    * coordinator (writeToStdout / writeToStderr) so that console.log
@@ -186,7 +176,6 @@ export type InternalMountOptions = MountOptions & {
   readonly liveUpdates?: boolean;
   readonly onRender?: (info: { renderTime: number }) => void;
   readonly maxFps?: number;
-  readonly isScreenReaderEnabled?: boolean;
   readonly incrementalRendering?: boolean;
   readonly clipboard?: ClipboardTransport;
   [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
@@ -195,6 +184,46 @@ export type InternalMountOptions = MountOptions & {
   [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
   [INTERNAL_SUSPENSION_HOST]?: SuspensionHost;
 };
+
+const acceptedMountOptionKeys = new Set<PropertyKey>([
+  // Public options.
+  "stdout",
+  "stdin",
+  "stderr",
+  "mode",
+  "patchConsole",
+  // Repository-only controls. These remain temporary internal strings or
+  // symbols until the separate internal-option cleanup is implemented.
+  "liveUpdates",
+  "onRender",
+  "maxFps",
+  "incrementalRendering",
+  "clipboard",
+  INTERNAL_KITTY_KEYBOARD,
+  INTERNAL_RENDER_OBSERVER,
+  INTERNAL_TEST_INPUT_HOST,
+  INTERNAL_TERMINAL_SIZE_PROBE,
+  INTERNAL_SUSPENSION_HOST,
+  // Deliberately recognized migration errors for superseded mount contracts.
+  "fullscreen",
+  "alternateScreen",
+  "interactive",
+  "debug",
+  "rawMode",
+  "exitOnCtrlC",
+  "kittyKeyboard",
+]);
+
+function assertKnownMountOptionKeys(options: unknown): asserts options is InternalMountOptions {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new TypeError("Mount options must be an object or undefined.");
+  }
+  for (const key of Reflect.ownKeys(options)) {
+    if (acceptedMountOptionKeys.has(key)) continue;
+    if (typeof key === "symbol") throw new TypeError("Unknown symbol mount option.");
+    throw new TypeError(`Unknown mount option ${JSON.stringify(key)}.`);
+  }
+}
 
 // Extends `App<TuiNode>` (the renderer's real app type) so `TuiApp` inherits Vue's full app
 // surface — `use`/`component`/`provide`/`config`/… — for free.
@@ -218,10 +247,6 @@ type RootProps = Record<string, unknown>;
 
 const FULLSCREEN_STATIC_ERROR =
   "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
-// Screen-reader Inline can remain live without a coherent terminal row count.
-// A large relative move is clamped by terminal emulators at the bottom margin,
-// giving resize recovery a truthful bottom boundary without inventing 24 rows.
-const TERMINAL_BOTTOM_CLAMP_ROWS = 9999;
 
 function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
   return classifyLiveInputAvailability(stdin).status === "available";
@@ -229,16 +254,6 @@ function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
 
 function supportsTerminalMouse(): boolean {
   return process.env["TERM"] !== "dumb";
-}
-
-function normalizeRequestedPresentation(options: object): RenderPresentation | undefined {
-  const presentation = (options as { readonly presentation?: unknown }).presentation;
-  if (presentation === undefined || presentation === "visual" || presentation === "screen-reader") {
-    return presentation;
-  }
-  throw new TypeError(
-    'Mount option "presentation" must be "visual", "screen-reader", or undefined.',
-  );
 }
 
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
@@ -249,7 +264,7 @@ function normalizeRequestedPresentation(options: object): RenderPresentation | u
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 
 // Error classification and fallback messages share one UI-independent source
-// with render-to-string so fatal settlement cannot diverge from presentation.
+// with render-to-string so fatal settlement stays consistent across hosts.
 
 type MaybeWritableStream = NodeJS.WriteStream & {
   writable?: boolean;
@@ -338,7 +353,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
-  let mountedBoxPresence: ReturnType<typeof createInternalBoxPresenceService> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
   let mountedMouseController: FullscreenMouseController | null = null;
   let mountedTestInputHostDetach: (() => void) | null = null;
@@ -982,12 +996,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
-      if (mountedBoxPresence) {
-        const boxPresence = mountedBoxPresence;
-        mountedBoxPresence = null;
-        setInternalBoxPresenceService(appContext, null);
-        runBestEffort(() => boxPresence.dispose());
-      }
       if (mountedCaretController) {
         const caretController = mountedCaretController;
         mountedCaretController = null;
@@ -1271,8 +1279,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // The mount contract is validated before reading stream getters, checking
     // stream ownership, or mutating Vue/terminal state. Removed-option errors
     // deliberately win over an invalid mode value.
+    assertKnownMountOptionKeys(options);
     const requestedMode = normalizeRequestedMode(options);
-    const requestedPresentation = normalizeRequestedPresentation(options);
     const liveUpdatesOverride = validateLiveUpdates(
       (options as { readonly liveUpdates?: unknown }).liveUpdates,
     );
@@ -1339,10 +1347,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const stdin = options.stdin ?? process.stdin;
     const stderr = options.stderr ?? process.stderr;
 
-    const requestedScreenReaderPresentation =
-      requestedPresentation !== undefined
-        ? requestedPresentation === "screen-reader"
-        : (options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true");
     const stdoutFacts = {
       isTTY: Boolean(stdout.isTTY),
       columns: stdout.columns,
@@ -1354,23 +1358,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const surface = resolveLiveSurface({
       requestedMode,
       liveUpdatesOverride,
-      presentation: requestedScreenReaderPresentation ? "screen-reader" : "visual",
       suspensionSupported: suspensionHost.supported,
       stdout: stdoutFacts,
       terminalProbe,
     });
     const renderSession = createLiveRenderSessionService(surface);
-    const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
     const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
-    const boundedInlineSurface =
-      surface.kind === "inline-terminal" && surface.session.output.presentation === "visual";
+    const boundedInlineSurface = surface.kind === "inline-terminal";
     const inlineTerminalSurface = surface.kind === "inline-terminal";
     const mouseProtocolAvailable = supportsTerminalMouse() || testInputHost?.supportsMouse === true;
     const targetedCaretOutputAvailable =
-      dynamicUpdatesLive &&
-      surface.session.output.destination === "terminal" &&
-      surface.session.output.presentation === "visual";
+      dynamicUpdatesLive && surface.session.output.destination === "terminal";
 
     function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
       const currentStdout = {
@@ -1556,7 +1555,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let resizeEventGeneration = 0;
       let resizeHandledGeneration = 0;
       let resizePaintPending = false;
-      let preparingBoxPresenceCandidate = false;
       let requestPendingResizeRefresh: () => void = () => {};
       let prepareResumeSurface: (() => (() => CoordinatedWriteResult) | null) | null = null;
       let suspendedFullscreenSurface = false;
@@ -1766,10 +1764,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                   ensureFullscreenSurface();
                 }
                 mountedMouseController?.resume();
-                mountedGeometry?.setSurfaceAvailable(!isScreenReaderEnabled);
-                mountedTextSelection?.setSurfaceAvailable(
-                  fixedFullscreenSurface && !isScreenReaderEnabled,
-                );
+                mountedGeometry?.setSurfaceAvailable(true);
+                mountedTextSelection?.setSurfaceAvailable(fixedFullscreenSurface);
               });
             });
             if (!(await waitForAcceptedOutput(surfaceResult))) {
@@ -1876,9 +1872,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           ? activeWriterCaretOwner.position
           : mountedCaretController?.writerPosition;
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
-        // the first content commit, the value the resize-boundary path assigns,
-        // and what an empty screen-reader frame leaves — must fall
-        // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
+        // the first content commit or the value the resize-boundary path assigns —
+        // must fall back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
         // null/undefined, so an
         // empty string would pass through and restore nothing after an external write.
         withWriterCaretOwnership(caretPosition, () => {
@@ -1920,10 +1915,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 });
                 return;
               }
-              if (isScreenReaderEnabled && dynamicUpdatesLive) {
-                repaintTranscript(() => writeCommittedInlineOutput(stdout, outputData));
-                return;
-              }
               if (!dynamicUpdatesLive) {
                 writeRuntimeOutput(stdout, outputData);
                 return;
@@ -1954,10 +1945,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                   writeBefore: () => writeRuntimeOutput(stderr, outputData),
                   forceFull: true,
                 });
-                return;
-              }
-              if (isScreenReaderEnabled && dynamicUpdatesLive) {
-                repaintTranscript(() => writeCommittedInlineOutput(stderr, outputData));
                 return;
               }
               if (!dynamicUpdatesLive) {
@@ -2042,11 +2029,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       };
       const clipboard = createInternalClipboardService({
         transport: clipboardTransport,
-        osc52Available:
-          dynamicUpdatesLive &&
-          surface.session.output.destination === "terminal" &&
-          surface.session.output.presentation === "visual",
-        osc52UnavailableReason: isScreenReaderEnabled ? "screen-reader" : "output-not-terminal",
+        osc52Available: dynamicUpdatesLive && surface.session.output.destination === "terminal",
         writeOsc52(text) {
           if (teardownStarted) throw new Error("clipboard transport is disposed");
           if (terminalSuspended) throw new Error("clipboard transport is suspended");
@@ -2187,7 +2170,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
         const focusController = createInternalFocusController({
           root: tuiRoot,
-          inputRouting: stdinController.internal_inputRouting,
         });
         mountedFocusController = focusController;
         const caretController = createInternalCaretController({
@@ -2196,21 +2178,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           requestPaint: () => scheduledCommit(),
         });
         mountedCaretController = caretController;
-        const boxPresence = createInternalBoxPresenceService(tuiRoot, () => {
-          // Reconciliation at the start of this very commit is already covered
-          // by the frame about to begin. Ref-only retargets outside that window
-          // still need to schedule an otherwise output-identical transaction.
-          if (!preparingBoxPresenceCandidate) scheduledCommit();
-        });
-        mountedBoxPresence = boxPresence;
-        setInternalBoxPresenceService(appContext, boxPresence);
         const geometry = createInternalGeometryService(tuiRoot, () => scheduledCommit());
         mountedGeometry = geometry;
-        if (isScreenReaderEnabled) geometry.setSurfaceAvailable(false);
         setInternalGeometryService(appContext, geometry);
         const textSelection = createInternalTextSelectionController({
-          surfaceAvailable: fixedFullscreenSurface && !isScreenReaderEnabled,
-          unavailableReason: isScreenReaderEnabled ? "screen-reader" : "host-unavailable",
+          surfaceAvailable: fixedFullscreenSurface,
+          unavailableReason: "host-unavailable",
           requestPaint: () => scheduledCommit(),
           clipboard: mountedClipboard!,
         });
@@ -2416,23 +2389,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (error !== undefined) throw error;
       }
 
-      function repaintTranscript(writeBefore: () => void) {
-        runCoordinatedWrite(
-          () => {
-            if (frameState.outputHeight > 0) {
-              writeRuntimeOutput(stdout, ansiEscapes.eraseLines(frameState.outputHeight));
-            }
-            writeBefore();
-          },
-          () => {
-            // Preserve the existing transcript updater's empty-frame fallback:
-            // after a coordinated write an empty live region still restores one
-            // newline (`lastOutput + "\n"`), matching the pinned Ink behavior.
-            writeRuntimeOutput(stdout, frameState.lastOutput || "\n");
-          },
-        );
-      }
-
       function repaintFullscreen(
         output: string,
         options: {
@@ -2581,16 +2537,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // A frame that fills or exceeds the viewport gets no trailing newline.
         // Only apply when writing to a real TTY — piped output always gets trailing newlines.
         const fillsViewport = isTty && viewportRows !== null && outputHeight >= viewportRows;
-        // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
-        // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
-        // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
-        // and `lastOutputHeight = wrappedOutput === "" ? 0 : split("\n").length`.
-        // So EVERY SR frame, empty or not, must skip the trailing newline: an empty
-        // frame emits zero lines instead of a spurious blank line (G17), and a
-        // non-empty multi-line frame keeps its true line count so the next-frame
-        // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
-        // interactive frames are untouched — they still append "\n" as before.
-        const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
+        const outputToRender = fillsViewport ? output : output + "\n";
 
         if (hasStaticOutput) {
           // Clear frame -> write static -> re-render frame via log-update
@@ -2660,33 +2607,25 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
-      // Produce the dynamic frame for a given terminal width. In screen-reader
-      // mode the tree is linearized to flat plain text (no borders / 2D grid)
-      // via renderScreenReaderOutput, then wrapped with wrapAnsi(trim:false,
-      // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
-      // <Static> channel is excluded here (skipStaticElements) just like
-      // render-to-string.ts; static output is handled separately by commit().
+      // Produce the visual dynamic frame for a given terminal width. Static
+      // output is handled separately by commit().
       function renderFrame(
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
         selection?: InternalSelectionPaintFrame,
       ): string {
-        if (!isScreenReaderEnabled) {
-          const output = paint(tuiRoot, {
-            viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
-            geometry,
-            selection,
-          });
-          // The hard paint viewport is the primary guard. Keep a final physical
-          // row bound as defense-in-depth for future paint extensions: Inline
-          // must never let an application frame exceed terminal-addressable rows.
-          return boundedInlineSurface && viewportRows !== undefined
-            ? output.split("\n").slice(0, viewportRows).join("\n")
-            : output;
-        }
-        const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
-        return wrapAnsi(linear, width, { trim: false, hard: true });
+        const output = paint(tuiRoot, {
+          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+          geometry,
+          selection,
+        });
+        // The hard paint viewport is the primary guard. Keep a final physical
+        // row bound as defense-in-depth for future paint extensions: Inline
+        // must never let an application frame exceed terminal-addressable rows.
+        return boundedInlineSurface && viewportRows !== undefined
+          ? output.split("\n").slice(0, viewportRows).join("\n")
+          : output;
       }
 
       let blockedFrameRetryPending = false;
@@ -2730,7 +2669,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
         if (pendingExitErrorIsSilent) return acceptedCoordinatedWrite;
         if (rejectedFullscreenStatic) return acceptedCoordinatedWrite;
-        if (terminalSuspended && !terminalResumePainting) return acceptedCoordinatedWrite;
+        if (terminalSuspended && !terminalResumePainting) {
+          // Suspension pauses physical terminal ownership, not Vue or accepted
+          // component lifetimes. Keep rendered-target validity current so a
+          // hidden or detached focus boundary cannot retain logical ownership
+          // until the terminal resumes.
+          mountedRenderedTargets?.reconcile();
+          return acceptedCoordinatedWrite;
+        }
         if (rejectUnsupportedFullscreenStatic()) return acceptedCoordinatedWrite;
 
         // Fullscreen ownership must be physically established before user
@@ -2830,7 +2776,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (rejectUnsupportedFullscreenStatic(staticNodes)) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         const releasePreparedFrame = acquireRuntimeResource("preparedFrames");
-        let boxPresenceFrame: InternalBoxPresenceFrame | undefined;
         let geometryFrame: InternalGeometryPaintFrame | undefined;
         let selectionFrame: InternalSelectionPaintFrame | undefined;
         let caretFrame: InternalPreparedCaretFrame | undefined;
@@ -2845,7 +2790,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             mouseFrame?.discard();
             selectionFrame?.discard();
             geometryFrame?.discard();
-            boxPresenceFrame?.discard();
           } finally {
             releasePreparedFrame();
             leaveLifecycleTransaction();
@@ -2855,7 +2799,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (settled) return;
           settled = true;
           try {
-            boxPresenceFrame?.commit();
             geometryFrame?.commit();
             selectionFrame?.accept();
             mouseFrame?.accept();
@@ -2889,19 +2832,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         hooks.register(accept, abandon);
 
         const start = onRender ? performance.now() : 0;
-        preparingBoxPresenceCandidate = true;
-        try {
-          mountedRenderedTargets?.reconcile();
-          boxPresenceFrame = mountedBoxPresence?.beginFrame();
-        } finally {
-          preparingBoxPresenceCandidate = false;
-        }
+        mountedRenderedTargets?.reconcile();
 
         // Prepare Static output without settling its mounted host instances. The
         // transaction is accepted only after its physical stdout write returns
         // normally, or after a successful output-free renderer commit.
         const w = renderSession.session.dimensions.layout.columns;
-        preparedStatic = prepareStaticOutput(tuiRoot, w, isScreenReaderEnabled, staticNodes);
+        preparedStatic = prepareStaticOutput(tuiRoot, w, staticNodes);
         const staticOutput = preparedStatic.output;
         const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
         if (!dynamicUpdatesLive) {
@@ -2980,8 +2917,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               )
             : undefined;
           const paintViewportRows = exactViewportRows ?? inlineViewportRows;
-          geometryFrame = isScreenReaderEnabled ? undefined : mountedGeometry?.beginFrame();
-          selectionFrame = isScreenReaderEnabled ? undefined : mountedTextSelection?.beginFrame();
+          geometryFrame = mountedGeometry?.beginFrame();
+          selectionFrame = mountedTextSelection?.beginFrame();
           const frame = renderFrame(w, paintViewportRows, geometryFrame, selectionFrame);
           if (geometryFrame && mountedMouseController) {
             mouseFrame = mountedMouseController.prepareFrame(geometryFrame);
@@ -3018,58 +2955,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             return;
           }
 
-          if (isScreenReaderEnabled) {
-            // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
-            // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
-            // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
-            // (inline static, if any) + the wrapped output, then RETURNS — before the
-            // normal interactive frame path. Crucially it:
-            //   - never emits a whole-terminal reset, so a tall transcript cannot
-            //     delete terminal-owned scrollback;
-            //   - emits new Static content once instead of retaining/replaying it;
-            //   - never routes through the log-update writer (raw writes only);
-            //   - leaves the cursor visible (the mount-time hide is skipped for SR).
-            // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
-            // it plays the role of Ink's `wrappedOutput`.
-            if (onRender) onRender({ renderTime: performance.now() - start });
-            if (frame !== "" || hasStaticOutput) ensureInlineRegionStart();
-            runSynchronizedOutput(() => {
-              if (hasStaticOutput) {
-                // Erase the previous main output before writing new static output
-                // (ink.tsx:579-588), then reset the tracked height to 0.
-                const erase =
-                  frameState.outputHeight > 0
-                    ? ansiEscapes.eraseLines(frameState.outputHeight)
-                    : "";
-                writePreparedStatic(preparedStatic!, erase + staticOutput, hooks.markStaticHanded);
-                frameState.outputHeight = 0;
-                hooks.capturePostStaticRollback();
-              }
-
-              if (frame === frameState.lastOutput && !hasStaticOutput) return;
-
-              if (hasStaticOutput) {
-                // Already erased above; write the wrapped output directly.
-                writeRuntimeOutput(stdout, frame);
-              } else {
-                const erase =
-                  frameState.outputHeight > 0
-                    ? ansiEscapes.eraseLines(frameState.outputHeight)
-                    : "";
-                writeRuntimeOutput(stdout, erase + frame);
-              }
-
-              // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
-              // case — empty frame => 0 lines, multi-line frame keeps its true count so
-              // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
-              frameState.lastOutput = frame;
-              frameState.lastOutputToRender = frame;
-              frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-            });
-            boundaryFrame = frame;
-            return;
-          }
-
           // Interactive path
           if (onRender) onRender({ renderTime: performance.now() - start });
           renderInteractiveFrame(frame, outputHeight, preparedStatic, caretFrame!, {
@@ -3083,15 +2968,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       // A render-throttle window derived from maxFps drives terminal commits.
-      // Screen-reader paths and non-positive maxFps are unthrottled, matching
-      // Ink's terminal-rendering behavior.
-      const unthrottled = isScreenReaderEnabled || maxFps <= 0;
+      const unthrottled = maxFps <= 0;
       const renderThrottleMs =
         !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
 
-      // Unthrottled screen-reader or maxFps<=0 commits fire every tick, so the
-      // throttle window is unused there — renderThrottleMs is already 0. Otherwise
-      // it's the maxFps-derived window (34ms at the default maxFps=30).
+      // Non-positive maxFps commits fire every tick. Otherwise this is the
+      // maxFps-derived window (34ms at the default maxFps=30).
       const scheduler = createCommitScheduler(commit, {
         immediate: unthrottled,
         throttleMs: renderThrottleMs,
@@ -3105,9 +2987,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedCommit = commit;
       prepareResumeSurface = () => commit;
       scheduledCommit = () => {
-        if (!pendingExitErrorIsSilent && !terminalSuspended && !resizePaintPending) {
-          scheduler.schedule();
-        }
+        if (!pendingExitErrorIsSilent && !resizePaintPending) scheduler.schedule();
       };
 
       // Internal provides — set before the actual mount so components can inject
@@ -3207,8 +3087,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // the showCursor + cursorTo suffix for the active position), so the last
       // visibility change on the first frame is the SHOW — exactly Ink's ordering.
       //
-      // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
-      // dedicated write branch never routes through log-update, so no hide.
       // Fullscreen acquisition is lazy as well: after managed-input capability
       // preflight, the first input demand or commit enters the alternate screen
       // and hides the cursor before acquiring input modes or repainting.
@@ -3301,10 +3179,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           const currentRows = nextDimensions.terminal?.rows ?? null;
           const dimensionsChanged =
             currentWidth !== previousTerminalWidth || currentRows !== lastPaintedTerminalRows;
-          // A screen-reader transcript intentionally works even when rows are
-          // unknown. Treat every resize event as invalidating its old physical
-          // row mapping; an unbounded layout cannot prove otherwise.
-          const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
+          const inlineMappingChanged = dimensionsChanged;
 
           return () =>
             commit({
@@ -3321,14 +3196,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                   // fresh row, forget writer bookkeeping without emitting erase bytes,
                   // and paint the new bounded region from scratch.
                   runSynchronizedOutput(() => {
-                    if (!isScreenReaderEnabled) writeRuntimeOutput(stdout, hideCursorEscape);
-                    let bottomClampRows: number;
-                    if (isScreenReaderEnabled) bottomClampRows = TERMINAL_BOTTOM_CLAMP_ROWS;
-                    else if (currentRows !== null) bottomClampRows = currentRows;
-                    else return;
+                    writeRuntimeOutput(stdout, hideCursorEscape);
+                    if (currentRows === null) return;
                     writeRuntimeOutput(
                       stdout,
-                      ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape,
+                      ansiEscapes.cursorDown(currentRows) + nextLineEscape,
                     );
                     writer.reset();
                     frameState.lastOutput = "";

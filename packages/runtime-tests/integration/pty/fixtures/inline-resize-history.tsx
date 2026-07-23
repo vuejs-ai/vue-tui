@@ -2,7 +2,6 @@ import process from "node:process";
 import { Text, createApp, useApp, type TuiApp } from "@vue-tui/runtime";
 import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef } from "vue";
 
-const presentation = process.argv[3] === "screen-reader" ? "screen-reader" : "visual";
 const readyMarker = "\x1b]0;__READY__\x07";
 const resizedMarker = "\x1b]0;INLINE_RESIZED\x07";
 
@@ -45,7 +44,4 @@ const App = defineComponent(() => {
 });
 
 app = createApp(App);
-app.mount({
-  mode: presentation === "screen-reader" ? "fullscreen" : "inline",
-  presentation,
-});
+app.mount({ mode: "inline" });

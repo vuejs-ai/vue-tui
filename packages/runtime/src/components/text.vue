@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, inject, provide, useAttrs } from "vue";
 import { TextContextKey } from "../context.ts";
-import { useInternalRenderSession } from "../render-session.ts";
 import { textProps } from "./text-props.ts";
 import { assertTextValid } from "./text-validate.ts";
 import { assertNoUnsupportedAttrs } from "./unsupported-attrs.ts";
@@ -23,12 +22,7 @@ const componentInstance = instance;
 // provides true yet reads false here; descendants then see true and render inline.
 provide(TextContextKey, true);
 const insideText = inject(TextContextKey, false);
-const renderSession = useInternalRenderSession();
-
-const srEnabled = computed(() => renderSession.session.output.presentation === "screen-reader");
-const srHidden = computed(() => srEnabled.value && props.ariaHidden);
-const srLabel = computed(() => (srEnabled.value && props.ariaLabel ? props.ariaLabel : null));
-const hasContent = computed(() => srLabel.value != null || slots.default != null);
+const hasContent = computed(() => slots.default != null);
 
 function hostProps(): Record<string, unknown> {
   return explicitHostProps(props, componentInstance.vnode.props, textProps);
@@ -36,23 +30,14 @@ function hostProps(): Record<string, unknown> {
 </script>
 
 <template>
-  <template
-    v-if="
-      assertNoUnsupportedAttrs('Text', attrs) &&
-      assertTextValid(props, !srEnabled) &&
-      !srHidden &&
-      hasContent
-    "
-  >
+  <template v-if="assertNoUnsupportedAttrs('Text', attrs) && assertTextValid(props) && hasContent">
     <tui-virtual-text v-if="insideText" v-bind="hostProps()">
-      <template v-if="srLabel">{{ srLabel }}</template>
-      <slot v-else />
+      <slot />
     </tui-virtual-text>
     <!-- Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when they
          overflow their container (e.g. in no-wrap flex rows). -->
     <tui-text v-else v-bind="{ ...hostProps(), flexShrink: 1 }">
-      <template v-if="srLabel">{{ srLabel }}</template>
-      <slot v-else />
+      <slot />
     </tui-text>
   </template>
 </template>

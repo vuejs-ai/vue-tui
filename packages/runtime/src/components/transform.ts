@@ -1,6 +1,5 @@
 import { Comment, defineComponent, h, isVNode, provide, type PropType, type VNode } from "vue";
 import { TextContextKey } from "../context.ts";
-import { useInternalRenderSession } from "../render-session.ts";
 import type { PublicComponent } from "./with-children.ts";
 
 type TransformFn = (line: string, lineIndex: number) => string;
@@ -10,14 +9,12 @@ const transformProps = {
   // object lives in a standalone `const` (which would otherwise widen `true` →
   // `boolean`). Matches Ink's `TransformProps`.
   transform: { type: Function as PropType<TransformFn>, required: true as const },
-  accessibilityLabel: String,
 };
 
 const TransformImpl = defineComponent({
   name: "Transform",
   props: transformProps,
   setup(props, { slots }) {
-    const renderSession = useInternalRenderSession();
     // A <Transform> is a text context: Ink models it as an ink-text host, so
     // descendant <Text>/<Newline> render inline (squashed into the transform's
     // text). It only provides — it never injects. (G58)
@@ -28,11 +25,8 @@ const TransformImpl = defineComponent({
 
       // Mirror Ink's Transform (Transform.tsx:28-30): when there are no children
       // it returns null — creating NO host node — and this guard runs BEFORE the
-      // accessibilityLabel substitution. Two consequences we must match:
-      //  - an empty <Transform> in a flex `gap` row adds neither a node nor a gap
-      //    slot (P13); and
-      //  - a childless <Transform accessibilityLabel> emits nothing even in
-      //    screen-reader mode, because null wins over the label (P19).
+      // host node. An empty <Transform> in a flex `gap` row therefore adds
+      // neither a node nor a gap slot (P13).
       //
       // Ink's exact guard is `children === undefined || children === null`. Vue
       // can't see that raw value — `slots.default?.()` materializes a bare
@@ -55,14 +49,6 @@ const TransformImpl = defineComponent({
       // nothing and only the gap-slot differs.)
       if (isNoRenderableChildren(children)) {
         return null;
-      }
-
-      const isScreenReaderEnabled = renderSession.session.output.presentation === "screen-reader";
-
-      // When screen reader is enabled and accessibilityLabel is set,
-      // render the label text instead of children.
-      if (isScreenReaderEnabled && props.accessibilityLabel) {
-        return h("tui-transform", { transform: props.transform }, props.accessibilityLabel);
       }
 
       return h("tui-transform", { transform: props.transform }, children);
@@ -89,5 +75,4 @@ function isNoRenderableChildren(children: VNode[] | undefined): boolean {
 /** Props accepted by `<Transform>` — the vue-tui analogue of Ink's `TransformProps`. */
 export interface TransformProps {
   transform: TransformFn;
-  accessibilityLabel?: string;
 }

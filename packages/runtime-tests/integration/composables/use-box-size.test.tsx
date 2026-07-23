@@ -186,30 +186,6 @@ test("clears a previous size while a replacement Box awaits accepted paint", asy
   }
 });
 
-test("returns null when visual Box geometry is unavailable", async () => {
-  let size!: Readonly<{ value: BoxSize | null }>;
-  const App = defineComponent(() => {
-    const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
-    return () => (
-      <Box ref={target} width={4} height={1}>
-        <Text>linear transcript</Text>
-      </Box>
-    );
-  });
-
-  const result = await render(App, {
-    columns: 20,
-    rows: 4,
-    host: { presentation: "screen-reader" },
-  });
-  try {
-    expect(size.value).toBeNull();
-  } finally {
-    result.dispose();
-  }
-});
-
 test("a retained size becomes null when its setup scope is disposed", async () => {
   let size!: ReturnType<typeof useBoxSize>;
   const App = defineComponent(() => {

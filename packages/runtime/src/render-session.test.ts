@@ -22,7 +22,6 @@ function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
   return {
     requestedMode: "inline",
     liveUpdatesOverride: undefined,
-    presentation: "visual",
     suspensionSupported: false,
     stdout: { isTTY: true, columns: 100, rows: 30 },
     terminalProbe: unavailable,
@@ -187,7 +186,6 @@ test("live updates disabled has first fallback priority", () => {
   expect(surface.session.output).toEqual({
     destination: "stream",
     dynamicUpdates: "at-teardown",
-    presentation: "visual",
   });
 });
 
@@ -208,33 +206,6 @@ test("a forced non-TTY updater remains a stream without a terminal mode", () => 
   });
   expect(surface.session.output.dynamicUpdates).toBe("live");
   expect(surface.session.dimensions.terminal).toBeNull();
-});
-
-test("screen-reader Fullscreen request resolves to an Inline main-screen transcript", () => {
-  const surface = resolveLiveSurface(
-    liveInput({
-      requestedMode: "fullscreen",
-      presentation: "screen-reader",
-      stdout: { isTTY: true, columns: undefined, rows: undefined },
-    }),
-  );
-
-  expect(surface.kind).toBe("inline-terminal");
-  expect(surface.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: "inline",
-    fallback: "screen-reader-transcript",
-  });
-  expect(surface.session.output).toEqual({
-    destination: "terminal",
-    dynamicUpdates: "live",
-    presentation: "screen-reader",
-  });
-  expect(surface.session.capabilities).toEqual({
-    stableOrigin: false,
-    elementHitTesting: false,
-    suspension: false,
-  });
 });
 
 test("visual TTY without detected dimensions falls back to final stream", () => {
@@ -308,26 +279,23 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
   expect(session.capabilities.elementHitTesting).toBe(true);
 });
 
-test.each(["visual", "screen-reader"] as const)(
-  "string service exposes one fixed %s document snapshot",
-  (presentation) => {
-    const service = createStringRenderSessionService({ columns: 37, presentation });
-    const session = service.session;
+test("string service exposes one fixed document snapshot", () => {
+  const service = createStringRenderSessionService({ columns: 37 });
+  const session = service.session;
 
-    expect(session).toEqual({
-      host: "string",
-      mode: null,
-      output: { destination: "document", dynamicUpdates: "none", presentation },
-      dimensions: { terminal: null, layout: { columns: 37, rows: null } },
-      capabilities: {
-        stableOrigin: false,
-        elementHitTesting: false,
-        suspension: false,
-      },
-    });
-    service.dispose();
-    expect(service.session).toBe(session);
-    expect(session.dimensions.layout).toEqual({ columns: 37, rows: null });
-    expect(session.capabilities.elementHitTesting).toBe(false);
-  },
-);
+  expect(session).toEqual({
+    host: "string",
+    mode: null,
+    output: { destination: "document", dynamicUpdates: "none" },
+    dimensions: { terminal: null, layout: { columns: 37, rows: null } },
+    capabilities: {
+      stableOrigin: false,
+      elementHitTesting: false,
+      suspension: false,
+    },
+  });
+  service.dispose();
+  expect(service.session).toBe(session);
+  expect(session.dimensions.layout).toEqual({ columns: 37, rows: null });
+  expect(session.capabilities.elementHitTesting).toBe(false);
+});

@@ -1,27 +1,27 @@
 # Autonomous iteration
 
-> **Status:** unstamped operating contract after completed Runtime foundation closure. F1 through F8 are Done, Runtime R1 through R12 is Closed on local candidate implementation head `e31aa1a`, and R13 through R17 is Non-blocking. No foundation is Active or Queued. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
+> **Status:** unstamped operating contract. Its work-selection and verification rules remain current, but its earlier claim that the Runtime foundation was complete has been withdrawn by the active [Runtime public API decision review](./runtime-public-api-decisions.md). F1 through F8 and R1 through R17 describe implementation evidence on the branch, not accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
 
 ## Objective
 
-Autonomous work should advance the [product goal](./goal.md) through observable user behavior, not maximize commits or internal changes. The loop is successful when it exposes and closes a framework-owned gap in an [active application scenario](./product-scenarios.md#active-application-scenarios) while keeping the terminal, Vue contract, public API, records, and verification gates trustworthy.
+Autonomous work should advance the [product intent](./intent.md) through observable user behavior, not maximize commits or internal changes. The loop is successful when it exposes and closes a framework-owned gap in an [active application scenario](./product-scenarios.md#active-application-scenarios) while keeping the terminal, Vue contract, public API, records, and verification gates trustworthy.
 
 The coding agent was the pilot journey, not the definition of all future work. Inline and Fullscreen remain peers; an autonomous run may collect comparative evidence and may not choose a primary or degraded mode.
 
 ## Current live objective
 
-There is no active foundation objective. The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records the completed local candidate, final packed consumers, J1-J6 capacity and release evidence, focus-generation correction, real-PTY and image-observed terminal journeys, repository gate, review, and the boundary between local `e31aa1a` and the older remote PR #265 head.
+The active foundation objective is to review the Runtime public API one item at a time in the [decision ledger](./runtime-public-api-decisions.md). An Open entry is not an autonomous implementation assignment: first establish the user task, minimum Runtime-owned primitive, public-only higher-layer composition, host semantics, peer evidence where relevant, and Yunfei's decision.
 
-The completed focus rule is part of that baseline. After an authoritative renderer commit, host-only rendered reconciliation reuses the accepted focus generation only when no logical mutation is pending and the route boundary, owner, ordered ancestors, external owner, complete rendered-target order, and eligible sequential-target order are identity- and order-equal. Any logical mutation or semantic route/traversal change publishes a replacement. Reuse preserves the existing demand lease. F3 then fails only the stale selected path closed; independently captured application-global handlers for the same fact remain unaffected.
+The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and the exact public contracts it described are superseded by the current item-by-item review.
 
-No successor follows automatically. R13 is higher-layer editor, finder, viewer, collection, overlay, command, and keymap work; R14 through R17 retain their recorded application-specific, additive, compatibility, release, and performance classifications. They become active only through new representative evidence and an explicit ledger change.
+No code change follows automatically from opening an entry. Implementation begins only after that entry has a justified target; higher-layer editor, finder, viewer, collection, overlay, command, and keymap work still requires representative application evidence.
 
 ## Baseline for future work
 
 - PR [#264](https://github.com/vuejs-ai/vue-tui/pull/264) merged the lower baseline as `25df36d`.
-- F1 through F8 and Runtime R1 through R12 are completed local contracts. Preserve their direct replacements, ownership boundaries, failure behavior, exact package paths, and successful-final-output authority.
+- F1 through F8 and Runtime R1 through R12 are historical implementation and verification evidence. Preserve sound internal mechanisms while reviewing their public names, package paths, and contracts through the decision ledger.
 - PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) was the development vehicle, but its remote head is older than the final local candidate. Its body and remote checks are historical until a maintainer-directed update occurs.
-- Do not broaden one top-level Text into a global selection document, merge clipboard into selection state, add an automatic clipboard fallback chain, expose F2's private controller, expose F3's private topology, expose F5's insertion slots or final-paint provenance, or move `/inline` and `/fullscreen` contracts back into the common root without new accepted evidence.
+- Do not broaden one top-level Text into a global selection document, merge clipboard into selection state, add an automatic clipboard fallback chain, expose private controllers or topology, or publish final-paint provenance without new accepted evidence. `/inline` and any possible `/fullscreen` surface are reviewed independently rather than preserved from the earlier candidate by default.
 
 ## Pull-request policy
 
@@ -45,7 +45,7 @@ When several units qualify, prefer clearer user harm, stronger reproducible evid
 ## Operating loop
 
 1. Resolve the latest local branch, default branch, relevant external state, and Git identity without resetting newer work.
-2. Read the records map, [goal.md](./goal.md), [product-scenarios.md](./product-scenarios.md), this operating contract, and the exact records for the affected area.
+2. Read the records map, [intent.md](./intent.md), [product-scenarios.md](./product-scenarios.md), this operating contract, and the exact records for the affected area.
 3. State the affected application scenario, user-visible failure, and objective before/after criterion: a failing test, type error, active-screen predicate, process result, package failure, or measured reopen trigger.
 4. Demonstrate the red state before implementing when practical, using the strongest fitting layer: unit logic, component rendering, real PTY screen, clean packed consumer, or committed capacity workload.
 5. Implement the smallest coherent change and update affected examples, public documentation, and unstamped records in the same change.
@@ -92,7 +92,7 @@ Stop before:
 
 Ordinary implementation choices inside an accepted API and objective do not require a stop. Choose the smallest reversible option, record durable rationale where it will matter again, and keep moving.
 
-## Reference regression journey for the completed interaction foundations
+## Reference regression journey for interaction-foundation candidates
 
 When a change could regress F3 through F8, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover prompt editing, bracketed paste, token streaming, approval accept and reject, long Inline and Fullscreen output, resize, modal focus restoration, Ctrl+C or normal exit, and exact raw, paste, mouse, cursor, alternate-screen, termios, and shell restoration.
 
@@ -103,9 +103,9 @@ Run the same state machine with two view adapters:
 
 The comparison should record which behavior shares one public abstraction and where the terminal model requires a mode-specific capability. It must not hide differences behind a lowest-common-denominator API or choose a product hierarchy.
 
-## Work after the completed foundation
+## Work around the active foundation review
 
-The [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is closed; no successor is activated automatically. R13 through R17 remain Non-blocking. A future foundation requires new representative evidence and an explicit ledger update, while independent bugs and external contributions continue to use the evidence rules above.
+The earlier [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) now carries the active review. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently settle an Open public contract.
 
 ## Distillation returned after each run
 

@@ -229,41 +229,6 @@ test.sequential("unthrottled scheduler commits every mutation", async () => {
   app.unmount();
 });
 
-test.sequential("screen reader mode bypasses throttle (immediate commits)", async () => {
-  // Screen-reader presentation uses immediate commits so every frame is
-  // available without delay for assistive technology.
-  const msg = shallowRef("Hello");
-
-  const App = defineComponent(() => {
-    return () => <Text>{msg.value}</Text>;
-  });
-
-  const app = createApp(App);
-  const stdout = makeFakeWritable({ columns: 80 });
-  const stderr = makeFakeWritable({ columns: 80 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    presentation: "screen-reader",
-  });
-
-  await nextTick();
-  await nextTick();
-  expect(writes.some((w) => w.includes("Hello"))).toBe(true);
-
-  // Even rapid mutations should commit immediately (no throttle)
-  msg.value = "World";
-  await nextTick();
-  await nextTick();
-  expect(writes.some((w) => w.includes("World"))).toBe(true);
-
-  app.unmount();
-});
-
 test.sequential("no throttled renders after unmount", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {

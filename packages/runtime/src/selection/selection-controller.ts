@@ -70,7 +70,7 @@ interface FrameOwner {
 
 export interface CreateInternalTextSelectionControllerOptions {
   readonly surfaceAvailable: boolean;
-  readonly unavailableReason: "host-unavailable" | "screen-reader" | "string-host";
+  readonly unavailableReason: "host-unavailable" | "string-host";
   readonly requestPaint: () => void;
   readonly clipboard: InternalClipboardService;
 }
@@ -79,7 +79,7 @@ const INACTIVE = Object.freeze({ status: "inactive" as const, range: null, selec
 const PENDING = Object.freeze({ status: "pending" as const, range: null, selectedText: "" });
 
 function unavailableState(
-  reason: "host-unavailable" | "screen-reader" | "string-host" | "mapping-unavailable",
+  reason: "host-unavailable" | "string-host" | "mapping-unavailable",
 ): TextSelectionState {
   return Object.freeze({ status: "unavailable", reason, range: null, selectedText: "" });
 }

@@ -111,42 +111,6 @@ test.each([1, 4])(
   },
 );
 
-test("a screen-reader Fullscreen request leaves its fatal transcript on the main screen", async () => {
-  const marker = "SCREEN_READER_FATAL";
-  const stdout = makeWritable({ isTTY: true, columns: 80, rows: 24 });
-  const stderr = makeWritable({ isTTY: true, columns: 80, rows: 24 });
-  const stdoutCapture = captureStream(stdout);
-  const stderrCapture = captureStream(stderr);
-  const { stream: stdin } = makeFakeStdin();
-  const Fatal = defineComponent(() => () => {
-    throw new Error(marker);
-  });
-  const app = createApp(Fatal);
-
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "fullscreen",
-    presentation: "screen-reader",
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
-
-  try {
-    await expect(app.waitUntilExit()).rejects.toThrow(marker);
-    const output = stdoutCapture.chunks.join("");
-    expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-    expect(stripAnsi(output)).toContain(marker);
-    expect(stripAnsi(stderrCapture.chunks.join(""))).not.toContain(marker);
-  } finally {
-    stdin.destroy();
-    stdout.destroy();
-    stderr.destroy();
-  }
-});
-
 test("a throttled Inline boundary error falls back to stderr when stdout is lost before paint", async () => {
   const marker = "THROTTLED_INLINE_STDOUT_LOST";
   const trigger = shallowRef(false);

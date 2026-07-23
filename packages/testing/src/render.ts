@@ -10,8 +10,6 @@ import { trackHost } from "./cleanup.ts";
 export interface TestHost {
   /** Requested production screen model. @default "inline" */
   readonly mode?: NonNullable<MountOptions["mode"]>;
-  /** Renderer presentation. @default "visual" */
-  readonly presentation?: "visual" | "screen-reader";
   /** Input stream class. @default "tty" */
   readonly stdin?: "tty" | "non-tty";
   /** Output stream class. @default "tty" */
@@ -67,7 +65,6 @@ export interface RenderResult {
 
 interface NormalizedTestHost {
   readonly mode: NonNullable<MountOptions["mode"]>;
-  readonly presentation: "visual" | "screen-reader";
   readonly stdin: "tty" | "non-tty";
   readonly stdout: {
     readonly kind: "tty" | "stream";
@@ -150,13 +147,8 @@ function normalizeOptions(options: RenderOptions): {
   const propsOption = root.props;
 
   const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
-  rejectUnknownKeys(
-    host,
-    ["mode", "presentation", "stdin", "stdout", "patchConsole"],
-    "render host",
-  );
+  rejectUnknownKeys(host, ["mode", "stdin", "stdout", "patchConsole"], "render host");
   const modeOption = host.mode;
-  const presentationOption = host.presentation;
   const stdinOption = host.stdin;
   const stdoutOption = host.stdout;
   const patchConsoleOption = host.patchConsole;
@@ -164,10 +156,6 @@ function normalizeOptions(options: RenderOptions): {
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
     throw new TypeError('render host mode must be "inline" or "fullscreen".');
-  }
-  const presentation = presentationOption === undefined ? "visual" : presentationOption;
-  if (presentation !== "visual" && presentation !== "screen-reader") {
-    throw new TypeError('render host presentation must be "visual" or "screen-reader".');
   }
   const stdin = stdinOption === undefined ? "tty" : stdinOption;
   if (stdin !== "tty" && stdin !== "non-tty") {
@@ -192,7 +180,6 @@ function normalizeOptions(options: RenderOptions): {
     props: propsOption as Record<string, unknown> | undefined,
     host: {
       mode,
-      presentation,
       stdin,
       stdout: { kind, columns, rows },
       patchConsole,
@@ -347,7 +334,6 @@ export async function render(
         stdin,
         stderr,
         mode: host.mode,
-        presentation: host.presentation,
         patchConsole: host.patchConsole,
       });
     } finally {

@@ -16,8 +16,6 @@ describe("runtimeResourceTracker", () => {
       "processListeners",
       "streamListeners",
       "focusTargets",
-      "focusScopes",
-      "boxPresenceBindings",
       "geometryBindings",
       "caretOwners",
       "pointerHosts",

@@ -25,13 +25,6 @@ function visibleLines(terminal: InstanceType<typeof Terminal>): string[] {
   );
 }
 
-function allBufferLines(terminal: InstanceType<typeof Terminal>): string[] {
-  const buffer = terminal.buffer.active;
-  return Array.from({ length: buffer.length }, (_, row) =>
-    (buffer.getLine(row)?.translateToString(true) ?? "").trimEnd(),
-  );
-}
-
 async function assertStableFullscreenSurface(scenario: SurfaceScenario) {
   const ps = term("fullscreen-origin", ["8", scenario]);
   let exited = false;
@@ -141,34 +134,4 @@ test("fullscreen drops a wide glyph that crosses the viewport's right edge", asy
 
 test("fullscreen left clipping preserves the column after a straddling wide glyph", async () => {
   await assertStableFullscreenSurface("horizontal-left-wide");
-});
-
-test("fullscreen screen-reader request uses a main-screen linear transcript", async () => {
-  const ps = term("fullscreen-origin", ["8", "screen-reader"]);
-  let exited = false;
-
-  try {
-    await ps.waitForOutput((output) => output.includes("__SETTLED__:screen-reader"));
-    expect(ps.output).not.toContain("\x1b[2J\x1b[H");
-    expect(ps.output).not.toContain("\x1b[?1049h");
-    expect(ps.output).not.toContain("\x1b[?1049l");
-    expect(ps.output).not.toContain("\x1b[?25l");
-
-    const terminal = await emulate(ps.output);
-    expect(terminal.buffer.active.type).toBe("normal");
-    expect(allBufferLines(terminal)).toContain("__READY__");
-    expect(visibleLines(terminal)).toContain("BUTTON");
-
-    ps.write("q");
-    await ps.waitForOutput((output) => output.includes("__EXITED__:screen-reader"));
-    await ps.waitForExit();
-    exited = true;
-
-    const restored = await emulate(ps.output);
-    expect(restored.buffer.active.type).toBe("normal");
-    expect(allBufferLines(restored)).toContain("__READY__");
-    expect(allBufferLines(restored).some((line) => line.includes("BUTTON"))).toBe(true);
-  } finally {
-    if (!exited) ps.kill("SIGTERM");
-  }
 });

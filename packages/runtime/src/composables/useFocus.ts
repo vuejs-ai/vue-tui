@@ -1,129 +1,114 @@
 import {
   inject,
+  isRef,
+  onMounted,
   onScopeDispose,
-  toValue,
   watch,
   type ComponentPublicInstance,
-  type MaybeRefOrGetter,
-  type ShallowRef,
+  type Ref,
 } from "vue";
+import { AppContextKey } from "../context.ts";
 import {
-  InternalFocusControllerKey,
-  InternalFocusScopeKey,
-  getInternalProvidedFocusScope,
-  registerInternalFocusScopeDependent,
-  type InternalProvidedFocusScope,
-} from "../focus/focus-context.ts";
-import type {
-  InternalFocusScopeHandle,
-  InternalFocusTargetUpdate,
-} from "../focus/focus-controller.ts";
-import { resolveTuiNode } from "../host/resolve-node.ts";
-import { useRenderedTargetRegistration } from "../rendered-target.ts";
-import type { UseFocusScopeReturn } from "./useFocusScope.ts";
+  resolveFocusComponentBoundary,
+  validateFocusComponentTarget,
+} from "../focus/component-target.ts";
+import { InternalFocusControllerKey } from "../focus/focus-context.ts";
+import {
+  useRenderedTargetRegistrationControl,
+  type RenderedTargetRegistrationControl,
+} from "../rendered-target.ts";
 
-declare const focusHandleBrand: unique symbol;
-
-export interface UseFocusOptions {
-  readonly scope?: UseFocusScopeReturn;
-  readonly disabled?: MaybeRefOrGetter<boolean>;
-  readonly tabIndex?: MaybeRefOrGetter<0 | -1>;
-  readonly autoFocus?: MaybeRefOrGetter<boolean>;
-}
+/**
+ * A Vue ref whose component boundary controls this focus handle's rendered
+ * availability.
+ *
+ * The target is not the focus identity and does not define input routing or
+ * navigation. If the boundary becomes unavailable or its rendered ancestry is
+ * hidden or detached, this handle loses focus. Later availability does not
+ * restore focus.
+ */
+export type FocusTarget = Readonly<Ref<ComponentPublicInstance | null | undefined>>;
 
 export interface UseFocusReturn {
-  readonly [focusHandleBrand]: true;
-  readonly isFocused: Readonly<ShallowRef<boolean>>;
-  focus(): boolean;
-  blur(): boolean;
+  readonly isFocused: Readonly<Ref<boolean>>;
+  focus(): void;
+  blur(): void;
 }
 
-function readBoolean(
-  source: MaybeRefOrGetter<boolean> | undefined,
-  fallback: boolean,
-  option: string,
-): boolean {
-  const value = source === undefined ? fallback : toValue(source);
-  if (typeof value !== "boolean") {
-    throw new TypeError(`useFocus() ${option} must resolve to a boolean`);
-  }
-  return value;
-}
-
-function readTabIndex(source: MaybeRefOrGetter<0 | -1> | undefined): 0 | -1 {
-  const value = source === undefined ? 0 : toValue(source);
-  if (value !== 0 && value !== -1) {
-    throw new TypeError("useFocus() tabIndex must resolve to 0 or -1");
-  }
-  return value;
-}
-
-export function useFocus(
-  target: MaybeRefOrGetter<ComponentPublicInstance | null | undefined>,
-  options: UseFocusOptions = {},
-): UseFocusReturn {
+export function useFocus(): UseFocusReturn;
+export function useFocus(target: FocusTarget): UseFocusReturn;
+export function useFocus(target?: FocusTarget): UseFocusReturn {
+  const hasTarget = arguments.length > 0;
   const controller = inject(InternalFocusControllerKey, null);
-  if (!controller) throw new Error("useFocus() must be called inside a vue-tui render tree");
-
-  const inheritedScope = inject(InternalFocusScopeKey, null);
-  const hasExplicitScope = options.scope !== undefined;
-  const scopeHandle = options.scope as InternalFocusScopeHandle | undefined;
-  const scopeLifetime: InternalProvidedFocusScope | undefined = hasExplicitScope
-    ? getInternalProvidedFocusScope(scopeHandle!)
-    : (inheritedScope ?? undefined);
-  if (hasExplicitScope && !scopeLifetime) {
-    throw new Error("Focus scope belongs to another application or has been disposed");
+  const app = inject(AppContextKey, null);
+  if (!controller || !app) {
+    throw new Error("useFocus() must be called inside a vue-tui render tree");
   }
-  const assignedScope = scopeLifetime?.handle;
+  if (hasTarget && !isRef(target)) {
+    throw new TypeError("useFocus() target must be a Vue ref to a component instance");
+  }
 
-  const readOptions = (): Required<InternalFocusTargetUpdate> => ({
-    disabled: readBoolean(options.disabled, false, "disabled"),
-    tabIndex: readTabIndex(options.tabIndex),
-    autoFocus: readBoolean(options.autoFocus, false, "autoFocus"),
+  const internal = controller.createTarget({
+    requiresRenderedTarget: hasTarget,
   });
-
-  const initial = readOptions();
-  const handle = controller.createTarget({ scope: assignedScope, ...initial });
-  let stopOptions: (() => void) | undefined;
-  let disposeRenderedTarget: (() => void) | undefined;
-  let unregisterScopeDependent: (() => void) | undefined;
+  let targetRegistration: RenderedTargetRegistrationControl | undefined;
+  let stopValidation: (() => void) | undefined;
   let disposed = false;
-  const dispose = (removeTarget: boolean): void => {
+
+  const validateCurrentTarget = (): void => {
+    if (hasTarget) validateFocusComponentTarget(target!.value, app);
+  };
+  const dispose = (): void => {
     if (disposed) return;
     disposed = true;
-    stopOptions?.();
-    unregisterScopeDependent?.();
-    disposeRenderedTarget?.();
-    if (removeTarget) controller.removeTarget(handle);
+    stopValidation?.();
+    targetRegistration?.dispose();
+    controller.removeTarget(internal);
   };
+
   try {
-    stopOptions = watch(
-      readOptions,
-      (update) => {
-        // Vue may still invoke a watch callback with `undefined` after the
-        // source getter rejects an invalid reactive option. The validation
-        // error is the public failure; keep the last accepted controller
-        // state and wait for the next valid value.
-        if (!update) return;
-        controller.updateTarget(handle, update);
-      },
-      { flush: "sync" },
-    );
-    disposeRenderedTarget = useRenderedTargetRegistration(
-      () => resolveTuiNode(toValue(target)),
-      (host) => controller.attachTarget(handle, host),
-    );
-    if (scopeLifetime) {
-      unregisterScopeDependent = registerInternalFocusScopeDependent(scopeLifetime, () =>
-        dispose(false),
+    if (hasTarget) {
+      validateCurrentTarget();
+      stopValidation = watch(target!, validateCurrentTarget, { flush: "post" });
+      onMounted(validateCurrentTarget);
+      targetRegistration = useRenderedTargetRegistrationControl(
+        () => {
+          try {
+            validateFocusComponentTarget(target!.value, app);
+            return resolveFocusComponentBoundary(target!.value);
+          } catch {
+            // The validation watcher or an explicit operation reports the
+            // public TypeError. Renderer reconciliation treats the invalid
+            // value only as an unavailable boundary in the meantime.
+            return null;
+          }
+        },
+        (host) => controller.attachTarget(internal, host),
       );
     }
   } catch (error) {
-    dispose(true);
+    dispose();
     throw error;
   }
 
-  onScopeDispose(() => dispose(true));
+  onScopeDispose(dispose);
 
-  return handle as UseFocusReturn;
+  return Object.freeze({
+    isFocused: internal.isFocused,
+    focus() {
+      if (disposed) return;
+      if (hasTarget) {
+        validateCurrentTarget();
+        // Vue assigns template refs before mounted hooks. Reconcile explicitly
+        // so onMounted(() => focus.focus()) observes that already-attached
+        // boundary without turning an earlier unavailable request into a queue.
+        targetRegistration?.reconcile();
+      }
+      internal.focus();
+    },
+    blur() {
+      if (disposed) return;
+      internal.blur();
+    },
+  });
 }

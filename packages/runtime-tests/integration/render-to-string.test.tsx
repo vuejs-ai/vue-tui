@@ -15,7 +15,6 @@ import {
 import { Static } from "@vue-tui/runtime/inline";
 import { useStderr } from "../../runtime/dist/internal.mjs";
 import { useStdout } from "../../runtime/dist/internal.mjs";
-import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
 import { useInternalInputRoutingForTest } from "../../runtime/dist/internal.mjs";
 
 describe("renderToString", () => {
@@ -37,7 +36,7 @@ describe("renderToString", () => {
     expect(output).toBe("test");
   });
 
-  test("public renderToString rejects hidden screen-reader passthrough before rendering", () => {
+  test("rejects the removed screen-reader option before rendering", () => {
     let setupRan = false;
     const App = defineComponent(() => () => <Text>x</Text>);
     const guarded = Object.defineProperty({ isScreenReaderEnabled: undefined }, "columns", {
@@ -49,9 +48,9 @@ describe("renderToString", () => {
     });
 
     expect(() => {
-      // @ts-expect-error - screen-reader presentation is selected only by the internal helper
+      // @ts-expect-error - screen-reader rendering is not a public string-render capability
       renderToString(App, guarded);
-    }).toThrow('renderToString option "isScreenReaderEnabled" is unavailable');
+    }).toThrow('renderToString received an unknown option "isScreenReaderEnabled"');
     expect(setupRan).toBe(false);
   });
 
@@ -67,23 +66,7 @@ describe("renderToString", () => {
     }).toThrow('renderToString option "rows" is unavailable');
   });
 
-  test("public and internal helpers select fixed visual and screen-reader documents", () => {
-    const App = defineComponent(() => () => (
-      <Box ariaLabel="accessible label">
-        <Text>visual child</Text>
-      </Box>
-    ));
-
-    expect(renderToString(App)).toContain("visual child");
-    expect(renderToString(App)).not.toContain("accessible label");
-    expect(renderToStringWithScreenReader(App)).toContain("accessible label");
-    expect(renderToStringWithScreenReader(App)).not.toContain("visual child");
-  });
-
-  test.each([
-    ["visual", renderToString],
-    ["screen-reader", renderToStringWithScreenReader],
-  ] as const)("provides truthful %s string layout facts", (_presentation, renderDocument) => {
+  test("provides truthful string layout facts", () => {
     let width: ReturnType<typeof useLayoutWidth> | undefined;
     let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
     const App = defineComponent(() => {
@@ -92,7 +75,7 @@ describe("renderToString", () => {
       return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
     });
 
-    expect(renderDocument(App, { columns: 37 })).toBe("37xunbounded");
+    expect(renderToString(App, { columns: 37 })).toBe("37xunbounded");
     expect(width!.value).toBe(37);
     expect(viewportHeight).toBeNull();
   });

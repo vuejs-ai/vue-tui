@@ -12,6 +12,11 @@ export interface RenderedTargetRegistration {
   dispose(): void;
 }
 
+export interface RenderedTargetRegistrationControl {
+  reconcile(): void;
+  dispose(): void;
+}
+
 export interface RenderedTargetController {
   register(resolve: () => TuiNode | null, attach: RenderedTargetAttach): RenderedTargetRegistration;
   reconcile(): void;
@@ -289,17 +294,17 @@ export function createRenderedTargetController(
 }
 
 /** Internal composable used by concrete ref-bound behaviors. */
-export function useRenderedTargetRegistration(
+export function useRenderedTargetRegistrationControl(
   resolve: () => TuiNode | null,
   attach: RenderedTargetAttach,
-): () => void {
+): RenderedTargetRegistrationControl {
   // Some ref-bound composables intentionally report an unavailable standalone
   // state. Avoid both Vue's inject-outside-setup warning and a hard dependency
   // on renderer context for those callers. Composables that require a render
   // tree validate their own context before reaching this internal helper.
   const app = hasInjectionContext() ? inject(AppContextKey, null) : null;
   const controller = app ? getRenderedTargetController(app) : undefined;
-  if (!controller) return () => {};
+  if (!controller) return { reconcile() {}, dispose() {} };
 
   const registration = controller.register(resolve, attach);
   let stop: WatchStopHandle | undefined;
@@ -317,5 +322,14 @@ export function useRenderedTargetRegistration(
     registration.dispose();
   };
   tryOnScopeDispose(dispose);
-  return dispose;
+  return { reconcile: () => registration.reconcile(), dispose };
+}
+
+/** Internal composable used by concrete ref-bound behaviors. */
+export function useRenderedTargetRegistration(
+  resolve: () => TuiNode | null,
+  attach: RenderedTargetAttach,
+): () => void {
+  const control = useRenderedTargetRegistrationControl(resolve, attach);
+  return () => control.dispose();
 }

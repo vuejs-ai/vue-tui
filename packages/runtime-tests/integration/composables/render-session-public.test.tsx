@@ -10,7 +10,6 @@ import {
   useViewportHeight,
 } from "@vue-tui/runtime";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
-import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
 import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makePublicTty(columns?: number, rows?: number): NodeJS.WriteStream {
@@ -43,22 +42,6 @@ const unboundedLiveCases: readonly {
   readonly name: string;
   readonly options: RenderOptions;
 }[] = [
-  {
-    name: "screen-reader Inline TTY",
-    options: {
-      columns: 80,
-      rows: 24,
-      host: { mode: "inline", presentation: "screen-reader" },
-    },
-  },
-  {
-    name: "screen-reader Fullscreen request",
-    options: {
-      columns: 80,
-      rows: 24,
-      host: { mode: "fullscreen", presentation: "screen-reader" },
-    },
-  },
   {
     name: "final stream",
     options: {
@@ -197,22 +180,16 @@ test("layout primitives fail clearly outside a vue-tui render tree", () => {
   }
 });
 
-test.each([
-  ["visual", renderToString],
-  ["screen-reader", renderToStringWithScreenReader],
-] as const)(
-  "the %s string host exposes width without a finite viewport",
-  (_name, renderDocument) => {
-    let width: ReturnType<typeof useLayoutWidth> | undefined;
-    let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
-    const App = defineComponent(() => {
-      width = useLayoutWidth();
-      viewportHeight = useViewportHeight();
-      return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
-    });
+test("the string host exposes width without a finite viewport", () => {
+  let width: ReturnType<typeof useLayoutWidth> | undefined;
+  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+  const App = defineComponent(() => {
+    width = useLayoutWidth();
+    viewportHeight = useViewportHeight();
+    return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+  });
 
-    expect(renderDocument(App, { columns: 37 })).toBe("37xunbounded");
-    expect(width!.value).toBe(37);
-    expect(viewportHeight).toBeNull();
-  },
-);
+  expect(renderToString(App, { columns: 37 })).toBe("37xunbounded");
+  expect(width!.value).toBe(37);
+  expect(viewportHeight).toBeNull();
+});

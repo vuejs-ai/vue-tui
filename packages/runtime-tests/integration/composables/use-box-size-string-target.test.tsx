@@ -13,7 +13,7 @@ test("validates its direct Box target on hosts without visual geometry", async (
   expect(() => renderToString(App)).toThrow(
     "useBoxSize() target must be a ref bound directly to <Box>",
   );
-  await expect(
-    render(App, { columns: 20, rows: 4, host: { presentation: "screen-reader" } }),
-  ).rejects.toThrow("useBoxSize() target must be a ref bound directly to <Box>");
+  await expect(render(App, { columns: 20, rows: 4, host: { stdout: "stream" } })).rejects.toThrow(
+    "useBoxSize() target must be a ref bound directly to <Box>",
+  );
 });

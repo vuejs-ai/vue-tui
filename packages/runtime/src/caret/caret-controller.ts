@@ -10,8 +10,23 @@ import type {
   InternalElementGeometry,
   InternalGeometryPaintFrame,
 } from "../geometry/geometry-service.ts";
-import type { CaretHiddenReason, CaretState } from "../composables/useCaret.ts";
 import { changeRuntimeResource } from "../resource-tracker.ts";
+
+type CaretHiddenReason =
+  | "unavailable"
+  | "detached"
+  | "pending"
+  | "hidden"
+  | "clipped"
+  | "outside"
+  | "invalid-position"
+  | "unrelated";
+
+type CaretState =
+  | { readonly status: "unavailable" }
+  | { readonly status: "inactive" }
+  | { readonly status: "hidden"; readonly reason: CaretHiddenReason }
+  | { readonly status: "visible"; readonly surface: InternalCellPoint };
 
 export interface InternalCaretRegistration {
   readonly state: Readonly<ShallowRef<CaretState>>;

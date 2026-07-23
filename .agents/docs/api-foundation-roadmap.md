@@ -1,6 +1,6 @@
 # API foundation roadmap
 
-> **Status:** historical unstamped execution ledger. It records the F1–F8 and R1–R17 classifications made on the earlier candidate, but the active [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) supersedes its unstamped “Done,” “Closed,” and “complete foundation” conclusions. The earlier mechanisms, tests, and journey results remain evidence; this ledger no longer defines the target public package boundary.
+> **Status:** historical unstamped execution ledger. It records the F1–F8 and R1–R17 classifications made on the earlier candidate, but the [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes its unstamped “Done,” “Closed,” and “complete foundation” conclusions. The earlier mechanisms, tests, and journey results remain evidence; the implemented narrower candidate is documented in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md), and neither historical record defines accepted target decisions.
 
 ## Why this exists
 
@@ -31,7 +31,7 @@ Moving an item to Done requires, as applicable:
 
 ## Current checkpoint
 
-**Historical completed Runtime foundation:** F1 through F8 were classified Done, and R1 through R12 Closed, on local candidate implementation head `e31aa1a`. R13 through R17 retained their original Non-blocking classifications. The active re-audit has reopened the public boundary without discarding the capacity, packed-consumer, focus, PTY, visual, repository, remote-state-boundary, and review evidence recorded in [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence).
+**Historical completed Runtime foundation:** F1 through F8 were classified Done, and R1 through R12 Closed, on local candidate implementation head `e31aa1a`. R13 through R17 retained their original Non-blocking classifications. The current public API decision review keeps the boundary reopened without discarding the capacity, packed-consumer, focus, PTY, visual, repository, remote-state-boundary, and review evidence recorded in [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence).
 
 **Historical F8 checkpoint:** F8 first became Done at `3d7e197`. The root exposes one app-owned `useClipboard()` service configured by one custom or OSC 52 mount transport; `/fullscreen` exposes `useTextSelection(target, { isActive?, pointer? })` for exactly one top-level Text. Selection follows successful final-paint provenance, keeps one active range per app, exposes command-driven and pointer extension, and returns exact selected text through the separate clipboard service for caller-owned fallback. The exact completed contract is [Fullscreen text selection and clipboard](./fullscreen-selection-and-copy.md); final Runtime evidence is centralized in the closure record.
 

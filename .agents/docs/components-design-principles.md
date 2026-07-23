@@ -26,7 +26,7 @@ re-enumerate it: a second copy would drift.
 
 ## Inclusion bar — product-driven and evidence-backed
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 A component earns its place by closing a recurring need in an [active product scenario](./product-scenarios.md#active-application-scenarios) or a real consumer. A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
 
@@ -48,13 +48,16 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 - emit a new escape sequence, or flip a terminal mode;
 - hook the terminal commit scheduler _directly_; an ordinary component-owned timer, such as
   Spinner's frame counter, is not Runtime work;
-- require terminal, renderer-tree, or accepted-paint facts that cannot be implemented from Runtime's supported public primitives such as `useLayoutWidth()`, `useViewportHeight()`, and direct-Box `useBoxSize()`.
+- require terminal, renderer-tree, or accepted-paint facts that cannot be implemented from accepted Runtime public primitives.
 
-Otherwise it is a component. The clean illustration: **targeted mouse input is runtime work** —
-input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime. The selected
-implemented F6 contract supplies `useMouseEvent()` and `useMouseDrag()` from the Fullscreen semantic subpath;
-see [targeted-pointer.md](./targeted-pointer.md). Anything driven by existing keyboard input plus
-the accepted public layout and Box-size facts is a pure composition.
+Otherwise it belongs above Runtime. `useFocus()` is an accepted Runtime building block because unique ownership and rendered-component validity cannot be reproduced safely above Runtime; it exposes only an explicit handle and readonly ownership, so components still own disabled state, automatic focus, ordering, routing, scopes, modal policy, and names. The current branch's `useLayoutWidth()`, `useViewportHeight()`, and `useBoxSize()` remain candidates under item-by-item review rather than accepted building blocks; see the [Runtime public API decision ledger](./runtime-public-api-decisions.md). General accepted-tree presence is private rather than a public component dependency. Components may use an unresolved candidate to provide evidence, but that use does not settle its public contract.
+
+Targeted mouse input illustrates the unresolved edge: input decoding, terminal-mode ownership, hit
+testing, and capture require Runtime mechanisms, while application interaction policy can live above
+Runtime. The current branch retains internal mouse implementation material but exports neither
+`useMouseEvent()` nor `useMouseDrag()` and has no `/fullscreen` public subpath. The minimum public
+primitive, if one is needed, remains Open; see [targeted-pointer](./targeted-pointer.md). Anything
+driven entirely by already accepted public facts remains a higher-layer composition.
 (`overflow:"hidden"`
 clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
 the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
@@ -116,10 +119,7 @@ consistent and to flag real authoring traps:
   `props.onInput(...)` at event time. This is the load-bearing half of the
   [AGENTS.md](../../AGENTS.md) handler rule; the `MaybeRef<Handler> + unref()` form is for a
   composable you _author_, not for component props.
-- **Imperative handles** → prefer props / `v-model` / events / slots and the existing runtime
-  composables (`useFocus`, `useFocusManager`) first. Reach for `defineExpose` only for genuinely
-  imperative actions that can't be modeled declaratively (`reset()`, `scrollTo()`) — never to
-  re-implement focus control the runtime already owns.
+- **Imperative handles** → prefer props / `v-model` / events / slots first. Reach for `defineExpose` only for genuinely imperative actions that can't be modeled declaratively (`reset()`, `scrollTo()`). Runtime's accepted `useFocus()` handle is the primitive for explicit unique ownership and optional rendered-target lifetime; it does not justify exposing a manager or embedding traversal, scopes, string lookup, restoration, automatic focus, or input routing in Runtime. A component or higher layer composes those policies with Vue state and gates `useInput()` through the handle's readonly `isFocused` ref.
 - **Authoring mechanics** → for the parts that generalize, defer to
   [component-authoring.md](./component-authoring.md): SFC by default, and a render function only
   when a component must inspect its own child vnodes. (That doc is mostly about the runtime's
@@ -128,7 +128,7 @@ consistent and to flag real authoring traps:
 
 ## Boolean prop naming & defaults
 
-[VOUCHED @hyf0]
+[VOUCHED @hyfdev]
 
 Component boolean props follow Vue-ecosystem and terminal-UI convention — not verb-prefixed toggles.
 
@@ -137,10 +137,6 @@ Component boolean props follow Vue-ecosystem and terminal-UI convention — not 
 - **Name for precision — what is toggled, not the device.** A bare device noun reads ambiguously; prefer the specific behavior it controls (e.g. `wheel` for mouse-wheel scrolling rather than `mouse`, which would also imply clicks).
 - **A prop with a global / terminal-wide side effect is opt-in (`false` by default), and the side effect is documented.** Example: enabling terminal mouse tracking suppresses the terminal's native text selection window-wide (users bypass with Shift) — so such a prop must be opt-in, not on by default.
 
-## Deliberately omitted
+## Accessibility is not a current component contract
 
-[VOUCHED @hyf0 2026-07-10]
-
-- **No accessibility requirement.** Components are not required to set `ariaRole` / `ariaState`.
-  It isn't always cheap to get right, and mandating it would tax contribution; a component may opt
-  in where it's natural.
+Runtime no longer exposes a screen-reader presentation or `ariaRole` / `ariaState` primitives, so components cannot claim built-in terminal accessibility by setting those removed props. A future accessibility design must define a complete semantic Runtime contract before component-level conventions are added. The previous vouch covered optional use of the now-removed ARIA experiment; changing that premise removes the stamp rather than carrying it onto this new decision.

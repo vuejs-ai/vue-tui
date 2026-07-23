@@ -13,7 +13,6 @@ export const fullscreenOriginScenarios = [
   "horizontal-left-wide",
   "horizontal-wide",
   "horizontal-transform",
-  "screen-reader",
   "foreground-reset",
 ] as const;
 

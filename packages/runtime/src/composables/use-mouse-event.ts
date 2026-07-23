@@ -48,20 +48,12 @@ export function useMouseEvent<Type extends keyof TuiMouseEventMap>(
     throw new TypeError('useMouseEvent() event type must be "click" or "wheel"');
   }
 
-  if (
-    session.host === "live" &&
-    session.output.presentation === "visual" &&
-    session.mode.effective === "inline"
-  ) {
+  if (session.host === "live" && session.mode.effective === "inline") {
     guardInline(options);
     return;
   }
 
-  if (
-    session.host !== "live" ||
-    session.output.presentation !== "visual" ||
-    !session.capabilities.elementHitTesting
-  ) {
+  if (session.host !== "live" || !session.capabilities.elementHitTesting) {
     return;
   }
 

@@ -1,6 +1,6 @@
 import { Comment, defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
-import { renderToString, renderToStringWithScreenReader } from "../render-to-string.ts";
+import { renderToString } from "../render-to-string.ts";
 import { Transform } from "./transform.ts";
 
 type EmptySlotCase = {
@@ -25,29 +25,4 @@ test.each(emptySlotCases)("source-private Transform omits its host node for $nam
   );
 
   expect(renderToString(App, { columns: 20 })).toBe("a  b");
-});
-
-test.each(emptySlotCases)(
-  "source-private Transform checks $name before its screen-reader label",
-  ({ slots }) => {
-    const App = defineComponent(
-      () => () =>
-        h(Transform, { accessibilityLabel: "announced", transform: (line: string) => line }, slots),
-    );
-
-    expect(renderToStringWithScreenReader(App)).toBe("");
-  },
-);
-
-test("source-private Transform substitutes its screen-reader label after the child guard", () => {
-  const App = defineComponent(
-    () => () =>
-      h(
-        Transform,
-        { accessibilityLabel: "announced", transform: (line: string) => line },
-        { default: () => "visual child" },
-      ),
-  );
-
-  expect(renderToStringWithScreenReader(App)).toBe("announced");
 });

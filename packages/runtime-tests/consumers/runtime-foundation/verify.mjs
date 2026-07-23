@@ -49,7 +49,7 @@ const consumers = {
     sourceRoot: "src",
   },
   machud: {
-    repository: "https://github.com/hyf0/machud.git",
+    repository: "https://github.com/hyfdev/machud.git",
     pin: "a51a6853686eb818471d0027d2549e6e664c9b36",
     patch: "machud.patch",
     patchSha256: "af3fd2f856d6ae10f6ff678d9c37535e07f51a186c2429a9b8ee4af61c8e6a08",

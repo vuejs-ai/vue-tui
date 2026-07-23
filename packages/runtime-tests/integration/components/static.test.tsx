@@ -3,7 +3,6 @@ import { expect, test } from "vite-plus/test";
 import { render, type ContentFrame, type RenderResult } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
 
 function staticTranscript(frames: readonly ContentFrame[]): string {
   return frames.map((frame) => frame.staticOutput).join("");
@@ -291,36 +290,33 @@ test("an empty Static block adds no blank line to history or the dynamic frame",
   expect(result.lastFrame()).toBe("[live]");
 });
 
-test.each(["visual", "screen-reader"] as const)(
-  "a Static under an authored hidden ancestor waits until it becomes visible in %s output",
-  async (presentation) => {
-    const visible = shallowRef(false);
-    const App = defineComponent(() => () => (
-      <Box flexDirection="column">
-        <Box display={visible.value ? "flex" : "none"}>
-          <Static>
-            <Text>DEFERRED</Text>
-          </Static>
-        </Box>
-        <Text>[live]</Text>
+test("a Static under an authored hidden ancestor waits until it becomes visible", async () => {
+  const visible = shallowRef(false);
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Box display={visible.value ? "flex" : "none"}>
+        <Static>
+          <Text>DEFERRED</Text>
+        </Static>
       </Box>
-    ));
-    const result = await render(App, { host: { presentation } });
+      <Text>[live]</Text>
+    </Box>
+  ));
+  const result = await render(App);
 
-    expect(staticTranscript(result.frames)).toBe("");
-    expect(result.lastFrame()).toBe("[live]");
+  expect(staticTranscript(result.frames)).toBe("");
+  expect(result.lastFrame()).toBe("[live]");
 
-    visible.value = true;
-    await flush(result);
-    expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
+  visible.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
 
-    visible.value = false;
-    await flush(result);
-    visible.value = true;
-    await flush(result);
-    expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
-  },
-);
+  visible.value = false;
+  await flush(result);
+  visible.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
+});
 
 test("a Static under v-show waits for the Box to become visible", async () => {
   const visible = shallowRef(false);
@@ -342,7 +338,7 @@ test("a Static under v-show waits for the Box to become visible", async () => {
   expect(staticTranscript(result.frames)).toBe("VSHOW\n");
 });
 
-test("hidden Static content stays absent from synchronous visual and screen-reader documents", () => {
+test("hidden Static content stays absent from a synchronous document", () => {
   const App = defineComponent(() => () => (
     <Box display="none">
       <Static>
@@ -352,10 +348,9 @@ test("hidden Static content stays absent from synchronous visual and screen-read
   ));
 
   expect(renderToString(App)).toBe("");
-  expect(renderToStringWithScreenReader(App)).toBe("");
 });
 
-test("nested Static is rejected before live visual or screen-reader output", async () => {
+test("nested Static is rejected before live output", async () => {
   const App = defineComponent(() => () => (
     <Static>
       <Text>A</Text>
@@ -368,10 +363,9 @@ test("nested Static is rejected before live visual or screen-reader output", asy
 
   const message = "<Static> cannot be nested inside another <Static>";
   await expect(render(App)).rejects.toThrow(message);
-  await expect(render(App, { host: { presentation: "screen-reader" } })).rejects.toThrow(message);
 });
 
-test("nested Static is rejected by both synchronous document presentations", () => {
+test("nested Static is rejected by the synchronous document renderer", () => {
   const App = defineComponent(() => () => (
     <Static>
       <Text>A</Text>
@@ -383,9 +377,6 @@ test("nested Static is rejected by both synchronous document presentations", () 
   ));
 
   expect(() => renderToString(App)).toThrow("<Static> cannot be nested inside another <Static>");
-  expect(() => renderToStringWithScreenReader(App)).toThrow(
-    "<Static> cannot be nested inside another <Static>",
-  );
 });
 
 test("Static in a text context is rejected before Yoga insertion", async () => {

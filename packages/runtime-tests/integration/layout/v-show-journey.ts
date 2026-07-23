@@ -11,13 +11,20 @@ import {
   type PropType,
   type Ref,
 } from "vue";
-import { Box, Text, useBoxPresence, useBoxSize, type BoxSize } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  useBoxSize,
+  useFocus,
+  type BoxSize,
+  type UseFocusReturn,
+} from "@vue-tui/runtime";
 
 interface VShowJourneyState {
   mounts: number;
   unmounts: number;
   value: Ref<number> | null;
-  presence: Readonly<Ref<boolean>> | null;
+  focus: UseFocusReturn | null;
   size: Readonly<Ref<BoxSize | null>> | null;
 }
 
@@ -25,7 +32,7 @@ export const vShowJourneyState: VShowJourneyState = {
   mounts: 0,
   unmounts: 0,
   value: null,
-  presence: null,
+  focus: null,
   size: null,
 };
 
@@ -33,7 +40,7 @@ export function resetVShowJourneyState(): void {
   vShowJourneyState.mounts = 0;
   vShowJourneyState.unmounts = 0;
   vShowJourneyState.value = null;
-  vShowJourneyState.presence = null;
+  vShowJourneyState.focus = null;
   vShowJourneyState.size = null;
 }
 
@@ -56,7 +63,7 @@ export default defineComponent({
   setup(props) {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
     const value = ref(props.revision);
-    const presence = useBoxPresence(target);
+    const focus = useFocus(target);
     const size = useBoxSize(target);
 
     watch(
@@ -68,11 +75,12 @@ export default defineComponent({
     );
 
     vShowJourneyState.value = value;
-    vShowJourneyState.presence = presence;
+    vShowJourneyState.focus = focus;
     vShowJourneyState.size = size;
 
     onMounted(() => {
       vShowJourneyState.mounts++;
+      focus.focus();
     });
     onUnmounted(() => {
       vShowJourneyState.unmounts++;

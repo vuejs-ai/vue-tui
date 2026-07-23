@@ -50,10 +50,7 @@ export function useTextSelection(
   const failInline = (): never => {
     throw new Error("useTextSelection() requires an effective visual Fullscreen render surface");
   };
-  const isInline =
-    session.host === "live" &&
-    session.output.presentation === "visual" &&
-    session.mode.effective === "inline";
+  const isInline = session.host === "live" && session.mode.effective === "inline";
   if (isInline) {
     if (readActive()) failInline();
     watch(

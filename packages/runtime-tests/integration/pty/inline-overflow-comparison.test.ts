@@ -115,15 +115,6 @@ test("Inline never takes ownership of a partially occupied pre-mount row", async
   expect(lines).toContain("TOP 2");
 });
 
-test("screen-reader Inline also preserves a partially occupied pre-mount row", async () => {
-  const { lines, output } = await runScenario("partial-row-screen-reader");
-
-  expectNoMainScreenReset(output);
-  expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(lines).toContain("PRE_APP_PARTIAL");
-  expect(lines).toContain("TOP 2");
-});
-
 test("Static can be the first managed write after a partial row", async () => {
   const { lines, output } = await runScenario("partial-row-static");
 

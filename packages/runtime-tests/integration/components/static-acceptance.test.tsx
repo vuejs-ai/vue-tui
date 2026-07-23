@@ -61,15 +61,6 @@ const acceptanceHosts = [
     options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptions>,
   },
   {
-    name: "Fullscreen request with screen-reader Inline fallback",
-    isTTY: true,
-    options: {
-      mode: "fullscreen",
-      liveUpdates: true,
-      presentation: "screen-reader",
-    } satisfies Partial<InternalMountOptions>,
-  },
-  {
     name: "final non-TTY",
     isTTY: false,
     options: { mode: "inline", liveUpdates: false } satisfies Partial<InternalMountOptions>,

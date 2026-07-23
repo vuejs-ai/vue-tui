@@ -2,43 +2,41 @@
 
 ## Status and authority
 
-This is the completed local boundary record for PR #265. The earlier API is experimental evidence, not a compatibility target. The implementation, packed-package boundary, local repository validation, terminal-visible review, and bounded adversarial review now reflect the target below. The PR remains unmerged and unreleased.
+This is the implementation and technical evidence record for the public boundary currently present on PR #265. On 2026-07-22 Yunfei reopened that surface for item-by-item review. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is the authoritative inventory of his stated selections and the Open queue; its unstamped entries still await review and vouch. This record's unstamped retain, remove, completed, and target language describes the previous candidate and is not acceptance. The PR remains unmerged and unreleased.
 
 The goal is not to publish every mechanism already implemented. `@vue-tui/runtime` publishes only facts and operations that require ownership of the terminal, Vue renderer, accepted layout or paint, normalized terminal input, or lifecycle resources. Application policy remains ordinary Vue code or an optional higher layer. No `@vue-tui/use` package is required by this phase.
 
-Maintainer-vouched behavior that does not conflict with this clean boundary remains in force, including the typed accessibility props, shared-stdin behavior, multiple Inline Static regions, same-stdout mount arbitration, and the acknowledged incidental `TuiNode` appearance through Vue's private `App._container` type. The latter is not supported authoring API.
+Earlier vouches do not bypass the item-by-item review when their assumptions changed. In particular, the former accessibility props and transcript path are now removed rather than retained as current or hidden Runtime support; [accessibility-api](./accessibility-api.md) preserves only the historical evidence.
 
 ## User-visible result
 
-The pre-audit branch asked users to understand Runtime's parser, routing, paint geometry, focus manager, pointer pipeline, clipboard transports, output coordinator, scheduler controls, and lifecycle result channel. The resulting foundation asks users to understand only four things:
+The pre-audit branch asked users to understand Runtime's parser, routing, paint geometry, focus manager, pointer pipeline, clipboard transports, output coordinator, scheduler controls, and lifecycle result channel. The selected target asks users to understand only four things:
 
 1. Render with `Box`, `Text`, `createApp()`, or `renderToString()`.
 2. Read the few layout facts Runtime alone knows.
-3. Subscribe to normalized input and keep focus or routing policy in Vue state.
+3. Subscribe to normalized input and, when needed, participate in one shared unique-focus controller without adopting Runtime routing policy.
 4. Let the app owner mount, flush, exit, and await restoration.
 
 ```ts
 import { createApp } from "@vue-tui/runtime";
 
 const app = createApp(App);
-app.mount({ mode: "fullscreen", presentation: "visual" });
+app.mount({ mode: "fullscreen" });
 await app.waitUntilExit();
 ```
 
 ```ts
-import { shallowRef } from "vue";
-import { Box, useBoxPresence, useInput } from "@vue-tui/runtime";
+import { onMounted, shallowRef } from "vue";
+import { Box, useFocus, useInput } from "@vue-tui/runtime";
 
 const panel = shallowRef<InstanceType<typeof Box> | null>(null);
-const present = useBoxPresence(panel);
+const focus = useFocus(panel);
 
-useInput((event) => {
-  if (!present.value) return;
-  routeThroughApplicationFocus(event);
-});
+useInput(handlePanelInput, { isActive: focus.isFocused });
+onMounted(() => focus.focus());
 ```
 
-There is no public focus manager, renderer session, physical caret, pointer route, selection service, clipboard transport, arbitrary stdout transaction, frame-rate knob, `/fullscreen`, or `/internal` package entry.
+There is no public focus manager, renderer session, screen-reader presentation, ARIA semantic API, physical caret, pointer route, selection service, clipboard transport, arbitrary stdout transaction, frame-rate knob, `/fullscreen`, or `/internal` package entry.
 
 ## Path 0: renderer entry and basic nodes
 
@@ -62,11 +60,11 @@ const help = renderToString(Help, { columns: 80 });
 
 - Retain `createApp`, `renderToString`, `Box`, and `Text`. Only Runtime can create the Vue custom renderer, own Yoga nodes, paint terminal cells, sanitize ANSI, and release the tree coherently.
 - Retain the exact closed `BoxProps` and `TextProps` contracts already established by Path 0. Their named types let components describe Runtime-validated inputs without copying the grammar.
-- Retain `Color`, `AriaRole`, and `AriaState` because they are shared stable domains of those primitives.
+- Retain `Color` as the shared stable color domain of those primitives. The experimental `AriaRole` and `AriaState` domains were removed with screen-reader presentation.
 - Remove `Newline`, `Spacer`, and `useAnimation`; ordinary Text, Box, and Vue timers implement them without Runtime access.
-- Keep Transform, screen-reader linearization, Yoga hosts, ANSI runs, and renderer nodes private. No current application justifies a transform API.
+- Keep Transform, Yoga hosts, ANSI runs, and renderer nodes private. No current application justifies a transform API; the screen-reader linearizer was deleted instead of retained privately.
 
-All four rendering hosts use the same accepted Box/Text layout vocabulary. Visual Inline and Fullscreen paint terminal cells, visual non-TTY and final-output mounts emit documents, screen-reader presentation emits a linear transcript, and string rendering returns a visual document without terminal resources. `renderToString()` accepts only `{ columns?: number }`, defaults to 80, and fails synchronously after cleanup.
+All supported rendering hosts use the same Box/Text visual vocabulary. Inline and Fullscreen paint terminal cells, non-TTY and final-output mounts emit documents, and string rendering returns a document without terminal resources. `renderToString()` accepts only `{ columns?: number }`, defaults to 80, and fails synchronously after cleanup.
 
 ## Path 1: layout, viewport, and Box facts
 
@@ -80,15 +78,13 @@ The old `useWindowSize()`, `useLayoutSize()`, `useRenderSession()`, `useBoxMetri
 const width = useLayoutWidth(); // Readonly<Ref<number>>
 const viewportHeight = useViewportHeight(); // Readonly<Ref<number>> | null
 const size = useBoxSize(boxRef); // Readonly<Ref<{width; height} | null>>
-const present = useBoxPresence(boxRef); // Readonly<Ref<boolean>>
 ```
 
 - `useLayoutWidth()` is numeric on every host. Runtime alone knows the width actually accepted by root layout; string and widthless stream hosts use 80 unless a document width was supplied.
-- `useViewportHeight()` returns a ref only when the render tree has a finite visual viewport. Inline and Fullscreen visual TTYs have one; string, screen-reader, and unbounded stream documents return `null` once at setup.
-- `useBoxSize()` reports the full size of one directly referenced Box after an accepted visual paint. It returns `null` before acceptance, while hidden or detached, and on string or screen-reader hosts. A clipped Box retains its full accepted size.
-- `useBoxPresence()` reports whether a direct Box belongs to the last accepted live tree, independently of zero size or clipping. It supplies the renderer-only fact needed by public focus composition.
+- `useViewportHeight()` returns a ref only when the render tree has a finite viewport. Inline and Fullscreen TTYs have one; string and unbounded stream documents return `null` once at setup.
+- `useBoxSize()` reports the full size of one directly referenced Box after an accepted paint. It returns `null` before acceptance, while hidden or detached, and on string hosts. A clipped Box retains its full accepted size.
 
-Third parties cannot derive accepted layout or tree presence from Vue refs alone. They can derive responsive layouts, focus membership, and component policy from these four facts without access to Yoga nodes, surface coordinates, clipping fragments, or the render-session graph. Those broader mechanisms remain private.
+Third parties cannot derive accepted layout from Vue refs alone. They can derive responsive layouts and component policy from these three facts without access to Yoga nodes, surface coordinates, clipping fragments, or the render-session graph. General accepted-tree membership is not published as `useBoxPresence()` merely to reconstruct focus outside Runtime; the selected `useFocus(target)` overload keeps its narrower renderer-owned validity check internal.
 
 ## Path 2: Inline history
 
@@ -103,11 +99,13 @@ An Inline application needs completed records to become immutable terminal histo
 <Text>{{ liveTail }}</Text>
 ```
 
-`Static` remains the only value on `@vue-tui/runtime/inline`. Runtime alone can separate irreversible history bytes from the replaceable live region and preserve ordering across commits. It has an ordinary Vue slot and no collection-specific props or named types; iteration, keys, filtering, and layout are application policy.
+`Static` remains the only value on `@vue-tui/runtime/inline`. Runtime alone can separate irreversible history bytes from the replaceable live region. It has an ordinary Vue slot and no collection-specific props or named types; iteration, keys, filtering, layout, conditional mounting, and remount identity are ordinary Vue composition.
 
-Static works in Inline TTY, non-TTY/final output, screen-reader transcript, and string documents. Effective visual Fullscreen rejects it because alternate-screen history is not durable. Hidden instances stay open until present; accepted instances never replay. The renderer's static channel remains internal.
+The accepted target keeps an instance open until its first non-empty eligible output, commits that block once, releases the slot subtree through normal Vue unmount lifecycle, and never rewrites accepted history. Ordinary conditional unmount cannot erase accepted bytes, and remount creates a new producer. A true Fullscreen surface throws and restores its resources. The current implementation still consumes an output-free eligible render; that gap is tracked in [TODOs](./todos.md#runtime-public-api-review). Non-TTY, string, exact ordering, hidden-ancestor, and placement semantics remain Open.
 
-## Path 3: normalized input without interaction policy
+## Path 3: normalized input and minimum focus without routing policy
+
+> **Superseded input target, 2026-07-23:** The input example and first input bullets in this path remain evidence for the previous candidate, not the selected target. The vouched replacement uses nested `TuiInputEvent`, `TuiKey`, and `TuiKeyName` facts, ignores handler results, defaults `exitOnCtrlC` to `false`, and keeps raw-input ownership outside this accepted contract. The focus paragraphs below record the later selected minimum focus target. See the [event decision](./runtime-public-api-decisions.md#useinput-exposes-one-tagged-text-key-and-paste-event-contract), [delivery decision](./runtime-public-api-decisions.md#useinput-is-a-live-broadcast-subscription-without-propagation-results), and [implementation TODOs](./todos.md#runtime-public-api-review).
 
 ### User task
 
@@ -132,9 +130,11 @@ useInput(
 - Retain `useInput(handler, { isActive? })`, `TuiInputEvent`, and `TuiKeyName`. Runtime must decode UTF-8, bracketed paste, escape ambiguity, and negotiated key protocols and must acquire and restore raw mode around actual demand.
 - A handler normally returns nothing. The exact `{ preventDefault: true }` result suppresses only Runtime's delayed Ctrl+C exit default for that event. It does not stop sibling subscriptions, report application handling, or control external forwarding.
 - Retain `useStdin()` and `UseStdinReturn` as the raw escape hatch to the exact stream selected by the host. Raw bytes have no Runtime event semantics and are not guaranteed to compose with managed input.
-- Remove parser phase, byte sequence, source/fidelity, release/repeat, codepoint, input availability, external forwarding, focus, scopes, and route decisions from the public surface.
+- Remove parser phase, byte sequence, source/fidelity, release/repeat, codepoint, input availability, external forwarding, focus scopes, and route decisions from the public surface.
 
-Focus identity, traversal, modal trapping, and propagation can be implemented in a public higher layer with Vue providers/state, one `useInput()` subscription, and `useBoxPresence()` for rendered membership. Inline and Fullscreen TTY hosts support managed input. A non-controllable or non-TTY stdin remains available as a raw stream, but activating managed input fails before terminal mutation. String rendering provides inert shared services and has no input lifecycle.
+Retain two explicit `useFocus` overloads in one per-app unique-owner controller. `useFocus()` creates a logical identity whose automatic validity follows its Vue scope; another successful focus acquisition can still replace its ownership. `useFocus(target)` additionally binds that identity's validity to one rendered target and its rendered ancestors. The target is not the identity and supplies no navigation or input route. Hidden or detached targeted focus clears without restoration. Remove the public manager, string lookup, traversal, scopes, modal trapping, focused subscriptions, external forwarding, restoration, and automatic Tab behavior.
+
+Inline and Fullscreen TTY hosts support managed input. A non-controllable or non-TTY stdin remains available as a raw stream, but activating managed input fails before terminal mutation. String rendering provides inert shared services and has no input lifecycle.
 
 ## Path 4: editable text and physical caret
 
@@ -152,7 +152,6 @@ The app owner chooses the host, can await a committed frame when coordinating a 
 const app = createApp(App);
 app.mount({
   mode: "inline",
-  presentation: "visual",
   stdout,
   stdin,
   stderr,
@@ -174,18 +173,18 @@ exit(error); // waitUntilExit() rejects with this Error
 
 ### Boundary decision
 
-- `MountOptions` contains exactly `stdout`, `stdin`, `stderr`, `mode`, `presentation`, and `patchConsole`.
-- `RenderMode` is `"inline" | "fullscreen"`; `RenderPresentation` is `"visual" | "screen-reader"`.
+- `MountOptions` currently contains exactly `stdout`, `stdin`, `stderr`, `mode`, and `patchConsole`. The presence and base protocols of the stream and mode fields are accepted with remaining host semantics still Open; the complete `patchConsole` contract below is vouched.
+- The mode union is expressed on `MountOptions["mode"]` rather than through a separate root alias. There is no presentation union because there is no screen-reader presentation.
 - `TuiApp.mount()` validates the requested host before mutation. One app has one real mount attempt; a busy-stdout arbitration no-op does not consume it.
-- `TuiApp.waitUntilRenderFlush()` is an app-owner barrier available only while mounted. Component code does not receive it through `useApp()`.
-- `TuiApp.waitUntilExit()` resolves `void` after normal restoration, rejects with the first application `Error`, and reports otherwise-hidden cleanup failures on a normal exit with `AggregateError`.
+- `TuiApp.waitUntilRenderFlush()` is an always-callable app-owner output barrier. It resolves immediately when no work exists before mount or after exit, waits for accepted render and output work while mounted, and waits for already-started teardown output without duplicating the exit result. Component code does not receive it through `useApp()`. The implementation still has obsolete pre-mount and teardown availability errors tracked in [TODOs](./todos.md#runtime-public-api-review).
+- `TuiApp.waitUntilExit()` resolves `void` after normal teardown, restoration, and accepted output, or rejects with the first application `Error` after that same completion point. The current implementation aggregates otherwise-hidden cleanup failures, but the public shape of multiple teardown failures is not accepted by this statement.
 - `useApp()` exposes only `exit(error?: Error)`. Exit payloads, `clear()`, and component-level flush are removed.
-- `patchConsole` remains because only Runtime can serialize console output around a live frame. A module-level owner stack prevents one app from removing another app's console sink.
-- Output cadence, `maxFps`, `onRender`, incremental painting, screen-reader booleans, clipboard transports, and terminal protocol options remain private. Direct coordinated stdout/stderr composables and their flow-control result exposed the output scheduler and are removed.
+- `patchConsole` defaults on, accepts `false` as the escape hatch, and uses a normal active-application registration stack around one physical process-console patch. Runtime installs protection before user component execution, releases each registration after that application's Vue cleanup, and forwards intercepted content without filtering it.
+- Output cadence, `maxFps`, `onRender`, incremental painting, clipboard transports, and terminal protocol options remain private. Screen-reader booleans and their implementation paths were removed entirely. Direct coordinated stdout/stderr composables and their flow-control result exposed the output scheduler and are removed.
 
-The inherited Vue app surface (`config`, `use`, `mixin`, `component`, `directive`, `provide`, `runWithContext`, `onUnmount`, and `unmount`) remains Vue's contract. Runtime redefines only `mount` and adds the two barriers. The vouched incidental host type on Vue's underscore field is unsupported.
+The current candidate inherits the documented Vue app surface available in the consumer's supported Vue peer version, including `config`, `use`, `mixin`, `component`, `directive`, `provide`, `runWithContext`, and `unmount`; Vue 3.5's `onUnmount` is not present in the minimum supported Vue 3.4. Runtime redefines only `mount` and adds the two barriers. Whether full Vue App inheritance remains the target is Open in the [current item review](./runtime-public-api-review.md#createapp-and-tuiapp), and the incidental host type on Vue's underscore field is unsupported.
 
-Inline, Fullscreen, errors, signals, job-control suspend/resume, HMR, console output, and raw terminal modes share one resource-ownership teardown. An explicit `presentation: "visual"` overrides the screen-reader environment variable. Default live output follows whether stdout is a TTY rather than whether the process happens to run in CI. A non-TTY mount produces final stream output and does not pretend it acquired a visual terminal surface.
+Inline, Fullscreen, errors, signals, job-control suspend/resume, HMR, console output, and raw terminal modes share one resource-ownership teardown. Default live output follows whether stdout is a TTY rather than whether the process happens to run in CI. A non-TTY mount produces final stream output and does not pretend it acquired a terminal surface. `presentation`, `INK_SCREEN_READER`, and internal transcript helpers no longer alter this resolution.
 
 ### Public integration subpaths
 
@@ -204,23 +203,24 @@ Pointer hit testing, capture, drag, arbitrary existing-Text selection, physical 
 
 Applications can implement explicit copy actions with their own selected string and injected clipboard adapter. They cannot implement correct arbitrary painted-Text selection or pointer targeting from this foundation; those capabilities are explicitly outside the minimum deliverable rather than falsely approximated with layout rectangles. `Text.inverse`, `CellPoint`, `ElementTarget`, `/fullscreen`, mouse hooks, selection hooks, clipboard hooks, and `MountOptions.clipboard` are removed.
 
-## Exhaustive retained public ledger
+## Previous candidate public ledger
 
 ### Root values and associated named types
 
-| Public API                                                                | Concrete task                                        | Why Runtime must provide it                        | Third-party alternative                                    | Hosts and absence/lifecycle                                       | Decision                  |
-| ------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------- |
-| `createApp`; `TuiApp`; `MountOptions`; `RenderMode`; `RenderPresentation` | Mount and own a live Vue terminal app                | Creates the renderer and owns terminal resources   | None can reproduce ownership safely                        | Live Inline, Fullscreen, TTY, and streams; one real mount attempt | Retain                    |
-| `renderToString`; `RenderToStringOptions`                                 | Produce one synchronous width-bound document         | Runs the same renderer without live resources      | A wrapper can call it, not recreate it                     | String only; synchronous cleanup and failure                      | Retain                    |
-| `Box`; `BoxProps`; `Color`; `AriaRole`; `AriaState`                       | Layout, paint, clip, hide, and describe regions      | Runtime owns Yoga and terminal cells               | Higher components compose Box                              | Every rendering host; closed validated props                      | Retain                    |
-| `Text`; `TextProps`                                                       | Render styled, wrapped, accessible terminal text     | Runtime owns graphemes, ANSI state, and cell width | Higher components compose Text                             | Every rendering host; screen-reader substitutes semantics         | Retain                    |
-| `useApp`; `UseAppReturn`                                                  | End the current app normally or with an Error        | Runtime owns teardown and error settlement         | Cannot safely emulate inside a component                   | Live hosts; `exit()` unavailable in string rendering              | Retain, reduced to `exit` |
-| `useInput`; `TuiInputEvent`; `TuiKeyName`                                 | Receive normalized text, paste, and finite key facts | Runtime owns byte parsing and terminal input modes | Focus/routing composes above it                            | Managed TTY input only; `isActive` owns demand                    | Retain, reduced           |
-| `useStdin`; `UseStdinReturn`                                              | Reach the exact mounted raw stream                   | Runtime selects the host stream                    | Host owner can retain its stream, shared components cannot | Live and inert string contexts; no semantic guarantees            | Retain escape hatch       |
-| `useLayoutWidth`                                                          | Read accepted root width                             | Runtime owns layout input and resize acceptance    | Cannot derive reliably from process stdout                 | Numeric readonly ref on every host                                | Retain                    |
-| `useViewportHeight`                                                       | Gate behavior requiring finite visual rows           | Runtime resolves whether a visual viewport exists  | Cannot infer from layout width or raw rows                 | Ref on visual TTY surfaces, otherwise `null`                      | Retain                    |
-| `useBoxSize`; `BoxSize`                                                   | Size one accepted direct Box                         | Runtime owns accepted paint and ref identity       | Layout guesses are not equivalent                          | Visual paint only; readonly nullable ref                          | Retain                    |
-| `useBoxPresence`                                                          | Know whether one Box is in the accepted live tree    | Runtime owns accepted tree membership              | Size cannot distinguish every host/state                   | Live hosts; false before acceptance/after detach                  | Retain                    |
+| Public API                                                                | Concrete task                                        | Why Runtime must provide it                                          | Third-party alternative                                       | Hosts and absence/lifecycle                                       | Decision                  |
+| ------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------- |
+| `createApp`; `TuiApp`; `MountOptions`; `RenderMode`; `RenderPresentation` | Mount and own a live Vue terminal app                | Creates the renderer and owns terminal resources                     | None can reproduce ownership safely                           | Live Inline, Fullscreen, TTY, and streams; one real mount attempt | Retain                    |
+| `renderToString`; `RenderToStringOptions`                                 | Produce one synchronous width-bound document         | Runs the same renderer without live resources                        | A wrapper can call it, not recreate it                        | String only; synchronous cleanup and failure                      | Retain                    |
+| `Box`; `BoxProps`; `Color`; `AriaRole`; `AriaState`                       | Layout, paint, clip, hide, and describe regions      | Runtime owns Yoga and terminal cells                                 | Higher components compose Box                                 | Every rendering host; closed validated props                      | Retain                    |
+| `Text`; `TextProps`                                                       | Render styled, wrapped, accessible terminal text     | Runtime owns graphemes, ANSI state, and cell width                   | Higher components compose Text                                | Every rendering host; screen-reader substitutes semantics         | Retain                    |
+| `useApp`; `UseAppReturn`                                                  | End the current app normally or with an Error        | Runtime owns teardown and error settlement                           | Cannot safely emulate inside a component                      | Live hosts; `exit()` unavailable in string rendering              | Retain, reduced to `exit` |
+| `useInput`; `TuiInputEvent`; `TuiKeyName`                                 | Receive normalized text, paste, and finite key facts | Runtime owns byte parsing and terminal input modes                   | Focus/routing composes above it                               | Managed TTY input only; `isActive` owns demand                    | Retain, reduced           |
+| `useStdin`; `UseStdinReturn`                                              | Reach the exact mounted raw stream                   | Runtime selects the host stream                                      | Host owner can retain its stream, shared components cannot    | Live and inert string contexts; no semantic guarantees            | Retain escape hatch       |
+| `useFocus`; focus return and target types                                 | Select one logical or rendered-bound input owner     | Runtime owns the shared controller and rendered validity transaction | App policy composes `isFocused` with `useInput({ isActive })` | Exact live, string, and non-TTY host semantics remain Open        | Retain, reduced           |
+| `useLayoutWidth`                                                          | Read accepted root width                             | Runtime owns layout input and resize acceptance                      | Cannot derive reliably from process stdout                    | Numeric readonly ref on every host                                | Retain                    |
+| `useViewportHeight`                                                       | Gate behavior requiring finite visual rows           | Runtime resolves whether a visual viewport exists                    | Cannot infer from layout width or raw rows                    | Ref on visual TTY surfaces, otherwise `null`                      | Retain                    |
+| `useBoxSize`; `BoxSize`                                                   | Size one accepted direct Box                         | Runtime owns accepted paint and ref identity                         | Layout guesses are not equivalent                             | Visual paint only; readonly nullable ref                          | Retain                    |
+| `useBoxPresence`                                                          | General accepted-tree membership                     | The private fact exists, but focus needs a narrower transaction      | No retained public task justifies the generic boolean         | Current implementation only                                       | Remove                    |
 
 ### Subpaths
 
@@ -242,18 +242,18 @@ Applications can implement explicit copy actions with their own selected string 
 | `stderr`       | Exact fatal and patched-console error stream        | Output failures preserve the original app error and continue restoration      | Retain   |
 | `mode`         | Requests Inline or Fullscreen terminal ownership    | Fullscreen may degrade to final stream behavior when no live surface exists   | Retain   |
 | `presentation` | Selects visual paint or a screen-reader transcript  | Exact finite validation; explicit value overrides environment default         | Retain   |
-| `patchConsole` | Opt in or out of Runtime-coordinated console output | Defaults true; multiple apps have independent sink lifetimes                  | Retain   |
+| `patchConsole` | Opt in or out of Runtime-coordinated console output | Defaults true; `false` opts out; active applications nest; no content filter  | Retain   |
 
 ### App methods
 
-| Method                           | Semantics                                                                       | Decision                                         |
-| -------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `mount(options?)`                | Validate, acquire, render, and return the Vue component instance                | Retain with minimum options                      |
-| `unmount()`                      | Synchronously start idempotent teardown                                         | Retain inherited Vue method                      |
-| `waitUntilRenderFlush()`         | While mounted, await current Vue, console, renderer, and output work            | Retain on host-owned app handle only             |
-| `waitUntilExit()`                | Await complete restoration; resolve void or reject with the authoritative Error | Retain                                           |
-| Vue app methods listed in Path 5 | Plugins, DI, registration, context, and unmount hooks                           | Retain unchanged as Vue composition              |
-| `clear()`                        | Destructively reset a mounted surface                                           | Remove; choose Fullscreen or clear outside mount |
+| Method                           | Semantics                                                                           | Decision                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `mount(options?)`                | Validate, acquire, render, and return the Vue component instance                    | Retain with minimum options                      |
+| `unmount()`                      | Synchronously start idempotent teardown                                             | Retain inherited Vue method                      |
+| `waitUntilRenderFlush()`         | Await already-accepted render and output work; resolve immediately when none exists | Retain on host-owned app handle only             |
+| `waitUntilExit()`                | Await complete restoration; resolve void or reject with the authoritative Error     | Retain                                           |
+| Vue app methods listed in Path 5 | Plugins, DI, registration, context, and unmount hooks                               | Retain unchanged as Vue composition              |
+| `clear()`                        | Destructively reset a mounted surface                                               | Remove; choose Fullscreen or clear outside mount |
 
 ## Evidence and completion gate
 
@@ -263,4 +263,4 @@ Final local evidence on 2026-07-19 satisfies that gate. `vp run ready` passed fo
 
 The basic-template application also passed the repository's real-PTY visual loop. The initial and incremented PNGs were inspected, `+` changed the counter, `q` exited, the post-exit shell was observed, and terminal attributes before and after the app were identical. The bounded adversarial review found two stale current-facing documentation claims, which were corrected; the same reviewer then passed the package boundary and user-facing surface.
 
-The foundation is complete only for the supported capabilities above. Remaining work should be application behavior, components, and optional public-only utilities. A future physical caret, pointer, arbitrary Text selection, or terminal clipboard feature must first prove a smaller Runtime-only primitive and can be added without invalidating this surface.
+The local evidence above proves that the previous candidate is implemented coherently; it does not prove that its public boundary is accepted or complete. The Runtime foundation remains under review while the decision ledger has Open entries, including whether future caret, pointer, arbitrary Text selection, or terminal clipboard work can be added without redesigning Runtime ownership or data flow.

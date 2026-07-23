@@ -26,11 +26,11 @@ afterEach(async () => {
   delete testGlobal.__VT_TEST_STDOUT__;
   delete testGlobal.__VT_TARGET_INSTANCE__;
   delete testGlobal.__VT_TARGET_CURRENT__;
-  delete testGlobal.__VT_TARGET_PRESENCE__;
+  delete testGlobal.__VT_TARGET_FOCUSED__;
   delete testGlobal.__VT_TEST_APP__;
 });
 
-test("HMR keeps component identity while Box presence follows replacement and reload", async () => {
+test("HMR keeps component identity while targeted focus follows replacement and reload", async () => {
   const read = capture({ terminal: true });
   server = await createServer({
     root,
@@ -40,7 +40,7 @@ test("HMR keeps component identity while Box presence follows replacement and re
   });
   await server.listen();
   await waitFor(read, "box=7x2");
-  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__ === true);
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__ === true);
   const targetInstance = (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   expect(targetInstance).toBeDefined();
 
@@ -53,7 +53,7 @@ test("HMR keeps component identity while Box presence follows replacement and re
   );
   await waitFor(read, "TARGET-B-HOT");
   await waitFor(read, "box=7x2");
-  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__ === false);
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__ === false);
 
   expect((globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__).toBe(targetInstance);
   expect((globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__).toBe(targetInstance);
@@ -70,5 +70,5 @@ test("HMR keeps component identity while Box presence follows replacement and re
   const reloadedTarget = (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
   expect(reloadedTarget).toBeDefined();
   expect(reloadedTarget).not.toBe(targetInstance);
-  expect((globalThis as Record<string, unknown>).__VT_TARGET_PRESENCE__).toBe(false);
+  expect((globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__).toBe(false);
 });

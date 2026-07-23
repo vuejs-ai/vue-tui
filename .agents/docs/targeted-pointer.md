@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** historical unstamped F6 contract. The re-audit removed the `/fullscreen` package entry and public pointer hooks because the selected API exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence; targeted pointer behavior is explicitly outside the current foundation. No VOUCHED stamp changed. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
+> **Status:** historical unstamped F6 contract. The previous re-audit candidate removed the `/fullscreen` package entry and public pointer hooks because those APIs exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence. Whether the current public foundation can support future pointer behavior without redesign remains Open in the [Runtime public API decision ledger](./runtime-public-api-decisions.md). No VOUCHED stamp changed.
 
 ## Product boundary
 

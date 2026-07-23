@@ -165,49 +165,6 @@ test("modeled Fullscreen suspension restores and reacquires the alternate screen
   result.dispose();
 });
 
-test("Fullscreen screen-reader request resolves to an Inline transcript", async () => {
-  const result = await render(
-    () => (
-      <Box ariaLabel="screen-reader transcript">
-        <Text>visual child</Text>
-      </Box>
-    ),
-    {
-      host: { mode: "fullscreen", presentation: "screen-reader" },
-    },
-  );
-
-  expect(result.lastFrame()).toContain("screen-reader transcript");
-  expect(result.lastFrame()).not.toContain("visual child");
-  expect((await result.screen()).activeBuffer).toBe("normal");
-});
-
-test("modeled screen-reader transcript suspends and resumes without acquiring Fullscreen", async () => {
-  const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    useInput(() => {});
-    return () => <Text>{`transcript:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
-  });
-  const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { mode: "fullscreen", presentation: "screen-reader" },
-  });
-
-  expect(result.lastFrame()).toContain("transcript:30xunbounded");
-  await result.terminal.suspend();
-  expect(result.terminal.rawMode.current).toBe(false);
-  expect((await result.screen()).activeBuffer).toBe("normal");
-  await result.terminal.resize(24, 6);
-  await result.terminal.resume();
-
-  expect(result.terminal.rawMode.current).toBe(true);
-  expect(result.lastFrame()).toContain("transcript:24xunbounded");
-  expect((await result.screen()).activeBuffer).toBe("normal");
-  result.dispose();
-});
-
 test("modeled stream restores input modes without manufacturing a terminal surface", async () => {
   const App = defineComponent(() => {
     useInput(() => {});
@@ -357,7 +314,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
     {},
     {
       mode: getter("mode", "inline", "sideways"),
-      presentation: getter("presentation", "visual", "audio"),
       stdin: getter("stdin", "tty", "maybe"),
       stdout: getter("stdout", "tty", "file"),
     },
@@ -382,7 +338,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
     rows: 1,
     props: 1,
     mode: 1,
-    presentation: 1,
     stdin: 1,
     stdout: 1,
   });
@@ -410,11 +365,31 @@ test("a removed option fails before its accessor or component setup runs", async
   expect(setupRan).toBe(false);
 });
 
+test.each([undefined, "visual", "screen-reader"])(
+  "removed render-host presentation value %# fails before another host option is read",
+  async (presentation) => {
+    let setupRan = false;
+    const App = defineComponent(() => {
+      setupRan = true;
+      return () => <Text>invalid presentation</Text>;
+    });
+    const host = Object.defineProperty({ presentation }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    await expect(render(App, { host } as never)).rejects.toThrow(
+      'Unknown render host option "presentation"',
+    );
+    expect(setupRan).toBe(false);
+  },
+);
+
 test.each([
   [{ host: { mode: "sideways" } }, "render host mode"],
   [{ host: { mode: null } }, "render host mode"],
-  [{ host: { presentation: "audio" } }, "render host presentation"],
-  [{ host: { presentation: null } }, "render host presentation"],
   [{ host: { stdin: "maybe" } }, "render host stdin"],
   [{ host: { stdin: null } }, "render host stdin"],
   [{ host: { stdout: "file" } }, "render host stdout"],

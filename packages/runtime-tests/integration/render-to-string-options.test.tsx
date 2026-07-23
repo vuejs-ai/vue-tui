@@ -1,7 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, renderToString, Text } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
 
 const Document = defineComponent(() => () => <Text>document</Text>);
 
@@ -75,10 +74,4 @@ test("reads an accepted columns accessor exactly once", () => {
 
   expect(renderToString(Document, options)).toBe("document");
   expect(reads).toBe(1);
-});
-
-test("the internal transcript helper uses the same closed option bag", () => {
-  expect(() => renderToStringWithScreenReader(Document, { unknown: true } as never)).toThrow(
-    'renderToStringWithScreenReader received an unknown option "unknown"',
-  );
 });

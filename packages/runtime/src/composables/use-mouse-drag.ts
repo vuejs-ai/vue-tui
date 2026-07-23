@@ -57,20 +57,12 @@ export function useMouseDrag(
     isDragging: readonly(isDragging) as Readonly<ShallowRef<boolean>>,
   });
 
-  if (
-    session.host === "live" &&
-    session.output.presentation === "visual" &&
-    session.mode.effective === "inline"
-  ) {
+  if (session.host === "live" && session.mode.effective === "inline") {
     guardInline(options);
     return result;
   }
 
-  if (
-    session.host !== "live" ||
-    session.output.presentation !== "visual" ||
-    !session.capabilities.elementHitTesting
-  ) {
+  if (session.host !== "live" || !session.capabilities.elementHitTesting) {
     return result;
   }
 

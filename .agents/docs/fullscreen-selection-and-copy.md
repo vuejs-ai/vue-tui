@@ -1,6 +1,6 @@
 # Fullscreen text selection and clipboard
 
-> **Status:** historical unstamped F8 contract. The re-audit removed `/fullscreen`, public arbitrary-Text selection, clipboard hooks, clipboard mount options, and selection-only inverse styling. The mechanisms remain private evidence, but correct pointer targeting and arbitrary painted-Text selection are explicitly outside the minimum foundation until a smaller Runtime-only primitive is proven. Application-owned copy of an already known string remains ordinary dependency injection. No VOUCHED stamp changed. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
+> **Status:** historical unstamped F8 contract. The previous re-audit candidate removed `/fullscreen`, public arbitrary-Text selection, clipboard hooks, clipboard mount options, and selection-only inverse styling. The mechanisms remain private evidence. Whether correct pointer targeting and arbitrary painted-Text selection can stay future additive work or prove that the foundation lacks a smaller Runtime primitive is Open in the [Runtime public API decision ledger](./runtime-public-api-decisions.md). Application-owned copy of an already known string remains ordinary dependency injection. No VOUCHED stamp changed.
 
 ## Product boundary
 

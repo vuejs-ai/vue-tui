@@ -16,8 +16,6 @@ export {
   type TuiText,
   type TuiNode,
 } from "./host/nodes.ts";
-export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
-export { renderToStringWithScreenReader } from "./render-to-string.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
 export { connectDevtools, isDevConnected } from "./hmr.ts";
 export type { AppContext } from "./context.ts";

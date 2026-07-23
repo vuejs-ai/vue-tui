@@ -22,7 +22,6 @@ export type ClipboardTransport = CustomClipboardTransport | Osc52ClipboardTransp
 export type ClipboardUnavailableReason =
   | "not-configured"
   | "output-not-terminal"
-  | "screen-reader"
   | "suspended"
   | "disposed"
   | "string-host"
@@ -54,7 +53,6 @@ export interface InternalClipboardService {
 export interface InternalClipboardServiceOptions {
   readonly transport: ClipboardTransport | undefined;
   readonly osc52Available: boolean;
-  readonly osc52UnavailableReason?: "output-not-terminal" | "screen-reader";
   readonly writeOsc52: (text: string) => void;
   readonly stringHost?: boolean;
 }
@@ -126,9 +124,7 @@ export function createInternalClipboardService(
     if (options.stringHost) return unavailable("string-host");
     if (!options.transport) return unavailable("not-configured");
     if (options.transport.kind === "custom") return AVAILABLE_CUSTOM;
-    return options.osc52Available
-      ? AVAILABLE_OSC52
-      : unavailable(options.osc52UnavailableReason ?? "output-not-terminal");
+    return options.osc52Available ? AVAILABLE_OSC52 : unavailable("output-not-terminal");
   };
 
   const mutableAvailability = shallowRef<ClipboardAvailability>(baseAvailability());

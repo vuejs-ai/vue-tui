@@ -1017,11 +1017,6 @@ test("selected topology composes across shared stdin suspension and teardown", a
 
 test.each([
   {
-    label: "screen-reader transcript",
-    options: { mode: "fullscreen", isScreenReaderEnabled: true, liveUpdates: true } as const,
-    stdout: createWritable(),
-  },
-  {
     label: "final-output stream",
     options: { mode: "fullscreen", liveUpdates: false } as const,
     stdout: createWritable(false),

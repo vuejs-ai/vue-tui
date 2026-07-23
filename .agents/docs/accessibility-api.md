@@ -1,107 +1,45 @@
-# Accessibility (ARIA + screen-reader) API
+# Accessibility status and removed screen-reader experiment
 
-> **Status:** current ARIA behavior with the minimum Runtime host boundary. Older references to `isScreenReaderEnabled` or a package `/internal` entry are superseded by `presentation: "screen-reader"` and source-private helpers. No VOUCHED stamp changed.
+> **Status:** `@vue-tui/runtime` currently provides no screen-reader presentation and no ARIA-shaped component API. The earlier experiment is removed rather than retained privately. This record preserves the useful design evidence without describing a supported or hidden path.
 
-How vue-tui exposes ARIA and renders screen-reader (SR) output, and why. Companion to the aria-camelCase vouched entry in [ink-divergences](./ink-divergences.md); `renderToString` being layout-only remains Ink parity. The former public render-session and layout-size projections are historical; current layout code uses `useLayoutWidth()` and the setup-time nullable `useViewportHeight()`. This file keeps the _why_ and the researched / run-verified findings those entries deliberately omit, so they are not re-derived expensively. The exported aria types are part of the public contract — see [api-contract](./api-contract.md).
+## Current boundary
 
-## The constraint that shapes everything
+Runtime has one visual rendering model across Inline, Fullscreen, stream, and string hosts. It does not expose or recognize:
 
-vue-tui renders to a terminal — **no DOM, no browser accessibility tree.** To support screen
-readers it must READ aria semantics off its own components and GENERATE the linearized SR text
-itself (e.g. `<Box aria-role="checkbox" aria-state={{ checked: true }}>Accept</Box>` →
-`"(checked) checkbox: Accept"`). So aria values must reach the framework as something it can read
-at the component boundary — i.e. **component props** — exactly like Ink, which is also a no-DOM
-renderer. The mainstream Vue a11y pattern (let `aria-*` fall through to the DOM as kebab
-attributes and let the browser interpret them) is structurally unavailable here: there is no DOM
-to receive them and no browser to read them.
+- a `presentation` mount option;
+- `ariaLabel`, `ariaHidden`, `ariaRole`, or `ariaState` on `Box` or `Text`;
+- public `AriaRole`, `AriaState`, or `RenderPresentation` types;
+- `INK_SCREEN_READER` as an environment selector;
+- a transcript renderer, internal screen-reader string helper, or testing-only presentation control.
 
-## Naming: typed camelCase props (kebab works at runtime)
+The closed component and option surfaces reject these removed inputs instead of silently accepting inert accessibility claims. Ordinary rendered text may still be read by terminal assistive technology, but Runtime does not claim that visual text is a semantic screen-reader API.
 
-- Props are camelCase — `ariaLabel` / `ariaHidden` / `ariaRole` / `ariaState` — with exported
-  `AriaRole` (union) and `AriaState` (object) types, field-for-field identical to Ink's.
-- Ink uses kebab string-literal prop KEYS (`'aria-role'`). vue-tui does not, because Vue's prop
-  convention is camelCase AND camelCase is the only spelling the type-checker validates (below).
-- Ink's kebab spelling still works at runtime: Vue camelizes an incoming kebab attribute onto the
-  declared prop, and `node-ops` accepts both `aria-role` and `ariaRole` keys on the host node. So
-  `aria-role` ports from Ink/HTML unchanged — it is the runtime-compatible escape, not the
-  type-safe path.
-- This is a Vue-idiom + reasonableness choice, **not parity** (Ink is kebab). See the
-  "The governing principle: correctness first, alignment is only a means" section in
-  [ink-divergences](./ink-divergences.md).
+## Why partial ARIA support is not enough
 
-## Type-safety boundary (run-verified: `tsc` + `vue-tsc`)
+vue-tui has no DOM and no browser accessibility tree. A meaningful accessibility feature would need Runtime to interpret component semantics, maintain a coherent accessible representation, choose how that representation is delivered on each terminal host, and define update, focus, lifecycle, error, and testing behavior. Merely accepting ARIA-shaped props would make user code look accessible while no platform consumes those values.
 
-camelCase is the ONLY spelling that is compile-checked, and it is checked in both authoring
-contexts:
+The removed experiment coupled all of those concerns through renderer, mount, environment, component-validation, string-rendering, Static, resize, lifecycle, and test-host branches. Keeping the machinery private would still preserve an unsupported second rendering model and make future Runtime work account for a capability the package does not promise. Yunfei therefore chose to remove and not support it in the current minimum foundation.
 
-- **TSX (`tsc`)** and **templates (`vue-tsc`)**: a bad value (`ariaRole="notarole"`), a typo
-  (`ariaRol`), or an unknown / compound-misspelled name all produce a COMPILE ERROR.
-- **kebab `aria-*` is NOT compile-checked** in either context: Vue/Volar treat `aria-*` (and
-  `data-*`) as always-valid global attributes, so they bypass prop-matching. Control proving the
-  hole is `aria-*`-specific (not general fallthrough): a non-aria kebab like `border-style` IS
-  checked — Volar camelizes it to `borderStyle` and validates the value.
+This is not a permanent decision that terminal accessibility is unimportant. It is a refusal to advertise a partial contract. A future proposal can be additive if it starts from concrete user tasks and supplies a complete model that Runtime alone must own.
 
-→ **The type-safe spelling is camelCase**; `aria-role` is the runtime-only porting escape the
-compiler cannot guard. To reproduce: a scratch `.tsx` run through the package `tsc`, and a scratch
-`.vue` run through `vue-tsc` (the repo has no vue-tsc — install it in an isolated dir), importing
-`Box` from the built dist, asserting which mis-writes error.
+## What would justify revisiting it
 
-## The compound-word pit (and the rule)
+A future accessibility proposal should establish at least:
 
-camelCase↔kebab is ambiguous for COMPOUND aria words: a human writes `ariaHasPopup`, but Vue's
-`camelize` derives `ariaHaspopup` from the canonical `aria-haspopup` (the long-open vuejs/core
-#5477). The current single-word vocabulary (role / label / hidden / state) camelizes losslessly,
-so the pit is **latent, not live**.
+1. the real assistive-technology journey and terminal behavior it serves;
+2. the minimum semantic vocabulary rather than copying browser ARIA mechanically;
+3. Inline, Fullscreen, stream, string, non-TTY, resize, suspend/resume, and error semantics;
+4. how higher-level components add semantics using only supported public Runtime APIs;
+5. run evidence with the intended terminal and screen-reader tools, plus a deterministic public test path;
+6. an additive migration that does not reintroduce parser, renderer-node, or lifecycle implementation details as public API.
 
-**Rule:** any future compound aria word must be declared as the mechanical camelize of the kebab
-name (`ariaHaspopup`, never the human-natural `ariaHasPopup`) or folded into the typed `ariaState`
-object — never bridged by relying on auto-camelize. In TSX, and in templates via the camelCase
-spelling, TS catches a wrong compound name; a kebab compound in a template is silent, so camelCase
-is the guarded path. The cross-field consensus (see precedents) is the same: **never auto-camelize
-an aria round-trip.**
+## Historical evidence from the removed experiment
 
-## `aria-hidden` modeling
+Version `0.1.0` advertised a linear transcript and an 18-value `AriaRole` union; the published changelog remains the historical release record. PR #265 then experimented with `presentation: "screen-reader"`, `INK_SCREEN_READER`, camelCase Vue props, a host-tree linearizer, a source-private string helper, Fullscreen-to-Inline fallback, and deterministic-host selection. Those paths are now removed from the current branch.
 
-ARIA's `aria-hidden` is a tristate enumerated STRING (`true` / `false` / `undefined`, default
-`undefined` = visible) — not a boolean; `aria-hidden="false"` explicitly means _visible_. Ink
-models it as a plain `boolean` (bare → true) and vue-tui follows that for ergonomics. Known edge
-(run-verified): the literal string `aria-hidden="false"` currently HIDES (Boolean-prop coercion
-sees the non-empty string as truthy) where ARIA says visible; bare / `={true}` hide, and
-`={false}` / omitted are correctly visible. Fixable with an explicit normalize if it ever matters.
+The experiment still established two reusable design facts:
 
-## SR rendering architecture
+- A no-DOM renderer cannot rely on browser attribute fallthrough; any future semantic values must be interpreted by the renderer or by another explicitly owned accessibility engine.
+- Vue and Volar type-check declared camelCase props, while kebab `aria-*` is treated as a broadly allowed global attribute in templates and can bypass component-prop checking. A future design must not assume that accepting arbitrary kebab attributes gives a checked semantic contract.
 
-- **Live path:** `app.mount({ presentation: "screen-reader" })` (or `INK_SCREEN_READER=true` when presentation is not explicit) makes each
-  commit emit the linearized SR text instead of the ANSI frame.
-- **Component adaptation:** there is no generic public render-session projection. Common components express one semantic tree through the typed ARIA props and let Runtime choose visual paint or the linear transcript. No current consumer needs to branch on presentation inside setup; a future real task may justify a narrow presentation fact without restoring mode resolution, writer policy, dimensions, and capabilities as one object.
-- **`renderToString`:** public, **layout-only** (matches Ink). Its source-private SR-capable helper is used by the accessibility test suite; the public string API does not surface SR. The visual and screen-reader document hosts remain separate and use isolated inert streams rather than process terminal state.
-- **`renderScreenReaderOutput(node)`:** the linearizer that walks the host tree's
-  `internal_accessibility`. **`/internal`-only** [VOUCHED @hyf0]. Ink keeps its
-  counterpart (`renderNodeToScreenReaderOutput`) module-internal and never exports it; we match
-  that. It was never usefully public anyway — its only parameter type (`TuiNode`) and the
-  node-construction primitives needed to build one are not in the public barrel, so a public
-  consumer could not name or construct the argument. No example/README/user path used it; the live
-  SR machinery (`render`, the internal `renderToStringWithScreenReader`, the `<Static>` channel)
-  imports it from the source module, unaffected. Public SR output is reached via the `mount`
-  `presentation: "screen-reader"` mount option, not by calling this directly.
-
-## Precedents (condensed) — cross-field consensus
-
-How other systems shape an aria API, surveyed when settling vue-tui's:
-
-- **React / Ink:** kebab string-literal prop keys, typed union/object; JSX keys never camelize, so
-  there is no round-trip to disagree. (vue-tui can copy the SHAPE, not the mechanism — Vue
-  camelizes.)
-- **AccessKit** (drives egui; the strongest other no-DOM precedent): abandons strings for a typed
-  `Role` enum + typed state methods — no kebab to convert at all.
-- **Vue a11y libraries** (Reka UI / Headless UI / Vuetify): kebab `aria-*` as fallthrough
-  attributes onto the DOM, never declared props — relies on a DOM + browser, so unavailable here.
-- **Web Components / HTML reflection / Lit:** dual surface bridged by an EXPLICIT curated map
-  (`aria-haspopup` ↔ `ariaHasPopup`, `aria-posinset` ↔ `ariaPosInSet`), never auto-camelize — the
-  platform's own answer to the compound problem, and proof that naive remove-dash-uppercase is
-  wrong.
-- **WAI-ARIA spec:** aria names are all-lowercase single tokens (`aria-haspopup`, not
-  `aria-has-popup`); `aria-hidden` etc. are tristate strings, not booleans.
-
-**Consensus across all of them: never auto-camelize an aria round-trip.** vue-tui satisfies it for
-single-word props (lossless) and the compound-word rule above preserves it.
+The previous vouch covered keeping the linearizer internal while the feature existed. Because the helper and the feature are now removed entirely, that old stamp was removed rather than transferred to this different decision. No new vouch has been added.

@@ -20,7 +20,6 @@ export interface TextSelectionRange {
 
 export type TextSelectionUnavailableReason =
   | "host-unavailable"
-  | "screen-reader"
   | "string-host"
   | "mapping-unavailable";
 

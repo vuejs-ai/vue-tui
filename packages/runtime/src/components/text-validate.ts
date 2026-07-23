@@ -13,7 +13,7 @@ function assertBoolean(value: unknown, prop: string): void {
   }
 }
 
-export function assertTextValid(props: TextProps, validatePaint: boolean): true {
+export function assertTextValid(props: TextProps): true {
   const values = props as Record<string, unknown>;
   const wrap = values["wrap"];
   if (typeof wrap !== "string") {
@@ -23,22 +23,15 @@ export function assertTextValid(props: TextProps, validatePaint: boolean): true 
     throw new Error(`Unsupported ${label("wrap")} value: ${JSON.stringify(wrap)}.`);
   }
 
-  if (typeof values["ariaLabel"] !== "undefined" && typeof values["ariaLabel"] !== "string") {
-    throw new TypeError(`${label("ariaLabel")} must be a string.`);
+  const color = values["color"];
+  if (color !== undefined && color !== "revert" && color !== "initial") {
+    assertColor(color, label("color"));
   }
-  assertBoolean(values["ariaHidden"], "ariaHidden");
-
-  if (validatePaint) {
-    const color = values["color"];
-    if (color !== undefined && color !== "revert" && color !== "initial") {
-      assertColor(color, label("color"));
-    }
-    if (values["backgroundColor"] !== undefined) {
-      assertColor(values["backgroundColor"], label("backgroundColor"));
-    }
-    assertBoolean(values["dimColor"], "dimColor");
-    assertBoolean(values["bold"], "bold");
+  if (values["backgroundColor"] !== undefined) {
+    assertColor(values["backgroundColor"], label("backgroundColor"));
   }
+  assertBoolean(values["dimColor"], "dimColor");
+  assertBoolean(values["bold"], "bold");
 
   return true;
 }

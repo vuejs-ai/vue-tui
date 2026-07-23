@@ -64,8 +64,8 @@ test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode")
   },
 );
 
-test.each([null, false, true, "screenreader", 0, {}, [], () => {}, Symbol("presentation"), 1n])(
-  "invalid presentation %# fails before another mount option is read",
+test.each([undefined, "visual", "screen-reader", null, false, 0, {}, []])(
+  "unknown presentation value %# fails before another mount option is read",
   (presentation) => {
     const options = Object.defineProperty({ presentation }, "stdout", {
       enumerable: true,
@@ -75,9 +75,22 @@ test.each([null, false, true, "screenreader", 0, {}, [], () => {}, Symbol("prese
     });
 
     const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow(
-      'Mount option "presentation" must be "visual", "screen-reader", or undefined',
-    );
+    expect(() => app.mount(options as never)).toThrow('Unknown mount option "presentation"');
+  },
+);
+
+test.each(["isScreenReaderEnabled", "unrecognizedOption"])(
+  "unknown mount key %s fails through the generic closed-option guard",
+  (key) => {
+    const options = Object.defineProperty({ [key]: undefined }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
   },
 );
 
@@ -114,32 +127,6 @@ test.each([
 
   const app = createApp(App);
   expect(() => app.mount(options as never)).toThrow('mount option "clipboard"');
-});
-
-test("screen-reader Fullscreen request stays on the main screen", async () => {
-  const stdout = makeFakeWritable({ columns: 80, rows: 24 });
-  const stderr = makeFakeWritable({ columns: 80, rows: 24 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = chunksFrom(stdout);
-
-  const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-    presentation: "screen-reader",
-  });
-
-  await nextTick();
-  await app.waitUntilRenderFlush();
-  app.unmount();
-  await app.waitUntilExit();
-
-  const output = writes.join("");
-  expect(output).toContain("Hello");
-  expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
 });
 
 test("visual TTY without detected dimensions uses final stream output", async () => {

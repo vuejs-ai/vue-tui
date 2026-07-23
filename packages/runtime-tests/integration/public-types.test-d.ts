@@ -12,40 +12,38 @@ import {
   Box,
   Text,
   useApp,
-  useBoxPresence,
   useBoxSize,
+  useFocus,
   useInput,
   useLayoutWidth,
   useStdin,
   useViewportHeight,
 } from "@vue-tui/runtime";
 import type {
-  AriaRole,
-  AriaState,
   BoxProps,
   BoxSize,
   Color,
+  FocusTarget,
   TextProps,
   MountOptions,
   TuiInputEvent,
   TuiKeyName,
-  RenderMode,
-  RenderPresentation,
   TuiApp,
   UseAppReturn,
+  UseFocusReturn,
   UseStdinReturn,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 
 const defaultMountOptions: MountOptions = {};
-const inlineMountOptions: MountOptions = { mode: "inline", presentation: "visual" };
-const fullscreenMountOptions: MountOptions = {
-  mode: "fullscreen",
-  presentation: "screen-reader",
-};
+const inlineMountOptions: MountOptions = { mode: "inline" };
+const fullscreenMountOptions: MountOptions = { mode: "fullscreen" };
 expectTypeOf(defaultMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(inlineMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(fullscreenMountOptions).toMatchTypeOf<MountOptions>();
+expectTypeOf<keyof MountOptions>().toEqualTypeOf<
+  "stdout" | "stdin" | "stderr" | "mode" | "patchConsole"
+>();
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -65,8 +63,8 @@ const removedKittyKeyboardOption: MountOptions = { kittyKeyboard: { mode: "enabl
 const invalidModeOption: MountOptions = { mode: "full-screen" };
 // @ts-expect-error Output cadence is Runtime-owned rather than a mount policy.
 const removedLiveUpdatesOption: MountOptions = { liveUpdates: true };
-// @ts-expect-error Presentation has two finite public values.
-const invalidPresentationOption: MountOptions = { presentation: "screenreader" };
+// @ts-expect-error Runtime has no presentation selector, even when its value is undefined.
+const removedPresentationOption: MountOptions = { presentation: undefined };
 const removedClipboardOption: MountOptions = {
   // @ts-expect-error Clipboard transport injection is application policy, not a Runtime mount option.
   clipboard: { kind: "custom", writeText: async () => ({ status: "copied" }) },
@@ -80,7 +78,7 @@ void removedExitOnCtrlCOption;
 void removedKittyKeyboardOption;
 void invalidModeOption;
 void removedLiveUpdatesOption;
-void invalidPresentationOption;
+void removedPresentationOption;
 void removedClipboardOption;
 
 // @ts-expect-error Clipboard policy is outside the Runtime foundation.
@@ -140,13 +138,9 @@ expectTypeOf<keyof BoxProps>().toEqualTypeOf<
   | "backgroundColor"
   | "overflowY"
   | "display"
-  | "ariaLabel"
-  | "ariaHidden"
-  | "ariaRole"
-  | "ariaState"
 >();
 expectTypeOf<keyof TextProps>().toEqualTypeOf<
-  "color" | "backgroundColor" | "dimColor" | "bold" | "wrap" | "ariaLabel" | "ariaHidden"
+  "color" | "backgroundColor" | "dimColor" | "bold" | "wrap"
 >();
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<"row" | "column" | undefined>();
 expectTypeOf<BoxProps["alignItems"]>().toEqualTypeOf<"center" | "stretch" | undefined>();
@@ -166,8 +160,24 @@ expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
 expectTypeOf<TextProps["wrap"]>().toEqualTypeOf<"wrap" | "truncate" | undefined>();
 expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<Color | undefined>();
-expectTypeOf<BoxProps["ariaRole"]>().toEqualTypeOf<AriaRole | undefined>();
-expectTypeOf<BoxProps["ariaState"]>().toEqualTypeOf<AriaState | undefined>();
+
+// Screen-reader semantics are not part of the current Runtime foundation.
+// @ts-expect-error The root entry does not publish an ARIA role vocabulary.
+export type _AriaRoleWasRemoved = import("@vue-tui/runtime").AriaRole;
+// @ts-expect-error The root entry does not publish an ARIA state vocabulary.
+export type _AriaStateWasRemoved = import("@vue-tui/runtime").AriaState;
+// @ts-expect-error Box does not accept screen-reader-only props.
+export type _BoxAriaLabelWasRemoved = BoxProps["ariaLabel"];
+// @ts-expect-error Box does not accept screen-reader-only props.
+export type _BoxAriaHiddenWasRemoved = BoxProps["ariaHidden"];
+// @ts-expect-error Box does not accept screen-reader-only props.
+export type _BoxAriaRoleWasRemoved = BoxProps["ariaRole"];
+// @ts-expect-error Box does not accept screen-reader-only props.
+export type _BoxAriaStateWasRemoved = BoxProps["ariaState"];
+// @ts-expect-error Text does not accept screen-reader-only props.
+export type _TextAriaLabelWasRemoved = TextProps["ariaLabel"];
+// @ts-expect-error Text does not accept screen-reader-only props.
+export type _TextAriaHiddenWasRemoved = TextProps["ariaHidden"];
 
 const namedColor: Color = "gray";
 const rgbColor: Color = "#12abEF";
@@ -212,10 +222,13 @@ export type _RemovedTransformProps = import("@vue-tui/runtime").TransformProps;
 export type _RemovedUseAnimationOptions = import("@vue-tui/runtime").UseAnimationOptions;
 // @ts-expect-error Animation scheduling is ordinary Vue timer policy.
 export type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimationReturn;
+// @ts-expect-error Mount mode is available through MountOptions rather than a separate root type.
+export type _RemovedRenderMode = import("@vue-tui/runtime").RenderMode;
+// @ts-expect-error Runtime has no presentation type.
+export type _RemovedRenderPresentation = import("@vue-tui/runtime").RenderPresentation;
 
 // Runtime publishes only the layout facts applications have demonstrated.
-expectTypeOf<RenderMode>().toEqualTypeOf<"inline" | "fullscreen">();
-expectTypeOf<RenderPresentation>().toEqualTypeOf<"visual" | "screen-reader">();
+expectTypeOf<NonNullable<MountOptions["mode"]>>().toEqualTypeOf<"inline" | "fullscreen">();
 expectTypeOf<ReturnType<typeof useLayoutWidth>>().toEqualTypeOf<Readonly<Ref<number>>>();
 expectTypeOf<ReturnType<typeof useViewportHeight>>().toEqualTypeOf<Readonly<Ref<number>> | null>();
 
@@ -253,33 +266,21 @@ expectTypeOf<BoxSize>().toEqualTypeOf<{
 
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
 const boxSize = useBoxSize(boxHost);
-const boxPresence = useBoxPresence(boxHost);
 expectTypeOf(boxSize).toEqualTypeOf<Readonly<Ref<BoxSize | null>>>();
-expectTypeOf(boxPresence).toEqualTypeOf<Readonly<Ref<boolean>>>();
 // @ts-expect-error The accepted Box measurement is readonly.
 boxSize.value = { width: 1, height: 1 };
-// @ts-expect-error Accepted Box presence is renderer-owned and readonly.
-boxPresence.value = false;
 
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has separate semantics and is not a Box size target.
 useBoxSize(textHost);
-// @ts-expect-error Text is not a direct Box-presence target.
-useBoxPresence(textHost);
 const customHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error Arbitrary component refs do not mean one measurable Box.
 useBoxSize(customHost);
-// @ts-expect-error Arbitrary component refs do not mean one direct Box.
-useBoxPresence(customHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
 useBoxSize(rawBoxHost);
-// @ts-expect-error A raw component value cannot represent target attachment and detachment.
-useBoxPresence(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
 useBoxSize(() => boxHost.value);
-// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
-useBoxPresence(() => boxHost.value);
 
 // @ts-expect-error Rich paint geometry is private.
 export type _UseElementGeometryWasRemoved = typeof import("@vue-tui/runtime").useElementGeometry;
@@ -346,9 +347,42 @@ export type _UseStderrWasRemoved = typeof import("@vue-tui/runtime").useStderr;
 // @ts-expect-error The output-gate result type is private.
 export type _CoordinatedWriteResultWasRemoved = import("@vue-tui/runtime").CoordinatedWriteResult;
 
-// Runtime publishes renderer presence, not one focus/scope/routing policy.
-// @ts-expect-error Focus policy can be composed above Runtime.
-export type _UseFocusWasRemoved = typeof import("@vue-tui/runtime").useFocus;
+// Runtime publishes one unique focus identity and optional rendered-component
+// validity without publishing navigation, scopes, or input routing.
+expectTypeOf<FocusTarget>().toEqualTypeOf<
+  Readonly<Ref<ComponentPublicInstance | null | undefined>>
+>();
+expectTypeOf<UseFocusReturn>().toEqualTypeOf<{
+  readonly isFocused: Readonly<Ref<boolean>>;
+  focus(): void;
+  blur(): void;
+}>();
+const logicalFocus = useFocus();
+const targetedFocus = useFocus(customHost);
+const textFocus = useFocus(textHost);
+expectTypeOf(logicalFocus).toEqualTypeOf<UseFocusReturn>();
+expectTypeOf(targetedFocus).toEqualTypeOf<UseFocusReturn>();
+expectTypeOf(textFocus).toEqualTypeOf<UseFocusReturn>();
+expectTypeOf(logicalFocus.focus()).toEqualTypeOf<void>();
+expectTypeOf(logicalFocus.blur()).toEqualTypeOf<void>();
+// @ts-expect-error Focus state is Runtime-owned and readonly.
+logicalFocus.isFocused.value = false;
+// @ts-expect-error A raw component instance does not carry target lifecycle.
+useFocus(rawBoxHost);
+// @ts-expect-error A getter is not a Vue component target ref.
+useFocus(() => customHost.value);
+// @ts-expect-error A target ref must resolve to component public instances.
+useFocus(shallowRef(42));
+// @ts-expect-error Focus acquisition has no options or policy argument.
+useFocus(customHost, {});
+// @ts-expect-error A VNode is renderer input, not a mounted component boundary.
+useFocus(shallowRef<import("vue").VNode | null>(null));
+// @ts-expect-error Host renderer nodes are private and are not focus targets.
+useFocus(shallowRef<{ readonly type: "box" } | null>(null));
+// @ts-expect-error Host renderer node types are not part of the public package.
+export type _FocusRendererNodeWasRemoved = import("@vue-tui/runtime").TuiNode;
+// @ts-expect-error General accepted-tree presence is not a public primitive.
+export type _UseBoxPresenceWasRemoved = typeof import("@vue-tui/runtime").useBoxPresence;
 // @ts-expect-error Scope policy can be composed above Runtime.
 export type _UseFocusScopeWasRemoved = typeof import("@vue-tui/runtime").useFocusScope;
 // @ts-expect-error Focused routing can be composed above Runtime's one global subscription.
@@ -359,8 +393,6 @@ export type _UseFocusScopeInputWasRemoved = typeof import("@vue-tui/runtime").us
 export type _UseFocusManagerWasRemoved = typeof import("@vue-tui/runtime").useFocusManager;
 // @ts-expect-error Normalized external forwarding was not a lossless terminal transport.
 export type _UseExternalInputWasRemoved = typeof import("@vue-tui/runtime").useExternalInput;
-// @ts-expect-error Focus supporting types were removed with the policy API.
-export type _UseFocusReturnWasRemoved = import("@vue-tui/runtime").UseFocusReturn;
 // @ts-expect-error Focus supporting types were removed with the policy API.
 export type _UseFocusScopeReturnWasRemoved = import("@vue-tui/runtime").UseFocusScopeReturn;
 // @ts-expect-error External routing supporting types were removed with the policy API.

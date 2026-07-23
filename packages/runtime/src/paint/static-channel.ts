@@ -2,7 +2,6 @@ import Yoga from "yoga-layout";
 import { NESTED_STATIC_ERROR, type TuiNode, type TuiStatic } from "../host/nodes.ts";
 import { isContentLayoutGuarded } from "../host/layout-guards.ts";
 import { paintIsolated } from "./paint.ts";
-import { renderScreenReaderOutput } from "./screen-reader.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   if (root.type === "tui-static") out.push(root);
@@ -63,25 +62,11 @@ export interface PreparedStaticOutput {
 }
 
 /** Paint one open <Static> host without changing its write-once state. */
-function prepareStaticNode(
-  stat: TuiStatic,
-  columns: number,
-  isScreenReaderEnabled: boolean,
-): PreparedStaticBatch {
+function prepareStaticNode(stat: TuiStatic, columns: number): PreparedStaticBatch {
   const paintableChildren = stat.children.filter((child) => !isInertStaticAnchor(child));
   let frame = "";
   if (paintableChildren.length > 0) {
-    if (isScreenReaderEnabled) {
-      // <Static>'s internal host is always a forward column. Each top-level slot
-      // child is therefore one transcript block; layout within a block remains
-      // ordinary Box/Text composition.
-      frame = paintableChildren
-        .map((child) => renderScreenReaderOutput(child, { skipStaticElements: false }))
-        .filter(Boolean)
-        .join("\n");
-    } else {
-      frame = paintIsolated(paintableChildren, columns, stat);
-    }
+    frame = paintIsolated(paintableChildren, columns, stat);
   }
   return { stat, frame };
 }
@@ -90,13 +75,12 @@ function prepareStaticNode(
 export function prepareStaticOutput(
   root: TuiNode,
   columns: number,
-  isScreenReaderEnabled = false,
   statics = findStatics(root),
 ): PreparedStaticOutput {
   validateStaticPlacement(statics);
   const batches = statics
     .filter((stat) => stat.commitState === "open" && !hasAuthoredHiddenAncestor(stat))
-    .map((stat) => prepareStaticNode(stat, columns, isScreenReaderEnabled));
+    .map((stat) => prepareStaticNode(stat, columns));
   const output = batches.map(({ frame }) => (frame.length > 0 ? frame + "\n" : "")).join("");
   let state: "pending" | "accepted" | "abandoned" = "pending";
 

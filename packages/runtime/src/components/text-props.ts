@@ -10,8 +10,6 @@ export const textProps = {
   dimColor: Boolean,
   bold: Boolean,
   wrap: { type: String as PropType<WrapMode>, default: "wrap" },
-  ariaLabel: String,
-  ariaHidden: Boolean,
 };
 
 /** Props accepted by the public `<Text>` primitive. */

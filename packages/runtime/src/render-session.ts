@@ -4,7 +4,6 @@ import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
 
 /** The terminal screen model requested when an application mounts. */
 export type RenderMode = "inline" | "fullscreen";
-export type RenderPresentation = "visual" | "screen-reader";
 
 /** A terminal or deliberately modeled terminal's character-cell dimensions. */
 export interface RenderSize {
@@ -38,11 +37,6 @@ export type RenderModeResolution =
       readonly fallback: null;
     }
   | {
-      readonly requested: "fullscreen";
-      readonly effective: "inline";
-      readonly fallback: "screen-reader-transcript";
-    }
-  | {
       readonly requested: RenderMode;
       readonly effective: null;
       readonly fallback: "live-updates-disabled" | "stdout-not-tty" | "terminal-size-unavailable";
@@ -52,21 +46,18 @@ export type LiveRenderOutput =
   | {
       readonly destination: "terminal";
       readonly dynamicUpdates: "live";
-      readonly presentation: RenderPresentation;
     }
   | {
       readonly destination: "stream";
       readonly dynamicUpdates: "live" | "at-teardown";
-      readonly presentation: RenderPresentation;
     };
 
 export interface StringRenderOutput {
   readonly destination: "document";
   readonly dynamicUpdates: "none";
-  readonly presentation: RenderPresentation;
 }
 
-/** Where output goes, when dynamic frames are emitted, and how they are presented. */
+/** Where output goes and when dynamic frames are emitted. */
 export type RenderOutput = LiveRenderOutput | StringRenderOutput;
 
 export interface RenderCapabilities {
@@ -111,7 +102,6 @@ export type InternalRenderSessionSnapshot = RenderSession;
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
   readonly liveUpdatesOverride: boolean | undefined;
-  readonly presentation: RenderPresentation;
   /** Whether this live host can coordinate restore-before-stop and resume. */
   readonly suspensionSupported: boolean;
   readonly stdout: {
@@ -139,7 +129,6 @@ export type ResolvedLiveSurface =
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "inline-terminal";
-      readonly fallback: null | "screen-reader-transcript";
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "fullscreen-terminal";
@@ -276,7 +265,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "stream",
           dynamicUpdates: "at-teardown",
-          presentation: input.presentation,
         },
         dimensions,
         capabilities: unavailableCapabilities(input.suspensionSupported),
@@ -296,31 +284,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "stream",
           dynamicUpdates: "live",
-          presentation: input.presentation,
-        },
-        dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
-      }),
-    };
-  }
-
-  if (input.presentation === "screen-reader") {
-    const isFullscreenRequest = input.requestedMode === "fullscreen";
-    const fallback = isFullscreenRequest ? "screen-reader-transcript" : null;
-    const mode: RenderModeResolution = isFullscreenRequest
-      ? { requested: "fullscreen", effective: "inline", fallback: "screen-reader-transcript" }
-      : { requested: "inline", effective: "inline", fallback: null };
-    return {
-      kind: "inline-terminal",
-      fallback,
-      liveUpdatesRequested: liveUpdates,
-      dimensions,
-      session: sessionSnapshot({
-        mode,
-        output: {
-          destination: "terminal",
-          dynamicUpdates: "live",
-          presentation: "screen-reader",
         },
         dimensions,
         capabilities: unavailableCapabilities(input.suspensionSupported),
@@ -340,7 +303,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "stream",
           dynamicUpdates: "at-teardown",
-          presentation: "visual",
         },
         dimensions,
         capabilities: unavailableCapabilities(input.suspensionSupported),
@@ -363,7 +325,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "terminal",
           dynamicUpdates: "live",
-          presentation: "visual",
         },
         dimensions: terminalBoundedDimensions,
         capabilities: {
@@ -377,7 +338,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
 
   return {
     kind: "inline-terminal",
-    fallback: null,
     liveUpdatesRequested: liveUpdates,
     dimensions: terminalBoundedDimensions,
     session: sessionSnapshot({
@@ -385,7 +345,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
       output: {
         destination: "terminal",
         dynamicUpdates: "live",
-        presentation: "visual",
       },
       dimensions: terminalBoundedDimensions,
       capabilities: unavailableCapabilities(input.suspensionSupported),
@@ -449,7 +408,6 @@ export function createLiveRenderSessionService(
 
 export function createStringRenderSessionService(options: {
   readonly columns: number;
-  readonly presentation: RenderPresentation;
 }): InternalStringRenderSessionService {
   const state = shallowReactive<InternalStringRenderSessionSnapshot>({
     host: "string",
@@ -457,7 +415,6 @@ export function createStringRenderSessionService(options: {
     output: Object.freeze({
       destination: "document",
       dynamicUpdates: "none",
-      presentation: options.presentation,
     }),
     dimensions: Object.freeze({
       terminal: null,

@@ -1,12 +1,6 @@
-import { defineComponent, h, nextTick, reactive } from "vue";
+import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
-import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
-import {
-  observeTuiNodeCreations,
-  renderToStringWithScreenReader,
-  type TuiBox,
-} from "../../../runtime/dist/internal.mjs";
 
 function renderBox(props: Record<string, unknown>): string {
   const App = defineComponent(
@@ -175,100 +169,22 @@ test.each(["hard", "truncate-end", "truncate-middle", "truncate-start"])(
   },
 );
 
-test("screen-reader rendering skips paint-only validation", () => {
-  const App = defineComponent(
-    () => () =>
-      h(Box, { borderStyle: "not-a-border", borderColor: "not-a-color" } as never, {
-        default: () =>
-          h(Text, { color: "not-a-color", backgroundColor: "not-a-color" } as never, {
-            default: () => "accessible",
-          }),
-      }),
+test.each([
+  ["Box", "ariaLabel"],
+  ["Box", "ariaHidden"],
+  ["Box", "ariaRole"],
+  ["Box", "ariaState"],
+  ["Box", "aria-label"],
+  ["Box", "aria-hidden"],
+  ["Box", "aria-role"],
+  ["Box", "aria-state"],
+  ["Text", "ariaLabel"],
+  ["Text", "ariaHidden"],
+  ["Text", "aria-label"],
+  ["Text", "aria-hidden"],
+] as const)("rejects removed %s attribute %s at runtime", (component, prop) => {
+  const renderRemovedProp = component === "Box" ? renderBox : renderText;
+  expect(() => renderRemovedProp({ [prop]: prop.endsWith("Hidden") ? true : "value" })).toThrow(
+    new RegExp(`<${component}> does not accept the undeclared attribute`),
   );
-
-  expect(renderToStringWithScreenReader(App)).toBe("accessible");
-  expect(() => renderToString(App)).toThrow(/prop/);
-});
-
-test("screen-reader rendering still validates structure hidden from its transcript", () => {
-  const InvalidBox = defineComponent(
-    () => () =>
-      h(Box, { ariaHidden: true, width: "not-a-percentage" } as never, {
-        default: () => h(Text, null, { default: () => "hidden" }),
-      }),
-  );
-  const InvalidText = defineComponent(
-    () => () =>
-      h(Text, { ariaHidden: true, wrap: "truncate-middle" } as never, { default: () => "hidden" }),
-  );
-  const InvalidState = defineComponent(
-    () => () =>
-      h(Box, { ariaHidden: true, ariaState: { busy: "yes" } } as never, {
-        default: () => h(Text, null, { default: () => "hidden" }),
-      }),
-  );
-
-  expect(() => renderToStringWithScreenReader(InvalidBox)).toThrow(/prop "width"/);
-  expect(() => renderToStringWithScreenReader(InvalidText)).toThrow(/prop "wrap"/);
-  expect(() => renderToStringWithScreenReader(InvalidState)).toThrow(/ariaState\.busy/);
-});
-
-test("reads each ariaState entry once while validating and storing a frame", () => {
-  let reads = 0;
-  const state = Object.defineProperty({}, "busy", {
-    enumerable: true,
-    get() {
-      reads++;
-      return reads === 1 ? true : "changed between reads";
-    },
-  });
-  const App = defineComponent(
-    () => () =>
-      h(Box, { ariaState: state } as never, {
-        default: () => h(Text, null, { default: () => "status" }),
-      }),
-  );
-
-  expect(renderToStringWithScreenReader(App)).toBe("(busy) status");
-  expect(reads).toBe(1);
-});
-
-test("a stable reactive ariaState is snapshotted per accepted frame", async () => {
-  const state = reactive({ busy: false, checked: false });
-  let host: TuiBox | undefined;
-  const stopObserving = observeTuiNodeCreations((node) => {
-    if (node.type === "tui-box" && host === undefined) host = node;
-  });
-
-  try {
-    const App = defineComponent(() => () => (
-      <Box ariaState={state}>
-        <Text>status</Text>
-      </Box>
-    ));
-    const result = await render(App, { host: { presentation: "screen-reader" } });
-    try {
-      expect(result.lastFrame()).toBe("status");
-      const firstSnapshot = host?.internal_accessibility?.state;
-      expect(firstSnapshot).toEqual({ busy: false, checked: false });
-      expect(firstSnapshot).not.toBe(state);
-
-      // An unaccepted in-place mutation must not mutate the previously stored host fact.
-      (state as unknown as { busy: unknown }).busy = "invalid";
-      expect(firstSnapshot).toEqual({ busy: false, checked: false });
-
-      state.busy = true;
-      await nextTick();
-      await result.waitUntilRenderFlush();
-
-      const secondSnapshot = host?.internal_accessibility?.state;
-      expect(secondSnapshot).toEqual({ busy: true, checked: false });
-      expect(secondSnapshot).not.toBe(firstSnapshot);
-      expect(result.lastFrame()).toBe("(busy) status");
-    } finally {
-      result.dispose();
-    }
-  } finally {
-    stopObserving();
-  }
 });

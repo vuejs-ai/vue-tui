@@ -3,7 +3,7 @@
 > Records how vue-tui's packages are layered by responsibility, the strict one-way
 > dependency direction between them, and where a new piece of code (a component vs a hook)
 > belongs. The three-layer set, the one-way dependency direction, and the split between
-> component-tied hooks (`components`) and independent hooks (`use`) are **[VOUCHED @hyf0]**.
+> component-tied hooks (`components`) and independent hooks (`use`) are **[VOUCHED @hyfdev]**.
 > Runtime's own terminal-I/O boundary is governed by
 > [components-design-principles.md](./components-design-principles.md) — deferred to there,
 > not restated or changed here.
@@ -12,7 +12,7 @@
 
 vue-tui is layered by responsibility; each layer may depend **only downward**.
 
-- **`@vue-tui/runtime`** — the engine and only the public primitives whose correct behavior requires ownership of the terminal, renderer tree, accepted layout or paint, input protocol, lifecycle, or terminal resources. The current minimum includes `createApp`, `renderToString`, `Box`, `Text`, `useApp`, `useInput`, `useStdin`, direct layout and Box facts, `/inline`'s `Static`, and the narrow `/devtools` and `/testing` integration seams. Rich session, routing, focus, paint geometry, caret, pointer, selection, clipboard, and output-coordination state remains internal. Runtime depends on nothing else in the family. `Static` remains Runtime work because its one-attempt acceptance and stream-commit ownership are renderer/output mechanics even though Vue owns collection iteration and its authoring path is surface-specific.
+- **`@vue-tui/runtime`** — the engine and only the public primitives whose correct behavior requires ownership of the terminal, renderer tree, accepted layout or paint, input protocol, lifecycle, or terminal resources. The current branch candidate includes `createApp`, `renderToString`, `Box`, `Text`, `useApp`, `useInput`, `useStdin`, direct layout and Box facts, `/inline`'s `Static`, and the narrow `/devtools` and `/testing` integration seams; the [decision ledger](./runtime-public-api-decisions.md) separates accepted entries from Open contracts. Rich session, routing, focus, paint geometry, caret, pointer, selection, clipboard, and output-coordination state remains internal. Runtime depends on nothing else in the family. `Static` remains Runtime work because its one-attempt acceptance and stream-commit ownership are renderer/output mechanics even though Vue owns collection iteration and its authoring path is surface-specific.
 - **`@vue-tui/use`** — independent, reusable hooks that are **not tied to any single
   component** (shared headless behavior/logic). May depend on `runtime`; **must never depend
   on `components`.**

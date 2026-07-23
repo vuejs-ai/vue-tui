@@ -13,7 +13,6 @@ type Scenario =
   | "fullscreen"
   | "explicit-preclear"
   | "partial-row"
-  | "partial-row-screen-reader"
   | "partial-row-static"
   | "post-teardown";
 
@@ -115,7 +114,6 @@ const App = defineComponent(() => {
 app = createApp(App);
 app.mount({
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
-  presentation: scenario === "partial-row-screen-reader" ? "screen-reader" : "visual",
 });
 
 if (scenario.startsWith("post-teardown")) {

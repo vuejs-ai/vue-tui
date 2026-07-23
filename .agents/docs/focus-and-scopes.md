@@ -1,6 +1,6 @@
 # Logical focus and focus scopes
 
-> **Status:** historical unstamped F4 record. The re-audit withdrew focus targets, scopes, focused subscriptions, external forwarding, and the public manager because they bundle application policy. Their sound renderer and route mechanisms remain private evidence. Higher layers may compose focus from Vue state and one public `useInput()` subscription; a future real consumer may justify a smaller Runtime-only fact. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
+> **Status:** historical unstamped F4 record. The [vouched minimum `useFocus()` decision](./runtime-public-api-decisions.md#usefocus) supersedes both this document's scope/routing/manager design and the later proposal to remove Focus entirely. Runtime now retains only per-app unique ownership plus optional component-boundary validity; applications compose input activation, traversal, scopes, restoration, and string lookup above that primitive. The renderer and routing results below remain historical implementation evidence, not current authoring guidance.
 
 ## Product problem
 

@@ -2,7 +2,6 @@ import { defineComponent, h, nextTick, shallowRef, type Component } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "../../../runtime/dist/internal.mjs";
 
 const removedListeners = [
   "onMousedown",
@@ -44,21 +43,6 @@ test.each(removedListeners)("Text rejects the removed %s prop from JavaScript/an
     () => () => h(Text, { [listener]: () => {} } as Record<string, unknown>, () => "content"),
   );
   expect(() => renderToString(App)).toThrow(rejection("Text", listener));
-});
-
-test("rejection happens before screen-reader and ariaHidden branches", () => {
-  const HiddenBox = defineComponent(
-    () => () =>
-      h(Box, { ariaHidden: true, onClick: () => {} } as Record<string, unknown>, () =>
-        h(Text, null, () => "secret"),
-      ),
-  );
-  const HiddenText = defineComponent(
-    () => () => h(Text, { ariaHidden: true, onWheel: () => {} } as Record<string, unknown>),
-  );
-
-  expect(() => renderToStringWithScreenReader(HiddenBox)).toThrow(rejection("Box", "onClick"));
-  expect(() => renderToStringWithScreenReader(HiddenText)).toThrow(rejection("Text", "onWheel"));
 });
 
 test("childless Text still rejects a removed listener", () => {

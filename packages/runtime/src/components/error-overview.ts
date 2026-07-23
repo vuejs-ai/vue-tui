@@ -8,9 +8,7 @@ import Box from "./box.vue";
 import Text from "./text.vue";
 
 // Ported from Ink's src/components/ErrorOverview.tsx (v7.0.4). We use the <Box>
-// and <Text> wrapper components (not raw host elements) because Ink does, and
-// because aria-label support is implemented at that component layer in vue-tui —
-// the labels are only emitted when a screen reader is enabled, matching Ink.
+// and <Text> wrapper components rather than raw host elements because Ink does.
 
 // Error's source file is reported as file:///home/user/file.js; this removes
 // the `file://[cwd]/` prefix so paths render cwd-relative (Ink cleanupPath).
@@ -150,8 +148,6 @@ export const ErrorOverview = defineComponent({
                                   dimColor: line !== origin.line,
                                   backgroundColor: line === origin.line ? "red" : undefined,
                                   color: line === origin.line ? "white" : undefined,
-                                  ariaLabel:
-                                    line === origin.line ? `Line ${line}, error` : `Line ${line}`,
                                 },
                                 { default: () => `${String(line).padStart(lineWidth, " ")}:` },
                               ),
@@ -233,7 +229,6 @@ export const ErrorOverview = defineComponent({
                             {
                               dimColor: true,
                               color: "gray",
-                              ariaLabel: `at ${file} line ${parsedLine.line} column ${parsedLine.column}`,
                             },
                             { default: () => ` (${file}:${parsedLine.line}:${parsedLine.column})` },
                           ),

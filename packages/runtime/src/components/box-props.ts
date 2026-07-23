@@ -7,38 +7,6 @@ type JustifyContent = "flex-start" | "center" | "space-between";
 type PercentageWidth = `${number}%`;
 type BorderStyle = "single" | "round";
 
-export type AriaRole =
-  | "button"
-  | "checkbox"
-  | "combobox"
-  | "list"
-  | "listbox"
-  | "listitem"
-  | "menu"
-  | "menuitem"
-  | "option"
-  | "progressbar"
-  | "radio"
-  | "radiogroup"
-  | "tab"
-  | "tablist"
-  | "table"
-  | "textbox"
-  | "timer"
-  | "toolbar";
-
-export interface AriaState {
-  busy?: boolean;
-  checked?: boolean;
-  disabled?: boolean;
-  expanded?: boolean;
-  multiline?: boolean;
-  multiselectable?: boolean;
-  readonly?: boolean;
-  required?: boolean;
-  selected?: boolean;
-}
-
 export const boxProps = {
   flexDirection: String as PropType<FlexDirection>,
   flexGrow: Number,
@@ -67,11 +35,6 @@ export const boxProps = {
   backgroundColor: String as PropType<Color>,
   overflowY: String as PropType<"visible" | "hidden">,
   display: String as PropType<"flex" | "none">,
-
-  ariaLabel: String,
-  ariaHidden: Boolean,
-  ariaRole: String as PropType<AriaRole>,
-  ariaState: Object as PropType<AriaState>,
 };
 
 /** Props accepted by the public `<Box>` primitive. */

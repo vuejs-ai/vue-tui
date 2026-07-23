@@ -1,6 +1,6 @@
 # Mouse input — design & decision record
 
-> **Current status:** historical mouse design evidence only. The minimum Runtime foundation exposes no mouse hook or `/fullscreen` subpath; targeted pointer behavior remains explicitly outside the current foundation. See the [active ledger](./runtime-public-foundation-reaudit.md#exhaustive-retained-public-ledger).
+> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath, but that implementation state does not prove the Runtime foundation complete. Whether targeted pointer behavior can remain future additive work is Open in the [Runtime public API decision ledger](./runtime-public-api-decisions.md).
 
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:
@@ -387,7 +387,7 @@ must not change the public event / `MouseTarget.rect` contract.
   and `alternateScreen` its deprecated alias in shipped v1. F1.4 replaced both with `mode`, without
   a compatibility alias. This naming decision does not settle
   whether full-screen or inline should be the product's primary mode; see
-  [goal.md](./goal.md#rendering-modes).
+  [intent.md](./intent.md#rendering-modes).
 
 ## 9. Deliberately out of scope (v1)
 

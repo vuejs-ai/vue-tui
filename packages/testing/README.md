@@ -89,14 +89,13 @@ interface RenderOptions {
 
 `columns` and `rows` must be positive safe integers no greater than 65535. They set both the modeled output dimensions and the emulator dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. `rows` still controls the emulator when `host.stdout` is `"stream"`, while the Runtime layout remains row-unbounded because a stream does not own a finite visual viewport.
 
-For a visual Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. Screen-reader and stream presentations remain row-unbounded. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
+For an Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. Stream output remains row-unbounded. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
 
 ### Host options
 
 ```ts
 interface TestHost {
   readonly mode?: "inline" | "fullscreen";
-  readonly presentation?: "visual" | "screen-reader";
   readonly stdin?: "tty" | "non-tty";
   readonly stdout?: "tty" | "stream";
   readonly patchConsole?: boolean;
@@ -106,7 +105,6 @@ interface TestHost {
 | Host field     | Default    | Meaning                                                             |
 | -------------- | ---------- | ------------------------------------------------------------------- |
 | `mode`         | `"inline"` | Requested production screen model                                   |
-| `presentation` | `"visual"` | Visual renderer or linear screen-reader transcript                  |
 | `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                |
 | `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions        |
 | `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer |
@@ -114,8 +112,9 @@ interface TestHost {
 These controls model production facts rather than setting unrelated internal booleans. In particular:
 
 - a Fullscreen request on stream stdout has no effective terminal mode;
-- a Fullscreen screen-reader request resolves to an Inline transcript on the normal screen;
 - TTY output updates live, while stream output follows Runtime's monotonic document policy.
+
+The test host has no screen-reader presentation selector. It models only supported Runtime hosts; the removed ARIA and transcript experiment is not available through a hidden testing-only option. `patchConsole` remains an explicit opt-in while its public Runtime contract is reviewed independently.
 
 The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can suppress it for one event by returning the exact object `{ preventDefault: true }`; this does not stop other captured `useInput()` subscriptions from running.
 

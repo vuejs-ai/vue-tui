@@ -17,32 +17,6 @@ function streams() {
 }
 
 describe("live geometry service wiring", () => {
-  test("screen-reader presentation never publishes visual geometry", async () => {
-    const host = streams();
-    let geometry!: Readonly<ShallowRef<InternalElementGeometry>>;
-    const Root = defineComponent(() => {
-      const target = shallowRef<unknown>(null);
-      geometry = useInternalElementGeometry(target);
-      return () => h("tui-box", { ref: target }, [h("tui-text", null, "linear")]);
-    });
-    const app = createApp(Root);
-    app.mount({
-      ...host,
-      patchConsole: false,
-      maxFps: 0,
-      liveUpdates: true,
-      isScreenReaderEnabled: true,
-      mode: "fullscreen",
-    } as InternalMountOptions);
-    await nextTick();
-    await app.waitUntilRenderFlush();
-    expect(geometry.value).toEqual({ status: "unavailable" });
-    app.unmount();
-    host.stdout.destroy();
-    host.stderr.destroy();
-    host.stdin.destroy();
-  });
-
   test("suspension publishes unavailable and continuation repaints before recovery", async () => {
     const host = streams();
     const suspension = createManualSuspensionHost();

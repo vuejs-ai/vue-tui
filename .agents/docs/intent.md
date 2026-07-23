@@ -4,7 +4,7 @@
 
 ## Positioning
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 vue-tui is a Vue-native application framework for interactive terminal UIs.
 
@@ -14,7 +14,7 @@ Coding agents are a major application scenario, not the definition of the whole 
 
 ## What makes it an application framework
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 vue-tui combines:
 
@@ -37,13 +37,13 @@ Owning a renderer is an implementation responsibility, not the product value on 
 
 ## API stability during experimentation
 
-[VOUCHED @hyf0 2026-07-11]
+[VOUCHED @hyfdev 2026-07-11]
 
 vue-tui is currently experimental. Until a future stability milestone is explicitly accepted, existing public APIs are not backward-compatibility constraints. Treat each shipped API as evidence about the current implementation, then decide from the target product and terminal model whether to retain it, redesign it, or delete it. Design work should prefer one coherent target contract over aliases, deprecation windows, precedence rules, or compatibility shims whose only purpose is to preserve current releases.
 
 ## Rendering modes
 
-[VOUCHED @hyf0 2026-07-11]
+[VOUCHED @hyfdev 2026-07-11]
 
 Rendering mode selects one of two terminal screen models:
 
@@ -56,13 +56,13 @@ A future hierarchy decision requires evidence from representative journeys in bo
 
 ## Inline scrollback ownership
 
-[VOUCHED @hyf0 2026-07-11]
+[VOUCHED @hyfdev 2026-07-11]
 
 The coordinated inline renderer must never erase terminal history or shell output that existed before the application started. Applications that need behavior outside that guarantee must retain an explicit application-side escape hatch. This vouch does not choose the exact overflow presentation, implementation mechanism, or escape-hatch API. Those details may be derived or proposed through real-terminal evidence, but they cannot weaken the scrollback invariant implicitly.
 
 ## Application scenarios and shared interaction flows
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 The active application scenarios are:
 
@@ -74,7 +74,7 @@ A terminal workspace or multiplexer such as Herdr is a demanding subscenario of 
 
 ## How product work is chosen
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 Product work starts from concrete evidence, in this order of strength:
 
@@ -89,7 +89,7 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 
 ## Product boundaries
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 - vue-tui owns terminal UI rendering, Vue integration, reusable interaction behavior, development tooling, and verification support.
 - It does not provide model SDKs, agent loops, tool-execution policy, Git or database clients, monitoring collectors, or other application business layers.
@@ -112,7 +112,7 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 
 - The first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent) exercises streaming, tool execution, approval, and `@vue-tui/runtime/inline` `Static` output, although much of its higher-level interaction behavior is still application code.
 - [mo](https://github.com/liangmiQwQ/mo/tree/6bea467a6995f4912e809b417b5c56a3964cc556) is a real inline vue-tui consumer whose project selector exercises search, filtering, preview, selection, and shell handoff.
-- [machud](https://github.com/hyf0/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36) is a real full-screen vue-tui consumer that exercises layout, resize, input, HMR, and self-contained distribution.
+- [machud](https://github.com/hyfdev/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36) is a real full-screen vue-tui consumer that exercises layout, resize, input, HMR, and self-contained distribution.
 - [Herdr](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6) demonstrates the terminal-workspace subscenario with tabs, panes, real PTYs, persistent sessions, and agent state. Its Ratatui UI, `portable-pty` dependency, and vendored `libghostty-vt` keep the visible application framework and terminal-session engine as distinct responsibilities.
 - Reproducible issues such as [`v-show` #246](https://github.com/vuejs-ai/vue-tui/issues/246) and [`useInput` ownership #250](https://github.com/vuejs-ai/vue-tui/issues/250) are evidence for Vue-contract and interaction gaps; they do not define the product alone.
 

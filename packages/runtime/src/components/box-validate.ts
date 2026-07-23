@@ -1,5 +1,5 @@
 import { assertColor } from "./color.ts";
-import type { AriaState, BoxProps } from "./box-props.ts";
+import type { BoxProps } from "./box-props.ts";
 import { MAX_LAYOUT_VALUE } from "../numeric-limits.ts";
 
 const percentageWidthPattern = /^(?:0|[1-9]\d*)(?:\.\d+)?%$/;
@@ -11,37 +11,6 @@ const borderStyles = new Set(["single", "round"]);
 const overflowValues = new Set(["visible", "hidden"]);
 const displayValues = new Set(["flex", "none"]);
 const positionValues = new Set(["absolute"]);
-const ariaRoles = new Set([
-  "button",
-  "checkbox",
-  "combobox",
-  "list",
-  "listbox",
-  "listitem",
-  "menu",
-  "menuitem",
-  "option",
-  "progressbar",
-  "radio",
-  "radiogroup",
-  "tab",
-  "tablist",
-  "table",
-  "textbox",
-  "timer",
-  "toolbar",
-]);
-const ariaStateKeys = new Set([
-  "busy",
-  "checked",
-  "disabled",
-  "expanded",
-  "multiline",
-  "multiselectable",
-  "readonly",
-  "required",
-  "selected",
-]);
 
 function isPercentageWidth(value: string): boolean {
   if (!percentageWidthPattern.test(value)) return false;
@@ -121,38 +90,8 @@ function assertWidth(value: unknown): void {
   }
 }
 
-function assertBoolean(value: unknown, prop: string): void {
-  if (typeof value !== "boolean") {
-    throw new TypeError(`${propLabel(prop)} must be a boolean.`);
-  }
-}
-
-function snapshotAriaStateValue(value: unknown): AriaState | undefined {
-  if (value === undefined) return;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError(`${propLabel("ariaState")} must be an object.`);
-  }
-  const state = value as Record<string, unknown>;
-  const snapshot: AriaState = {};
-  for (const key of Object.keys(state)) {
-    if (!ariaStateKeys.has(key)) {
-      throw new Error(`Unsupported ${propLabel("ariaState")} key: ${JSON.stringify(key)}.`);
-    }
-    const entry = state[key];
-    if (entry !== undefined && typeof entry !== "boolean") {
-      throw new TypeError(`${propLabel(`ariaState.${key}`)} must be a boolean.`);
-    }
-    snapshot[key as keyof AriaState] = entry as boolean | undefined;
-  }
-  return snapshot;
-}
-
-/**
- * Validate the small public Box vocabulary before Vue patches a host node.
- * Paint-only values are intentionally ignored for a screen-reader document,
- * where neither colors nor border glyphs are consumed.
- */
-export function assertBoxValid(props: BoxProps, validatePaint: boolean): true {
+/** Validate the small public Box vocabulary before Vue patches a host node. */
+export function assertBoxValid(props: BoxProps): true {
   const values = props as Record<string, unknown>;
 
   assertEnum(values["flexDirection"], "flexDirection", flexDirections);
@@ -184,31 +123,12 @@ export function assertBoxValid(props: BoxProps, validatePaint: boolean): true {
 
   assertEnum(values["overflowY"], "overflowY", overflowValues);
   assertEnum(values["display"], "display", displayValues);
-  if (typeof values["ariaLabel"] !== "undefined" && typeof values["ariaLabel"] !== "string") {
-    throw new TypeError(`${propLabel("ariaLabel")} must be a string.`);
-  }
-  assertBoolean(values["ariaHidden"], "ariaHidden");
-  assertEnum(values["ariaRole"], "ariaRole", ariaRoles);
-
-  if (validatePaint) {
-    assertEnum(values["borderStyle"], "borderStyle", borderStyles);
-    if (values["borderColor"] !== undefined)
-      assertColor(values["borderColor"], propLabel("borderColor"));
-    if (values["backgroundColor"] !== undefined) {
-      assertColor(values["backgroundColor"], propLabel("backgroundColor"));
-    }
+  assertEnum(values["borderStyle"], "borderStyle", borderStyles);
+  if (values["borderColor"] !== undefined)
+    assertColor(values["borderColor"], propLabel("borderColor"));
+  if (values["backgroundColor"] !== undefined) {
+    assertColor(values["backgroundColor"], propLabel("backgroundColor"));
   }
 
   return true;
-}
-
-/**
- * Validate and copy accessibility state in one pass. Reading each value once
- * during render subscribes Box to mutations of a stable reactive object without
- * allowing a getter to return a different value between validation and storage.
- * The new object also prevents an old accepted host frame from changing by
- * aliasing.
- */
-export function snapshotAriaState(value: AriaState | undefined): AriaState | undefined {
-  return snapshotAriaStateValue(value);
 }

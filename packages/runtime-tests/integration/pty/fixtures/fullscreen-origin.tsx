@@ -11,7 +11,6 @@ type Scenario =
   | "horizontal-overflow"
   | "horizontal-left-wide"
   | "horizontal-wide"
-  | "screen-reader"
   | "foreground-reset";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
@@ -140,7 +139,6 @@ const App = defineComponent(() => {
 const app = createApp(App);
 app.mount({
   mode: "fullscreen",
-  presentation: scenario === "screen-reader" ? "screen-reader" : "visual",
 });
 
 void app.waitUntilExit().then(

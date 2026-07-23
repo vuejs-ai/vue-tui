@@ -37,7 +37,7 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.includes(shownMarker));
     let lines = await visibleLines(throughMarker(ps.output, shownMarker));
     expect(lines).toContain("probe:0");
-    expect(lines).toContain("visible=true revision=0");
+    expect(lines).toContain("visible=true revision=0 focused=true");
 
     let before = ps.output.length;
     ps.write("h");
@@ -46,7 +46,7 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     const hiddenOutput = throughMarker(ps.output, hiddenMarker);
     lines = await visibleLines(hiddenOutput);
     expect(lines).not.toContain("probe:0");
-    expect(lines).toContain("visible=false revision=0");
+    expect(lines).toContain("visible=false revision=0 focused=false");
 
     before = ps.output.length;
     ps.write("u");
@@ -54,7 +54,7 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.slice(before).includes(updatedMarker));
     lines = await visibleLines(throughMarker(ps.output, updatedMarker));
     expect(lines).not.toContain("probe:2");
-    expect(lines).toContain("visible=false revision=2");
+    expect(lines).toContain("visible=false revision=2 focused=false");
 
     before = ps.output.length;
     ps.write("s");
@@ -62,7 +62,14 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.slice(before).includes(restoredMarker));
     lines = await visibleLines(throughMarker(ps.output, restoredMarker));
     expect(lines).toContain("probe:2");
-    expect(lines).toContain("visible=true revision=2");
+    expect(lines).toContain("visible=true revision=2 focused=false");
+
+    before = ps.output.length;
+    ps.write("f");
+    const refocusedMarker = "__VSHOW_PHASE__:focused-again:mounts=1:unmounts=0";
+    await ps.waitForOutput((output) => output.slice(before).includes(refocusedMarker));
+    lines = await visibleLines(throughMarker(ps.output, refocusedMarker));
+    expect(lines).toContain("visible=true revision=2 focused=true");
 
     ps.write("q");
     await ps.waitForOutput((output) => output.includes("__VSHOW_OK__:mounts=1:unmounts=1"));

@@ -7,7 +7,6 @@ import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { paint } from "./paint/paint.ts";
-import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
 import { prepareStaticOutput } from "./paint/static-channel.ts";
 import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
 import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
@@ -22,7 +21,6 @@ import {
   InternalRenderSessionKey,
   createStringRenderSessionService,
   type InternalStringRenderSessionService,
-  type RenderPresentation,
 } from "./render-session.ts";
 import { InternalClipboardServiceKey } from "./clipboard/context.ts";
 import { createStringClipboardService } from "./clipboard/clipboard-service.ts";
@@ -60,34 +58,19 @@ export interface RenderToStringOptions {
  * caller after cleanup.
  */
 export function renderToString(component: Component, options?: RenderToStringOptions): string {
-  return renderToStringInternal(component, normalizePublicOptions(options), "visual");
-}
-
-/**
- * Screen-reader-capable variant of {@link renderToString}, for the accessibility
- * test suite only. The public `renderToString` is layout-only, matching Ink,
- * which keeps screen-reader string rendering in a private test helper rather
- * than its public API.
- */
-export function renderToStringWithScreenReader(
-  component: Component,
-  options?: RenderToStringOptions,
-): string {
-  return renderToStringInternal(component, normalizeInternalOptions(options), "screen-reader");
+  return renderToStringInternal(component, normalizePublicOptions(options));
 }
 
 function renderToStringInternal(
   component: Component,
   options: { readonly columns: number },
-  presentation: RenderPresentation,
 ): string {
   const renderSession = createStringRenderSessionService({
     columns: options.columns,
-    presentation,
   });
   const contexts = createStringContexts(options.columns);
   try {
-    return renderStringDocument(component, options.columns, presentation, renderSession, contexts);
+    return renderStringDocument(component, options.columns, renderSession, contexts);
   } finally {
     renderSession.dispose();
     contexts.dispose();
@@ -97,17 +80,14 @@ function renderToStringInternal(
 function renderStringDocument(
   component: Component,
   columns: number,
-  presentation: RenderPresentation,
   renderSession: InternalStringRenderSessionService,
   contexts: ReturnType<typeof createStringContexts>,
 ): string {
-  const isScreenReaderEnabled = presentation === "screen-reader";
   // Create a standalone root node --- no stdout, stdin, or terminal bindings.
   const { appContext, stdinContext } = contexts;
   const root = createRoot(appContext);
   const focusController = createInternalFocusController({
     root,
-    inputRouting: stdinContext.internal_inputRouting,
     inert: true,
   });
   const caretController = createInternalCaretController({
@@ -193,14 +173,12 @@ function renderStringDocument(
       // String rendering has no physical handoff. Snapshot every complete open
       // Static subtree only after mount, then accept that local document prefix
       // before painting the mutable region that excludes Static hosts.
-      const preparedStatic = prepareStaticOutput(root, columns, isScreenReaderEnabled);
+      const preparedStatic = prepareStaticOutput(root, columns);
       capturedStaticOutput = preparedStatic.output;
       preparedStatic.accept();
 
       // Render the dynamic frame to a string.
-      output = isScreenReaderEnabled
-        ? renderScreenReaderOutput(root, { skipStaticElements: true })
-        : paint(root);
+      output = paint(root);
     } finally {
       restoreLayoutGuards();
     }
@@ -227,12 +205,7 @@ function renderStringDocument(
 
     // The static channel appends a trailing newline for terminal rendering
     // (so dynamic output starts on a fresh line). Strip it here so
-    // renderToString returns clean output. This applies in BOTH modes: SR mode
-    // linearizes static blocks into plain text too (prepareStaticOutput branches on
-    // isScreenReaderEnabled), and Ink's SR renderer likewise returns the static
-    // output when node.staticNode exists (renderer.ts:24-33). Prepending the
-    // captured static output mirrors the non-SR path so SR renderToString does
-    // not silently drop <Static> content.
+    // renderToString returns clean output.
     const normalizedStaticOutput = capturedStaticOutput.endsWith("\n")
       ? capturedStaticOutput.slice(0, -1)
       : capturedStaticOutput;
@@ -325,7 +298,7 @@ function normalizeOptionsObject(options: unknown): Record<PropertyKey, unknown> 
 
 function rejectUnknownOptions(
   options: Record<PropertyKey, unknown>,
-  helper: "renderToString" | "renderToStringWithScreenReader",
+  helper: "renderToString",
 ): void {
   for (const key of Reflect.ownKeys(options)) {
     if (key === "columns") continue;
@@ -337,14 +310,7 @@ function rejectUnknownOptions(
 }
 
 function rejectModePassthrough(options: Record<PropertyKey, unknown>): void {
-  for (const key of [
-    "mode",
-    "fullscreen",
-    "alternateScreen",
-    "rows",
-    "presentation",
-    "isScreenReaderEnabled",
-  ] as const) {
+  for (const key of ["mode", "fullscreen", "alternateScreen", "rows"] as const) {
     if (hasOwn(options, key)) {
       throw new TypeError(
         `renderToString option "${key}" is unavailable; public string rendering is a visual document with unbounded rows and no terminal mode.`,
@@ -355,28 +321,10 @@ function rejectModePassthrough(options: Record<PropertyKey, unknown>): void {
 
 function normalizePublicOptions(options: unknown): { readonly columns: number } {
   const object = normalizeOptionsObject(options);
-  // Recognizable attempts to select a terminal mode or the private transcript
-  // renderer fail before any option getter can trigger rendering side effects.
+  // Recognizable attempts to select a terminal mode fail before any option
+  // getter can trigger rendering side effects.
   rejectModePassthrough(object);
   rejectUnknownOptions(object, "renderToString");
-  return { columns: normalizeColumns(object.columns) };
-}
-
-function normalizeInternalOptions(options: unknown): { readonly columns: number } {
-  const object = normalizeOptionsObject(options);
-  for (const key of ["mode", "fullscreen", "alternateScreen", "rows", "presentation"] as const) {
-    if (hasOwn(object, key)) {
-      throw new TypeError(
-        `renderToStringWithScreenReader option "${key}" is unavailable; the helper renders a screen-reader document with unbounded rows and no terminal mode.`,
-      );
-    }
-  }
-  if (hasOwn(object, "isScreenReaderEnabled")) {
-    throw new TypeError(
-      'renderToStringWithScreenReader no longer accepts "isScreenReaderEnabled"; the helper name selects that presentation.',
-    );
-  }
-  rejectUnknownOptions(object, "renderToStringWithScreenReader");
   return { columns: normalizeColumns(object.columns) };
 }
 

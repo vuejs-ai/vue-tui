@@ -9,9 +9,8 @@ import {
 } from "@vue-tui/runtime";
 import { useStderr } from "../../runtime/dist/internal.mjs";
 import { useStdout } from "../../runtime/dist/internal.mjs";
-import { renderToStringWithScreenReader } from "../../runtime/dist/internal.mjs";
 
-test.sequential("both string hosts avoid process terminal streams", () => {
+test.sequential("the string host avoids process terminal streams", () => {
   const originals = {
     stdin: process.stdin,
     stdout: process.stdout,
@@ -46,7 +45,6 @@ test.sequential("both string hosts avoid process terminal streams", () => {
 
   try {
     expect(renderToString(App, { columns: 41 })).toBe("41xunbounded");
-    expect(renderToStringWithScreenReader(App, { columns: 42 })).toBe("42xunbounded");
     expect(reads).toEqual({ stdin: 0, stdout: 0, stderr: 0 });
   } finally {
     for (const key of ["stdin", "stdout", "stderr"] as const) {

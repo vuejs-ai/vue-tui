@@ -4,7 +4,7 @@
 
 ## Current decision
 
-Performance optimization is not a current product priority. [VOUCHED @hyf0 2026-07-10]
+Performance optimization is not a current product priority. [VOUCHED @hyfdev 2026-07-10]
 
 Do not start a renderer rewrite, replace the layout engine, add a native runtime requirement, or schedule speculative optimization from this record alone. The Runtime foundations and representative workloads now exist; future product work should continue above them unless a current journey crosses a reopen trigger.
 

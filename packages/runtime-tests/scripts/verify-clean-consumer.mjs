@@ -8,9 +8,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const temporaryRoot = mkdtempSync(join(tmpdir(), "vue-tui-clean-consumer-"));
 const tarballDirectory = join(temporaryRoot, "tarballs");
-const consumerDirectory = join(temporaryRoot, "consumer");
 mkdirSync(tarballDirectory);
-mkdirSync(consumerDirectory);
 
 function run(command, args, cwd = repositoryRoot, environment = {}) {
   try {
@@ -60,75 +58,88 @@ try {
   const testingTarball = pack(join(repositoryRoot, "packages/testing"));
   const componentsTarball = pack(join(repositoryRoot, "packages/components"));
 
-  writeFileSync(
-    join(consumerDirectory, "package.json"),
-    JSON.stringify(
-      {
-        private: true,
-        type: "module",
-        dependencies: {
-          "@vue-tui/runtime": `file:${runtimeTarball}`,
-          "@vue-tui/testing": `file:${testingTarball}`,
-          "@vue-tui/components": `file:${componentsTarball}`,
-          vue: "3.4.38",
+  const consumerVariants = [
+    { directoryName: "vue-3.4", vueVersion: "3.4.38", supportsUseTemplateRef: false },
+    { directoryName: "vue-3.5", vueVersion: "3.5.34", supportsUseTemplateRef: true },
+  ];
+
+  for (const { directoryName, vueVersion, supportsUseTemplateRef } of consumerVariants) {
+    const consumerDirectory = join(temporaryRoot, directoryName);
+    mkdirSync(consumerDirectory);
+
+    writeFileSync(
+      join(consumerDirectory, "package.json"),
+      JSON.stringify(
+        {
+          private: true,
+          type: "module",
+          dependencies: {
+            "@vue-tui/runtime": `file:${runtimeTarball}`,
+            "@vue-tui/testing": `file:${testingTarball}`,
+            "@vue-tui/components": `file:${componentsTarball}`,
+            vue: vueVersion,
+          },
+          devDependencies: {
+            "@types/node": "24.12.4",
+            typescript: "6.0.3",
+            "vue-tsc": "3.3.4",
+          },
         },
-        devDependencies: {
-          "@types/node": "24.12.4",
-          typescript: "6.0.3",
-          "vue-tsc": "3.3.4",
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(consumerDirectory, "tsconfig.json"),
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2022",
+            module: "NodeNext",
+            moduleResolution: "NodeNext",
+            strict: true,
+            skipLibCheck: false,
+            noEmit: true,
+            jsx: "preserve",
+            types: ["node"],
+          },
+          include: ["consumer.ts", "consumer.tsx"],
         },
-      },
-      null,
-      2,
-    ),
-  );
-  writeFileSync(
-    join(consumerDirectory, "tsconfig.json"),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2022",
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          strict: true,
-          skipLibCheck: false,
-          noEmit: true,
-          jsx: "preserve",
-          types: ["node"],
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(consumerDirectory, "tsconfig.sfc.json"),
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2022",
+            module: "ESNext",
+            moduleResolution: "Bundler",
+            strict: true,
+            skipLibCheck: false,
+            noEmit: true,
+            types: ["node"],
+          },
+          include: [
+            "App.vue",
+            "RejectedMouseListeners.vue",
+            ...(supportsUseTemplateRef ? ["Vue35Focus.vue", "Vue35FocusTarget.vue"] : []),
+          ],
         },
-        include: ["consumer.ts", "consumer.tsx"],
-      },
-      null,
-      2,
-    ),
-  );
-  writeFileSync(
-    join(consumerDirectory, "tsconfig.sfc.json"),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2022",
-          module: "ESNext",
-          moduleResolution: "Bundler",
-          strict: true,
-          skipLibCheck: false,
-          noEmit: true,
-          types: ["node"],
-        },
-        include: ["App.vue", "RejectedMouseListeners.vue"],
-      },
-      null,
-      2,
-    ),
-  );
-  writeFileSync(
-    join(consumerDirectory, "consumer.ts"),
-    `import { shallowRef } from "vue";
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(consumerDirectory, "consumer.ts"),
+      `import { computed, shallowRef } from "vue";
 import {
   Box,
   Text,
-  useBoxPresence,
   useBoxSize,
+  useFocus,
   useInput,
   useLayoutWidth,
   useStdin,
@@ -136,10 +147,12 @@ import {
   type BoxSize,
   type BoxProps,
   type Color,
+  type FocusTarget,
   type MountOptions,
   type RenderToStringOptions,
   type TuiInputEvent,
   type TextProps,
+  type UseFocusReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
 import { connectDevtools } from "@vue-tui/runtime/devtools";
@@ -149,13 +162,16 @@ import {
   type TestHostBridge,
   type TestHostBridgeOptions,
 } from "@vue-tui/runtime/testing";
-import type { RenderResult } from "@vue-tui/testing";
+import type { RenderResult, TestHost } from "@vue-tui/testing";
 import type { ComponentPublicInstance, MaybeRefOrGetter, Ref } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
   : false;
 type Expect<T extends true> = T;
+type _ExactMountOptions = Expect<
+  Equal<keyof MountOptions, "stdout" | "stdin" | "stderr" | "mode" | "patchConsole">
+>;
 type _ExactStdinSurface = Expect<
   Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
 >;
@@ -186,10 +202,6 @@ type _ExactBoxProps = Expect<
     | "backgroundColor"
     | "overflowY"
     | "display"
-    | "ariaLabel"
-    | "ariaHidden"
-    | "ariaRole"
-    | "ariaState"
   >
 >;
 type _ExactTextProps = Expect<
@@ -200,8 +212,6 @@ type _ExactTextProps = Expect<
     | "dimColor"
     | "bold"
     | "wrap"
-    | "ariaLabel"
-    | "ariaHidden"
   >
 >;
 type _ExactColor = Expect<
@@ -242,9 +252,20 @@ type _ExactInputOptions = Expect<
 type _ExactBoxSize = Expect<
   Equal<BoxSize, { readonly width: number; readonly height: number }>
 >;
-type _ExactBoxPresence = Expect<
-  Equal<ReturnType<typeof useBoxPresence>, Readonly<Ref<boolean>>>
+type _ExactFocusTarget = Expect<
+  Equal<FocusTarget, Readonly<Ref<ComponentPublicInstance | null | undefined>>>
 >;
+type _ExactFocusReturn = Expect<
+  Equal<
+    UseFocusReturn,
+    {
+      readonly isFocused: Readonly<Ref<boolean>>;
+      focus(): void;
+      blur(): void;
+    }
+  >
+>;
+type _ExactTargetedFocusParameter = Expect<Equal<Parameters<typeof useFocus>, [target: FocusTarget]>>;
 type _ExactLayoutWidth = Expect<
   Equal<ReturnType<typeof useLayoutWidth>, Readonly<Ref<number>>>
 >;
@@ -292,12 +313,9 @@ if (viewportHeight) {
 }
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
 const boxSize = useBoxSize(boxHost);
-const boxPresence = useBoxPresence(boxHost);
 const measuredSize: BoxSize | null = boxSize.value;
 // @ts-expect-error Accepted Box size is readonly.
 boxSize.value = { width: 1, height: 1 };
-// @ts-expect-error Accepted Box presence is readonly.
-boxPresence.value = false;
 if (measuredSize) {
   // @ts-expect-error Accepted Box size fields are readonly.
   measuredSize.width = 2;
@@ -305,22 +323,44 @@ if (measuredSize) {
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has different semantics and is not a Box target.
 useBoxSize(textHost);
-// @ts-expect-error Text is not a direct Box-presence target.
-useBoxPresence(textHost);
 const arbitraryHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error An arbitrary component ref does not identify one measurable Box.
 useBoxSize(arbitraryHost);
-// @ts-expect-error An arbitrary component ref does not identify one direct Box.
-useBoxPresence(arbitraryHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
 useBoxSize(rawBoxHost);
-// @ts-expect-error A raw component value cannot represent target attachment and detachment.
-useBoxPresence(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
 useBoxSize(() => boxHost.value);
-// @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
-useBoxPresence(() => boxHost.value);
+const logicalFocus = useFocus();
+const boxFocus = useFocus(boxHost);
+const textFocus = useFocus(textHost);
+const arbitraryFocus = useFocus(arbitraryHost);
+const computedFocus = useFocus(computed(() => arbitraryHost.value));
+const storedFocus: UseFocusReturn = boxFocus;
+const logicalFocusResult: void = logicalFocus.focus();
+const logicalBlurResult: void = logicalFocus.blur();
+const boxFocusResult: void = boxFocus.focus();
+const boxBlurResult: void = boxFocus.blur();
+textFocus.focus();
+arbitraryFocus.focus();
+computedFocus.focus();
+storedFocus.isFocused.value;
+// @ts-expect-error Runtime-owned focus state is readonly.
+storedFocus.isFocused.value = false;
+// @ts-expect-error A raw component cannot represent target attachment and detachment.
+useFocus(rawBoxHost);
+// @ts-expect-error Callers can wrap a derived target in computed(); focus accepts refs only.
+useFocus(() => arbitraryHost.value);
+// @ts-expect-error A target ref must resolve to component public instances.
+useFocus(shallowRef(42));
+// @ts-expect-error The public surface has two explicit overloads, not an explicit undefined target.
+useFocus(undefined);
+// @ts-expect-error Runtime focus has no options object.
+useFocus(boxHost, { autoFocus: true });
+void logicalFocusResult;
+void logicalBlurResult;
+void boxFocusResult;
+void boxBlurResult;
 useStdin().stdin;
 // @ts-expect-error Raw-mode control is internal to semantic input routes.
 useStdin().setRawMode(false);
@@ -334,6 +374,10 @@ const removedExitOnCtrlC: MountOptions = { exitOnCtrlC: false };
 const removedKittyKeyboard: MountOptions = { kittyKeyboard: { mode: "enabled" } };
 // @ts-expect-error Clipboard transport injection is application policy.
 const removedClipboardMount: MountOptions = { clipboard: { kind: "osc52" } };
+// @ts-expect-error Runtime has no presentation selector, including an explicit undefined value.
+const removedPresentationMount: MountOptions = { presentation: undefined };
+// @ts-expect-error The modeled test host does not restore the removed Runtime selector.
+const removedTestPresentation: TestHost = { presentation: undefined };
 const packedColor: Color = "gray";
 const packedRgbColor: Color = "#12abEF";
 // @ts-expect-error Runtime has one canonical gray spelling.
@@ -370,8 +414,8 @@ type _RemovedTuiInputModifiers = import("@vue-tui/runtime").TuiInputModifiers;
 type _RemovedUseInputAvailability = typeof import("@vue-tui/runtime").useInputAvailability;
 // @ts-expect-error Availability supporting types were removed with the hook.
 type _RemovedInputAvailability = import("@vue-tui/runtime").InputAvailability;
-// @ts-expect-error Focus policy is composed above Runtime.
-type _RemovedUseFocus = typeof import("@vue-tui/runtime").useFocus;
+// @ts-expect-error General rendered presence is not a public Runtime primitive.
+type _RemovedUseBoxPresence = typeof import("@vue-tui/runtime").useBoxPresence;
 // @ts-expect-error Scope policy is composed above Runtime.
 type _RemovedUseFocusScope = typeof import("@vue-tui/runtime").useFocusScope;
 // @ts-expect-error Focused routing is composed above one public subscription.
@@ -380,14 +424,20 @@ type _RemovedUseFocusedInput = typeof import("@vue-tui/runtime").useFocusedInput
 type _RemovedUseFocusScopeInput = typeof import("@vue-tui/runtime").useFocusScopeInput;
 // @ts-expect-error Runtime does not publish a global focus manager.
 type _RemovedUseFocusManager = typeof import("@vue-tui/runtime").useFocusManager;
+// @ts-expect-error Runtime focus has no public options object.
+type _RemovedUseFocusOptions = import("@vue-tui/runtime").UseFocusOptions;
+// @ts-expect-error Runtime does not publish manager observation or traversal types.
+type _RemovedUseFocusManagerReturn = import("@vue-tui/runtime").UseFocusManagerReturn;
 // @ts-expect-error Normalized external forwarding was not lossless transport.
 type _RemovedUseExternalInput = typeof import("@vue-tui/runtime").useExternalInput;
-// @ts-expect-error Focus supporting types were removed with the policy API.
-type _RemovedUseFocusReturn = import("@vue-tui/runtime").UseFocusReturn;
 // @ts-expect-error Focus scope supporting types were removed with the policy API.
 type _RemovedUseFocusScopeReturn = import("@vue-tui/runtime").UseFocusScopeReturn;
 // @ts-expect-error External forwarding supporting types were removed.
 type _RemovedExternalInputSource = import("@vue-tui/runtime").ExternalInputSource;
+// @ts-expect-error Renderer nodes are private and are not focus targets.
+type _RemovedTuiNode = import("@vue-tui/runtime").TuiNode;
+// @ts-expect-error Vue VNodes are not part of the Runtime focus target contract.
+type _RemovedVNode = import("@vue-tui/runtime").VNode;
 // @ts-expect-error Kitty negotiation options are private Runtime machinery.
 type _RemovedKittyKeyboardOptions = import("@vue-tui/runtime").KittyKeyboardOptions;
 // @ts-expect-error Kitty flag names are private Runtime machinery.
@@ -412,6 +462,18 @@ type _RemovedUseRenderSession = typeof import("@vue-tui/runtime").useRenderSessi
 type _RemovedRenderSession = import("@vue-tui/runtime").RenderSession;
 // @ts-expect-error Requested/effective mode resolution is private Runtime machinery.
 type _RemovedRenderModeResolution = import("@vue-tui/runtime").RenderModeResolution;
+// @ts-expect-error Mount mode is available through MountOptions rather than a separate root type.
+type _RemovedRenderMode = import("@vue-tui/runtime").RenderMode;
+// @ts-expect-error Runtime has no presentation type.
+type _RemovedRenderPresentation = import("@vue-tui/runtime").RenderPresentation;
+// @ts-expect-error Runtime has no ARIA role vocabulary.
+type _RemovedAriaRole = import("@vue-tui/runtime").AriaRole;
+// @ts-expect-error Runtime has no ARIA state vocabulary.
+type _RemovedAriaState = import("@vue-tui/runtime").AriaState;
+// @ts-expect-error Box does not accept screen-reader-only props.
+type _RemovedBoxAriaLabel = BoxProps["ariaLabel"];
+// @ts-expect-error Text does not accept screen-reader-only props.
+type _RemovedTextAriaLabel = TextProps["ariaLabel"];
 // @ts-expect-error Output writer strategy is private Runtime machinery.
 type _RemovedRenderOutput = import("@vue-tui/runtime").RenderOutput;
 // @ts-expect-error Physical terminal dimensions are not a public Runtime contract.
@@ -530,13 +592,13 @@ void packedColor;
 void packedRgbColor;
 void removedGreyColor;
 `,
-  );
-  writeFileSync(
-    join(consumerDirectory, "consumer.tsx"),
-    `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+    );
+    writeFileSync(
+      join(consumerDirectory, "consumer.tsx"),
+      `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
+import { Box, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { defineComponent, shallowRef } from "vue";
+import { defineComponent, onMounted, shallowRef } from "vue";
 
 // @ts-expect-error Spinner is a leaf component and ignores child content.
 const unsupportedSpinnerChildren = <Spinner children="ignored" />;
@@ -572,9 +634,10 @@ export const InputProbe = defineComponent(() => {
   const host = shallowRef<InstanceType<typeof Box> | null>(null);
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
   const size = useBoxSize(host);
-  const presence = useBoxPresence(host);
+  const focus = useFocus(host);
   const layoutWidth = useLayoutWidth();
   const viewportHeight = useViewportHeight();
+  onMounted(() => focus.focus());
   useInput(
     (event) => {
       if (event.kind === "key" && event.name === "enter") {
@@ -584,7 +647,7 @@ export const InputProbe = defineComponent(() => {
         return { preventDefault: true };
       }
     },
-    { isActive: presence },
+    { isActive: focus.isFocused },
   );
   if (scrollBox.value) {
     const movementResults: readonly boolean[] = [
@@ -597,16 +660,16 @@ export const InputProbe = defineComponent(() => {
     scrollBox.value.scrollToLine(2, true);
     void movementResults;
   }
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(presence.value)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(focus.isFocused.value)}</Text></ScrollBox></Box>;
 });
 `,
-  );
-  writeFileSync(
-    join(consumerDirectory, "App.vue"),
-    `<script setup lang="ts">
-import { shallowRef } from "vue";
+    );
+    writeFileSync(
+      join(consumerDirectory, "App.vue"),
+      `<script setup lang="ts">
+import { onMounted, shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 
 const host = shallowRef<InstanceType<typeof Box> | null>(null);
@@ -614,10 +677,12 @@ const vShowVisible = shallowRef(true);
 const screen = shallowRef<"editor" | "confirm">("editor");
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
 const size = useBoxSize(host);
-const presence = useBoxPresence(host);
+const focus = useFocus(host);
+const isFocused = focus.isFocused;
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
 const mountedStdin = useStdin();
+onMounted(() => focus.focus());
 useInput(
   (event) => {
     if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
@@ -626,7 +691,7 @@ useInput(
       screen.value = screen.value === "editor" ? "confirm" : "editor";
     }
   },
-  { isActive: presence },
+  { isActive: isFocused },
 );
 mountedStdin.stdin;
 if (scrollBox.value) {
@@ -650,15 +715,47 @@ mountedStdin.setRawMode(false);
       <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
-      <ScrollBox ref="scrollBox"><Text>{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ presence }}</Text></ScrollBox>
+      <ScrollBox ref="scrollBox"><Text>{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ isFocused }}</Text></ScrollBox>
     </Box>
   </Box>
 </template>
 `,
-  );
-  writeFileSync(
-    join(consumerDirectory, "RejectedMouseListeners.vue"),
-    `<script setup lang="ts">
+    );
+    if (supportsUseTemplateRef) {
+      writeFileSync(
+        join(consumerDirectory, "Vue35FocusTarget.vue"),
+        `<script setup lang="ts">
+import { Box, Text } from "@vue-tui/runtime";
+</script>
+
+<template>
+  <Box><Text>custom focus target</Text></Box>
+</template>
+`,
+      );
+      writeFileSync(
+        join(consumerDirectory, "Vue35Focus.vue"),
+        `<script setup lang="ts">
+import { onMounted, useTemplateRef } from "vue";
+import { useFocus, type FocusTarget, type UseFocusReturn } from "@vue-tui/runtime";
+import Vue35FocusTarget from "./Vue35FocusTarget.vue";
+
+const target = useTemplateRef("customFocusTarget");
+const acceptedTarget: FocusTarget = target;
+const focus: UseFocusReturn = useFocus(target);
+onMounted(() => focus.focus());
+void acceptedTarget;
+</script>
+
+<template>
+  <Vue35FocusTarget ref="customFocusTarget" />
+</template>
+`,
+      );
+    }
+    writeFileSync(
+      join(consumerDirectory, "RejectedMouseListeners.vue"),
+      `<script setup lang="ts">
 import { ScrollBox } from "@vue-tui/components";
 import { Text } from "@vue-tui/runtime";
 
@@ -679,10 +776,10 @@ const listener = () => {};
   <ScrollBox @wheel="listener"><Text>scroll</Text></ScrollBox>
 </template>
 `,
-  );
-  writeFileSync(
-    join(consumerDirectory, "runtime.mjs"),
-    `import assert from "node:assert/strict";
+    );
+    writeFileSync(
+      join(consumerDirectory, "runtime.mjs"),
+      `import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
 import * as devtools from "@vue-tui/runtime/devtools";
@@ -692,7 +789,7 @@ import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, isReadonly, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
-const { Box, createApp, Text, useBoxPresence, useBoxSize, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
+const { Box, createApp, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
 assert.deepEqual(Object.keys(devtools).sort(), ["connectDevtools"]);
 assert.deepEqual(Object.keys(runtimeTesting).sort(), ["createTestHostBridge"]);
@@ -723,7 +820,7 @@ assert.equal("useElementGeometry" in runtime, false);
 assert.equal("useCaret" in runtime, false);
 assert.equal("useInputAvailability" in runtime, false);
 assert.equal("useExternalInput" in runtime, false);
-assert.equal("useFocus" in runtime, false);
+assert.equal("useBoxPresence" in runtime, false);
 assert.equal("useFocusedInput" in runtime, false);
 assert.equal("useFocusManager" in runtime, false);
 assert.equal("useFocusScope" in runtime, false);
@@ -733,7 +830,7 @@ assert.equal("kittyModifiers" in runtime, false);
 assert.equal(typeof useLayoutWidth, "function");
 assert.equal(typeof useViewportHeight, "function");
 assert.equal(typeof useBoxSize, "function");
-assert.equal(typeof useBoxPresence, "function");
+assert.equal(typeof useFocus, "function");
 assert.equal(typeof useInput, "function");
 
 for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
@@ -977,10 +1074,64 @@ assert.equal(idle.terminal.rawMode.current, false);
 assert.deepEqual(idle.terminal.rawMode.history, []);
 idle.dispose();
 
+let logicalFocusHandle;
+let targetedFocusHandle;
+let unavailableFocusHandle;
+let setupObservedLogicalFocus = false;
+const FocusProbe = defineComponent(() => {
+  const target = shallowRef(null);
+  const unavailableTarget = shallowRef(null);
+  logicalFocusHandle = useFocus();
+  targetedFocusHandle = useFocus(target);
+  unavailableFocusHandle = useFocus(unavailableTarget);
+  assert.equal(logicalFocusHandle.focus(), undefined);
+  setupObservedLogicalFocus = logicalFocusHandle.isFocused.value;
+  assert.equal(unavailableFocusHandle.focus(), undefined);
+  assert.equal(logicalFocusHandle.isFocused.value, true);
+  onMounted(() => targetedFocusHandle.focus());
+  return () => h(Box, { ref: target }, () => h(Text, null, () => "focused"));
+});
+const focusApp = await render(FocusProbe);
+assert.equal(setupObservedLogicalFocus, true);
+assert.equal(logicalFocusHandle.isFocused.value, false);
+assert.equal(targetedFocusHandle.isFocused.value, true);
+assert.equal(unavailableFocusHandle.isFocused.value, false);
+assert.equal(unavailableFocusHandle.focus(), undefined);
+assert.equal(targetedFocusHandle.isFocused.value, true);
+assert.equal(isReadonly(targetedFocusHandle.isFocused), true);
+assert.equal(Object.isFrozen(targetedFocusHandle), true);
+assert.deepEqual(Reflect.ownKeys(targetedFocusHandle), ["isFocused", "focus", "blur"]);
+assert.equal(targetedFocusHandle.blur(), undefined);
+assert.equal(targetedFocusHandle.isFocused.value, false);
+assert.equal(logicalFocusHandle.focus(), undefined);
+assert.equal(logicalFocusHandle.isFocused.value, true);
+focusApp.unmount();
+await focusApp.waitUntilExit();
+assert.equal(logicalFocusHandle.isFocused.value, false);
+assert.equal(logicalFocusHandle.focus(), undefined);
+assert.equal(logicalFocusHandle.blur(), undefined);
+assert.equal(logicalFocusHandle.isFocused.value, false);
+focusApp.dispose();
+
+let stringLogicalFocus;
+let stringTargetedFocus;
+const StringFocusProbe = defineComponent(() => {
+  const target = shallowRef(null);
+  stringLogicalFocus = useFocus();
+  stringTargetedFocus = useFocus(target);
+  stringLogicalFocus.focus();
+  onMounted(() => stringTargetedFocus.focus());
+  return () => h(Box, { ref: target }, () => h(Text, null, () => "string focus"));
+});
+assert.equal(runtime.renderToString(StringFocusProbe), "string focus");
+assert.equal(stringLogicalFocus.isFocused.value, false);
+assert.equal(stringTargetedFocus.isFocused.value, false);
+assert.equal(stringLogicalFocus.focus(), undefined);
+assert.equal(stringTargetedFocus.blur(), undefined);
+
 let layoutWidthProjection;
 let viewportHeightProjection;
 let boxSizeProjection;
-let boxPresenceProjection;
 let scrollBoxHandle;
 const LayoutProbe = defineComponent(() => {
   const host = shallowRef(null);
@@ -988,7 +1139,6 @@ const LayoutProbe = defineComponent(() => {
   layoutWidthProjection = useLayoutWidth();
   viewportHeightProjection = useViewportHeight();
   boxSizeProjection = useBoxSize(host);
-  boxPresenceProjection = useBoxPresence(host);
   return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
     h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed size") }),
   );
@@ -997,7 +1147,6 @@ const layoutApp = await render(LayoutProbe, { columns: 20, rows: 5 });
 assert.equal(layoutWidthProjection.value, 20);
 assert.equal(viewportHeightProjection.value, 5);
 assert.deepEqual(boxSizeProjection.value, { width: 8, height: 3 });
-assert.equal(boxPresenceProjection.value, true);
 assert.deepEqual(Reflect.ownKeys(boxSizeProjection.value), ["width", "height"]);
 assert.equal(isReadonly(layoutWidthProjection), true);
 assert.equal(isReadonly(viewportHeightProjection), true);
@@ -1072,10 +1221,11 @@ movementApp.dispose();
 
 const events = [];
 const inputScreen = shallowRef("editor");
-let inputPresence;
+let inputFocus;
 const WithInput = defineComponent(() => {
   const host = shallowRef(null);
-  inputPresence = useBoxPresence(host);
+  inputFocus = useFocus(host);
+  onMounted(() => inputFocus.focus());
   useInput(
     (event) => {
       events.push(event);
@@ -1088,12 +1238,12 @@ const WithInput = defineComponent(() => {
         return { preventDefault: true };
       }
     },
-    { isActive: inputPresence },
+    { isActive: inputFocus.isFocused },
   );
   return () => h(Box, { ref: host }, () => h(Text, null, () => "active"));
 });
 const active = await render(WithInput);
-assert.equal(inputPresence.value, true);
+assert.equal(inputFocus.isFocused.value, true);
 assert.equal(active.terminal.rawMode.current, true);
 await active.stdin.write("a");
 await active.stdin.write("\\r");
@@ -1120,6 +1270,7 @@ assert.deepEqual(events[2], {
 assert.equal(events.every(Object.isFrozen), true);
 assert.equal(inputScreen.value, "editor");
 active.dispose();
+assert.equal(inputFocus.isFocused.value, false);
 assert.equal(active.terminal.rawMode.current, false);
 
 const InvalidResult = defineComponent(() => {
@@ -1133,26 +1284,27 @@ await assert.rejects(
 );
 invalidResult.dispose();
 `,
-  );
+    );
 
-  run("npm", ["install", "--no-audit", "--no-fund", "--package-lock=false"], consumerDirectory);
-  run("npx", ["tsc", "-p", "tsconfig.json"], consumerDirectory);
-  run("npx", ["vue-tsc", "-p", "tsconfig.sfc.json"], consumerDirectory);
-  run(process.execPath, ["runtime.mjs"], consumerDirectory, { FORCE_COLOR: "3" });
+    run("npm", ["install", "--no-audit", "--no-fund", "--package-lock=false"], consumerDirectory);
+    run("npx", ["tsc", "-p", "tsconfig.json"], consumerDirectory);
+    run("npx", ["vue-tsc", "-p", "tsconfig.sfc.json"], consumerDirectory);
+    run(process.execPath, ["runtime.mjs"], consumerDirectory, { FORCE_COLOR: "3" });
 
-  const dependencyTree = JSON.parse(
-    run("npm", ["ls", "vue", "--all", "--json"], consumerDirectory),
-  );
-  assert.deepEqual([...collectVueVersions(dependencyTree)], ["3.4.38"]);
-  assert.equal(
-    JSON.parse(readFileSync(join(consumerDirectory, "node_modules/vue/package.json"), "utf8"))
-      .version,
-    "3.4.38",
-  );
+    const dependencyTree = JSON.parse(
+      run("npm", ["ls", "vue", "--all", "--json"], consumerDirectory),
+    );
+    assert.deepEqual([...collectVueVersions(dependencyTree)], [vueVersion]);
+    assert.equal(
+      JSON.parse(readFileSync(join(consumerDirectory, "node_modules/vue/package.json"), "utf8"))
+        .version,
+      vueVersion,
+    );
 
-  process.stdout.write(
-    "clean runtime, testing, and components tarball consumer passed with Vue 3.4.38 and TypeScript 6.0.3\n",
-  );
+    process.stdout.write(
+      `clean runtime, testing, and components tarball consumer passed with Vue ${vueVersion} and TypeScript 6.0.3\n`,
+    );
+  }
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true });
 }

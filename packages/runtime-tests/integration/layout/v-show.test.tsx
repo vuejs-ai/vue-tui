@@ -10,7 +10,7 @@ async function flushUpdate(result: RenderResult): Promise<void> {
 }
 
 test.each(["inline", "fullscreen"] as const)(
-  "v-show preserves a stateful subtree and republishes its %s target state",
+  "v-show preserves a stateful subtree and invalidates its %s focus target",
   async (mode) => {
     resetVShowJourneyState();
     const visible = shallowRef(true);
@@ -39,14 +39,14 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(result.lastFrame()).toBe("probe:0\ntail");
       expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
-      expect(vShowJourneyState.presence?.value).toBe(true);
+      expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
 
       visible.value = false;
       await flushUpdate(result);
       expect(result.lastFrame()).toBe("tail");
       expect(vShowJourneyState.mounts).toBe(1);
       expect(vShowJourneyState.unmounts).toBe(0);
-      expect(vShowJourneyState.presence?.value).toBe(false);
+      expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
       expect(vShowJourneyState.size?.value).toBeNull();
 
       // Box's authored display and v-show are independent layers. Updating the
@@ -66,11 +66,13 @@ test.each(["inline", "fullscreen"] as const)(
       visible.value = true;
       await flushUpdate(result);
       expect(result.lastFrame()).toBe("    probe:2\ntail");
-      expect(vShowJourneyState.presence?.value).toBe(true);
+      expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
       expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
+      vShowJourneyState.focus?.focus();
+      expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
       result.unmount();
       expect(vShowJourneyState.unmounts).toBe(1);
-      expect(vShowJourneyState.presence?.value).toBe(false);
+      expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
       expect(vShowJourneyState.size?.value).toBeNull();
     } finally {
       result.dispose();

@@ -26,20 +26,8 @@ const completeBox = (
     backgroundColor="#12abEF"
     overflowY="hidden"
     display="flex"
-    ariaLabel="status"
-    ariaHidden={false}
-    ariaRole="progressbar"
-    ariaState={{ busy: true }}
   >
-    <Text
-      color="revert"
-      backgroundColor="blue"
-      dimColor
-      bold
-      wrap="truncate"
-      ariaLabel="value"
-      ariaHidden={false}
-    >
+    <Text color="revert" backgroundColor="blue" dimColor bold wrap="truncate">
       text
     </Text>
   </Box>
@@ -80,6 +68,20 @@ const textTruncateEnd = <Text wrap="truncate-end">text</Text>;
 // @ts-expect-error Foreground reset tokens do not apply to backgrounds.
 const textBackgroundReset = <Text backgroundColor="revert">text</Text>;
 
+// Screen-reader-only component props are not part of the current visual Runtime vocabulary.
+// @ts-expect-error Box does not accept an ARIA label prop.
+const boxAriaLabel = <Box ariaLabel="status" />;
+// @ts-expect-error Box does not accept an ARIA hidden prop.
+const boxAriaHidden = <Box ariaHidden />;
+// @ts-expect-error Box does not accept an ARIA role prop.
+const boxAriaRole = <Box ariaRole="status" />;
+// @ts-expect-error Box does not accept an ARIA state prop.
+const boxAriaState = <Box ariaState={{ busy: true }} />;
+// @ts-expect-error Text does not accept an ARIA label prop.
+const textAriaLabel = <Text ariaLabel="value">text</Text>;
+// @ts-expect-error Text does not accept an ARIA hidden prop.
+const textAriaHidden = <Text ariaHidden>text</Text>;
+
 void boxFlexWrap;
 void boxAlignSelf;
 void boxPaddingX;
@@ -95,6 +97,12 @@ void textStrikethrough;
 void textInverse;
 void textTruncateEnd;
 void textBackgroundReset;
+void boxAriaLabel;
+void boxAriaHidden;
+void boxAriaRole;
+void boxAriaState;
+void textAriaLabel;
+void textAriaHidden;
 
 // Common visual components are passive; targeted pointer behavior is outside
 // the current Runtime foundation.

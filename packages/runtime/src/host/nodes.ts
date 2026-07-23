@@ -45,10 +45,6 @@ export interface TuiBox extends NodeBase {
   style: TuiHostStyle;
   props: BoxProps;
   paintDirty: boolean;
-  internal_accessibility?: {
-    role?: string;
-    state?: Record<string, boolean>;
-  };
 }
 
 export interface TuiText extends NodeBase {

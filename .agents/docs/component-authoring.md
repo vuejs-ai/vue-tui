@@ -48,11 +48,10 @@ compiler to hoist), unmeasurable in a ~32ms-throttled TUI.
 
 ## Why Text validates `color`/`backgroundColor` eagerly
 
-`Text` validates its public contract during render before the empty-content branch. Visual
-documents accept only the public `Color` grammar, plus `revert` and `initial` for foreground;
-screen-reader documents skip those paint-only checks. Structural values such as `wrap` still
-validate in every presentation. Removing content-dependent validation is what lets `Text`
-remain a template without inspecting child vnodes.
+`Text` validates its public contract during render before the empty-content branch. Every current
+host accepts only the public `Color` grammar, plus `revert` and `initial` for foreground; there is
+no presentation-specific validation bypass. Removing content-dependent validation is what lets
+`Text` remain a template without inspecting child vnodes.
 
 ## Renderer work the templates required (run-discovered, all fixed)
 
@@ -68,15 +67,11 @@ and fixed at the root:
   The anchors are byte-identical to a genuine `{''}` child — and **real Ink v7.0.4 doesn't
   count `''`/`null` children in that index either** (`a{''}<Transform>b` → `ab[1]`; the old
   render-fn `Text` already diverged to `ab[2]`). Fix: `advancesLineIndex(child)` (in
-  `host/nodes.ts`) skips `comment` AND empty `text-leaf`, applied to all 8 index-advance loops
-  across `paint.ts` / `host/text-measure.ts` / `paint/screen-reader.ts` — a parity improvement,
-  not a divergence.
-- **Box — a root `v-if` makes `$el` a Fragment anchor.** `Box` must render **nothing** when
-  screen-reader-hidden, which needs a conditional root; a root `v-if` makes the component's
-  `$el` a fragment boundary anchor (empty `text-leaf`, no renderer element). The shared
-  rendered-target resolver drills the component `subTree` to the first real host node, skipping
-  comment/empty-`text-leaf` anchors (verified to resolve each ref'd Box to its **own** node, never a sibling's). Public `useBoxSize()` consumes that resolver only for a direct same-app Box and derives its result from accepted paint rather than reading Yoga through `$el`.
-- **A component ref is not a rendered-lifetime signal.** A public component instance may remain identical while a root `v-if`, keyed root, or HMR rerender replaces its `$el`. Internal behaviors bound to that ref must use the per-render-root contract in [rendered-target-lifetime.md](./rendered-target-lifetime.md), not add another watcher of the component proxy. Rendered lifetime and focus eligibility remain separate contracts: F2 owns attachment identity and cleanup, while completed F4 derives hidden, disabled, scope, and traversal eligibility from the current rendered tree.
+  `host/nodes.ts`) skips `comment` AND empty `text-leaf` across visual paint and text measurement —
+  a parity improvement, not a divergence. The removed screen-reader experiment once reused the
+  same helper; no current source path remains.
+- **Box — a root `v-if` makes `$el` a Fragment anchor.** `Box` uses a conditional root so closed-prop validation can fail before creating a host node; that root `v-if` makes the component's `$el` a fragment boundary anchor (empty `text-leaf`, no renderer element). Public `useBoxSize()` resolves only a direct same-app Box to its own host and derives the result from accepted paint rather than reading Yoga through `$el`. `useFocus(target)` has a different contract: it follows the targeted stateful component's root boundary, unwraps stateful single-root chains and Vue's development-root single-root normalization, preserves a true Fragment as one boundary, and never selects the first rendered descendant.
+- **A component ref is not a rendered-lifetime signal.** A public component instance may remain identical while a root `v-if`, keyed root, or HMR rerender replaces its root boundary. Internal behavior behind `useFocus(target)` must use the per-render-root contract in [rendered-target-lifetime.md](./rendered-target-lifetime.md), not add another watcher of the component proxy. The target changes only the opaque handle's validity: hidden or detached ancestry clears current ownership without restoration, while targetless `useFocus()` follows only its Vue scope. Focus ordering, disabled state, scopes, traversal, input routing, and string lookup remain outside Runtime.
 
 ## Pitfalls (for adding or editing component SFCs)
 

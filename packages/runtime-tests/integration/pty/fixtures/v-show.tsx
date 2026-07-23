@@ -1,5 +1,5 @@
 import process from "node:process";
-import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp, useFocus, useInput } from "@vue-tui/runtime";
 import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import {
   defineComponent,
@@ -11,6 +11,7 @@ import {
   vShow,
   watch,
   withDirectives,
+  type ComponentPublicInstance,
 } from "vue";
 
 const visible = shallowRef(true);
@@ -60,6 +61,8 @@ const VShowTarget = defineComponent({
 
 const App = defineComponent(() => {
   const { exit } = useApp();
+  const target = shallowRef<ComponentPublicInstance | null>(null);
+  const focus = useFocus(target);
   useInput((event) => {
     if (event.kind !== "text") return;
     if (event.text === "h") {
@@ -77,19 +80,34 @@ const App = defineComponent(() => {
       void markAfterCommit("shown-again");
       return;
     }
+    if (event.text === "f") {
+      focus.focus();
+      void markAfterCommit("focused-again");
+      return;
+    }
     if (event.text === "q") {
       exit();
     }
   });
 
   onMounted(() => {
+    focus.focus();
     void markAfterCommit("shown");
   });
 
   return () =>
     h(Box, { flexDirection: "column" }, () => [
-      h(VShowTarget, { visible: visible.value, revision: revision.value }),
-      h(Text, null, () => `visible=${visible.value} revision=${revision.value}`),
+      h(VShowTarget, {
+        ref: target,
+        visible: visible.value,
+        revision: revision.value,
+      }),
+      h(
+        Text,
+        null,
+        () =>
+          `visible=${visible.value} revision=${revision.value} focused=${focus.isFocused.value}`,
+      ),
     ]);
 });
 

@@ -20,27 +20,22 @@ const inlineTtyOptions: RenderOptions = {
   props: { label: "ready" },
   host: {
     mode: "inline",
-    presentation: "visual",
     stdin: "tty",
     stdout: "tty",
     patchConsole: false,
   },
 };
 const fullscreenOptions: RenderOptions = { host: { mode: "fullscreen" } };
-const transcriptStreamOptions: RenderOptions = {
-  host: {
-    mode: "fullscreen",
-    presentation: "screen-reader",
-    stdin: "non-tty",
-    stdout: "stream",
-  },
+const streamOptions: RenderOptions = {
+  host: { mode: "fullscreen", stdin: "non-tty", stdout: "stream" },
 };
 
 expectTypeOf(defaultOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(inlineTtyOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(fullscreenOptions).toMatchTypeOf<RenderOptions>();
-expectTypeOf(transcriptStreamOptions).toMatchTypeOf<RenderOptions>();
+expectTypeOf(streamOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf<NonNullable<RenderOptions["host"]>>().toEqualTypeOf<TestHost>();
+expectTypeOf<keyof TestHost>().toEqualTypeOf<"mode" | "stdin" | "stdout" | "patchConsole">();
 
 const TestComponent = defineComponent(() => () => null);
 expectTypeOf(render(TestComponent, inlineTtyOptions)).toEqualTypeOf<Promise<RenderResult>>();
@@ -53,8 +48,8 @@ const removedDebug: RenderOptions = { debug: true };
 const removedExitOnCtrlC: RenderOptions = { exitOnCtrlC: false };
 // @ts-expect-error Only Inline and Fullscreen are valid requested modes.
 const invalidMode: RenderOptions = { host: { mode: "full-screen" } };
-// @ts-expect-error Only visual and screen-reader presentations are modeled.
-const invalidPresentation: RenderOptions = { host: { presentation: "audio" } };
+// @ts-expect-error Presentation is not a test-host capability.
+const removedPresentation: RenderOptions = { host: { presentation: undefined } };
 // @ts-expect-error Only TTY and non-TTY input hosts are modeled.
 const invalidStdin: RenderOptions = { host: { stdin: "pipe" } };
 // @ts-expect-error Only TTY and stream output hosts are modeled.
@@ -63,7 +58,7 @@ void removedLiveUpdates;
 void removedDebug;
 void removedExitOnCtrlC;
 void invalidMode;
-void invalidPresentation;
+void removedPresentation;
 void invalidStdin;
 void invalidStdout;
 void (null as unknown as TestRenderSession);
