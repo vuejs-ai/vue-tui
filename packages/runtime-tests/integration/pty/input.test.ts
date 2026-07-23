@@ -54,6 +54,7 @@ it.each([
   ["Shift+Tab", "shiftTab", "\x1b[Z"],
   ["Backspace", "backspace", "\b"],
   ["Delete", "delete", "\x1b[3~"],
+  ["F1", "f1", "\x1bOP"],
 ] as const)("useInput - handles the finite %s key", async (_label, test, input) => {
   await expectInput(test, input);
 });
@@ -62,33 +63,39 @@ it("useInput - handles rapid arrows and Enter in one chunk", async () => {
   await expectInput("rapidArrowsEnter", "\x1b[B\x1b[B\x1b[B\r");
 });
 
-it.each([
-  ["unsupported F1", "dropUnsupported", "\x1bOPq"],
-  ["complete uninterpreted control sequence", "dropUninterpreted", "\x1b[?25hq"],
-] as const)("useInput - drops %s", async (_label, test, input) => {
-  await expectInput(test, input);
-});
+it.each([["complete uninterpreted control sequence", "dropUninterpreted", "\x1b[?25hq"]] as const)(
+  "useInput - drops %s",
+  async (_label, test, input) => {
+    await expectInput(test, input);
+  },
+);
 
 it.each([
   ["legacy", "\x03"],
   ["Kitty", "\x1b[99;5u"],
-] as const)("useInput - preventDefault handler can own %s Ctrl+C", async (_label, input) => {
-  const ps = term("use-input-ctrl-c");
-  ps.write(input);
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
+] as const)(
+  "useInput - default-false handler receives and can own %s Ctrl+C",
+  async (_label, input) => {
+    const ps = term("use-input-ctrl-c");
+    ps.write(input);
+    await ps.waitForExit();
+    expect(ps.output).toContain("exited");
+  },
+);
 
 it.each([
   ["legacy", "\x03"],
   ["Kitty", "\x1b[99;5u"],
-] as const)("useInput - Runtime exits on unprevented %s Ctrl+C", async (_label, input) => {
-  const ps = term("input-default-ctrl-c");
-  ps.write(input);
-  await ps.waitForOutput((output) => output.includes("exited"));
-  await ps.waitForExit();
-  expect(ps.output).toContain("exited");
-});
+] as const)(
+  "useInput - explicit exitOnCtrlC exits before delivering %s Ctrl+C",
+  async (_label, input) => {
+    const ps = term("input-default-ctrl-c");
+    ps.write(input);
+    await ps.waitForOutput((output) => output.includes("exited"));
+    await ps.waitForExit();
+    expect(ps.output).toContain("exited");
+  },
+);
 
 it("useInput - private keyboard negotiation owns its reply and preserves adjacent input", async () => {
   const ps = term("input-auto-negotiation");
@@ -159,6 +166,14 @@ it("useInput - preserves escape sequences inside paste", async () => {
   const ps = term("normalized-paste", ["escapeSequences"]);
   ps.write("\x1b[200~hello\x1b[Aworld\x1b[201~");
   await ps.waitForExit();
+  expect(ps.output).toContain("exited");
+});
+
+it("useInput - explicit exitOnCtrlC never treats pasted Ctrl+C as a key", async () => {
+  const ps = term("normalized-paste", ["ctrlC"]);
+  ps.write("\x1b[200~\x03\x1b[201~");
+  await ps.waitForExit();
+  expect(ps.output).toContain("__PASTE_CTRL_C__");
   expect(ps.output).toContain("exited");
 });
 

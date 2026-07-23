@@ -77,7 +77,7 @@ function useRegisteredFocus(
 }
 
 function isTab(event: TuiInputEvent): boolean {
-  return event.kind === "key" && event.name === "tab";
+  return event.type === "key" && event.key.name === "tab";
 }
 
 async function flushAcceptedRender(result: RenderResult): Promise<void> {

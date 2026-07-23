@@ -108,13 +108,13 @@ test("the replacement useInput after a same-tick swap still receives input", asy
 
   const A = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") aKeys.push(event.text);
+      if (event.type === "text") aKeys.push(event.text);
     });
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") bKeys.push(event.text);
+      if (event.type === "text") bKeys.push(event.text);
     });
     return () => <Text>b</Text>;
   });
@@ -200,13 +200,13 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
 
   const AppA = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") aKeys.push(event.text);
+      if (event.type === "text") aKeys.push(event.text);
     });
     return () => <Text>a</Text>;
   });
   const AppB = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") bKeys.push(event.text);
+      if (event.type === "text") bKeys.push(event.text);
     });
     return () => <Text>b</Text>;
   });
@@ -354,7 +354,7 @@ test("a pending partial escape does not bleed across a useInput swap", async () 
   });
   const B = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") bKeys.push(event.text);
+      if (event.type === "text") bKeys.push(event.text);
     });
     return () => <Text>b</Text>;
   });
@@ -389,7 +389,7 @@ test("input emitted on a no-input screen does not bleed into the next useInput",
   });
   const B = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") bKeys.push(event.text);
+      if (event.type === "text") bKeys.push(event.text);
     });
     return () => <Text>b</Text>;
   });

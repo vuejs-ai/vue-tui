@@ -19,6 +19,7 @@ import {
   type SharedStdinSubscription,
 } from "./io/stdin-ingress.ts";
 import type { NormalizedInputFact } from "./io/normalized-input.ts";
+import { projectPublicInputEvent } from "./io/public-input.ts";
 import {
   captureInternalInputRoutePlan,
   dispatchInternalInput,
@@ -89,6 +90,7 @@ import {
   normalizeRequestedMode,
   resolveLiveDimensions,
   resolveLiveSurface,
+  validateExitOnCtrlC,
   validateLiveUpdates,
   type InternalRenderSessionService,
   type ResolvedLiveDimensions,
@@ -169,6 +171,13 @@ export interface MountOptions {
    * @default true
    */
   readonly patchConsole?: boolean;
+  /**
+   * Exit before delivering an exact Ctrl+C key. Omission leaves Ctrl+C as
+   * ordinary managed input; bracketed paste never triggers this option.
+   *
+   * @default false
+   */
+  readonly exitOnCtrlC?: boolean;
 }
 
 /** Repository-only mount controls used by Runtime tests and official test tooling. */
@@ -192,6 +201,7 @@ const acceptedMountOptionKeys = new Set<PropertyKey>([
   "stderr",
   "mode",
   "patchConsole",
+  "exitOnCtrlC",
   // Repository-only controls. These remain temporary internal strings or
   // symbols until the separate internal-option cleanup is implemented.
   "liveUpdates",
@@ -210,7 +220,6 @@ const acceptedMountOptionKeys = new Set<PropertyKey>([
   "interactive",
   "debug",
   "rawMode",
-  "exitOnCtrlC",
   "kittyKeyboard",
 ]);
 
@@ -1284,6 +1293,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const liveUpdatesOverride = validateLiveUpdates(
       (options as { readonly liveUpdates?: unknown }).liveUpdates,
     );
+    const exitOnCtrlC = validateExitOnCtrlC(
+      (options as { readonly exitOnCtrlC?: unknown }).exitOnCtrlC,
+    );
     const clipboardTransport = normalizeClipboardTransport(
       (options as { readonly clipboard?: unknown }).clipboard,
     );
@@ -2102,6 +2114,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
         appCtx: appContext,
+        exitOnCtrlC,
         getMouseController: () => mountedMouseController,
         mouseProtocolAvailable,
         beforeManagedInputAcquire: ensureFullscreenSurface,
@@ -3442,6 +3455,7 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
 
 interface CreateStdinControllerOptions {
   appCtx: AppContext;
+  exitOnCtrlC: boolean;
   acquireKittyKeyboardDemand: () => () => void;
   isKittyKeyboardReady: () => boolean;
   getMouseController: () => FullscreenMouseController | null;
@@ -3463,14 +3477,11 @@ function createStdinController(
   const { appCtx } = opts;
   const inputAvailability = createInputAvailabilityRef(classifyLiveInputAvailability(stdin));
   let controller!: StdinController;
-  const inputRouting = createInternalInputRoutingRuntime(
-    [{ id: "framework:ctrl-c", handle: runCtrlCDefault }],
-    {
-      acquire() {
-        return controller.acquireSemanticInput();
-      },
+  const inputRouting = createInternalInputRoutingRuntime([], {
+    acquire() {
+      return controller.acquireSemanticInput();
     },
-  );
+  });
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
     readonly kind: "routes";
@@ -3538,9 +3549,13 @@ function createStdinController(
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
+  /** Raw refs that require Runtime's parser and negotiated input protocols. */
+  let managedRawRefs = 0;
+  /** Raw refs owned by independent public useStdin() hook calls. */
+  let publicRawRefs = 0;
   // Physical semantic leases cover acquisition through deferred release. Their
   // published subset alone grants public/selected route eligibility. Low-level
-  // mouse consumers remain separate logical raw demand through localRefs.
+  // mouse consumers are managed raw demand; public raw-only refs are excluded.
   let semanticPhysicalRefs = 0;
   let publishedSemanticRefs = 0;
   interface SemanticInputDemand {
@@ -3946,7 +3961,7 @@ function createStdinController(
   function reconcileSharedSubscription(): void {
     if (
       resumeAwaitingTerminalModes &&
-      (localRefs === 0 ||
+      (managedRawRefs === 0 ||
         (opts.isManagedInputSurfaceReady() &&
           opts.isKittyKeyboardReady() &&
           (!canWriteTerminalMode() ||
@@ -3961,7 +3976,8 @@ function createStdinController(
     ) {
       resumeAwaitingTerminalModes = false;
     }
-    const shouldBeActive = !disposed && !suspended && !resumeAwaitingTerminalModes && localRefs > 0;
+    const shouldBeActive =
+      !disposed && !suspended && !resumeAwaitingTerminalModes && managedRawRefs > 0;
     if (shouldBeActive === sharedSubscriptionActive) return;
     sharedSubscriptionActive = shouldBeActive;
     sharedSubscription.setActive(shouldBeActive);
@@ -3980,7 +3996,7 @@ function createStdinController(
     try {
       while (true) {
         kittyDemandReconcileRequested = false;
-        const shouldHoldDemand = !disposed && localRefs > 0;
+        const shouldHoldDemand = !disposed && managedRawRefs > 0;
 
         if (shouldHoldDemand && !releaseKittyKeyboardDemand) {
           let release: (() => void) | undefined;
@@ -4001,7 +4017,7 @@ function createStdinController(
             break;
           }
 
-          if (!disposed && localRefs > 0) {
+          if (!disposed && managedRawRefs > 0) {
             releaseKittyKeyboardDemand = release;
           } else {
             try {
@@ -4052,7 +4068,7 @@ function createStdinController(
             input: mouseController.captureInputSnapshot(),
           })
         : undefined,
-      managedInputActive: publishedSemanticRefs > 0 || localRefs > semanticPhysicalRefs,
+      managedInputActive: publishedSemanticRefs > 0 || managedRawRefs > semanticPhysicalRefs,
     });
   }
 
@@ -4098,28 +4114,12 @@ function createStdinController(
     }
   }
 
-  function noDefaultAction() {
-    return Object.freeze({ performed: false, continue: true, blockExternal: false });
-  }
-
-  function runCtrlCDefault(fact: NormalizedInputFact) {
-    if (fact.kind !== "key" || fact.key.phase === "release") {
-      return noDefaultAction();
-    }
-    const { modifiers } = fact.key;
-    const isCtrlC =
-      modifiers.ctrl &&
-      !modifiers.shift &&
-      !modifiers.alt &&
-      !modifiers.super &&
-      !modifiers.hyper &&
-      !modifiers.meta &&
-      (fact.key.name === "c" ||
-        fact.key.primaryCodepoint === 99 ||
-        fact.key.baseLayoutCodepoint === 99);
-    if (!isCtrlC) return noDefaultAction();
-    appCtx.exit();
-    return Object.freeze({ performed: true, continue: false, blockExternal: true });
+  function isCtrlC(fact: NormalizedInputFact): boolean {
+    const event = projectPublicInputEvent(fact);
+    const key = event?.type === "paste" ? undefined : event?.key;
+    if (!key || key.character !== "c") return false;
+    const { shift, alt, ctrl, meta, super: superKey, hyper } = key;
+    return ctrl && !shift && !alt && !meta && !superKey && !hyper;
   }
 
   function deliverCapturedMouse(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
@@ -4143,6 +4143,10 @@ function createStdinController(
   function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed || !snapshot.managedInputActive) return;
     if (deliverCapturedMouse(event, snapshot)) return;
+    if (opts.exitOnCtrlC && isCtrlC(event)) {
+      appCtx.exit();
+      return;
+    }
 
     // Resolve the independent global layer and selected topology before the first callback.
     // A callback may remove or replace later routes, but that only changes a
@@ -4175,6 +4179,14 @@ function createStdinController(
   function assertManagedInputAvailable(): void {
     if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin)) {
       throwManagedInputUnavailable();
+    }
+  }
+
+  function assertPublicRawModeAvailable(): void {
+    if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin)) {
+      throw new Error(
+        "Raw mode is unavailable because the mounted stdin is not a controllable TTY.",
+      );
     }
   }
 
@@ -4425,6 +4437,133 @@ function createStdinController(
     }
   }
 
+  function acquireLogicalRawMode(managed: boolean): boolean {
+    if (disposed) {
+      throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
+    }
+    if (managed) {
+      // Managed semantic routes surface this failure transactionally before
+      // publishing their replacement. Rechecking the structural capability
+      // also prevents a setterless host that was pre-raw at mount from silently
+      // attaching after its external owner returns it to cooked mode.
+      assertManagedInputAvailable();
+      if (!suspended && !opts.beforeManagedInputAcquire()) return false;
+    } else {
+      assertPublicRawModeAvailable();
+    }
+
+    const state = getRawModeState(stdin);
+    const firstSharedRef = state.refs === 0;
+    const localRefsBefore = localRefs;
+    const kindRefsBefore = managed ? managedRawRefs : publicRawRefs;
+    let committedRef = false;
+    try {
+      if (
+        firstSharedRef &&
+        !state.pendingDisable &&
+        !state.physicalActive &&
+        !state.physicalRawUncertain &&
+        !state.physicalRefHeld &&
+        !state.physicalRefUncertain
+      ) {
+        state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
+        state.changedRawMode = !state.baselineRaw;
+      }
+      if (managed && managedRawRefs === 0 && inputDeliveryActive) {
+        // A newly active managed route starts a fresh application delivery
+        // generation. A public raw-only hold deliberately has no parser
+        // generation and therefore does not affect this boundary.
+        sharedSubscription.invalidate();
+      }
+      const participatesPhysically = !suspended;
+      state.refs++;
+      if (participatesPhysically) state.activeRefs++;
+      localRefs++;
+      if (managed) managedRawRefs++;
+      else publicRawRefs++;
+      changeRuntimeResource("rawLeases", 1);
+      committedRef = true;
+      if (participatesPhysically) state.pendingDisable = false;
+      reconcilePhysicalRawMode(state);
+      reconcileSharedSubscription();
+      reconcileKittyDemand();
+    } catch (error) {
+      // A re-entrant dispose/release may already have consumed this logical
+      // acquisition. Roll back only this still-surviving kind of ref.
+      const kindRefs = managed ? managedRawRefs : publicRawRefs;
+      if (committedRef && !disposed && localRefs > localRefsBefore && kindRefs > kindRefsBefore) {
+        state.refs = Math.max(0, state.refs - 1);
+        if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
+        localRefs = Math.max(0, localRefs - 1);
+        if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
+        else publicRawRefs = Math.max(0, publicRawRefs - 1);
+        changeRuntimeResource("rawLeases", -1);
+      }
+      if (state.activeRefs === 0) state.pendingDisable = false;
+      runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+      resetRawModeStateIfIdle(state);
+      runTerminalCleanup(reconcileSharedSubscription);
+      runTerminalCleanup(reconcileKittyDemand);
+      throw error;
+    }
+    return true;
+  }
+
+  function releaseLogicalRawMode(managed: boolean): void {
+    if (!appCtx.isRawModeSupported) return;
+    if (managed ? managedRawRefs === 0 : publicRawRefs === 0) return;
+    const state = getRawModeState(stdin);
+    state.refs = Math.max(0, state.refs - 1);
+    if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
+    localRefs = Math.max(0, localRefs - 1);
+    if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
+    else publicRawRefs = Math.max(0, publicRawRefs - 1);
+    changeRuntimeResource("rawLeases", -1);
+    let firstError: unknown;
+    try {
+      reconcileKittyDemand();
+    } catch (error) {
+      firstError = error;
+    }
+    if (managed && managedRawRefs === 0) {
+      // End the managed delivery generation even when a public raw-only owner
+      // keeps the physical terminal raw.
+      try {
+        sharedSubscription.invalidate();
+      } catch (error) {
+        firstError = error;
+      }
+      pendingApplicationInput.length = 0;
+    }
+    try {
+      reconcileSharedSubscription();
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (
+      state.activeRefs === 0 &&
+      (state.physicalActive ||
+        state.physicalRawUncertain ||
+        state.physicalRefHeld ||
+        state.physicalRefUncertain)
+    ) {
+      // Defer only the shared physical toggle, allowing a same-tick replacement
+      // hook or managed route to inherit the already-active terminal state.
+      state.pendingDisable = true;
+      queueMicrotask(() => {
+        if (!state.pendingDisable || state.activeRefs > 0) return;
+        state.pendingDisable = false;
+        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+        resetRawModeStateIfIdle(state);
+      });
+    } else {
+      resetRawModeStateIfIdle(state);
+    }
+    // Release is cleanup. Preserve progress across a hostile listener removal;
+    // controller disposal retries physical restoration.
+    void firstError;
+  }
+
   controller = {
     stdin,
     isRawModeSupported: appCtx.isRawModeSupported,
@@ -4436,68 +4575,17 @@ function createStdinController(
     injectTestMouse(event) {
       acceptSharedInput(createInternalTestMouseFact(event), captureApplicationInputSnapshot());
     },
+    acquirePublicRawMode() {
+      acquireLogicalRawMode(false);
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        releaseLogicalRawMode(false);
+      };
+    },
     acquireRawMode() {
-      if (disposed) {
-        throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
-      }
-      // Managed semantic routes surface this failure transactionally before
-      // publishing their replacement. Rechecking the structural capability
-      // also prevents a setterless host that was pre-raw at mount from silently
-      // attaching after its external owner returns it to cooked mode.
-      assertManagedInputAvailable();
-      if (!suspended && !opts.beforeManagedInputAcquire()) return false;
-      const state = getRawModeState(stdin);
-      const firstSharedRef = state.refs === 0;
-      const localRefsBefore = localRefs;
-      let committedRef = false;
-      try {
-        if (
-          firstSharedRef &&
-          !state.pendingDisable &&
-          !state.physicalActive &&
-          !state.physicalRawUncertain &&
-          !state.physicalRefHeld &&
-          !state.physicalRefUncertain
-        ) {
-          state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
-          state.changedRawMode = !state.baselineRaw;
-        }
-        if (localRefs === 0 && inputDeliveryActive) {
-          // A newly active semantic route starts a fresh application delivery
-          // generation. Initial Vue setup is different: a terminal can
-          // synchronously send the prefix of an event beside the Kitty capability
-          // query before setup installs the first route. That prefix belongs to
-          // the initial bootstrap snapshot and must survive until
-          // activateInputDelivery() binds it to the complete initial route set.
-          sharedSubscription.invalidate();
-        }
-        const participatesPhysically = !suspended;
-        state.refs++;
-        if (participatesPhysically) state.activeRefs++;
-        localRefs++;
-        changeRuntimeResource("rawLeases", 1);
-        committedRef = true;
-        if (participatesPhysically) state.pendingDisable = false;
-        reconcilePhysicalRawMode(state);
-        reconcileSharedSubscription();
-        reconcileKittyDemand();
-      } catch (error) {
-        // A re-entrant dispose/release may already have consumed this logical
-        // acquisition. Roll it back only while its local count still exists.
-        if (committedRef && !disposed && localRefs > localRefsBefore) {
-          state.refs = Math.max(0, state.refs - 1);
-          if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
-          localRefs = Math.max(0, localRefs - 1);
-          changeRuntimeResource("rawLeases", -1);
-        }
-        if (state.activeRefs === 0) state.pendingDisable = false;
-        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-        resetRawModeStateIfIdle(state);
-        runTerminalCleanup(reconcileSharedSubscription);
-        runTerminalCleanup(reconcileKittyDemand);
-        throw error;
-      }
-      return true;
+      return acquireLogicalRawMode(true);
     },
     acquireSemanticInput() {
       assertManagedInputAvailable();
@@ -4572,7 +4660,7 @@ function createStdinController(
       pendingBootstrapInputSnapshot = undefined;
       inputDeliveryActive = true;
       flushPendingApplicationInput();
-      if (localRefs === 0) {
+      if (managedRawRefs === 0) {
         sharedSubscription.invalidate();
         pendingApplicationInput.length = 0;
         reconcileSharedSubscription();
@@ -4688,62 +4776,7 @@ function createStdinController(
       }
     },
     releaseRawMode() {
-      if (!appCtx.isRawModeSupported) return;
-      if (localRefs === 0) return;
-      const state = getRawModeState(stdin);
-      state.refs = Math.max(0, state.refs - 1);
-      if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
-      localRefs = Math.max(0, localRefs - 1);
-      changeRuntimeResource("rawLeases", -1);
-      let firstError: unknown;
-      try {
-        reconcileKittyDemand();
-      } catch (error) {
-        firstError = error;
-      }
-      if (localRefs === 0) {
-        // End this app-level delivery generation. Handler-level route snapshots
-        // belong to the later routing/lifetime checkpoint; once no app consumer remains, orphaned
-        // framing is discarded and the physical listener may detach.
-        try {
-          sharedSubscription.invalidate();
-        } catch (error) {
-          firstError = error;
-        }
-        pendingApplicationInput.length = 0;
-      }
-      try {
-        reconcileSharedSubscription();
-      } catch (error) {
-        firstError ??= error;
-      }
-      if (
-        state.activeRefs === 0 &&
-        (state.physicalActive ||
-          state.physicalRawUncertain ||
-          state.physicalRefHeld ||
-          state.physicalRefUncertain)
-      ) {
-        // Defer ONLY the SHARED terminal raw-mode toggle (Ink defers just disableRawMode,
-        // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
-        // the old before mounting the new, so activeRefs briefly hits 0. Disabling
-        // synchronously would drop raw mode between the two mounts; the microtask
-        // short-circuits if a replacement re-acquired in the meantime — which it
-        // signals by clearing pendingDisable (matching Ink's flag, App.tsx:362-365).
-        state.pendingDisable = true;
-        queueMicrotask(() => {
-          if (!state.pendingDisable || state.activeRefs > 0) return;
-          state.pendingDisable = false;
-          runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-          resetRawModeStateIfIdle(state);
-        });
-      } else {
-        resetRawModeStateIfIdle(state);
-      }
-      // Release is terminal cleanup. Preserve progress across a hostile
-      // listener removal instead of surfacing an error that could abort the
-      // remaining Vue scope disposals; dispose() retries the physical restore.
-      void firstError;
+      releaseLogicalRawMode(true);
     },
     suspend(sync = false) {
       if (suspended) return;
@@ -4897,6 +4930,8 @@ function createStdinController(
           changeRuntimeResource("rawLeases", -localRefs);
           localRefs = 0;
         }
+        managedRawRefs = 0;
+        publicRawRefs = 0;
         // Reconcile terminal raw mode synchronously when ownership changes. This
         // covers BOTH teardown orderings:
         //   (1) dispose() ran while this controller still held refs (above), or

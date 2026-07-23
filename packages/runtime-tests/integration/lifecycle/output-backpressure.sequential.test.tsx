@@ -17,8 +17,8 @@ const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l";
 
 function inputLabel(event: TuiInputEvent): string {
-  if (event.kind === "text" || event.kind === "paste") return event.text;
-  return event.name ?? event.character;
+  if (event.type === "text" || event.type === "paste") return event.text;
+  return event.key.name ?? event.key.character;
 }
 
 function makeTrackedStdin(): {

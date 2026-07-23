@@ -5,7 +5,7 @@ export default defineComponent(() => {
   const count = shallowRef(0);
 
   useInput((event) => {
-    if (event.kind !== "text") return;
+    if (event.type !== "text") return;
     if (event.text === "+") {
       count.value++;
       return;

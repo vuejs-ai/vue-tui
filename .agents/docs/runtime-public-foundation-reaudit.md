@@ -105,7 +105,7 @@ The accepted target keeps an instance open until its first non-empty eligible ou
 
 ## Path 3: normalized input and minimum focus without routing policy
 
-> **Superseded input target, 2026-07-23:** The input example and first input bullets in this path remain evidence for the previous candidate, not the selected target. The vouched replacement uses nested `TuiInputEvent`, `TuiKey`, and `TuiKeyName` facts, ignores handler results, defaults `exitOnCtrlC` to `false`, and keeps raw-input ownership outside this accepted contract. The focus paragraphs below record the later selected minimum focus target. See the [event decision](./runtime-public-api-decisions.md#useinput-exposes-one-tagged-text-key-and-paste-event-contract), [delivery decision](./runtime-public-api-decisions.md#useinput-is-a-live-broadcast-subscription-without-propagation-results), and [implementation TODOs](./todos.md#runtime-public-api-review).
+> **Current input target, 2026-07-24:** The branch now uses the vouched nested `TuiInputEvent`, `TuiKey`, and `TuiKeyName` facts, ignores handler results, defaults `exitOnCtrlC` to `false`, and restores `useStdin()` as the complete independently owned low-level escape. The focus paragraphs below record the selected minimum focus target. See the [event decision](./runtime-public-api-decisions.md#useinput-exposes-one-tagged-text-key-and-paste-event-contract), [delivery decision](./runtime-public-api-decisions.md#useinput-is-a-live-broadcast-subscription-without-propagation-results), and [low-level decision](./runtime-public-api-decisions.md#usestdin-remains-a-complete-low-level-input-escape).
 
 ### User task
 
@@ -114,11 +114,10 @@ Applications need facts such as inserted text, a complete paste, Enter, Escape, 
 ```ts
 useInput(
   (event) => {
-    if (event.kind === "text") query.value += event.text;
-    if (event.kind === "key" && event.name === "escape") closeOverlay();
-    if (event.kind === "key" && event.character === "c" && event.ctrl) {
+    if (event.type === "text") query.value += event.text;
+    if (event.type === "key" && event.key.name === "escape") closeOverlay();
+    if (event.type === "key" && event.key.character === "c" && event.key.ctrl) {
       cancelCurrentOperation();
-      return { preventDefault: true };
     }
   },
   { isActive: () => overlayOpen.value },
@@ -127,10 +126,10 @@ useInput(
 
 ### Boundary decision
 
-- Retain `useInput(handler, { isActive? })`, `TuiInputEvent`, and `TuiKeyName`. Runtime must decode UTF-8, bracketed paste, escape ambiguity, and negotiated key protocols and must acquire and restore raw mode around actual demand.
-- A handler normally returns nothing. The exact `{ preventDefault: true }` result suppresses only Runtime's delayed Ctrl+C exit default for that event. It does not stop sibling subscriptions, report application handling, or control external forwarding.
-- Retain `useStdin()` and `UseStdinReturn` as the raw escape hatch to the exact stream selected by the host. Raw bytes have no Runtime event semantics and are not guaranteed to compose with managed input.
-- Remove parser phase, byte sequence, source/fidelity, release/repeat, codepoint, input availability, external forwarding, focus scopes, and route decisions from the public surface.
+- Retain `useInput(handler, { isActive? })`, `TuiInputEvent`, `TuiKey`, and `TuiKeyName`. Runtime classifies complete paste before non-empty insertion text before a reliable logical key. Text may include a complete nested key, key-only input requires it, and paste has no key. A key has exactly one normalized semantic name or logical character and six explicit modifiers. Protocol, raw sequence, parser token, codepoint, base-layout identity, locks, release, and unsupported input remain private.
+- Resolve a direct or live-ref handler when input arrives, default reactive `isActive` to true, broadcast every event to every active subscription, and ignore returns. Repeat is delivered normally and release is not. Focus, ordering, priority, propagation, and routing remain application policy. `exitOnCtrlC` defaults false; true exits before delivering that exact key, while paste never triggers it.
+- Retain `useStdin()` and `UseStdinReturn` with exactly the mounted `Readable`, a raw-mode capability Boolean, and `setRawMode(enabled)`. Each call owns one idempotent hold with Vue scope cleanup, independently of other calls and managed input. Raw-only use does not start the parser, change encoding, or negotiate Kitty or bracketed paste. Direct listeners are caller-owned and have no ordering, deduplication, protocol-filtering, or byte-exact composition guarantee with managed input; non-TTY streams remain observable, and string rendering uses an isolated inert stream.
+- Remove public parser phase, byte sequence, source/fidelity, codepoint, base-layout identity, input availability, external forwarding, focus scopes, route decisions, `usePaste()`, and `useRawInput()`.
 
 Retain two explicit `useFocus` overloads in one per-app unique-owner controller. `useFocus()` creates a logical identity whose automatic validity follows its Vue scope; another successful focus acquisition can still replace its ownership. `useFocus(target)` additionally binds that identity's validity to one rendered target and its rendered ancestors. The target is not the identity and supplies no navigation or input route. Hidden or detached targeted focus clears without restoration. Remove the public manager, string lookup, traversal, scopes, modal trapping, focused subscriptions, external forwarding, restoration, and automatic Tab behavior.
 
@@ -156,6 +155,7 @@ app.mount({
   stdin,
   stderr,
   patchConsole: true,
+  exitOnCtrlC: false,
 });
 
 await app.waitUntilRenderFlush();
@@ -173,7 +173,7 @@ exit(error); // waitUntilExit() rejects with this Error
 
 ### Boundary decision
 
-- `MountOptions` currently contains exactly `stdout`, `stdin`, `stderr`, `mode`, and `patchConsole`. The presence and base protocols of the stream and mode fields are accepted with remaining host semantics still Open; the complete `patchConsole` contract below is vouched.
+- `MountOptions` currently contains exactly `stdout`, `stdin`, `stderr`, `mode`, `patchConsole`, and `exitOnCtrlC`. The presence and base protocols of the stream and mode fields are accepted with remaining host semantics still Open; the complete `patchConsole` contract and default-off Ctrl+C convenience are vouched.
 - The mode union is expressed on `MountOptions["mode"]` rather than through a separate root alias. There is no presentation union because there is no screen-reader presentation.
 - `TuiApp.mount()` validates the requested host before mutation. One app has one real mount attempt; a busy-stdout arbitration no-op does not consume it.
 - `TuiApp.waitUntilRenderFlush()` is an always-callable app-owner output barrier. It resolves immediately when no work exists before mount or after exit, waits for accepted render and output work while mounted, and waits for already-started teardown output without duplicating the exit result. Component code does not receive it through `useApp()`. The implementation still has obsolete pre-mount and teardown availability errors tracked in [TODOs](./todos.md#runtime-public-api-review).

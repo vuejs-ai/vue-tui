@@ -7,7 +7,7 @@ const App = defineComponent(() => {
   const input = shallowRef("");
 
   const handleInput = (event: TuiInputEvent) => {
-    if (event.kind === "text" || event.kind === "paste") input.value += event.text;
+    if (event.type === "text" || event.type === "paste") input.value += event.text;
   };
 
   useInput(handleInput);

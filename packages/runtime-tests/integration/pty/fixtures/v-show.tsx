@@ -64,7 +64,7 @@ const App = defineComponent(() => {
   const target = shallowRef<ComponentPublicInstance | null>(null);
   const focus = useFocus(target);
   useInput((event) => {
-    if (event.kind !== "text") return;
+    if (event.type !== "text") return;
     if (event.text === "h") {
       visible.value = false;
       void markAfterCommit("hidden");

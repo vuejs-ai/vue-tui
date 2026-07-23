@@ -16,6 +16,8 @@ export interface TestHost {
   readonly stdout?: "tty" | "stream";
   /** Route console output through the modeled Runtime writer. @default false */
   readonly patchConsole?: boolean;
+  /** Exit before delivering an exact Ctrl+C key. @default false */
+  readonly exitOnCtrlC?: boolean;
 }
 
 export interface RenderOptions {
@@ -72,6 +74,7 @@ interface NormalizedTestHost {
     readonly rows: number | undefined;
   };
   readonly patchConsole: boolean;
+  readonly exitOnCtrlC: boolean;
   readonly emulatorRows: number;
 }
 
@@ -147,11 +150,16 @@ function normalizeOptions(options: RenderOptions): {
   const propsOption = root.props;
 
   const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
-  rejectUnknownKeys(host, ["mode", "stdin", "stdout", "patchConsole"], "render host");
+  rejectUnknownKeys(
+    host,
+    ["mode", "stdin", "stdout", "patchConsole", "exitOnCtrlC"],
+    "render host",
+  );
   const modeOption = host.mode;
   const stdinOption = host.stdin;
   const stdoutOption = host.stdout;
   const patchConsoleOption = host.patchConsole;
+  const exitOnCtrlCOption = host.exitOnCtrlC;
 
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
@@ -174,6 +182,10 @@ function normalizeOptions(options: RenderOptions): {
   if (typeof patchConsole !== "boolean") {
     throw new TypeError("render host patchConsole must be a boolean.");
   }
+  const exitOnCtrlC = exitOnCtrlCOption === undefined ? false : exitOnCtrlCOption;
+  if (typeof exitOnCtrlC !== "boolean") {
+    throw new TypeError("render host exitOnCtrlC must be a boolean.");
+  }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
 
   return {
@@ -183,6 +195,7 @@ function normalizeOptions(options: RenderOptions): {
       stdin,
       stdout: { kind, columns, rows },
       patchConsole,
+      exitOnCtrlC,
       emulatorRows,
     },
   };
@@ -335,6 +348,7 @@ export async function render(
         stderr,
         mode: host.mode,
         patchConsole: host.patchConsole,
+        exitOnCtrlC: host.exitOnCtrlC,
       });
     } finally {
       if (host.patchConsole) {

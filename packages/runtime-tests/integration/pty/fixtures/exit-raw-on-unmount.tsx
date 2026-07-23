@@ -1,8 +1,8 @@
-import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useStdin } from "@vue-tui/runtime";
 import { defineComponent } from "vue";
 
 const App = defineComponent(() => {
-  useInput(() => undefined);
+  useStdin().setRawMode(true);
 
   return () => <Text>Hello World</Text>;
 });

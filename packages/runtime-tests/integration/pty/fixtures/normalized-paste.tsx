@@ -12,8 +12,8 @@ const PasteDemo = defineComponent({
 
     useInput((event) => {
       receivedCount++;
-      if (event.kind !== "paste") {
-        throw new Error(`Expected one normalized paste event, received ${event.kind}`);
+      if (event.type !== "paste") {
+        throw new Error(`Expected one normalized paste event, received ${event.type}`);
       }
 
       if (props.test === "basic" && event.text === "hello world") {
@@ -22,6 +22,12 @@ const PasteDemo = defineComponent({
       }
 
       if (props.test === "escapeSequences" && event.text === "hello[Aworld") {
+        exit();
+        return;
+      }
+
+      if (props.test === "ctrlC" && event.text === "\x03") {
+        process.stdout.write("__PASTE_CTRL_C__");
         exit();
         return;
       }
@@ -51,7 +57,7 @@ const MultipleHooksDemo = defineComponent(() => {
 
   const register = () => {
     useInput((event) => {
-      if (event.kind !== "paste" || event.text !== "hello") {
+      if (event.type !== "paste" || event.text !== "hello") {
         throw new Error(`Expected normalized paste, received ${JSON.stringify(event)}`);
       }
       receivedCount++;
@@ -71,6 +77,6 @@ const MultipleHooksDemo = defineComponent(() => {
 
 const test = process.argv[2];
 const app = createApp(test === "multipleHooks" ? MultipleHooksDemo : PasteDemo, { test });
-app.mount();
+app.mount({ exitOnCtrlC: test === "ctrlC" });
 await app.waitUntilExit();
 console.log("exited");

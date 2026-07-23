@@ -24,7 +24,7 @@ const Counter = defineComponent(() => {
   const count = shallowRef(0);
 
   useInput((event) => {
-    if (event.kind !== "text") return;
+    if (event.type !== "text") return;
     if (event.text === "+") {
       count.value++;
       return;
@@ -99,15 +99,17 @@ interface TestHost {
   readonly stdin?: "tty" | "non-tty";
   readonly stdout?: "tty" | "stream";
   readonly patchConsole?: boolean;
+  readonly exitOnCtrlC?: boolean;
 }
 ```
 
-| Host field     | Default    | Meaning                                                             |
-| -------------- | ---------- | ------------------------------------------------------------------- |
-| `mode`         | `"inline"` | Requested production screen model                                   |
-| `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                |
-| `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions        |
-| `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer |
+| Host field     | Default    | Meaning                                                                |
+| -------------- | ---------- | ---------------------------------------------------------------------- |
+| `mode`         | `"inline"` | Requested production screen model                                      |
+| `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                   |
+| `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions           |
+| `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer    |
+| `exitOnCtrlC`  | `false`    | Whether exact Ctrl+C exits before reaching managed input subscriptions |
 
 These controls model production facts rather than setting unrelated internal booleans. In particular:
 
@@ -116,7 +118,7 @@ These controls model production facts rather than setting unrelated internal boo
 
 The test host has no screen-reader presentation selector. It models only supported Runtime hosts; the removed ARIA and transcript experiment is not available through a hidden testing-only option. `patchConsole` remains an explicit opt-in while its public Runtime contract is reviewed independently.
 
-The removed `liveUpdates`, `debug`, and `exitOnCtrlC` render options are rejected. Content-frame observation is always available. While managed input is active, Ctrl+C is a delayed framework default. A `useInput()` handler can suppress it for one event by returning the exact object `{ preventDefault: true }`; this does not stop other captured `useInput()` subscriptions from running.
+The removed `liveUpdates`, `debug`, and top-level `exitOnCtrlC` render options are rejected; model the production mount choice with `host.exitOnCtrlC`. Content-frame observation is always available. The default false delivers exact Ctrl+C to every active `useInput()` subscription as an ordinary nested key event. True exits before delivering that key, paste never triggers it, and handler returns are ignored rather than consuming input or suppressing peer delivery.
 
 ### Examples
 

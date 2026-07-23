@@ -29,6 +29,8 @@ re-validate every entry below against the new source.
 
 > **Current public-API review note (unstamped, 2026-07-22):** Yunfei explicitly reopened whether earlier public-API vouches still fit the minimum Runtime boundary because some assumptions changed. For API retention and exact signatures, the stamped sections below are evidence of the earlier decision, not an automatic answer; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) carries the current result. Behavior decisions unrelated to a reviewed API boundary are not silently discarded by this note.
 
+> **Current input/stdin implementation note (unstamped, 2026-07-24):** the current branch implements the vouched nested `TuiInputEvent`/`TuiKey` broadcast contract, ignores `useInput()` handler returns, defaults `exitOnCtrlC` to false, and implements the complete independently owned `useStdin()` raw-mode escape. Earlier F3 passages about `kind`, uninterpreted public facts, required route results, preventable delayed defaults, removed `exitOnCtrlC`, or stream-only stdin remain historical relationship evidence.
+
 ## The governing principle: correctness first, alignment is only a means
 
 **Aligning to Ink is a means, never the goal.** The goal is the _most correct, most
@@ -228,6 +230,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyfdev]
 - **Completed F3.1–F3.4 plus public migration (unstamped):** one weakly registered framework ingress replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, normalizes each event once into the same immutable semantic fact for all eligible app controllers, and carries each app's fact-start route and selected-topology activations through split framing. Distinct facts dispatch serially and recapture after the preceding callback even when Node batches them into one chunk; plain text remains one fact when the wire provides no finer boundary. Public `useInput` consumes one cached readonly key, text, paste, or uninterpreted projection, and every captured global handler returns an explicit route result; `usePaste` and public `Key` are removed. The private policy and live topology runtime execute global, selected-boundary, supplied-focus-path, delayed-default, and optional-external layers in the actual controller while keeping action, continuation, defaults, and external permission independent. The bridge does not publish or select focus topology. Product-boundary, prior-art, implementation, and real nested-PTY evidence select semantic facts plus normalized UTF-8; arbitrary original-byte recovery is deliberately not promised. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. The vouched direct-stdin contract retains the actual mounted stream as a raw escape hatch without framework event or safe routing-composition guarantees. Managed non-TTY exclusion, removal of public raw-mode controls, and semantic-demand ownership of raw/listener/ref/Kitty state are implemented. See [normalized input and routing](./input-routing.md).
+- **Current public supersession (unstamped, 2026-07-24):** the shared ingress, normalization, multi-app ownership, suspension, restoration, and mounted-stream identity remain implementation mechanisms. The old public uninterpreted projection, route result, selected topology, delayed default, and removal of raw controls described above are superseded by the current broadcast `type`/nested-key surface, default-false `exitOnCtrlC`, and complete per-hook `useStdin()` raw hold.
 
 ## Vue API and Mental Model Divergences
 
@@ -648,6 +651,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **vue-tui:** own `debug` keys on live mounts and `@vue-tui/testing` render options are removed programming errors and fail before terminal or component mutation. The testing package installs a symbol-keyed internal render observer that receives structured `{ dynamic, staticOutput }` commits without selecting a host, changing stdout, disabling console handling, or changing scheduling. Terminal-visible assertions use an independent xterm emulator; `maxFps: 0` remains an unthrottled scheduler choice rather than an output mode.
 - **Why:** output policy and observation have different consumers. Making tests alter application bytes produced sessions that claimed production cadence while stdout followed an append-only diagnostic branch, and content frames had to be inferred from a stream containing terminal controls. Orthogonal observation lets the deterministic host exercise the real Inline, Fullscreen, live-stream, and final-stream paths while exposing both semantic commits and the resulting terminal screen. Direct removal is appropriate while vue-tui is experimental. Implemented and verified in F1.5.
 
+> **Implementation checkpoint, 2026-07-24:** the vouched `useStdin` section below is now implemented. Its final historical bullet still records the earlier pending state and is preserved verbatim because the vouch covers the whole section.
+
 ### `useStdin` keeps Ink's complete low-level shape with safer ownership
 
 [VOUCHED @hyfdev 2026-07-23]
@@ -881,10 +886,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** the hooks read a React context whose **default** value is a no-op object, so
   calling e.g. `useStdin()` outside an Ink tree returns inert defaults without an error.
-- **vue-tui:** `useApp`, `useStdout`, `useStderr`, `useStdin`, `useLayoutWidth`,
-  `useViewportHeight`, `useBoxSize`, `useFocus`, `useFocusManager`, `useInput`, `useInputAvailability`, `/fullscreen`'s `useMouseEvent` and `useMouseDrag`, and
-  `useCaret` **throw** when their required context is absent. The removed `useAnimation` used to avoid throwing by
-  creating a standalone scheduler; that behavior is recorded in the historical entry above.
+- **vue-tui:** the current public `useApp`, `useStdin`, `useLayoutWidth`, `useViewportHeight`, `useBoxSize`, `useFocus`, and `useInput` composables **throw** when their required context is absent. Removed composables followed the same guard while they existed. The removed `useAnimation` used to avoid throwing by creating a standalone scheduler; that behavior is recorded in the historical entry above.
 - **Why:** a composable used in the wrong place is usually a bug, and a thrown error names it at
   the call site instead of returning a context that quietly does nothing. An unbounded document is
   not a missing context: inside a valid tree, `useViewportHeight()` returns `null`, and

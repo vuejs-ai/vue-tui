@@ -23,6 +23,7 @@ const inlineTtyOptions: RenderOptions = {
     stdin: "tty",
     stdout: "tty",
     patchConsole: false,
+    exitOnCtrlC: true,
   },
 };
 const fullscreenOptions: RenderOptions = { host: { mode: "fullscreen" } };
@@ -35,7 +36,10 @@ expectTypeOf(inlineTtyOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(fullscreenOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(streamOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf<NonNullable<RenderOptions["host"]>>().toEqualTypeOf<TestHost>();
-expectTypeOf<keyof TestHost>().toEqualTypeOf<"mode" | "stdin" | "stdout" | "patchConsole">();
+expectTypeOf<keyof TestHost>().toEqualTypeOf<
+  "mode" | "stdin" | "stdout" | "patchConsole" | "exitOnCtrlC"
+>();
+expectTypeOf<TestHost["exitOnCtrlC"]>().toEqualTypeOf<boolean | undefined>();
 
 const TestComponent = defineComponent(() => () => null);
 expectTypeOf(render(TestComponent, inlineTtyOptions)).toEqualTypeOf<Promise<RenderResult>>();
@@ -44,7 +48,7 @@ expectTypeOf(render(TestComponent, inlineTtyOptions)).toEqualTypeOf<Promise<Rend
 const removedLiveUpdates: RenderOptions = { liveUpdates: true };
 // @ts-expect-error Removed testing implementation detail; observation is always available.
 const removedDebug: RenderOptions = { debug: true };
-// @ts-expect-error Ctrl+C is a preventable delayed default, not a test-host option.
+// @ts-expect-error Ctrl+C policy belongs to the modeled host, not the render wrapper.
 const removedExitOnCtrlC: RenderOptions = { exitOnCtrlC: false };
 // @ts-expect-error Only Inline and Fullscreen are valid requested modes.
 const invalidMode: RenderOptions = { host: { mode: "full-screen" } };
@@ -54,6 +58,8 @@ const removedPresentation: RenderOptions = { host: { presentation: undefined } }
 const invalidStdin: RenderOptions = { host: { stdin: "pipe" } };
 // @ts-expect-error Only TTY and stream output hosts are modeled.
 const invalidStdout: RenderOptions = { host: { stdout: "file" } };
+// @ts-expect-error Modeled Ctrl+C policy must be boolean.
+const invalidExitOnCtrlC: RenderOptions = { host: { exitOnCtrlC: "yes" } };
 void removedLiveUpdates;
 void removedDebug;
 void removedExitOnCtrlC;
@@ -61,6 +67,7 @@ void invalidMode;
 void removedPresentation;
 void invalidStdin;
 void invalidStdout;
+void invalidExitOnCtrlC;
 void (null as unknown as TestRenderSession);
 
 declare const result: RenderResult;

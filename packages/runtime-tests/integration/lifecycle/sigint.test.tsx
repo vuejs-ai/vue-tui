@@ -3,7 +3,19 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
 
-test("Ctrl+C reaches useInput before its delayed exit default", async () => {
+const noModifiers = {
+  shift: false,
+  alt: false,
+  ctrl: false,
+  meta: false,
+  super: false,
+  hyper: false,
+} as const;
+
+test.each([
+  ["omitted", undefined],
+  ["false", false],
+] as const)("exitOnCtrlC %s delivers Ctrl+C as ordinary input", async (_label, exitOnCtrlC) => {
   const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
     useInput((event) => {
@@ -11,62 +23,88 @@ test("Ctrl+C reaches useInput before its delayed exit default", async () => {
     });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App);
+  const host = exitOnCtrlC === undefined ? {} : { exitOnCtrlC };
+  const result = await render(App, { host });
 
-  await stdin.write("\x03");
-  expect(events).toHaveLength(1);
-  expect(events[0]).toMatchObject({
-    kind: "key",
-    character: "c",
-    shift: false,
-    alt: false,
-    ctrl: true,
-  });
-  await expect(waitUntilExit()).resolves.toBeUndefined();
+  await result.stdin.write("\x03");
+  await result.stdin.write("x");
+
+  expect(events).toEqual([
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true },
+    },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
 });
 
-test("a handler can prevent the Ctrl+C default for one event", async () => {
+test.each(["inline", "fullscreen"] as const)(
+  "exitOnCtrlC true exits %s before delivering the exact key",
+  async (mode) => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+      });
+      return () => <Text>x</Text>;
+    });
+    const result = await render(App, { host: { mode, exitOnCtrlC: true } });
+
+    await result.stdin.write("\x03");
+
+    expect(events).toEqual([]);
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+    expect(result.terminal.rawMode.current).toBe(false);
+    result.dispose();
+  },
+);
+
+test("exitOnCtrlC true delivers Ctrl+C with any other command modifier", async () => {
   const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
     useInput((event) => {
       events.push(event);
-      return { preventDefault: true };
     });
     return () => <Text>x</Text>;
   });
-  const { stdin, unmount } = await render(App);
+  const result = await render(App, { host: { exitOnCtrlC: true } });
 
-  await stdin.write("\x03");
-  expect(events).toHaveLength(1);
-  unmount();
-});
-
-test("Ctrl+C with another command modifier is not the exit shortcut", async () => {
-  const events: TuiInputEvent[] = [];
-  const App = defineComponent(() => {
-    useInput((event) => {
-      events.push(event);
-    });
-    return () => <Text>x</Text>;
-  });
-  const { stdin, unmount } = await render(App);
-
-  for (const encodedModifiers of [7, 13, 21, 37]) {
-    await stdin.write(`\x1b[99;${encodedModifiers}u`);
-    await stdin.write("x");
+  for (const encodedModifiers of [6, 7, 13, 21, 37]) {
+    await result.stdin.write(`\x1b[99;${encodedModifiers}u`);
   }
 
   expect(events).toEqual([
-    { kind: "key", character: "c", shift: false, alt: true, ctrl: true },
-    { kind: "text", text: "x" },
-    { kind: "text", text: "x" },
-    { kind: "text", text: "x" },
-    { kind: "text", text: "x" },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, shift: true, ctrl: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, alt: true, ctrl: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, super: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, hyper: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, meta: true },
+    },
   ]);
-  unmount();
+
+  await result.stdin.write("\x03");
+  expect(events).toHaveLength(5);
+  await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  result.dispose();
 });
 
-test("Ctrl+C recognizes a Kitty base-layout codepoint", async () => {
+test("exitOnCtrlC uses logical primary identity rather than Kitty base-layout metadata", async () => {
   const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
     useInput((event) => {
@@ -74,16 +112,39 @@ test("Ctrl+C recognizes a Kitty base-layout codepoint", async () => {
     });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App);
+  const result = await render(App, { host: { exitOnCtrlC: true } });
 
-  await stdin.write("\x1b[1089::99;5u");
+  await result.stdin.write("\x1b[1089::99;5u");
+  await result.stdin.write("x");
 
-  expect(events[0]).toMatchObject({
-    kind: "key",
-    character: "c",
-    shift: false,
-    alt: false,
-    ctrl: true,
+  expect(events).toEqual([
+    {
+      type: "key",
+      key: { character: "с", ...noModifiers, ctrl: true },
+    },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
+});
+
+test("exitOnCtrlC never interprets pasted Ctrl+C as the exit shortcut", async () => {
+  const events: TuiInputEvent[] = [];
+  const App = defineComponent(() => {
+    useInput((event) => {
+      events.push(event);
+    });
+    return () => <Text>x</Text>;
   });
-  await expect(waitUntilExit()).resolves.toBeUndefined();
+  const result = await render(App, { host: { exitOnCtrlC: true } });
+
+  await result.stdin.write("\x1b[200~\x03\x1b[201~");
+  await result.stdin.write("x");
+
+  expect(events).toEqual([
+    { type: "paste", text: "\x03" },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
 });

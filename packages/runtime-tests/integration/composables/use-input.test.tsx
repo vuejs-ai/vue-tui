@@ -7,11 +7,20 @@ import { captureWrites, makeFakeStdin, makeFakeWritable } from "../lifecycle/tes
 const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l";
 
+const noModifiers = {
+  shift: false,
+  alt: false,
+  ctrl: false,
+  meta: false,
+  super: false,
+  hyper: false,
+} as const;
+
 function eventLabel(event: TuiInputEvent): string {
-  if (event.kind === "text" || event.kind === "paste") {
-    return `${event.kind}:${event.text}`;
+  if (event.type === "text" || event.type === "paste") {
+    return `${event.type}:${event.text}`;
   }
-  return event.name ? `key:${event.name}` : `key:${event.character}`;
+  return event.key.name ? `key:${event.key.name}` : `key:${event.key.character}`;
 }
 
 function makeTrackedStreams() {
@@ -42,18 +51,17 @@ function makeTrackedStreams() {
 }
 
 describe("minimum normalized public input", () => {
-  test("delivers one immutable fact to every captured application handler", async () => {
-    const events: TuiInputEvent[] = [];
-    const order: string[] = [];
+  test("broadcasts one immutable event to every active subscriber without an ordering contract", async () => {
+    const firstEvents: TuiInputEvent[] = [];
+    const secondEvents: TuiInputEvent[] = [];
     const App = defineComponent(() => {
       useInput((event) => {
-        order.push("first");
-        events.push(event);
-        return { preventDefault: true };
+        firstEvents.push(event);
+        return "ignored";
       });
       useInput((event) => {
-        order.push("second");
-        events.push(event);
+        secondEvents.push(event);
+        return Promise.resolve("ignored");
       });
       return () => <Text>listening</Text>;
     });
@@ -61,16 +69,21 @@ describe("minimum normalized public input", () => {
     const result = await render(App);
     await result.stdin.write("\x03");
 
-    expect(order).toEqual(["first", "second"]);
-    expect(events[0]).toBe(events[1]);
-    expect(events[0]).toEqual({
-      kind: "key",
-      character: "c",
-      shift: false,
-      alt: false,
-      ctrl: true,
+    expect(firstEvents).toHaveLength(1);
+    expect(secondEvents).toHaveLength(1);
+    expect(firstEvents[0]).toBe(secondEvents[0]);
+    expect(firstEvents[0]).toEqual({
+      type: "key",
+      key: {
+        character: "c",
+        ...noModifiers,
+        ctrl: true,
+      },
     });
-    expect(Object.isFrozen(events[0])).toBe(true);
+    expect(Object.isFrozen(firstEvents[0])).toBe(true);
+    expect(Object.isFrozen(firstEvents[0]?.type === "key" ? firstEvents[0].key : undefined)).toBe(
+      true,
+    );
     expect(result.terminal.rawMode.current).toBe(true);
     result.unmount();
   });
@@ -92,15 +105,18 @@ describe("minimum normalized public input", () => {
     await result.stdin.write("\x1bA");
 
     expect(events).toEqual([
-      { kind: "text", text: "hello" },
-      { kind: "paste", text: payload },
-      { kind: "key", name: "up", shift: false, alt: false, ctrl: false },
-      { kind: "key", character: "a", shift: true, alt: true, ctrl: false },
+      { type: "text", text: "hello" },
+      { type: "paste", text: payload },
+      { type: "key", key: { name: "up", ...noModifiers } },
+      {
+        type: "key",
+        key: { character: "a", ...noModifiers, shift: true, alt: true },
+      },
     ]);
     result.unmount();
   });
 
-  test("does not expose release, unsupported, unsafe-modifier, uninterpreted, or pointer facts", async () => {
+  test("does not expose release, unknown private, uninterpreted, or pointer facts", async () => {
     const handler = vi.fn<(event: TuiInputEvent) => void>();
     const App = defineComponent(() => {
       useInput(handler);
@@ -109,10 +125,9 @@ describe("minimum normalized public input", () => {
 
     const result = await render(App);
     for (const sequence of [
+      "\x1b[0;1:3;229u",
       "\x1b[99;5:3u",
-      "\x1bOP",
-      "\x1b[57430u",
-      "\x1b[97;33u",
+      "\x1b[58000u",
       "\x1b[?25h",
       "\x1b[<0;4;5M",
     ]) {
@@ -120,6 +135,27 @@ describe("minimum normalized public input", () => {
     }
 
     expect(handler).not.toHaveBeenCalled();
+    result.unmount();
+  });
+
+  test("delivers a Kitty key repeat as another ordinary event", async () => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+      });
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("\x1b[1;5:1A");
+    await result.stdin.write("\x1b[1;5:2A");
+
+    const expected = {
+      type: "key",
+      key: { name: "up", ...noModifiers, ctrl: true },
+    };
+    expect(events).toEqual([expected, expected]);
     result.unmount();
   });
 
@@ -169,46 +205,19 @@ describe("handler and activation contract", () => {
     result.unmount();
   });
 
-  test("freezes active subscription membership at fact start", async () => {
+  test("resolves a live handler ref when each event arrives", async () => {
     const calls: string[] = [];
-    const secondActive = shallowRef(true);
-    const App = defineComponent(() => {
-      useInput((event) => {
-        calls.push(`first:${eventLabel(event)}`);
-        secondActive.value = false;
-      });
-      useInput(
-        (event) => {
-          calls.push(`second:${eventLabel(event)}`);
-        },
-        { isActive: secondActive },
-      );
-      return () => <Text>listening</Text>;
-    });
-
-    const result = await render(App);
-    await result.stdin.write("a");
-    await result.stdin.write("b");
-
-    expect(calls).toEqual(["first:text:a", "second:text:a", "first:text:b"]);
-    result.unmount();
-  });
-
-  test("a closure can select a current handler without a reactive handler API", async () => {
-    const calls: string[] = [];
-    let current = (event: TuiInputEvent) => {
+    const handler = shallowRef<(event: TuiInputEvent) => void>((event) => {
       calls.push(`first:${eventLabel(event)}`);
-    };
+    });
     const App = defineComponent(() => {
-      useInput((event) => {
-        current(event);
-      });
+      useInput(handler);
       return () => <Text>listening</Text>;
     });
 
     const result = await render(App);
     await result.stdin.write("a");
-    current = (event) => {
+    handler.value = (event) => {
       calls.push(`second:${eventLabel(event)}`);
     };
     await result.stdin.write("b");
@@ -217,10 +226,49 @@ describe("handler and activation contract", () => {
     result.unmount();
   });
 
+  test("treats a direct function as the handler rather than a handler getter", async () => {
+    const returnedHandler = vi.fn<(event: TuiInputEvent) => void>();
+    const directHandler = vi.fn((_event: TuiInputEvent) => returnedHandler);
+    const App = defineComponent(() => {
+      useInput(directHandler);
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("a");
+
+    expect(directHandler).toHaveBeenCalledTimes(1);
+    expect(directHandler.mock.calls[0]?.[0]).toEqual({ type: "text", text: "a" });
+    expect(returnedHandler).not.toHaveBeenCalled();
+    result.unmount();
+  });
+
+  test("keeps a callable ref-marked value classified as a direct handler", async () => {
+    const valueHandler = vi.fn<(event: TuiInputEvent) => void>();
+    const directHandler = vi.fn<(event: TuiInputEvent) => void>();
+    const valueGetter = vi.fn(() => valueHandler);
+    Object.defineProperties(directHandler, {
+      __v_isRef: { value: true },
+      value: { get: valueGetter },
+    });
+    const App = defineComponent(() => {
+      useInput(directHandler);
+      return () => <Text>listening</Text>;
+    });
+
+    const result = await render(App);
+    await result.stdin.write("a");
+
+    expect(directHandler).toHaveBeenCalledTimes(1);
+    expect(directHandler.mock.calls[0]?.[0]).toEqual({ type: "text", text: "a" });
+    expect(valueGetter).not.toHaveBeenCalled();
+    expect(valueHandler).not.toHaveBeenCalled();
+    result.unmount();
+  });
+
   test.each([
     ["null", null],
     ["object", {}],
-    ["handler ref", shallowRef(() => undefined)],
   ])(
     "rejects a non-function initial handler (%s) before acquiring input",
     async (_label, handler) => {
@@ -346,158 +394,89 @@ describe("handler and activation contract", () => {
   });
 });
 
-describe("Ctrl+C delayed default", () => {
-  test("ordinary undefined lets the Runtime default exit after every handler runs", async () => {
-    const calls: string[] = [];
-    const App = defineComponent(() => {
-      useInput((event) => {
-        calls.push(eventLabel(event));
-      });
-      return () => <Text>running</Text>;
-    });
-
-    const result = await render(App);
-    await result.stdin.write("\x03");
-
-    expect(calls).toEqual(["key:c"]);
-    await expect(result.waitUntilExit()).resolves.toBeUndefined();
-    result.dispose();
-  });
-
-  test("the exact preventDefault result keeps the app active without stopping peers", async () => {
-    const calls: string[] = [];
-    const App = defineComponent(() => {
-      useInput((event) => {
-        calls.push(`first:${eventLabel(event)}`);
-        return event.kind === "key" && event.character === "c" && event.ctrl
-          ? { preventDefault: true }
-          : undefined;
-      });
-      useInput((event) => {
-        calls.push(`second:${eventLabel(event)}`);
-      });
-      return () => <Text>running</Text>;
-    });
-
-    const result = await render(App);
-    await result.stdin.write("\x03");
-    await result.stdin.write("x");
-
-    expect(calls).toEqual(["first:key:c", "second:key:c", "first:text:x", "second:text:x"]);
-    expect(result.terminal.rawMode.current).toBe(true);
-    result.unmount();
-  });
-
-  test("a distinguishable Kitty Ctrl+Shift+C does not trigger the Runtime default", async () => {
-    const events: TuiInputEvent[] = [];
-    const App = defineComponent(() => {
-      useInput((event) => {
-        events.push(event);
-      });
-      return () => <Text>running</Text>;
-    });
-
-    const result = await render(App);
-    await result.stdin.write("\x1b[99;6:1u");
-    await result.stdin.write("x");
-
-    expect(events).toEqual([
-      { kind: "key", character: "c", shift: true, alt: false, ctrl: true },
-      { kind: "text", text: "x" },
-    ]);
-    expect(result.terminal.rawMode.current).toBe(true);
-    result.unmount();
-  });
-
+describe("handler results and failures", () => {
   test.each([
     ["Promise", Promise.resolve(undefined)],
     ["false", false],
-    ["extra field", { preventDefault: true, extra: true }],
-  ])("fails the fact closed for an invalid %s handler result", async (_label, invalidResult) => {
-    const laterHandler = vi.fn<(event: TuiInputEvent) => void>();
-    const App = defineComponent(() => {
-      useInput((() => invalidResult) as never);
-      useInput(laterHandler);
-      return () => <Text>listening</Text>;
-    });
-
-    const result = await render(App);
-    await expect(result.stdin.write("\x03")).rejects.toThrow(
-      "useInput() handlers must synchronously return undefined or the exact object { preventDefault: true }.",
-    );
-    expect(laterHandler).not.toHaveBeenCalled();
-    result.unmount();
-  });
-
-  test.each([
-    [
-      "a thrown handler error",
-      (() => {
-        throw new Error("handler failed");
-      }) as never,
-      "handler failed",
-    ],
-    [
-      "an invalid handler result",
-      (() => false) as never,
-      "useInput() handlers must synchronously return undefined or the exact object { preventDefault: true }.",
-    ],
+    ["legacy-looking object", { preventDefault: true }],
+    ["arbitrary object", { status: "handled" }],
   ])(
-    "%s exits only the failing app after the shared fact reaches its peer",
-    async (_label, failingHandler, expectedMessage) => {
-      const streams = makeTrackedStreams();
-      const peerStdout = makeFakeWritable();
-      const peerStderr = makeFakeWritable();
-      const peerCalls: string[] = [];
-      const FailingApp = defineComponent(() => {
-        useInput(failingHandler);
-        return () => <Text>failing</Text>;
+    "ignores an arbitrary %s handler result and still broadcasts",
+    async (_label, handlerResult) => {
+      const firstHandler = vi.fn((_: TuiInputEvent) => handlerResult);
+      const secondHandler = vi.fn<(event: TuiInputEvent) => void>();
+      const App = defineComponent(() => {
+        useInput(firstHandler);
+        useInput(secondHandler);
+        return () => <Text>listening</Text>;
       });
-      const PeerApp = defineComponent(() => {
-        useInput((event) => {
-          peerCalls.push(eventLabel(event));
-        });
-        return () => <Text>peer</Text>;
-      });
-      const failing = createApp(FailingApp);
-      const peer = createApp(PeerApp);
 
-      try {
-        failing.mount({
-          stdin: streams.stdin,
-          stdout: streams.stdout,
-          stderr: streams.stderr,
-          patchConsole: false,
-        });
-        peer.mount({
-          stdin: streams.stdin,
-          stdout: peerStdout,
-          stderr: peerStderr,
-          patchConsole: false,
-        });
-        const exited = failing.waitUntilExit();
+      const result = await render(App);
+      await result.stdin.write("x");
 
-        expect(() => streams.stdin.emit("data", "x")).toThrow(expectedMessage);
-        expect(peerCalls).toEqual(["text:x"]);
-        await expect(exited).rejects.toThrow(expectedMessage);
-
-        expect(streams.rawModeCalls).toEqual([true]);
-        expect(streams.stdin.listenerCount("data")).toBe(1);
-        expect(() => streams.stdin.emit("data", "y")).not.toThrow();
-        expect(peerCalls).toEqual(["text:x", "text:y"]);
-
-        peer.unmount();
-        expect(streams.rawModeCalls).toEqual([true, false]);
-        expect(streams.stdin.listenerCount("data")).toBe(0);
-      } finally {
-        failing.unmount();
-        peer.unmount();
-        peerStdout.destroy();
-        peerStderr.destroy();
-        streams.destroy();
-      }
+      expect(firstHandler).toHaveBeenCalledTimes(1);
+      expect(secondHandler).toHaveBeenCalledTimes(1);
+      expect(firstHandler.mock.calls[0]?.[0]).toBe(secondHandler.mock.calls[0]?.[0]);
+      expect(result.terminal.rawMode.current).toBe(true);
+      result.unmount();
     },
   );
+
+  test("a thrown handler error exits only the failing app after the shared fact reaches its peer", async () => {
+    const streams = makeTrackedStreams();
+    const peerStdout = makeFakeWritable();
+    const peerStderr = makeFakeWritable();
+    const peerCalls: string[] = [];
+    const FailingApp = defineComponent(() => {
+      useInput(() => {
+        throw new Error("handler failed");
+      });
+      return () => <Text>failing</Text>;
+    });
+    const PeerApp = defineComponent(() => {
+      useInput((event) => {
+        peerCalls.push(eventLabel(event));
+      });
+      return () => <Text>peer</Text>;
+    });
+    const failing = createApp(FailingApp);
+    const peer = createApp(PeerApp);
+
+    try {
+      failing.mount({
+        stdin: streams.stdin,
+        stdout: streams.stdout,
+        stderr: streams.stderr,
+        patchConsole: false,
+      });
+      peer.mount({
+        stdin: streams.stdin,
+        stdout: peerStdout,
+        stderr: peerStderr,
+        patchConsole: false,
+      });
+      const exited = failing.waitUntilExit();
+
+      expect(() => streams.stdin.emit("data", "x")).toThrow("handler failed");
+      expect(peerCalls).toEqual(["text:x"]);
+      await expect(exited).rejects.toThrow("handler failed");
+
+      expect(streams.rawModeCalls).toEqual([true]);
+      expect(streams.stdin.listenerCount("data")).toBe(1);
+      expect(() => streams.stdin.emit("data", "y")).not.toThrow();
+      expect(peerCalls).toEqual(["text:x", "text:y"]);
+
+      peer.unmount();
+      expect(streams.rawModeCalls).toEqual([true, false]);
+      expect(streams.stdin.listenerCount("data")).toBe(0);
+    } finally {
+      failing.unmount();
+      peer.unmount();
+      peerStdout.destroy();
+      peerStderr.destroy();
+      streams.destroy();
+    }
+  });
 });
 
 describe("semantic input terminal ownership", () => {

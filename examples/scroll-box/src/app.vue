@@ -38,22 +38,22 @@ function pageLines(): number {
 }
 
 useInput((event) => {
-  if (event.kind === "text" && event.text === "q") {
+  if (event.type === "text" && event.text === "q") {
     exit();
     return;
   }
-  if (event.kind !== "key") return;
+  if (event.type !== "key") return;
   const handle = box.value;
   if (!handle) return;
   let moved: boolean;
-  if (event.name === "up") moved = handle.scrollByLines(-1);
-  else if (event.name === "down") moved = handle.scrollByLines(1);
-  else if (event.name === "page-up") moved = handle.scrollByLines(-pageLines());
-  else if (event.name === "page-down") moved = handle.scrollByLines(pageLines());
-  else if (event.name === "home") moved = handle.scrollToTop();
-  else if (event.name === "end") moved = handle.scrollToBottom();
+  if (event.key.name === "up") moved = handle.scrollByLines(-1);
+  else if (event.key.name === "down") moved = handle.scrollByLines(1);
+  else if (event.key.name === "page-up") moved = handle.scrollByLines(-pageLines());
+  else if (event.key.name === "page-down") moved = handle.scrollByLines(pageLines());
+  else if (event.key.name === "home") moved = handle.scrollToTop();
+  else if (event.key.name === "end") moved = handle.scrollToBottom();
   else return;
-  lastScroll.value = `${event.name}:${moved ? "moved" : "edge"}`;
+  lastScroll.value = `${event.key.name}:${moved ? "moved" : "edge"}`;
 });
 </script>
 

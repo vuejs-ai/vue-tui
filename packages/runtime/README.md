@@ -46,7 +46,7 @@ For reliable discovery, copy the [provided instruction](./docs/visual-developmen
 import { createApp } from "@vue-tui/runtime";
 import App from "./app.vue";
 
-createApp(App).mount();
+createApp(App).mount({ exitOnCtrlC: true });
 ```
 
 ```vue
@@ -58,7 +58,7 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((event) => {
-  if (event.kind !== "text") return;
+  if (event.type !== "text") return;
   if (event.text === "+") {
     count.value++;
     return;
@@ -135,19 +135,40 @@ Runtime does not export layout conveniences as separate components. Write line b
 
 | Composable                        | Description                                                                                                 |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`        | Frozen insertion text, complete paste payloads, and finite key identities; `isActive` gates input demand    |
+| `useInput(handler, opts?)`        | Frozen insertion text, complete paste payloads, and logical key identities; `isActive` gates input demand   |
 | `useFocus()` / `useFocus(target)` | One explicit logical focus identity, optionally limited by a rendered component target                      |
 | `useApp()`                        | In-tree exit request — `{ exit(error?) }`; host-owned lifecycle barriers stay on the app handle             |
 | `useLayoutWidth()`                | Readonly reactive width Runtime gives the root layout on every host                                         |
 | `useViewportHeight()`             | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
 | `useBoxSize(ref)`                 | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
-| `useStdin()`                      | Access the actual mounted stdin as a raw byte-stream escape hatch                                           |
+| `useStdin()`                      | Access the mounted stdin and independently coordinate one low-level raw-mode hold                           |
 
-`useInput()` delivers a frozen event whose `kind` is `"text"`, `"paste"`, or `"key"`. Text and paste events contain `text`; a key event contains either a finite `name` or one shortcut `character`, plus top-level `shift`, `alt`, and `ctrl` booleans. Terminal protocol, byte sequence, codepoint, repeat/release, and uninterpreted-input details remain private. Handlers normally return nothing. The exact object `{ preventDefault: true }` suppresses only Runtime's delayed Ctrl+C default for that event; it does not stop other `useInput()` subscriptions. Unless a handler throws, every subscription captured for an event runs in registration order.
+`useInput()` delivers a frozen `TuiInputEvent` discriminated by `type`. A `"text"` event contains non-empty insertion-ready `text` and may contain a complete nested `key` only when Runtime has reliable logical-key identity. A `"key"` event contains that required nested `key` and no text. A `"paste"` event contains one complete decoded bracketed-paste payload, including an empty payload, and no key. Classification is paste before text before key; opaque text and IME commits remain text without an invented key, and input with no public text, paste, or logical key fact is not delivered.
 
-Raw stdin runs in parallel with vue-tui's managed input route. It may include terminal protocol replies and bracketed-paste framing, and vue-tui does not guarantee deduplication, priority, or safe composition with `useInput()`.
+`TuiKey` contains exactly one normalized `name` or one logical `character`, plus boolean `shift`, `alt`, `ctrl`, `meta`, `super`, and `hyper` modifiers. `TuiKeyName` suggests `backspace`, `tab`, `enter`, `escape`, `insert`, `delete`, arrows, `home`, `end`, `page-up`, `page-down`, and `f1` through `f12`, but retains a string tail for future normalized lower-kebab-case semantic names. Key identity is logical rather than physical or base-layout identity. Terminal protocol, raw sequence, parser token, codepoint, base-layout identity, lock state, release phase, and unsupported input remain private.
 
-`useStdin()` exposes no framework raw-mode controls. Managed input is available only on a controllable TTY. The first active `useInput()` subscription acquires raw mode, bracketed-paste reporting, an application input route, and Runtime-private Kitty keyboard negotiation. The last active subscription immediately releases raw mode, paste reporting, and that route. If Runtime already sent a Kitty capability query, it may retain the shared listener and a bounded timer briefly only to filter the late protocol reply; disposing the app releases that reply filter immediately. `isActive` is a ref, getter, or boolean that gates this demand. Direct stream listeners do not create managed demand. A non-TTY stream remains available through `useStdin().stdin` for raw pipe bytes, while an active managed subscription fails before dispatching an event or changing terminal state. Mount options containing the removed `rawMode`, `exitOnCtrlC`, or public Kitty configuration fields are rejected before terminal mutation.
+The handler is a direct function or a live ref to one; Runtime resolves a ref with `unref()` when input arrives, so a direct function is never treated as a getter. `isActive` is an optional boolean, ref, or getter and defaults to `true`. Every active subscription receives each event, returns are ignored, and no subscription can consume input, prevent peer delivery, or control focus or routing through a result. Runtime does not promise relative handler ordering as an application routing mechanism. Repeat arrives as another ordinary input and release is not delivered. `MountOptions.exitOnCtrlC` defaults to `false`, so exact Ctrl+C is normally delivered as `{ type: "key", key: { character: "c", ctrl: true, ... } }`; `true` exits before delivering that exact key, and paste contents never trigger the option.
+
+For intentional low-level input, `useStdin()` returns exactly `stdin: Readable`, `isRawModeSupported: boolean`, and `setRawMode(enabled): void`:
+
+```ts
+import { onScopeDispose } from "vue";
+import { useStdin } from "@vue-tui/runtime";
+
+const { stdin, isRawModeSupported, setRawMode } = useStdin();
+
+if (isRawModeSupported) setRawMode(true);
+stdin.on("data", handleLowLevelInput);
+
+onScopeDispose(() => {
+  stdin.off("data", handleLowLevelInput);
+  setRawMode(false);
+});
+```
+
+The stream is the exact `Readable` selected for the mount. Each hook call owns one independent idempotent logical raw-mode hold: repeated `true` does not stack, `false` releases only that call, and scope disposal releases a surviving hold automatically. Managed `useInput()` demand owns a separate hold, so neither path can disable the other. Runtime temporarily restores physical raw mode during suspension, reacquires surviving holds on resume, and restores the borrowed stream baseline during teardown.
+
+Raw-only use does not attach Runtime's normalized parser, change the stream encoding, or negotiate Kitty or bracketed-paste protocols. The caller owns direct listeners and their cleanup. Direct stream observation and `useInput()` may see the same physical input with no safe ordering, deduplication, protocol-filtering, or byte-exact composition guarantee. A non-TTY stream remains observable while `isRawModeSupported` is false; activating managed input still fails before dispatch or terminal mutation. String rendering supplies an isolated inert `Readable`, reports no raw support, never touches `process.stdin`, and produces no input. Runtime exposes no stdin ingress, parser, route, protocol configuration, availability controller, or `useRawInput()` API.
 
 ### Focus ownership and input composition
 
@@ -266,10 +287,11 @@ fullscreen.mount({
   stdin,
   stderr,
   patchConsole: true,
+  exitOnCtrlC: true,
 });
 ```
 
-`mount()` has five public options: `stdout`, `stdin`, `stderr`, `mode`, and `patchConsole`. Output cadence, frame-rate tuning, renderer observation, terminal protocols, accessibility presentation, and clipboard transports are not mount policy. `patchConsole` remains under independent public-API review; its current presence is not an acceptance of its final semantics.
+`mount()` has six public options: `stdout`, `stdin`, `stderr`, `mode`, `patchConsole`, and `exitOnCtrlC`. Output cadence, frame-rate tuning, renderer observation, terminal protocols, accessibility presentation, and clipboard transports are not mount policy. `patchConsole` defaults to true and `exitOnCtrlC` defaults to false.
 
 The returned app handle owns two barriers. `waitUntilRenderFlush()` is available only between a successful mount and teardown and resolves after queued Vue work, coordinated console output, and the current terminal write have settled. `waitUntilExit()` resolves with no value after normal restoration, rejects with the exact `Error` passed to `useApp().exit(error)`, and rejects with an `AggregateError` if an otherwise normal exit cannot completely restore terminal state. `unmount()` starts teardown but remains synchronous; await `waitUntilExit()` when later process work depends on restoration being complete.
 

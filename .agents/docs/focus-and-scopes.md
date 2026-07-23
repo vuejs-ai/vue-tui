@@ -1,6 +1,6 @@
 # Logical focus and focus scopes
 
-> **Status:** historical unstamped F4 record. The [vouched minimum `useFocus()` decision](./runtime-public-api-decisions.md#usefocus) supersedes both this document's scope/routing/manager design and the later proposal to remove Focus entirely. Runtime now retains only per-app unique ownership plus optional component-boundary validity; applications compose input activation, traversal, scopes, restoration, and string lookup above that primitive. The renderer and routing results below remain historical implementation evidence, not current authoring guidance.
+> **Status:** historical unstamped F4 record. The [vouched minimum `useFocus()` decision](./runtime-public-api-decisions.md#usefocus) supersedes both this document's scope/routing/manager design and the later proposal to remove Focus entirely. Runtime now retains only per-app unique ownership plus optional component-boundary validity; applications compose input activation, traversal, scopes, restoration, and string lookup above that primitive. The current `useInput()` surface is a broadcast subscription with ignored returns, and `exitOnCtrlC` is a default-false mount option rather than the historical preventable delayed default. The renderer and routing results below remain historical implementation evidence, not current authoring guidance.
 
 ## Product problem
 
@@ -272,9 +272,9 @@ useFocusScopeInput(approvalScope, closeTargetlessApproval);
 
 Reusable overlay components normally call `useFocusScope()` in the overlay component and let child controls inject it; the explicit `scope` option is for same-setup ownership, not a requirement on every target.
 
-## Current API dispositions
+## Historical F4 API dispositions
 
-vue-tui is experimental, so these are direct target replacements without aliases or deprecations:
+At the time of the F4 candidate, these were direct target replacements without aliases or deprecations:
 
 | Current surface             | Recommended disposition                             | Reason                                                                                                                                                                                                                    |
 | --------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -287,7 +287,7 @@ vue-tui is experimental, so these are direct target replacements without aliases
 | Registration-order Tab      | Replace                                             | Current rendered preorder and active scope determine traversal.                                                                                                                                                           |
 | Per-focus raw lease         | Remove                                              | The atomically selected F3 topology owns semantic input resources.                                                                                                                                                        |
 
-The application-global `useInput`, `TuiInputEvent`, `InputHandler`, `InputHandlerResult`, `useInputAvailability`, and direct stdin contract remain unchanged.
+That candidate kept its then-current application-global `useInput`, `TuiInputEvent`, `InputHandler`, `InputHandlerResult`, `useInputAvailability`, and direct-stdin contract unchanged. The later vouched review superseded those public input and stdin shapes as summarized in this document's status.
 
 ## Alternatives considered
 

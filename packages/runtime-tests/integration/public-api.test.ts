@@ -69,6 +69,7 @@ test("does not retain the superseded render-fact hooks", () => {
 
 test("does not retain the superseded split input API", () => {
   expect(api).not.toHaveProperty("usePaste");
+  expect(api).not.toHaveProperty("useRawInput");
 });
 
 test("keeps focus identity and normalized subscription without publishing routing policy", () => {

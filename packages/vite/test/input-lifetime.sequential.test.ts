@@ -134,7 +134,7 @@ afterEach(async () => {
   delete testGlobal().__VT_TEST_STDOUT__;
 });
 
-test("public input survives template, script, and full HMR lifetimes", async () => {
+test("public input and raw stdin ownership survive template, script, and full HMR lifetimes", async () => {
   const { stdin, rawModeCalls, refBalance, trace } = createTrackedStdin();
   const { stdout, read } = createTrackedStdout(trace);
   Object.assign(testGlobal(), {

@@ -393,6 +393,7 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
     isRawModeSupported: false,
     inputAvailability: createInputAvailabilityRef(stringInputUnavailable),
     internal_inputRouting: createInternalInputRoutingRuntime(),
+    acquirePublicRawMode: () => () => {},
     acquireRawMode: () => {},
     releaseRawMode: () => {},
     acquireSemanticInput: () => Object.freeze({ activate() {}, release() {} }),

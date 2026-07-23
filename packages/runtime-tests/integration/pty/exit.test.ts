@@ -54,9 +54,10 @@ it("exit with thrown error", async () => {
   expect(output).toContain("errored");
 });
 
-it("an active semantic input route keeps the app alive until it exits", async () => {
-  // The fixture owns a useInput route and writes __READY__ after 500ms. Its
-  // stdin ref keeps the process alive until q reaches the route and exits.
+it("independent public and managed raw owners keep the app alive until managed input exits", async () => {
+  // The fixture owns two public raw holds plus a useInput route and writes
+  // __READY__ after 500ms. Their shared stdin ref keeps the process alive until
+  // q reaches the managed route and exits.
   const ps = term("exit-double-raw-mode");
 
   // After __READY__ (resolved internally by the term helper), wait 500ms and

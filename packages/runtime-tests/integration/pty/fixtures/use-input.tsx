@@ -41,6 +41,7 @@ const namedKeyExpectations: Readonly<Record<string, KeyExpectation>> = {
   shiftTab: { name: "tab", shift: true },
   backspace: { name: "backspace" },
   delete: { name: "delete" },
+  f1: { name: "f1" },
 };
 
 const characterExpectations: Readonly<Record<string, CharacterExpectation>> = {
@@ -49,13 +50,16 @@ const characterExpectations: Readonly<Record<string, CharacterExpectation>> = {
 };
 
 function hasModifiers(
-  event: Extract<TuiInputEvent, { readonly kind: "key" }>,
+  event: Extract<TuiInputEvent, { readonly type: "key" }>,
   expected: { readonly shift?: boolean; readonly alt?: boolean; readonly ctrl?: boolean },
 ): boolean {
   return (
-    event.shift === (expected.shift ?? false) &&
-    event.alt === (expected.alt ?? false) &&
-    event.ctrl === (expected.ctrl ?? false)
+    event.key.shift === (expected.shift ?? false) &&
+    event.key.alt === (expected.alt ?? false) &&
+    event.key.ctrl === (expected.ctrl ?? false) &&
+    !event.key.meta &&
+    !event.key.super &&
+    !event.key.hyper
   );
 }
 
@@ -82,11 +86,11 @@ const UserInput = defineComponent({
 
     useInput((event) => {
       if (props.test === "rapidArrowsEnter") {
-        if (event.kind === "key" && event.name === "down") {
+        if (event.type === "key" && event.key.name === "down") {
           rapidDownArrowCount++;
           return;
         }
-        if (event.kind === "key" && event.name === "enter") {
+        if (event.type === "key" && event.key.name === "enter") {
           if (rapidDownArrowCount !== 3) {
             throw new Error(`Expected enter after 3 down arrows, received ${rapidDownArrowCount}`);
           }
@@ -99,7 +103,7 @@ const UserInput = defineComponent({
 
       if (props.test === "lowercase" || props.test === "uppercase") {
         const expected = props.test === "lowercase" ? "q" : "Q";
-        if (event.kind === "text" && event.text === expected) {
+        if (event.type === "text" && event.text === expected) {
           exit();
           return;
         }
@@ -116,7 +120,7 @@ const UserInput = defineComponent({
             : props.test === "pastedTab"
               ? "\ttest"
               : "hello";
-        if (event.kind === "paste" && event.text === expected) {
+        if (event.type === "paste" && event.text === expected) {
           exit();
           return;
         }
@@ -125,8 +129,8 @@ const UserInput = defineComponent({
       const namedExpectation = namedKeyExpectations[props.test ?? ""];
       if (
         namedExpectation &&
-        event.kind === "key" &&
-        event.name === namedExpectation.name &&
+        event.type === "key" &&
+        event.key.name === namedExpectation.name &&
         hasModifiers(event, namedExpectation)
       ) {
         exit();
@@ -136,16 +140,16 @@ const UserInput = defineComponent({
       const characterExpectation = characterExpectations[props.test ?? ""];
       if (
         characterExpectation &&
-        event.kind === "key" &&
-        event.character === characterExpectation.character &&
+        event.type === "key" &&
+        event.key.character === characterExpectation.character &&
         hasModifiers(event, characterExpectation)
       ) {
         exit();
         return;
       }
 
-      if (props.test === "dropUnsupported" || props.test === "dropUninterpreted") {
-        if (event.kind === "text" && event.text === "q") {
+      if (props.test === "dropUninterpreted") {
+        if (event.type === "text" && event.text === "q") {
           exit();
           return;
         }

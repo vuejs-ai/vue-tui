@@ -7,4 +7,4 @@ if (!process.env["DEEPSEEK_API_KEY"]) {
   process.exit(1);
 }
 
-createApp(App).mount();
+createApp(App).mount({ exitOnCtrlC: true });

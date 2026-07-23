@@ -1,6 +1,6 @@
 # ScrollBox — decision record
 
-> **Status:** F7 Scroll composition is Done. The maintainer selected a boolean movement result for all four existing operations: `true` means only that the effective top content line changed after flooring and clamping. A sticky-following re-arm without movement returns `false`. Public types, runtime and JavaScript behavior, package consumption, deterministic F4/F6 routing, real PTY, visual restoration, full repository gates, and fresh CI agree. The component remains common, passive, and input-free; completed F8 owns its separate Text-selection and clipboard contract. No VOUCHED stamp is implied.
+> **Status:** the four-operation boolean movement contract remains current: `true` means only that the effective top content line changed after flooring and clamping, while a sticky-following re-arm without movement returns `false`. `ScrollBox` remains common, passive, and input-free. The F4/F6/F8 routing, pointer, selection, and clipboard composition below is historical closure evidence for the broader candidate, not current Runtime API guidance. Current `useInput()` broadcasts and ignores handler returns, so an application explicitly uses the boolean to decide whether to call another scroll owner.
 
 > Decisions specific to `@vue-tui/components`'s `ScrollBox`. Shared conventions live in
 > [components-design-principles.md](../components-design-principles.md). Tracking: #221.
@@ -50,11 +50,9 @@ job, not a built-in prop:
   configuration and modes that vue-tui does not currently negotiate. Keyboard bindings remain a
   valid application policy, but they do not imply portable wheel support.
 
-Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse
-ownership, reliable geometry, and hit testing. F8 now supplies a separate application-controlled
-Text selection and clipboard model after mouse capture; neither concern becomes `ScrollBox` state
-or input. See [Fullscreen text selection and clipboard](../fullscreen-selection-and-copy.md),
-[terminal UI prior art](../terminal-ui-prior-art.md), and [api-design.md](../api-design.md).
+Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse ownership, reliable geometry, and hit testing. The historical F8 candidate supplied a separate application-controlled Text selection and clipboard model after mouse capture; neither concern became `ScrollBox` state or input. See [Fullscreen text selection and clipboard](../fullscreen-selection-and-copy.md), [terminal UI prior art](../terminal-ui-prior-art.md), and [api-design.md](../api-design.md).
+
+> **Historical F6/F8 composition:** the pointer code and route-result discussion below records the earlier `/fullscreen` candidate. The current minimum Runtime does not publish those pointer, selection, clipboard, or route-result APIs.
 
 The implemented unstamped F6 contract composes Fullscreen wheel behavior through a ref-bound runtime
 composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
@@ -94,24 +92,24 @@ export interface ScrollBoxExpose {
 
 The result has one exact meaning:
 
-- the result is synchronous because F3 focused handlers and F6 mouse handlers must return synchronously;
+- the result is synchronous so application code can immediately decide whether to call another scroll owner; it is not a `useInput()` return value;
 - it reports whether the effective top rendered row changed after flooring and clamping, including partial movement toward an edge;
 - `false` covers the top or bottom edge, the same absolute row, zero movement, values whose floored result is the same row, and a non-overflowing viewport;
 - Page Up/Down need no new component method: the application binds `useBoxSize()` directly to the wrapper Box, reads its accepted `height`, and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
-- the result is not an `InputHandlerResult` or `MouseHandlerResult`: an inner unchanged operation continues to its outer owner, while an outer owner may apply a different keyboard policy, and F3 and F6 expose different route types;
+- the result is not an input propagation result: current `useInput()` ignores handler returns, so an application that owns nested keyboard policy explicitly tries the inner ScrollBox and calls the outer owner only when the inner method returns `false`;
 - the component remains the sole offset and sticky-following owner and still acquires no keyboard or mouse input.
 
 One existing edge makes the return meaning precise. Content shrink or viewport growth can clamp a non-sticky offset to the current bottom without re-arming follow. A later `scrollToBottom()` can therefore re-arm sticky following without changing the top row; appended content then follows. That call returns `false` even though internal follow policy changed.
 
 All four existing names and parameters are retained, and their `void` return is replaced directly without an alias or compatibility shim. The named `ScrollBoxExpose` type and `InstanceType<typeof ScrollBox>` both expose the boolean. Template, TSX, and packed JavaScript consumers cover the type and runtime surface; the packed consumer uses Vue 3.4.38 and TypeScript 6.0.3 with `skipLibCheck: false` and proves both movement outcomes, invalid values, and continued use after an error.
 
-Component tests cover relative, absolute, fractional, zero, clamped, repeated, top, bottom, non-overflowing, sticky-rearm, invalid-value, and extra-argument behavior. Deterministic nested tests run real F4 focus routing in Inline and Fullscreen and F6 target-to-ancestor wheel routing in Fullscreen; page movement reads the F5 wrapper height. A shared real-PTY fixture repeats the two keyboard modes and raw SGR wheel journey, including exact terminal-mode cleanup. Repository visual sessions inspected the same visible offsets and routes step by step, then proved normal-buffer, cursor, input-mode, termios, and post-exit shell restoration. `vp run ready` and a fresh zero-cache `CI=true vp run ci` pass.
+Component tests cover relative, absolute, fractional, zero, clamped, repeated, top, bottom, non-overflowing, sticky-rearm, invalid-value, and extra-argument behavior. Historical closure tests also ran F4 focus routing in Inline and Fullscreen and F6 target-to-ancestor wheel routing in Fullscreen; page movement read the then-public F5 wrapper height. A shared real-PTY fixture repeated the two keyboard modes and raw SGR wheel journey, including exact terminal-mode cleanup. Repository visual sessions inspected the same visible offsets and routes step by step, then proved normal-buffer, cursor, input-mode, termios, and post-exit shell restoration. That evidence remains useful for the boolean movement mechanism without making the removed routing surfaces current.
 
 ### Alternatives considered
 
 The bounded pinned-peer check does not settle the vue-tui shape. Textual's private non-animated pointer helper [returns whether clamped position changed](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L2718-L2822), and its wheel handler [stops bubbling only after movement](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L4777-L4805), but its public semantic scroll methods return `None` and its keyboard edge behavior differs. OpenTUI's [`scrollBy()` and `scrollTo()` return `void`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderables/ScrollBox.ts#L404-L473); recognized keyboard commands are handled regardless of movement and wheel can reach multiple ancestors. Ratatui [leaves input to the application](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui/src/lib.rs#L268-L289), while its stateful list scroll methods return unit. These sources support the mechanism and passive boundary, not one public Vue encoding.
 
-The selected boolean is the smallest conventional encoding of the one fact every journey consumes, maps directly to `"consume"` versus `"continue"`, and allocates nothing on wheel input. A named `"moved" | "unchanged"` result would carry the same bit with a new public type and more verbose routing. A structured `{ moved, followingChanged }` result could expose the no-move sticky re-arm, but that internal policy fact is unused by every representative handler and would broaden every operation. Those alternatives remain decision history, not queued compatibility surfaces.
+The selected boolean is the smallest conventional encoding of the one fact every journey consumes and lets application code decide whether to try another owner without duplicating ScrollBox state. A named `"moved" | "unchanged"` result would carry the same bit with a new public type and more verbose control flow. A structured `{ moved, followingChanged }` result could expose the no-move sticky re-arm, but that internal policy fact is unused by every representative handler and would broaden every operation. Those alternatives remain decision history, not queued compatibility surfaces.
 
 ## Future direction (not in scope now)
 

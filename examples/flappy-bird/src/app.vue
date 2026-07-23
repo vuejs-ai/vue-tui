@@ -145,18 +145,18 @@ function restart(): void {
 }
 
 useInput((event) => {
-  if (event.kind === "text" && event.text === "q") {
+  if (event.type === "text" && event.text === "q") {
     exit();
     return;
   }
   if (world.dead) {
-    if (event.kind === "text" && event.text === "r") {
+    if (event.type === "text" && event.text === "r") {
       restart();
     }
     return;
   }
-  const isFlapText = event.kind === "text" && (event.text === " " || event.text === "w");
-  const isUpArrow = event.kind === "key" && event.name === "up";
+  const isFlapText = event.type === "text" && (event.text === " " || event.text === "w");
+  const isUpArrow = event.type === "key" && event.key.name === "up";
   if (isFlapText || isUpArrow) {
     flap();
   }

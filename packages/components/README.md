@@ -48,11 +48,11 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const box = shallowRef<ScrollBoxExpose | null>(null);
 
 useInput((event) => {
-  if (event.kind !== "key") return;
+  if (event.type !== "key") return;
   const handle = box.value;
   if (!handle) return;
-  if (event.name === "up") handle.scrollByLines(-1);
-  else if (event.name === "down") handle.scrollByLines(1);
+  if (event.key.name === "up") handle.scrollByLines(-1);
+  else if (event.key.name === "down") handle.scrollByLines(1);
 });
 </script>
 

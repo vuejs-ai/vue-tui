@@ -2,11 +2,12 @@ import process from "node:process";
 import { createApp, useInput } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
 
-// Any active semantic input route owns raw mode and bracketed-paste mode. A
-// handler that allows the delayed default therefore exits on both legacy and
-// Kitty Ctrl+C encodings without a separate mount option.
+// Managed input owns raw and bracketed-paste mode. The explicit mount policy
+// exits before either legacy or Kitty Ctrl+C reaches this handler.
 const DefaultCtrlC = defineComponent(() => {
-  useInput(() => undefined);
+  useInput(() => {
+    throw new Error("exitOnCtrlC must run before managed input delivery");
+  });
 
   onMounted(() => {
     process.stdout.write("__READY__");
@@ -16,6 +17,6 @@ const DefaultCtrlC = defineComponent(() => {
 });
 
 const app = createApp(DefaultCtrlC);
-app.mount();
+app.mount({ exitOnCtrlC: true });
 await app.waitUntilExit();
 console.log("exited");

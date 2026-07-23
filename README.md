@@ -58,7 +58,7 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((event) => {
-  if (event.kind !== "text") return;
+  if (event.type !== "text") return;
   // "+" is Shift+"=" on most keyboards, so accept the bare "=" too.
   if (event.text === "+" || event.text === "=") {
     count.value++;
@@ -84,7 +84,7 @@ useInput((event) => {
 import { createApp } from "@vue-tui/runtime";
 import App from "./app.vue";
 
-createApp(App).mount();
+createApp(App).mount({ exitOnCtrlC: true });
 ```
 
 - Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
@@ -173,10 +173,12 @@ The [`@vue-tui/components`](./packages/components) package adds higher-level com
 | `useApp()`                        | Request normal or error exit from inside the mounted Vue tree                                                              |
 | `useLayoutWidth()`                | Read the reactive numeric width Runtime gives the root layout on every host                                                |
 | `useViewportHeight()`             | Read the reactive visual viewport height, or get `null` at setup when the document is not row-bounded                      |
-| `useStdin()`                      | Access the actual mounted stdin as a raw byte-stream escape hatch                                                          |
+| `useStdin()`                      | Access the mounted stdin plus an independently owned raw-mode hold for intentional low-level input                         |
 | `useBoxSize(ref)`                 | Observe the last accepted full width and height of a directly referenced `<Box>`, or `null` when unavailable               |
 
-`useInput()` delivers a frozen `text`, complete bracketed `paste`, or recognized `key` event. Named keys use a finite vocabulary such as `enter`, `escape`, `tab`, and the navigation keys; shortcut keys instead carry one `character`. Key modifiers are the top-level `shift`, `alt`, and `ctrl` booleans. Handlers normally return nothing. The only special result is the exact object `{ preventDefault: true }`, which suppresses Runtime's Ctrl+C default for that event; it does not stop another subscription or implement application propagation. Unless a handler throws, every subscription captured when the normalized fact begins runs in registration order.
+`useInput()` delivers a frozen event with `type: "text" | "key" | "paste"`. Text contains non-empty insertion-ready `text` and may include a complete nested `key` when the terminal supplied reliable logical identity; key-only input contains a required nested `key` and no text; bracketed paste contains one complete payload, including a valid empty payload, and no key. A `key` contains exactly one normalized `name` or one logical `character`, plus `shift`, `alt`, `ctrl`, `meta`, `super`, and `hyper` booleans. Known names such as `enter`, `escape`, arrows, navigation keys, and `f1` through `f12` are suggested, while future names remain forward-compatible normalized lower-kebab-case strings. Protocol, raw sequence, parser token, codepoint, base-layout identity, lock state, key release, and unsupported input stay private.
+
+The handler may be a direct function or a live ref to a function; Runtime resolves it when input arrives. `isActive` accepts a boolean, ref, or getter, defaults to `true`, and owns managed-input demand. Every active subscription receives the event, handler return values are ignored, and no return value consumes input or controls focus, routing, or peer delivery. Key repeat arrives as another ordinary event and key release is suppressed. `MountOptions.exitOnCtrlC` defaults to `false`, so exact Ctrl+C is normally a key event; setting it to `true` exits before delivering that key. Paste contents never trigger the option.
 
 Every `useFocus()` call creates a distinct opaque identity in one private per-app controller. `focus()` synchronously replaces the previous owner when the handle is available, `blur()` releases that handle, and the readonly `isFocused` ref composes directly with `useInput(handler, { isActive: focus.isFocused })`. Pass no target for a logical identity whose validity follows its Vue scope, or pass a component ref when the rendered component boundary should clear focus after removal or hidden ancestry. Unavailable, disposed, and string-rendering operations are inert and never queue later acquisition; later availability never restores focus. Runtime exposes no focus manager, scope or traversal API, string lookup, automatic Tab handling, restoration, or input routing. See the [Runtime guide](./packages/runtime/README.md#focus-ownership-and-input-composition).
 
@@ -200,7 +202,7 @@ The broad render-session and public paint-fragment projections are not applicati
 
 The previous focus-bound `useCaret()` contract has been withdrawn. Runtime retains terminal-cursor transport internally, but `useFocus()` does not expose physical caret placement; that capability remains outside this minimum foundation until a semantic Text-position contract is proven without exposing renderer coordinates.
 
-There is no public input-availability hook. An active `useInput()` subscription is the gate: it acquires managed input only while `isActive` resolves to true and fails before terminal mutation when stdin is not a controllable TTY. `useStdin()` returns the mounted stream for applications that intentionally consume raw pipe bytes; those bytes may include terminal replies and paste framing and have no normalized-event or safe-composition guarantee. Runtime privately negotiates only the Kitty protocol support needed to produce the public event projection, falls back to legacy input, and restores what it acquired. Applications do not choose Kitty flags through mount options. The removed `rawMode`, `exitOnCtrlC`, and public `kittyKeyboard` controls are not supported.
+There is no public input-availability hook. An active `useInput()` subscription is the gate: it acquires managed input only while `isActive` resolves to true and fails before terminal mutation when stdin is not a controllable TTY. `useStdin()` returns exactly `{ stdin, isRawModeSupported, setRawMode }` for applications that intentionally own low-level input. Each hook call has one independent idempotent raw-mode hold, surviving `true` calls do not stack, `false` releases only that call, and Vue scope disposal releases it automatically without disabling another hook or managed `useInput()` demand. Raw-only use does not attach Runtime's normalized parser, change stream encoding, or negotiate Kitty or bracketed-paste protocols; direct listeners and their cleanup belong to the caller. A non-TTY stream remains observable with no raw support, while string rendering provides an isolated inert stream that never touches `process.stdin`. Direct listeners and managed input may see the same physical bytes with no ordering, deduplication, protocol-filtering, or byte-exact composition guarantee.
 
 ## Testing
 
@@ -220,7 +222,7 @@ test("counter responds to + and - keys", async () => {
   const Counter = defineComponent(() => {
     const count = shallowRef(0);
     useInput((event) => {
-      if (event.kind !== "text") return;
+      if (event.type !== "text") return;
       if (event.text === "+") {
         count.value++;
         return;

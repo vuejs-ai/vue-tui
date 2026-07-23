@@ -1,6 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test, vi } from "vite-plus/test";
-import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useStdin } from "@vue-tui/runtime";
 import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
@@ -59,7 +59,7 @@ test.sequential("a clean exit rejects when terminal restoration fails", async ()
   };
 
   const InteractiveApp = defineComponent(() => {
-    useInput(() => {});
+    useStdin().setRawMode(true);
     return () => <Text>Hello</Text>;
   });
   const app = createApp(InteractiveApp);

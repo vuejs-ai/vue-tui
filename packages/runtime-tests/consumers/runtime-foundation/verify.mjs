@@ -33,7 +33,7 @@ const consumers = {
   "coding-agent": {
     pin: "3e44c9a266e52ebeba2db669b4bb96521b9e2f3a",
     patch: "coding-agent.patch",
-    patchSha256: "7dae637675b6e6306182ad9f6443e872cc403ca7fb0f9ae06d6cbfe2f0a07450",
+    patchSha256: "640bc7c480bc056daa4368158b0520f9467cfc78d00120b0871835769baaf107",
     changedPaths: [
       "examples/coding-agent/src/app.vue",
       "examples/coding-agent/src/components/message-list.vue",
@@ -44,7 +44,7 @@ const consumers = {
     repository: "https://github.com/liangmiQwQ/mo.git",
     pin: "6bea467a6995f4912e809b417b5c56a3964cc556",
     patch: "mo.patch",
-    patchSha256: "1d6104f4ebe2a3a8b84290f07390228685ddc980af522b4681a7188cbd3763ee",
+    patchSha256: "c3ad6c31f12de6499d022e199fe7d743378f0e3203ce3ac2abd4b74054ca5d11",
     changedPaths: ["src/components/selector.vue", "src/utils/selector.ts"],
     sourceRoot: "src",
   },
@@ -52,7 +52,7 @@ const consumers = {
     repository: "https://github.com/hyfdev/machud.git",
     pin: "a51a6853686eb818471d0027d2549e6e664c9b36",
     patch: "machud.patch",
-    patchSha256: "af3fd2f856d6ae10f6ff678d9c37535e07f51a186c2429a9b8ee4af61c8e6a08",
+    patchSha256: "e2a3278fa49630a594f3732ff72cac8cb47935d77dfb7c267df9162fcf50dd27",
     changedPaths: [
       "src/App.vue",
       "src/components/Bar.vue",

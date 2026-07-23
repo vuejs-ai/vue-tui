@@ -25,7 +25,7 @@ const App = defineComponent(() => {
   });
 
   useInput((event) => {
-    if (event.kind === "key" && event.name === "enter") {
+    if (event.type === "key" && event.key.name === "enter") {
       if (done) {
         return;
       }
@@ -38,7 +38,7 @@ const App = defineComponent(() => {
       return;
     }
 
-    if (event.kind === "key" && (event.name === "backspace" || event.name === "delete")) {
+    if (event.type === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
       query.value = query.value.slice(0, -1);
     }
   });

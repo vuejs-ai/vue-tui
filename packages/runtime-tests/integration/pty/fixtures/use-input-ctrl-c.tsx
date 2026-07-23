@@ -6,9 +6,9 @@ const UserInput = defineComponent(() => {
   const { exit } = useApp();
 
   useInput((event) => {
-    if (event.kind === "key" && event.character === "c" && event.ctrl && !event.shift) {
+    if (event.type === "key" && event.key.character === "c" && event.key.ctrl && !event.key.shift) {
       exit();
-      return { preventDefault: true };
+      return;
     }
 
     throw new Error("Crash");

@@ -237,14 +237,22 @@ async function runJ1(maxFps: number): Promise<JourneyExecution> {
     useInput((event) => {
       if (
         approval.value === "closed" &&
-        event.kind === "text" &&
+        event.type === "text" &&
         (event.text === "a" || event.text === "r")
       ) {
         approval.value = event.text === "a" ? "accept" : "reject";
-      } else if (approval.value === "accept" && event.kind === "key" && event.name === "enter") {
+      } else if (
+        approval.value === "accept" &&
+        event.type === "key" &&
+        event.key.name === "enter"
+      ) {
         approvalResult.value = "accepted";
         approval.value = "closed";
-      } else if (approval.value === "reject" && event.kind === "key" && event.name === "escape") {
+      } else if (
+        approval.value === "reject" &&
+        event.type === "key" &&
+        event.key.name === "escape"
+      ) {
         approvalResult.value = "rejected";
         approval.value = "closed";
       } else {
@@ -386,28 +394,28 @@ async function runJ2(maxFps: number): Promise<JourneyExecution> {
     exit = useApp().exit;
     useInput((event) => {
       if (phase.value !== "open") return;
-      if (event.kind === "text" && /^[a-z]$/.test(event.text)) {
+      if (event.type === "text" && /^[a-z]$/.test(event.text)) {
         query.value += event.text;
-      } else if (event.kind === "key" && event.name === "backspace") {
+      } else if (event.type === "key" && event.key.name === "backspace") {
         query.value = query.value.slice(0, -1);
-      } else if (event.kind === "key" && event.name === "down") {
+      } else if (event.type === "key" && event.key.name === "down") {
         active.value = Math.min(filtered.value.length - 1, active.value + 1);
-      } else if (event.kind === "key" && event.name === "up") {
+      } else if (event.type === "key" && event.key.name === "up") {
         active.value = Math.max(0, active.value - 1);
-      } else if (event.kind === "key" && event.name === "enter") {
+      } else if (event.type === "key" && event.key.name === "enter") {
         const selected = filtered.value[active.value];
         if (selected) accepted.value = [...accepted.value, selected];
         phase.value = "accepted";
       } else if (
-        event.kind === "key" &&
-        event.character === "c" &&
-        event.ctrl &&
-        !event.alt &&
-        !event.shift
+        event.type === "key" &&
+        event.key.character === "c" &&
+        event.key.ctrl &&
+        !event.key.alt &&
+        !event.key.shift
       ) {
         phase.value = "cancelled";
         sequence.value++;
-        return { preventDefault: true };
+        return;
       } else {
         return;
       }
@@ -545,8 +553,8 @@ async function runJ3(maxFps: number): Promise<JourneyExecution> {
   const App = defineComponent(() => {
     exit = useApp().exit;
     useInput((event) => {
-      if (event.kind !== "key") return;
-      const delta = event.name === "down" ? 1 : event.name === "up" ? -1 : 0;
+      if (event.type !== "key") return;
+      const delta = event.key.name === "down" ? 1 : event.key.name === "up" ? -1 : 0;
       if (delta === 0 || !scroll.value?.scrollByLines(delta)) return;
       scrollTop.value += delta;
       sequence.value++;
@@ -682,7 +690,7 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
     }
     viewportHeight = resolvedViewportHeight;
     useInput((event) => {
-      if (event.kind !== "text" || event.text !== "q") return;
+      if (event.type !== "text" || event.text !== "q") return;
       sequence.value++;
       last.value = { ...last.value, action: "quit" };
     });
@@ -830,7 +838,7 @@ async function runJ5(maxFps: number): Promise<JourneyExecution> {
   const App = defineComponent(() => {
     exit = useApp().exit;
     useInput((event) => {
-      if (event.kind !== "text") return;
+      if (event.type !== "text") return;
       if (overlayOpen.value) {
         if (event.text !== "c") return;
         overlayOpen.value = false;

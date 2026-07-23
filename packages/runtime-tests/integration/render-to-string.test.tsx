@@ -1,4 +1,5 @@
 import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
+import type { Readable } from "node:stream";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
 import {
@@ -166,8 +167,10 @@ describe("renderToString", () => {
     });
     const output = renderToString(App);
     expect(output).toContain("with stdin");
-    expect(Reflect.ownKeys(captured!)).toEqual(["stdin"]);
-    expect(captured?.stdin.isTTY).toBe(false);
+    expect(Reflect.ownKeys(captured!)).toEqual(["stdin", "isRawModeSupported", "setRawMode"]);
+    expect(Reflect.get(captured!.stdin, "isTTY")).toBe(false);
+    expect(captured?.isRawModeSupported).toBe(false);
+    expect(() => captured?.setRawMode(true)).not.toThrow();
   });
 
   test("useStdout does not throw in renderToString", () => {
@@ -191,7 +194,7 @@ describe("renderToString", () => {
   });
 
   test("string terminal streams are isolated and direct writes remain inert", () => {
-    let capturedStdin: NodeJS.ReadStream | undefined;
+    let capturedStdin: Readable | undefined;
     let capturedStdout: NodeJS.WriteStream | undefined;
     let capturedStderr: NodeJS.WriteStream | undefined;
     const App = defineComponent(() => {
@@ -207,7 +210,7 @@ describe("renderToString", () => {
     expect(capturedStdin).not.toBe(process.stdin);
     expect(capturedStdout).not.toBe(process.stdout);
     expect(capturedStderr).not.toBe(process.stderr);
-    expect(capturedStdin?.isTTY).toBe(false);
+    expect(Reflect.get(capturedStdin!, "isTTY")).toBe(false);
     expect(capturedStdout?.isTTY).toBe(false);
     expect(capturedStdout?.columns).toBe(29);
   });
@@ -671,7 +674,7 @@ describe("renderToString", () => {
       let pasted = "";
       const App = defineComponent(() => {
         useInput((event) => {
-          if (event.kind === "paste") pasted = event.text;
+          if (event.type === "paste") pasted = event.text;
         });
         return () => <Text>with paste</Text>;
       });

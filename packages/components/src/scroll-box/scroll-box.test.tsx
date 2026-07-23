@@ -68,7 +68,7 @@ test("ScrollBox drives scrolling through the exposed handle", async () => {
     // ScrollBox listens to no input itself; the app wires its own keys to the
     // exposed handle. Nothing here is a ScrollBox convention.
     useInput((event) => {
-      if (event.kind !== "text") return;
+      if (event.type !== "text") return;
       if (event.text === "u") box.value?.scrollByLines(-4);
       else if (event.text === "g") box.value?.scrollToTop();
       else if (event.text === "G") box.value?.scrollToBottom();

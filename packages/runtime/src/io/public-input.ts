@@ -1,87 +1,164 @@
-import type { InternalInputRouteDecision } from "./input-route-policy.ts";
 import type { NormalizedInputFact } from "./normalized-input.ts";
 
+/**
+ * Stable semantic key names emitted by Runtime.
+ *
+ * The listed names are editor suggestions, not a closed world: newer terminal
+ * protocols may add other normalized lower-kebab-case names.
+ */
 export type TuiKeyName =
   | "backspace"
-  | "delete"
-  | "down"
-  | "end"
+  | "tab"
   | "enter"
   | "escape"
-  | "home"
+  | "insert"
+  | "delete"
+  | "up"
+  | "down"
   | "left"
-  | "page-down"
-  | "page-up"
   | "right"
-  | "tab"
-  | "up";
+  | "home"
+  | "end"
+  | "page-up"
+  | "page-down"
+  | "f1"
+  | "f2"
+  | "f3"
+  | "f4"
+  | "f5"
+  | "f6"
+  | "f7"
+  | "f8"
+  | "f9"
+  | "f10"
+  | "f11"
+  | "f12"
+  | (string & {});
 
-interface PublicKeyModifiers {
+interface TuiKeyModifiers {
   readonly shift: boolean;
   readonly alt: boolean;
   readonly ctrl: boolean;
+  readonly meta: boolean;
+  readonly super: boolean;
+  readonly hyper: boolean;
 }
 
-export type TuiInputEvent =
-  | {
-      readonly kind: "text";
-      readonly text: string;
-    }
-  | {
-      readonly kind: "paste";
-      readonly text: string;
-    }
-  | (PublicKeyModifiers & {
-      readonly kind: "key";
-      readonly name: TuiKeyName;
-      readonly character?: never;
-    })
-  | (PublicKeyModifiers & {
-      readonly kind: "key";
-      readonly character: string;
-      readonly name?: never;
-    });
+/** One complete logical key identity and its command modifiers. */
+export type TuiKey = TuiKeyModifiers &
+  (
+    | {
+        readonly name: TuiKeyName;
+        readonly character?: never;
+      }
+    | {
+        readonly character: string;
+        readonly name?: never;
+      }
+  );
 
 /**
- * Source-private bridge for the focus composables that are removed later in
- * Path 3. These supporting names must not remain package-root exports.
+ * Normalized application input.
+ *
+ * Text is insertion-ready and non-empty. A text event includes `key` only when
+ * the terminal also supplied reliable logical-key identity. Paste always
+ * contains one complete decoded bracketed-paste payload, including an empty
+ * payload. Key events contain no insertion text.
  */
-export type InputHandlerResult = void | { readonly preventDefault: true };
-export type InputHandler = (event: TuiInputEvent) => InputHandlerResult;
+export type TuiInputEvent =
+  | {
+      readonly type: "text";
+      readonly text: string;
+      readonly key?: TuiKey;
+    }
+  | {
+      readonly type: "key";
+      readonly key: TuiKey;
+      readonly text?: never;
+    }
+  | {
+      readonly type: "paste";
+      readonly text: string;
+      readonly key?: never;
+    };
 
-const publicInputCache = new WeakMap<NormalizedInputFact, TuiInputEvent | null>();
-
-const namedKeys = Object.freeze({
-  backspace: "backspace",
-  delete: "delete",
-  down: "down",
-  end: "end",
-  enter: "enter",
-  escape: "escape",
-  home: "home",
-  left: "left",
-  pagedown: "page-down",
-  pageup: "page-up",
+const namedKeyAliases = Object.freeze({
   return: "enter",
-  right: "right",
-  tab: "tab",
-  up: "up",
+  pageup: "page-up",
+  pagedown: "page-down",
   kpbackspace: "backspace",
   kpdelete: "delete",
   kpdown: "down",
   kpend: "end",
   kpenter: "enter",
   kphome: "home",
+  kpinsert: "insert",
   kpleft: "left",
   kppagedown: "page-down",
   kppageup: "page-up",
   kpright: "right",
   kpup: "up",
+  kp0: "keypad-0",
+  kp1: "keypad-1",
+  kp2: "keypad-2",
+  kp3: "keypad-3",
+  kp4: "keypad-4",
+  kp5: "keypad-5",
+  kp6: "keypad-6",
+  kp7: "keypad-7",
+  kp8: "keypad-8",
+  kp9: "keypad-9",
+  kpdecimal: "keypad-decimal",
+  kpdivide: "keypad-divide",
+  kpmultiply: "keypad-multiply",
+  kpsubtract: "keypad-subtract",
+  kpadd: "keypad-add",
+  kpequal: "keypad-equal",
+  kpseparator: "keypad-separator",
+  kpbegin: "keypad-begin",
+  capslock: "caps-lock",
+  scrolllock: "scroll-lock",
+  numlock: "num-lock",
+  printscreen: "print-screen",
+  mediaplay: "media-play",
+  mediapause: "media-pause",
+  mediaplaypause: "media-play-pause",
+  mediareverse: "media-reverse",
+  mediastop: "media-stop",
+  mediafastforward: "media-fast-forward",
+  mediarewind: "media-rewind",
+  mediatracknext: "media-track-next",
+  mediatrackprevious: "media-track-previous",
+  mediarecord: "media-record",
+  lowervolume: "lower-volume",
+  raisevolume: "raise-volume",
+  mutevolume: "mute-volume",
+  leftshift: "left-shift",
+  leftcontrol: "left-control",
+  leftalt: "left-alt",
+  leftsuper: "left-super",
+  lefthyper: "left-hyper",
+  leftmeta: "left-meta",
+  rightshift: "right-shift",
+  rightcontrol: "right-control",
+  rightalt: "right-alt",
+  rightsuper: "right-super",
+  righthyper: "right-hyper",
+  rightmeta: "right-meta",
+  isoLevel3Shift: "iso-level-3-shift",
+  isoLevel5Shift: "iso-level-5-shift",
 } as const satisfies Readonly<Record<string, TuiKeyName>>);
 
 const normalizeNamedKey = (name: string | undefined): TuiKeyName | undefined => {
   if (!name) return undefined;
-  return (namedKeys as Readonly<Record<string, TuiKeyName>>)[name];
+  const aliased = (namedKeyAliases as Readonly<Record<string, TuiKeyName>>)[name];
+  if (aliased) return aliased;
+
+  const normalized = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[_\s]+/g, "-")
+    .toLowerCase();
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) ? normalized : undefined;
 };
 
 const isOneUnicodeScalar = (value: string): boolean => {
@@ -89,7 +166,7 @@ const isOneUnicodeScalar = (value: string): boolean => {
   return !iterator.next().done && iterator.next().done === true;
 };
 
-const normalizeShortcutCharacter = (value: string | undefined): string | undefined => {
+const normalizeLogicalCharacter = (value: string | undefined): string | undefined => {
   if (!value || !isOneUnicodeScalar(value)) return undefined;
   const codepoint = value.codePointAt(0)!;
   if (codepoint >= 0x41 && codepoint <= 0x5a) return value.toLowerCase();
@@ -102,77 +179,89 @@ const hasLegacyEscapePrefixAlt = (
   if (fact.key.protocol !== "legacy" || !fact.key.modifiers.meta) return false;
   if (fact.sequence.startsWith("\x1b\x1b")) return true;
   // A legacy ESC-prefixed printable/control key has no parsed CSI/SS3 code.
-  // A single CSI carrying the explicit Meta bit does, and must stay filtered.
+  // A CSI carrying an explicit Meta bit does, and remains Meta.
   return fact.key.code === undefined;
 };
 
-const publicModifiers = (
+const projectModifiers = (
   fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
-): PublicKeyModifiers | undefined => {
+): TuiKeyModifiers => {
   const { modifiers } = fact.key;
   const legacyEscapeAlt = hasLegacyEscapePrefixAlt(fact);
-  if (modifiers.super || modifiers.hyper || (modifiers.meta && !legacyEscapeAlt)) {
-    return undefined;
-  }
   return {
     shift: modifiers.shift,
     alt: modifiers.alt || legacyEscapeAlt,
     ctrl: modifiers.ctrl,
+    meta: modifiers.meta && !legacyEscapeAlt,
+    super: modifiers.super,
+    hyper: modifiers.hyper,
   };
 };
 
-const shortcutCharacter = (
+const logicalCharacter = (
   fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
 ): string | undefined => {
   const { key } = fact;
-  if (key.protocol === "kitty") {
-    const codepoint = key.baseLayoutCodepoint ?? key.primaryCodepoint;
-    return codepoint === undefined
-      ? undefined
-      : normalizeShortcutCharacter(String.fromCodePoint(codepoint));
+  if (!key.printable) return undefined;
+
+  // Kitty's primary codepoint is logical identity. The optional base-layout
+  // codepoint is physical-layout metadata and deliberately stays private.
+  if (key.protocol === "kitty" && key.primaryCodepoint !== undefined) {
+    return normalizeLogicalCharacter(String.fromCodePoint(key.primaryCodepoint));
   }
   if (key.name === "space") return " ";
   if (key.name === "number") {
-    const scalars = Array.from(fact.sequence);
-    return normalizeShortcutCharacter(scalars.at(-1));
+    return normalizeLogicalCharacter(Array.from(fact.sequence).at(-1));
   }
-  return normalizeShortcutCharacter(key.name);
+  return normalizeLogicalCharacter(key.name);
 };
 
 const projectKey = (
   fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
-): TuiInputEvent | null => {
-  if (fact.key.phase === "release") return null;
-  const modifiers = publicModifiers(fact);
-  if (!modifiers) return null;
-
-  if (fact.key.printable && fact.key.text && !modifiers.ctrl && !modifiers.alt) {
-    return Object.freeze({ kind: "text", text: fact.key.text.value });
+): TuiKey | undefined => {
+  const modifiers = projectModifiers(fact);
+  const character = logicalCharacter(fact);
+  if (character !== undefined) {
+    return Object.freeze({ character, ...modifiers });
   }
 
   const name = normalizeNamedKey(fact.key.name);
-  if (name) return Object.freeze({ kind: "key", name, ...modifiers });
-  if (!fact.key.printable) return null;
-
-  const character = shortcutCharacter(fact);
-  return character ? Object.freeze({ kind: "key", character, ...modifiers }) : null;
+  return name === undefined ? undefined : Object.freeze({ name, ...modifiers });
 };
 
-/** Project one private normalized fact to the minimum public input union. */
+const publicInputCache = new WeakMap<NormalizedInputFact, TuiInputEvent | null>();
+
+/** Project one private normalized fact to the public text, key, or paste union. */
 export function projectPublicInputEvent(fact: NormalizedInputFact): TuiInputEvent | null {
   if (publicInputCache.has(fact)) return publicInputCache.get(fact)!;
 
   let event: TuiInputEvent | null;
   switch (fact.kind) {
-    case "key":
-      event = projectKey(fact);
+    case "paste":
+      event = Object.freeze({ type: "paste", text: fact.text });
       break;
     case "text":
-      event = fact.phase === "release" ? null : Object.freeze({ kind: "text", text: fact.text });
+      event =
+        fact.phase === "release" || fact.text.length === 0
+          ? null
+          : Object.freeze({ type: "text", text: fact.text });
       break;
-    case "paste":
-      event = Object.freeze({ kind: "paste", text: fact.text });
+    case "key": {
+      if (fact.key.phase === "release") {
+        event = null;
+        break;
+      }
+      const key = projectKey(fact);
+      const text = fact.key.text?.value;
+      if (text !== undefined && text.length > 0) {
+        event = Object.freeze(
+          key === undefined ? { type: "text", text } : { type: "text", text, key },
+        );
+      } else {
+        event = key === undefined ? null : Object.freeze({ type: "key", key });
+      }
       break;
+    }
     case "pointer":
     case "uninterpreted":
       event = null;
@@ -181,41 +270,4 @@ export function projectPublicInputEvent(fact: NormalizedInputFact): TuiInputEven
 
   publicInputCache.set(fact, event);
   return event;
-}
-
-const continuedDecision: InternalInputRouteDecision = Object.freeze({
-  performed: false,
-  continue: true,
-  preventDefault: false,
-  blockExternal: false,
-});
-const preventedDecision: InternalInputRouteDecision = Object.freeze({
-  performed: false,
-  continue: true,
-  preventDefault: true,
-  blockExternal: false,
-});
-
-const invalidResult = (): TypeError =>
-  new TypeError(
-    "useInput() handlers must synchronously return undefined or the exact object { preventDefault: true }.",
-  );
-
-/** Validate the one public default-control result and keep all routing private. */
-export function normalizeInputHandlerResult(result: unknown): InternalInputRouteDecision {
-  if (result === undefined) return continuedDecision;
-  if (
-    typeof result !== "object" ||
-    result === null ||
-    Object.getPrototypeOf(result) !== Object.prototype
-  ) {
-    throw invalidResult();
-  }
-
-  const keys = Reflect.ownKeys(result);
-  if (keys.length !== 1 || keys[0] !== "preventDefault") throw invalidResult();
-  if ((result as { readonly preventDefault?: unknown }).preventDefault !== true) {
-    throw invalidResult();
-  }
-  return preventedDecision;
 }

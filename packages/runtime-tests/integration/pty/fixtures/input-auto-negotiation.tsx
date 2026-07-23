@@ -7,8 +7,8 @@ const InputAutoNegotiation = defineComponent(() => {
   const observed: string[] = [];
 
   useInput((event) => {
-    if (event.kind !== "text") {
-      exit(new Error(`expected text input, received ${event.kind}`));
+    if (event.type !== "text") {
+      exit(new Error(`expected text input, received ${event.type}`));
       return;
     }
     observed.push(event.text);

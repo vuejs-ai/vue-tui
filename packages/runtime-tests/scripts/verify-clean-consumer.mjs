@@ -134,7 +134,8 @@ try {
     );
     writeFileSync(
       join(consumerDirectory, "consumer.ts"),
-      `import { computed, shallowRef } from "vue";
+      `import type { Readable } from "node:stream";
+import { computed, shallowRef } from "vue";
 import {
   Box,
   Text,
@@ -151,6 +152,8 @@ import {
   type MountOptions,
   type RenderToStringOptions,
   type TuiInputEvent,
+  type TuiKey,
+  type TuiKeyName,
   type TextProps,
   type UseFocusReturn,
   type UseStdinReturn,
@@ -163,17 +166,27 @@ import {
   type TestHostBridgeOptions,
 } from "@vue-tui/runtime/testing";
 import type { RenderResult, TestHost } from "@vue-tui/testing";
-import type { ComponentPublicInstance, MaybeRefOrGetter, Ref } from "vue";
+import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
   ? true
   : false;
 type Expect<T extends true> = T;
 type _ExactMountOptions = Expect<
-  Equal<keyof MountOptions, "stdout" | "stdin" | "stderr" | "mode" | "patchConsole">
+  Equal<
+    keyof MountOptions,
+    "stdout" | "stdin" | "stderr" | "mode" | "patchConsole" | "exitOnCtrlC"
+  >
 >;
 type _ExactStdinSurface = Expect<
-  Equal<UseStdinReturn, { readonly stdin: NodeJS.ReadStream }>
+  Equal<
+    UseStdinReturn,
+    {
+      readonly stdin: Readable;
+      readonly isRawModeSupported: boolean;
+      readonly setRawMode: (enabled: boolean) => void;
+    }
+  >
 >;
 type _ExactBoxProps = Expect<
   Equal<
@@ -237,11 +250,111 @@ type _ExactColor = Expect<
   >
 >;
 type _ExactRenderToStringOptions = Expect<Equal<keyof RenderToStringOptions, "columns">>;
-type _ExactHandlerInput = Expect<
+type _ExactKeyName = Expect<
   Equal<
-    Parameters<typeof useInput>[0],
-    (event: TuiInputEvent) => void | { readonly preventDefault: true }
+    TuiKeyName,
+    | "backspace"
+    | "tab"
+    | "enter"
+    | "escape"
+    | "insert"
+    | "delete"
+    | "up"
+    | "down"
+    | "left"
+    | "right"
+    | "home"
+    | "end"
+    | "page-up"
+    | "page-down"
+    | "f1"
+    | "f2"
+    | "f3"
+    | "f4"
+    | "f5"
+    | "f6"
+    | "f7"
+    | "f8"
+    | "f9"
+    | "f10"
+    | "f11"
+    | "f12"
+    | (string & {})
   >
+>;
+type ExpectedTuiKey = {
+  readonly shift: boolean;
+  readonly alt: boolean;
+  readonly ctrl: boolean;
+  readonly meta: boolean;
+  readonly super: boolean;
+  readonly hyper: boolean;
+} & (
+  | {
+      readonly name: TuiKeyName;
+      readonly character?: never;
+    }
+  | {
+      readonly character: string;
+      readonly name?: never;
+    }
+);
+type _ExactTuiKey = Expect<Equal<TuiKey, ExpectedTuiKey>>;
+type ExpectedTuiInputEvent =
+  | {
+      readonly type: "text";
+      readonly text: string;
+      readonly key?: TuiKey;
+    }
+  | {
+      readonly type: "key";
+      readonly key: TuiKey;
+      readonly text?: never;
+    }
+  | {
+      readonly type: "paste";
+      readonly text: string;
+      readonly key?: never;
+    };
+type _ExactTuiInputEvent = Expect<Equal<TuiInputEvent, ExpectedTuiInputEvent>>;
+const completeNamedKey: TuiKey = {
+  name: "enter",
+  shift: false,
+  alt: false,
+  ctrl: false,
+  meta: false,
+  super: false,
+  hyper: false,
+};
+const plainTextEvent: TuiInputEvent = { type: "text", text: "a" };
+const enhancedTextEvent: TuiInputEvent = {
+  type: "text",
+  text: "A",
+  key: {
+    character: "a",
+    shift: true,
+    alt: false,
+    ctrl: false,
+    meta: false,
+    super: false,
+    hyper: false,
+  },
+};
+const keyOnlyEvent: TuiInputEvent = { type: "key", key: completeNamedKey };
+const emptyPasteEvent: TuiInputEvent = { type: "paste", text: "" };
+void plainTextEvent;
+void enhancedTextEvent;
+void keyOnlyEvent;
+void emptyPasteEvent;
+// @ts-expect-error Key events require one complete nested key.
+const incompleteKeyEvent: TuiInputEvent = { type: "key", key: { name: "enter" } };
+// @ts-expect-error Paste cannot carry key evidence.
+const keyOnPasteEvent: TuiInputEvent = { type: "paste", text: "", key: completeNamedKey };
+void incompleteKeyEvent;
+void keyOnPasteEvent;
+type InputHandler = (event: TuiInputEvent) => void;
+type _ExactHandlerInput = Expect<
+  Equal<Parameters<typeof useInput>[0], MaybeRef<InputHandler>>
 >;
 type _ExactInputOptions = Expect<
   Equal<
@@ -275,6 +388,10 @@ type _ExactViewportHeight = Expect<
 type _ExactTestingBridge = Expect<
   Equal<ReturnType<typeof createTestHostBridge>, TestHostBridge>
 >;
+type _ExactTestHost = Expect<
+  Equal<keyof TestHost, "mode" | "stdin" | "stdout" | "patchConsole" | "exitOnCtrlC">
+>;
+const exitOnCtrlCTestHost: TestHost = { exitOnCtrlC: true };
 const observedTestFrame = (frame: TestContentFrame): void => {
   frame.dynamic;
   frame.staticOutput;
@@ -287,21 +404,41 @@ connectDevtools({
 });
 const active = shallowRef(true);
 const screen = shallowRef<"editor" | "confirm">("editor");
-const handler = (event: TuiInputEvent): void | { readonly preventDefault: true } => {
-  if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
+const handler: InputHandler = (event) => {
+  if ((event.type === "text" || event.type === "paste") && screen.value === "editor") {
     event.text;
     return;
   }
-  if (event.kind === "key" && event.name === "enter") {
+  if (event.type === "key" && event.key.name === "enter") {
     screen.value = screen.value === "editor" ? "confirm" : "editor";
   }
-  if (event.kind === "key" && event.character === "c" && event.ctrl) {
-    return { preventDefault: true };
+  if (event.type === "key" && event.key.character === "c" && event.key.ctrl) {
+    return;
   }
 };
 useInput(handler, { isActive: () => active.value });
+const liveHandler = shallowRef(handler);
+useInput(liveHandler);
+const futureKeyName: TuiKeyName = "media-fast-forward";
+void futureKeyName;
 // @ts-expect-error Parser packet metadata is not part of the public event.
 declare const removedSequence: TuiInputEvent["sequence"];
+// @ts-expect-error The public event discriminator is type, not kind.
+declare const removedKind: TuiInputEvent["kind"];
+// @ts-expect-error Paste is a tagged member rather than a second boolean.
+declare const removedIsPaste: TuiInputEvent["isPaste"];
+// @ts-expect-error Parser protocol is not part of logical key identity.
+declare const removedProtocol: TuiKey["protocol"];
+// @ts-expect-error Parser tokens are not public key names.
+declare const removedParserName: TuiKey["parserName"];
+// @ts-expect-error Codepoints remain private parser evidence.
+declare const removedCodepoint: TuiKey["codepoint"];
+// @ts-expect-error Base-layout identity remains private physical-layout evidence.
+declare const removedBaseLayout: TuiKey["baseLayout"];
+// @ts-expect-error Lock state is not a public command modifier.
+declare const removedCapsLock: TuiKey["capsLock"];
+// @ts-expect-error Releases are suppressed rather than exposed as a public phase.
+declare const removedPhase: TuiKey["phase"];
 
 const layoutWidth = useLayoutWidth();
 const viewportHeight = useViewportHeight();
@@ -362,14 +499,11 @@ void logicalBlurResult;
 void boxFocusResult;
 void boxBlurResult;
 useStdin().stdin;
-// @ts-expect-error Raw-mode control is internal to semantic input routes.
 useStdin().setRawMode(false);
-// @ts-expect-error Raw-mode availability is not part of the public stdin escape hatch.
 useStdin().isRawModeSupported;
 // @ts-expect-error The removed mount option must not survive in packaged declarations.
 const removedRawMode: MountOptions = { rawMode: "auto" };
-// @ts-expect-error Ctrl+C policy is expressed by an input result, not a mount option.
-const removedExitOnCtrlC: MountOptions = { exitOnCtrlC: false };
+const acceptedExitOnCtrlC: MountOptions = { exitOnCtrlC: true };
 // @ts-expect-error Runtime privately negotiates the keyboard protocol.
 const removedKittyKeyboard: MountOptions = { kittyKeyboard: { mode: "enabled" } };
 // @ts-expect-error Clipboard transport injection is application policy.
@@ -383,19 +517,13 @@ const packedRgbColor: Color = "#12abEF";
 // @ts-expect-error Runtime has one canonical gray spelling.
 const removedGreyColor: Color = "grey";
 useInput((_event) => {});
-useInput((_event) => ({ preventDefault: true }));
-// @ts-expect-error Handler refs are unnecessary; close over reactive state instead.
+// Handler results are ignored rather than controlling propagation or defaults.
+useInput((_event) => 42);
 useInput(shallowRef(handler));
 // @ts-expect-error Activation must resolve to a boolean.
 useInput(handler, { isActive: "yes" });
-// @ts-expect-error Input decisions are synchronous.
 useInput(async (_event) => undefined);
-// @ts-expect-error "continue" was removed; ordinary handlers return undefined.
-useInput((_event) => "continue");
-// @ts-expect-error "consume" bundled unrelated routing policy and was removed.
-useInput((_event) => "consume");
-// @ts-expect-error Runtime does not publish higher-level routing decisions.
-useInput((_event) => ({ action: "none", routing: "continue", defaultAction: "allow" }));
+useInput((_event) => ({ arbitrary: true }));
 // @ts-expect-error Parser-shaped handler aliases are not public.
 type _RemovedInputHandler = import("@vue-tui/runtime").InputHandler;
 // @ts-expect-error Route-result aliases are not public.
@@ -408,7 +536,7 @@ type _RemovedUseInputOptions = import("@vue-tui/runtime").UseInputOptions;
 type _RemovedTuiInputPhase = import("@vue-tui/runtime").TuiInputPhase;
 // @ts-expect-error Parser source and fidelity are not application facts.
 type _RemovedTuiInputSource = import("@vue-tui/runtime").TuiInputSource;
-// @ts-expect-error Key modifiers live directly on the finite key event.
+// @ts-expect-error Key modifiers live on the complete nested TuiKey.
 type _RemovedTuiInputModifiers = import("@vue-tui/runtime").TuiInputModifiers;
 // @ts-expect-error Availability is established by activating a subscription.
 type _RemovedUseInputAvailability = typeof import("@vue-tui/runtime").useInputAvailability;
@@ -448,6 +576,8 @@ type _RemovedKittyFlags = typeof import("@vue-tui/runtime").kittyFlags;
 type _RemovedKittyModifiers = typeof import("@vue-tui/runtime").kittyModifiers;
 // @ts-expect-error Key was replaced by TuiInputEvent.
 type _RemovedKey = import("@vue-tui/runtime").Key;
+// @ts-expect-error Runtime does not publish a second raw-input composable.
+type _RemovedUseRawInput = typeof import("@vue-tui/runtime").useRawInput;
 // @ts-expect-error Paste is a TuiInputEvent member, not a separate composable.
 type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
 // @ts-expect-error The separate paste options were removed with usePaste().
@@ -585,7 +715,8 @@ type _RemovedMouseTarget = import("@vue-tui/runtime").MouseTarget;
 // @ts-expect-error The mutable v1 event was removed.
 type _RemovedTuiMouseEvent = import("@vue-tui/runtime").TuiMouseEvent;
 void removedRawMode;
-void removedExitOnCtrlC;
+void acceptedExitOnCtrlC;
+void exitOnCtrlCTestHost;
 void removedKittyKeyboard;
 void removedClipboardMount;
 void packedColor;
@@ -640,11 +771,11 @@ export const InputProbe = defineComponent(() => {
   onMounted(() => focus.focus());
   useInput(
     (event) => {
-      if (event.kind === "key" && event.name === "enter") {
-        event.name.toUpperCase();
+      if (event.type === "key" && event.key.name === "enter") {
+        event.key.name.toUpperCase();
       }
-      if (event.kind === "key" && event.character === "c" && event.ctrl) {
-        return { preventDefault: true };
+      if (event.type === "key" && event.key.character === "c" && event.key.ctrl) {
+        event.key.character.toUpperCase();
       }
     },
     { isActive: focus.isFocused },
@@ -685,15 +816,17 @@ const mountedStdin = useStdin();
 onMounted(() => focus.focus());
 useInput(
   (event) => {
-    if ((event.kind === "text" || event.kind === "paste") && screen.value === "editor") {
+    if ((event.type === "text" || event.type === "paste") && screen.value === "editor") {
       event.text.toUpperCase();
-    } else if (event.kind === "key" && event.name === "enter") {
+    } else if (event.type === "key" && event.key.name === "enter") {
       screen.value = screen.value === "editor" ? "confirm" : "editor";
     }
   },
   { isActive: isFocused },
 );
 mountedStdin.stdin;
+mountedStdin.isRawModeSupported;
+mountedStdin.setRawMode(false);
 if (scrollBox.value) {
   const movementResults: readonly boolean[] = [
     scrollBox.value.scrollByLines(1),
@@ -705,8 +838,6 @@ if (scrollBox.value) {
   scrollBox.value.scrollToLine(2, true);
   void movementResults;
 }
-// @ts-expect-error Raw-mode control is not exposed by useStdin().
-mountedStdin.setRawMode(false);
 </script>
 
 <template>
@@ -801,6 +932,7 @@ for (const unsupportedSubpath of ["internal", "fullscreen"]) {
 }
 assert.equal("Static" in runtime, false);
 assert.equal("usePaste" in runtime, false);
+assert.equal("useRawInput" in runtime, false);
 assert.equal("useCursor" in runtime, false);
 assert.equal("useBoxMetrics" in runtime, false);
 assert.equal("measureElement" in runtime, false);
@@ -1039,11 +1171,16 @@ const Probe = defineComponent(() => {
   return () => h(Text, null, () => "probe");
 });
 const live = createApp(Probe);
-live.mount({ stdin, stdout, liveUpdates: false, patchConsole: false });
+live.mount({ stdin, stdout, liveUpdates: false, patchConsole: false, exitOnCtrlC: false });
 assert.equal(observedStdin.stdin, stdin);
-assert.deepEqual(Reflect.ownKeys(observedStdin), ["stdin"]);
-assert.equal("setRawMode" in observedStdin, false);
-assert.equal("isRawModeSupported" in observedStdin, false);
+assert.deepEqual(Reflect.ownKeys(observedStdin), [
+  "stdin",
+  "isRawModeSupported",
+  "setRawMode",
+]);
+assert.equal(observedStdin.isRawModeSupported, false);
+assert.equal(typeof observedStdin.setRawMode, "function");
+observedStdin.setRawMode(false);
 live.unmount();
 
 function assertRemovedMountOption(name, value, message) {
@@ -1061,7 +1198,6 @@ function assertRemovedMountOption(name, value, message) {
 }
 
 assertRemovedMountOption("rawMode", "always", /Mount option "rawMode" was removed/);
-assertRemovedMountOption("exitOnCtrlC", false, /Mount option "exitOnCtrlC" was removed/);
 assertRemovedMountOption(
   "kittyKeyboard",
   { mode: "enabled" },
@@ -1229,13 +1365,14 @@ const WithInput = defineComponent(() => {
   useInput(
     (event) => {
       events.push(event);
-      if (inputScreen.value === "editor" && event.kind === "text") {
+      if (inputScreen.value === "editor" && event.type === "text") {
         inputScreen.value = "confirm";
-      } else if (inputScreen.value === "confirm" && event.kind === "key" && event.name === "enter") {
+      } else if (
+        inputScreen.value === "confirm" &&
+        event.type === "key" &&
+        event.key.name === "enter"
+      ) {
         inputScreen.value = "editor";
-      }
-      if (event.kind === "key" && event.character === "c" && event.ctrl) {
-        return { preventDefault: true };
       }
     },
     { isActive: inputFocus.isFocused },
@@ -1250,39 +1387,52 @@ await active.stdin.write("\\r");
 await active.stdin.write("\\x03");
 assert.equal(events.length, 3);
 assert.deepEqual(events[0], {
-  kind: "text",
+  type: "text",
   text: "a",
 });
 assert.deepEqual(events[1], {
-  kind: "key",
-  name: "enter",
-  shift: false,
-  alt: false,
-  ctrl: false,
+  type: "key",
+  key: {
+    name: "enter",
+    shift: false,
+    alt: false,
+    ctrl: false,
+    meta: false,
+    super: false,
+    hyper: false,
+  },
 });
 assert.deepEqual(events[2], {
-  kind: "key",
-  character: "c",
-  shift: false,
-  alt: false,
-  ctrl: true,
+  type: "key",
+  key: {
+    character: "c",
+    shift: false,
+    alt: false,
+    ctrl: true,
+    meta: false,
+    super: false,
+    hyper: false,
+  },
 });
 assert.equal(events.every(Object.isFrozen), true);
+assert.equal(events.slice(1).every((event) => Object.isFrozen(event.key)), true);
 assert.equal(inputScreen.value, "editor");
 active.dispose();
 assert.equal(inputFocus.isFocused.value, false);
 assert.equal(active.terminal.rawMode.current, false);
 
-const InvalidResult = defineComponent(() => {
-  useInput(() => "consume");
-  return () => h(Text, null, () => "invalid");
+let ignoredResultDeliveries = 0;
+const IgnoredResult = defineComponent(() => {
+  useInput(() => {
+    ignoredResultDeliveries += 1;
+    return 42;
+  });
+  return () => h(Text, null, () => "ignored");
 });
-const invalidResult = await render(InvalidResult);
-await assert.rejects(
-  invalidResult.stdin.write("x"),
-  /handlers must synchronously return undefined or the exact object { preventDefault: true }/,
-);
-invalidResult.dispose();
+const ignoredResult = await render(IgnoredResult);
+await ignoredResult.stdin.write("x");
+assert.equal(ignoredResultDeliveries, 1);
+ignoredResult.dispose();
 `,
     );
 

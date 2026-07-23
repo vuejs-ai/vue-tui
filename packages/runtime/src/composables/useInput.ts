@@ -1,20 +1,38 @@
-import { inject, isRef, onScopeDispose, toValue, watch, type MaybeRefOrGetter } from "vue";
+import {
+  inject,
+  isRef,
+  onScopeDispose,
+  toValue,
+  unref,
+  watch,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+} from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
 import { isErrorInput, messageForNonError } from "../error-value.ts";
 import type { NormalizedInputFact } from "../io/normalized-input.ts";
-import {
-  normalizeInputHandlerResult,
-  projectPublicInputEvent,
-  type TuiInputEvent,
-} from "../io/public-input.ts";
+import { projectPublicInputEvent, type TuiInputEvent } from "../io/public-input.ts";
+import type { InternalInputRouteDecision } from "../io/input-route-policy.ts";
 import type { InternalInputApplicationGlobalRegistration } from "../io/input-route-runtime.ts";
 
-function validateHandler(
-  handler: unknown,
-): asserts handler is (event: TuiInputEvent) => void | { readonly preventDefault: true } {
+type InputHandler = (event: TuiInputEvent) => void;
+
+const continuedDecision: InternalInputRouteDecision = Object.freeze({
+  performed: false,
+  continue: true,
+  preventDefault: false,
+  blockExternal: false,
+});
+
+function validateHandler(handler: unknown): asserts handler is InputHandler {
   if (typeof handler !== "function") {
     throw new TypeError("useInput() handler must be a function");
   }
+}
+
+function validateHandlerSource(handler: unknown): asserts handler is MaybeRef<InputHandler> {
+  if (typeof handler === "function") return;
+  if (!isRef(handler)) validateHandler(handler);
 }
 
 function validateOptions(
@@ -42,12 +60,19 @@ function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
   return value;
 }
 
+/**
+ * Subscribe to normalized text, key, and paste input for the current app.
+ *
+ * A handler ref is resolved when each event arrives. Every active subscription
+ * receives the event; return values do not consume it or affect peer delivery.
+ */
 export function useInput(
-  handler: (event: TuiInputEvent) => void | { readonly preventDefault: true },
+  handler: MaybeRef<InputHandler>,
   options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
 ): void {
-  validateHandler(handler);
+  validateHandlerSource(handler);
   validateOptions(options);
+  const resolveHandler = typeof handler === "function" ? () => handler : () => unref(handler);
   const app = inject(AppContextKey);
   const stdin = inject(StdinContextKey);
   if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
@@ -62,8 +87,11 @@ export function useInput(
   function listener(fact: NormalizedInputFact) {
     try {
       const event = projectPublicInputEvent(fact);
-      if (!event) return normalizeInputHandlerResult(undefined);
-      return normalizeInputHandlerResult(handler(event));
+      if (!event) return continuedDecision;
+      const currentHandler = resolveHandler();
+      validateHandler(currentHandler);
+      currentHandler(event);
+      return continuedDecision;
     } catch (error) {
       const fatalError = isErrorInput(error) ? error : new Error(messageForNonError(error));
       application.exit(fatalError);

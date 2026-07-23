@@ -93,21 +93,23 @@ async function submit() {
 
 useInput((event) => {
   if (state.value === "approving") {
-    if (event.kind !== "key" || (event.name !== "enter" && event.name !== "escape")) return;
+    if (event.type !== "key" || (event.key.name !== "enter" && event.key.name !== "escape")) {
+      return;
+    }
     state.value = "streaming";
-    approvalResolve?.(event.name === "enter");
+    approvalResolve?.(event.key.name === "enter");
     approvalResolve = null;
     return;
   }
 
   if (state.value !== "idle") return;
-  if (event.kind === "text" || event.kind === "paste") {
+  if (event.type === "text" || event.type === "paste") {
     inputText.value += event.text;
     return;
   }
-  if (event.name === "backspace" || event.name === "delete") {
+  if (event.key.name === "backspace" || event.key.name === "delete") {
     inputText.value = inputText.value.slice(0, -1);
-  } else if (event.name === "enter") {
+  } else if (event.key.name === "enter") {
     void submit();
   }
 });

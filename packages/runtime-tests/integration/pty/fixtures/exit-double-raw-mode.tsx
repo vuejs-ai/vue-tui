@@ -1,11 +1,13 @@
 import process from "node:process";
-import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useApp, useInput, useStdin } from "@vue-tui/runtime";
 import { defineComponent, h, onMounted } from "vue";
 
 const App = defineComponent(() => {
   const { exit } = useApp();
+  useStdin().setRawMode(true);
+  useStdin().setRawMode(true);
   useInput((event) => {
-    if (event.kind === "text" && event.text === "q") {
+    if (event.type === "text" && event.text === "q") {
       exit();
     }
   });

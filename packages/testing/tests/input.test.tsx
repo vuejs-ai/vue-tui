@@ -20,9 +20,20 @@ test("input writes settle complete text and finite Escape ambiguity", async () =
     await result.stdin.write("\x1b");
 
     expect(events).toEqual([
-      { kind: "text", text: "a" },
-      { kind: "text", text: "b" },
-      { kind: "key", name: "escape", shift: false, alt: false, ctrl: false },
+      { type: "text", text: "a" },
+      { type: "text", text: "b" },
+      {
+        type: "key",
+        key: {
+          name: "escape",
+          shift: false,
+          alt: false,
+          ctrl: false,
+          meta: false,
+          super: false,
+          hyper: false,
+        },
+      },
     ]);
   } finally {
     result.dispose();
@@ -39,7 +50,7 @@ test("incomplete framing rejects without discarding bytes needed by a later writ
     expect(events).toEqual([]);
 
     await result.stdin.write("\x1b[201~");
-    expect(events).toEqual([{ kind: "paste", text: "partial" }]);
+    expect(events).toEqual([{ type: "paste", text: "partial" }]);
   } finally {
     result.dispose();
   }
@@ -53,7 +64,7 @@ test("split UTF-8 bytes use the production decoder and retain an incomplete scal
       "incomplete terminal protocol frame",
     );
     await result.stdin.write(Uint8Array.of(0x98, 0x80));
-    expect(events).toEqual([{ kind: "text", text: "😀" }]);
+    expect(events).toEqual([{ type: "text", text: "😀" }]);
   } finally {
     result.dispose();
   }
@@ -67,7 +78,7 @@ test("input writes fail while the modeled terminal is suspended", async () => {
     await expect(result.stdin.write("x")).rejects.toThrow("Test host bridge is suspended");
     await result.terminal.resume();
     await result.stdin.write("y");
-    expect(events).toEqual([{ kind: "text", text: "y" }]);
+    expect(events).toEqual([{ type: "text", text: "y" }]);
   } finally {
     result.dispose();
   }

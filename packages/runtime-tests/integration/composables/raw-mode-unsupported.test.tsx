@@ -68,9 +68,10 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
   return { error, unmount: () => app.unmount() };
 }
 
-test("useStdin exposes only the exact custom stream mounted into the application", () => {
+test("useStdin exposes the exact non-TTY stream without claiming raw-mode support", () => {
   const stdout = makeFakeWritable();
-  const stdin = makeNonTtyStdin();
+  const setRawModeCalls: boolean[] = [];
+  const stdin = makeNonTtyStdin(setRawModeCalls);
   let observed: ReturnType<typeof useStdin> | undefined;
   const App = defineComponent(() => {
     observed = useStdin();
@@ -81,11 +82,15 @@ test("useStdin exposes only the exact custom stream mounted into the application
   app.mount({ stdout, stdin });
   try {
     expect(observed?.stdin).toBe(stdin);
-    expect(Reflect.ownKeys(observed!)).toEqual(["stdin"]);
-    expect(observed).not.toHaveProperty("setRawMode");
-    expect(observed).not.toHaveProperty("isRawModeSupported");
+    expect(Reflect.ownKeys(observed!)).toEqual(["stdin", "isRawModeSupported", "setRawMode"]);
+    expect(observed?.isRawModeSupported).toBe(false);
+    expect(() => observed?.setRawMode(true)).toThrow(
+      "Raw mode is unavailable because the mounted stdin is not a controllable TTY.",
+    );
+    expect(() => observed?.setRawMode(false)).not.toThrow();
+    expect(setRawModeCalls).toEqual([]);
     expect(observed).not.toHaveProperty("acquireRawMode");
-    expect(observed).not.toHaveProperty("internal_routes");
+    expect(observed).not.toHaveProperty("internal_inputRouting");
   } finally {
     app.unmount();
     stdin.destroy();

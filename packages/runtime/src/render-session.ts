@@ -161,11 +161,6 @@ export function normalizeRequestedMode(options: object): RenderMode {
       'Mount option "rawMode" was removed; semantic input routes own terminal raw mode.',
     );
   }
-  if (hasOwn(options, "exitOnCtrlC")) {
-    throw new TypeError(
-      'Mount option "exitOnCtrlC" was removed; Ctrl+C is a delayed input default that handlers can prevent per event.',
-    );
-  }
   if (hasOwn(options, "kittyKeyboard")) {
     throw new TypeError(
       'Mount option "kittyKeyboard" was removed; Runtime privately negotiates the keyboard protocol required by public input facts.',
@@ -182,6 +177,12 @@ export function normalizeRequestedMode(options: object): RenderMode {
 export function validateLiveUpdates(value: unknown): boolean | undefined {
   if (value === undefined || typeof value === "boolean") return value;
   throw new TypeError('Mount option "liveUpdates" must be a boolean or undefined.');
+}
+
+export function validateExitOnCtrlC(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === "boolean") return value;
+  throw new TypeError('Mount option "exitOnCtrlC" must be a boolean or undefined.');
 }
 
 function positiveCellCount(value: unknown): number | null {

@@ -17,7 +17,7 @@ function chunksFrom(stream: NodeJS.WriteStream): string[] {
   return chunks;
 }
 
-test.each(["fullscreen", "alternateScreen", "interactive", "debug", "exitOnCtrlC"] as const)(
+test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
   "removed %s option fails before another mount option is read",
   (removedKey) => {
     const options = Object.defineProperty({ [removedKey]: undefined }, "stdout", {
@@ -29,6 +29,23 @@ test.each(["fullscreen", "alternateScreen", "interactive", "debug", "exitOnCtrlC
 
     const app = createApp(App);
     expect(() => app.mount(options as never)).toThrow(`Mount option "${removedKey}" was removed`);
+  },
+);
+
+test.each([null, 0, "true", {}, []])(
+  "invalid exitOnCtrlC %# fails before another mount option is read",
+  (exitOnCtrlC) => {
+    const options = Object.defineProperty({ exitOnCtrlC }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow(
+      'Mount option "exitOnCtrlC" must be a boolean or undefined',
+    );
   },
 );
 

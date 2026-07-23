@@ -1,4 +1,4 @@
-import { PassThrough } from "node:stream";
+import { PassThrough, type Readable } from "node:stream";
 import { defineComponent, inject, onUnmounted } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { Text, useInput, useStdin, type TuiInputEvent } from "../index.ts";
@@ -23,8 +23,8 @@ const continueRoute = (): InternalInputRouteDecision => ({
 });
 
 function publicEventLabel(event: TuiInputEvent): string {
-  if (event.kind === "text" || event.kind === "paste") return event.text;
-  return event.name ?? event.character;
+  if (event.type === "text" || event.type === "paste") return event.text;
+  return event.key.name ?? event.key.character;
 }
 
 function createStdin(): NodeJS.ReadStream {
@@ -197,7 +197,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     const stdout = createWritable();
     const stdoutChunks: string[] = [];
     stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk.toString()));
-    let observedStdin: NodeJS.ReadStream | undefined;
+    let observedStdin: Readable | undefined;
     let routing!: InternalInputRoutingRuntime;
     let selectRoute!: () => () => void;
     const semanticCalls: string[] = [];
@@ -784,10 +784,10 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     }
   });
 
-  test("isolates a modal and lets semantic routes prevent delayed defaults", async () => {
+  test("isolates a modal and keeps private semantic default prevention composable", async () => {
     const calls: string[] = [];
     const external: string[] = [];
-    let preventCtrlC = true;
+    let preventPaneDefault = true;
     const App = defineComponent(() => {
       const routing = requireRouting();
       useInput((event) => {
@@ -812,11 +812,11 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
             };
           }
           if (fact.kind === "key" && fact.key.name === "c" && fact.key.modifiers.ctrl) {
-            calls.push(`pane:ctrl-c:${preventCtrlC ? "prevent" : "allow"}`);
+            calls.push(`pane:ctrl-c:${preventPaneDefault ? "prevent" : "allow"}`);
             return {
               performed: true,
               continue: true,
-              preventDefault: preventCtrlC,
+              preventDefault: preventPaneDefault,
               blockExternal: false,
             };
           }
@@ -860,19 +860,23 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     const options = mountOptions(mode);
     const app = createApp(App);
     app.mount(options);
-    const exited = app.waitUntilExit();
 
-    options.stdin!.emit("data", "\x1b[15~");
-    options.stdin!.emit("data", "\x1b");
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    options.stdin!.emit("data", "\t");
-    options.stdin!.emit("data", "\x03");
-    options.stdin!.emit("data", "z");
-    preventCtrlC = false;
-    options.stdin!.emit("data", "\x03");
-    await exited;
+    try {
+      options.stdin!.emit("data", "\x1b[15~");
+      options.stdin!.emit("data", "\x1b");
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      options.stdin!.emit("data", "\t");
+      options.stdin!.emit("data", "\x03");
+      options.stdin!.emit("data", "z");
+      preventPaneDefault = false;
+      options.stdin!.emit("data", "\x03");
+    } finally {
+      app.unmount();
+      await app.waitUntilExit();
+    }
 
     expect(calls).toEqual([
+      "application-global:f5",
       "modal:\x1b[15~",
       "application-global:escape",
       "modal:\x1b",
@@ -888,7 +892,7 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
       "pane-default:\x03",
       "unmounted",
     ]);
-    expect(external).toEqual(["\t", "\x03", "z"]);
+    expect(external).toEqual(["\t", "\x03", "z", "\x03"]);
   });
 
   test("fails one application closed while shared stdin still reaches another", () => {

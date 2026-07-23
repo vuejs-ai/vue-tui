@@ -73,7 +73,7 @@ function makeTrackedStdout(
 }
 
 function inputText(event: TuiInputEvent): string | null {
-  return event.kind === "text" || event.kind === "paste" ? event.text : null;
+  return event.type === "text" || event.type === "paste" ? event.text : null;
 }
 
 function mountInputApp({

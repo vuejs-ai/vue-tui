@@ -7,7 +7,7 @@ export default defineComponent(() => {
   const showClock = shallowRef(true);
 
   useInput((event) => {
-    if (event.kind !== "text") return;
+    if (event.type !== "text") return;
     if (event.text === "c") {
       showClock.value = !showClock.value;
       return;

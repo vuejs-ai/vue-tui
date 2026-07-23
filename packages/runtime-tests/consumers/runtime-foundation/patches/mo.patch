@@ -1,5 +1,5 @@
 diff --git a/src/components/selector.vue b/src/components/selector.vue
-index f8d650e..0000000 100644
+index f8d650e..5c3e42e 100644
 --- a/src/components/selector.vue
 +++ b/src/components/selector.vue
 @@ -95,61 +95,61 @@ const footerText = computed(() =>
@@ -13,14 +13,14 @@ index f8d650e..0000000 100644
    }
 
 -  if (key.ctrl && input === 'c') {
-+  if (event.kind === 'key' && event.character === 'c' && event.ctrl) {
++  if (event.type === 'key' && event.key.character === 'c' && event.key.ctrl) {
      cancel()
 -    return
-+    return { preventDefault: true }
++    return
    }
 
 -  if (key.escape) {
-+  if (event.kind === 'key' && event.name === 'escape') {
++  if (event.type === 'key' && event.key.name === 'escape') {
      if (query.value) {
        query.value = ''
        resetCursor(listItems.value)
@@ -31,7 +31,7 @@ index f8d650e..0000000 100644
    }
 
 -  if (key.return) {
-+  if (event.kind === 'key' && event.name === 'enter') {
++  if (event.type === 'key' && event.key.name === 'enter') {
      if (currentPath.value) {
        state.value = 'succeed'
        selectedPath.value = currentPath.value
@@ -41,24 +41,24 @@ index f8d650e..0000000 100644
    }
 
 -  if (key.upArrow) {
-+  if (event.kind === 'key' && event.name === 'up') {
++  if (event.type === 'key' && event.key.name === 'up') {
      moveCursor(-1)
      return
    }
 
 -  if (key.downArrow) {
-+  if (event.kind === 'key' && event.name === 'down') {
++  if (event.type === 'key' && event.key.name === 'down') {
      moveCursor(1)
      return
    }
 
 -  if (key.tab) {
-+  if (event.kind === 'key' && event.name === 'tab') {
++  if (event.type === 'key' && event.key.name === 'tab') {
      return
    }
 
 -  if (key.backspace || key.delete) {
-+  if (event.kind === 'key' && (event.name === 'backspace' || event.name === 'delete')) {
++  if (event.type === 'key' && (event.key.name === 'backspace' || event.key.name === 'delete')) {
      const newQuery = query.value.slice(0, -1)
      query.value = newQuery
      resetCursor(newQuery ? searchItems(newQuery, groups, root) : listItems.value)
@@ -67,7 +67,7 @@ index f8d650e..0000000 100644
 
 -  if (input && !key.ctrl && !key.meta) {
 -    const newQuery = query.value + input
-+  if (event.kind === 'text' || event.kind === 'paste') {
++  if (event.type === 'text' || event.type === 'paste') {
 +    const newQuery = query.value + event.text
      query.value = newQuery
      resetCursor(searchItems(newQuery, groups, root))

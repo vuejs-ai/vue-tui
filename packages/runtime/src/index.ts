@@ -17,7 +17,7 @@ export type { TextProps } from "./components/text-props.ts";
 export { useApp, type UseAppReturn } from "./composables/useApp.ts";
 export { useFocus, type FocusTarget, type UseFocusReturn } from "./composables/useFocus.ts";
 export { useInput } from "./composables/useInput.ts";
-export type { TuiInputEvent, TuiKeyName } from "./io/public-input.ts";
+export type { TuiInputEvent, TuiKey, TuiKeyName } from "./io/public-input.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useLayoutWidth } from "./composables/use-layout-width.ts";
 export { useViewportHeight } from "./composables/use-viewport-height.ts";

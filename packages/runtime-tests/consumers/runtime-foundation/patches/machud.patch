@@ -1,5 +1,5 @@
 diff --git a/src/App.vue b/src/App.vue
-index 755dcd2..737cf12 100644
+index 755dcd2..d6682b2 100644
 --- a/src/App.vue
 +++ b/src/App.vue
 @@ -1,6 +1,6 @@
@@ -46,7 +46,7 @@ index 755dcd2..737cf12 100644
  const contentRows = computed(() => (width.value >= 100 ? WIDE_CONTENT_ROWS : NARROW_CONTENT_ROWS));
  // Centre vertically only when the viewport is genuinely taller than the content — a short terminal
  // keeps today's top-anchored layout and never clips.
-@@ -92,24 +93,19 @@ const effectiveMode = computed(() =>
+@@ -92,24 +93,20 @@ const effectiveMode = computed(() =>
  );
  watchEffect(() => setThemeMode(effectiveMode.value));
 
@@ -70,9 +70,10 @@ index 755dcd2..737cf12 100644
 -}
 +// Exit cleanly via the app lifecycle so the full-screen surface is restored on quit.
 +// String rendering provides inert app and input services, so this same setup also works for --once.
++// The interactive mount opts into Runtime's Ctrl+C exit policy below.
 +const { exit } = useApp();
 +useInput((event) => {
-+  if (event.kind !== "text") return;
++  if (event.type !== "text") return;
 +  if (event.text === "q") {
 +    exit();
 +    return;
@@ -84,7 +85,7 @@ index 755dcd2..737cf12 100644
  </script>
 
  <template>
-@@ -119,7 +115,7 @@ useInput((event) => {
+@@ -119,7 +116,7 @@ useInput((event) => {
    <Box
      flexDirection="column"
 -    :width="isLive ? columns : contentWidth"
@@ -93,7 +94,7 @@ index 755dcd2..737cf12 100644
      :alignItems="isLive ? 'center' : undefined"
      :justifyContent="framed ? 'center' : undefined"
    >
-@@ -148,7 +144,7 @@ useInput((event) => {
+@@ -148,7 +145,7 @@ useInput((event) => {
 
        <NarrowView v-else :m="m" />
 
@@ -305,7 +306,7 @@ index 4cf4504..569bb23 100644
    return Array.from({ length: n }, (_, i) => mix(dim, hex, n > 1 ? i / (n - 1) : 1));
  }
 diff --git a/src/main.ts b/src/main.ts
-index 215b2b3..ace2d93 100644
+index 215b2b3..6b4d224 100644
 --- a/src/main.ts
 +++ b/src/main.ts
 @@ -36,8 +36,8 @@ if (args.includes("--json")) {
@@ -317,7 +318,7 @@ index 215b2b3..ace2d93 100644
    // and restore the user's shell + scrollback on exit. Auto-ignored when not a
    // TTY, so piping still works.
 -  createApp(App).mount({ alternateScreen: true });
-+  createApp(App).mount({ mode: "fullscreen" });
++  createApp(App).mount({ mode: "fullscreen", exitOnCtrlC: true });
  }
 diff --git a/src/theme.ts b/src/theme.ts
 index edb529a..55f9fca 100644

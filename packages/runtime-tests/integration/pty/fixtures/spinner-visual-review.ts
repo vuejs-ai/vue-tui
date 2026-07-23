@@ -11,7 +11,7 @@ const App = defineComponent({
     const { exit } = useApp();
 
     useInput((event) => {
-      if (event.kind !== "text" || event.text !== "q") return;
+      if (event.type !== "text" || event.text !== "q") return;
       exit();
     });
 

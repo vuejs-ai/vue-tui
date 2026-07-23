@@ -7,7 +7,14 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import { shallowRef, type ComponentPublicInstance, type MaybeRefOrGetter, type Ref } from "vue";
+import type { Readable } from "node:stream";
+import {
+  shallowRef,
+  type ComponentPublicInstance,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+  type Ref,
+} from "vue";
 import {
   Box,
   Text,
@@ -27,6 +34,7 @@ import type {
   TextProps,
   MountOptions,
   TuiInputEvent,
+  TuiKey,
   TuiKeyName,
   TuiApp,
   UseAppReturn,
@@ -42,8 +50,10 @@ expectTypeOf(defaultMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(inlineMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf(fullscreenMountOptions).toMatchTypeOf<MountOptions>();
 expectTypeOf<keyof MountOptions>().toEqualTypeOf<
-  "stdout" | "stdin" | "stderr" | "mode" | "patchConsole"
+  "stdout" | "stdin" | "stderr" | "mode" | "patchConsole" | "exitOnCtrlC"
 >();
+expectTypeOf<MountOptions["exitOnCtrlC"]>().toEqualTypeOf<boolean | undefined>();
+const exitOnCtrlC: MountOptions = { exitOnCtrlC: true };
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -55,8 +65,6 @@ const removedInteractiveOption: MountOptions = { interactive: true };
 const removedDebugOption: MountOptions = { debug: true };
 // @ts-expect-error Semantic input routes own raw mode; there is no mount policy.
 const removedRawModeOption: MountOptions = { rawMode: "auto" };
-// @ts-expect-error Ctrl+C is an input default that handlers prevent per event, not a mount policy.
-const removedExitOnCtrlCOption: MountOptions = { exitOnCtrlC: false };
 // @ts-expect-error Runtime privately negotiates the keyboard protocol needed by public input facts.
 const removedKittyKeyboardOption: MountOptions = { kittyKeyboard: { mode: "enabled" } };
 // @ts-expect-error Only the two finite render-mode values are accepted.
@@ -74,7 +82,7 @@ void removedAlternateScreenOption;
 void removedInteractiveOption;
 void removedDebugOption;
 void removedRawModeOption;
-void removedExitOnCtrlCOption;
+void exitOnCtrlC;
 void removedKittyKeyboardOption;
 void invalidModeOption;
 void removedLiveUpdatesOption;
@@ -317,18 +325,28 @@ export type _UseCursorWasRemoved = typeof import("@vue-tui/runtime").useCursor;
 export type _CursorPositionWasRemoved = import("@vue-tui/runtime").CursorPosition;
 
 // Composable return types: named per VueUse's `UseXReturn` convention. useStdin() exposes
-// only the actual mounted stream; framework semantic routes own every raw-mode and protocol
-// operation through the private StdinContext.
+// the mounted base stream and one independently owned raw-mode hold without publishing
+// Runtime's normalized ingress, routing, or protocol machinery.
 expectTypeOf<UseStdinReturn>().toEqualTypeOf<{
-  readonly stdin: NodeJS.ReadStream;
+  readonly stdin: Readable;
+  readonly isRawModeSupported: boolean;
+  readonly setRawMode: (enabled: boolean) => void;
 }>();
 expectTypeOf<ReturnType<typeof useStdin>>().toEqualTypeOf<UseStdinReturn>();
-expectTypeOf<keyof ReturnType<typeof useStdin>>().toEqualTypeOf<"stdin">();
+expectTypeOf<keyof ReturnType<typeof useStdin>>().toEqualTypeOf<
+  "stdin" | "isRawModeSupported" | "setRawMode"
+>();
 declare const publicStdin: ReturnType<typeof useStdin>;
-// @ts-expect-error Public raw-mode control was removed; semantic routes own acquisition.
-publicStdin.setRawMode(false);
-// @ts-expect-error Raw-input availability belongs to the eventual semantic input API.
-void publicStdin.isRawModeSupported;
+expectTypeOf(publicStdin.stdin).toEqualTypeOf<Readable>();
+expectTypeOf(publicStdin.isRawModeSupported).toEqualTypeOf<boolean>();
+expectTypeOf(publicStdin.setRawMode(true)).toEqualTypeOf<void>();
+expectTypeOf(publicStdin.setRawMode(false)).toEqualTypeOf<void>();
+// @ts-expect-error The mounted stream reference is readonly.
+publicStdin.stdin = process.stdin;
+// @ts-expect-error Raw-mode capability is a readonly host fact.
+publicStdin.isRawModeSupported = false;
+// @ts-expect-error Each hook call owns its setter; callers cannot replace it.
+publicStdin.setRawMode = () => {};
 
 expectTypeOf<UseAppReturn>().toEqualTypeOf<{
   readonly exit: (error?: Error) => void;
@@ -398,81 +416,157 @@ export type _UseFocusScopeReturnWasRemoved = import("@vue-tui/runtime").UseFocus
 // @ts-expect-error External routing supporting types were removed with the policy API.
 export type _ExternalInputSourceWasRemoved = import("@vue-tui/runtime").ExternalInputSource;
 
-// Semantic input exposes only insertion text, complete paste, and a finite key fact.
+// Semantic input exposes insertion text, complete paste, and one nested logical-key fact.
 expectTypeOf<TuiKeyName>().toEqualTypeOf<
   | "backspace"
-  | "delete"
-  | "down"
-  | "end"
+  | "tab"
   | "enter"
   | "escape"
-  | "home"
-  | "left"
-  | "page-down"
-  | "page-up"
-  | "right"
-  | "tab"
+  | "insert"
+  | "delete"
   | "up"
+  | "down"
+  | "left"
+  | "right"
+  | "home"
+  | "end"
+  | "page-up"
+  | "page-down"
+  | "f1"
+  | "f2"
+  | "f3"
+  | "f4"
+  | "f5"
+  | "f6"
+  | "f7"
+  | "f8"
+  | "f9"
+  | "f10"
+  | "f11"
+  | "f12"
+  | (string & {})
 >();
-type ExpectedTuiInputEvent =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "paste"; readonly text: string }
+const suggestedKeyName: TuiKeyName = "page-down";
+const futureKeyName: TuiKeyName = "media-fast-forward";
+void suggestedKeyName;
+void futureKeyName;
+// @ts-expect-error Named keys are strings.
+const invalidKeyName: TuiKeyName = 1;
+void invalidKeyName;
+
+type ExpectedTuiKey = {
+  readonly shift: boolean;
+  readonly alt: boolean;
+  readonly ctrl: boolean;
+  readonly meta: boolean;
+  readonly super: boolean;
+  readonly hyper: boolean;
+} & (
   | {
-      readonly kind: "key";
       readonly name: TuiKeyName;
       readonly character?: never;
-      readonly shift: boolean;
-      readonly alt: boolean;
-      readonly ctrl: boolean;
     }
   | {
-      readonly kind: "key";
       readonly character: string;
       readonly name?: never;
-      readonly shift: boolean;
-      readonly alt: boolean;
-      readonly ctrl: boolean;
+    }
+);
+expectTypeOf<TuiKey>().toEqualTypeOf<ExpectedTuiKey>();
+
+type ExpectedTuiInputEvent =
+  | {
+      readonly type: "text";
+      readonly text: string;
+      readonly key?: TuiKey;
+    }
+  | {
+      readonly type: "key";
+      readonly key: TuiKey;
+      readonly text?: never;
+    }
+  | {
+      readonly type: "paste";
+      readonly text: string;
+      readonly key?: never;
     };
-expectTypeOf<TuiInputEvent>().toMatchTypeOf<ExpectedTuiInputEvent>();
-expectTypeOf<ExpectedTuiInputEvent>().toMatchTypeOf<TuiInputEvent>();
-expectTypeOf<Parameters<typeof useInput>[0]>().toEqualTypeOf<
-  (event: TuiInputEvent) => void | { readonly preventDefault: true }
->();
+expectTypeOf<TuiInputEvent>().toEqualTypeOf<ExpectedTuiInputEvent>();
+const completeNamedKey: TuiKey = {
+  name: "enter",
+  shift: false,
+  alt: false,
+  ctrl: false,
+  meta: false,
+  super: false,
+  hyper: false,
+};
+const plainTextEvent: TuiInputEvent = { type: "text", text: "a" };
+const enhancedTextEvent: TuiInputEvent = {
+  type: "text",
+  text: "A",
+  key: { ...completeNamedKey, name: "future-key", shift: true },
+};
+const keyOnlyEvent: TuiInputEvent = { type: "key", key: completeNamedKey };
+const emptyPasteEvent: TuiInputEvent = { type: "paste", text: "" };
+void plainTextEvent;
+void enhancedTextEvent;
+void keyOnlyEvent;
+void emptyPasteEvent;
+// @ts-expect-error A key event requires one complete nested key.
+const incompleteKeyEvent: TuiInputEvent = { type: "key", key: { name: "enter" } };
+// @ts-expect-error A key event never carries insertion text.
+const textOnKeyEvent: TuiInputEvent = { type: "key", key: completeNamedKey, text: "x" };
+// @ts-expect-error Paste carries only its decoded payload.
+const keyOnPasteEvent: TuiInputEvent = { type: "paste", text: "", key: completeNamedKey };
+void incompleteKeyEvent;
+void textOnKeyEvent;
+void keyOnPasteEvent;
+
+type InputHandler = (event: TuiInputEvent) => void;
+expectTypeOf<Parameters<typeof useInput>[0]>().toEqualTypeOf<MaybeRef<InputHandler>>();
 expectTypeOf<Parameters<typeof useInput>[1]>().toEqualTypeOf<
   { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
 >();
 
-const inputHandler = (event: TuiInputEvent): void | { readonly preventDefault: true } => {
-  if (event.kind === "key" && event.character === "c" && event.ctrl) {
-    return { preventDefault: true };
+const inputHandler: InputHandler = (event) => {
+  if (event.type === "key" && event.key.character === "c" && event.key.ctrl) {
+    return;
   }
 };
 const inputActive = shallowRef(true);
 useInput(inputHandler, { isActive: inputActive });
 useInput(inputHandler, { isActive: () => inputActive.value });
+const liveInputHandler = shallowRef(inputHandler);
+useInput(liveInputHandler);
 
 declare const inputEvent: TuiInputEvent;
-if (inputEvent.kind === "key") {
-  expectTypeOf(inputEvent.shift).toEqualTypeOf<boolean>();
-  expectTypeOf(inputEvent.alt).toEqualTypeOf<boolean>();
-  expectTypeOf(inputEvent.ctrl).toEqualTypeOf<boolean>();
-  if (inputEvent.name !== undefined) {
-    expectTypeOf(inputEvent.name).toEqualTypeOf<TuiKeyName>();
+if (inputEvent.type === "key") {
+  expectTypeOf(inputEvent.key.shift).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.key.alt).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.key.ctrl).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.key.meta).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.key.super).toEqualTypeOf<boolean>();
+  expectTypeOf(inputEvent.key.hyper).toEqualTypeOf<boolean>();
+  if (inputEvent.key.name !== undefined) {
+    expectTypeOf(inputEvent.key.name).toEqualTypeOf<TuiKeyName>();
   } else {
-    expectTypeOf(inputEvent.character).toEqualTypeOf<string>();
+    expectTypeOf(inputEvent.key.character).toEqualTypeOf<string>();
   }
   // @ts-expect-error Normalized key facts are readonly.
-  inputEvent.ctrl = false;
+  inputEvent.key.ctrl = false;
 } else {
   expectTypeOf(inputEvent.text).toEqualTypeOf<string>();
   // @ts-expect-error Normalized text and paste payloads are readonly.
   inputEvent.text = "replacement";
 }
+if (inputEvent.type === "text" && inputEvent.key) {
+  expectTypeOf(inputEvent.key).toEqualTypeOf<TuiKey>();
+}
 
 useInput(() => undefined);
-useInput(() => ({ preventDefault: true }));
-// @ts-expect-error Handler refs are unnecessary; close over a ref when callback identity is reactive.
-useInput(shallowRef(inputHandler));
+// Handler results are deliberately ignored rather than defining propagation or defaults.
+useInput(() => 42);
+useInput(async () => undefined);
+useInput(() => ({ arbitrary: true }));
 // @ts-expect-error Activation must resolve to a boolean.
 useInput(inputHandler, { isActive: "yes" });
 
@@ -488,7 +582,7 @@ export type _UseInputOptionsWasRemoved = import("@vue-tui/runtime").UseInputOpti
 export type _TuiInputPhaseWasRemoved = import("@vue-tui/runtime").TuiInputPhase;
 // @ts-expect-error Parser source/fidelity is not an application fact.
 export type _TuiInputSourceWasRemoved = import("@vue-tui/runtime").TuiInputSource;
-// @ts-expect-error Modifiers live directly on key events without another named type.
+// @ts-expect-error Modifiers live directly on TuiKey without another named type.
 export type _TuiInputModifiersWasRemoved = import("@vue-tui/runtime").TuiInputModifiers;
 type RuntimePublicModule = typeof import("@vue-tui/runtime");
 export type _UseInputAvailabilityWasRemoved =
@@ -503,10 +597,36 @@ export type _KittyFlagNameWasRemoved = import("@vue-tui/runtime").KittyFlagName;
 
 // @ts-expect-error Key was replaced by the normalized TuiInputEvent union.
 export type _LegacyKeyWasRemoved = import("@vue-tui/runtime").Key;
+// @ts-expect-error Raw terminal input remains available only through caller-owned stream listeners.
+export type _UseRawInputWasRemoved = typeof import("@vue-tui/runtime").useRawInput;
 // @ts-expect-error Paste is a TuiInputEvent member, so its separate options were removed.
 export type _UsePasteOptionsWereRemoved = import("@vue-tui/runtime").UsePasteOptions;
 // @ts-expect-error Paste is observed through useInput(), not a separate public composable.
 export type _UsePasteWasRemoved = typeof import("@vue-tui/runtime").usePaste;
+
+// Parser, transport, physical-layout, and phase evidence remains private.
+// @ts-expect-error The public discriminator is `type`, not the parser's old `kind`.
+export type _TuiInputKindWasRemoved = TuiInputEvent["kind"];
+// @ts-expect-error Paste is represented by the tagged member, not a second flag.
+export type _TuiInputIsPasteWasRemoved = TuiInputEvent["isPaste"];
+// @ts-expect-error Named identity is nested under `key`.
+export type _TuiInputFlatNameWasRemoved = TuiInputEvent["name"];
+// @ts-expect-error Raw sequences are not application input facts.
+export type _TuiInputSequenceWasRemoved = TuiInputEvent["sequence"];
+// @ts-expect-error Parser protocol is not part of logical key identity.
+export type _TuiKeyProtocolWasRemoved = TuiKey["protocol"];
+// @ts-expect-error Parser tokens are not public key names.
+export type _TuiKeyParserNameWasRemoved = TuiKey["parserName"];
+// @ts-expect-error Codepoints remain private parser evidence.
+export type _TuiKeyCodepointWasRemoved = TuiKey["codepoint"];
+// @ts-expect-error Base-layout identity is physical-layout metadata.
+export type _TuiKeyBaseLayoutWasRemoved = TuiKey["baseLayout"];
+// @ts-expect-error Raw terminal bytes do not live on logical keys.
+export type _TuiKeyRawSequenceWasRemoved = TuiKey["sequence"];
+// @ts-expect-error Lock state is not a public command modifier.
+export type _TuiKeyCapsLockWasRemoved = TuiKey["capsLock"];
+// @ts-expect-error Key phase is private; releases are suppressed.
+export type _TuiKeyPhaseWasRemoved = TuiKey["phase"];
 
 // Pointer targeting and routing remain private until a smaller Runtime-only primitive is proven.
 // @ts-expect-error The terminal-wide v1 mouse hook was removed.

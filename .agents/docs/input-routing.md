@@ -1,6 +1,6 @@
 # Normalized input and routing
 
-> **Status:** historical unstamped F3 routing record. The parser, serialized ingress, terminal-resource ownership, and Runtime Ctrl+C default remain implementation evidence. The previous candidate exposes only `useInput()` key/text/paste facts, `isActive`, and `{ preventDefault: true }`, but that exact event and control contract is Open in the [Runtime public API decision ledger](./runtime-public-api-decisions.md). Availability, focus/scopes, public propagation, external forwarding, and parser metadata are private in the current branch without being accepted as permanently excluded. The direct `useStdin().stdin` decision remains vouched.
+> **Status:** historical unstamped F3 routing record. The parser, serialized ingress, shared-stream ownership, and transactional input-resource mechanisms remain implementation evidence, but this document's public fact shapes, required route results, availability hook, focus/scopes, external forwarding, delayed Ctrl+C default, and stream-only stdin conclusion are superseded. The current branch exposes `type: "text" | "key" | "paste"` with nested `TuiKey`, broadcasts to active `useInput()` subscriptions while ignoring returns, defaults `MountOptions.exitOnCtrlC` to false, and returns complete independently owned raw-mode control from `useStdin()`. See the [vouched input event decision](./runtime-public-api-decisions.md#useinput-exposes-one-tagged-text-key-and-paste-event-contract), [delivery decision](./runtime-public-api-decisions.md#useinput-is-a-live-broadcast-subscription-without-propagation-results), and [low-level stdin decision](./runtime-public-api-decisions.md#usestdin-remains-a-complete-low-level-input-escape). The routing designs below remain historical evidence, not current authoring guidance.
 
 ## Product problem
 
@@ -152,6 +152,8 @@ A usage audit found that the first-party coding-agent journey, pinned `mo` at `6
 
 vue-tui guarantees that `useStdin().stdin` exposes the actual stdin stream mounted into the application. Bytes read from that stream carry no framework event semantics and are not guaranteed to compose safely with framework input routing. [VOUCHED @hyfdev 2026-07-12]
 
+**Current extension, 2026-07-24:** the vouched stream identity and unsafe-composition boundary above still hold, while the complete current `UseStdinReturn` also exposes `isRawModeSupported` and `setRawMode(enabled)`. Each hook call owns one idempotent raw-mode hold with automatic Vue-scope cleanup, independently of other hook calls and managed `useInput()` demand. Raw-only use starts no Runtime parser, encoding change, Kitty negotiation, or bracketed-paste reporting.
+
 The managed non-duplication guarantee is correspondingly scoped to vue-tui's semantic routes. A direct listener may observe user bytes, framework protocol replies, and paste wrappers before ownership is known; it does not participate in modal, focus, delayed-default, or external-owner priority and may duplicate or interfere with routed delivery. Stream mutation such as pausing, destroying, replaying, or changing decoding can also affect the framework ingress and remains outside the routing contract. Applications that need protocol-filtered semantic fallthrough use the selected external-owner route, so no second brokered channel is added. Removing the framework's public raw-mode operations does not remove this stream escape hatch: an application may still manipulate the actual stream directly, but that manipulation remains outside safe routing-composition guarantees.
 
 Whole-terminal handoff is a separate operation. Ink 7.1's `suspendTerminal()` and Bubble Tea's `ExecProcess` release framework input/output and terminal modes while an external program owns the terminal, then restore and redraw. They do not route an unhandled event to an embedded PTY while the outer application remains active.
@@ -172,9 +174,11 @@ Runtime closure Stage 2 proves this host contract through the exact issue #266 p
 
 ## Accepted public input contract
 
+> **Superseded public candidate:** this section records the unstamped F3/F4 contract implemented before the 2026-07-23 item review. Its `kind`, parser metadata, uninterpreted event, required `InputHandlerResult`, `useInputAvailability()`, public route attachments, preventable delayed Ctrl+C, and stream-only `useStdin()` are not current public APIs. The current contract is the smaller broadcast and low-level-stdin surface summarized in the status above.
+
 The source audit, issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250), issue [#266](https://github.com/vuejs-ai/vue-tui/issues/266), the first-party coding-agent and ScrollBox examples, pinned `mo` and `machud`, the two-mode workbench and nested-PTY journeys, and the reverified peer routes supplied the evidence for this contract. They did not determine one complete attachment API without also deciding F4's logical focus and target ownership. The maintainer accepted the five recommended choices together on 2026-07-13 without adding a VOUCHED stamp; the alternatives remain below only as decision history.
 
-### Evidence-backed current-API dispositions
+### Historical evidence-backed API dispositions
 
 - **Replace `useInput`.** The name may remain for the application-global hook, but the Ink-shaped `(input: string, key: Key) => void` signature and lossy `Key` type are removed directly. A normalized handler receives key, text, paste, or uninterpreted input and must return an explicit synchronous route result.
 - **Remove `usePaste`.** Paste is always one normalized fact. Any active semantic-input demand owns bracketed-paste negotiation, so listener presence can no longer change event classification or decide whether the terminal reports paste boundaries.

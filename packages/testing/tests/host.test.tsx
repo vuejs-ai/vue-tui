@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, Text, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
@@ -36,7 +37,7 @@ test("a selected route owns deterministic TTY input independently from final out
   const calls: string[] = [];
   const App = defineComponent(() => {
     useInput((event) => {
-      if (event.kind === "text") calls.push(event.text);
+      if (event.type === "text") calls.push(event.text);
     });
     return () => <Text>selected input</Text>;
   });
@@ -54,7 +55,7 @@ test("a selected route owns deterministic TTY input independently from final out
 
 test("a modeled non-TTY keeps direct stdin bytes available", async () => {
   const directCalls: string[] = [];
-  let physicalStdin: NodeJS.ReadStream | undefined;
+  let physicalStdin: Readable | undefined;
   const App = defineComponent(() => {
     physicalStdin = useStdin().stdin;
     return () => <Text>non-tty</Text>;
@@ -394,6 +395,7 @@ test.each([
   [{ host: { stdin: null } }, "render host stdin"],
   [{ host: { stdout: "file" } }, "render host stdout"],
   [{ host: { stdout: null } }, "render host stdout"],
+  [{ host: { exitOnCtrlC: "yes" } }, "render host exitOnCtrlC"],
   [{ host: { updates: "live" } }, 'Unknown render host option "updates"'],
   [{ host: { clipboard: "copied" } }, 'Unknown render host option "clipboard"'],
   [{ columns: 0 }, "render columns"],

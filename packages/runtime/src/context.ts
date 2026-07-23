@@ -22,6 +22,8 @@ export interface StdinContext {
   isRawModeSupported: boolean;
   readonly inputAvailability: Readonly<Ref<InputAvailability>>;
   internal_inputRouting: InternalInputRoutingRuntime;
+  /** Acquire one independently releasable public raw-mode hold. */
+  acquirePublicRawMode: () => () => void;
   /** Returns false when output capacity must reconcile before raw input can activate. */
   acquireRawMode: () => boolean | void;
   releaseRawMode: () => void;

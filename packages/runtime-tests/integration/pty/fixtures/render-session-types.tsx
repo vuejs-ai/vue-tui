@@ -4,10 +4,10 @@ import { Text, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runt
 export default defineComponent(() => {
   const width = useLayoutWidth();
   const viewportHeight = useViewportHeight();
-  const { stdin } = useStdin();
+  const { stdin, isRawModeSupported, setRawMode } = useStdin();
   void stdin;
-  // @ts-expect-error Raw-mode control is internal to semantic input demand.
-  useStdin().setRawMode(false);
+  void isRawModeSupported;
+  setRawMode(false);
 
   return () => (
     <Text>
