@@ -77,8 +77,6 @@ test.sequential("mount owns one beforeExit listener until unmount", async () => 
   app.unmount();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 
-  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
-    "waitUntilRenderFlush() is only available while the app is mounted",
-  );
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 });

@@ -58,21 +58,15 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
 
   async function settleRuntimeWork(activeApp: TuiApp): Promise<void> {
     await nextTick();
-    try {
-      await activeApp.waitUntilRenderFlush();
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "waitUntilRenderFlush() is only available while the app is mounted"
-      ) {
-        // Input may have requested a normal exit or triggered an application
-        // error. The exit barrier preserves that authoritative outcome instead
-        // of leaking the later flush-availability error through the test host.
-        await activeApp.waitUntilExit();
-        return;
-      }
-      throw error;
-    }
+    await activeApp.waitUntilRenderFlush();
+    // A resume/input operation may synchronously schedule Vue's error-exit
+    // turn after the render barrier it just completed. Let that already-queued
+    // lifecycle work settle without subscribing to any future application work.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // The flush barrier deliberately does not report lifecycle errors. Test
+    // operations still surface an exit they triggered through the authoritative
+    // app barrier, while a clean exit remains a successful operation.
+    if (isInactive()) await activeApp.waitUntilExit();
   }
 
   const observer: InternalRenderObserver = {
@@ -136,7 +130,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       try {
         const instance = targetApp.mount(resolvedOptions);
         app = targetApp;
-        ingress = getSharedStdinIngress(stdin);
+        ingress = getSharedStdinIngress(stdin as NodeJS.ReadStream);
         phase = "active";
         void targetApp.waitUntilExit().then(
           () => {
@@ -182,7 +176,11 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
         }
         phase = "active";
         await settleRuntimeWork(app);
-        if (!isInactive()) assertActive();
+        if (isInactive()) {
+          await app.waitUntilExit();
+          throw new Error("Test host bridge application is no longer mounted.");
+        }
+        assertActive();
       });
     },
   };

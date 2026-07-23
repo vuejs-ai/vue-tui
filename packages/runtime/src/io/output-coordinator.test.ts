@@ -74,7 +74,7 @@ describe("output coordinator", () => {
 
     expect(result).toMatchObject({ status: "accepted", writable: false });
     expect(chunks).toEqual(["abc"]);
-    expect(runtimeResourceTracker.snapshot().streamListeners).toBe(listenerBaseline + 3);
+    expect(runtimeResourceTracker.snapshot().streamListeners).toBe(listenerBaseline + 4);
     events.emit("drain");
     await readyOf(result);
     expect(runtimeResourceTracker.snapshot().streamListeners).toBe(listenerBaseline);
@@ -185,6 +185,21 @@ describe("output coordinator", () => {
     expect(coordinator.isBlocked()).toBe(false);
   });
 
+  test("settles and releases drain listeners when a blocked stream finishes", async () => {
+    const listenerBaseline = runtimeResourceTracker.snapshot().streamListeners;
+    const { stream, events } = createWritable([false]);
+    const onDeferredError = vi.fn();
+    const coordinator = createOutputCoordinator({ onDeferredError });
+    const result = coordinator.run(() => coordinator.write(stream, "a"));
+
+    events.emit("finish");
+
+    await expect(readyOf(result)).rejects.toThrow("ended before drain");
+    expect(onDeferredError).toHaveBeenCalledOnce();
+    expect(runtimeResourceTracker.snapshot().streamListeners).toBe(listenerBaseline);
+    expect(coordinator.isBlocked()).toBe(false);
+  });
+
   test("settles and releases drain listeners when a blocked stream errors", async () => {
     const listenerBaseline = runtimeResourceTracker.snapshot().streamListeners;
     const failure = new Error("stream failed");
@@ -221,6 +236,24 @@ describe("output coordinator", () => {
       writable: true,
     });
     expect(second.chunks).toEqual(["fresh"]);
+  });
+
+  test("abort still clears the gate when borrowed listener removal throws", async () => {
+    const listenerBaseline = runtimeResourceTracker.snapshot().streamListeners;
+    const { stream, events } = createWritable([false]);
+    const coordinator = createOutputCoordinator();
+    const result = coordinator.run(() => coordinator.write(stream, "blocked"));
+    const failure = new Error("reload abandoned output");
+    const originalOff = events.off.bind(events);
+    events.off = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
+      originalOff(event, listener);
+      throw new Error("hostile off");
+    }) as typeof events.off;
+
+    expect(() => coordinator.abort(failure)).not.toThrow();
+    await expect(readyOf(result)).rejects.toBe(failure);
+    expect(coordinator.isBlocked()).toBe(false);
+    expect(runtimeResourceTracker.snapshot().streamListeners).toBe(listenerBaseline);
   });
 
   test("stops handoff when a physical write synchronously aborts the transaction", () => {

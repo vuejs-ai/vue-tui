@@ -40,7 +40,7 @@ async function send(message) {
 try {
   let mountFailure;
   try {
-    app.mount({ patchConsole: false });
+    app.mount();
   } catch (error) {
     mountFailure = error;
   }

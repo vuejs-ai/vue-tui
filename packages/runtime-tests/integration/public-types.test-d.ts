@@ -7,9 +7,10 @@
 // `check:type` script). This file is named `*.test-d.ts` on purpose so vitest does NOT
 // pick it up as a runtime test (its include is `*.test.ts`), while tsc still checks it.
 import { expectTypeOf } from "vite-plus/test";
-import type { Readable } from "node:stream";
+import type { Readable, Writable } from "node:stream";
 import {
   shallowRef,
+  type App as VueApp,
   type ComponentPublicInstance,
   type MaybeRef,
   type MaybeRefOrGetter,
@@ -54,6 +55,21 @@ expectTypeOf<keyof MountOptions>().toEqualTypeOf<
 >();
 expectTypeOf<MountOptions["exitOnCtrlC"]>().toEqualTypeOf<boolean | undefined>();
 const exitOnCtrlC: MountOptions = { exitOnCtrlC: true };
+declare const nodeReadable: Readable;
+declare const nodeWritable: Writable;
+const baseStreamMountOptions: MountOptions = {
+  stdin: nodeReadable,
+  stdout: nodeWritable,
+  stderr: nodeWritable,
+};
+expectTypeOf<MountOptions["stdin"]>().toEqualTypeOf<Readable | undefined>();
+expectTypeOf<MountOptions["stdout"]>().toEqualTypeOf<Writable | undefined>();
+expectTypeOf<MountOptions["stderr"]>().toEqualTypeOf<Writable | undefined>();
+declare const webWritable: WritableStream;
+const rejectedWebWritable: MountOptions = {
+  // @ts-expect-error Web WritableStream uses a different writer and backpressure protocol.
+  stdout: webWritable,
+};
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -88,6 +104,8 @@ void invalidModeOption;
 void removedLiveUpdatesOption;
 void removedPresentationOption;
 void removedClipboardOption;
+void baseStreamMountOptions;
+void rejectedWebWritable;
 
 // @ts-expect-error Clipboard policy is outside the Runtime foundation.
 export type _UseClipboardWasRemoved = typeof import("@vue-tui/runtime").useClipboard;
@@ -354,6 +372,24 @@ expectTypeOf<UseAppReturn>().toEqualTypeOf<{
 expectTypeOf<ReturnType<typeof useApp>>().toEqualTypeOf<UseAppReturn>();
 expectTypeOf<ReturnType<TuiApp["waitUntilExit"]>>().toEqualTypeOf<Promise<void>>();
 expectTypeOf<ReturnType<TuiApp["waitUntilRenderFlush"]>>().toEqualTypeOf<Promise<void>>();
+expectTypeOf<TuiApp["config"]>().toEqualTypeOf<VueApp<unknown>["config"]>();
+expectTypeOf<TuiApp["runWithContext"]>().toEqualTypeOf<VueApp<unknown>["runWithContext"]>();
+expectTypeOf<TuiApp["onUnmount"]>().toEqualTypeOf<VueApp<unknown>["onUnmount"]>();
+expectTypeOf<TuiApp["unmount"]>().toEqualTypeOf<VueApp<unknown>["unmount"]>();
+expectTypeOf<TuiApp["version"]>().toEqualTypeOf<VueApp<unknown>["version"]>();
+declare const publicTuiApp: TuiApp;
+const chainedTuiApp = publicTuiApp.use({ install() {} });
+expectTypeOf(chainedTuiApp).toEqualTypeOf<TuiApp>();
+expectTypeOf(publicTuiApp.mixin({})).toEqualTypeOf<TuiApp>();
+expectTypeOf(publicTuiApp.component("PublicRoot", Text)).toEqualTypeOf<TuiApp>();
+expectTypeOf(publicTuiApp.directive("public", {})).toEqualTypeOf<TuiApp>();
+expectTypeOf(publicTuiApp.provide("answer", 42)).toEqualTypeOf<TuiApp>();
+// @ts-expect-error Chained Vue app methods retain the public projection.
+void chainedTuiApp._container;
+// @ts-expect-error Vue renderer internals are not part of the public TuiApp projection.
+export type _AppContainerWasRemoved = TuiApp["_container"];
+// @ts-expect-error Every underscore-prefixed Vue app field is private.
+export type _AppUidWasRemoved = TuiApp["_uid"];
 // @ts-expect-error Host flush is app-owner lifecycle, not an in-tree control.
 export type _UseAppFlushWasRemoved = UseAppReturn["waitUntilRenderFlush"];
 // @ts-expect-error Imperative frame clearing is not a stable app contract.

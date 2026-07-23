@@ -1,4 +1,11 @@
-import { defineComponent, h, inject, type Component, type PropType } from "vue";
+import {
+  defineComponent,
+  h,
+  inject,
+  type Component,
+  type ComponentPublicInstance,
+  type PropType,
+} from "vue";
 import Box from "./components/box.vue";
 import Text from "./components/text.vue";
 import { DevStateKey, type DevState } from "./hmr.ts";
@@ -58,6 +65,7 @@ const StatusLine = defineComponent({
 export function createDevOverlayWrapper(
   rootComponent: Component,
   rootProps?: Record<string, unknown>,
+  captureRoot?: (instance: ComponentPublicInstance | null) => void,
 ): Component {
   return defineComponent({
     name: "DevOverlay",
@@ -74,7 +82,7 @@ export function createDevOverlayWrapper(
         // slot" warning. This wrapper renders on EVERY dev session, so an array
         // here would surface that warning in the terminal on every dev boot.
         return h(Box, { flexDirection: "column", flexGrow: 1 }, () => [
-          h(Box, { flexGrow: 1 }, () => [h(rootComponent, rootProps)]),
+          h(Box, { flexGrow: 1 }, () => [h(rootComponent, { ...rootProps, ref: captureRoot })]),
           state.value.type === "update" ? h(StatusLine, { paths: state.value.paths }) : null,
         ]);
       };

@@ -47,6 +47,10 @@ interface TransactionState {
   failure: unknown;
 }
 
+type ListenerCleanupResult =
+  | { readonly failed: false }
+  | { readonly failed: true; readonly error: unknown };
+
 export interface OutputCoordinator {
   /** Whether one building, handed, or backpressured transaction owns the gate. */
   readonly isBlocked: () => boolean;
@@ -100,11 +104,12 @@ const acceptedWritable = Object.freeze({
  */
 export function createOutputCoordinator(options?: {
   readonly onDeferredError?: (error: unknown) => void;
+  readonly trackWrite?: (stream: NodeJS.WriteStream) => (error?: unknown) => void;
 }): OutputCoordinator {
   type State = "idle" | "building" | "backpressured";
   let state: State = "idle";
   let transaction: TransactionState | null = null;
-  let removeWaitListeners: (() => void) | null = null;
+  let removeWaitListeners: (() => ListenerCleanupResult) | null = null;
 
   function newTransaction(runOptions?: {
     readonly onFullyHanded?: () => void;
@@ -141,17 +146,23 @@ export function createOutputCoordinator(options?: {
     current.onUnhandedFailure?.(error);
   }
 
-  function detachWaitListeners(): void {
-    removeWaitListeners?.();
+  function detachWaitListeners(): ListenerCleanupResult {
+    const remove = removeWaitListeners;
     removeWaitListeners = null;
+    return remove?.() ?? { failed: false };
   }
 
   function finish(current: TransactionState): void {
     if (transaction !== current) return;
-    detachWaitListeners();
+    const cleanup = detachWaitListeners();
     transaction = null;
     state = "idle";
-    current.resolveReady();
+    if (cleanup.failed) {
+      current.rejectReady(cleanup.error);
+      options?.onDeferredError?.(cleanup.error);
+    } else {
+      current.resolveReady();
+    }
   }
 
   function fail(current: TransactionState, error: unknown, deferred: boolean): void {
@@ -174,9 +185,27 @@ export function createOutputCoordinator(options?: {
   }
 
   function callWrite(write: PendingWrite): boolean {
-    const writable = write.callback
-      ? write.stream.write(write.data, write.callback)
-      : write.stream.write(write.data);
+    const settleTrackedWrite = options?.trackWrite?.(write.stream);
+    let settled = false;
+    const complete = (error?: Error | null): void => {
+      if (settled) return;
+      settled = true;
+      settleTrackedWrite?.(error);
+      write.callback?.();
+    };
+    let writable: boolean;
+    try {
+      writable =
+        write.callback || settleTrackedWrite
+          ? write.stream.write(write.data, complete)
+          : write.stream.write(write.data);
+    } catch (error) {
+      if (!settled) {
+        settled = true;
+        settleTrackedWrite?.(error);
+      }
+      throw error;
+    }
     write.onHandoff?.();
     return writable;
   }
@@ -190,18 +219,36 @@ export function createOutputCoordinator(options?: {
   function waitForDrain(current: TransactionState, stream: NodeJS.WriteStream): void {
     const releases: (() => void)[] = [];
     let active = true;
-    const cleanup = () => {
-      if (!active) return;
+    const cleanup = (): ListenerCleanupResult => {
+      if (!active) return { failed: false };
       active = false;
-      stream.off("drain", onDrain);
-      stream.off("close", onClose);
-      stream.off("error", onError);
-      for (const release of releases) release();
+      let failed = false;
+      let firstError: unknown;
+      const runCleanup = (operation: () => void): void => {
+        try {
+          operation();
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            firstError = error;
+          }
+        }
+      };
+      runCleanup(() => stream.off("drain", onDrain));
+      runCleanup(() => stream.off("close", onClose));
+      runCleanup(() => stream.off("finish", onFinish));
+      runCleanup(() => stream.off("error", onError));
+      for (const release of releases) runCleanup(release);
+      return failed ? { failed: true, error: firstError } : { failed: false };
     };
     const onDrain = () => {
       if (!active || transaction !== current) return;
-      cleanup();
+      const listenerCleanup = cleanup();
       removeWaitListeners = null;
+      if (listenerCleanup.failed) {
+        fail(current, listenerCleanup.error, true);
+        return;
+      }
       pump(current);
     };
     const onClose = () => {
@@ -209,6 +256,12 @@ export function createOutputCoordinator(options?: {
       cleanup();
       removeWaitListeners = null;
       fail(current, new Error("Output stream closed before drain."), true);
+    };
+    const onFinish = () => {
+      if (!active || transaction !== current) return;
+      cleanup();
+      removeWaitListeners = null;
+      fail(current, new Error("Output stream ended before drain."), true);
     };
     const onError = (error: unknown) => {
       if (!active || transaction !== current) return;
@@ -219,6 +272,8 @@ export function createOutputCoordinator(options?: {
     stream.once("drain", onDrain);
     releases.push(acquireRuntimeResource("streamListeners"));
     stream.once("close", onClose);
+    releases.push(acquireRuntimeResource("streamListeners"));
+    stream.once("finish", onFinish);
     releases.push(acquireRuntimeResource("streamListeners"));
     stream.once("error", onError);
     releases.push(acquireRuntimeResource("streamListeners"));

@@ -29,7 +29,7 @@ function makeRawTrackingStdin(initialRaw = false): {
   return { stream, calls };
 }
 
-test.sequential("a failing terminal restore does not prevent the remaining leases from being released", () => {
+test.sequential("a failing terminal restore rejects with that failure after releasing remaining leases", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(stdout, { columns: 80, rows: 24, isTTY: true });
   const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -37,11 +37,12 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
   const writes: string[] = [];
   const originalWrite = stdout.write.bind(stdout);
   let failKittyDisable = true;
+  const restoreFailure = new Error("kitty restore failed");
   stdout.write = ((...args: unknown[]) => {
     const chunk = String(args[0]);
     writes.push(chunk);
     if (failKittyDisable && chunk.includes("\x1b[<u")) {
-      throw new Error("kitty restore failed");
+      throw restoreFailure;
     }
     return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
   }) as NodeJS.WriteStream["write"];
@@ -86,6 +87,10 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
     if (!exitListenersBefore.has(listener)) process.off("exit", listener);
   }
   stdout.removeAllListeners("resize");
+  const exitFailure = await app.waitUntilExit().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 
   expect(observed).toMatchObject({
     unmountError: undefined,
@@ -93,9 +98,10 @@ test.sequential("a failing terminal restore does not prevent the remaining lease
     rawMode: false,
     rawModeCalls: [true, false],
   });
+  expect(exitFailure).toBe(restoreFailure);
 });
 
-test.sequential("a failed bracketed-paste release is retried by controller disposal", () => {
+test.sequential("a failed bracketed-paste release is retried and still rejects with the first failure", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   Object.assign(stdout, { columns: 80, rows: 24, isTTY: true });
   const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -103,12 +109,13 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
   const writes: string[] = [];
   const originalWrite = stdout.write.bind(stdout);
   let failFirstPasteDisable = true;
+  const restoreFailure = new Error("bracketed paste restore failed");
   stdout.write = ((...args: unknown[]) => {
     const chunk = String(args[0]);
     writes.push(chunk);
     if (failFirstPasteDisable && chunk.includes("\x1b[?2004l")) {
       failFirstPasteDisable = false;
-      throw new Error("bracketed paste restore failed");
+      throw restoreFailure;
     }
     return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
   }) as NodeJS.WriteStream["write"];
@@ -129,6 +136,10 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
   } as InternalMountOptions);
 
   app.unmount();
+  const exitFailure = await app.waitUntilExit().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 
   expect({
     pasteDisableAttempts: writes.filter((chunk) => chunk.includes("\x1b[?2004l")).length,
@@ -139,4 +150,5 @@ test.sequential("a failed bracketed-paste release is retried by controller dispo
     rawMode: false,
     rawModeCalls: [true, false],
   });
+  expect(exitFailure).toBe(restoreFailure);
 });

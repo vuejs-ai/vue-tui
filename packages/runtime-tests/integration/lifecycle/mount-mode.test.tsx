@@ -146,7 +146,7 @@ test.each([
   expect(() => app.mount(options as never)).toThrow('mount option "clipboard"');
 });
 
-test("visual TTY without detected dimensions uses final stream output", async () => {
+test("Fullscreen without detected dimensions fails before output and remains retryable", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -155,27 +155,31 @@ test("visual TTY without detected dimensions uses final stream output", async ()
   delete (stdout as { rows?: number }).rows;
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-    liveUpdates: true,
-    [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-  } as InternalMountOptions);
+  expect(() =>
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      mode: "fullscreen",
+      liveUpdates: true,
+      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+    } as InternalMountOptions),
+  ).toThrow("Fullscreen mode requires positive terminal columns and rows");
+  expect(writes).toEqual([]);
+
+  Object.assign(stdout, { columns: 80, rows: 24 });
+  app.mount({ stdout, stdin, stderr, mode: "fullscreen", patchConsole: false });
 
   await nextTick();
   await app.waitUntilRenderFlush();
-  expect(writes.join("")).not.toContain("Hello");
-  expect(writes.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
-
+  expect(writes.join("")).toContain(ansiEscapes.enterAlternativeScreen);
   app.unmount();
   await app.waitUntilExit();
   expect(writes.join("")).toContain("Hello");
-  expect(writes.join("")).not.toContain(ansiEscapes.exitAlternativeScreen);
+  expect(writes.join("")).toContain(ansiEscapes.exitAlternativeScreen);
 });
 
-test("a partial custom TTY size never borrows dimensions from the process terminal", async () => {
+test("a partial custom TTY size fails instead of borrowing process dimensions", async () => {
   const stdout = makeFakeWritable({ columns: 140, rows: 40 });
   const stderr = makeFakeWritable({ columns: 80, rows: 24 });
   const { stream: stdin } = makeFakeStdin();
@@ -183,17 +187,15 @@ test("a partial custom TTY size never borrows dimensions from the process termin
   delete (stdout as { rows?: number }).rows;
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-  });
+  expect(() => app.mount({ stdout, stdin, stderr, mode: "fullscreen" })).toThrow(
+    "Fullscreen mode requires positive terminal columns and rows",
+  );
+  expect(writes).toEqual([]);
 
-  await nextTick();
+  Object.assign(stdout, { rows: 40 });
+  app.mount({ stdout, stdin, stderr, mode: "fullscreen", patchConsole: false });
   await app.waitUntilRenderFlush();
-  expect(writes.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(writes.join("")).not.toContain("Hello");
+  expect(writes.join("")).toContain(ansiEscapes.enterAlternativeScreen);
 
   app.unmount();
   await app.waitUntilExit();

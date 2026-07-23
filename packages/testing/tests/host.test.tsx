@@ -19,7 +19,7 @@ test("stream omission selects production final-output cadence", async () => {
   const result = await render(() => <Text>stream</Text>, {
     columns: 72,
     rows: 16,
-    host: { stdout: "stream", mode: "fullscreen" },
+    host: { stdout: "stream", mode: "inline" },
   });
 
   expect(result.lastFrame()).toBe("stream");
@@ -172,7 +172,7 @@ test("modeled stream restores input modes without manufacturing a terminal surfa
     return () => <Text>stream</Text>;
   });
   const result = await render(App, {
-    host: { stdout: "stream", mode: "fullscreen" },
+    host: { stdout: "stream", mode: "inline" },
   });
 
   expect(result.terminal.rawMode.current).toBe(true);

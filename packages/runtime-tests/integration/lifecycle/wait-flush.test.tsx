@@ -97,7 +97,7 @@ test("waitUntilRenderFlush flushes pending throttled render", async () => {
   await app.waitUntilExit();
 });
 
-test("waitUntilRenderFlush resolves when stdout is not writable", async () => {
+test("waitUntilRenderFlush remains non-reporting when stdout becomes unwritable", async () => {
   const msg = shallowRef("Hello");
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
@@ -114,11 +114,15 @@ test("waitUntilRenderFlush resolves when stdout is not writable", async () => {
   msg.value = "World";
   await nextTick();
   (stdout as NodeJS.WriteStream & { writable?: boolean }).writable = false;
-  await app.waitUntilRenderFlush();
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
   expect(getContentWrites(writes).some((w) => stripAnsi(w).includes("World"))).toBe(false);
 
-  app.unmount();
-  await app.waitUntilExit();
+  await expect(app.waitUntilExit()).rejects.toThrow(
+    "Runtime output stream became unwritable before exit settlement.",
+  );
+  stdout.destroy();
+  stderr.destroy();
+  stdin.destroy();
 });
 
 test("waitUntilExit waits for stdout barrier when only writableLength is exposed", async () => {
@@ -148,6 +152,9 @@ test("waitUntilExit waits for stdout barrier when only writableLength is exposed
       return true;
     },
     on() {
+      return this;
+    },
+    once() {
       return this;
     },
     off() {
@@ -245,7 +252,7 @@ test("waitUntilRenderFlush waits for all concurrent waiters on the same rerender
   app.unmount();
 });
 
-test("waitUntilRenderFlush rejects after unmount", async () => {
+test("waitUntilRenderFlush resolves immediately after unmount", async () => {
   const App = defineComponent(() => () => <Text>Hello</Text>);
   const app = createApp(App);
   const stdout = makeFakeWritable();
@@ -255,9 +262,7 @@ test("waitUntilRenderFlush rejects after unmount", async () => {
 
   app.unmount();
   await app.waitUntilExit();
-  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
-    "waitUntilRenderFlush() is only available while the app is mounted",
-  );
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
 });
 
 test("waitUntilExit waits for the unmount write callback", async () => {
@@ -282,7 +287,7 @@ test("waitUntilExit waits for the unmount write callback", async () => {
   expect(didUnmountWriteCallbackFire).toBe(true);
 });
 
-test("waitUntilRenderFlush rejects after exit with error", async () => {
+test("waitUntilRenderFlush remains non-reporting after exit with error", async () => {
   let exitFn!: (err: Error) => void;
   const App = defineComponent(() => {
     const { exit } = useApp();
@@ -301,9 +306,7 @@ test("waitUntilRenderFlush rejects after exit with error", async () => {
   await nextTick();
   exitFn(new Error("boom"));
   await expect(app.waitUntilExit()).rejects.toThrow("boom");
-  await expect(app.waitUntilRenderFlush()).rejects.toThrow(
-    "waitUntilRenderFlush() is only available while the app is mounted",
-  );
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
 });
 
 // Port of Ink render.tsx:1528-1562 ("issue 596: useEffect can run before the

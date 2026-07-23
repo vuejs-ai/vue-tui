@@ -156,9 +156,15 @@ test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga
 
   // (1) mount() rethrows the setWidth error.
   const app1 = createApp(App);
+  const exited = app1.waitUntilExit().then(
+    () => ({ kind: "resolved" as const, error: undefined }),
+    (error: unknown) => ({ kind: "rejected" as const, error }),
+  );
   expect(() =>
     app1.mount({ stdout, stdin, stderr, liveUpdates: false } as InternalMountOptions),
-  ).toThrow("YOGA_SET_WIDTH_FAILED");
+  ).toThrow(widthError);
+  const outcome = await exited;
+  expect(outcome).toEqual({ kind: "rejected", error: widthError });
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   restore();

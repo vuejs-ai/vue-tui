@@ -134,11 +134,12 @@ try {
     );
     writeFileSync(
       join(consumerDirectory, "consumer.ts"),
-      `import type { Readable } from "node:stream";
-import { computed, shallowRef } from "vue";
+      `import type { Readable, Writable } from "node:stream";
+import { computed, defineComponent, shallowRef } from "vue";
 import {
   Box,
   Text,
+  createApp,
   useBoxSize,
   useFocus,
   useInput,
@@ -154,6 +155,7 @@ import {
   type TuiInputEvent,
   type TuiKey,
   type TuiKeyName,
+  type TuiApp,
   type TextProps,
   type UseFocusReturn,
   type UseStdinReturn,
@@ -178,6 +180,46 @@ type _ExactMountOptions = Expect<
     "stdout" | "stdin" | "stderr" | "mode" | "patchConsole" | "exitOnCtrlC"
   >
 >;
+type _NoPrivateContainer = Expect<Equal<"_container" extends keyof TuiApp ? true : false, false>>;
+type _NoPrivateUid = Expect<Equal<"_uid" extends keyof TuiApp ? true : false, false>>;
+type _VersionSpecificOnUnmount = Expect<
+  Equal<"onUnmount" extends keyof TuiApp ? true : false, ${supportsUseTemplateRef}>
+>;
+declare const nodeReadable: Readable;
+declare const nodeWritable: Writable;
+const baseStreamMount: MountOptions = {
+  stdin: nodeReadable,
+  stdout: nodeWritable,
+  stderr: nodeWritable,
+};
+declare const webReadable: ReadableStream;
+declare const webWritable: WritableStream;
+// @ts-expect-error Web streams require explicit outside adaptation.
+const rejectedWebReadable: MountOptions = { stdin: webReadable };
+// @ts-expect-error Web streams require explicit outside adaptation.
+const rejectedWebWritable: MountOptions = { stdout: webWritable };
+const PublicRoot = defineComponent(() => () => null);
+const publicApp: TuiApp = createApp(PublicRoot, { answer: 42 });
+const chainedPublicApp = publicApp.use({ install() {} });
+type _ChainedNoPrivateContainer = Expect<
+  Equal<"_container" extends keyof typeof chainedPublicApp ? true : false, false>
+>;
+publicApp.provide("answer", 42);
+publicApp.config.errorHandler = () => {};
+publicApp.component("PublicRoot", PublicRoot);
+publicApp.directive("public", {});
+publicApp.runWithContext(() => 42);
+publicApp.unmount;
+publicApp.version;
+${supportsUseTemplateRef ? "publicApp.onUnmount(() => {});" : "// @ts-expect-error Vue 3.4 does not publish App.onUnmount().\npublicApp.onUnmount(() => {});"}
+const publicRenderBarrier: Promise<void> = publicApp.waitUntilRenderFlush();
+const publicExitBarrier: Promise<void> = publicApp.waitUntilExit();
+const publicRootInstance: ComponentPublicInstance = publicApp.mount(baseStreamMount);
+void publicRootInstance;
+void publicRenderBarrier;
+void publicExitBarrier;
+void rejectedWebReadable;
+void rejectedWebWritable;
 type _ExactStdinSurface = Expect<
   Equal<
     UseStdinReturn,
@@ -1171,7 +1213,9 @@ const Probe = defineComponent(() => {
   return () => h(Text, null, () => "probe");
 });
 const live = createApp(Probe);
-live.mount({ stdin, stdout, liveUpdates: false, patchConsole: false, exitOnCtrlC: false });
+await live.waitUntilRenderFlush();
+live.mount({ stdin, stdout, patchConsole: false, exitOnCtrlC: false });
+await live.waitUntilRenderFlush();
 assert.equal(observedStdin.stdin, stdin);
 assert.deepEqual(Reflect.ownKeys(observedStdin), [
   "stdin",
@@ -1181,7 +1225,10 @@ assert.deepEqual(Reflect.ownKeys(observedStdin), [
 assert.equal(observedStdin.isRawModeSupported, false);
 assert.equal(typeof observedStdin.setRawMode, "function");
 observedStdin.setRawMode(false);
+const liveExit = live.waitUntilExit();
 live.unmount();
+await liveExit;
+await live.waitUntilRenderFlush();
 
 function assertRemovedMountOption(name, value, message) {
   let stdoutRead = false;

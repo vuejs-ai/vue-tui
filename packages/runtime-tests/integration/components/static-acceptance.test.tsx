@@ -66,14 +66,9 @@ const acceptanceHosts = [
     options: { mode: "inline", liveUpdates: false } satisfies Partial<InternalMountOptions>,
   },
   {
-    name: "Fullscreen request with final non-TTY output",
+    name: "live non-TTY",
     isTTY: false,
-    options: { mode: "fullscreen", liveUpdates: false } satisfies Partial<InternalMountOptions>,
-  },
-  {
-    name: "Fullscreen request with live non-TTY output",
-    isTTY: false,
-    options: { mode: "fullscreen", liveUpdates: true } satisfies Partial<InternalMountOptions>,
+    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptions>,
   },
 ] as const;
 
@@ -367,13 +362,19 @@ test("Static inserted while Fullscreen is suspended rejects before surface or in
 
     showStatic.value = true;
     await nextTick();
-    const exited = expect(result.waitUntilExit()).rejects.toThrow(
-      "<Static> cannot render on an effective visual Fullscreen surface",
+    const exited = result.waitUntilExit().then(
+      () => ({ kind: "resolved" as const, error: undefined }),
+      (error: unknown) => ({ kind: "rejected" as const, error }),
     );
     await expect(result.terminal.resume()).rejects.toThrow(
       "<Static> cannot render on an effective visual Fullscreen surface",
     );
-    await exited;
+    const outcome = await exited;
+    expect(outcome.kind).toBe("rejected");
+    expect(outcome.error).toBeInstanceOf(Error);
+    expect((outcome.error as Error).message).toContain(
+      "<Static> cannot render on an effective visual Fullscreen surface",
+    );
     expect(result.frames.length).toBe(framesBeforeSuspend);
     expect(result.terminal.rawMode.history).toEqual([true, false]);
     expect(result.terminal.rawMode.current).toBe(false);

@@ -47,7 +47,7 @@ const unboundedLiveCases: readonly {
     options: {
       columns: 80,
       rows: 24,
-      host: { mode: "fullscreen", stdout: "stream" },
+      host: { mode: "inline", stdout: "stream" },
     },
   },
 ];
@@ -89,7 +89,7 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
       stdout,
       stderr,
       stdin,
-      mode: "fullscreen",
+      mode: "inline",
       liveUpdates: true,
       maxFps: 0,
       patchConsole: false,
@@ -107,7 +107,7 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
   }
 });
 
-test("disabling live updates makes the visual layout unbounded even when terminal rows are known", async () => {
+test("Fullscreen remains bounded when liveUpdates is false", async () => {
   const stdout = makePublicTty(80, 24);
   const stderr = makePublicTty(80, 24);
   const stdin = makePublicStdin();
@@ -132,7 +132,7 @@ test("disabling live updates makes the visual layout unbounded even when termina
     } as InternalMountOptions);
 
     expect(width!.value).toBe(80);
-    expect(viewportHeight).toBeNull();
+    expect(viewportHeight!.value).toBe(24);
   } finally {
     app.unmount();
     await app.waitUntilExit();

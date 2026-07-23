@@ -113,7 +113,7 @@ interface TestHost {
 
 These controls model production facts rather than setting unrelated internal booleans. In particular:
 
-- a Fullscreen request on stream stdout has no effective terminal mode;
+- a Fullscreen request on stream stdout is rejected before component setup or terminal mutation;
 - TTY output updates live, while stream output follows Runtime's monotonic document policy.
 
 The test host has no screen-reader presentation selector. It models only supported Runtime hosts; the removed ARIA and transcript experiment is not available through a hidden testing-only option. `patchConsole` remains an explicit opt-in while its public Runtime contract is reviewed independently.
@@ -225,12 +225,12 @@ Each `stdin.write()` must end on a complete input boundary. A lone Escape and ot
 
 ### Lifecycle methods
 
-| Method                   | Behavior                                                                                              |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `unmount()`              | Tears down the application; the emulator remains available for immediate restoration assertions       |
-| `dispose()`              | Idempotently unmounts, removes the host from automatic cleanup, and releases streams and the emulator |
-| `waitUntilExit()`        | Settles with the application exit result and rejects for `exit(error)`                                |
-| `waitUntilRenderFlush()` | Waits for the runtime render queue and pending emulator writes                                        |
+| Method                   | Behavior                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `unmount()`              | Tears down the application; the emulator remains available for immediate restoration assertions                                     |
+| `dispose()`              | Idempotently unmounts, removes the host from automatic cleanup, and releases streams and the emulator after Runtime exit settlement |
+| `waitUntilExit()`        | Settles with the application exit result and rejects for `exit(error)`                                                              |
+| `waitUntilRenderFlush()` | Waits for the runtime render queue and pending emulator writes                                                                      |
 
 After `dispose()`, retained content facts such as `frames`, `lastFrame()`, and terminal dimension getters remain readable. Operations that require the live test host—`screen()`, input, resize, `suspend()`, `resume()`, render flush, and exit flushing—reject with `Test host has been disposed.`. `unmount()` and `dispose()` remain safe to call again.
 

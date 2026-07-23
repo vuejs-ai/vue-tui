@@ -52,7 +52,7 @@ test("alternate screen - disabled by default", async () => {
   expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
 });
 
-test("alternate screen - ignored when non-interactive", async () => {
+test("alternate screen - Fullscreen stays live when liveUpdates is false", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();
 
@@ -71,53 +71,55 @@ test("alternate screen - ignored when non-interactive", async () => {
   await exited;
 
   const output = stdout.chunks.join("");
-  expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
+  expect(output).toContain(ansiEscapes.enterAlternativeScreen);
+  expect(output).toContain(ansiEscapes.exitAlternativeScreen);
 });
 
-test("alternate screen - ignored when isTTY is false", async () => {
+test("alternate screen - Fullscreen rejects a non-TTY before output", () => {
   const stdout = makeTtyStream({ isTTY: false });
   const stdin = makeFakeStdin();
+  const stderr = makeTtyStream();
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    mode: "fullscreen",
-  });
-  await nextTick();
-
-  const exited = app.waitUntilExit();
-  app.unmount();
-  await exited;
+  expect(() =>
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      mode: "fullscreen",
+    }),
+  ).toThrow('Fullscreen mode requires mount option "stdout" to be a TTY.');
 
   const output = stdout.chunks.join("");
   expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
   expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
+  stdin.destroy();
+  stdout.destroy();
+  stderr.destroy();
 });
 
-test("alternate screen - ignored when isTTY is false even if interactive is true", async () => {
+test("alternate screen - liveUpdates cannot bypass the Fullscreen TTY preflight", () => {
   const stdout = makeTtyStream({ isTTY: false });
   const stdin = makeFakeStdin();
+  const stderr = makeTtyStream();
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    mode: "fullscreen",
-    liveUpdates: true,
-  } as InternalMountOptions);
-  await nextTick();
-
-  const exited = app.waitUntilExit();
-  app.unmount();
-  await exited;
+  expect(() =>
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+      mode: "fullscreen",
+      liveUpdates: true,
+    } as InternalMountOptions),
+  ).toThrow('Fullscreen mode requires mount option "stdout" to be a TTY.');
 
   const output = stdout.chunks.join("");
   expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
   expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
+  stdin.destroy();
+  stdout.destroy();
+  stderr.destroy();
 });
 
 test("alternate screen - enters on mount and exits on unmount", async () => {

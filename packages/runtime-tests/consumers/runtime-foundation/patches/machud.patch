@@ -315,8 +315,10 @@ index 215b2b3..6b4d224 100644
  } else {
 -  // alternateScreen: take over the terminal on a clean buffer (like btop/htop)
 +  // Full-screen mode takes over the terminal on a clean buffer (like btop/htop)
-   // and restore the user's shell + scrollback on exit. Auto-ignored when not a
-   // TTY, so piping still works.
+-  // and restore the user's shell + scrollback on exit. Auto-ignored when not a
+-  // TTY, so piping still works.
++  // and restores the user's shell + scrollback on exit. It requires a TTY; use
++  // --once or --json when piping a snapshot.
 -  createApp(App).mount({ alternateScreen: true });
 +  createApp(App).mount({ mode: "fullscreen", exitOnCtrlC: true });
  }

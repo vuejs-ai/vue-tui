@@ -1022,7 +1022,7 @@ test("selected topology composes across shared stdin suspension and teardown", a
 test.each([
   {
     label: "final-output stream",
-    options: { mode: "fullscreen", liveUpdates: false } as const,
+    options: { mode: "inline", liveUpdates: false } as const,
     stdout: createWritable(false),
   },
 ])(

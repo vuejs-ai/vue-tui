@@ -32,24 +32,25 @@ test.sequential("a user error handler is composed with Runtime's fatal lifecycle
   expect(seen).toEqual([originalError]);
 });
 
-test.sequential("waiting for a render flush before mount rejects without touching stdout", async () => {
+test.sequential("waiting for a render flush before mount resolves without touching stdout", async () => {
   const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   try {
     const app = createApp(App);
-    await expect(app.waitUntilRenderFlush()).rejects.toThrow(
-      "waitUntilRenderFlush() is only available while the app is mounted",
-    );
+    await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
     expect(write).not.toHaveBeenCalled();
   } finally {
     write.mockRestore();
   }
 });
 
-test.sequential("a clean exit rejects when terminal restoration fails", async () => {
+test.sequential("a clean exit preserves a genuine AggregateError from restoration", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
-  const restoreFailure = new Error("raw-mode restore failed");
+  const restoreFailure = new AggregateError(
+    [new Error("raw-mode restore detail")],
+    "raw-mode restore failed",
+  );
   const rawModes: boolean[] = [];
 
   stdin.setRawMode = (mode: boolean) => {
@@ -74,10 +75,7 @@ test.sequential("a clean exit rejects when terminal restoration fails", async ()
 
   app.unmount();
 
-  await expect(app.waitUntilExit()).rejects.toMatchObject({
-    name: "AggregateError",
-    errors: expect.arrayContaining([restoreFailure]),
-  });
+  await expect(app.waitUntilExit()).rejects.toBe(restoreFailure);
   expect(rawModes).toEqual([true, false, false]);
 });
 

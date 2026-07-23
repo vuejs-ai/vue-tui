@@ -116,6 +116,28 @@ test.sequential("a console record emitted while the output gate is busy is retai
   await app.waitUntilExit();
 });
 
+test.sequential("non-TTY console output is immediate while the dynamic document remains final", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const writes = captureWrites(stdout);
+  Object.assign(stdout, { isTTY: false });
+  const app = createApp(defineComponent(() => () => <Text>FINAL-DOCUMENT</Text>));
+
+  app.mount({ stdin, stdout, stderr, maxFps: 0 } as InternalMountOptions);
+  await app.waitUntilRenderFlush();
+  expect(writes.join("")).not.toContain("FINAL-DOCUMENT");
+
+  console.log("IMMEDIATE-CONSOLE");
+  await app.waitUntilRenderFlush();
+  expect(writes.join("")).toContain("IMMEDIATE-CONSOLE");
+  expect(writes.join("")).not.toContain("FINAL-DOCUMENT");
+
+  app.unmount();
+  await app.waitUntilExit();
+  expect(writes.join("")).toContain("FINAL-DOCUMENT");
+});
+
 test.sequential("unmounting one app does not remove another app's console sink", async () => {
   const stdoutA = makeFakeWritable();
   const stdoutB = makeFakeWritable();

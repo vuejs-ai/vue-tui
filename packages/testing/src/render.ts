@@ -269,6 +269,14 @@ export async function render(
     app.unmount();
   };
   let disposed = false;
+  let resourcesDisposal: Promise<void> | undefined;
+  const disposeResourcesAfterExit = () => {
+    resourcesDisposal ??= app.waitUntilExit().then(
+      () => disposeResources(),
+      () => disposeResources(),
+    );
+    void resourcesDisposal.catch(() => undefined);
+  };
   let untrack: () => void = () => undefined;
   const dispose = () => {
     if (disposed) return;
@@ -280,11 +288,7 @@ export async function render(
       errors.push(error);
     }
     untrack();
-    try {
-      disposeResources();
-    } catch (error) {
-      errors.push(error);
-    }
+    disposeResourcesAfterExit();
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose the test host.");
   };
@@ -304,21 +308,7 @@ export async function render(
     }
   };
   const settleRuntimeRender = async (): Promise<void> => {
-    try {
-      await app.waitUntilRenderFlush();
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "waitUntilRenderFlush() is only available while the app is mounted"
-      ) {
-        // A render error can tear the app down before this test-host barrier.
-        // waitUntilExit() carries the original application error (or the
-        // successful result of a deliberate early exit).
-        await app.waitUntilExit();
-        return;
-      }
-      throw error;
-    }
+    await app.waitUntilRenderFlush();
   };
   const failAfterDispose = (error: unknown): never => {
     try {
@@ -447,7 +437,9 @@ export async function render(
     },
     screen: async () => {
       assertActive();
-      return await emulator.snapshot();
+      const snapshot = await emulator.snapshot();
+      assertActive();
+      return snapshot;
     },
     stdin: {
       async write(data: string | Uint8Array): Promise<void> {
