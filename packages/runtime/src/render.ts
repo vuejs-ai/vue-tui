@@ -2989,9 +2989,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const start = onRender ? performance.now() : 0;
         mountedRenderedTargets?.reconcile();
 
-        // Prepare Static output without settling its mounted host instances. The
-        // transaction is accepted only after its physical stdout write returns
-        // normally, or after a successful output-free renderer commit.
+        // Only non-empty Static blocks participate in settlement; output-free
+        // instances stay open for later content or ordinary Vue unmount. A
+        // prepared block is accepted only after its stdout write returns normally.
         const w = renderSession.session.dimensions.layout.columns;
         preparedStatic = prepareStaticOutput(tuiRoot, w, staticNodes);
         const staticOutput = preparedStatic.output;

@@ -80,6 +80,7 @@ test("Static commits completed lines once while a small dynamic tail remains rep
 
   expectNoMainScreenReset(output);
   expect(lines).toContain("PRE_APP_HISTORY");
+  expect(lines.filter((line) => line === "DEFERRED")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 0")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 1")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 2")).toHaveLength(1);

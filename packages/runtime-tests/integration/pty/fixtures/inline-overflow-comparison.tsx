@@ -2,7 +2,7 @@ import process from "node:process";
 import ansiEscapes from "ansi-escapes";
 import { Box, Text, createApp, useApp, type TuiApp } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
+import { defineComponent, h, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type Scenario =
   | "current-full"
@@ -20,6 +20,9 @@ const rows = Number(process.argv[2]) || 6;
 const scenario = (process.argv[3] ?? "current-full") as Scenario;
 const revision = shallowRef(0);
 let app: TuiApp;
+const DeferredHistory = defineComponent(
+  () => () => h(Text, null, () => (revision.value > 0 ? "DEFERRED" : "")),
+);
 
 process.stdout.rows = rows;
 process.stdout.write(scenario.startsWith("partial-row") ? "PRE_APP_PARTIAL" : "PRE_APP_HISTORY\n");
@@ -65,14 +68,17 @@ const App = defineComponent(() => {
     if (scenario === "static-tail") {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
       return (
-        <>
+        <Box flexDirection="column">
+          <Static key="deferred">
+            <DeferredHistory />
+          </Static>
           {completed.map((item) => (
             <Static key={item}>
               <Text>{item}</Text>
             </Static>
           ))}
           <Text>TAIL {revision.value}</Text>
-        </>
+        </Box>
       );
     }
 

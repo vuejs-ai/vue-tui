@@ -55,9 +55,9 @@ interface PreparedStaticBatch {
 export interface PreparedStaticOutput {
   /** Combined open Static bytes, including each non-empty frame's trailing newline. */
   readonly output: string;
-  /** Confirm a normally returned output write, or a successful output-free commit. */
+  /** Confirm every non-empty block represented in this prepared transaction. */
   accept(): void;
-  /** Prevent retry after an indeterminate throwing output write. */
+  /** Prevent retry for every non-empty block in an indeterminate transaction. */
   abandon(): void;
 }
 
@@ -81,14 +81,18 @@ export function prepareStaticOutput(
   const batches = statics
     .filter((stat) => stat.commitState === "open" && !hasAuthoredHiddenAncestor(stat))
     .map((stat) => prepareStaticNode(stat, columns));
-  const output = batches.map(({ frame }) => (frame.length > 0 ? frame + "\n" : "")).join("");
+  // An output-free instance is still a producer: it remains open until a later
+  // eligible render produces bytes, or ordinary Vue unmount removes it. Only
+  // blocks represented in this transaction may be accepted or abandoned.
+  const committableBatches = batches.filter(({ frame }) => frame.length > 0);
+  const output = committableBatches.map(({ frame }) => frame + "\n").join("");
   let state: "pending" | "accepted" | "abandoned" = "pending";
 
   const settle = (next: "accepted" | "abandoned"): TuiStatic[] => {
     if (state !== "pending") return [];
     state = next;
     const transitioned: TuiStatic[] = [];
-    for (const { stat } of batches) {
+    for (const { stat } of committableBatches) {
       if (stat.commitState !== "open") continue;
       stat.commitState = next;
       transitioned.push(stat);

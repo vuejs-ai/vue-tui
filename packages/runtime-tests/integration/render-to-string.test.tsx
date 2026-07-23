@@ -1,4 +1,11 @@
-import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
+import {
+  defineComponent,
+  onMounted,
+  onScopeDispose,
+  onUnmounted,
+  shallowRef,
+  watchSyncEffect,
+} from "vue";
 import type { Readable } from "node:stream";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
@@ -37,34 +44,22 @@ describe("renderToString", () => {
     expect(output).toBe("test");
   });
 
-  test("rejects the removed screen-reader option before rendering", () => {
-    let setupRan = false;
+  test("ignores terminal-host properties supplied by untyped callers", () => {
+    let setupRan = 0;
     const App = defineComponent(() => () => <Text>x</Text>);
-    const guarded = Object.defineProperty({ isScreenReaderEnabled: undefined }, "columns", {
-      enumerable: true,
-      get() {
-        setupRan = true;
-        throw new Error("columns getter must not run");
-      },
+    const sharedOptions = {
+      columns: 20,
+      mode: "fullscreen",
+      rows: 24,
+      isScreenReaderEnabled: true,
+    };
+    const CountedApp = defineComponent(() => {
+      setupRan++;
+      return () => <App />;
     });
 
-    expect(() => {
-      // @ts-expect-error - screen-reader rendering is not a public string-render capability
-      renderToString(App, guarded);
-    }).toThrow('renderToString received an unknown option "isScreenReaderEnabled"');
-    expect(setupRan).toBe(false);
-  });
-
-  test("public renderToString rejects terminal-surface passthrough", () => {
-    const App = defineComponent(() => () => <Text>x</Text>);
-    expect(() => {
-      // @ts-expect-error - a synchronous document has no requested terminal mode
-      renderToString(App, { mode: "fullscreen" });
-    }).toThrow('renderToString option "mode" is unavailable');
-    expect(() => {
-      // @ts-expect-error - a synchronous document has unbounded rows
-      renderToString(App, { rows: 24 });
-    }).toThrow('renderToString option "rows" is unavailable');
+    expect(renderToString(CountedApp, sharedOptions as never)).toBe("x");
+    expect(setupRan).toBe(1);
   });
 
   test("provides truthful string layout facts", () => {
@@ -148,15 +143,14 @@ describe("renderToString", () => {
     expect(output).toContain("with exit");
   });
 
-  test("useApp exit is explicitly unavailable in a string render", () => {
+  test("useApp exit is inert in a string render", () => {
     const App = defineComponent(() => {
       useApp().exit();
-      return () => <Text>unreachable</Text>;
+      useApp().exit(new Error("ignored"));
+      return () => <Text>still rendered</Text>;
     });
 
-    expect(() => renderToString(App)).toThrow(
-      "useApp().exit() is unavailable during renderToString()",
-    );
+    expect(renderToString(App)).toBe("still rendered");
   });
 
   test("useStdin does not throw in renderToString", () => {
@@ -510,6 +504,25 @@ describe("renderToString", () => {
     expect(output).toBe("A\nB\nDynamic");
   });
 
+  test("an output-free Static adds no bytes to a string document", () => {
+    const WithDynamicOutput = defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Static>
+          <Text>{""}</Text>
+        </Static>
+        <Text>Dynamic</Text>
+      </Box>
+    ));
+    const StaticOnly = defineComponent(() => () => (
+      <Static>
+        <Text>{""}</Text>
+      </Static>
+    ));
+
+    expect(renderToString(WithDynamicOutput)).toBe("Dynamic");
+    expect(renderToString(StaticOnly)).toBe("");
+  });
+
   // ── Effect behavior ────────────────────────────────────
 
   test("captures initial render before onMounted state updates", () => {
@@ -549,6 +562,25 @@ describe("renderToString", () => {
     const output = renderToString(App);
     expect(output).toBe("Cleanup test");
     expect(cleanupRan).toBe(true);
+  });
+
+  test("rethrows an unmount lifecycle error after host cleanup", () => {
+    const unmountError = new Error("unmount failed");
+    const App = defineComponent(() => {
+      onUnmounted(() => {
+        throw unmountError;
+      });
+      return () => <Text>cleanup error</Text>;
+    });
+    let caught: unknown;
+
+    try {
+      renderToString(App);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(unmountError);
   });
 
   // ── Error handling ─────────────────────────────────────

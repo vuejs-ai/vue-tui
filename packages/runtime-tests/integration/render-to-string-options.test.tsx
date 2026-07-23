@@ -4,33 +4,46 @@ import { Box, renderToString, Text } from "@vue-tui/runtime";
 
 const Document = defineComponent(() => () => <Text>document</Text>);
 
-test("rejects every unknown own option before reading columns or rendering", () => {
+test("ignores unrelated string and symbol options without reading them", () => {
   let columnsReads = 0;
-  let setupRan = false;
-  const App = defineComponent(() => {
-    setupRan = true;
-    return () => <Text>never</Text>;
-  });
-  const options = Object.defineProperty({ debug: true }, "columns", {
-    enumerable: true,
-    get() {
-      columnsReads++;
-      throw new Error("columns getter must not run");
+  let ignoredReads = 0;
+  const presentation = Symbol("presentation");
+  const options = Object.defineProperties(
+    {
+      mode: "fullscreen",
+      rows: 24,
+      fullscreen: true,
+      alternateScreen: true,
+      isScreenReaderEnabled: true,
     },
-  });
-
-  expect(() => renderToString(App, options as never)).toThrow(
-    'renderToString received an unknown option "debug"',
+    {
+      columns: {
+        enumerable: true,
+        get() {
+          columnsReads++;
+          return 20;
+        },
+      },
+      debug: {
+        enumerable: true,
+        get() {
+          ignoredReads++;
+          throw new Error("debug getter must not run");
+        },
+      },
+      [presentation]: {
+        enumerable: true,
+        get() {
+          ignoredReads++;
+          throw new Error("symbol getter must not run");
+        },
+      },
+    },
   );
-  expect(columnsReads).toBe(0);
-  expect(setupRan).toBe(false);
-});
 
-test("rejects symbol options instead of silently ignoring them", () => {
-  const option = Symbol("presentation");
-  expect(() => renderToString(Document, { [option]: true } as never)).toThrow(
-    "renderToString received an unknown symbol option",
-  );
+  expect(renderToString(Document, options as never)).toBe("document");
+  expect(columnsReads).toBe(1);
+  expect(ignoredReads).toBe(0);
 });
 
 test.each([null, [], "80", 80, true])("rejects non-option-object input %#", (options) => {

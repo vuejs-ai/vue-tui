@@ -292,6 +292,9 @@ type _ExactColor = Expect<
   >
 >;
 type _ExactRenderToStringOptions = Expect<Equal<keyof RenderToStringOptions, "columns">>;
+const readonlyStringRenderOptions: RenderToStringOptions = { columns: 80 };
+// @ts-expect-error String-render layout input is readonly after construction.
+readonlyStringRenderOptions.columns = 40;
 type _ExactKeyName = Expect<
   Equal<
     TuiKeyName,
@@ -1068,9 +1071,15 @@ assert.throws(
   () => runtime.renderToString(PackedPublicProps, { columns: 65_536 }),
   /option "columns" must be an integer between 1 and 65535/,
 );
-assert.throws(
-  () => runtime.renderToString(PackedPublicProps, { debug: true }),
-  /received an unknown option "debug"/,
+assert.equal(
+  runtime.renderToString(PackedPublicProps, {
+    columns: 80,
+    debug: true,
+    mode: "fullscreen",
+    rows: 24,
+    [Symbol("presentation")]: true,
+  }).includes("packed-colors"),
+  true,
 );
 const OversizedDocument = defineComponent(() => () =>
   h(Box, { width: 1_024, height: 1_025, flexShrink: 0 }, () => h(Text, null, () => "large")),

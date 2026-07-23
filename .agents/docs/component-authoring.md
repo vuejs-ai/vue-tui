@@ -59,7 +59,7 @@ Authoring the templates and running the **existing** suites surfaced three custo
 realities. None was reasoned out up front; each was caught green-to-red (run, don't reason)
 and fixed at the root:
 
-- **Static — output-free slot trees must still settle.** A conditional or empty ordinary slot leaves inert Vue anchors. The static channel skips those anchors for paint but still accepts the whole mounted host after a successful output-free transaction. The component then releases that host and its Yoga subtree while retaining its own accepted state, so later slot content cannot replay the same history identity.
+- **Static — only non-empty slot output settles.** A conditional or empty ordinary slot leaves inert Vue anchors. The static channel skips those anchors for paint and leaves that mounted host open until a later eligible render produces bytes or ordinary Vue unmount removes it. Only hosts represented by non-empty bytes in the current settlement transaction are accepted or abandoned; acceptance then releases the slot host and its Yoga subtree through ordinary Vue lifecycle while retaining the component's write-once identity.
 - **Text — `<slot/>` fragment anchors shifted the transform line-index, exposing an Ink-parity
   bug.** A `<slot/>` mounts as a Fragment whose boundary anchors are empty `text-leaf`s; the
   squash loops that give a nested `<Transform>` its positional line index counted every

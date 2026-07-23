@@ -132,6 +132,100 @@ test.each(acceptanceHosts)(
   },
 );
 
+test("an initially output-free Static appends when it later emits on final non-TTY output", async () => {
+  const ready = shallowRef(false);
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static>
+        <Text>{ready.value ? "HISTORY" : ""}</Text>
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+  const stdout = makeOutput({ isTTY: false });
+  const stderr = makeOutput({ isTTY: false });
+  const { stream: stdin } = makeFakeStdin();
+  const chunks: string[] = [];
+  stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+  const app = createApp(App);
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      liveUpdates: false,
+      patchConsole: false,
+      maxFps: 0,
+    } as InternalMountOptions);
+    await app.waitUntilRenderFlush();
+    expect(chunks).toEqual([]);
+
+    ready.value = true;
+    await nextTick();
+    await app.waitUntilRenderFlush();
+    expect(chunks.join("")).toBe("HISTORY\n");
+
+    app.unmount();
+    await app.waitUntilExit();
+    expect(chunks.join("")).toBe("HISTORY\n[live]\n");
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test("a visual Inline Static remains open after a ready sibling commits", async () => {
+  const ready = shallowRef(false);
+  const Deferred = defineComponent(() => () => <Text>{ready.value ? "DEFERRED_TTY" : ""}</Text>);
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static key="deferred">
+        <Deferred />
+      </Static>
+      <Static key="immediate">
+        <Text>IMMEDIATE_TTY</Text>
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+  const stdout = makeOutput({ isTTY: true });
+  const stderr = makeOutput({ isTTY: true });
+  stdout.rows = 8;
+  stdout.write("PRE_APP_HISTORY\n");
+  const { stream: stdin } = makeFakeStdin();
+  const chunks: string[] = [];
+  stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+  const app = createApp(App);
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      patchConsole: false,
+    } as InternalMountOptions);
+    await app.waitUntilRenderFlush();
+    expect(countOccurrences(stripAnsi(chunks.join("")), "IMMEDIATE_TTY")).toBe(1);
+    expect(countOccurrences(stripAnsi(chunks.join("")), "DEFERRED_TTY")).toBe(0);
+
+    ready.value = true;
+    await nextTick();
+    await app.waitUntilRenderFlush();
+    expect(countOccurrences(stripAnsi(chunks.join("")), "DEFERRED_TTY")).toBe(1);
+  } finally {
+    app.unmount();
+    await app.waitUntilExit();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
 test("effective visual Fullscreen rejects empty Static before terminal ownership or a frame", async () => {
   const dynamicMarker = "FULLSCREEN_DYNAMIC_MUST_NOT_RENDER";
   const App = defineComponent(() => () => (

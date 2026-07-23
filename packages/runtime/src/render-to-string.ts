@@ -1,5 +1,4 @@
-import type { Component } from "vue";
-import { createRenderer } from "vue";
+import { createRenderer, createVNode, type Component, type VNode } from "vue";
 import { Readable, Writable } from "node:stream";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
@@ -34,7 +33,7 @@ export interface RenderToStringOptions {
    *
    * @default 80
    */
-  columns?: number;
+  readonly columns?: number;
 }
 
 /**
@@ -48,8 +47,7 @@ export interface RenderToStringOptions {
  *
  * Terminal-specific input, focus, and stream composables receive isolated inert
  * services because there is no terminal session. `useApp()` can be called while
- * sharing a component with a live tree, but invoking `exit()` reports that the
- * operation is unavailable for synchronous string rendering.
+ * sharing a component with a live tree, and its `exit()` operation is a no-op.
  *
  * The `<Static>` component is supported --- its output is prepended to the
  * dynamic output.
@@ -75,6 +73,44 @@ function renderToStringInternal(
     renderSession.dispose();
     contexts.dispose();
   }
+}
+
+function createHostYogaAllocationLedger(): {
+  readonly lifetime: NonNullable<Parameters<typeof buildNodeOps>[0]["hostYogaLifetime"]>;
+  rollback(): void;
+} {
+  const allocationOrder: TuiNode[] = [];
+  const pending = new Map<TuiNode, () => void>();
+  const lifetime = {
+    allocated(node: TuiNode, dispose: () => void): void {
+      allocationOrder.push(node);
+      pending.set(node, dispose);
+    },
+    released(node: TuiNode): void {
+      pending.delete(node);
+    },
+  };
+
+  return {
+    lifetime,
+    rollback(): void {
+      for (let index = allocationOrder.length - 1; index >= 0; index--) {
+        const node = allocationOrder[index]!;
+        const dispose = pending.get(node);
+        if (!dispose) continue;
+        // Remove before disposal so a throwing cleanup is attempted once and a
+        // disposer calling lifetime.released() remains harmless.
+        pending.delete(node);
+        try {
+          dispose();
+        } catch {
+          // Continue through every independently allocated host. Cleanup must
+          // not replace the render or component failure already in flight.
+        }
+      }
+      allocationOrder.length = 0;
+    },
+  };
 }
 
 function renderStringDocument(
@@ -104,28 +140,28 @@ function renderStringDocument(
   });
   const renderedTargets = createRenderedTargetController(root, focusController);
   setRenderedTargetController(appContext, renderedTargets);
-  let yogaAttached = false;
-  let rootDetached = false;
-  let appUnmounted = false;
-  let mounted = false;
-  let unmountApp: (() => void) | undefined;
+  const hostYogaLedger = createHostYogaAllocationLedger();
+  const renderer = createRenderer<TuiNode, TuiNode>(
+    buildNodeOps({
+      // Unlike the live renderer, the synchronous string host must not settle
+      // Static on each host mutation: the tui-static host is inserted before
+      // its slot children. The complete tree is collected once after render.
+      onCommit: () => {},
+      hostYogaLifetime: hostYogaLedger.lifetime,
+    }),
+  );
+  const app = renderer.createApp(component);
+  type VueContainer = typeof root & { _vnode?: VNode | null };
+  const container = root as VueContainer;
+  let rootAttached = false;
+  let renderCompleted = false;
+  let treeUnmounted = false;
+  let vnode: VNode | undefined;
 
   try {
     attachYoga(root);
-    yogaAttached = true;
+    rootAttached = true;
     root.yoga.setWidth(columns);
-
-    const renderer = createRenderer<TuiNode, TuiNode>(
-      buildNodeOps({
-        // Unlike the live renderer, the synchronous string host must not settle
-        // Static on each host mutation: the tui-static host is inserted before
-        // its slot children. The complete tree is collected once after mount.
-        onCommit: () => {},
-      }),
-    );
-
-    const app = renderer.createApp(component);
-    unmountApp = () => app.unmount();
 
     // Provide isolated string-host contexts so shared components can inject
     // their normal services without acquiring a terminal.
@@ -157,8 +193,11 @@ function renderStringDocument(
     };
 
     // Synchronously render the Vue tree into the root.
-    app.mount(root);
-    mounted = true;
+    const ownedVNode = createVNode(component);
+    ownedVNode.appContext = app._context;
+    vnode = ownedVNode;
+    renderer.render(ownedVNode, root);
+    renderCompleted = true;
     renderedTargets.reconcile();
 
     const restoreLayoutGuards = calculateLayoutWithContentGuards(
@@ -183,15 +222,10 @@ function renderStringDocument(
       restoreLayoutGuards();
     }
 
-    // Tear down: unmount the tree so Vue cleans up child nodes and runs
-    // effect cleanup functions. Child yoga nodes are freed by the node-ops
-    // remove handler.
-    app.unmount();
-    appUnmounted = true;
-
-    // Free the root yoga node itself (children already freed by unmount).
-    detachYoga(root);
-    rootDetached = true;
+    // Run component and host cleanup before deciding whether the first
+    // uncaught lifecycle error should propagate to the caller.
+    renderer.render(null, root);
+    treeUnmounted = true;
 
     // Re-throw after full cleanup so callers see the original error. Mirrors the
     // live renderer's exit-error path: a genuine Error — including a cross-realm
@@ -216,17 +250,17 @@ function renderStringDocument(
 
     return normalizedStaticOutput || output;
   } finally {
-    // If layout/paint threw, the happy-path app.unmount() above was skipped. Unmount
-    // here so the tree's onScopeDispose cleanups ALWAYS run — otherwise a composable
-    // that registered an external listener leaks one per failed call. Guard with
-    // `mounted` (never unmount a tree that never mounted) and `appUnmounted`
-    // (the happy path already unmounted, so avoid a second unmount).
-    // app.unmount() also frees the CHILD yoga nodes via the node-ops remove
-    // handler, leaving only the root for freeRecursive below.
-    if (mounted && !appUnmounted) {
+    // Vue only records container._vnode after a successful patch. When the
+    // initial synchronous patch throws after creating the root component,
+    // temporarily seed that ownership link so render(null) can traverse the
+    // partial tree, stop every created scope, and invoke normal host removals.
+    if (!treeUnmounted && vnode?.component) {
+      if (!renderCompleted && container._vnode == null) {
+        container._vnode = vnode;
+      }
       try {
-        unmountApp?.();
-        appUnmounted = true;
+        renderer.render(null, root);
+        treeUnmounted = true;
       } catch {
         // Best-effort teardown: a throw here must not mask the original error.
       }
@@ -256,22 +290,21 @@ function renderStringDocument(
       // Best-effort: F3/string-host cleanup below must still run.
     }
 
-    // Ensure native yoga memory is freed even if rendering or teardown threw.
-    // Yoga nodes are WASM-backed and not garbage collected. In the happy path
-    // detachYoga(root) already freed the root; here (error path) freeRecursive
-    // cleans up the root and any child nodes the unmount above couldn't free.
-    if (yogaAttached && !rootDetached) {
+    // An interrupted initial patch can allocate a host before Vue attaches it
+    // to the root. Such nodes are unreachable from ordinary unmount traversal,
+    // so release every still-owned allocation in reverse creation order.
+    hostYogaLedger.rollback();
+
+    // The root itself is outside the render-local host ledger.
+    if (rootAttached) {
       try {
-        root.yoga.freeRecursive();
+        detachYoga(root);
       } catch {
-        // Best-effort: node may already be partially freed
+        // Best-effort: root may already be partially freed.
       }
     }
   }
 }
-
-const hasOwn = (value: object, key: PropertyKey): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
 
 function normalizeColumns(value: unknown): number {
   if (value === undefined) return 80;
@@ -296,35 +329,8 @@ function normalizeOptionsObject(options: unknown): Record<PropertyKey, unknown> 
   return options as Record<PropertyKey, unknown>;
 }
 
-function rejectUnknownOptions(
-  options: Record<PropertyKey, unknown>,
-  helper: "renderToString",
-): void {
-  for (const key of Reflect.ownKeys(options)) {
-    if (key === "columns") continue;
-    if (typeof key === "symbol") {
-      throw new TypeError(`${helper} received an unknown symbol option.`);
-    }
-    throw new TypeError(`${helper} received an unknown option ${JSON.stringify(key)}.`);
-  }
-}
-
-function rejectModePassthrough(options: Record<PropertyKey, unknown>): void {
-  for (const key of ["mode", "fullscreen", "alternateScreen", "rows"] as const) {
-    if (hasOwn(options, key)) {
-      throw new TypeError(
-        `renderToString option "${key}" is unavailable; public string rendering is a visual document with unbounded rows and no terminal mode.`,
-      );
-    }
-  }
-}
-
 function normalizePublicOptions(options: unknown): { readonly columns: number } {
   const object = normalizeOptionsObject(options);
-  // Recognizable attempts to select a terminal mode fail before any option
-  // getter can trigger rendering side effects.
-  rejectModePassthrough(object);
-  rejectUnknownOptions(object, "renderToString");
   return { columns: normalizeColumns(object.columns) };
 }
 
@@ -349,10 +355,6 @@ function createInertReadable(): NodeJS.ReadStream {
   return stream;
 }
 
-function unavailableOperation(name: string): Error {
-  return new Error(`${name} is unavailable during renderToString().`);
-}
-
 function createStringContexts(columns: number): {
   readonly appContext: AppContext;
   readonly stdinContext: StdinContext;
@@ -362,9 +364,7 @@ function createStringContexts(columns: number): {
   const stderr = createDiscardWritable(columns);
   const stdin = createInertReadable();
   const appContext: AppContext = {
-    exit: () => {
-      throw unavailableOperation("useApp().exit()");
-    },
+    exit: () => {},
     stdout,
     stderr,
     stdin,

@@ -147,6 +147,10 @@ This match is deliberate because terminal history is an irreversible output side
 
 The behavior was run-verified against the pinned commit with a real TTY-shaped `PassThrough`: an initially empty `items` array later appended `A`; mounting `Static(A)`, conditionally removing it, and mounting it again wrote `A` twice while the first output remained; and an item component's effect cleanup ran immediately after its block was accepted rather than waiting for app unmount. Ink implements the open empty producer and fresh per-mount cursor in [`Static.tsx`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L58). The current vue-tui implementation already preserves committed history, releases accepted slot children, and treats remount as a new instance, but it incorrectly consumes an output-free eligible render; the accepted correction remains tracked in [TODOs](./todos.md#runtime-public-api-review).
 
+### Static lifecycle implementation checkpoint
+
+As of 2026-07-24, vue-tui implements the vouched lifecycle target above: an output-free eligible instance stays open, only a block represented by non-empty bytes in the current settlement transaction settles, acceptance releases the slot subtree through Vue lifecycle, ordinary unmount before output writes no history, and remount creates a fresh producer. This checkpoint updates implementation status without rewriting the vouched evidence and pre-implementation statement above.
+
 ### Non-TTY Inline output is a final document
 
 [VOUCHED @hyfdev 2026-07-23]

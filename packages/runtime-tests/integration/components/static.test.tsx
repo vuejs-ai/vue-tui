@@ -95,7 +95,68 @@ test("changing the Vue key remounts Static and commits a new block", async () =>
   expect(staticTranscript(result.frames)).toBe("first\nsecond\n");
 });
 
-test("an output-free first commit settles the instance; outer v-if creates a later block", async () => {
+test("an output-free Static stays open until its first later non-empty output", async () => {
+  const ready = shallowRef(false);
+  const value = shallowRef("first");
+  const unmounted: string[] = [];
+  const Deferred = defineComponent(() => {
+    onUnmounted(() => unmounted.push("deferred"));
+    return () => <Text>{ready.value ? value.value : ""}</Text>;
+  });
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static>
+        <Deferred />
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const result = await render(App);
+  expect(staticTranscript(result.frames)).toBe("");
+  expect(unmounted).toEqual([]);
+
+  ready.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("first\n");
+  expect(unmounted).toEqual(["deferred"]);
+
+  value.value = "ignored";
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("first\n");
+});
+
+test("accepting a ready sibling leaves an output-free Static open for later content", async () => {
+  const ready = shallowRef(false);
+  const completed = shallowRef(["IMMEDIATE"]);
+  const Deferred = defineComponent(() => () => <Text>{ready.value ? "DEFERRED" : ""}</Text>);
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static key="deferred">
+        <Deferred />
+      </Static>
+      {completed.value.map((value) => (
+        <Static key={value}>
+          <Text>{value}</Text>
+        </Static>
+      ))}
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const result = await render(App);
+  expect(staticTranscript(result.frames)).toBe("IMMEDIATE\n");
+
+  ready.value = true;
+  completed.value = [...completed.value, "SIMULTANEOUS"];
+  await flush(result);
+  const transcript = staticTranscript(result.frames);
+  expect(count(transcript, "IMMEDIATE")).toBe(1);
+  expect(count(transcript, "DEFERRED")).toBe(1);
+  expect(count(transcript, "SIMULTANEOUS")).toBe(1);
+});
+
+test("unmounting an open output-free Static produces no history block", async () => {
   const mounted = shallowRef(true);
   const ready = shallowRef(false);
   const App = defineComponent(() => () => (
@@ -107,16 +168,38 @@ test("an output-free first commit settles the instance; outer v-if creates a lat
 
   const result = await render(App);
   expect(staticTranscript(result.frames)).toBe("");
-
+  mounted.value = false;
+  await flush(result);
   ready.value = true;
   await flush(result);
   expect(staticTranscript(result.frames)).toBe("");
 
-  mounted.value = false;
-  await flush(result);
   mounted.value = true;
   await flush(result);
   expect(staticTranscript(result.frames)).toBe("LATE\n");
+});
+
+test("conditional unmount preserves committed history and remount repeats a fresh block", async () => {
+  const mounted = shallowRef(true);
+  const App = defineComponent(
+    () => () =>
+      mounted.value ? (
+        <Static key="repeatable">
+          <Text>A</Text>
+        </Static>
+      ) : null,
+  );
+
+  const result = await render(App);
+  expect(staticTranscript(result.frames)).toBe("A\n");
+
+  mounted.value = false;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("A\n");
+
+  mounted.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("A\nA\n");
 });
 
 test("open sibling instances commit in current tree order", async () => {

@@ -140,7 +140,7 @@ createApp(App).mount({ exitOnCtrlC: true });
 </Static>
 ```
 
-Each mounted instance commits its slot tree once, including an output-free first commit; gate the instance itself with `v-if` when its content is not ready. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. A Static below a hidden Box remains pending and commits once when that Box is shown. Do not nest Static inside another Static or Text. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there.
+Each mounted instance remains open until its first non-empty eligible output, then commits those bytes once and releases its slot subtree through ordinary Vue unmount lifecycle. An output-free render does not consume the instance, so later content may still commit; ordinary unmount before output writes no history. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. On non-TTY output, an accepted block appends immediately before the final dynamic document is written at teardown. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there. Exact simultaneous ordering, hidden-ancestor eligibility, placement and nesting rules, and failure timing remain under review.
 
 Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, targeted focus availability, geometry, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text` and `Static` roots is not supported.
 

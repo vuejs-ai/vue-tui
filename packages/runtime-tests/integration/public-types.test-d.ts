@@ -34,6 +34,7 @@ import type {
   FocusTarget,
   TextProps,
   MountOptions,
+  RenderToStringOptions,
   TuiInputEvent,
   TuiKey,
   TuiKeyName,
@@ -70,6 +71,11 @@ const rejectedWebWritable: MountOptions = {
   // @ts-expect-error Web WritableStream uses a different writer and backpressure protocol.
   stdout: webWritable,
 };
+
+const stringRenderOptions: RenderToStringOptions = { columns: 80 };
+expectTypeOf<keyof RenderToStringOptions>().toEqualTypeOf<"columns">();
+// @ts-expect-error String-render layout input is readonly after construction.
+stringRenderOptions.columns = 40;
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };

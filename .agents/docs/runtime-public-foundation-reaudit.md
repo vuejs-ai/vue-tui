@@ -64,7 +64,7 @@ const help = renderToString(Help, { columns: 80 });
 - Remove `Newline`, `Spacer`, and `useAnimation`; ordinary Text, Box, and Vue timers implement them without Runtime access.
 - Keep Transform, Yoga hosts, ANSI runs, and renderer nodes private. No current application justifies a transform API; the screen-reader linearizer was deleted instead of retained privately.
 
-All supported rendering hosts use the same Box/Text visual vocabulary. Inline and Fullscreen paint terminal cells, non-TTY and final-output mounts emit documents, and string rendering returns a document without terminal resources. `renderToString()` accepts only `{ columns?: number }`, defaults to 80, and fails synchronously after cleanup.
+All supported rendering hosts use the same Box/Text visual vocabulary. Inline and Fullscreen paint terminal cells, non-TTY and final-output mounts emit documents, and string rendering returns a document without terminal resources. `renderToString()` exposes exactly `{ readonly columns?: number }` to TypeScript, defaults to 80, validates one 1–65,535 integer width, and reads no unrelated runtime keys. `useApp().exit()` is an inert no-op in the string host. Runtime renders an owned root VNode and records every host Yoga allocation in a render-local ledger, so an initial Vue patch failure still disposes created scopes and inert streams, frees the render's Yoga nodes, and synchronously rethrows the original error.
 
 ## Path 1: layout, viewport, and Box facts
 
@@ -101,7 +101,7 @@ An Inline application needs completed records to become immutable terminal histo
 
 `Static` remains the only value on `@vue-tui/runtime/inline`. Runtime alone can separate irreversible history bytes from the replaceable live region. It has an ordinary Vue slot and no collection-specific props or named types; iteration, keys, filtering, layout, conditional mounting, and remount identity are ordinary Vue composition.
 
-The accepted target keeps an instance open until its first non-empty eligible output, commits that block once, releases the slot subtree through normal Vue unmount lifecycle, and never rewrites accepted history. Ordinary conditional unmount cannot erase accepted bytes, and remount creates a new producer. A true Fullscreen surface throws and restores its resources. The current implementation still consumes an output-free eligible render; that gap is tracked in [TODOs](./todos.md#runtime-public-api-review). Non-TTY, string, exact ordering, hidden-ancestor, and placement semantics remain Open.
+The implementation keeps an instance open until its first non-empty eligible output or ordinary Vue unmount. Only a block represented by non-empty bytes in the current settlement transaction settles; acceptance commits once, releases the slot subtree through normal Vue lifecycle, and never rewrites accepted history. Ordinary conditional unmount cannot erase accepted bytes, and remount creates a new producer. Accepted non-TTY blocks append immediately, string rendering prefixes accepted blocks to the dynamic document, and a true Fullscreen surface throws and restores its resources. Exact simultaneous ordering, hidden-ancestor eligibility, placement and nesting rules, and failure timing remain Open.
 
 ## Path 3: normalized input and minimum focus without routing policy
 
