@@ -14,6 +14,7 @@ export const fullscreenOriginScenarios = [
   "horizontal-wide",
   "horizontal-transform",
   "foreground-reset",
+  "box-text-contract",
 ] as const;
 
 export type FullscreenOriginScenario = (typeof fullscreenOriginScenarios)[number];

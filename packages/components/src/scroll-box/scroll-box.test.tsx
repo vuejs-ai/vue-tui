@@ -1,4 +1,4 @@
-import { defineComponent, h, nextTick, shallowRef } from "vue";
+import { defineComponent, h, nextTick, shallowRef, vShow, withDirectives } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
@@ -327,15 +327,17 @@ test("ScrollBox preserves a non-sticky offset across ancestor hiding", async () 
   const visible = shallowRef(true);
   const box = shallowRef<ScrollBoxExpose>();
   const App = defineComponent(() => {
-    return () => (
-      <Box display={visible.value ? "flex" : "none"} height={4} width={20}>
-        <ScrollBox ref={box}>
-          {messages(12).map((item) => (
-            <Text key={item}>{item}</Text>
-          ))}
-        </ScrollBox>
-      </Box>
-    );
+    return () =>
+      withDirectives(
+        <Box height={4} width={20}>
+          <ScrollBox ref={box}>
+            {messages(12).map((item) => (
+              <Text key={item}>{item}</Text>
+            ))}
+          </ScrollBox>
+        </Box>,
+        [[vShow, visible.value]],
+      );
   });
 
   const result = await render(App, { columns: 40, rows: 8 });

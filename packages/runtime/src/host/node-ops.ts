@@ -27,8 +27,10 @@ import {
   isYogaProp,
   BORDER_PROPS,
   reconcileBorderEdges,
+  GUTTER_PROPS,
   MARGIN_PROPS,
   PADDING_PROPS,
+  reconcileGutters,
   reconcileMarginEdges,
   reconcilePaddingEdges,
   bindTextMeasure,
@@ -89,6 +91,11 @@ const STYLE_PROPS = new Set([
   "overflow",
   "overflowX",
   "overflowY",
+  // Gap is another shorthand family whose physical axes must reconcile from
+  // the complete current prop set.
+  "gap",
+  "rowGap",
+  "columnGap",
   // Margin/padding families are yoga-only (not visual), but each physical edge
   // depends on up to three of these props together, so reconcileMargin/PaddingEdges
   // must read the full set from el.props. Storing them here is how they get there;
@@ -271,12 +278,11 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   /**
    * Install the minimal DOM-style contract Vue's built-in `v-show` directive
    * requires. Runtime-dom reads and writes `el.style.display`; the custom host
-   * maps that one property onto the same Yoga display state used by Box's
-   * `display` prop.
+   * maps that one property onto a private raw-host Yoga display channel.
    *
-   * Keep the authored Box prop separate from the directive's temporary hidden
-   * state. This matters when a Box prop changes while `v-show` remains false:
-   * the subtree must stay hidden, then reveal using the latest authored value.
+   * Keep the raw-host channel separate from the directive's temporary hidden
+   * state. This matters if the private channel changes while `v-show` remains
+   * false: the subtree must stay hidden, then reveal using the latest value.
    */
   function installBoxStyle(node: TuiBox): void {
     let authoredDisplay: unknown;
@@ -571,8 +577,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       el.type === "root"
     ) {
       if (el.type === "tui-box" && key === "display") {
-        // The controller composes the authored Box prop with `v-show`'s
-        // temporary hidden state and owns the resulting Yoga update.
+        // Compose the private raw-host channel with `v-show`'s temporary hidden
+        // state. Public BoxProps do not expose this key.
         boxDisplayControllers.get(el)?.setAuthoredDisplay(next);
         return;
       }
@@ -608,8 +614,17 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         if (PADDING_PROPS.has(key)) {
           reconcilePaddingEdges(el, (el as { props: Record<string, unknown> }).props);
         }
+        if (GUTTER_PROPS.has(key)) {
+          reconcileGutters(el, (el as { props: Record<string, unknown> }).props);
+        }
       } else if (STYLE_PROPS.has(key)) {
-        (el as { props: Record<string, unknown> }).props[key] = next;
+        // Vue patches a key removed from `v-bind` as `null`. For Text's
+        // tri-state style channels, removal means "unspecified": colors and
+        // modifiers must inherit again, and wrap must return to its default.
+        // Keeping null would make the paint cascade treat the channel as an
+        // explicit override and would send wrap through the truncation branch.
+        const stored = el.type === "tui-text" && next === null ? undefined : next;
+        (el as { props: Record<string, unknown> }).props[key] = stored;
         // `wrap` is the one STYLE_PROP that changes a text node's MEASURED height
         // (the measure func reads el.props.wrap to pick wrap/truncate/hard layout)
         // yet is NOT a yoga prop — so it skips applyYogaProp and never invalidates
@@ -637,7 +652,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       return;
     }
     if (el.type === "tui-virtual-text" && STYLE_PROPS.has(key)) {
-      (el.props as Record<string, unknown>)[key] = next;
+      // Same removed-key normalization as the top-level Text host above.
+      (el.props as Record<string, unknown>)[key] = next === null ? undefined : next;
       const owner = findMeasureOwner(el);
       if (owner?.type === "tui-text") owner.textRevision++;
       onCommit();

@@ -147,49 +147,102 @@ export type _BoxPropsIsCommonOnly = import("@vue-tui/runtime/inline").BoxProps;
 // Prop types carry their component's real, declared props.
 expectTypeOf<keyof BoxProps>().toEqualTypeOf<
   | "flexDirection"
+  | "flexWrap"
   | "flexGrow"
   | "flexShrink"
   | "flexBasis"
   | "alignItems"
+  | "alignSelf"
   | "justifyContent"
   | "gap"
+  | "rowGap"
+  | "columnGap"
   | "width"
   | "height"
   | "minWidth"
   | "minHeight"
+  | "maxWidth"
+  | "maxHeight"
   | "position"
   | "top"
+  | "right"
+  | "bottom"
   | "left"
+  | "margin"
+  | "marginX"
+  | "marginY"
   | "marginTop"
+  | "marginRight"
+  | "marginBottom"
+  | "marginLeft"
+  | "padding"
+  | "paddingX"
+  | "paddingY"
   | "paddingTop"
+  | "paddingRight"
   | "paddingBottom"
   | "paddingLeft"
-  | "paddingRight"
   | "borderStyle"
+  | "borderTop"
+  | "borderRight"
+  | "borderBottom"
+  | "borderLeft"
   | "borderColor"
   | "backgroundColor"
+  | "overflow"
+  | "overflowX"
   | "overflowY"
-  | "display"
 >();
 expectTypeOf<keyof TextProps>().toEqualTypeOf<
-  "color" | "backgroundColor" | "dimColor" | "bold" | "wrap"
+  | "color"
+  | "backgroundColor"
+  | "dimColor"
+  | "bold"
+  | "italic"
+  | "underline"
+  | "strikethrough"
+  | "inverse"
+  | "wrap"
 >();
-expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<"row" | "column" | undefined>();
-expectTypeOf<BoxProps["alignItems"]>().toEqualTypeOf<"center" | "stretch" | undefined>();
+expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<
+  "row" | "column" | "row-reverse" | "column-reverse" | undefined
+>();
+expectTypeOf<BoxProps["flexWrap"]>().toEqualTypeOf<
+  "nowrap" | "wrap" | "wrap-reverse" | undefined
+>();
+expectTypeOf<BoxProps["alignItems"]>().toEqualTypeOf<
+  "flex-start" | "center" | "flex-end" | "stretch" | undefined
+>();
+expectTypeOf<BoxProps["alignSelf"]>().toEqualTypeOf<
+  "auto" | "flex-start" | "center" | "flex-end" | "stretch" | undefined
+>();
 expectTypeOf<BoxProps["justifyContent"]>().toEqualTypeOf<
-  "flex-start" | "center" | "space-between" | undefined
+  | "flex-start"
+  | "center"
+  | "flex-end"
+  | "space-between"
+  | "space-around"
+  | "space-evenly"
+  | undefined
 >();
 expectTypeOf<BoxProps["width"]>().toEqualTypeOf<number | `${number}%` | undefined>();
+expectTypeOf<BoxProps["flexBasis"]>().toEqualTypeOf<number | `${number}%` | undefined>();
 expectTypeOf<BoxProps["height"]>().toEqualTypeOf<number | undefined>();
-expectTypeOf<BoxProps["position"]>().toEqualTypeOf<"absolute" | undefined>();
+expectTypeOf<BoxProps["position"]>().toEqualTypeOf<
+  "relative" | "absolute" | "static" | undefined
+>();
+expectTypeOf<BoxProps["right"]>().toEqualTypeOf<number | `${number}%` | undefined>();
 expectTypeOf<BoxProps["borderStyle"]>().toEqualTypeOf<"single" | "round" | undefined>();
+expectTypeOf<BoxProps["borderTop"]>().toEqualTypeOf<boolean | undefined>();
+expectTypeOf<BoxProps["overflow"]>().toEqualTypeOf<"visible" | "hidden" | undefined>();
 expectTypeOf<BoxProps["overflowY"]>().toEqualTypeOf<"visible" | "hidden" | undefined>();
-expectTypeOf<BoxProps["display"]>().toEqualTypeOf<"flex" | "none" | undefined>();
 expectTypeOf<BoxProps["gap"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<TextProps["bold"]>().toEqualTypeOf<boolean | undefined>();
-expectTypeOf<TextProps["color"]>().toEqualTypeOf<Color | "revert" | "initial" | undefined>();
-expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
-expectTypeOf<TextProps["wrap"]>().toEqualTypeOf<"wrap" | "truncate" | undefined>();
+expectTypeOf<TextProps["color"]>().toEqualTypeOf<Color | "default" | undefined>();
+expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<Color | "default" | undefined>();
+expectTypeOf<TextProps["wrap"]>().toEqualTypeOf<
+  "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start" | undefined
+>();
 expectTypeOf<BoxProps["backgroundColor"]>().toEqualTypeOf<Color | undefined>();
 expectTypeOf<BoxProps["borderColor"]>().toEqualTypeOf<Color | undefined>();
 
@@ -225,16 +278,12 @@ void removedBlackBrightAlias;
 // Removed props are absent, rather than retained as `never` tombstones.
 // @ts-expect-error Mouse listeners are not Box props.
 export type _RemovedBoxClick = BoxProps["onClick"];
-// @ts-expect-error Spacing shorthands are not Box props.
-export type _RemovedBoxPaddingX = BoxProps["paddingX"];
-// @ts-expect-error Unevidenced horizontal margin is not a Box prop.
-export type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
-// @ts-expect-error Horizontal clipping is not a Box prop.
-export type _RemovedBoxOverflowX = BoxProps["overflowX"];
-// @ts-expect-error Unevidenced text decoration is not a Text prop.
-export type _RemovedTextUnderline = TextProps["underline"];
-// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
-export type _RemovedTextInverse = TextProps["inverse"];
+// @ts-expect-error Vue v-show replaces the removed Yoga display prop.
+export type _RemovedBoxDisplay = BoxProps["display"];
+// @ts-expect-error Multi-line cross-axis distribution is outside the minimum Box surface.
+export type _RemovedBoxAlignContent = BoxProps["alignContent"];
+// @ts-expect-error Text has no browser-style class surface.
+export type _RemovedTextClass = TextProps["class"];
 type StaticComponentProps = InstanceType<typeof Static>["$props"];
 // @ts-expect-error Static no longer owns an application collection.
 export type _RemovedStaticItemsProp = StaticComponentProps["items"];

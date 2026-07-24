@@ -16,14 +16,12 @@ test.each(["inline", "fullscreen"] as const)(
     const visible = shallowRef(true);
     const revision = shallowRef(0);
     const targetKey = shallowRef(0);
-    const authoredDisplay = shallowRef<"flex" | "none">("flex");
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
         <VShowJourney
           visible={visible.value}
           revision={revision.value}
           targetKey={targetKey.value}
-          authoredDisplay={authoredDisplay.value}
         />
         <Text>tail</Text>
       </Box>
@@ -49,12 +47,8 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
       expect(vShowJourneyState.size?.value).toBeNull();
 
-      // Box's authored display and v-show are independent layers. Updating the
-      // prop while the directive remains false must not reveal the subtree.
-      authoredDisplay.value = "none";
-      await flushUpdate(result);
-      expect(result.lastFrame()).toBe("tail");
-      authoredDisplay.value = "flex";
+      // Reactive state and the rendered target can both change while the
+      // directive keeps the mounted subtree out of layout and paint.
       revision.value = 2;
       targetKey.value = 1;
       await flushUpdate(result);

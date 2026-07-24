@@ -126,11 +126,11 @@ createApp(App).mount({ exitOnCtrlC: true });
 
 ## Components
 
-| Component                        | Description                                                                                                   |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime)    | Terminal layout container with the supported flex, size, spacing, border, clipping, and visibility primitives |
-| [`<Text>`](./packages/runtime)   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                           |
-| [`<Static>`](./packages/runtime) | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`               |
+| Component                        | Description                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime)    | Terminal layout container with flex, size, spacing, border, and clipping props plus Box-rooted `v-show` |
+| [`<Text>`](./packages/runtime)   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                     |
+| [`<Static>`](./packages/runtime) | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`         |
 
 `Static` is deliberately absent from the common root export and has no collection API. Import the component from `@vue-tui/runtime/inline`, then use ordinary Vue iteration and stable keys when committing a list:
 
@@ -142,9 +142,11 @@ createApp(App).mount({ exitOnCtrlC: true });
 
 Each mounted instance remains open until its first non-empty eligible output, then commits those bytes once and releases its slot subtree through ordinary Vue unmount lifecycle. An output-free render does not consume the instance, so later content may still commit; ordinary unmount before output writes no history. Reactive changes do not rewrite accepted terminal history, while remounting creates a new block. On non-TTY output, an accepted block appends immediately before the final dynamic document is written at teardown. Effective visual Fullscreen rejects `Static`; use application-owned state and a bounded viewport there. Exact simultaneous ordering, hidden-ancestor eligibility, placement and nesting rules, and failure timing remain under review.
 
-Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, targeted focus availability, geometry, and Fullscreen hit testing. It composes with the Box `display` prop: either `v-show="false"` or `display="none"` hides. Direct `v-show` use on `Text` and `Static` roots is not supported.
+Vue's built-in `v-show` works on `<Box>` roots and keeps their component subtree mounted while removing hidden content from terminal layout, paint, targeted focus availability, geometry, and Fullscreen hit testing. `v-if` remains the lifecycle-owning choice, and direct `v-show` use on `Text` and `Static` roots is not supported.
 
-Nested `<Text color="revert">` and `<Text color="initial">` spans reset only the foreground to the terminal default. They can wrap across lines and nest safely inside a colored parent; the parent's foreground resumes after the span, while background and the retained boolean text styles continue to compose normally.
+Nested `<Text>` spans resolve foreground and background independently. Omitting `color` or `backgroundColor` inherits that channel from the enclosing Text; `color="default"` or `backgroundColor="default"` selects the terminal default for only that channel, and the enclosing value resumes after the subtree.
+
+The six Text modifiers — `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, and `inverse` — use a three-state cascade: omission or `undefined` inherits the enclosing value, `true` enables the modifier, and `false` disables it for that subtree; omitted outermost modifiers are disabled. `wrap` accepts exactly `"wrap"`, `"hard"`, `"truncate"`, `"truncate-middle"`, and `"truncate-start"`, defaulting to `"wrap"`. `"wrap"` prefers word boundaries but still breaks an over-wide word, `"hard"` ignores word boundaries, and the three truncation modes retain the start, both ends, or the end respectively within the final terminal-cell width. The outermost Text's `wrap` governs its complete composed content.
 
 Runtime does not export layout conveniences as separate components. Write line breaks as text, and use an ordinary Box when a flex spacer is useful:
 

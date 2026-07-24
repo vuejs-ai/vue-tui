@@ -10,6 +10,20 @@ function renderBox(props: Record<string, unknown>): string {
   return renderToString(App, { columns: 40 });
 }
 
+/**
+ * Validate an empty target inside a fixed, clipped wrapper. This keeps exact
+ * 65,535 boundaries away from the separate paint-surface allocation limit.
+ */
+function validateBox(props: Record<string, unknown>): void {
+  const App = defineComponent(
+    () => () =>
+      h(Box, { width: 1, height: 1, overflow: "hidden" }, () =>
+        h(Box, props as never, { default: () => undefined }),
+      ),
+  );
+  renderToString(App, { columns: 40 });
+}
+
 function renderText(props: Record<string, unknown>): string {
   const App = defineComponent(() => () => h(Text, props as never, { default: () => "content" }));
   return renderToString(App, { columns: 40 });
@@ -34,7 +48,7 @@ const namedColors = [
   "whiteBright",
 ] as const;
 
-test("accepts exactly the public terminal color families", () => {
+test("accepts the closed Color grammar and Text-only default escape", () => {
   for (const color of [...namedColors, "#12abEF", "#000000", "#ffffff"] as const) {
     expect(() => renderText({ color })).not.toThrow();
     expect(() => renderText({ backgroundColor: color })).not.toThrow();
@@ -42,8 +56,12 @@ test("accepts exactly the public terminal color families", () => {
     expect(() => renderBox({ backgroundColor: color })).not.toThrow();
   }
 
-  expect(() => renderText({ color: "revert" })).not.toThrow();
-  expect(() => renderText({ color: "initial" })).not.toThrow();
+  expect(() => renderText({ color: "default" })).not.toThrow();
+  expect(() => renderText({ backgroundColor: "default" })).not.toThrow();
+  expect(() => renderBox({ backgroundColor: "default" })).toThrow(/<Box> prop "backgroundColor"/);
+  expect(() => renderBox({ borderColor: "default", borderStyle: "single" })).toThrow(
+    /<Box> prop "borderColor"/,
+  );
 });
 
 test.each([
@@ -51,57 +69,112 @@ test.each([
   "grey",
   "blackBright",
   "not-a-color",
+  "revert",
+  "initial",
   "#fff",
   "#12345",
   "#1234567",
   "#gggggg",
   "rgb(1, 2, 3)",
   "ansi256(42)",
-])("rejects unsupported public foreground color %j", (color) => {
+])("rejects unsupported public Text color %j", (color) => {
   expect(() => renderText({ color })).toThrow(/<Text> prop "color"/);
+  expect(() => renderText({ backgroundColor: color })).toThrow(/<Text> prop "backgroundColor"/);
 });
 
-test("foreground reset tokens are not background or border colors", () => {
-  expect(() => renderText({ backgroundColor: "revert" })).toThrow(/<Text> prop "backgroundColor"/);
-  expect(() => renderBox({ backgroundColor: "initial" })).toThrow(/<Box> prop "backgroundColor"/);
-  expect(() => renderBox({ borderColor: "revert", borderStyle: "single" })).toThrow(
-    /<Box> prop "borderColor"/,
-  );
+test("accepts every reviewed Box enum and Text wrap value", () => {
+  for (const flexDirection of ["row", "column", "row-reverse", "column-reverse"]) {
+    expect(() => validateBox({ flexDirection })).not.toThrow();
+  }
+  for (const flexWrap of ["nowrap", "wrap", "wrap-reverse"]) {
+    expect(() => validateBox({ flexWrap })).not.toThrow();
+  }
+  for (const alignItems of ["flex-start", "center", "flex-end", "stretch"]) {
+    expect(() => validateBox({ alignItems })).not.toThrow();
+  }
+  for (const alignSelf of ["auto", "flex-start", "center", "flex-end", "stretch"]) {
+    expect(() => validateBox({ alignSelf })).not.toThrow();
+  }
+  for (const justifyContent of [
+    "flex-start",
+    "center",
+    "flex-end",
+    "space-between",
+    "space-around",
+    "space-evenly",
+  ]) {
+    expect(() => validateBox({ justifyContent })).not.toThrow();
+  }
+  for (const position of ["relative", "absolute", "static"]) {
+    expect(() =>
+      validateBox({ position, top: -1, right: "25%", bottom: 2, left: "-5%" }),
+    ).not.toThrow();
+  }
+  for (const overflow of ["visible", "hidden"]) {
+    expect(() => validateBox({ overflow, overflowX: overflow, overflowY: overflow })).not.toThrow();
+  }
+  for (const wrap of ["wrap", "hard", "truncate", "truncate-middle", "truncate-start"]) {
+    expect(() => renderText({ wrap })).not.toThrow();
+  }
 });
 
-test("accepts the retained numeric domains at their exact boundaries", () => {
-  expect(() =>
-    renderBox({
-      flexDirection: "column",
-      flexGrow: 65_535,
-      flexShrink: 0,
-      flexBasis: 65_535,
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 65_535,
-      width: 65_535,
-      height: 65_535,
-      minWidth: 65_535,
-      minHeight: 65_535,
-      position: "absolute",
-      top: -65_535,
-      left: 65_535,
-      marginTop: -65_535,
-      paddingTop: 65_535,
-      paddingBottom: 65_535,
-      paddingLeft: 65_535,
-      paddingRight: 65_535,
-      overflowY: "hidden",
-      // Yoga removes a display:none node from layout, so this assertion tests
-      // validation boundaries without asking the painter to allocate the
-      // deliberately separate maximum for every dimension at once.
-      display: "none",
-    }),
-  ).not.toThrow();
+test("accepts every numeric category at its exact boundary", () => {
+  for (const prop of [
+    "flexBasis",
+    "gap",
+    "rowGap",
+    "columnGap",
+    "width",
+    "height",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+    "padding",
+    "paddingX",
+    "paddingY",
+    "paddingTop",
+    "paddingRight",
+    "paddingBottom",
+    "paddingLeft",
+  ]) {
+    expect(() => validateBox({ [prop]: 0 })).not.toThrow();
+    expect(() => validateBox({ [prop]: 65_535 })).not.toThrow();
+  }
+  for (const prop of [
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "margin",
+    "marginX",
+    "marginY",
+    "marginTop",
+    "marginRight",
+    "marginBottom",
+    "marginLeft",
+  ]) {
+    expect(() => validateBox({ [prop]: -65_535 })).not.toThrow();
+    expect(() => validateBox({ [prop]: 65_535 })).not.toThrow();
+  }
+  for (const prop of ["flexGrow", "flexShrink"]) {
+    expect(() => validateBox({ [prop]: 0 })).not.toThrow();
+    expect(() => validateBox({ [prop]: 0.5 })).not.toThrow();
+    expect(() => validateBox({ [prop]: 65_535 })).not.toThrow();
+  }
+});
 
-  expect(() => renderBox({ width: "0%" })).not.toThrow();
-  expect(() => renderBox({ width: "100.000%" })).not.toThrow();
-  expect(() => renderBox({ display: "none", marginTop: 65_535 })).not.toThrow();
+test("accepts canonical percentages without losing decimals", () => {
+  for (const prop of ["width", "flexBasis"]) {
+    for (const value of ["0%", "0.5%", "35%", "55.9%", "100.0%"]) {
+      expect(() => validateBox({ [prop]: value })).not.toThrow();
+    }
+  }
+  for (const prop of ["top", "right", "bottom", "left"]) {
+    for (const value of ["-65535%", "-0.5%", "-0%", "0%", "55.9%", "65535.000%"]) {
+      expect(() => validateBox({ [prop]: value })).not.toThrow();
+    }
+  }
 });
 
 test.each([
@@ -111,10 +184,10 @@ test.each([
   ["flexBasis", 1.5, RangeError],
   ["flexBasis", 65_536, RangeError],
   ["gap", -1, RangeError],
-  ["gap", 65_536, RangeError],
+  ["rowGap", 65_536, RangeError],
   ["height", "4", TypeError],
   ["height", 65_536, RangeError],
-  ["minWidth", 65_536, RangeError],
+  ["maxWidth", -1, RangeError],
   ["paddingLeft", -1, RangeError],
   ["paddingLeft", 65_536, RangeError],
   ["marginTop", 0.5, RangeError],
@@ -123,68 +196,89 @@ test.each([
   ["top", -65_536, RangeError],
   ["left", 65_536, RangeError],
 ] as const)("rejects invalid numeric domain for %s", (prop, value, ErrorType) => {
-  expect(() => renderBox({ [prop]: value })).toThrow(ErrorType);
+  expect(() => validateBox({ [prop]: value })).toThrow(ErrorType);
 });
 
 test.each(["00%", ".5%", "1.%", "+1%", "-1%", " 1%", "1 %", "1e2%", "20"])(
-  "rejects non-canonical percentage width %j",
-  (width) => {
-    expect(() => renderBox({ width })).toThrow(/<Box> prop "width"/);
+  "rejects non-canonical unsigned percentage %j",
+  (value) => {
+    expect(() => validateBox({ width: value })).toThrow(/<Box> prop "width"/);
+    expect(() => validateBox({ flexBasis: value })).toThrow(/<Box> prop "flexBasis"/);
   },
 );
 
-test("rejects an arbitrarily large decimal percentage", () => {
-  expect(() => renderBox({ width: `${"9".repeat(400)}%` })).toThrow(/<Box> prop "width"/);
-});
+test.each(["--1%", "+1%", "01%", "-.5%", "1e2%", "1 %", "65535.1%", "-65535.0001%"])(
+  "rejects unsafe or non-canonical offset percentage %j",
+  (value) => {
+    expect(() => validateBox({ right: value })).toThrow(/<Box> prop "right"/);
+  },
+);
 
 test.each(["100.0001%", "100.00000000000000000001%", "101%", "65535%"])(
-  "rejects percentage width above the evidenced containing-block range %j",
-  (width) => {
-    expect(() => renderBox({ width })).toThrow(/<Box> prop "width"/);
+  "rejects percentage dimensions above the containing-block range %j",
+  (value) => {
+    expect(() => validateBox({ width: value })).toThrow(/<Box> prop "width"/);
+    expect(() => validateBox({ flexBasis: value })).toThrow(/<Box> prop "flexBasis"/);
   },
 );
 
+test("rejects arbitrarily large percentage text before Yoga", () => {
+  const huge = `${"9".repeat(400)}%`;
+  expect(() => validateBox({ width: huge })).toThrow(/<Box> prop "width"/);
+  expect(() => validateBox({ left: huge })).toThrow(/<Box> prop "left"/);
+});
+
 test.each([
-  ["flexDirection", "row-reverse"],
-  ["alignItems", "flex-start"],
-  ["justifyContent", "space-around"],
+  ["flexDirection", "diagonal"],
+  ["flexWrap", "reverse"],
+  ["alignItems", "baseline"],
+  ["alignSelf", "baseline"],
+  ["justifyContent", "stretch"],
   ["borderStyle", "double"],
   ["overflowY", "clip"],
-  ["display", "block"],
-  ["position", "relative"],
+  ["position", "fixed"],
 ] as const)("rejects unsupported %s value %j", (prop, value) => {
-  expect(() => renderBox({ [prop]: value })).toThrow(new RegExp(`<Box> prop "${prop}"`));
+  expect(() => validateBox({ [prop]: value })).toThrow(new RegExp(`<Box> prop "${prop}"`));
 });
 
-test("requires every public offset to belong to an absolute Box", () => {
-  expect(() => renderBox({ top: 0 })).toThrow(/require position="absolute"/);
-  expect(() => renderBox({ left: -1 })).toThrow(/require position="absolute"/);
-  expect(() => renderBox({ position: "absolute", top: 0, left: -1 })).not.toThrow();
+test("validates all four border-edge booleans and six Text modifiers", () => {
+  for (const prop of ["borderTop", "borderRight", "borderBottom", "borderLeft"]) {
+    expect(() => validateBox({ borderStyle: "single", [prop]: true })).not.toThrow();
+    expect(() => validateBox({ borderStyle: "single", [prop]: false })).not.toThrow();
+    expect(() => validateBox({ borderStyle: "single", [prop]: 1 })).toThrow(TypeError);
+  }
+  for (const prop of ["dimColor", "bold", "italic", "underline", "strikethrough", "inverse"]) {
+    expect(() => renderText({ [prop]: true })).not.toThrow();
+    expect(() => renderText({ [prop]: false })).not.toThrow();
+    expect(() => renderText({ [prop]: "yes" })).toThrow(TypeError);
+  }
 });
 
-test.each(["hard", "truncate-end", "truncate-middle", "truncate-start"])(
-  "rejects removed Text wrap mode %j",
-  (wrap) => {
-    expect(() => renderText({ wrap })).toThrow(/<Text> prop "wrap"/);
-  },
-);
+test("removes the truncate-end alias", () => {
+  expect(() => renderText({ wrap: "truncate-end" })).toThrow(/<Text> prop "wrap"/);
+});
 
 test.each([
+  ["Box", "display"],
+  ["Box", "alignContent"],
+  ["Box", "aspectRatio"],
+  ["Box", "style"],
   ["Box", "ariaLabel"],
   ["Box", "ariaHidden"],
   ["Box", "ariaRole"],
   ["Box", "ariaState"],
   ["Box", "aria-label"],
-  ["Box", "aria-hidden"],
-  ["Box", "aria-role"],
-  ["Box", "aria-state"],
+  ["Text", "class"],
+  ["Text", "style"],
   ["Text", "ariaLabel"],
   ["Text", "ariaHidden"],
-  ["Text", "aria-label"],
-  ["Text", "aria-hidden"],
-] as const)("rejects removed %s attribute %s at runtime", (component, prop) => {
+] as const)("rejects omitted %s attribute %s before host creation", (component, prop) => {
   const renderRemovedProp = component === "Box" ? renderBox : renderText;
-  expect(() => renderRemovedProp({ [prop]: prop.endsWith("Hidden") ? true : "value" })).toThrow(
+  expect(() => renderRemovedProp({ [prop]: prop.includes("Hidden") ? true : "value" })).toThrow(
     new RegExp(`<${component}> does not accept the undeclared attribute`),
   );
+});
+
+test("rejects percentage height through the declared numeric field", () => {
+  expect(() => validateBox({ height: "100%" })).toThrow(TypeError);
 });

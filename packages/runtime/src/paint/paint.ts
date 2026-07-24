@@ -1,15 +1,15 @@
 import stringWidth from "string-width";
-import sliceAnsi from "slice-ansi";
 import cliBoxes from "cli-boxes";
 import {
+  ansiCodesToString,
+  diffAnsiCodes,
   type StyledChar,
   styledCharsFromTokens,
-  styledCharsToString,
   tokenize,
 } from "@alcalzone/ansi-tokenize";
 import chalk from "chalk";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { applyChalk, applyColor, isForegroundResetColor } from "./text-style.ts";
+import { applyChalk, applyColor } from "./text-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -31,7 +31,7 @@ import {
   isContainer,
 } from "../host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
-import { wrapText, safeSliceEnd } from "../host/text-measure.ts";
+import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
 import { isContentLayoutGuarded } from "../host/layout-guards.ts";
 import type {
@@ -161,6 +161,44 @@ function styledGraphemesFromAnsi(line: string): StyledChar[] {
       fullWidth: stringWidth(part.segment) > 1,
     });
   }
+  return result;
+}
+
+const boldOpen = "\u001B[1m";
+const dimOpen = "\u001B[2m";
+
+function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
+  return style.code === boldOpen || style.code === dimOpen;
+}
+
+/**
+ * Serialize styled cells while preserving bold and dim independently.
+ *
+ * Both intensities close with SGR 22. The dependency's ordinary minimal diff
+ * emits that shared close when one intensity is removed, but does not reopen
+ * the other intensity when it remains present in the next cell. Reapply the
+ * target intensity set after such a transition; every other style transition
+ * retains the dependency's existing byte sequence.
+ */
+function styledCharsToString(chars: StyledChar[]): string {
+  let result = "";
+  let previousStyles: StyledChar["styles"] = [];
+
+  for (const character of chars) {
+    let transition = diffAnsiCodes(previousStyles, character.styles);
+    const targetCodes = new Set(character.styles.map((style) => style.code));
+    const removesIntensity = previousStyles.some(
+      (style) => isIntensityStyle(style) && !targetCodes.has(style.code),
+    );
+    if (removesIntensity) {
+      transition = [...transition, ...character.styles.filter((style) => isIntensityStyle(style))];
+    }
+    result += ansiCodesToString(transition);
+    result += character.value;
+    previousStyles = character.styles;
+  }
+
+  result += ansiCodesToString(diffAnsiCodes(previousStyles, []));
   return result;
 }
 
@@ -507,11 +545,9 @@ class Output {
           // the write origin to clip.x1 and shifts the retained text left.
           if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
           const maxWidth = clipH.x2 - lineX;
-          const sliced = sliceAnsi(line, from, to);
           if (from > 0 || to < lineWidth) {
+            const sliced = sliceAnsiPreservingIntensity(line, from, to);
             line = safeSliceEnd(sliced, maxWidth);
-          } else {
-            line = sliced;
           }
         }
 
@@ -531,7 +567,9 @@ class Output {
         // already preserved the retained source span's real surface origin.
         if (clipH && transformers.length > 0) {
           const maxWidth = Math.max(0, clipH.x2 - lineX);
-          line = safeSliceEnd(sliceAnsi(line, 0, maxWidth), maxWidth);
+          if (this.caches.getStringWidth(line) > maxWidth) {
+            line = safeSliceEnd(line, maxWidth);
+          }
         }
 
         const characters = this.caches.getStyledChars(line);
@@ -753,18 +791,31 @@ class Output {
 // already-styled children, so `<Text bold>A<Text green>B</Text></Text>` becomes
 // `chalk.bold("A" + chalk.green("B"))` — bold stays OPEN across the green child.
 //
-// Background inheritance is faithful to Ink, where only <Box> provides
-// `backgroundContext` (Text does NOT): `inheritedBg` is the nearest enclosing
-// Box's bg and is threaded UNCHANGED to every descendant <Text> (a parent Text's
-// own backgroundColor never alters it). Each Text's string own bg wins (Ink's
-// `ownBackgroundColor ?? inheritedBg` for the public string-only surface), while
-// host-level non-string values are treated as absent. An explicit
-// `backgroundColor=""` remains a string own bg, resolves to a falsy value, and
-// opts the span out.
+// The surrounding Box background is the outermost Text's base. From there,
+// background follows the same structural channel cascade as foreground and
+// modifiers: omission inherits the nearest Text value, an explicit color
+// replaces it, and "default" actively resets the terminal channel. Unsupported
+// raw-host non-string values are treated as absent.
+const InlineStyleChannel = {
+  foreground: 1 << 0,
+  background: 1 << 1,
+  dimColor: 1 << 2,
+  bold: 1 << 3,
+  italic: 1 << 4,
+  underline: 1 << 5,
+  strikethrough: 1 << 6,
+  inverse: 1 << 7,
+} as const;
+
 interface InlineTextChunk {
   readonly value: string;
-  /** A nested reset span must not receive any enclosing Text foreground color. */
-  readonly blocksAncestorForeground: boolean;
+  /**
+   * Channels whose nearest explicit nested value has already resolved. An
+   * enclosing Text must not wrap those channels again. This represents both
+   * terminal-default colors and all three modifier states without sentinel
+   * characters in user text.
+   */
+  readonly blockedAncestorStyles: number;
 }
 
 type InlineText = readonly InlineTextChunk[];
@@ -774,7 +825,7 @@ function mergeInlineText(chunks: InlineText): InlineTextChunk[] {
   for (const chunk of chunks) {
     if (chunk.value.length === 0) continue;
     const previous = merged.at(-1);
-    if (previous?.blocksAncestorForeground === chunk.blocksAncestorForeground) {
+    if (previous?.blockedAncestorStyles === chunk.blockedAncestorStyles) {
       merged[merged.length - 1] = { ...previous, value: previous.value + chunk.value };
     } else {
       merged.push(chunk);
@@ -792,50 +843,66 @@ function renderTextWithInlineStyles(
   inheritedBg?: unknown,
 ): InlineText {
   if (!node.children || node.children.length === 0) return [];
-  // Concatenate children, each already carrying its OWN style (a nested <Text>
-  // child wraps itself; the Box bg threads through unchanged), then wrap the whole
-  // concatenation with THIS node's own style — Ink's parent-wraps-children model.
-  const inner = squashInlineChildren(node.children, inheritedBg);
+  // Only this Text receives the surrounding Box background as its base. Nested
+  // Text nodes receive no second Box fallback: omission then inherits this
+  // Text's resolved background through the same channel cascade as foreground
+  // and modifiers.
+  const inner = squashInlineChildren(node.children, undefined);
   return applyOwnStyle(node.props, inner, inheritedBg);
 }
 
-// Apply a Text node's OWN chalk styling as a wrap around its already-composed
-// children string — the vue-tui equivalent of Ink's `internal_transform` being
-// applied to the node's squashed children. The node's effective bg is
-// `ownBackgroundColor ?? inheritedBg` (`??`, so an explicit "" opts out) — exactly
-// Ink Text.tsx:103-106. We build the prop set the wrap uses from the node's OWN
-// defined props plus this effective bg, NOT the inherited boolean styles: those
-// already wrap us at the ancestor level, so re-applying them here would double
-// the SGR codes.
+function explicitStyleMask(props: TextProps): number {
+  let mask = 0;
+  if (props.color !== undefined) mask |= InlineStyleChannel.foreground;
+  if (props.backgroundColor !== undefined) mask |= InlineStyleChannel.background;
+  if (props.dimColor !== undefined) mask |= InlineStyleChannel.dimColor;
+  if (props.bold !== undefined) mask |= InlineStyleChannel.bold;
+  if (props.italic !== undefined) mask |= InlineStyleChannel.italic;
+  if (props.underline !== undefined) mask |= InlineStyleChannel.underline;
+  if (props.strikethrough !== undefined) mask |= InlineStyleChannel.strikethrough;
+  if (props.inverse !== undefined) mask |= InlineStyleChannel.inverse;
+  return mask;
+}
+
+function omitBlockedStyles(props: TextProps, mask: number): TextProps {
+  return {
+    ...props,
+    color: mask & InlineStyleChannel.foreground ? undefined : props.color,
+    backgroundColor: mask & InlineStyleChannel.background ? undefined : props.backgroundColor,
+    dimColor: mask & InlineStyleChannel.dimColor ? undefined : props.dimColor,
+    bold: mask & InlineStyleChannel.bold ? undefined : props.bold,
+    italic: mask & InlineStyleChannel.italic ? undefined : props.italic,
+    underline: mask & InlineStyleChannel.underline ? undefined : props.underline,
+    strikethrough: mask & InlineStyleChannel.strikethrough ? undefined : props.strikethrough,
+    inverse: mask & InlineStyleChannel.inverse ? undefined : props.inverse,
+  };
+}
+
+// Apply one Text node's explicit channel values around its composed children.
+// Every explicit value resolves that channel for the complete subtree:
+// omission inherits, true enables, false disables, and `default` actively
+// selects the terminal-default foreground or background. The structural mask
+// makes enclosing wrappers skip channels already settled by a nested Text,
+// including bold and dim which share SGR 22 as their reset code.
 function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown): InlineText {
   if (inner.length === 0) return inner;
   const defined = Object.fromEntries(
     Object.entries(props).filter(([, v]) => v !== undefined),
   ) as TextProps;
-  // effective bg: string own backgroundColor wins (incl. an explicit "" opt-out);
-  // non-string host values are not part of the public color surface and must not
-  // cut off Box background inheritance.
+  // A surrounding Box supplies only the outermost Text's base background.
+  // Public Text background values are strings, including the active `default`
+  // reset. Unsupported raw-host values do not replace the base.
   const ownBg = defined.backgroundColor;
   const effectiveBg = typeof ownBg === "string" ? ownBg : inheritedBg;
   const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg };
-
-  // A foreground reset applies to the complete subtree. Keep that subtree as
-  // one structural chunk so every enclosing Text can skip only its foreground
-  // color while still applying background and boolean styles. This avoids the
-  // collision and nesting bugs of embedding sentinel characters in user text.
-  if (isForegroundResetColor(styleProps.color)) {
-    const value = sanitizeAnsiMultiline(applyChalk(inlineTextValue(inner), styleProps));
-    return value.length === 0 ? [] : [{ value, blocksAncestorForeground: true }];
-  }
+  const ownMask = explicitStyleMask(props);
 
   return mergeInlineText(
     inner.map((chunk) => {
-      const chunkProps = chunk.blocksAncestorForeground
-        ? { ...styleProps, color: undefined }
-        : styleProps;
+      const chunkProps = omitBlockedStyles(styleProps, chunk.blockedAncestorStyles);
       return {
         value: sanitizeAnsiMultiline(applyChalk(chunk.value, chunkProps)),
-        blocksAncestorForeground: chunk.blocksAncestorForeground,
+        blockedAncestorStyles: chunk.blockedAncestorStyles | ownMask,
       };
     }),
   );
@@ -858,9 +925,10 @@ function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown
 // still gets index 1 (not 2) — Ink parity (G52). A real <Transform> among real
 // siblings still gets its correct positional index (G21).
 //
-// `inheritedBg` is the nearest enclosing Box bg (NOT a merged style set): it
-// threads UNCHANGED to descendant <Text> nodes, which each wrap themselves with
-// their own style (Ink's parent-wraps-children composition).
+// `inheritedBg` is a base for direct Text children reached through a standalone
+// Transform. A Text node itself recurses here with `undefined`; its nested Text
+// descendants inherit background structurally through the parent's style
+// channel rather than receiving the surrounding Box value again.
 function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): InlineText {
   const chunks: InlineTextChunk[] = [];
   let transformIndex = 0;
@@ -907,9 +975,7 @@ function renderTransformAsText(node: TuiTransform, inheritedBg?: unknown): strin
 // carrying its own style INSIDE the parent's eventual wrap.
 function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknown): InlineText {
   if (child.type === "text-leaf") {
-    return child.value.length === 0
-      ? []
-      : [{ value: child.value, blocksAncestorForeground: false }];
+    return child.value.length === 0 ? [] : [{ value: child.value, blockedAncestorStyles: 0 }];
   }
   if (child.type === "tui-virtual-text" || child.type === "tui-text") {
     return renderTextWithInlineStyles(child, inheritedBg);
@@ -940,7 +1006,10 @@ function squashTransformChild(child: TuiNode, index: number, inheritedBg: unknow
       return [
         {
           value: transformed,
-          blocksAncestorForeground: inner.some((chunk) => chunk.blocksAncestorForeground),
+          blockedAncestorStyles: inner.reduce(
+            (mask, chunk) => mask | chunk.blockedAncestorStyles,
+            0,
+          ),
         },
       ];
     }
@@ -1447,10 +1516,13 @@ function paintNode(
       // so a degenerate box's absolute children are still clipped by overflow.
       let clipped = false;
       const overflow = node.props["overflow"] as string | undefined;
-      const clipH =
-        overflow === "hidden" || (node.props["overflowX"] as string | undefined) === "hidden";
-      const clipV =
-        overflow === "hidden" || (node.props["overflowY"] as string | undefined) === "hidden";
+      const overflowX = (node.props["overflowX"] as string | undefined) ?? overflow ?? "visible";
+      const overflowY = (node.props["overflowY"] as string | undefined) ?? overflow ?? "visible";
+      // Axis-specific values override the broad shorthand. Active ancestor
+      // clips remain on Output's stack, so a visible inner axis cannot reopen
+      // a region hidden by an outer Box.
+      const clipH = overflowX === "hidden";
+      const clipV = overflowY === "hidden";
       if (clipH || clipV) {
         const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
         const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);

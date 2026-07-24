@@ -1,5 +1,5 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, isReadonly, nextTick, shallowRef } from "vue";
+import { defineComponent, isReadonly, nextTick, shallowRef, vShow, withDirectives } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useBoxSize, type BoxSize } from "@vue-tui/runtime";
@@ -115,14 +115,16 @@ test("distinguishes zero size, clipping, hidden state, and detachment", async ()
     return () =>
       visible.value ? (
         <Box width={5} height={1} overflowY="hidden">
-          <Box
-            ref={target}
-            display={hidden.value ? "none" : "flex"}
-            position={clipped.value ? "absolute" : undefined}
-            top={clipped.value ? 2 : undefined}
-            width={zero.value ? 0 : 3}
-            height={zero.value ? 0 : 1}
-          />
+          {withDirectives(
+            <Box
+              ref={target}
+              position={clipped.value ? "absolute" : undefined}
+              top={clipped.value ? 2 : undefined}
+              width={zero.value ? 0 : 3}
+              height={zero.value ? 0 : 1}
+            />,
+            [[vShow, !hidden.value]],
+          )}
         </Box>
       ) : null;
   });

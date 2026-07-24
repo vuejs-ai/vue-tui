@@ -1,16 +1,22 @@
-import type { TextProps } from "./text-props.ts";
 import { assertColor } from "./color.ts";
+import type { TextProps } from "./text-props.ts";
 
-const wrapModes = new Set(["wrap", "truncate"]);
+const wrapModes = new Set(["wrap", "hard", "truncate", "truncate-middle", "truncate-start"]);
 
 function label(prop: string): string {
   return `<Text> prop "${prop}"`;
 }
 
 function assertBoolean(value: unknown, prop: string): void {
+  if (value === undefined) return;
   if (typeof value !== "boolean") {
     throw new TypeError(`${label(prop)} must be a boolean.`);
   }
+}
+
+function assertTextColor(value: unknown, prop: string): void {
+  if (value === undefined || value === "default") return;
+  assertColor(value, label(prop));
 }
 
 export function assertTextValid(props: TextProps): true {
@@ -23,15 +29,18 @@ export function assertTextValid(props: TextProps): true {
     throw new Error(`Unsupported ${label("wrap")} value: ${JSON.stringify(wrap)}.`);
   }
 
-  const color = values["color"];
-  if (color !== undefined && color !== "revert" && color !== "initial") {
-    assertColor(color, label("color"));
+  assertTextColor(values["color"], "color");
+  assertTextColor(values["backgroundColor"], "backgroundColor");
+  for (const prop of [
+    "dimColor",
+    "bold",
+    "italic",
+    "underline",
+    "strikethrough",
+    "inverse",
+  ] as const) {
+    assertBoolean(values[prop], prop);
   }
-  if (values["backgroundColor"] !== undefined) {
-    assertColor(values["backgroundColor"], label("backgroundColor"));
-  }
-  assertBoolean(values["dimColor"], "dimColor");
-  assertBoolean(values["bold"], "bold");
 
   return true;
 }

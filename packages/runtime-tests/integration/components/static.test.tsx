@@ -373,34 +373,6 @@ test("an empty Static block adds no blank line to history or the dynamic frame",
   expect(result.lastFrame()).toBe("[live]");
 });
 
-test("a Static under an authored hidden ancestor waits until it becomes visible", async () => {
-  const visible = shallowRef(false);
-  const App = defineComponent(() => () => (
-    <Box flexDirection="column">
-      <Box display={visible.value ? "flex" : "none"}>
-        <Static>
-          <Text>DEFERRED</Text>
-        </Static>
-      </Box>
-      <Text>[live]</Text>
-    </Box>
-  ));
-  const result = await render(App);
-
-  expect(staticTranscript(result.frames)).toBe("");
-  expect(result.lastFrame()).toBe("[live]");
-
-  visible.value = true;
-  await flush(result);
-  expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
-
-  visible.value = false;
-  await flush(result);
-  visible.value = true;
-  await flush(result);
-  expect(staticTranscript(result.frames)).toBe("DEFERRED\n");
-});
-
 test("a Static under v-show waits for the Box to become visible", async () => {
   const visible = shallowRef(false);
   const App = defineComponent(
@@ -422,13 +394,13 @@ test("a Static under v-show waits for the Box to become visible", async () => {
 });
 
 test("hidden Static content stays absent from a synchronous document", () => {
-  const App = defineComponent(() => () => (
-    <Box display="none">
-      <Static>
-        <Text>SECRET</Text>
-      </Static>
-    </Box>
-  ));
+  const App = defineComponent(
+    () => () =>
+      withDirectives(
+        h(Box, null, () => h(Static, null, () => h(Text, null, () => "SECRET"))),
+        [[vShow, false]],
+      ),
+  );
 
   expect(renderToString(App)).toBe("");
 });

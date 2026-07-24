@@ -234,29 +234,51 @@ type _ExactBoxProps = Expect<
   Equal<
     keyof BoxProps,
     | "flexDirection"
+    | "flexWrap"
     | "flexGrow"
     | "flexShrink"
     | "flexBasis"
     | "alignItems"
+    | "alignSelf"
     | "justifyContent"
     | "gap"
+    | "rowGap"
+    | "columnGap"
     | "width"
     | "height"
     | "minWidth"
     | "minHeight"
+    | "maxWidth"
+    | "maxHeight"
     | "position"
     | "top"
+    | "right"
+    | "bottom"
     | "left"
+    | "margin"
+    | "marginX"
+    | "marginY"
     | "marginTop"
+    | "marginRight"
+    | "marginBottom"
+    | "marginLeft"
+    | "padding"
+    | "paddingX"
+    | "paddingY"
     | "paddingTop"
+    | "paddingRight"
     | "paddingBottom"
     | "paddingLeft"
-    | "paddingRight"
     | "borderStyle"
+    | "borderTop"
+    | "borderRight"
+    | "borderBottom"
+    | "borderLeft"
     | "borderColor"
     | "backgroundColor"
+    | "overflow"
+    | "overflowX"
     | "overflowY"
-    | "display"
   >
 >;
 type _ExactTextProps = Expect<
@@ -266,7 +288,32 @@ type _ExactTextProps = Expect<
     | "backgroundColor"
     | "dimColor"
     | "bold"
+    | "italic"
+    | "underline"
+    | "strikethrough"
+    | "inverse"
     | "wrap"
+  >
+>;
+type _ExactBoxDirection = Expect<
+  Equal<
+    BoxProps["flexDirection"],
+    "row" | "column" | "row-reverse" | "column-reverse" | undefined
+  >
+>;
+type _ExactBoxPercentageInputs = Expect<
+  Equal<BoxProps["width"] | BoxProps["flexBasis"], number | \`\${number}%\` | undefined>
+>;
+type _ExactBoxOffset = Expect<
+  Equal<BoxProps["right"], number | \`\${number}%\` | undefined>
+>;
+type _ExactTextColors = Expect<
+  Equal<TextProps["color"] | TextProps["backgroundColor"], Color | "default" | undefined>
+>;
+type _ExactTextWrap = Expect<
+  Equal<
+    TextProps["wrap"],
+    "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start" | undefined
   >
 >;
 type _ExactColor = Expect<
@@ -559,8 +606,16 @@ const removedPresentationMount: MountOptions = { presentation: undefined };
 const removedTestPresentation: TestHost = { presentation: undefined };
 const packedColor: Color = "gray";
 const packedRgbColor: Color = "#12abEF";
+const mutableBoxProps: BoxProps = {};
+mutableBoxProps.paddingX = 1;
+mutableBoxProps.right = "-5%";
+const mutableTextProps: TextProps = {};
+mutableTextProps.bold = false;
+mutableTextProps.backgroundColor = "default";
 // @ts-expect-error Runtime has one canonical gray spelling.
 const removedGreyColor: Color = "grey";
+// @ts-expect-error Text's terminal-default escape is not a member of shared Color.
+const removedDefaultColor: Color = "default";
 useInput((_event) => {});
 // Handler results are ignored rather than controlling propagation or defaults.
 useInput((_event) => 42);
@@ -669,12 +724,12 @@ type _RemovedElementGeometryFragment = import("@vue-tui/runtime").ElementGeometr
 type _RemovedTestRenderSession = import("@vue-tui/testing").TestRenderSession;
 // @ts-expect-error The test result does not republish Runtime session internals.
 type _RemovedRenderResultSession = RenderResult["session"];
-// @ts-expect-error Removed Box props are absent rather than never tombstones.
-type _RemovedBoxMarginLeft = BoxProps["marginLeft"];
-// @ts-expect-error Removed spacing shorthands are absent rather than never tombstones.
-type _RemovedBoxPaddingX = BoxProps["paddingX"];
-// @ts-expect-error Removed Text decoration is not a public prop.
-type _RemovedTextUnderline = TextProps["underline"];
+// @ts-expect-error Vue visibility replaces the removed Yoga display prop.
+type _RemovedBoxDisplay = BoxProps["display"];
+// @ts-expect-error Multi-line cross-axis distribution is outside the minimum Box surface.
+type _RemovedBoxAlignContent = BoxProps["alignContent"];
+// @ts-expect-error Text has no browser-style class surface.
+type _RemovedTextClass = TextProps["class"];
 // @ts-expect-error Newline is ordinary Text composition.
 type _RemovedNewline = typeof import("@vue-tui/runtime").Newline;
 // @ts-expect-error Spacer is ordinary Box composition.
@@ -751,6 +806,14 @@ type _RemovedInlineStaticSlotProps = import("@vue-tui/runtime/inline").StaticSlo
 type _RemovedInlineStaticStyle = import("@vue-tui/runtime/inline").StaticStyle;
 // @ts-expect-error Common component types are not duplicated on the Inline subpath.
 type _InlineBoxProps = import("@vue-tui/runtime/inline").BoxProps;
+// @ts-expect-error Percentage notation remains a prop value category, not a named export.
+type _RemovedPercentage = import("@vue-tui/runtime").Percentage;
+// @ts-expect-error Offsets remain a prop value category, not a named export.
+type _RemovedOffset = import("@vue-tui/runtime").Offset;
+// @ts-expect-error Color publishes one complete authoring type, not its internal named subset.
+type _RemovedNamedColor = import("@vue-tui/runtime").NamedColor;
+// @ts-expect-error Wrap modes are derived from TextProps rather than separately exported.
+type _RemovedWrapMode = import("@vue-tui/runtime").WrapMode;
 // @ts-expect-error Mouse protocol types are not public Runtime contracts.
 type _RemovedRootMouseButton = import("@vue-tui/runtime").MouseButton;
 // @ts-expect-error The terminal-wide v1 mouse event was removed.
@@ -767,6 +830,7 @@ void removedClipboardMount;
 void packedColor;
 void packedRgbColor;
 void removedGreyColor;
+void removedDefaultColor;
 `,
     );
     writeFileSync(
@@ -791,20 +855,85 @@ void keyedStaticChildren;
 const unsupportedStaticItems = <Static items={[1]}><Text>x</Text></Static>;
 // @ts-expect-error Layout is composed inside Static's ordinary slot.
 const unsupportedStaticStyle = <Static style={{ flexDirection: "row" }}><Text>x</Text></Static>;
-// @ts-expect-error Horizontal margin is not in the minimum Box vocabulary.
-const unsupportedBoxMarginLeft = <Box marginLeft={1}><Text>x</Text></Box>;
-// @ts-expect-error Spacing shorthands are application composition.
-const unsupportedBoxPaddingX = <Box paddingX={1}><Text>x</Text></Box>;
-// @ts-expect-error Unevidenced text decoration is not a Runtime primitive.
-const unsupportedTextUnderline = <Text underline>x</Text>;
-// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
-const unsupportedTextInverse = <Text inverse>x</Text>;
+const completeBoxAndText = (
+  <Box
+    flexDirection="row-reverse"
+    flexWrap="wrap-reverse"
+    flexGrow={1.5}
+    flexShrink={0.5}
+    flexBasis="25%"
+    alignItems="stretch"
+    alignSelf="auto"
+    justifyContent="space-evenly"
+    gap={1}
+    rowGap={2}
+    columnGap={3}
+    width="75%"
+    height={10}
+    minWidth={1}
+    minHeight={2}
+    maxWidth={80}
+    maxHeight={20}
+    position="absolute"
+    top="-10%"
+    right="5%"
+    bottom={-1}
+    left={2}
+    margin={1}
+    marginX={2}
+    marginY={3}
+    marginTop={4}
+    marginRight={5}
+    marginBottom={6}
+    marginLeft={7}
+    padding={1}
+    paddingX={2}
+    paddingY={3}
+    paddingTop={4}
+    paddingRight={5}
+    paddingBottom={6}
+    paddingLeft={7}
+    borderStyle="round"
+    borderTop
+    borderRight={false}
+    borderBottom
+    borderLeft={false}
+    borderColor="gray"
+    backgroundColor="#123abc"
+    overflow="hidden"
+    overflowX="visible"
+    overflowY="hidden"
+  >
+    <Text
+      color="default"
+      backgroundColor="default"
+      dimColor={false}
+      bold
+      italic
+      underline
+      strikethrough
+      inverse
+      wrap="truncate"
+    >
+      complete public authoring surface
+    </Text>
+  </Box>
+);
+// @ts-expect-error Vue visibility directives replace the removed public display prop.
+const unsupportedBoxDisplay = <Box display="none"><Text>x</Text></Box>;
+// @ts-expect-error Multi-line cross-axis distribution is outside the public Box surface.
+const unsupportedBoxAlignContent = <Box alignContent="center"><Text>x</Text></Box>;
+// @ts-expect-error The canonical end-truncation spelling is \`truncate\`.
+const unsupportedTextTruncateEnd = <Text wrap="truncate-end">x</Text>;
+// @ts-expect-error Terminal-default resets use \`default\`.
+const unsupportedTextRevert = <Text color="revert">x</Text>;
 void unsupportedStaticItems;
 void unsupportedStaticStyle;
-void unsupportedBoxMarginLeft;
-void unsupportedBoxPaddingX;
-void unsupportedTextUnderline;
-void unsupportedTextInverse;
+void completeBoxAndText;
+void unsupportedBoxDisplay;
+void unsupportedBoxAlignContent;
+void unsupportedTextTruncateEnd;
+void unsupportedTextRevert;
 
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<InstanceType<typeof Box> | null>(null);
@@ -1029,11 +1158,11 @@ for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
 }
 
 for (const [componentName, component, attribute] of [
-  ["Box", Box, "paddingX"],
-  ["Box", Box, "marginLeft"],
+  ["Box", Box, "display"],
+  ["Box", Box, "alignContent"],
+  ["Box", Box, "aspectRatio"],
   ["Box", Box, "padddingLeft"],
   ["Box", Box, "class"],
-  ["Text", Text, "underline"],
   ["Text", Text, "colour"],
 ]) {
   const UnsupportedAttribute = defineComponent(() => () =>
@@ -1055,6 +1184,82 @@ const PackedPublicProps = defineComponent(() => () =>
   ),
 );
 assert.equal(runtime.renderToString(PackedPublicProps, { columns: 65_535 }).includes("packed-colors"), true);
+const CompleteBoxAndText = defineComponent(() => () =>
+  h(
+    Box,
+    {
+      flexDirection: "row-reverse",
+      flexWrap: "wrap-reverse",
+      flexGrow: 0.5,
+      flexShrink: 0.5,
+      flexBasis: "100%",
+      alignItems: "stretch",
+      alignSelf: "auto",
+      justifyContent: "space-evenly",
+      gap: 0,
+      rowGap: 0,
+      columnGap: 0,
+      width: "100%",
+      height: 4,
+      minWidth: 1,
+      minHeight: 1,
+      maxWidth: 80,
+      maxHeight: 4,
+      position: "static",
+      top: "-0%",
+      right: "0%",
+      bottom: 0,
+      left: 0,
+      margin: 0,
+      marginX: 0,
+      marginY: 0,
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
+      padding: 0,
+      paddingX: 0,
+      paddingY: 0,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      borderStyle: "round",
+      borderTop: true,
+      borderRight: true,
+      borderBottom: true,
+      borderLeft: true,
+      borderColor: "gray",
+      backgroundColor: "#123abc",
+      overflow: "visible",
+      overflowX: "visible",
+      overflowY: "hidden",
+    },
+    () =>
+      h(
+        Text,
+        {
+          color: "default",
+          backgroundColor: "default",
+          dimColor: true,
+          bold: true,
+          italic: true,
+          underline: true,
+          strikethrough: true,
+          inverse: true,
+          wrap: "truncate",
+        },
+        () => "complete-public-surface",
+      ),
+  ),
+);
+assert.equal(
+  runtime
+    .renderToString(CompleteBoxAndText, { columns: 80 })
+    .replace(/\\x1b\\[[0-9;]*m/g, "")
+    .includes("complete-public-surface"),
+  true,
+);
 for (const color of ["grey", "#fff"]) {
   const InvalidColor = defineComponent(() => () => h(Text, { color }, () => "invalid"));
   assert.throws(() => runtime.renderToString(InvalidColor), /<Text> prop "color"/);
@@ -1166,37 +1371,92 @@ function packedForegroundCharacters(value) {
   return result;
 }
 
-for (const resetColor of ["revert", "initial"]) {
-  const packedReset = await render(
-    defineComponent(() => () => h(Text, null, () => [
-      h(Text, { color: "red" }, () => [
-        "AA",
-        h(Text, { color: resetColor }, () => "BBB"),
-        "CC",
-      ]),
-      h(Text, { color: "blue" }, () => "Z"),
-    ])),
-    { columns: 4 },
-  );
-  const frame = packedReset.lastFrame({ trimLines: true });
-  assert.equal(frame.replace(/\\x1b\\[[0-9;]*m/g, ""), "AABB\\nBCCZ");
-  assert.deepEqual(packedForegroundCharacters(frame), [
-    ["A", "red"], ["A", "red"],
-    ["B", "default"], ["B", "default"], ["B", "default"],
-    ["C", "red"], ["C", "red"],
-    ["Z", "blue"],
-  ]);
-  packedReset.dispose();
+function packedStyledCharacters(value) {
+  const result = [];
+  const sgr = /\\x1b\\[([0-9;]*)m/g;
+  const state = {
+    foreground: "default",
+    background: "default",
+    dimColor: false,
+    bold: false,
+    italic: false,
+    underline: false,
+    strikethrough: false,
+    inverse: false,
+  };
+  const reset = () => {
+    state.foreground = "default";
+    state.background = "default";
+    state.dimColor = false;
+    state.bold = false;
+    state.italic = false;
+    state.underline = false;
+    state.strikethrough = false;
+    state.inverse = false;
+  };
+  const append = (text) => {
+    for (const character of text) {
+      if (character !== "\\n") result.push({ character, ...state });
+    }
+  };
+  let cursor = 0;
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    append(value.slice(cursor, match.index));
+    for (const parameter of (match[1] || "0").split(";").map(Number)) {
+      if (parameter === 0) reset();
+      else if (parameter === 1) state.bold = true;
+      else if (parameter === 2) state.dimColor = true;
+      else if (parameter === 3) state.italic = true;
+      else if (parameter === 4) state.underline = true;
+      else if (parameter === 7) state.inverse = true;
+      else if (parameter === 9) state.strikethrough = true;
+      else if (parameter === 22) {
+        state.bold = false;
+        state.dimColor = false;
+      } else if (parameter === 23) state.italic = false;
+      else if (parameter === 24) state.underline = false;
+      else if (parameter === 27) state.inverse = false;
+      else if (parameter === 29) state.strikethrough = false;
+      else if (parameter === 31) state.foreground = "red";
+      else if (parameter === 39) state.foreground = "default";
+      else if (parameter === 44) state.background = "blue";
+      else if (parameter === 49) state.background = "default";
+    }
+    cursor = match.index + match[0].length;
+  }
+  append(value.slice(cursor));
+  return result;
 }
+
+const packedReset = await render(
+  defineComponent(() => () => h(Text, null, () => [
+    h(Text, { color: "red" }, () => [
+      "AA",
+      h(Text, { color: "default" }, () => "BBB"),
+      "CC",
+    ]),
+    h(Text, { color: "blue" }, () => "Z"),
+  ])),
+  { columns: 4 },
+);
+const packedResetFrame = packedReset.lastFrame({ trimLines: true });
+assert.equal(packedResetFrame.replace(/\\x1b\\[[0-9;]*m/g, ""), "AABB\\nBCCZ");
+assert.deepEqual(packedForegroundCharacters(packedResetFrame), [
+  ["A", "red"], ["A", "red"],
+  ["B", "default"], ["B", "default"], ["B", "default"],
+  ["C", "red"], ["C", "red"],
+  ["Z", "blue"],
+]);
+packedReset.dispose();
 
 const packedPrivateUse = "\\uE000\\uE001";
 const packedNestedReset = await render(
   defineComponent(() => () => h(Text, { color: "red" }, () => [
     "A" + packedPrivateUse,
-    h(Text, { color: "revert" }, () => [
+    h(Text, { color: "default" }, () => [
       "B",
       h(Text, { color: "green" }, () => "C"),
-      h(Text, { color: "initial" }, () => "D"),
+      h(Text, { color: "default" }, () => "D"),
       "E",
     ]),
     "F",
@@ -1213,6 +1473,90 @@ assert.deepEqual(packedForegroundCharacters(packedNestedFrame), [
   ["F", "red"],
 ]);
 packedNestedReset.dispose();
+
+const packedCascade = await render(
+  defineComponent(() => () =>
+    h(
+      Text,
+      { color: "red", backgroundColor: "blue", bold: true, dimColor: true, underline: true },
+      () => [
+        "A",
+        h(Text, { bold: false }, () => "B"),
+        h(Text, { dimColor: false }, () => "C"),
+        h(
+          Text,
+          {
+            color: "default",
+            backgroundColor: "default",
+            italic: true,
+            strikethrough: true,
+            inverse: true,
+          },
+          () => "D",
+        ),
+        "E",
+      ],
+    ),
+  ),
+);
+assert.deepEqual(packedStyledCharacters(packedCascade.lastFrame()), [
+  {
+    character: "A",
+    foreground: "red",
+    background: "blue",
+    dimColor: true,
+    bold: true,
+    italic: false,
+    underline: true,
+    strikethrough: false,
+    inverse: false,
+  },
+  {
+    character: "B",
+    foreground: "red",
+    background: "blue",
+    dimColor: true,
+    bold: false,
+    italic: false,
+    underline: true,
+    strikethrough: false,
+    inverse: false,
+  },
+  {
+    character: "C",
+    foreground: "red",
+    background: "blue",
+    dimColor: false,
+    bold: true,
+    italic: false,
+    underline: true,
+    strikethrough: false,
+    inverse: false,
+  },
+  {
+    character: "D",
+    foreground: "default",
+    background: "default",
+    dimColor: true,
+    bold: true,
+    italic: true,
+    underline: true,
+    strikethrough: true,
+    inverse: true,
+  },
+  {
+    character: "E",
+    foreground: "red",
+    background: "blue",
+    dimColor: true,
+    bold: true,
+    italic: false,
+    underline: true,
+    strikethrough: false,
+    inverse: false,
+  },
+]);
+packedCascade.dispose();
 
 const stdin = new PassThrough();
 const stdout = new PassThrough();

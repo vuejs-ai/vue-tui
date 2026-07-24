@@ -7,5 +7,5 @@ import { Box, Text } from "@vue-tui/runtime";
        strictness is enabled: Vue intentionally permits undeclared component
        attributes as possible fallthrough inputs, so typing alone cannot protect
        this migration. -->
-  <Box :padding-x="2"><Text>x</Text></Box>
+  <Box display="none"><Text>x</Text></Box>
 </template>

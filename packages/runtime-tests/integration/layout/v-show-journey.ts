@@ -8,7 +8,6 @@ import {
   vShow,
   watch,
   withDirectives,
-  type PropType,
   type Ref,
 } from "vue";
 import {
@@ -55,10 +54,6 @@ export default defineComponent({
     visible: { type: Boolean, required: true },
     revision: { type: Number, required: true },
     targetKey: { type: Number, required: true },
-    authoredDisplay: {
-      type: String as PropType<"flex" | "none">,
-      required: true,
-    },
   },
   setup(props) {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
@@ -100,7 +95,6 @@ export default defineComponent({
               {
                 key: props.targetKey,
                 ref: target,
-                display: props.authoredDisplay,
                 width: 12,
                 height: 1,
                 flexShrink: 0,

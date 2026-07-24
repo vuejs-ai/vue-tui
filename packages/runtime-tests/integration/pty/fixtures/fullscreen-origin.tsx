@@ -11,10 +11,12 @@ type Scenario =
   | "horizontal-overflow"
   | "horizontal-left-wide"
   | "horizontal-wide"
-  | "foreground-reset";
+  | "foreground-reset"
+  | "box-text-contract";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
 const label = shallowRef("BUTTON");
+const contractExpanded = shallowRef(true);
 
 // term() waits for this marker before sending input. Write it before entering
 // the alternate screen so it cannot move the fullscreen frame.
@@ -32,7 +34,14 @@ const App = defineComponent(() => {
 
   useInput((event) => {
     const input = inputText(event);
-    if (input === "q") exit();
+    if (input === "q") {
+      exit();
+      return;
+    }
+    if (scenario === "box-text-contract" && input === "t") {
+      contractExpanded.value = !contractExpanded.value;
+      void nextTick().then(markSettled);
+    }
   });
 
   onMounted(() => {
@@ -102,21 +111,101 @@ const App = defineComponent(() => {
           <Text>Nested foreground reset</Text>
           <Text color="red" backgroundColor="blue">
             red:
-            <Text color="revert">
+            <Text color="default">
               default:<Text color="green">green</Text>:default
             </Text>
             :red
           </Text>
           <Box width={4} flexShrink={0}>
             <Text color="red">
-              AA<Text color="initial">BBB</Text>CC
+              AA<Text color="default">BBB</Text>CC
             </Text>
           </Box>
           <Text color="blue">blue sibling</Text>
           <Text color="red">
-            literal:<Text color="revert">reset</Text>:red
+            literal:<Text color="default">reset</Text>:red
           </Text>
           <Text>Press q to restore the shell</Text>
+        </Box>,
+      );
+    }
+
+    if (scenario === "box-text-contract") {
+      const expanded = contractExpanded.value;
+      return renderSurface(
+        <Box
+          {...(expanded ? { paddingX: 2 } : {})}
+          flexDirection="column"
+          width="100%"
+          height={18}
+          flexShrink={0}
+          paddingY={1}
+          borderStyle="round"
+          borderColor="cyan"
+          overflow="hidden"
+        >
+          <Text bold underline>
+            Box/Text · state:{expanded ? "explicit" : "withdrawn"} · t toggle · q exit
+          </Text>
+          <Box
+            {...(expanded ? { columnGap: 3 } : {})}
+            flexDirection="row-reverse"
+            flexWrap="wrap"
+            alignItems="stretch"
+            justifyContent="space-between"
+            gap={1}
+            rowGap={1}
+          >
+            <Box
+              {...(expanded ? { borderRight: false } : {})}
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="single"
+              borderColor="yellow"
+            >
+              <Text color="yellow">A · reverse</Text>
+            </Box>
+            <Box
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="round"
+              borderColor="green"
+            >
+              <Text color="green">B · wrap</Text>
+            </Box>
+            <Box
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="single"
+              borderColor="magenta"
+            >
+              <Text color="magenta">C · gap</Text>
+            </Box>
+          </Box>
+          <Text color="red" backgroundColor="blue" bold dimColor underline>
+            styles:A<Text {...(expanded ? { bold: false } : {})}>B</Text>
+            <Text {...(expanded ? { dimColor: false } : {})}>C</Text>
+            <Text color="default" backgroundColor="default" italic strikethrough inverse>
+              D
+            </Text>
+            E
+          </Text>
+          <Box width={18} height={1} overflowX="hidden">
+            <Text>overflow:0123456789ABCDEFGHIJ</Text>
+          </Box>
+          <Text wrap="truncate-middle">
+            truncate-middle:0123456789·中文·👩‍💻·ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          </Text>
+          <Text wrap="hard">hard-wrap:ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</Text>
+          <Box position="absolute" right="2%" bottom={1}>
+            <Text inverse>ABS</Text>
+          </Box>
         </Box>,
       );
     }

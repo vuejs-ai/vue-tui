@@ -7,8 +7,8 @@ type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransfo
 
 // calculateLayoutWithContentGuards temporarily changes Yoga display state while
 // the resulting layout is painted. Keep that renderer-owned state separate from
-// authored display:none so paint-derived services do not report a zero-content
-// guard as an authored hidden element.
+// the private raw-host display:none channel so paint-derived services do not
+// report a zero-content guard as author-requested hidden state.
 const activeContentGuards = new WeakSet<YogaNode>();
 
 export function isContentLayoutGuarded(node: TuiNode): boolean {

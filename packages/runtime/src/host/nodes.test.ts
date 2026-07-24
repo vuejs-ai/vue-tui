@@ -68,7 +68,7 @@ test("Box style.display maps Vue v-show writes onto Yoga display", () => {
   expect(commits).toBe(2);
 });
 
-test("Box display prop stays hidden under v-show and restores its latest value", () => {
+test("private raw-host display stays hidden under v-show and restores its latest value", () => {
   const ops = buildNodeOps({ onCommit: () => {} });
   const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
 
@@ -76,19 +76,19 @@ test("Box display prop stays hidden under v-show and restores its latest value",
   box.style.display = "none";
   expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
 
-  // A prop update while v-show is still false must not reveal the subtree.
+  // A private raw-host update while v-show is still false must not reveal the subtree.
   ops.patchProp(box, "display", "flex", "none");
   ops.patchProp(box, "display", "none", "flex");
   expect(box.style.display).toBe("none");
   expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
 
   // Vue restores the original style string when v-show becomes true. The host
-  // reveals using the latest authored Box prop, not a stale mount-time value.
+  // reveals using the latest raw-host value, not a stale mount-time value.
   box.style.display = "flex";
   expect(box.style.display).toBe("flex");
   expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
 
-  // Authored display=none wins even while v-show itself is true.
+  // Private raw-host display=none wins even while v-show itself is true.
   ops.patchProp(box, "display", "flex", "none");
   box.style.display = "flex";
   expect(box.style.display).toBe("none");

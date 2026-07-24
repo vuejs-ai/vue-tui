@@ -80,26 +80,37 @@ useInput((event) => {
 
 ## Components
 
-| Component  | Description                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------------------------- |
-| `<Box>`    | Terminal layout container with the supported flex, size, spacing, border, clipping, and visibility primitives |
-| `<Text>`   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                           |
-| `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`               |
+| Component  | Description                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------- |
+| `<Box>`    | Terminal layout container with flex, size, spacing, border, and clipping props plus Box-rooted `v-show` |
+| `<Text>`   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                     |
+| `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`         |
 
-`Box` and `Text` have closed prop surfaces. The exported `BoxProps` type has these 24 fields:
+`Box` and `Text` have closed prop surfaces. The exported `BoxProps` type has these 46 fields:
 
-| Purpose        | Box props                                                                                     |
-| -------------- | --------------------------------------------------------------------------------------------- |
-| Flex layout    | `flexDirection`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `justifyContent`, `gap` |
-| Size/position  | `width`, `height`, `minWidth`, `minHeight`, `position`, `top`, `left`                         |
-| Spacing        | `marginTop`, `paddingTop`, `paddingBottom`, `paddingLeft`, `paddingRight`                     |
-| Paint/clipping | `borderStyle`, `borderColor`, `backgroundColor`, `overflowY`, `display`                       |
+| Purpose    | Box props                                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| Flex       | `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `justifyContent` |
+| Gap        | `gap`, `rowGap`, `columnGap`                                                                                    |
+| Size       | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight`                                             |
+| Position   | `position`, `top`, `right`, `bottom`, `left`                                                                    |
+| Margin     | `margin`, `marginX`, `marginY`, `marginTop`, `marginRight`, `marginBottom`, `marginLeft`                        |
+| Padding    | `padding`, `paddingX`, `paddingY`, `paddingTop`, `paddingRight`, `paddingBottom`, `paddingLeft`                 |
+| Border     | `borderStyle`, `borderTop`, `borderRight`, `borderBottom`, `borderLeft`, `borderColor`                          |
+| Background | `backgroundColor`                                                                                               |
+| Clipping   | `overflow`, `overflowX`, `overflowY`                                                                            |
 
-The exported `TextProps` type has exactly `color`, `backgroundColor`, `dimColor`, `bold`, and `wrap`. `wrap` accepts `"wrap"` or end `"truncate"`; `borderStyle` accepts `"single"` or `"round"`. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits. Text foreground additionally accepts `"revert"` and `"initial"`.
+`BoxProps` deliberately has no `display` field. Use `v-if` when Vue should own creation and lifecycle, or Box-rooted `v-show` when the subtree should remain mounted while hidden.
+
+The exported `TextProps` type has exactly nine fields: `color`, `backgroundColor`, `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, `inverse`, and `wrap`. Foreground and background each accept `Color | "default"`: omission independently inherits the enclosing Text's resolved channel, while `"default"` selects that channel's terminal default for the subtree.
+
+The six modifier props use a three-state cascade. Omission or `undefined` inherits the enclosing value, `true` enables the modifier, and `false` disables it for that subtree; omitted outermost modifiers are disabled. `wrap` accepts exactly `"wrap"`, `"hard"`, `"truncate"`, `"truncate-middle"`, and `"truncate-start"`, defaulting to `"wrap"`. `"wrap"` prefers word boundaries but still breaks an over-wide word, `"hard"` ignores word boundaries, and the truncation modes retain the start, both ends, or the end respectively. Hard line breaks are preserved, truncation operates independently on each logical line without splitting terminal graphemes, and the outermost Text's `wrap` governs its complete composed content.
+
+`borderStyle` accepts `"single"` or `"round"`. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits.
 
 Runtime currently has no screen-reader presentation and no `ariaLabel`, `ariaHidden`, `ariaRole`, or `ariaState` component contract. It also has no environment-variable or internal-helper path that enables the removed experiment. A future accessibility design must provide a complete semantic and terminal-output model rather than making unsupported ARIA-shaped props look effective.
 
-Cell counts are integers from 0 through 65,535, signed `top`, `left`, and `marginTop` values range from -65,535 through 65,535, and flex factors are finite values from 0 through 65,535. Percentage width uses a plain decimal from 0% through 100%. Before allocating a visual grid, Runtime also limits the final surface to 1,048,576 cells, so individually valid width and height values are not a promise that every pair can be painted.
+Cell counts are integers from 0 through 65,535. Margins and numeric offsets use the signed range from -65,535 through 65,535; padding, gaps, dimensions, and numeric flex basis are non-negative. Flex factors are finite values from 0 through 65,535. Width and flex-basis percentages use canonical decimal text from 0% through 100%, while percentage offsets use the same grammar with an optional minus sign and a bounded absolute value. Before allocating a visual grid, Runtime also limits the final surface to 1,048,576 cells, so individually valid width and height values are not a promise that every pair can be painted.
 
 Unknown attributes are errors rather than ignored browser-style fallthrough. This includes removed props, misspellings, `class`, `style`, `data-*`, and listener attributes such as `@click`; `key`, `ref`, and Vue vnode lifecycle hooks remain normal Vue component mechanics. Vue templates do not reliably type-check undeclared fallthrough attributes, so Runtime performs this check before creating a terminal host node.
 
@@ -120,9 +131,9 @@ Use ordinary Vue iteration and stable keys for a collection:
 
 Each mounted instance remains open until its first non-empty eligible output. Only a block represented by non-empty bytes in the current settlement transaction is accepted; an output-free render leaves the instance mounted and eligible for later content, while ordinary unmount before output writes no history. Acceptance releases the slot subtree through ordinary Vue unmount lifecycle but preserves the component instance as its write-once identity, so reactive updates and keyed reorder do not replay accepted history. Remounting creates a new history block. On non-TTY output, an accepted block appends immediately before the current dynamic document is written once at clean teardown. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`. Exact simultaneous ordering, hidden-ancestor eligibility, placement and nesting rules, and failure timing remain under review.
 
-Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while mapping hidden state to Yoga layout, paint, targeted focus availability, Box size, and Runtime-private Fullscreen hit testing. `v-show="false"` always hides; when it becomes true, the latest Box `display` prop applies, so `display="none"` remains hidden. This contract is deliberately Box-rooted: applying `v-show` directly to `Text` or `Static` is not supported.
+Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the component subtree mounted while removing hidden content from Yoga layout, paint, targeted focus availability, Box size, and Runtime-private Fullscreen hit testing. When it becomes true, the Box returns to its current layout and paint properties. This contract is deliberately Box-rooted: applying `v-show` directly to `Text` or `Static` is not supported.
 
-Nested `<Text color="revert">` and `<Text color="initial">` spans reset only their foreground to the terminal default. Reset spans may nest and wrap; an enclosing foreground resumes after the span, while background and the retained boolean text styles continue to apply.
+Nested Text spans may nest and wrap safely. Each explicit color or modifier choice applies to its subtree, and the enclosing resolved values resume afterward; a nested `wrap` value has no independent effect because the outermost Text owns width handling for the composed content.
 
 Runtime does not export layout conveniences as separate components. Write line breaks as text, and use an ordinary Box when a flex spacer is useful:
 

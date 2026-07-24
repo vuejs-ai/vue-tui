@@ -242,9 +242,9 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Ink default: flexBasis=auto (yoga default), reset via the else branch on removal. (G19)
   // Mirror Ink's flexBasis branch exactly (styles.ts:547-555):
   //   number → setFlexBasis (absolute cells)
-  //   string → setFlexBasisPercent(Number.parseInt(v, 10))  — ANY string is a
-  //     PERCENT, including a bare numeric string like "3" → 3% (NOT 3 cells)
-  //     and "50%" → 50%; yoga would otherwise read "3" as 3 absolute cells.
+  //   string → setFlexBasisPercent(Number(v without "%")) — the public
+  //     validator admits only canonical percentages and preserves decimals.
+  //     Private raw hosts still treat a bare numeric string as a percentage.
   //   else   → setFlexBasisAuto()  — this is the load-bearing fallback: Vue's
   //     [Number, String] prop validation only WARNS on a bad runtime value
   //     (e.g. flexBasis={false}/{}/[]) and still forwards it, so without this
@@ -254,7 +254,7 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
     if (typeof v === "number") {
       n.setFlexBasis(v);
     } else if (typeof v === "string") {
-      n.setFlexBasisPercent(Number.parseInt(v, 10));
+      n.setFlexBasisPercent(Number(v.endsWith("%") ? v.slice(0, -1) : v));
     } else {
       n.setFlexBasisAuto();
     }
@@ -271,12 +271,12 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Ink default: justifyContent=flex-start (yoga default). Reset to FLEX_START on removal. (G19)
   justifyContent: (n, v) =>
     n.setJustifyContent(v == null ? Yoga.JUSTIFY_FLEX_START : toJustify(v as string)),
-  // Ink default: gap=0 (yoga default). Reset to 0 on removal. (G19)
-  gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v == null ? 0 : (v as number)),
-  // Ink default: columnGap=0 (yoga default). Reset to 0 on removal. (G19)
-  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v == null ? 0 : (v as number)),
-  // Ink default: rowGap=0 (yoga default). Reset to 0 on removal. (G19)
-  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v == null ? 0 : (v as number)),
+  // Each physical gutter depends on its axis-specific value and the broad gap.
+  // patchProp reconciles the family from current props so withdrawing rowGap or
+  // columnGap falls back to a surviving gap instead of leaving a stale zero.
+  gap: () => {},
+  columnGap: () => {},
+  rowGap: () => {},
 
   // margin/padding families do NOT compute their own edge widths here. Each
   // PHYSICAL edge depends on up to three props together (the specific edge, the
@@ -320,16 +320,9 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   borderLeft: () => {},
   borderRight: () => {},
 
-  // Ink styles.ts applyDisplayStyles: `display === 'flex' ? DISPLAY_FLEX : DISPLAY_NONE`,
-  // so ANY present value that isn't 'flex' (incl. off-spec strings reachable via a TS
-  // bypass — the public prop type is 'flex' | 'none') hides (A21). A19 carve-out: a
-  // removed/undefined `display` (value is null/undefined) must reset to the visible
-  // default DISPLAY_FLEX — Vue can't tell `display={undefined}` from an omitted prop, so
-  // it falls under the declarative render = f(current props) reset, NOT Ink's hide-on-
-  // present-undefined. Hence the `v != null` guard: ANY present (non-null) value except
-  // 'flex' hides — matching Ink, which hides non-string present junk too (`display={5}`,
-  // a deep TS-bypass: `5 === 'flex'` is false → DISPLAY_NONE) — while null/undefined
-  // (removed) → DISPLAY_FLEX (A19).
+  // Private raw-host compatibility channel used by Vue's v-show bridge. Any
+  // present value other than "flex" hides; removal/nullish input restores the
+  // visible default. Public BoxProps intentionally do not expose `display`.
   display: (n, v) =>
     n.setDisplay(v != null && v !== "flex" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
   // Ink does NOT call setOverflow on yoga — it only clips visually in paint.
@@ -495,6 +488,9 @@ export const PADDING_PROPS = new Set([
   "paddingRight",
 ]);
 
+/** Props whose change requires recomputing both physical Yoga gutters. */
+export const GUTTER_PROPS = new Set(["gap", "rowGap", "columnGap"]);
+
 // A prop counts as "present" only when its el.props value coerces to a FINITE
 // number. Spacing props are typed `number` (box-props.ts), matching Ink, whose
 // margin/padding are number-only; numeric STRINGS are still accepted because Vue
@@ -580,6 +576,21 @@ export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, u
   y.setPadding(Yoga.EDGE_ALL, 0);
   y.setPadding(Yoga.EDGE_HORIZONTAL, 0);
   y.setPadding(Yoga.EDGE_VERTICAL, 0);
+}
+
+/**
+ * Resolve physical row/column gutters with axis-specific-over-broad
+ * precedence. Writing the two resolved gutters directly makes reactive
+ * withdrawal declarative: removing rowGap reveals gap again.
+ */
+export function reconcileGutters(node: YogaCarrier, props: Record<string, unknown>): void {
+  const y = node.yoga as YogaNode;
+  const broad = present(props, "gap") ? Number(props["gap"]) : 0;
+  const row = present(props, "rowGap") ? Number(props["rowGap"]) : broad;
+  const column = present(props, "columnGap") ? Number(props["columnGap"]) : broad;
+  y.setGap(Yoga.GUTTER_ALL, 0);
+  y.setGap(Yoga.GUTTER_ROW, row);
+  y.setGap(Yoga.GUTTER_COLUMN, column);
 }
 
 const RESETTABLE_PROPS = new Set([

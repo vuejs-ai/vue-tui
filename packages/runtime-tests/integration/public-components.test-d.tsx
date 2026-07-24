@@ -2,32 +2,64 @@ import { Box, Text } from "@vue-tui/runtime";
 
 const completeBox = (
   <Box
-    flexDirection="column"
+    flexDirection="column-reverse"
+    flexWrap="wrap-reverse"
     flexGrow={1.5}
     flexShrink={0}
-    flexBasis={0}
+    flexBasis="25%"
     alignItems="center"
-    justifyContent="space-between"
+    alignSelf="auto"
+    justifyContent="space-evenly"
     gap={1}
+    rowGap={2}
+    columnGap={3}
     width="55.9%"
     height={4}
     minWidth={1}
     minHeight={0}
+    maxWidth={80}
+    maxHeight={20}
     position="absolute"
     top={-1}
+    right="-5%"
+    bottom={2}
     left={2}
+    margin={1}
+    marginX={2}
+    marginY={3}
     marginTop={-2}
+    marginRight={4}
+    marginBottom={5}
+    marginLeft={6}
+    padding={1}
+    paddingX={2}
+    paddingY={3}
     paddingTop={1}
     paddingBottom={1}
     paddingLeft={2}
     paddingRight={2}
     borderStyle="round"
+    borderTop
+    borderRight={false}
+    borderBottom
+    borderLeft={false}
     borderColor="gray"
     backgroundColor="#12abEF"
+    overflow="hidden"
+    overflowX="visible"
     overflowY="hidden"
-    display="flex"
   >
-    <Text color="revert" backgroundColor="blue" dimColor bold wrap="truncate">
+    <Text
+      color="default"
+      backgroundColor="default"
+      dimColor
+      bold
+      italic
+      underline
+      strikethrough
+      inverse
+      wrap="hard"
+    >
       text
     </Text>
   </Box>
@@ -35,38 +67,62 @@ const completeBox = (
 
 void completeBox;
 
+const textWrapModes = [
+  <Text wrap="wrap">wrap</Text>,
+  <Text wrap="hard">hard</Text>,
+  <Text wrap="truncate">truncate</Text>,
+  <Text wrap="truncate-middle">middle</Text>,
+  <Text wrap="truncate-start">start</Text>,
+];
+
+const textModifierStates = [
+  <Text
+    dimColor={false}
+    bold={false}
+    italic={false}
+    underline={false}
+    strikethrough={false}
+    inverse={false}
+  >
+    explicit false
+  </Text>,
+  <Text
+    dimColor={undefined}
+    bold={undefined}
+    italic={undefined}
+    underline={undefined}
+    strikethrough={undefined}
+    inverse={undefined}
+  >
+    omitted state
+  </Text>,
+];
+
+void textWrapModes;
+void textModifierStates;
+
 // Removed layout and paint vocabulary does not survive on the public constructor.
-// @ts-expect-error Box no longer publishes flex wrapping.
-const boxFlexWrap = <Box flexWrap="wrap" />;
-// @ts-expect-error Box no longer publishes per-child alignment.
-const boxAlignSelf = <Box alignSelf="center" />;
-// @ts-expect-error Box no longer publishes spacing shorthands.
-const boxPaddingX = <Box paddingX={1} />;
-// @ts-expect-error Box no longer publishes an unevidenced horizontal margin edge.
-const boxMarginLeft = <Box marginLeft={1} />;
-// @ts-expect-error Box no longer publishes horizontal clipping.
-const boxOverflowX = <Box overflowX="hidden" />;
-// @ts-expect-error Box borders are indivisible public primitives.
-const boxBorderTop = <Box borderTop={false} />;
+// @ts-expect-error Vue visibility directives replace the removed public display prop.
+const boxDisplay = <Box display="none" />;
+// @ts-expect-error Multi-line cross-axis distribution is outside the public Box surface.
+const boxAlignContent = <Box alignContent="center" />;
+// @ts-expect-error Aspect-ratio policy is outside the public Box surface.
+const boxAspectRatio = <Box aspectRatio={2} />;
 // @ts-expect-error Only evidenced border presets remain public.
 const boxBorderPreset = <Box borderStyle="double" />;
-// @ts-expect-error Only row and column remain public.
-const boxReverseDirection = <Box flexDirection="row-reverse" />;
 // @ts-expect-error Height has no percentage baseline on every host.
 const boxPercentageHeight = <Box height="100%" />;
 
-// @ts-expect-error Text no longer publishes unevidenced decoration policy.
-const textItalic = <Text italic>text</Text>;
-// @ts-expect-error Text no longer publishes unevidenced decoration policy.
-const textUnderline = <Text underline>text</Text>;
-// @ts-expect-error Text no longer publishes unevidenced decoration policy.
-const textStrikethrough = <Text strikethrough>text</Text>;
-// @ts-expect-error Selection-only inverse styling is not a public Text primitive.
-const textInverse = <Text inverse>text</Text>;
 // @ts-expect-error The duplicate end-truncation spelling was removed.
 const textTruncateEnd = <Text wrap="truncate-end">text</Text>;
-// @ts-expect-error Foreground reset tokens do not apply to backgrounds.
-const textBackgroundReset = <Text backgroundColor="revert">text</Text>;
+// @ts-expect-error Legacy foreground reset aliases were replaced by `default`.
+const textForegroundRevert = <Text color="revert">text</Text>;
+// @ts-expect-error Legacy foreground reset aliases were replaced by `default`.
+const textForegroundInitial = <Text color="initial">text</Text>;
+// @ts-expect-error Legacy reset aliases do not apply to the background channel.
+const textBackgroundRevert = <Text backgroundColor="revert">text</Text>;
+// @ts-expect-error Legacy reset aliases do not apply to the background channel.
+const textBackgroundInitial = <Text backgroundColor="initial">text</Text>;
 
 // Screen-reader-only component props are not part of the current visual Runtime vocabulary.
 // @ts-expect-error Box does not accept an ARIA label prop.
@@ -82,21 +138,16 @@ const textAriaLabel = <Text ariaLabel="value">text</Text>;
 // @ts-expect-error Text does not accept an ARIA hidden prop.
 const textAriaHidden = <Text ariaHidden>text</Text>;
 
-void boxFlexWrap;
-void boxAlignSelf;
-void boxPaddingX;
-void boxMarginLeft;
-void boxOverflowX;
-void boxBorderTop;
+void boxDisplay;
+void boxAlignContent;
+void boxAspectRatio;
 void boxBorderPreset;
-void boxReverseDirection;
 void boxPercentageHeight;
-void textItalic;
-void textUnderline;
-void textStrikethrough;
-void textInverse;
 void textTruncateEnd;
-void textBackgroundReset;
+void textForegroundRevert;
+void textForegroundInitial;
+void textBackgroundRevert;
+void textBackgroundInitial;
 void boxAriaLabel;
 void boxAriaHidden;
 void boxAriaRole;

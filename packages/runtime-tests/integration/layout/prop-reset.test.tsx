@@ -161,36 +161,6 @@ test("reset justifyContent to flex-start on removal", async () => {
   expect(lastFrame({ trimLines: true })).toBe("x");
 });
 
-test("reset display=none to visible default on removal", async () => {
-  const hidden = shallowRef(true);
-  const Dynamic = defineComponent(() => () => (
-    <Box {...(hidden.value ? { display: "none" } : {})}>
-      <Text>X</Text>
-    </Box>
-  ));
-
-  const { lastFrame } = await render(Dynamic, { columns: 100 });
-  expect(lastFrame({ trimLines: true })).toBe("");
-
-  hidden.value = false;
-  await nextTick();
-  expect(lastFrame({ trimLines: true })).toBe("X");
-});
-
-test("explicit display=none hides while set", async () => {
-  const Dynamic = defineComponent(() => () => (
-    <Box flexDirection="column">
-      <Box display="none">
-        <Text>hidden</Text>
-      </Box>
-      <Text>shown</Text>
-    </Box>
-  ));
-
-  const { lastFrame } = await render(Dynamic, { columns: 100 });
-  expect(lastFrame({ trimLines: true })).toBe("shown");
-});
-
 test("reset absolute positioning to normal flow on removal", async () => {
   const absolute = shallowRef(true);
   const Dynamic = defineComponent(() => () => (

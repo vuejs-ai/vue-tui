@@ -18,7 +18,7 @@ export interface TextProps {
   underline?: boolean;
   strikethrough?: boolean;
   inverse?: boolean;
-  wrap?: "wrap" | "hard" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
+  wrap?: "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 }
 
 /** Minimal DOM-style surface used by Vue's built-in `v-show` directive. */

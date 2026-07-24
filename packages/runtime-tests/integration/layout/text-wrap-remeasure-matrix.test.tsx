@@ -1,4 +1,4 @@
-import { defineComponent, h, shallowRef } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
@@ -7,7 +7,7 @@ import { Box, Text } from "@vue-tui/runtime";
 // runtime" divergence (see .agents/docs/ink-divergences.md). The sibling
 // `text-wrap-remeasure.test.tsx` covers the two directions of the original
 // run-verified case; this file proves the GENERAL declarative invariant across
-// both public wrap modes:
+// all five public wrap modes:
 //
 //   changing `wrap` at runtime produces the EXACT SAME frame as mounting with
 //   that `wrap` from the start  (i.e. measure always equals paint).
@@ -24,9 +24,15 @@ import { Box, Text } from "@vue-tui/runtime";
 // change must re-measure.
 const CONTENT = "aaaa bbbb cccc";
 
-type PublicWrapMode = "wrap" | "truncate";
+type PublicWrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
-const PUBLIC_MODES: readonly PublicWrapMode[] = ["wrap", "truncate"];
+const PUBLIC_MODES: readonly PublicWrapMode[] = [
+  "wrap",
+  "hard",
+  "truncate",
+  "truncate-middle",
+  "truncate-start",
+];
 
 function makePublicDynamic(wrap: { value: PublicWrapMode }) {
   // A reactive <Text :wrap> over fixed content, with a sentinel <Text> below so
@@ -70,14 +76,37 @@ describe("wrap-mode transition matrix: a runtime `wrap` change === a fresh mount
   test("derived ground-truth fresh-mount frames match explicit expectations", () => {
     // Pin every mode's ground truth, so the matrix below compares toggled frames
     // against the layouts we actually expect (not a silently-wrong baseline).
-    // `wrap` spans rows while `truncate` collapses to one row.
+    // `wrap` and `hard` span rows; all truncation modes preserve one row.
     const expected: Record<PublicWrapMode, string> = {
       wrap: "aaaa\nbbbb\ncccc\nZZZZ",
+      hard: "aaaa b\nbbb cc\ncc\nZZZZ",
       truncate: "aaaa …\nZZZZ",
+      "truncate-middle": "aaa…cc\nZZZZ",
+      "truncate-start": "… cccc\nZZZZ",
     };
     for (const mode of PUBLIC_MODES) {
       expect(freshFrames.get(mode), `fresh-mount frame for ${mode}`).toBe(expected[mode]);
     }
+  });
+
+  test("removing the wrap key re-measures and restores default wrapping", async () => {
+    const explicit = shallowRef(true);
+    const App = defineComponent(() => () => (
+      <Box width={6} flexDirection="column">
+        <Text {...(explicit.value ? { wrap: "truncate" as const } : {})}>{CONTENT}</Text>
+        <Text>ZZZZ</Text>
+      </Box>
+    ));
+    const { lastFrame, waitUntilRenderFlush } = await render(App, { columns: 40 });
+
+    expect(lastFrame()).toBe("aaaa …\nZZZZ");
+
+    // The next VNode omits wrap rather than retaining wrap={undefined}; Vue
+    // sends null for the removed host key and Text must return to default wrap.
+    explicit.value = false;
+    await waitUntilRenderFlush();
+
+    expect(lastFrame()).toBe("aaaa\nbbbb\ncccc\nZZZZ");
   });
 
   // Each transition: mount with `from`, toggle the reactive ref to `to`, flush,
@@ -99,92 +128,6 @@ describe("wrap-mode transition matrix: a runtime `wrap` change === a fresh mount
       await waitUntilRenderFlush();
 
       expect(lastFrame(), `${from} -> ${to} must match fresh-mount(${to})`).toBe(expected);
-    },
-  );
-});
-
-type InternalWrapMode =
-  | "wrap"
-  | "hard"
-  | "truncate"
-  | "truncate-end"
-  | "truncate-middle"
-  | "truncate-start";
-
-const INTERNAL_MODES: readonly InternalWrapMode[] = [
-  "wrap",
-  "hard",
-  "truncate",
-  "truncate-end",
-  "truncate-middle",
-  "truncate-start",
-];
-
-function makeRawHostDynamic(wrap: { value: InternalWrapMode }) {
-  // Deliberately bypass the public <Text> component, whose accepted wrap values
-  // are only "wrap" and "truncate". This exercises the private renderer host
-  // vocabulary that remains useful implementation material without making its
-  // four extra modes part of @vue-tui/runtime's public contract.
-  return defineComponent(
-    () => () =>
-      h("tui-box", { width: 6, flexDirection: "column" }, [
-        h("tui-text", { wrap: wrap.value }, CONTENT),
-        h("tui-text", null, "ZZZZ"),
-      ]),
-  );
-}
-
-async function freshRawHostFrame(mode: InternalWrapMode): Promise<string> {
-  const wrap = shallowRef<InternalWrapMode>(mode);
-  const { lastFrame } = await render(makeRawHostDynamic(wrap), { columns: 40 });
-  return lastFrame() ?? "";
-}
-
-const internalTransitions: Array<[InternalWrapMode, InternalWrapMode]> = [];
-for (const from of INTERNAL_MODES) {
-  for (const to of INTERNAL_MODES) {
-    if (from !== to) internalTransitions.push([from, to]);
-  }
-}
-
-describe("private raw-host wrap transition matrix", () => {
-  const freshFrames = new Map<InternalWrapMode, string>();
-
-  beforeAll(async () => {
-    for (const mode of INTERNAL_MODES) {
-      freshFrames.set(mode, await freshRawHostFrame(mode));
-    }
-  });
-
-  test("pins the internal six-mode fresh-mount layouts", () => {
-    const expected: Record<InternalWrapMode, string> = {
-      wrap: "aaaa\nbbbb\ncccc\nZZZZ",
-      hard: "aaaa b\nbbb cc\ncc\nZZZZ",
-      truncate: "aaaa …\nZZZZ",
-      "truncate-end": "aaaa …\nZZZZ",
-      "truncate-middle": "aaa…cc\nZZZZ",
-      "truncate-start": "… cccc\nZZZZ",
-    };
-    for (const mode of INTERNAL_MODES) {
-      expect(freshFrames.get(mode), `private fresh-mount frame for ${mode}`).toBe(expected[mode]);
-    }
-  });
-
-  test.each(internalTransitions)(
-    "reactive raw-host transition %s -> %s equals a fresh mount",
-    async (from, to) => {
-      const expected = freshFrames.get(to);
-      expect(expected, `private ground-truth frame for ${to} not derived`).toBeDefined();
-
-      const wrap = shallowRef<InternalWrapMode>(from);
-      const { lastFrame, waitUntilRenderFlush } = await render(makeRawHostDynamic(wrap), {
-        columns: 40,
-      });
-
-      wrap.value = to;
-      await waitUntilRenderFlush();
-
-      expect(lastFrame(), `${from} -> ${to} must match private fresh mount (${to})`).toBe(expected);
     },
   );
 });

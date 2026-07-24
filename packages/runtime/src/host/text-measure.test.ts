@@ -3,7 +3,13 @@ import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import { createText, createTextLeaf, createTransform, createVirtualText } from "./nodes.ts";
-import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
+import {
+  flattenLeaves,
+  measureTextNatural,
+  safeSliceEnd,
+  sliceAnsiPreservingIntensity,
+  wrapText,
+} from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
 import Box from "../components/box.vue";
 import Text from "../components/text.vue";
@@ -61,8 +67,8 @@ test("wrapText splits on width", () => {
   expect(wrapText("hello world", 5, "wrap")).toEqual(["hello", " ", "world"]);
 });
 
-test("wrapText truncate-end cuts with ellipsis", () => {
-  expect(wrapText("abcdefgh", 5, "truncate-end")).toEqual(["abcd…"]);
+test("wrapText truncate cuts with ellipsis", () => {
+  expect(wrapText("abcdefgh", 5, "truncate")).toEqual(["abcd…"]);
 });
 
 test("wrapText at width 0 wraps non-empty text onto its own line (Ink parity)", () => {
@@ -113,6 +119,20 @@ test("wrapText at width 0 keeps a wide (CJK) glyph whole and styled", () => {
   ]);
   // Mixed narrow + wide.
   expect(wrapText("A你", 0, "wrap")).toEqual(["", "A", "你"]);
+});
+
+test("ANSI slicing preserves independent bold and dim intensity at the first retained cell", () => {
+  const styled = "\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mBB\x1b[22m";
+
+  expect(sliceAnsiPreservingIntensity(styled, 0, 3)).toBe(
+    "\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m",
+  );
+  expect(safeSliceEnd(styled, 3)).toBe("\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m");
+  expect(wrapText("\x1b[1m\x1b[2mA\x1b[22m\x1b[2mB\x1b[22m", 0, "wrap")).toEqual([
+    "",
+    "\x1b[1m\x1b[2mA\x1b[22m",
+    "\x1b[2mB\x1b[22m",
+  ]);
 });
 
 test("wrapText at width 0 splits each hard-newline line independently", () => {
@@ -261,13 +281,33 @@ test("truncate preserves newlines (no collapse to one line)", () => {
   expect(lines[1]).toBe("yhello");
 });
 
-test("truncate of multi-line text that overflows collapses to one truncated line (matches Ink)", () => {
-  // Ink's wrapText does cliTruncate(text, maxWidth, {position}) on the whole
-  // string; when truncation happens, trailing lines are dropped. We match that
-  // exactly — do NOT change this to per-line truncation (it would diverge from Ink).
+test("truncate shortens each hard-newline segment independently", () => {
   const lines = wrapText("abcdef\nghijkl", 5, "truncate");
-  expect(lines).toEqual(["abcd…"]);
+  expect(lines).toEqual(["abcd…", "ghij…"]);
 });
+
+test.each([
+  ["truncate", ["AB👩‍💻C…", "ABCDE…", "ábcde…", "中文a…", "fit"]],
+  ["truncate-middle", ["AB…FG", "ABC…Z", "ábc…gh", "中…bc", "fit"]],
+  ["truncate-start", ["…CDEFG", "…EF👩‍💻Z", "…defgh", "…文abc", "fit"]],
+] as const)(
+  "%s truncates every hard line independently without splitting graphemes",
+  (mode, expected) => {
+    const lines = wrapText("AB👩‍💻CDEFG\nABCDEF👩‍💻Z\nábcdefgh\n中文abc\nfit", 6, mode);
+
+    expect(lines).toEqual(expected);
+    expect(lines).toHaveLength(5);
+    for (const line of lines) expect(stringWidth(line)).toBeLessThanOrEqual(6);
+  },
+);
+
+test.each(["truncate", "truncate-middle", "truncate-start"] as const)(
+  "%s keeps one result per hard line at the zero- and ellipsis-width boundaries",
+  (mode) => {
+    expect(wrapText("long\nx", 0, mode)).toEqual(["", ""]);
+    expect(wrapText("long\nx", 1, mode)).toEqual(["…", "x"]);
+  },
+);
 
 // --- Text-width parity tests ported from Ink ---
 

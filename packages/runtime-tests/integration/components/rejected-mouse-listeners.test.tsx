@@ -70,16 +70,15 @@ test("a removed listener introduced by a later render exits the application", as
 });
 
 test.each([
-  ["Box", Box, "paddingX"],
-  ["Box", Box, "flexWrap"],
-  ["Box", Box, "marginLeft"],
+  ["Box", Box, "display"],
+  ["Box", Box, "alignContent"],
+  ["Box", Box, "aspectRatio"],
   ["Box", Box, "padddingLeft"],
-  ["Text", Text, "underline"],
   ["Text", Text, "colour"],
 ] as const)("%s rejects undeclared attribute %s at render time", (name, component, attr) => {
   const App = defineComponent(
     () => () =>
-      h(component, { [attr]: 1 } as Record<string, unknown>, {
+      h(component as Component, { [attr]: 1 } as Record<string, unknown>, {
         default: () => h(Text, null, () => "x"),
       }),
   );

@@ -35,7 +35,7 @@ The current contract has no screen-reader presentation, ARIA component props or 
 
 The common rendering vocabulary is `Box` and `Text`. Newlines and flex spacers are ordinary composition; animation, transforms, broad Yoga styles, physical caret, pointer routing, arbitrary painted-Text selection, clipboard transport, and arbitrary coordinated stdout/stderr are not part of the minimum public foundation. Sound underlying mechanisms may remain private without becoming compatibility promises. `ScrollBox` retains Boolean scroll results because an outer application can use them to decide whether to continue its own routing.
 
-Vue's Box-rooted `v-show` behavior and nested Text foreground reset through `color="revert"` or `color="initial"` remain supported renderer behavior. These features need Runtime host and paint semantics but add no policy hook.
+Vue's Box-rooted `v-show` behavior remains supported renderer behavior; `Box` exposes no public `display` prop. Nested Text foreground and background independently inherit when omitted and select the terminal default through `color="default"` or `backgroundColor="default"`. The six `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, and `inverse` modifiers use omission, `true`, and `false` as inherit, enable, and disable states, while `wrap` accepts exactly `"wrap"`, `"hard"`, `"truncate"`, `"truncate-middle"`, and `"truncate-start"`. These features need Runtime host and paint semantics but add no policy hook.
 
 ## The contract = exports from supported package entry points **and their user-consumable types**
 

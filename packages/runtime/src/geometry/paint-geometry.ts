@@ -344,8 +344,7 @@ function prepareTextLayout(input: PrepareTextLayoutInput): PreparedTextLayout {
   const truncating =
     input.wrapMode === "truncate" ||
     input.wrapMode === "truncate-start" ||
-    input.wrapMode === "truncate-middle" ||
-    input.wrapMode === "truncate-end";
+    input.wrapMode === "truncate-middle";
   if (truncating) {
     return {
       kind: "truncated",

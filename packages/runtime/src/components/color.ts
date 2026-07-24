@@ -17,7 +17,7 @@ const namedColors = new Set([
   "whiteBright",
 ]);
 
-export type NamedColor =
+type NamedColor =
   | "black"
   | "red"
   | "green"
