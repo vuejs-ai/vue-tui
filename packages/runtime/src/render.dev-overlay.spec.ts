@@ -1,7 +1,8 @@
 import { test, expect } from "vite-plus/test";
 import { PassThrough } from "node:stream";
 import { connectDevtools, devState } from "./hmr.ts";
-import { createApp, type InternalMountOptions } from "./render.ts";
+import { createApp } from "./render.ts";
+import { createInternalMountOptions } from "./render.ts";
 import { Text } from "./index.ts";
 import { defineComponent, h, nextTick } from "vue";
 
@@ -37,14 +38,16 @@ test("dev overlay preserves the user root and full reload abandons stream observ
     },
   });
   const app = createApp(Root);
-  const instance = app.mount({
-    stdin,
-    stdout,
-    stderr,
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions) as unknown as { ping(): string };
+  const instance = app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout,
+      stderr,
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  ) as unknown as { ping(): string };
   expect(instance.ping()).toBe("pong");
 
   devState.value = { type: "error", error: { message: "BUILD-FAIL-XYZ" } };
@@ -112,14 +115,16 @@ test("full reload synchronously abandons backpressure before the replacement mou
   const Root = defineComponent(() => () => h(Text, null, () => "blocked"));
   const app = createApp(Root);
 
-  app.mount({
-    stdin,
-    stdout,
-    stderr,
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout,
+      stderr,
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  );
   let exitSettled = false;
   void app.waitUntilExit().then(
     () => {
@@ -137,14 +142,16 @@ test("full reload synchronously abandons backpressure before the replacement mou
   let replacementFailure: unknown;
   let replacementMounted = false;
   try {
-    replacement.mount({
-      stdin,
-      stdout,
-      stderr,
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    replacement.mount(
+      createInternalMountOptions({
+        stdin,
+        stdout,
+        stderr,
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     replacementMounted = true;
   } catch (error) {
     replacementFailure = error;

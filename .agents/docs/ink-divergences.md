@@ -137,6 +137,10 @@ The behavior was run-verified against the pinned commit with real `PassThrough` 
 
 The current vue-tui implementation already has first-call exit and final `waitUntilExit()` settlement, but its pre-mount and teardown availability errors on `waitUntilRenderFlush()` do not yet implement the accepted target and remain tracked in [TODOs](./todos.md#runtime-public-api-review).
 
+### App exit implementation checkpoint
+
+As of 2026-07-24, `waitUntilRenderFlush()` implements the vouched target above: it resolves immediately when called before mount or after completed exit, waits for already accepted render and output work while mounted, and remains a non-reporting barrier during teardown. The preceding pending statement is preserved because it belongs to the earlier evidence packet; this unstamped checkpoint updates implementation status without changing the vouched contract.
+
 ### Static history remains irreversible across ordinary mount lifecycle
 
 [VOUCHED @hyfdev 2026-07-23]

@@ -22,7 +22,7 @@ afterEach(async () => {
 // in SSR mode and the terminal (client) renderer produced a BLANK frame — silently, no
 // error. The fix force-client-compiles every vite:vue / vite:vue-jsx plugin in the set.
 test("JSX (.tsx) components render in the in-process dev server", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

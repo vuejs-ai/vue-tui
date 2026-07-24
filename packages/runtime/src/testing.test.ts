@@ -82,3 +82,28 @@ test("owns one mount and exposes active, suspended, and inactive phases", async 
     stderr.destroy();
   }
 });
+
+test("does not pass repository-only controls through the caller-owned mount property", async () => {
+  const bridge = createTestHostBridge();
+  const app = createApp(defineComponent(() => () => null));
+  const originalMount = app.mount.bind(app);
+  let interceptedOptions: unknown;
+  app.mount = ((options) => {
+    interceptedOptions = options;
+    return originalMount(options);
+  }) as typeof app.mount;
+  const stdin = makeInput();
+  const stdout = makeOutput();
+  const stderr = makeOutput();
+
+  try {
+    bridge.mount(app, { stdin, stdout, stderr, patchConsole: false });
+    expect(interceptedOptions).toBeUndefined();
+  } finally {
+    app.unmount();
+    await Promise.allSettled([app.waitUntilExit()]);
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});

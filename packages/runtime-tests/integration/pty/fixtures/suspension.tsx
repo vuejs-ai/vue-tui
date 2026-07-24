@@ -1,6 +1,6 @@
 import process from "node:process";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import {
   Box,
   createApp,
@@ -43,10 +43,12 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({
-  mode,
-  maxFps: 0,
-  [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-} as InternalMountOptions);
+app.mount(
+  createInternalMountOptions({
+    mode,
+    maxFps: 0,
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+  }),
+);
 
 await app.waitUntilExit();

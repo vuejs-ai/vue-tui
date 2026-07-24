@@ -4,7 +4,7 @@ import { expect, test } from "vite-plus/test";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import ansiEscapes from "ansi-escapes";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("an ended stdout rejects exit without writing after end", async () => {
@@ -22,7 +22,7 @@ test("an ended stdout rejects exit without writing after end", async () => {
   const stderr = makeFakeWritable({ columns: 100 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await nextTick();
   await nextTick();
 
@@ -157,13 +157,15 @@ test("explicit liveUpdates writes live Inline frames to non-TTY without terminal
   });
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    liveUpdates: true,
-    mode: "inline",
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr,
+      liveUpdates: true,
+      mode: "inline",
+    }),
+  );
 
   await nextTick();
   await app.waitUntilRenderFlush();

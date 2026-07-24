@@ -1,6 +1,7 @@
 import { PassThrough } from "node:stream";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import type { InternalMountOptionsInput } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { defineComponent, nextTick, onScopeDispose, ref, shallowRef } from "vue";
@@ -58,17 +59,17 @@ const acceptanceHosts = [
   {
     name: "visual Inline",
     isTTY: true,
-    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptions>,
+    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptionsInput>,
   },
   {
     name: "final non-TTY",
     isTTY: false,
-    options: { mode: "inline", liveUpdates: false } satisfies Partial<InternalMountOptions>,
+    options: { mode: "inline", liveUpdates: false } satisfies Partial<InternalMountOptionsInput>,
   },
   {
     name: "live non-TTY",
     isTTY: false,
-    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptions>,
+    options: { mode: "inline", liveUpdates: true } satisfies Partial<InternalMountOptionsInput>,
   },
 ] as const;
 
@@ -105,14 +106,16 @@ test.each(acceptanceHosts)(
     const app = createApp(App);
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        patchConsole: false,
-        maxFps: 0,
-        ...options,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          patchConsole: false,
+          maxFps: 0,
+          ...options,
+        }),
+      );
       await app.waitUntilRenderFlush();
 
       live.value = "live-2";
@@ -154,14 +157,16 @@ test("initial illegal Static nesting writes no history and exits with the mount 
   try {
     let mountError: unknown;
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode: "inline",
-        patchConsole: false,
-        maxFps: 0,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode: "inline",
+          patchConsole: false,
+          maxFps: 0,
+        }),
+      );
     } catch (error) {
       mountError = error;
     }
@@ -226,14 +231,16 @@ test("accepted-scope cleanup errors settle when an ancestor removes the Static h
   app.config.errorHandler = (error) => captured.push(error);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await nextTick();
     await nextTick();
     await app.waitUntilRenderFlush();
@@ -290,14 +297,16 @@ test("immediate app unmount rejects exit with an accepted-scope cleanup error", 
   const exited = app.waitUntilExit();
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     app.unmount();
     await expect(exited).rejects.toBe(cleanupFailure);
     expect(events).toEqual(["static", "dynamic"]);
@@ -327,15 +336,17 @@ test("an initially output-free Static appends when it later emits on final non-T
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: false,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: false,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await app.waitUntilRenderFlush();
     expect(chunks).toEqual([]);
 
@@ -379,13 +390,15 @@ test("a visual Inline Static remains open after a ready sibling commits", async 
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilRenderFlush();
     expect(countOccurrences(stripAnsi(chunks.join("")), "IMMEDIATE_TTY")).toBe(1);
     expect(countOccurrences(stripAnsi(chunks.join("")), "DEFERRED_TTY")).toBe(0);
@@ -424,15 +437,17 @@ test("effective visual Fullscreen rejects empty Static before terminal ownership
   try {
     let mountError: unknown;
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode: "fullscreen",
-        liveUpdates: true,
-        patchConsole: false,
-        maxFps: 0,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode: "fullscreen",
+          liveUpdates: true,
+          patchConsole: false,
+          maxFps: 0,
+        }),
+      );
     } catch (error) {
       mountError = error;
     }
@@ -479,16 +494,18 @@ test("visual Fullscreen rolls back setup-owned input before reporting Static rej
   try {
     let mountError: unknown;
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode: "fullscreen",
-        liveUpdates: true,
-        patchConsole: false,
-        maxFps: 0,
-        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode: "fullscreen",
+          liveUpdates: true,
+          patchConsole: false,
+          maxFps: 0,
+          [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+        }),
+      );
     } catch (error) {
       mountError = error;
     }
@@ -574,15 +591,17 @@ test("inserting Static after a Fullscreen frame rejects before any replacement f
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await app.waitUntilRenderFlush();
     expect(stdoutChunks.join("")).toContain("FULLSCREEN_BEFORE_STATIC");
     const updateStart = stdoutChunks.length;
@@ -703,15 +722,17 @@ test("a synchronous append during the Static write remains pending for the next 
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await nextTick();
     await app.waitUntilRenderFlush();
     app.unmount();
@@ -770,15 +791,17 @@ test("a throwing Static write abandons the instance before a synchronous slot re
   const exited = app.waitUntilExit();
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
 
     await app.waitUntilRenderFlush();
     showStatic.value = true;
@@ -835,15 +858,17 @@ test("accepted Static output is not replayed when the later dynamic write throws
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
@@ -899,15 +924,17 @@ test("a throwing Static write is indeterminate and is not retried during teardow
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
@@ -1017,15 +1044,17 @@ test("coordinated external output stays ordered between exact Static commits", a
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     await app.waitUntilRenderFlush();
 
     items.value = [{ id: 1, text: first }];
@@ -1071,15 +1100,17 @@ test("ordinary teardown commits one pending throttled Static append", async () =
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 1,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 1,
+      }),
+    );
     await app.waitUntilRenderFlush();
 
     showStatic.value = true;

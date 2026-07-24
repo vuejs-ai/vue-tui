@@ -4,7 +4,7 @@ Concrete follow-up work that Yunfei explicitly asked the project not to forget. 
 
 ## Runtime public API review
 
-The selected Runtime implementation follow-ups are complete. The optional higher-layer work below remains deferred.
+- [ ] Ask Yunfei to review the implemented live `Static` ordering, hidden-ancestor behavior, placement, nesting, and Static-specific failure-timing candidate before removing the corresponding Open decision-ledger entry or calling the Runtime foundation complete.
 
 ## Deferred higher-layer work
 

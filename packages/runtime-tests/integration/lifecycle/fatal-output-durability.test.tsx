@@ -6,7 +6,7 @@ import stripAnsi from "strip-ansi";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin } from "./test-streams.ts";
 
 function captureStream(stream: NodeJS.WriteStream): { readonly chunks: string[] } {
@@ -55,15 +55,17 @@ test.each([1, 4])(
     });
     const app = createApp(App);
 
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
 
     try {
       exit(fatal);
@@ -93,15 +95,17 @@ test("a throttled Inline error exit remains durable when stdout is lost before t
   const stderrCapture = captureStream(stderr);
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "inline",
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 1,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 1,
+    }),
+  );
 
   try {
     await nextTick();
@@ -144,15 +148,17 @@ test("an Inline frame-write failure is reported durably to stderr", async () => 
   }) as NodeJS.WriteStream["write"];
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "inline",
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 1,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 1,
+    }),
+  );
 
   try {
     await app.waitUntilRenderFlush();
@@ -196,14 +202,16 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
   const stderrWrites = captureWrites(stderr);
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: false,
-    patchConsole: false,
-    maxFps: 1,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: false,
+      patchConsole: false,
+      maxFps: 1,
+    }),
+  );
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -295,15 +303,17 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
     return () => h(Text, null, { default: () => "running" });
   });
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "fullscreen",
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      mode: "fullscreen",
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   let settlement: "pending" | "resolved" | "rejected" = "pending";

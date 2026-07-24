@@ -15,7 +15,5 @@ testGlobal.__VT_TEST_APP__ = app;
 app.mount({
   stdin: testGlobal.__VT_TEST_STDIN__ ?? process.stdin,
   stdout: testGlobal.__VT_TEST_STDOUT__ ?? process.stdout,
-  liveUpdates: true,
   patchConsole: false,
-  maxFps: 0,
 });

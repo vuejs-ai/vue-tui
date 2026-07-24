@@ -9,7 +9,7 @@ import type { CoordinatedWriteResult } from "../../../runtime/dist/internal.mjs"
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import { bsu, esu } from "../../../runtime/dist/internal.mjs";
 import { runtimeResourceTracker } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { createSlowWritable } from "./slow-writable.ts";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
@@ -60,14 +60,16 @@ test.sequential("an Inline transaction never writes again between write(false) a
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(Root);
 
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr: makeFakeWritable(),
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr: makeFakeWritable(),
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await new Promise((resolve) => setTimeout(resolve, 350));
   app.unmount();
   await slow.waitForIdle();
@@ -86,14 +88,16 @@ test.sequential("coordinated writes distinguish accepted backpressure from non-a
   const slow = createSlowWritable();
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(Root);
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr: makeFakeWritable(),
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr: makeFakeWritable(),
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   const first = write(`accepted:${"A".repeat(2_048)}\n`);
   const second = write("must-not-be-retained\n");
@@ -140,14 +144,16 @@ test.sequential("synchronized-output ownership follows physical BSU and ESU hand
   );
   const before = runtimeResourceTracker.snapshot().synchronizedOutputLeases;
 
-  app.mount({
-    stdin,
-    stdout,
-    stderr: makeFakeWritable(),
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout,
+      stderr: makeFakeWritable(),
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   const result = write("physical-lease\n");
 
   expect(result).toMatchObject({ status: "accepted", writable: false });
@@ -176,14 +182,16 @@ test.sequential("normal unmount waits for drain before final output and restorat
   const slow = createSlowWritable();
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(Root);
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr: makeFakeWritable(),
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr: makeFakeWritable(),
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   const writeResult = write(`record:${"R".repeat(2_048)}\n`);
   expect(writeResult).toMatchObject({ status: "accepted", writable: false });
@@ -220,16 +228,18 @@ test.sequential("Fullscreen managed input waits through initial output backpress
   const stderr = makeFakeWritable();
   const app = createApp(Root);
 
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr,
-    mode: "fullscreen",
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr,
+      mode: "fullscreen",
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   stdin.emit("data", "early");
   await app.waitUntilRenderFlush();
   await flushInputTurn();
@@ -275,15 +285,17 @@ test.sequential("Inline Kitty and paste activation reconcile one handed control 
   const stderr = makeFakeWritable();
   const app = createApp(Root);
 
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr,
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr,
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   stdin.emit("data", "early");
   await app.waitUntilRenderFlush();
   await flushInputTurn();
@@ -322,15 +334,17 @@ test.sequential("a semantic-input release during public output backpressure rest
   const { stream: stdin, isRaw } = makeTrackedStdin();
   const stderr = makeFakeWritable();
   const app = createApp(Root);
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr,
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr,
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const result = write("block-release\n");
@@ -378,15 +392,17 @@ test.sequential("blocked semantic-input changes retain only the final active sta
   const { stream: stdin, isRaw } = makeTrackedStdin();
   const stderr = makeFakeWritable();
   const app = createApp(Root);
-  app.mount({
-    stdin,
-    stdout: slow.stream,
-    stderr,
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr,
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const baselineOn = slow.deliveredOutput.split(PASTE_ON).length - 1;

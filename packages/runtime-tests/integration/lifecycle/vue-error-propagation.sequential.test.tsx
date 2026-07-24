@@ -3,7 +3,7 @@ import { defineComponent, nextTick, onErrorCaptured, onScopeDispose, shallowRef 
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { Box, createApp, Text, useApp, useInput, useLayoutWidth } from "@vue-tui/runtime";
 import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 afterEach(() => {
@@ -316,14 +316,16 @@ test.sequential("a partial initial mount restores terminal state and releases ev
 
   let thrown: unknown;
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      patchConsole: false,
-      onRender,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        patchConsole: false,
+        onRender,
+      }),
+    );
   } catch (error) {
     thrown = error;
   }

@@ -58,21 +58,6 @@ test("reports host suspension independently from output cadence and effective mo
   ]);
 });
 
-test.each(["fullscreen", "alternateScreen", "kittyKeyboard"] as const)(
-  "rejects own removed %s before mode validation",
-  (key) => {
-    expect(() => normalizeRequestedMode({ [key]: undefined, mode: null })).toThrow(
-      `Mount option "${key}" was removed`,
-    );
-  },
-);
-
-test("does not treat inherited old keys as removed mount options", () => {
-  const options = Object.create({ fullscreen: true }) as { mode?: string };
-  options.mode = "inline";
-  expect(normalizeRequestedMode(options)).toBe("inline");
-});
-
 test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode"), 1n])(
   "rejects invalid mode %#",
   (mode) => {

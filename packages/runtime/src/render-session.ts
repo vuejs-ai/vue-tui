@@ -134,39 +134,8 @@ export type ResolvedLiveSurface =
       readonly kind: "fullscreen-terminal";
     });
 
-const hasOwn = (value: object, key: PropertyKey): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
 /** Validate the accepted mount-mode contract without reading any stream option. */
 export function normalizeRequestedMode(options: object): RenderMode {
-  for (const removedKey of ["fullscreen", "alternateScreen"] as const) {
-    if (hasOwn(options, removedKey)) {
-      throw new TypeError(
-        `Mount option "${removedKey}" was removed; choose mode: "inline" or mode: "fullscreen".`,
-      );
-    }
-  }
-  if (hasOwn(options, "interactive")) {
-    throw new TypeError(
-      'Mount option "interactive" was removed; use "liveUpdates" only to override output cadence.',
-    );
-  }
-  if (hasOwn(options, "debug")) {
-    throw new TypeError(
-      'Mount option "debug" was removed; use "liveUpdates" for output cadence and @vue-tui/testing for deterministic content frames.',
-    );
-  }
-  if (hasOwn(options, "rawMode")) {
-    throw new TypeError(
-      'Mount option "rawMode" was removed; semantic input routes own terminal raw mode.',
-    );
-  }
-  if (hasOwn(options, "kittyKeyboard")) {
-    throw new TypeError(
-      'Mount option "kittyKeyboard" was removed; Runtime privately negotiates the keyboard protocol required by public input facts.',
-    );
-  }
-
   const mode = (options as { readonly mode?: unknown }).mode;
   if (mode === undefined) return "inline";
   if (mode === "inline" || mode === "fullscreen") return mode;

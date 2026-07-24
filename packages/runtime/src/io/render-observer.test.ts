@@ -2,7 +2,7 @@ import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Text } from "../index.ts";
-import { createApp, type MountOptions } from "../render.ts";
+import { createApp, createInternalMountOptions } from "../render.ts";
 import {
   INTERNAL_RENDER_OBSERVER,
   type InternalContentFrame,
@@ -20,15 +20,17 @@ async function run(observer?: InternalRenderObserver): Promise<string> {
   Object.assign(stdin, { isTTY: false });
 
   const app = createApp(defineComponent(() => () => h(Text, null, () => "observed")));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-    [INTERNAL_RENDER_OBSERVER]: observer,
-  } as MountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      patchConsole: false,
+      maxFps: 0,
+      [INTERNAL_RENDER_OBSERVER]: observer,
+    }),
+  );
   await app.waitUntilRenderFlush();
   app.unmount();
   stdout.destroy();

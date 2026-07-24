@@ -14,7 +14,7 @@ import { expect, test, vi, afterEach } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeWritable, makeFakeStdin } from "./test-streams.ts";
 
 afterEach(() => {
@@ -62,7 +62,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   app1.config.warnHandler = () => {};
   const exited = app1.waitUntilExit();
   expect(() =>
-    app1.mount({ stdout, stdin, stderr, liveUpdates: true } as InternalMountOptions),
+    app1.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true })),
   ).toThrow(ttyError);
   await expect(exited).rejects.toBe(ttyError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
@@ -73,7 +73,7 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 } as InternalMountOptions);
+  app2.mount(createInternalMountOptions({ stdout, stdin: stdin2, stderr, maxFps: 0 }));
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -112,13 +112,15 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
   app1.config.warnHandler = () => {};
   const exited = app1.waitUntilExit();
   expect(() =>
-    app1.mount({
-      stdout,
-      stdin,
-      stderr,
-      liveUpdates: true,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    } as InternalMountOptions),
+    app1.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    ),
   ).toThrow(enableError);
   await expect(exited).rejects.toBe(enableError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
@@ -128,7 +130,7 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
   const app2 = createApp(PlainApp);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0 } as InternalMountOptions);
+  app2.mount(createInternalMountOptions({ stdout, stdin: stdin2, stderr, maxFps: 0 }));
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();
@@ -169,7 +171,7 @@ test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga
     (error: unknown) => ({ kind: "rejected" as const, error }),
   );
   expect(() =>
-    app1.mount({ stdout, stdin, stderr, liveUpdates: false } as InternalMountOptions),
+    app1.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: false })),
   ).toThrow(widthError);
   const outcome = await exited;
   expect(outcome).toEqual({ kind: "rejected", error: widthError });

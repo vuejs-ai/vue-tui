@@ -1,7 +1,8 @@
 import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef, type ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import { createApp, type InternalMountOptions } from "../render.ts";
+import { createApp } from "../render.ts";
+import { createInternalMountOptions } from "../render.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
 import type { InternalElementGeometry } from "./geometry-service.ts";
 import { useInternalElementGeometry } from "./internal-use-element-geometry.ts";
@@ -27,14 +28,16 @@ describe("live geometry service wiring", () => {
       return () => h("tui-box", { ref: target, width: 4, height: 1 });
     });
     const app = createApp(Root);
-    app.mount({
-      ...host,
-      patchConsole: false,
-      maxFps: 0,
-      liveUpdates: true,
-      mode: "fullscreen",
-      [INTERNAL_SUSPENSION_HOST]: suspension,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...host,
+        patchConsole: false,
+        maxFps: 0,
+        liveUpdates: true,
+        mode: "fullscreen",
+        [INTERNAL_SUSPENSION_HOST]: suspension,
+      }),
+    );
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(geometry.value.status).toBe("visible");
@@ -61,14 +64,16 @@ describe("live geometry service wiring", () => {
       return () => h("tui-box", { ref: target, width: 5, height: 1 });
     });
     const app = createApp(Root);
-    app.mount({
-      ...host,
-      patchConsole: false,
-      maxFps: 0,
-      liveUpdates: false,
-      mode: "inline",
-      [INTERNAL_SUSPENSION_HOST]: suspension,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...host,
+        patchConsole: false,
+        maxFps: 0,
+        liveUpdates: false,
+        mode: "inline",
+        [INTERNAL_SUSPENSION_HOST]: suspension,
+      }),
+    );
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(geometry.value).toMatchObject({

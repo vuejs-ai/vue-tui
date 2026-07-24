@@ -4,7 +4,7 @@ import {
   INTERNAL_SUSPENSION_HOST,
 } from "../../runtime/dist/internal.mjs";
 import { INTERNAL_KITTY_KEYBOARD } from "../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../runtime/dist/internal.mjs";
 import { createApp, useInput, type TuiApp, type TuiInputEvent } from "@vue-tui/runtime";
 import { defineComponent, h, nextTick, shallowRef, type ShallowRef } from "vue";
 import { describe, expect, test } from "vite-plus/test";
@@ -103,16 +103,18 @@ function mountInputApp({
     return () => h("tui-text", null, "ready");
   });
   const app = createApp(App);
-  app.mount({
-    stdout,
-    ...(stderr ? { stderr } : {}),
-    stdin,
-    patchConsole: false,
-    liveUpdates: true,
-    maxFps: 0,
-    ...(kittyMode ? { [INTERNAL_KITTY_KEYBOARD]: { mode: kittyMode } } : {}),
-    ...(suspensionHost ? { [INTERNAL_SUSPENSION_HOST]: suspensionHost } : {}),
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      ...(stderr ? { stderr } : {}),
+      stdin,
+      patchConsole: false,
+      liveUpdates: true,
+      maxFps: 0,
+      ...(kittyMode ? { [INTERNAL_KITTY_KEYBOARD]: { mode: kittyMode } } : {}),
+      ...(suspensionHost ? { [INTERNAL_SUSPENSION_HOST]: suspensionHost } : {}),
+    }),
+  );
   return { app, inputs };
 }
 
@@ -143,13 +145,15 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
     const app = createApp(defineComponent(() => () => h("tui-text", null, "idle")));
 
     try {
-      app.mount({
-        stdout,
-        stdin,
-        patchConsole: false,
-        liveUpdates: true,
-        maxFps: 0,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+        }),
+      );
       expect(writes).not.toContain("\x1b[?u");
       expect(writes).not.toContain("\x1b[>1u");
       expectReleased(stdin, refBalance);
@@ -300,14 +304,16 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
 
     const exited = app.waitUntilExit();
     expect(() =>
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        patchConsole: false,
-        liveUpdates: true,
-        maxFps: 0,
-      } as InternalMountOptions),
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          patchConsole: false,
+          liveUpdates: true,
+          maxFps: 0,
+        }),
+      ),
     ).toThrow(queryError);
     await expect(exited).rejects.toBe(queryError);
     await settleLifecycle();

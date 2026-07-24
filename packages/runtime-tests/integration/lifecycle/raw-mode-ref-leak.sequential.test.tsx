@@ -16,7 +16,7 @@ import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
 import { useInternalInputRoutingForTest } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable } from "./test-streams.ts";
 
 // A fake TTY stdin that COUNTS ref()/unref() calls so we can assert balance, and
@@ -69,7 +69,7 @@ test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd
   const { stream: stdin, refs } = makeRefCountingThrowingStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true }));
   expect(selectRoute).toThrow("ERR_TTY_INIT_FAILED");
 
   // The leak guard: a throwing setRawMode must leave the stdin's ref count at 0.

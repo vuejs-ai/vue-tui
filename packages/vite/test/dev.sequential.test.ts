@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 test("boots the app in-process and renders a frame", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -43,7 +43,7 @@ test("boots the app in-process and renders a frame", async () => {
 });
 
 test("template-only edit hot-swaps with state preserved (no reload)", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

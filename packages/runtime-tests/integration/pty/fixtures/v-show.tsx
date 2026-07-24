@@ -1,6 +1,6 @@
 import process from "node:process";
 import { Box, Text, createApp, useApp, useFocus, useInput } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import {
   defineComponent,
   h,
@@ -113,7 +113,7 @@ const App = defineComponent(() => {
 
 process.stdout.write("__READY__\n");
 const app = createApp(App);
-app.mount({ mode: "fullscreen", maxFps: 0 } as InternalMountOptions);
+app.mount(createInternalMountOptions({ mode: "fullscreen", maxFps: 0 }));
 
 void app.waitUntilExit().then(() => {
   process.stdout.write(`__VSHOW_OK__:mounts=${mounts}:unmounts=${unmounts}\n`);

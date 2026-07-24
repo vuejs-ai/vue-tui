@@ -1,13 +1,11 @@
 import { nextTick, type ComponentPublicInstance } from "vue";
-import type { MountOptions, TuiApp } from "./render.ts";
-import {
-  INTERNAL_KITTY_KEYBOARD,
-  type InternalKittyKeyboardMountOptions,
-} from "./io/kitty-keyboard.ts";
+import { mountWithInternalOptions, type MountOptions, type TuiApp } from "./render.ts";
+import { INTERNAL_KITTY_KEYBOARD } from "./io/kitty-keyboard.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
 import { getSharedStdinIngress, type SharedStdinIngress } from "./io/stdin-ingress.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "./process-suspension.ts";
-import { INTERNAL_TERMINAL_SIZE_PROBE, type TerminalSizeProbe } from "./terminal-size-probe.ts";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "./terminal-size-probe.ts";
+import { createInternalMountOptions } from "./internal-mount-options.ts";
 
 export interface TestContentFrame {
   readonly dynamic: string;
@@ -24,14 +22,6 @@ export interface TestHostBridge {
   suspend(): Promise<void>;
   resume(): Promise<void>;
 }
-
-type TestingMountOptions = MountOptions & {
-  readonly maxFps?: number;
-  [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
-  [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
-  [INTERNAL_SUSPENSION_HOST]?: ReturnType<typeof createManualSuspensionHost>;
-  [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
-};
 
 function normalizeOptions(options: TestHostBridgeOptions): TestHostBridgeOptions {
   if (typeof options !== "object" || options === null || Array.isArray(options)) {
@@ -120,15 +110,18 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       // Test hosts observe renderer commits directly. Keep those commits
       // unthrottled so one Vue update turn deterministically produces its
       // corresponding content observation, independent of wall-clock timing.
-      const resolvedOptions: TestingMountOptions = { ...mountOptions, maxFps: 0 };
-      const stdin = resolvedOptions.stdin ?? process.stdin;
-      resolvedOptions[INTERNAL_RENDER_OBSERVER] = observer;
-      resolvedOptions[INTERNAL_SUSPENSION_HOST] = suspensionHost;
-      resolvedOptions[INTERNAL_TERMINAL_SIZE_PROBE] = () => ({ kind: "unavailable" });
-      resolvedOptions[INTERNAL_KITTY_KEYBOARD] = { mode: "disabled" };
+      const stdin = mountOptions.stdin ?? process.stdin;
+      const resolvedOptions = createInternalMountOptions({
+        ...mountOptions,
+        maxFps: 0,
+        [INTERNAL_RENDER_OBSERVER]: observer,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+      });
 
       try {
-        const instance = targetApp.mount(resolvedOptions);
+        const instance = mountWithInternalOptions(targetApp, resolvedOptions);
         app = targetApp;
         ingress = getSharedStdinIngress(stdin as NodeJS.ReadStream);
         phase = "active";

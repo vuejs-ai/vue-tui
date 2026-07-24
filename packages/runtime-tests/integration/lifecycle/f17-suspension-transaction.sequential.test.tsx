@@ -9,7 +9,7 @@ import {
   createManualSuspensionHost,
   type SuspensionHost,
 } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
 
 function makeWritable(): NodeJS.WriteStream {
@@ -59,16 +59,18 @@ test.sequential("registers suspension before the first terminal acquisition", ()
   const app = createApp(defineComponent(() => () => <Text>frame</Text>));
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
 
     expect(stateAtRegistration).toEqual({ writes: [], isRaw: false });
   } finally {
@@ -98,17 +100,19 @@ test.sequential("activating managed input while Fullscreen is suspended defers e
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await app.waitUntilRenderFlush();
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
@@ -175,16 +179,18 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     }) as NodeJS.WriteStream["write"];
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode: "fullscreen",
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode: "fullscreen",
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+        }),
+      );
       expect(stdin.isRaw).toBe(true);
 
       await suspensionHost.suspend();
@@ -240,16 +246,18 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
   const app = createApp(defineComponent(() => () => <Text>frame</Text>));
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
 
@@ -306,15 +314,17 @@ test.sequential("a resize reported by the continued frame is repainted before in
   }) as NodeJS.WriteStream["write"];
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await app.waitUntilRenderFlush();
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
@@ -359,16 +369,18 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
 
   app = createApp(defineComponent(() => () => <Text>frame</Text>));
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await suspensionHost.suspend();
 
     const resumeOffset = events.length;
@@ -419,15 +431,17 @@ test.sequential("a reentrant unmount cannot forward the initial Fullscreen paint
 
   app = createApp(defineComponent(() => () => <Text>first-frame</Text>));
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilExit();
 
     expect(reenterOnFirstPaint).toBe(false);
@@ -467,17 +481,19 @@ test.sequential.each(["inline", "fullscreen"] as const)(
     const app = createApp(defineComponent(() => () => <Text>{`${mode}-frame`}</Text>));
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode,
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+          [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+        }),
+      );
 
       await suspensionHost.suspend();
       (stdout as { columns?: number }).columns = undefined;

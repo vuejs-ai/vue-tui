@@ -8,7 +8,7 @@ import {
   type InternalRenderObserver,
 } from "../../../runtime/dist/internal.mjs";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 // A TTY-like writable that we control directly (columns/rows + resize listeners)
 // — the @vue-tui/testing render() helper hides the underlying stdout, but the
@@ -204,7 +204,7 @@ test("useLayoutWidth falls back to a positive width when stdout.columns is 0", a
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await new Promise<void>((r) => setTimeout(r, 60));
 
   try {
@@ -238,7 +238,7 @@ test("multiple layout primitive consumers share one app resize listener", async 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await new Promise<void>((r) => setTimeout(r, 60));
 
   expect(stdout.listenerCount("resize")).toBe(baseline + 1);
@@ -261,17 +261,19 @@ test("useViewportHeight derives a bounded height from an explicitly modeled term
 
   const app = createApp(App);
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      maxFps: 0,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
-        kind: "detected",
-        source: "environment",
-        size: { columns: 123, rows: 45 },
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        maxFps: 0,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
+          kind: "detected",
+          source: "environment",
+          size: { columns: 123, rows: 45 },
+        }),
       }),
-    } as InternalMountOptions);
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 60));
 
     expect(capturedRows).toBe(45);
@@ -298,15 +300,17 @@ test("rapid resize events commit only the newest layout and participate in the r
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_RENDER_OBSERVER]: observer,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_RENDER_OBSERVER]: observer,
+      }),
+    );
     await app.waitUntilRenderFlush();
     frames.length = 0;
 

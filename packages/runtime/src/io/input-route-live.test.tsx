@@ -4,7 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { Text, useInput, useStdin, type TuiInputEvent } from "../index.ts";
 import { StdinContextKey, type StdinContext } from "../context.ts";
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "../process-suspension.ts";
-import { createApp, type InternalMountOptions } from "../render.ts";
+import { createApp, createInternalMountOptions, type InternalMountOptions } from "../render.ts";
 import type { RenderMode } from "../render-session.ts";
 import type { InternalInputRouteDecision } from "./input-route-policy.ts";
 import type {
@@ -99,7 +99,7 @@ function createWritable(isTTY = true): NodeJS.WriteStream {
 }
 
 function mountOptions(mode: RenderMode, stdin = createStdin()): InternalMountOptions {
-  return {
+  return createInternalMountOptions({
     mode,
     stdin,
     stdout: createWritable(),
@@ -108,7 +108,7 @@ function mountOptions(mode: RenderMode, stdin = createStdin()): InternalMountOpt
     maxFps: 0,
     patchConsole: false,
     [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-  };
+  });
 }
 
 function requireRouting(): InternalInputRoutingRuntime {
@@ -144,11 +144,13 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     };
 
     const app = createApp(App);
-    app.mount({
-      ...mountOptions(mode, stdin),
-      stdout,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...mountOptions(mode, stdin),
+        stdout,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    );
     try {
       expect(() => stdinContext.acquireRawMode()).toThrow("outer raw-on failed");
       expect({
@@ -213,11 +215,13 @@ describe.each(modes)("live selected input topology in %s mode", (mode) => {
     });
 
     const app = createApp(App);
-    app.mount({
-      ...mountOptions(mode, stdin),
-      stdout,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...mountOptions(mode, stdin),
+        stdout,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
+      }),
+    );
     const directCalls: string[] = [];
     const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
     try {
@@ -970,10 +974,12 @@ test("selected topology composes across shared stdin suspension and teardown", a
 
   const first = createApp(SelectedApp("first", firstCalls));
   const second = createApp(SelectedApp("second", secondCalls));
-  first.mount({
-    ...mountOptions("inline", stdin),
-    [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-  } as InternalMountOptions);
+  first.mount(
+    createInternalMountOptions({
+      ...mountOptions("inline", stdin),
+      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+    }),
+  );
   second.mount(mountOptions("fullscreen", stdin));
   try {
     expect({ rawModeCalls, refs: refBalance(), listeners: stdin.listenerCount("data") }).toEqual({
@@ -1042,15 +1048,17 @@ test.each([
     });
 
     const app = createApp(App);
-    app.mount({
-      ...options,
-      stdout,
-      stderr: createWritable(false),
-      stdin,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...options,
+        stdout,
+        stderr: createWritable(false),
+        stdin,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+      }),
+    );
     try {
       stdin.emit("data", "x");
       expect(calls).toEqual(["x"]);

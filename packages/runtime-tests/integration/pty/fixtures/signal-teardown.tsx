@@ -1,7 +1,7 @@
 import process from "node:process";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
-import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 
 // Mounts a live interactive app in the alternate screen (cursor hidden), then
 // signals readiness on stderr. It deliberately NEVER unmounts/exits on its own
@@ -35,9 +35,11 @@ const App = defineComponent(() => {
 const unthrottled = process.argv.includes("--unthrottled");
 
 const app = createApp(App);
-app.mount({
-  mode: "fullscreen",
-  maxFps: unthrottled ? 0 : undefined,
-} as InternalMountOptions);
+app.mount(
+  createInternalMountOptions({
+    mode: "fullscreen",
+    maxFps: unthrottled ? 0 : undefined,
+  }),
+);
 
 await app.waitUntilExit();

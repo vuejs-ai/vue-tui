@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { expect, test, vi } from "vite-plus/test";
 import { createApp, Text, useStdin } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const App = defineComponent(() => () => <Text>Hello</Text>);
@@ -38,13 +38,15 @@ test.sequential("a clean exit preserves a genuine AggregateError from restoratio
     return () => <Text>Hello</Text>;
   });
   const app = createApp(InteractiveApp);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   app.unmount();
@@ -58,13 +60,15 @@ test.sequential("a real mount attempt consumes the app before a later stream is 
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  );
 
   let readSecondStdout = false;
   const second = Object.defineProperty({}, "stdout", {

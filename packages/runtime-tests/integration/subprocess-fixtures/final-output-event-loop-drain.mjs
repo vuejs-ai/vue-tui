@@ -1,4 +1,5 @@
 import { createApp, Text } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { defineComponent, h } from "vue";
 
 // Put the tail marker on its own logical line so terminal-width wrapping cannot
@@ -8,10 +9,12 @@ const payload = `${"x".repeat(256 * 1024)}\nFINAL_OUTPUT_TAIL_MARKER`;
 const App = defineComponent(() => () => h(Text, null, { default: () => payload }));
 
 const app = createApp(App);
-app.mount({
-  liveUpdates: false,
-  patchConsole: false,
-});
+app.mount(
+  createInternalMountOptions({
+    liveUpdates: false,
+    patchConsole: false,
+  }),
+);
 
 // Deliberately do not call unmount(), exit(), or waitUntilExit(). The runtime's
 // mount lifecycle must finalize and flush the final-output stream when the event

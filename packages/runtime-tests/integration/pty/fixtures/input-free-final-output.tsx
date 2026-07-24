@@ -1,6 +1,6 @@
 import process from "node:process";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import { writeSync } from "node:fs";
 import { createApp, Text } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
@@ -67,9 +67,11 @@ const app = createApp(App);
 process.on("exit", () => {
   writeSync(1, `__INPUT_FREE_EXIT__${JSON.stringify(ownershipState())}\n`);
 });
-app.mount({
-  liveUpdates: false,
-  patchConsole: false,
-  [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
-} as InternalMountOptions);
+app.mount(
+  createInternalMountOptions({
+    liveUpdates: false,
+    patchConsole: false,
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
+  }),
+);
 await app.waitUntilExit();

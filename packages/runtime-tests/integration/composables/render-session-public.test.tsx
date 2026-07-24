@@ -10,7 +10,7 @@ import {
   useViewportHeight,
 } from "@vue-tui/runtime";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makePublicTty(columns?: number, rows?: number): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -85,16 +85,18 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      }),
+    );
 
     expect(width!.value).toBe(80);
     expect(viewportHeight).toBeNull();
@@ -121,15 +123,17 @@ test("Fullscreen remains bounded when liveUpdates is false", async () => {
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: false,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: false,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
 
     expect(width!.value).toBe(80);
     expect(viewportHeight!.value).toBe(24);

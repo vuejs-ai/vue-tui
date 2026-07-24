@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent } from "vue";
 import { afterEach, expect, test, vi } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 afterEach(() => {
@@ -37,13 +37,15 @@ test.sequential("a synchronous initial frame failure is a consumed mount failure
   const exited = app.waitUntilExit();
 
   const mountError = captureMountError(() =>
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions),
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    ),
   );
 
   expect(mountError).toBe(failure);
@@ -51,13 +53,15 @@ test.sequential("a synchronous initial frame failure is a consumed mount failure
 
   const replacement = createApp(defineComponent(() => () => <Text>replacement</Text>));
   const { stream: replacementStdin } = makeFakeStdin();
-  replacement.mount({
-    stdout,
-    stderr,
-    stdin: replacementStdin,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
+  replacement.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin: replacementStdin,
+      patchConsole: false,
+      maxFps: 0,
+    }),
+  );
   replacement.unmount();
   await expect(replacement.waitUntilExit()).resolves.toBeUndefined();
 });
@@ -85,14 +89,16 @@ test.sequential("a user Vue error handler cannot replace initial managed-input f
   const exited = app.waitUntilExit();
 
   const mountError = captureMountError(() =>
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions),
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    ),
   );
 
   expect(mountError).toMatchObject({
@@ -132,14 +138,16 @@ test.sequential("a handled managed-input acquisition failure cannot continue to 
   const exited = app.waitUntilExit();
 
   const mountError = captureMountError(() =>
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions),
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    ),
   );
 
   expect(mountError).toBe(failure);

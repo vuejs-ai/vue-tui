@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, createApp, Text, useBoxSize } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -48,14 +48,16 @@ async function mountPlainApp(label: string): Promise<void> {
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await within(app.waitUntilRenderFlush(), `${label} render flush`);
   } finally {
     app.unmount();
@@ -89,26 +91,30 @@ test("rejects a foreign Box without contaminating later apps", async () => {
   observer.config.warnHandler = () => {};
 
   try {
-    owner.mount({
-      stdout: ownerStdout,
-      stderr: ownerStderr,
-      stdin: ownerStdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    owner.mount(
+      createInternalMountOptions({
+        stdout: ownerStdout,
+        stderr: ownerStderr,
+        stdin: ownerStdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await owner.waitUntilRenderFlush();
 
     const observerExited = within(observer.waitUntilExit(), "foreign target exit");
     expect(() =>
-      observer.mount({
-        stdout: observerStdout,
-        stderr: observerStderr,
-        stdin: observerStdin,
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-      } as InternalMountOptions),
+      observer.mount(
+        createInternalMountOptions({
+          stdout: observerStdout,
+          stderr: observerStderr,
+          stdin: observerStdin,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+        }),
+      ),
     ).toThrow("useBoxSize() target belongs to a different vue-tui app");
     await expect(observerExited).rejects.toThrow(
       "useBoxSize() target belongs to a different vue-tui app",
@@ -149,14 +155,16 @@ test("rejects a dynamic non-Box retarget through Vue's update", async () => {
   app.config.warnHandler = () => {};
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilRenderFlush();
     renderBox.value = false;
     await expect(nextTick()).rejects.toThrow(

@@ -43,7 +43,6 @@ import {
 import {
   INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
-  type InternalKittyKeyboardMountOptions,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
@@ -75,7 +74,7 @@ import {
 } from "./io/stream-lifecycle.ts";
 import { registerConsoleSink, type ConsoleSinkRegistration } from "./io/console-manager.ts";
 import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
-import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
+import { INTERNAL_RENDER_OBSERVER } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 import {
   createFullscreenMouseController,
@@ -87,7 +86,6 @@ import { setFullscreenMouseController } from "./mouse/context.ts";
 import {
   INTERNAL_TEST_INPUT_HOST,
   createInternalTestMouseFact,
-  type InternalTestInputHost,
   type InternalTestMouseEvent,
 } from "./io/test-input-host.ts";
 import {
@@ -144,15 +142,10 @@ import {
 } from "./caret/caret-controller.ts";
 import { InternalCaretControllerKey } from "./caret/caret-context.ts";
 import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
-import {
-  INTERNAL_SUSPENSION_HOST,
-  processSuspensionHost,
-  type SuspensionHost,
-} from "./process-suspension.ts";
+import { INTERNAL_SUSPENSION_HOST, processSuspensionHost } from "./process-suspension.ts";
 import {
   createInternalClipboardService,
   normalizeClipboardTransport,
-  type ClipboardTransport,
   type InternalClipboardService,
 } from "./clipboard/clipboard-service.ts";
 import { InternalClipboardServiceKey } from "./clipboard/context.ts";
@@ -163,6 +156,13 @@ import {
 import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 import type { InternalSelectionPaintFrame } from "./selection/selection-paint.ts";
 import { createVueCleanupGuard, type VueCleanupErrorOwner } from "./vue-cleanup-guard.ts";
+import { getInternalMountOptions, type InternalMountOptions } from "./internal-mount-options.ts";
+
+export {
+  createInternalMountOptions,
+  type InternalMountOptions,
+  type InternalMountOptionsInput,
+} from "./internal-mount-options.ts";
 
 export interface MountOptions {
   readonly stdout?: Writable;
@@ -194,50 +194,16 @@ export interface MountOptions {
   readonly exitOnCtrlC?: boolean;
 }
 
-/** Repository-only mount controls used by Runtime tests and official test tooling. */
-export type InternalMountOptions = MountOptions & {
-  readonly liveUpdates?: boolean;
-  readonly onRender?: (info: { renderTime: number }) => void;
-  readonly maxFps?: number;
-  readonly incrementalRendering?: boolean;
-  readonly clipboard?: ClipboardTransport;
-  [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
-  [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
-  [INTERNAL_TEST_INPUT_HOST]?: InternalTestInputHost;
-  [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
-  [INTERNAL_SUSPENSION_HOST]?: SuspensionHost;
-};
-
 const acceptedMountOptionKeys = new Set<PropertyKey>([
-  // Public options.
   "stdout",
   "stdin",
   "stderr",
   "mode",
   "patchConsole",
   "exitOnCtrlC",
-  // Repository-only controls. These remain temporary internal strings or
-  // symbols until the separate internal-option cleanup is implemented.
-  "liveUpdates",
-  "onRender",
-  "maxFps",
-  "incrementalRendering",
-  "clipboard",
-  INTERNAL_KITTY_KEYBOARD,
-  INTERNAL_RENDER_OBSERVER,
-  INTERNAL_TEST_INPUT_HOST,
-  INTERNAL_TERMINAL_SIZE_PROBE,
-  INTERNAL_SUSPENSION_HOST,
-  // Deliberately recognized migration errors for superseded mount contracts.
-  "fullscreen",
-  "alternateScreen",
-  "interactive",
-  "debug",
-  "rawMode",
-  "kittyKeyboard",
 ]);
 
-function assertKnownMountOptionKeys(options: unknown): asserts options is InternalMountOptions {
+function assertKnownMountOptionKeys(options: unknown): asserts options is MountOptions {
   if (typeof options !== "object" || options === null || Array.isArray(options)) {
     throw new TypeError("Mount options must be an object or undefined.");
   }
@@ -280,6 +246,20 @@ export interface TuiApp extends ConsumerVuePublicAppSurface {
   mount(options?: MountOptions): ComponentPublicInstance;
   waitUntilExit(): Promise<void>;
   waitUntilRenderFlush(): Promise<void>;
+}
+
+type InternalMountInvoker = (this: void, options: InternalMountOptions) => ComponentPublicInstance;
+const internalMountInvokers = new WeakMap<TuiApp, InternalMountInvoker>();
+
+export function mountWithInternalOptions(
+  app: TuiApp,
+  options: InternalMountOptions,
+): ComponentPublicInstance {
+  const mount = internalMountInvokers.get(app);
+  if (!mount) {
+    throw new TypeError("Internal test mounting requires an app created by this Runtime instance.");
+  }
+  return mount(options);
 }
 
 type RootProps = Record<string, unknown>;
@@ -1623,33 +1603,32 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const app = baseApp as unknown as TuiApp;
   let mountAttemptConsumed = false;
 
-  app.mount = function mount(options: InternalMountOptions = {}): ComponentPublicInstance {
+  const runtimeMount = function mount(
+    this: void,
+    options: MountOptions = {},
+  ): ComponentPublicInstance {
     if (mountAttemptConsumed) {
       throw new Error("A vue-tui app instance can only be mounted once");
     }
     // The mount contract is validated before reading stream getters, checking
-    // stream ownership, or mutating Vue/terminal state. Removed-option errors
-    // deliberately win over an invalid mode value.
+    // stream ownership, or mutating Vue/terminal state.
     assertKnownMountOptionKeys(options);
+    const internalOptions = getInternalMountOptions(options);
     const requestedMode = normalizeRequestedMode(options);
-    const liveUpdatesOverride = validateLiveUpdates(
-      (options as { readonly liveUpdates?: unknown }).liveUpdates,
-    );
+    const liveUpdatesOverride = validateLiveUpdates(internalOptions.liveUpdates);
     const exitOnCtrlC = validateExitOnCtrlC(
       (options as { readonly exitOnCtrlC?: unknown }).exitOnCtrlC,
     );
     const patchConsole = validatePatchConsole(
       (options as { readonly patchConsole?: unknown }).patchConsole,
     );
-    const clipboardTransport = normalizeClipboardTransport(
-      (options as { readonly clipboard?: unknown }).clipboard,
-    );
-    const onRender = options.onRender;
-    const incrementalRendering = options.incrementalRendering;
+    const clipboardTransport = normalizeClipboardTransport(internalOptions.clipboard);
+    const onRender = internalOptions.onRender;
+    const incrementalRendering = internalOptions.incrementalRendering;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
     // the render throttle engages by default — without this the animation
     // coalescing (G02) never kicks in on an unthrottled path.
-    const maxFps = options.maxFps ?? 30;
+    const maxFps = internalOptions.maxFps ?? 30;
     const resolvedStdout = options.stdout ?? process.stdout;
     const resolvedStdin = options.stdin ?? process.stdin;
     const resolvedStderr = options.stderr ?? process.stderr;
@@ -1665,11 +1644,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
-    const renderObserver = options[INTERNAL_RENDER_OBSERVER];
-    const testInputHost = options[INTERNAL_TEST_INPUT_HOST];
-    const kittyKeyboard = options[INTERNAL_KITTY_KEYBOARD];
-    const configuredTerminalSizeProbe = options[INTERNAL_TERMINAL_SIZE_PROBE];
-    const suspensionHost = options[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
+    const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
+    const testInputHost = internalOptions[INTERNAL_TEST_INPUT_HOST];
+    const kittyKeyboard = internalOptions[INTERNAL_KITTY_KEYBOARD];
+    const configuredTerminalSizeProbe = internalOptions[INTERNAL_TERMINAL_SIZE_PROBE];
+    const suspensionHost = internalOptions[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
     const suspensionSupported = suspensionHost.supported;
     // Process-global fallbacks describe the process's controlling terminal, not
     // an arbitrary custom WriteStream. A custom TTY must provide a complete
@@ -3382,24 +3361,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // The mount-throw catch below runs teardown(), which restores the console,
       // so a synchronous mount failure cannot leak a patched console.
       if (patchConsole) {
-        try {
-          mountedConsoleSink = registerConsoleSink((stream, data) => {
-            try {
-              if (stream === "stdout") {
-                return appContext.writeToStdout(data);
-              }
-              if (stream === "stderr") {
-                return appContext.writeToStderr(data);
-              }
-            } catch (error) {
-              requestRuntimeFailure(error);
+        mountedConsoleSink = registerConsoleSink((stream, data) => {
+          try {
+            if (stream === "stdout") {
+              return appContext.writeToStdout(data);
             }
-            return undefined;
-          });
-        } catch {
-          // patch-console uses console.Console which may not be available in
-          // some environments (e.g., vitest workers). Degrade gracefully.
-        }
+            if (stream === "stderr") {
+              return appContext.writeToStderr(data);
+            }
+          } catch (error) {
+            requestRuntimeFailure(error);
+          }
+          return undefined;
+        });
       }
 
       // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
@@ -3670,6 +3644,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       throw mountError;
     }
   };
+  app.mount = runtimeMount;
+  internalMountInvokers.set(app, runtimeMount as InternalMountInvoker);
 
   app.unmount = function unmount(): void {
     mountAttemptConsumed = true;

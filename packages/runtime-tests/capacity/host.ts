@@ -10,9 +10,9 @@ import {
   observeTuiNodeCreations,
   runtimeResourceTracker,
   yogaNodeTracker,
-  type InternalMountOptions,
   type RuntimeResourceSnapshot,
 } from "../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../runtime/dist/internal.mjs";
 import { createCapacityTerminalEmulator } from "./emulator.ts";
 import { trackCapacityLeakTarget } from "./leak-probe.ts";
 
@@ -364,19 +364,21 @@ async function mountCapacityHostWithOutput(
   trackLifetimeTarget?.("stderr", stderr);
   let rootProxy: ComponentPublicInstance;
   try {
-    rootProxy = app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: options.mode,
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: options.maxFps,
-      onRender: ({ renderTime }) => options.onRender?.(renderTime),
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    } as InternalMountOptions);
+    rootProxy = app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: options.mode,
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: options.maxFps,
+        onRender: ({ renderTime }) => options.onRender?.(renderTime),
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      }),
+    );
   } catch (error) {
     stopTuiNodeObservation();
     throw error;

@@ -1733,7 +1733,7 @@ repeatedCleanupApp.unmount();
 await repeatedCleanupApp.waitUntilExit();
 assert.equal(repeatedCleanupCalls, 2);
 
-function assertRemovedMountOption(name, value, message) {
+function assertUnknownMountOption(name, value) {
   let stdoutRead = false;
   const invalidOptions = { [name]: value };
   Object.defineProperty(invalidOptions, "stdout", {
@@ -1743,16 +1743,46 @@ function assertRemovedMountOption(name, value, message) {
     },
   });
   const invalid = createApp(Probe);
-  assert.throws(() => invalid.mount(invalidOptions), message);
+  assert.throws(
+    () => invalid.mount(invalidOptions),
+    new RegExp("Unknown mount option " + JSON.stringify(name)),
+  );
   assert.equal(stdoutRead, false);
 }
 
-assertRemovedMountOption("rawMode", "always", /Mount option "rawMode" was removed/);
-assertRemovedMountOption(
+for (const name of [
+  "liveUpdates",
+  "onRender",
+  "maxFps",
+  "incrementalRendering",
+  "clipboard",
+  "fullscreen",
+  "alternateScreen",
+  "interactive",
+  "debug",
+  "rawMode",
   "kittyKeyboard",
-  { mode: "enabled" },
-  /Mount option "kittyKeyboard" was removed/,
-);
+]) {
+  assertUnknownMountOption(name, undefined);
+}
+
+const bridgeBoundaryApp = createApp(Probe);
+const bridgeBoundaryMount = bridgeBoundaryApp.mount;
+let interceptedBridgeMountOptions;
+bridgeBoundaryApp.mount = (options) => {
+  interceptedBridgeMountOptions = options;
+  return bridgeBoundaryMount(options);
+};
+const bridgeBoundary = runtimeTesting.createTestHostBridge();
+bridgeBoundary.mount(bridgeBoundaryApp, {
+  stdin: new PassThrough(),
+  stdout: new PassThrough(),
+  stderr: new PassThrough(),
+  patchConsole: false,
+});
+assert.equal(interceptedBridgeMountOptions, undefined);
+bridgeBoundaryApp.unmount();
+await bridgeBoundaryApp.waitUntilExit();
 
 const NoInput = defineComponent(() => () => h(Text, null, () => "idle"));
 const idle = await render(NoInput);

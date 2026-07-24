@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
@@ -55,16 +55,18 @@ test.sequential("a failing terminal restore rejects with that failure after rele
   const app = createApp(App);
 
   const exitListenersBefore = new Set(process.listeners("exit"));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "fullscreen",
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      mode: "fullscreen",
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   let unmountError: unknown;
   try {
@@ -126,14 +128,16 @@ test.sequential("a failed bracketed-paste release is retried and still rejects w
     return () => null;
   });
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   app.unmount();
   const exitFailure = await app.waitUntilExit().then(

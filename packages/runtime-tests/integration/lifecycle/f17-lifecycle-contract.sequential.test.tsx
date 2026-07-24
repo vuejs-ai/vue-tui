@@ -8,7 +8,7 @@ import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { useStdout } from "../../../runtime/dist/internal.mjs";
 import { useInternalInputRoutingForTest } from "../../../runtime/dist/internal.mjs";
 import { bsu, esu } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyWritable(): NodeJS.WriteStream & { chunks: string[] } {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
@@ -56,15 +56,17 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
   const app = createApp(defineComponent(() => () => null));
   let mountError: unknown;
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
   } catch (error) {
     mountError = error;
   }
@@ -97,14 +99,16 @@ test.sequential("raw-mode teardown restores a pre-existing raw stdin baseline", 
   const { stream: stdin } = makeRawTrackingStdin(true);
   const app = createApp(defineComponent(() => () => null));
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   app.unmount();
 
   expect(stdin.isRaw).toBe(true);
@@ -140,14 +144,16 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
   });
   const app = createApp(App);
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   expect(selectRoute).toThrow("stdin.ref failed");
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
@@ -183,14 +189,16 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
     }),
   );
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance, setEncodingCalls }).toEqual({
     isRaw: true,
@@ -224,14 +232,16 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
     }),
   );
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   app.unmount();
 
   expect({ isRaw: stdin.isRaw, rawModeCalls }).toEqual({
@@ -253,13 +263,15 @@ test.sequential("exit settlement and beforeExit ownership are idempotent after t
 
   const beforeExitListeners = new Set(process.listeners("beforeExit"));
   const app = createApp(defineComponent(() => () => <Text>final</Text>));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: false,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: false,
+      patchConsole: false,
+    }),
+  );
 
   app.unmount();
   app.unmount();
@@ -305,14 +317,16 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
     return () => <Text>ACTIVE_FRAME</Text>;
   });
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -366,14 +380,16 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   }) as NodeJS.WriteStream["write"];
 
   const app = createApp(defineComponent(() => () => <Text>ACTIVE_FRAME</Text>));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    maxFps: 0,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -421,17 +437,19 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
   const content = shallowRef("initial");
   const App = defineComponent(() => () => <Text>{content.value}</Text>);
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    // Keep the update below pending so unmount's synchronous final commit drives
-    // the ordinary frame writer without throwing out of Vue's global post-flush
-    // queue and contaminating another test in this worker.
-    maxFps: 1,
-    patchConsole: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      // Keep the update below pending so unmount's synchronous final commit drives
+      // the ordinary frame writer without throwing out of Vue's global post-flush
+      // queue and contaminating another test in this worker.
+      maxFps: 1,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   content.value = "ORDINARY_RENDER_FAILURE";

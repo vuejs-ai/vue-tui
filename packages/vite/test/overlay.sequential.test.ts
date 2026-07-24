@@ -18,7 +18,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
-import { capture, waitFor } from "./helpers.ts";
+import { capture, waitFor, waitUntil } from "./helpers.ts";
 
 const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
 const appVue = fileURLToPath(new URL("./fixtures/overlay/src/app.vue", import.meta.url));
@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 
 test("a script hot update preserves public layout observations", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -54,15 +54,19 @@ test("a script hot update preserves public layout observations", async () => {
     origAppVue.replace('const label = "LABEL-A";', 'const label = "LABEL-B-HOT";'),
   );
   await waitFor(read, "LABEL-B-HOT");
+  await waitUntil(() => {
+    const latest = read().slice(read().lastIndexOf("LABEL-B-HOT"));
+    return latest.includes("box=7x2");
+  });
 
   const updatedOutput = read().slice(read().lastIndexOf("LABEL-B-HOT"));
-  expect(updatedOutput).toMatch(/layout=\d+xunbounded/);
+  expect(updatedOutput).toMatch(/layout=\d+x24/);
   expect(updatedOutput).toContain("box=7x2");
   expect(updatedOutput).not.toContain("box=pending");
 });
 
 test("a build error renders the in-process dev overlay", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

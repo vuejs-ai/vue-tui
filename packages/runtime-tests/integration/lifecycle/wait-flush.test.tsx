@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeWritable,
   makeFakeStdin,
@@ -79,7 +79,7 @@ test("waitUntilRenderFlush flushes pending throttled render", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, maxFps: 1 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 }));
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);
@@ -106,7 +106,7 @@ test("waitUntilRenderFlush remains non-reporting when stdout becomes unwritable"
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({ stdout, stdin, stderr, maxFps: 1 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 }));
   await nextTick();
   await nextTick();
   expect(getContentWrites(writes).length).toBe(1);

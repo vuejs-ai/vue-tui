@@ -19,7 +19,11 @@ export {
 export type { DevState, DevErrorInfo } from "./hmr.ts";
 export { connectDevtools, isDevConnected } from "./hmr.ts";
 export type { AppContext } from "./context.ts";
-export type { InternalMountOptions } from "./render.ts";
+export {
+  createInternalMountOptions,
+  type InternalMountOptions,
+  type InternalMountOptionsInput,
+} from "./internal-mount-options.ts";
 export {
   INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,

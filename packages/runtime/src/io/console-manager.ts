@@ -1,3 +1,4 @@
+import { Console as NodeConsole } from "node:console";
 import patchConsole from "patch-console";
 import type { CoordinatedWriteResult } from "./output-coordinator.ts";
 
@@ -21,6 +22,116 @@ export interface ConsoleSinkRegistration {
 
 const entries: ConsoleSinkEntry[] = [];
 let restorePatch: (() => void) | null = null;
+
+const patchedConsoleMethodNames = [
+  "assert",
+  "count",
+  "countReset",
+  "debug",
+  "dir",
+  "dirxml",
+  "error",
+  "group",
+  "groupCollapsed",
+  "groupEnd",
+  "info",
+  "log",
+  "table",
+  "time",
+  "timeEnd",
+  "timeLog",
+  "trace",
+  "warn",
+] as const satisfies readonly (keyof Console)[];
+
+interface ConsolePropertySnapshot {
+  readonly key: (typeof patchedConsoleMethodNames)[number];
+  readonly descriptor: PropertyDescriptor | undefined;
+}
+
+function restoreConsoleProperties(snapshots: readonly ConsolePropertySnapshot[]): void {
+  let firstError: unknown;
+  for (const { key, descriptor } of snapshots) {
+    try {
+      if (descriptor) {
+        Object.defineProperty(console, key, descriptor);
+      } else if (!Reflect.deleteProperty(console, key)) {
+        throw new TypeError(`Unable to restore console.${key}.`);
+      }
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError !== undefined) throw firstError;
+}
+
+function installConsolePatch(callback: typeof dispatch): () => void {
+  const snapshots = patchedConsoleMethodNames.map((key) => ({
+    key,
+    descriptor: Object.getOwnPropertyDescriptor(console, key),
+  }));
+  const consoleWithConstructor = console as Console & {
+    Console?: typeof NodeConsole;
+  };
+  const constructorDescriptor = Object.getOwnPropertyDescriptor(consoleWithConstructor, "Console");
+  let dependencyRestore: (() => void) | undefined;
+  let installationError: unknown;
+
+  try {
+    Object.defineProperty(
+      consoleWithConstructor,
+      "Console",
+      constructorDescriptor
+        ? {
+            configurable: constructorDescriptor.configurable,
+            enumerable: constructorDescriptor.enumerable,
+            value: NodeConsole,
+            writable: "writable" in constructorDescriptor ? constructorDescriptor.writable : true,
+          }
+        : {
+            configurable: true,
+            enumerable: false,
+            value: NodeConsole,
+            writable: true,
+          },
+    );
+    dependencyRestore = patchConsole(callback);
+  } catch (error) {
+    installationError = error;
+  }
+  try {
+    if (constructorDescriptor) {
+      Object.defineProperty(consoleWithConstructor, "Console", constructorDescriptor);
+    } else if (!Reflect.deleteProperty(consoleWithConstructor, "Console")) {
+      throw new TypeError("Unable to restore console.Console.");
+    }
+  } catch (error) {
+    installationError ??= error;
+  }
+  if (installationError !== undefined) {
+    try {
+      restoreConsoleProperties(snapshots);
+    } catch {
+      // Preserve the installation failure selected by the consumed mount.
+    }
+    throw installationError;
+  }
+
+  return () => {
+    let firstError: unknown;
+    try {
+      dependencyRestore?.();
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      restoreConsoleProperties(snapshots);
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (firstError !== undefined) throw firstError;
+  };
+}
 
 function startIdleCycle(entry: ConsoleSinkEntry): void {
   if (entry.resolveIdle) return;
@@ -78,7 +189,7 @@ function dispatch(stream: ConsoleStream, data: string): void {
 }
 
 export function registerConsoleSink(sink: ConsoleSink): ConsoleSinkRegistration {
-  if (!restorePatch) restorePatch = patchConsole(dispatch);
+  if (!restorePatch) restorePatch = installConsolePatch(dispatch);
 
   const entry: ConsoleSinkEntry = {
     sink,

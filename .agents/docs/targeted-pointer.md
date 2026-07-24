@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** historical unstamped F6 contract. The current foundation removes the `/fullscreen` package entry and public pointer hooks because those APIs exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence. The delegated bounded closure established that a future selected pointer journey can add a narrow Runtime-owned operation without redesigning current ownership or data flow; it did not preselect that operation's shape or add a vouch. No VOUCHED stamp changed.
+> **Status:** historical unstamped F6 contract. The current candidate removes the `/fullscreen` package entry and public pointer hooks because those APIs exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence. The public-only composition evidence indicates that a future selected pointer journey can add a narrow Runtime-owned operation without redesigning current ownership or data flow; it does not settle the remaining Open `Static` contract, preselect that future operation's shape, or add a vouch. No VOUCHED stamp changed.
 
 ## Product boundary
 

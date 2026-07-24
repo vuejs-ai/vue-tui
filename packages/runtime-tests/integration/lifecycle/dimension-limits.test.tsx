@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
 import { useInternalRenderSession } from "../../../runtime/dist/internal.mjs";
 import { MAX_LAYOUT_VALUE } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test("Inline does not reject a large terminal pair when the rendered region fits", async () => {
@@ -22,15 +22,17 @@ test("Inline does not reject a large terminal pair when the rendered region fits
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "inline",
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilRenderFlush();
     expect(observedSession!.dimensions).toEqual({
       terminal: { columns: 1_024, rows: 1_025 },
@@ -62,15 +64,17 @@ test.each(["inline", "fullscreen"] as const)(
     const app = createApp(App);
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode,
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+        }),
+      );
       await app.waitUntilRenderFlush();
       expect(observedSession!.dimensions).toEqual({
         terminal: { columns: 80, rows: 24 },

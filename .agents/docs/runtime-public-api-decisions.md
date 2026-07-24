@@ -317,4 +317,9 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 ## Open
 
-No additional Yunfei judgment is currently queued for the Runtime foundation. The evidence-determined technical closure is recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md), not as a decision-ledger entry. Future interaction features still require their own concrete user task and API review; the current closure does not vouch or preselect their exact public shape.
+For every Open entry, the current branch is a holding implementation and evidence, not a choice. Close an entry only after reviewing concrete user code, why Runtime must own it, whether a third party can compose it from smaller public primitives, host and lifecycle semantics, simpler alternatives, and measured peer behavior where peers are relevant.
+
+### Remaining `Static` host, placement, and failure semantics
+
+- **Question:** How are several simultaneously eligible live `Static` blocks ordered; how do hidden ancestors affect eligibility; which placements and nesting forms are valid; and when do Static-specific failures become the application failure?
+- **Holding:** The `/inline` entry, prop-free default-slot shape, one non-empty commit per instance, ordinary Vue mount and unmount meaning, explicit true-Fullscreen rejection, complete `renderToString()` behavior, and append-on-acceptance behavior in Inline non-TTY output are decided above. The branch's exact live traversal order, hidden-ancestor behavior, placement, nesting, and Static-specific failure timing are implementation evidence rather than an accepted contract until Yunfei reviews them.

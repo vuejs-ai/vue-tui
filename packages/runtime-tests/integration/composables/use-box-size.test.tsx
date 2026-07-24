@@ -3,7 +3,7 @@ import { defineComponent, isReadonly, nextTick, shallowRef, vShow, withDirective
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useBoxSize, type BoxSize } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(columns = 20, rows = 4): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -290,14 +290,16 @@ test("does not publish a candidate Box size before a failed output write is acce
 
   const app = createApp(App);
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilRenderFlush();
     const accepted = size.value;
     expect(accepted).toEqual({ width: 4, height: 1 });
@@ -337,14 +339,16 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
   try {
     const exited = app.waitUntilExit();
     expect(() =>
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-      } as InternalMountOptions),
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+        }),
+      ),
     ).toThrow("useBoxSize() target must be a ref bound directly to <Box>");
     await expect(exited).rejects.toThrow(
       "useBoxSize() target must be a ref bound directly to <Box>",

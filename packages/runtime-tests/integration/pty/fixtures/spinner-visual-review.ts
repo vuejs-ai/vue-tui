@@ -1,6 +1,7 @@
 import process from "node:process";
 import { Spinner } from "@vue-tui/components";
 import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import { defineComponent, h } from "vue";
 
 const frames = ["0", "1", "2", "3"];
@@ -32,7 +33,7 @@ const App = defineComponent({
 
 process.stdout.write("__SPINNER_READY__\n");
 const app = createApp(App);
-app.mount({ mode: "fullscreen", maxFps: 0 });
+app.mount(createInternalMountOptions({ mode: "fullscreen", maxFps: 0 }));
 
 void app.waitUntilExit().then(() => {
   process.stdout.write("__SPINNER_EXIT__\n");

@@ -3,7 +3,7 @@ import process from "node:process";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../../runtime/dist/internal.mjs";
 import { useInternalInputRoutingForTest } from "../../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 import { defineComponent, onMounted } from "vue";
 
 const require = createRequire(import.meta.url);
@@ -175,13 +175,15 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({
-  mode: requestedMode,
-  // The selected private topology owns the outer terminal's input demand.
-  maxFps: 0,
-  patchConsole: false,
-  [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
-} as InternalMountOptions);
+app.mount(
+  createInternalMountOptions({
+    mode: requestedMode,
+    // The selected private topology owns the outer terminal's input demand.
+    maxFps: 0,
+    patchConsole: false,
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "auto" },
+  }),
+);
 
 try {
   await app.waitUntilExit();

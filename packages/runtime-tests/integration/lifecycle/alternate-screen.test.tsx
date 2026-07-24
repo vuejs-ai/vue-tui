@@ -1,6 +1,6 @@
 import { defineComponent, nextTick, onMounted, onScopeDispose } from "vue";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
@@ -60,13 +60,15 @@ test("alternate screen - Fullscreen stays live when liveUpdates is false", async
   const stdin = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    mode: "fullscreen",
-    liveUpdates: false,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr: makeTtyStream(),
+      mode: "fullscreen",
+      liveUpdates: false,
+    }),
+  );
   await nextTick();
 
   const exited = app.waitUntilExit();
@@ -108,13 +110,15 @@ test("alternate screen - liveUpdates cannot bypass the Fullscreen TTY preflight"
 
   const app = createApp(App);
   expect(() =>
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      mode: "fullscreen",
-      liveUpdates: true,
-    } as InternalMountOptions),
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        mode: "fullscreen",
+        liveUpdates: true,
+      }),
+    ),
   ).toThrow('Fullscreen mode requires mount option "stdout" to be a TTY.');
 
   const output = stdout.chunks.join("");
@@ -162,13 +166,15 @@ test("alternate screen - enters before setup-owned input modes", async () => {
   });
 
   const app = createApp(InputApp);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    mode: "fullscreen",
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr: makeTtyStream(),
+      mode: "fullscreen",
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    }),
+  );
   await nextTick();
 
   const output = stdout.chunks.join("");
@@ -394,13 +400,15 @@ test("alternate screen - still activates with unthrottled commits", async () => 
   const stdin = makeFakeStdin();
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr: makeTtyStream(),
-    mode: "fullscreen",
-    maxFps: 0,
-  } as InternalMountOptions);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr: makeTtyStream(),
+      mode: "fullscreen",
+      maxFps: 0,
+    }),
+  );
   await nextTick();
 
   const exited = app.waitUntilExit();

@@ -11,9 +11,11 @@ import {
 } from "@vue-tui/runtime";
 import {
   createManualSuspensionHost,
+  createInternalMountOptions,
   INTERNAL_KITTY_KEYBOARD,
   INTERNAL_SUSPENSION_HOST,
   type InternalMountOptions,
+  type InternalMountOptionsInput,
 } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeWritable } from "../lifecycle/test-streams.ts";
 
@@ -52,11 +54,11 @@ function makeTrackedStdin(): {
   return { stream, rawModeCalls, setEncodingCalls, refBalance: () => refs };
 }
 
-function disabledKittyOptions(options: InternalMountOptions): InternalMountOptions {
-  return {
+function disabledKittyOptions(options: InternalMountOptionsInput): InternalMountOptions {
+  return createInternalMountOptions({
     ...options,
     [INTERNAL_KITTY_KEYBOARD]: { mode: "disabled" },
-  };
+  });
 }
 
 async function settle(): Promise<void> {

@@ -1,8 +1,8 @@
-// SEQUENTIAL: mutates a shared fixture and process-global capture seams. The
-// package test config runs files serially in separate workers, which also gives
-// this HMR lifetime test a fresh Vue HMR registry. Reusing the same process after
-// another server has registered identical SFC ids would make two independent
-// HMR lifetimes share Vue's process-global component records.
+// SEQUENTIAL: mutates process-global capture seams and its dedicated fixture.
+// The separate fixture avoids file races with overlay tests, while the separate
+// worker gives this HMR lifetime test a fresh Vue HMR registry. Reusing the same
+// process after another server has registered identical SFC ids would make two
+// independent HMR lifetimes share Vue's process-global component records.
 import { afterEach, expect, test } from "vite-plus/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,8 +11,10 @@ import { createServer, type ViteDevServer } from "vite";
 import { vueTui } from "../src/index.ts";
 import { capture, waitFor, waitUntil } from "./helpers.ts";
 
-const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
-const targetVue = fileURLToPath(new URL("./fixtures/overlay/src/target.vue", import.meta.url));
+const root = fileURLToPath(new URL("./fixtures/target-lifetime", import.meta.url));
+const targetVue = fileURLToPath(
+  new URL("./fixtures/target-lifetime/src/target.vue", import.meta.url),
+);
 const origTargetVue = readFileSync(targetVue, "utf8");
 let server: ViteDevServer | undefined;
 

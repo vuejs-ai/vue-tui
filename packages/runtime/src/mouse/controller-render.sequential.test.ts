@@ -5,7 +5,7 @@ import { expect, test } from "vite-plus/test";
 import { useMouseEvent } from "../composables/use-mouse-event.ts";
 import type { ElementTarget } from "../element-target.ts";
 import { INTERNAL_TEST_INPUT_HOST, type InternalTestInputHost } from "../io/test-input-host.ts";
-import { createApp, type MountOptions } from "../render.ts";
+import { createApp, createInternalMountOptions } from "../render.ts";
 
 function streams() {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -47,14 +47,16 @@ test("a deterministic host supplies its SGR profile to the physical mode owner",
   const app = createApp(Root);
 
   try {
-    app.mount({
-      ...host,
-      patchConsole: false,
-      maxFps: 0,
-      liveUpdates: true,
-      mode: "fullscreen",
-      [INTERNAL_TEST_INPUT_HOST]: inputHost,
-    } as MountOptions);
+    app.mount(
+      createInternalMountOptions({
+        ...host,
+        patchConsole: false,
+        maxFps: 0,
+        liveUpdates: true,
+        mode: "fullscreen",
+        [INTERNAL_TEST_INPUT_HOST]: inputHost,
+      }),
+    );
     await nextTick();
     await app.waitUntilRenderFlush();
     expect(target.value).not.toBeNull();

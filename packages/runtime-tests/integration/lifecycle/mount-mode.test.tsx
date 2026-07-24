@@ -4,7 +4,7 @@ import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const App = defineComponent(() => () => <Text>Hello</Text>);
@@ -17,20 +17,24 @@ function chunksFrom(stream: NodeJS.WriteStream): string[] {
   return chunks;
 }
 
-test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
-  "removed %s option fails before another mount option is read",
-  (removedKey) => {
-    const options = Object.defineProperty({ [removedKey]: undefined }, "stdout", {
-      enumerable: true,
-      get() {
-        throw new Error("stdout getter must not run");
-      },
-    });
+test.each([
+  "fullscreen",
+  "alternateScreen",
+  "interactive",
+  "debug",
+  "rawMode",
+  "kittyKeyboard",
+] as const)("removed %s option uses the generic closed-option guard", (key) => {
+  const options = Object.defineProperty({ [key]: undefined }, "stdout", {
+    enumerable: true,
+    get() {
+      throw new Error("stdout getter must not run");
+    },
+  });
 
-    const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow(`Mount option "${removedKey}" was removed`);
-  },
-);
+  const app = createApp(App);
+  expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
+});
 
 test.each([null, 0, "true", {}, []])(
   "invalid exitOnCtrlC %# fails before another mount option is read",
@@ -46,21 +50,6 @@ test.each([null, 0, "true", {}, []])(
     expect(() => app.mount(options as never)).toThrow(
       'Mount option "exitOnCtrlC" must be a boolean or undefined',
     );
-  },
-);
-
-test.each([undefined, "auto", "always"])(
-  "removed rawMode option value %# fails before another mount option is read",
-  (rawMode) => {
-    const options = Object.defineProperty({ rawMode }, "stdout", {
-      enumerable: true,
-      get() {
-        throw new Error("stdout getter must not run");
-      },
-    });
-
-    const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow('Mount option "rawMode" was removed');
   },
 );
 
@@ -111,10 +100,10 @@ test.each(["isScreenReaderEnabled", "unrecognizedOption"])(
   },
 );
 
-test.each([null, 0, "true", {}, []])(
-  "invalid liveUpdates %# fails before another mount option is read",
-  (liveUpdates) => {
-    const options = Object.defineProperty({ liveUpdates }, "stdout", {
+test.each(["liveUpdates", "onRender", "maxFps", "incrementalRendering", "clipboard"] as const)(
+  "repository-only string mount key %s is unavailable to public JavaScript callers",
+  (key) => {
+    const options = Object.defineProperty({ [key]: undefined }, "stdout", {
       enumerable: true,
       get() {
         throw new Error("stdout getter must not run");
@@ -122,29 +111,9 @@ test.each([null, 0, "true", {}, []])(
     });
 
     const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow(
-      'Mount option "liveUpdates" must be a boolean or undefined',
-    );
+    expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
   },
 );
-
-test.each([
-  null,
-  "osc52",
-  { kind: "platform" },
-  { kind: "custom" },
-  { kind: "custom", writeText: 42 },
-])("invalid clipboard transport %# fails before another mount option is read", (clipboard) => {
-  const options = Object.defineProperty({ clipboard }, "stdout", {
-    enumerable: true,
-    get() {
-      throw new Error("stdout getter must not run");
-    },
-  });
-
-  const app = createApp(App);
-  expect(() => app.mount(options as never)).toThrow('mount option "clipboard"');
-});
 
 test("Fullscreen without detected dimensions fails before output and remains retryable", async () => {
   const stdout = makeFakeWritable();
@@ -156,14 +125,16 @@ test("Fullscreen without detected dimensions fails before output and remains ret
 
   const app = createApp(App);
   expect(() =>
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      mode: "fullscreen",
-      liveUpdates: true,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    } as InternalMountOptions),
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        mode: "fullscreen",
+        liveUpdates: true,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      }),
+    ),
   ).toThrow("Fullscreen mode requires positive terminal columns and rows");
   expect(writes).toEqual([]);
 

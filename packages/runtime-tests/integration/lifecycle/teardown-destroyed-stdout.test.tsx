@@ -1,5 +1,5 @@
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 /**
  * Item 2.5b — every teardown stdout write must be skipped when stdout is already
  * destroyed/ended, not just gated on `isTTY`.
@@ -130,13 +130,15 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(InputApp);
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      // Force kitty enabled so dispose() attempts the disable-kitty escape.
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        // Force kitty enabled so dispose() attempts the disable-kitty escape.
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    );
 
     await new Promise<void>((r) => setTimeout(r, 60));
     // Kitty enable escape should have gone out on the live stream.
@@ -174,12 +176,14 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(InputApp);
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    );
 
     await new Promise<void>((r) => setTimeout(r, 60));
 

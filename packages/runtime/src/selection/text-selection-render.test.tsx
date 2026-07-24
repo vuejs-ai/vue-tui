@@ -3,7 +3,8 @@ import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef, type ComponentPublicInstance } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import { Text } from "../index.ts";
-import { createApp, type InternalMountOptions } from "../render.ts";
+import { createApp } from "../render.ts";
+import { createInternalMountOptions } from "../render.ts";
 import type { TextSelectionCommands } from "./public-selection.ts";
 import { useTextSelection } from "../composables/useTextSelection.ts";
 import {
@@ -46,13 +47,15 @@ describe("public Fullscreen text selection", () => {
     });
     const app = createApp(Root);
     try {
-      app.mount({
-        ...host,
-        mode: "fullscreen",
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          ...host,
+          mode: "fullscreen",
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+        }),
+      );
       await nextTick();
       await app.waitUntilRenderFlush();
       expect(selection.state.value.status).toBe("ready");
@@ -79,20 +82,22 @@ describe("public Fullscreen text selection", () => {
     });
     const app = createApp(Root);
     try {
-      app.mount({
-        ...host,
-        mode: "fullscreen",
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-        clipboard: {
-          kind: "custom",
-          writeText(text: string) {
-            copied.push(text);
-            return { status: "copied" };
+      app.mount(
+        createInternalMountOptions({
+          ...host,
+          mode: "fullscreen",
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          clipboard: {
+            kind: "custom",
+            writeText(text: string) {
+              copied.push(text);
+              return { status: "copied" };
+            },
           },
-        },
-      } as InternalMountOptions);
+        }),
+      );
       await nextTick();
       await app.waitUntilRenderFlush();
       expect(selection.state.value).toMatchObject({ status: "ready", selectedText: "" });
@@ -137,14 +142,16 @@ describe("public Fullscreen text selection", () => {
     });
     const app = createApp(Root);
     try {
-      app.mount({
-        ...host,
-        mode: "fullscreen",
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-        [INTERNAL_TEST_INPUT_HOST]: inputHost,
-      } as InternalMountOptions);
+      app.mount(
+        createInternalMountOptions({
+          ...host,
+          mode: "fullscreen",
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          [INTERNAL_TEST_INPUT_HOST]: inputHost,
+        }),
+      );
       await nextTick();
       await app.waitUntilRenderFlush();
 

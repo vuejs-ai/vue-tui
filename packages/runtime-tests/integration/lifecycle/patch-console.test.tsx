@@ -1,18 +1,8 @@
-import { Console as NodeConsole } from "node:console";
 import { defineComponent, h, inject, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
-import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createApp, Text, useStdin } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
-
-// vitest's worker console is a custom Console instance that LACKS the
-// `Console` constructor property a real Node global console always has.
-// patch-console needs `new console.Console(...)`, and render.ts degrades
-// gracefully (no patch at all) when it's missing — which would make the
-// filter/restore tests below pass vacuously. Restore the real-Node console
-// shape so the patch actually installs (safe to leave for the file's
-// lifetime: vitest isolates workers per test file).
-(console as { Console?: typeof NodeConsole }).Console ??= NodeConsole;
 
 // The console patch is installed before the first user setup and forwards
 // content without special-casing Vue's own warning prefix.
@@ -37,7 +27,7 @@ test("a Vue warning from initial setup is fully forwarded to stderr", async () =
 
   try {
     const app = createApp(WarnDuringSetup);
-    app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions);
+    app.mount(createInternalMountOptions({ stdout, stderr, stdin, maxFps: 0 }));
     await app.waitUntilRenderFlush();
     app.unmount();
     await app.waitUntilExit();
@@ -49,6 +39,138 @@ test("a Vue warning from initial setup is fully forwarded to stderr", async () =
   expect(stderrWrites.join("")).toContain("[Vue warn]");
   expect(stderrWrites.join("")).toContain('injection "intentionally-missing-injection" not found');
 });
+
+test.each([
+  ["the default", undefined],
+  ["explicit true", true],
+] as const)(
+  "patchConsole %s reports an installation failure and rolls back the consumed mount",
+  async (_label, patchConsole) => {
+    let setupCalls = 0;
+    const rawModes: boolean[] = [];
+
+    const App = defineComponent(() => {
+      setupCalls++;
+      useStdin().setRawMode(true);
+      return () => <Text>must not render</Text>;
+    });
+
+    const stdout = makeFakeWritable({ columns: 80, rows: 24 });
+    const stderr = makeFakeWritable();
+    const { stream: stdin } = makeFakeStdin();
+    stdin.setRawMode = (mode: boolean) => {
+      rawModes.push(mode);
+      return stdin;
+    };
+    const stdoutWrites = captureWrites(stdout);
+    const stderrWrites = captureWrites(stderr);
+    const listenerCountsBefore = {
+      stdin: [
+        stdin.listenerCount("data"),
+        stdin.listenerCount("end"),
+        stdin.listenerCount("error"),
+        stdin.listenerCount("close"),
+      ],
+      stdout: [
+        stdout.listenerCount("drain"),
+        stdout.listenerCount("finish"),
+        stdout.listenerCount("error"),
+        stdout.listenerCount("close"),
+      ],
+      stderr: [
+        stderr.listenerCount("drain"),
+        stderr.listenerCount("finish"),
+        stderr.listenerCount("error"),
+        stderr.listenerCount("close"),
+      ],
+    };
+    const consoleMethodsBefore = {
+      assert: console.assert,
+      count: console.count,
+      debug: console.debug,
+      log: console.log,
+      warn: console.warn,
+      error: console.error,
+    };
+    const originalErrorDescriptor = Object.getOwnPropertyDescriptor(console, "error");
+    if (!originalErrorDescriptor) throw new Error("console.error must be an own property");
+
+    const app = createApp(App);
+    let mountFailure: unknown;
+    try {
+      Object.defineProperty(console, "error", {
+        ...originalErrorDescriptor,
+        writable: false,
+      });
+      try {
+        app.mount({
+          stdin,
+          stdout,
+          stderr,
+          mode: "fullscreen",
+          ...(patchConsole === undefined ? {} : { patchConsole }),
+        });
+      } catch (error) {
+        mountFailure = error;
+      }
+    } finally {
+      Object.defineProperty(console, "error", originalErrorDescriptor);
+    }
+
+    // Keep the broken implementation from leaking a live app while this
+    // regression is red. The correct implementation has already rolled back.
+    if (mountFailure === undefined) app.unmount();
+
+    const exitOutcome = await app.waitUntilExit().then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    const listenerCountsAfter = {
+      stdin: [
+        stdin.listenerCount("data"),
+        stdin.listenerCount("end"),
+        stdin.listenerCount("error"),
+        stdin.listenerCount("close"),
+      ],
+      stdout: [
+        stdout.listenerCount("drain"),
+        stdout.listenerCount("finish"),
+        stdout.listenerCount("error"),
+        stdout.listenerCount("close"),
+      ],
+      stderr: [
+        stderr.listenerCount("drain"),
+        stderr.listenerCount("finish"),
+        stderr.listenerCount("error"),
+        stderr.listenerCount("close"),
+      ],
+    };
+    const stdoutBeforeRetry = stdoutWrites.join("");
+    const stderrBeforeRetry = stderrWrites.join("");
+
+    // A failed consumed attempt must release the stdout lease so another app
+    // can use the same caller-owned streams.
+    const retry = createApp(defineComponent(() => () => <Text>retry</Text>));
+    retry.mount({ stdin, stdout, stderr, patchConsole: false });
+    retry.unmount();
+    await retry.waitUntilExit();
+
+    expect(mountFailure).toBeInstanceOf(TypeError);
+    expect(exitOutcome.status).toBe("rejected");
+    if (exitOutcome.status === "rejected") expect(exitOutcome.error).toBe(mountFailure);
+    expect(setupCalls).toBe(0);
+    expect(rawModes).toEqual([]);
+    expect(stdoutBeforeRetry).toBe("");
+    expect(stderrBeforeRetry).toContain(String((mountFailure as Error).message));
+    expect(listenerCountsAfter).toEqual(listenerCountsBefore);
+    expect(console.assert).toBe(consoleMethodsBefore.assert);
+    expect(console.count).toBe(consoleMethodsBefore.count);
+    expect(console.debug).toBe(consoleMethodsBefore.debug);
+    expect(console.log).toBe(consoleMethodsBefore.log);
+    expect(console.warn).toBe(consoleMethodsBefore.warn);
+    expect(console.error).toBe(consoleMethodsBefore.error);
+  },
+);
 
 test("patchConsole false leaves the process console and app streams untouched", async () => {
   const stdout = makeFakeWritable();
@@ -79,13 +201,15 @@ test("patchConsole false leaves the process console and app streams untouched", 
 
   try {
     const app = createApp(defineComponent(() => () => <Text>frame</Text>));
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        patchConsole: false,
+        maxFps: 0,
+      }),
+    );
     expect(console.log).toBe(local.log);
     expect(console.warn).toBe(local.warn);
     expect(console.error).toBe(local.error);
@@ -135,7 +259,7 @@ test("console is restored when mount throws synchronously", () => {
   const warnBefore = console.warn;
 
   const app = createApp(ThrowOnPatchApp);
-  expect(() => app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions)).toThrow(
+  expect(() => app.mount(createInternalMountOptions({ stdout, stderr, stdin, maxFps: 0 }))).toThrow(
     "boom from vnode type getter",
   );
 
@@ -162,7 +286,7 @@ test.sequential("a console record emitted while the output gate is busy is retai
 
   const App = defineComponent(() => () => <Text>FRAME</Text>);
   const app = createApp(App);
-  app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdout, stderr, stdin, maxFps: 0 }));
   await app.waitUntilRenderFlush();
 
   expect(emittedFromInsideWrite).toBe(true);
@@ -180,7 +304,7 @@ test.sequential("non-TTY console output is immediate while the dynamic document 
   Object.assign(stdout, { isTTY: false });
   const app = createApp(defineComponent(() => () => <Text>FINAL-DOCUMENT</Text>));
 
-  app.mount({ stdin, stdout, stderr, maxFps: 0 } as InternalMountOptions);
+  app.mount(createInternalMountOptions({ stdin, stdout, stderr, maxFps: 0 }));
   await app.waitUntilRenderFlush();
   expect(writes.join("")).not.toContain("FINAL-DOCUMENT");
 
@@ -208,18 +332,22 @@ test.sequential("unmounting one app does not remove another app's console sink",
   const appA = createApp(App);
   const appB = createApp(App);
 
-  appA.mount({
-    stdout: stdoutA,
-    stderr: stderrA,
-    stdin: stdinA,
-    maxFps: 0,
-  } as InternalMountOptions);
-  appB.mount({
-    stdout: stdoutB,
-    stderr: stderrB,
-    stdin: stdinB,
-    maxFps: 0,
-  } as InternalMountOptions);
+  appA.mount(
+    createInternalMountOptions({
+      stdout: stdoutA,
+      stderr: stderrA,
+      stdin: stdinA,
+      maxFps: 0,
+    }),
+  );
+  appB.mount(
+    createInternalMountOptions({
+      stdout: stdoutB,
+      stderr: stderrB,
+      stdin: stdinB,
+      maxFps: 0,
+    }),
+  );
   await Promise.all([appA.waitUntilRenderFlush(), appB.waitUntilRenderFlush()]);
 
   appA.unmount();
@@ -268,12 +396,14 @@ test.sequential("the newest console owner is removed only after its Vue cleanup"
   const appA = createApp(AppA);
   const appB = createApp(AppB);
 
-  appA.mount({
-    stdout: stdoutA,
-    stderr: stderrA,
-    stdin: stdinA,
-    maxFps: 0,
-  } as InternalMountOptions);
+  appA.mount(
+    createInternalMountOptions({
+      stdout: stdoutA,
+      stderr: stderrA,
+      stdin: stdinA,
+      maxFps: 0,
+    }),
+  );
   const patchedMethods = {
     log: console.log,
     warn: console.warn,
@@ -281,12 +411,14 @@ test.sequential("the newest console owner is removed only after its Vue cleanup"
   };
   expect(patchedMethods.log).not.toBe(nativeMethods.log);
 
-  appB.mount({
-    stdout: stdoutB,
-    stderr: stderrB,
-    stdin: stdinB,
-    maxFps: 0,
-  } as InternalMountOptions);
+  appB.mount(
+    createInternalMountOptions({
+      stdout: stdoutB,
+      stderr: stderrB,
+      stdin: stdinB,
+      maxFps: 0,
+    }),
+  );
   expect(console.log).toBe(patchedMethods.log);
   expect(console.warn).toBe(patchedMethods.warn);
   expect(console.error).toBe(patchedMethods.error);
