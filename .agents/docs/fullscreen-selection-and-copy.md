@@ -1,6 +1,6 @@
 # Fullscreen text selection and clipboard
 
-> **Status:** historical unstamped F8 contract. The current candidate removes `/fullscreen`, public arbitrary-Text selection, clipboard hooks, clipboard mount options, and selection-only inverse styling. The mechanisms remain private evidence. The public-only composition evidence establishes source-owned keyboard selection and application-injected copy for known strings today, with any future painted-Text selection or OSC 52 transport added through a selected narrow Runtime-owned operation rather than a broad geometry or clipboard surface. It does not settle the remaining Open `Static` contract, preselect that future operation's shape, or add a vouch. No VOUCHED stamp changed.
+> **Status:** historical unstamped F8 contract. The current foundation removes `/fullscreen`, public arbitrary-Text selection, clipboard hooks, clipboard mount options, and selection-only inverse styling. The mechanisms remain private evidence. The public-only composition evidence establishes source-owned keyboard selection and application-injected copy for known strings today, with any future painted-Text selection or OSC 52 transport added through a selected narrow Runtime-owned operation rather than a broad geometry or clipboard surface. It does not alter the accepted `Static` contract, preselect that future operation's shape, or add a vouch. No VOUCHED stamp changed.
 
 ## Product boundary
 

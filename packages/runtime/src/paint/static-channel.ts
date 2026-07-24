@@ -1,6 +1,4 @@
-import Yoga from "yoga-layout";
 import { NESTED_STATIC_ERROR, type TuiNode, type TuiStatic } from "../host/nodes.ts";
-import { isContentLayoutGuarded } from "../host/layout-guards.ts";
 import { paintIsolated } from "./paint.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
@@ -24,21 +22,6 @@ function validateStaticPlacement(statics: readonly TuiStatic[]): void {
       ancestor = ancestor.parent;
     }
   }
-}
-
-function hasAuthoredHiddenAncestor(stat: TuiStatic): boolean {
-  let ancestor = stat.parent;
-  while (ancestor) {
-    const display =
-      "yoga" in ancestor
-        ? (ancestor.yoga as { getDisplay?: () => number }).getDisplay?.()
-        : undefined;
-    if (display === Yoga.DISPLAY_NONE && !isContentLayoutGuarded(ancestor)) {
-      return true;
-    }
-    ancestor = ancestor.parent;
-  }
-  return false;
 }
 
 interface PreparedStaticBatch {
@@ -83,7 +66,7 @@ export function prepareStaticOutput(
 ): PreparedStaticOutput {
   validateStaticPlacement(statics);
   const batches = statics
-    .filter((stat) => stat.commitState === "open" && !hasAuthoredHiddenAncestor(stat))
+    .filter((stat) => stat.commitState === "open")
     .map((stat) => prepareStaticNode(stat, columns));
   // An output-free instance is still a producer: it remains open until a later
   // eligible render produces bytes, or ordinary Vue unmount removes it. Only

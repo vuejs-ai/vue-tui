@@ -609,13 +609,17 @@ test("an empty Static block adds no blank line to history or the dynamic frame",
   expect(result.lastFrame()).toBe("[live]");
 });
 
-test("a Static under v-show waits for the Box to become visible", async () => {
+test("v-show does not change mounted Static eligibility", async () => {
   const visible = shallowRef(false);
   const App = defineComponent(
     () => () =>
       h(Box, { flexDirection: "column" }, () => [
         withDirectives(
-          h(Box, null, () => h(Static, null, () => h(Text, null, () => "VSHOW"))),
+          h(Box, null, () => h(Static, null, () => h(Text, null, () => "ANCESTOR"))),
+          [[vShow, visible.value]],
+        ),
+        withDirectives(
+          h(Static, null, () => h(Text, null, () => "DIRECT")),
           [[vShow, visible.value]],
         ),
         h(Text, null, () => "[live]"),
@@ -623,13 +627,13 @@ test("a Static under v-show waits for the Box to become visible", async () => {
   );
   const result = await render(App);
 
-  expect(staticTranscript(result.frames)).toBe("");
+  expect(staticTranscript(result.frames)).toBe("ANCESTOR\nDIRECT\n");
   visible.value = true;
   await flush(result);
-  expect(staticTranscript(result.frames)).toBe("VSHOW\n");
+  expect(staticTranscript(result.frames)).toBe("ANCESTOR\nDIRECT\n");
 });
 
-test("nested hidden ancestors retain the latest pending tree until every ancestor is visible", async () => {
+test("nested v-show ancestors neither defer nor rewrite mounted Static", async () => {
   const outerVisible = shallowRef(false);
   const innerVisible = shallowRef(false);
   const entries = shallowRef([
@@ -656,6 +660,7 @@ test("nested hidden ancestors retain the latest pending tree until every ancesto
       ]),
   );
   const result = await render(App);
+  expect(staticTranscript(result.frames)).toBe("old-A\nold-B\n");
 
   entries.value = [
     { id: "b", text: "new-B" },
@@ -663,23 +668,29 @@ test("nested hidden ancestors retain the latest pending tree until every ancesto
   ];
   outerVisible.value = true;
   await flush(result);
-  expect(staticTranscript(result.frames)).toBe("");
+  expect(staticTranscript(result.frames)).toBe("old-A\nold-B\n");
 
   innerVisible.value = true;
   await flush(result);
-  expect(staticTranscript(result.frames)).toBe("new-B\nnew-A\n");
+  expect(staticTranscript(result.frames)).toBe("old-A\nold-B\n");
 });
 
-test("hidden Static content stays absent from a synchronous document", () => {
+test("v-show does not hide Static from a synchronous document", () => {
   const App = defineComponent(
     () => () =>
-      withDirectives(
-        h(Box, null, () => h(Static, null, () => h(Text, null, () => "SECRET"))),
-        [[vShow, false]],
-      ),
+      h(Box, null, () => [
+        withDirectives(
+          h(Box, null, () => h(Static, null, () => h(Text, null, () => "ANCESTOR"))),
+          [[vShow, false]],
+        ),
+        withDirectives(
+          h(Static, null, () => h(Text, null, () => "DIRECT")),
+          [[vShow, false]],
+        ),
+      ]),
   );
 
-  expect(renderToString(App)).toBe("");
+  expect(renderToString(App)).toBe("ANCESTOR\nDIRECT");
 });
 
 test("nested Static is rejected before live output", async () => {

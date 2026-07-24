@@ -84,6 +84,7 @@ export interface TuiStatic extends NodeBase {
   type: "tui-static";
   children: TuiNode[];
   yoga: YogaNodeRef;
+  style: TuiHostStyle;
   props: BoxProps;
   /**
    * Runtime-owned write-once state for this mounted host instance. A normally
@@ -209,14 +210,26 @@ export function createTextLeaf(value: string): TuiTextLeaf {
 }
 
 export function createStatic(): TuiStatic {
-  return trackTuiNode({
+  const style = {} as TuiHostStyle;
+  Object.defineProperty(style, "display", {
+    enumerable: true,
+    get: () => "",
+    set: () => {},
+  });
+  const node = {
     type: "tui-static",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    // Static is an output boundary rather than a layout node. Keep Vue's
+    // built-in v-show directive operational while deliberately ignoring its
+    // display writes: mounted identity, not visual display, controls eligibility.
+    style,
     props: {},
     commitState: "open",
-  });
+  } satisfies TuiStatic;
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createTransform(fn: (line: string, lineIndex: number) => string): TuiTransform {

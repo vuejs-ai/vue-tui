@@ -2,7 +2,17 @@ import process from "node:process";
 import ansiEscapes from "ansi-escapes";
 import { Box, Text, createApp, useApp, type TuiApp } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
-import { defineComponent, h, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onMounted,
+  onScopeDispose,
+  shallowRef,
+  vShow,
+  watch,
+  withDirectives,
+} from "vue";
 
 type Scenario =
   | "current-full"
@@ -68,8 +78,16 @@ const App = defineComponent(() => {
     if (scenario === "static-tail") {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
       return h(Box, { flexDirection: "column" }, () => [
-        h(Static, { key: "deferred" }, () => h(DeferredHistory)),
-        ...completed.map((item) => h(Static, { key: item }, () => h(Text, null, () => item))),
+        withDirectives(
+          h(Box, { key: "deferred" }, () => h(Static, null, () => h(DeferredHistory))),
+          [[vShow, false]],
+        ),
+        ...completed.map((item) =>
+          withDirectives(
+            h(Static, { key: item }, () => h(Text, null, () => item)),
+            [[vShow, false]],
+          ),
+        ),
         h(Text, null, () => `TAIL ${revision.value}`),
       ]);
     }

@@ -1,6 +1,6 @@
 # Autonomous iteration
 
-> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The Runtime public API review has an implemented candidate recorded in the [current re-audit](./runtime-public-foundation-reaudit.md), while the exact `Static` contract remains Open; F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
+> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The completed minimum Runtime public foundation is recorded in the [current re-audit](./runtime-public-foundation-reaudit.md) and [decision ledger](./runtime-public-api-decisions.md); F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
 
 ## Objective
 
@@ -10,9 +10,9 @@ The coding agent was the pilot journey, not the definition of all future work. I
 
 ## Current live objective
 
-The remaining active Runtime-foundation review item is the exact live `Static` ordering, hidden-ancestor behavior, placement, nesting, and Static-specific failure timing. Other new work starts from a selected application scenario, real consumer, or reproducible framework failure; adding or changing a public primitive still requires the minimum Runtime-owned task, public-only higher-layer composition, host semantics, relevant peer evidence, and Yunfei's judgment where the choice depends on product intent.
+The Runtime-foundation review has no remaining public-contract item. Other new work starts from a selected application scenario, real consumer, or reproducible framework failure; adding or changing a public primitive still requires the minimum Runtime-owned task, public-only higher-layer composition, host semantics, relevant peer evidence, and Yunfei's judgment where the choice depends on product intent.
 
-The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and exact public contracts are superseded by the later item-by-item review; the current re-audit records the narrower implementation evidence without closing the remaining decision-ledger item.
+The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and exact public contracts are superseded by the later item-by-item review; the current re-audit and decision ledger record the narrower completed foundation.
 
 No code change follows automatically from a future proposal. Implementation begins only after it has a justified target; higher-layer editor, finder, viewer, collection, overlay, command, and keymap work still requires representative application evidence.
 

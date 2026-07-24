@@ -143,17 +143,15 @@ As of 2026-07-24, `waitUntilRenderFlush()` implements the vouched target above: 
 
 ### Static history remains irreversible across ordinary mount lifecycle
 
-[VOUCHED @hyfdev 2026-07-23]
-
 The accepted vue-tui target matches the pinned Ink v7.0.4 lifecycle behavior where the component models overlap. Producing no Static output does not consume the producer, so later content may still commit. Once output is committed, conditional unmount cannot erase terminal history. Mounting again creates a fresh producer and may append the same content again. The slot or item subtree is released through the framework's normal unmount lifecycle after acceptance.
 
 This match is deliberate because terminal history is an irreversible output side effect rather than reversible component visibility. Vue `v-if` and React conditional rendering therefore retain their ordinary create and destroy meaning; neither framework can reinterpret unmount as deleting bytes already written to a terminal.
 
-The behavior was run-verified against the pinned commit with a real TTY-shaped `PassThrough`: an initially empty `items` array later appended `A`; mounting `Static(A)`, conditionally removing it, and mounting it again wrote `A` twice while the first output remained; and an item component's effect cleanup ran immediately after its block was accepted rather than waiting for app unmount. Ink implements the open empty producer and fresh per-mount cursor in [`Static.tsx`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L58). The current vue-tui implementation already preserves committed history, releases accepted slot children, and treats remount as a new instance, but it incorrectly consumes an output-free eligible render; the accepted correction remains tracked in [TODOs](./todos.md#runtime-public-api-review).
+The behavior was run-verified against the pinned commit with a real TTY-shaped `PassThrough`: an initially empty `items` array later appended `A`; mounting `Static(A)`, conditionally removing it, and mounting it again wrote `A` twice while the first output remained; and an item component's effect cleanup ran immediately after its block was accepted rather than waiting for app unmount. Ink implements the open empty producer and fresh per-mount cursor in [`Static.tsx`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L58). The current vue-tui implementation preserves committed history, leaves an output-free mounted instance open, releases accepted slot children, and treats remount as a new instance.
 
 ### Static lifecycle implementation checkpoint
 
-As of 2026-07-24, vue-tui implements the vouched lifecycle target above: an output-free eligible instance stays open, only a block represented by non-empty bytes in the current settlement transaction settles, acceptance releases the slot subtree through Vue lifecycle, ordinary unmount before output writes no history, and remount creates a fresh producer. This checkpoint updates implementation status without rewriting the vouched evidence and pre-implementation statement above.
+As of 2026-07-24, vue-tui implements the lifecycle target above: an output-free eligible instance stays open, only a block represented by non-empty bytes in the current settlement transaction settles, acceptance releases the slot subtree through Vue lifecycle, ordinary unmount before output writes no history, and remount creates a fresh producer. This checkpoint records current implementation status without claiming an additional vouch.
 
 ### Non-TTY Inline output is a final document
 
@@ -331,6 +329,12 @@ current-props model, or API conventions.
 - **Ink:** exports `Static` from its root as a collection component with `items`, `style`, and a positional render-function child. Pinned v7.0.4 [stores a numeric rendered length and renders only `items.slice(index)`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/components/Static.tsx#L28-L58).
 - **vue-tui:** exports only a prop-free `Static` value from `@vue-tui/runtime/inline`. One ordinary default slot describes one history block. Applications use Vue `v-for` and stable `key` values for collections, conditional rendering for ordinary instance creation, and `Box` or `Text` inside the slot for layout and styling. There are no collection-specific props, scoped-slot values, events, methods, or named types.
 - **Why:** collection iteration, keyed identity, conditional creation, slots, and component cleanup are already Vue responsibilities. Copying Ink's React-shaped collection API into Runtime would duplicate those mechanisms and make the terminal-owned primitive larger. A third party can build an opinionated list component entirely from the public one-block primitive.
+
+#### Mounted `Static` ignores layout visibility
+
+- **Ink:** pinned v7.0.4 has no Vue-like `v-show`; its `renderToString` path was run-verified to omit a Static item below `display:none`, which is layout behavior rather than a cross-framework mount-lifecycle rule.
+- **vue-tui:** a Static present in the current Runtime render tree participates immediately regardless of ancestor or direct `v-show`. `v-if` and ordinary mount or unmount determine whether the history producer exists. The same mounted-identity rule applies to live Inline output and `renderToString()`.
+- **Why:** Yunfei chose the minimum Vue contract: `v-show` does not unmount a component, while Static is an irreversible history-output boundary rather than a layout node. Making layout visibility delay permanent output would introduce a separate policy and make a mounted producer's behavior depend on unrelated ancestor styling.
 
 #### Public Box size follows a direct Vue Box ref
 
