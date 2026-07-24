@@ -12,7 +12,7 @@
 // and both files mutate their fixture's app.vue; if they shared one file the edits would
 // race (one test's restore/edit clobbers the other's syntax error before the overlay
 // renders), which is exactly what made this test flake in the full suite.
-import { test, expect, afterEach } from "vite-plus/test";
+import { test, expect, afterEach, beforeEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
@@ -23,13 +23,27 @@ import { capture, waitFor, waitUntil } from "./helpers.ts";
 const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
 const appVue = fileURLToPath(new URL("./fixtures/overlay/src/app.vue", import.meta.url));
 let server: ViteDevServer | undefined;
-const origAppVue = readFileSync(appVue, "utf8");
+// Canonical fixture text is pinned at module load. Tests may introduce a temporary
+// syntax error; beforeEach/afterEach always restore so a killed prior run cannot
+// leave the broken file as the next suite's starting state.
+const SYNTAX_ERROR_MARK = "const count = shallowRef(0); const x =;";
+const CLEAN_COUNT_LINE = "const count = shallowRef(0);";
+function readCleanFixture(): string {
+  const raw = readFileSync(appVue, "utf8");
+  return raw.includes(SYNTAX_ERROR_MARK) ? raw.replace(SYNTAX_ERROR_MARK, CLEAN_COUNT_LINE) : raw;
+}
+const origAppVue = readCleanFixture();
+writeFileSync(appVue, origAppVue);
+
+beforeEach(() => {
+  writeFileSync(appVue, origAppVue);
+});
 
 afterEach(async () => {
   const testGlobal = globalThis as Record<string, unknown>;
   const app = testGlobal.__VT_TEST_APP__ as { unmount(): void } | undefined;
   app?.unmount();
-  await server?.close();
+  await server?.close().catch(() => {});
   server = undefined;
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;

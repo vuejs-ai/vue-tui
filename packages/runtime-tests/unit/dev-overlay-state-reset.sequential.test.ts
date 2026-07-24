@@ -37,6 +37,8 @@ test("a fresh dev app does not inherit a previous app's Build Error", async () =
 
   // App A hits a build error (real vite:error handler drives the module-global).
   hot.handlers.get("vite:error")!({ err: { message: "old build error" } });
+  // vite:error applies on a microtask so a same-turn beforeUpdate cannot clobber it.
+  await Promise.resolve();
   expect(devState.value).toEqual({ type: "error", error: { message: "old build error" } });
 
   // App A unmounts; App B mounts. Nothing reset devState before this fix, so App

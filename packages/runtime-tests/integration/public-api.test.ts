@@ -29,7 +29,12 @@ const PUBLIC_VALUE_EXPORTS = [
 ];
 
 const INLINE_VALUE_EXPORTS = ["Static"];
-const DEVTOOLS_VALUE_EXPORTS = ["connectDevtools"];
+const DEVTOOLS_VALUE_EXPORTS = [
+  "connectDevtools",
+  "disconnectDevtools",
+  "getDevtoolsSessionId",
+  "isDevConnected",
+];
 const TESTING_VALUE_EXPORTS = ["createTestHostBridge"];
 
 test("public API surface is exactly the documented value-export set", () => {

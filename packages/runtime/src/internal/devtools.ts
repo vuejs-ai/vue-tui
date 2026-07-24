@@ -1,2 +1,8 @@
 /** Privileged official-tooling entry. Not a supported public Runtime API. */
-export { connectDevtools } from "../hmr.ts";
+export {
+  connectDevtools,
+  disconnectDevtools,
+  isDevConnected,
+  getDevtoolsSessionId,
+  type ConnectDevtoolsOptions,
+} from "../hmr.ts";

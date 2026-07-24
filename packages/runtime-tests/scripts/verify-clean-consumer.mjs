@@ -1120,7 +1120,12 @@ assert.match(readFileSync(visualGuidePath, "utf8"), /Visual development feedback
 
 const { Box, createApp, Text, useBoxMetrics, useFocus, useInput, useLayoutSize, useStdin } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
-assert.deepEqual(Object.keys(internalDevtools).sort(), ["connectDevtools"]);
+assert.deepEqual(Object.keys(internalDevtools).sort(), [
+  "connectDevtools",
+  "disconnectDevtools",
+  "getDevtoolsSessionId",
+  "isDevConnected",
+]);
 assert.deepEqual(Object.keys(internalRuntimeTesting).sort(), ["createTestHostBridge"]);
 for (const unsupportedSubpath of ["devtools", "testing", "fullscreen"]) {
   await assert.rejects(import("@vue-tui/runtime/" + unsupportedSubpath), (error) => {

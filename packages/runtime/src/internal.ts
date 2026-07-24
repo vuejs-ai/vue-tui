@@ -17,7 +17,13 @@ export {
   type TuiNode,
 } from "./host/nodes.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
-export { connectDevtools, isDevConnected } from "./hmr.ts";
+export {
+  connectDevtools,
+  disconnectDevtools,
+  isDevConnected,
+  getDevtoolsSessionId,
+  type ConnectDevtoolsOptions,
+} from "./hmr.ts";
 export type { AppContext } from "./context.ts";
 export {
   createInternalMountOptions,

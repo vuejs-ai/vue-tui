@@ -78,11 +78,13 @@ test("a registered handler still works after the idempotency refactor", async ()
   const errHandler = hot.handlers.get("vite:error");
   expect(errHandler).toBeTypeOf("function");
   errHandler!({ err: { message: "boom" } });
+  // Error applies on a microtask so a same-turn beforeUpdate cannot clobber it.
+  await Promise.resolve();
   expect(devState.value).toEqual({ type: "error", error: { message: "boom" } });
 
-  // vite:beforeFullReload must send the reload request through the injected hot.
+  // vite:beforeFullReload tears down without a dead request-reload event.
   const reloadHandler = hot.handlers.get("vite:beforeFullReload");
   expect(reloadHandler).toBeTypeOf("function");
   reloadHandler!(undefined);
-  expect(hot.send).toHaveBeenCalledWith("vue-tui:request-reload");
+  expect(hot.send).not.toHaveBeenCalledWith("vue-tui:request-reload");
 });

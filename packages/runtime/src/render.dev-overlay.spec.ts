@@ -75,7 +75,7 @@ test("dev overlay preserves the user root and full reload abandons stream observ
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  expect(sends).toContain("vue-tui:request-reload");
+  expect(sends).not.toContain("vue-tui:request-reload");
   expect(exitSettled).toBe(false);
   expect(stdout.listenerCount("error")).toBe(listenerBaseline.stdoutError);
   expect(stdout.listenerCount("close")).toBe(listenerBaseline.stdoutClose);
