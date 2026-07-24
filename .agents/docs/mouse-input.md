@@ -1,6 +1,6 @@
 # Mouse input — design & decision record
 
-> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath, but that implementation state does not prove the Runtime foundation complete. Whether targeted pointer behavior can remain future additive work is Open in the [Runtime public API decision ledger](./runtime-public-api-decisions.md).
+> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath. The delegated bounded Runtime-foundation closure leaves target-bound pointer input as a future additive feature behind a narrow Runtime-owned operation if a selected journey requires it; the closure does not preselect its public shape or add a vouch.
 
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:

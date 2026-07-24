@@ -67,19 +67,11 @@ const App = defineComponent(() => {
 
     if (scenario === "static-tail") {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
-      return (
-        <Box flexDirection="column">
-          <Static key="deferred">
-            <DeferredHistory />
-          </Static>
-          {completed.map((item) => (
-            <Static key={item}>
-              <Text>{item}</Text>
-            </Static>
-          ))}
-          <Text>TAIL {revision.value}</Text>
-        </Box>
-      );
+      return h(Box, { flexDirection: "column" }, () => [
+        h(Static, { key: "deferred" }, () => h(DeferredHistory)),
+        ...completed.map((item) => h(Static, { key: item }, () => h(Text, null, () => item))),
+        h(Text, null, () => `TAIL ${revision.value}`),
+      ]);
     }
 
     if (scenario === "bounded" || scenario === "bounded-tail" || scenario === "explicit-preclear") {

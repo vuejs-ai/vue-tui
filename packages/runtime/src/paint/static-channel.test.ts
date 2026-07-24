@@ -188,23 +188,29 @@ test("acceptance seals every Static region before any callback and continues aft
   addText(first, "first");
   addText(second, "second");
   const injected = new Error("first acceptance callback failed");
-  let secondAccepted = 0;
+  const events: string[] = [];
   first.onAccepted = () => {
     expect(first.commitState).toBe("accepted");
     expect(second.commitState).toBe("accepted");
+    events.push("first");
     throw injected;
   };
   second.onAccepted = () => {
-    secondAccepted++;
+    events.push("second");
   };
 
   try {
     const prepared = prepareStaticOutput(root, 80);
     expect(prepared.output).toBe("first\nsecond\n");
-    expect(() => prepared.accept()).toThrow(injected);
+    expect(() =>
+      prepared.accept(() => {
+        events.push("before");
+        return () => events.push("after");
+      }),
+    ).toThrow(injected);
     expect(first.commitState).toBe("accepted");
     expect(second.commitState).toBe("accepted");
-    expect(secondAccepted).toBe(1);
+    expect(events).toEqual(["before", "first", "second", "after"]);
   } finally {
     first.parent = null;
     second.parent = null;

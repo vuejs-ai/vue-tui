@@ -1,10 +1,10 @@
 # Application API design
 
-> **Status:** historical unstamped design rationale for the earlier Runtime application-foundation candidate. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes this record's unstamped public shapes and completion conclusion while preserving its implementation and journey evidence. The later implemented candidate is recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). No VOUCHED stamp is implied.
+> **Status:** historical unstamped design rationale for the earlier Runtime application-foundation candidate. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes this record's unstamped public shapes and completion conclusion while preserving its implementation and journey evidence. The narrower implemented foundation is recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). No VOUCHED stamp is implied.
 
 ## Historical conclusion and current authority
 
-This record previously concluded that the Runtime application foundation was complete. The current item-by-item review keeps that conclusion withdrawn. For layout and measurement, the implemented candidates are `useLayoutWidth()`, setup-time nullable `useViewportHeight()`, and direct same-app Box-only `useBoxSize()`; every projection remains Open rather than authoritative, and general accepted-tree presence is private. For Focus, the authoritative ledger now accepts only the two explicit `useFocus()` overloads and their shared readonly handle; implementation remains pending. The broad render-session, element-geometry, focus-manager, scope, traversal, routing, and restoration surfaces described below remain historical evidence for their internal mechanisms rather than current public direction.
+This record previously concluded that a broader Runtime application foundation was complete. The 2026-07 item-by-item review replaced that public surface with the narrower boundary recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). The closed layout facts are `useLayoutWidth()`, setup-time nullable `useViewportHeight()`, and direct same-app Box-only `useBoxSize()`; general accepted-tree presence remains private. Focus is now the implemented pair of explicit `useFocus()` overloads with one shared readonly handle. The broad render-session, element-geometry, focus-manager, scope, traversal, routing, and restoration surfaces described below remain historical evidence for their internal mechanisms rather than current public direction.
 
 Future application-layer work should continue to start with capability boundaries and state ownership, validate them through representative journeys, and only then stabilize reusable composables and components. The completed lower-layer contracts here are constraints for that work rather than an automatically active new design phase.
 
@@ -329,7 +329,7 @@ Future editor, overlay, viewport, or high-level component APIs must preserve thi
 
 ## Second design packet: focus and input inside the rendering-mode contract
 
-The earlier F4 experiment in [logical focus and focus scopes](./focus-and-scopes.md) remains implementation and journey evidence, but its public manager, scopes, traversal, restoration, focused-input hooks, and external route are superseded. The authoritative contract is the vouched [`useFocus` review](./runtime-public-api-review.md#usefocus), and its implementation is pending.
+The earlier F4 experiment in [logical focus and focus scopes](./focus-and-scopes.md) remains implementation and journey evidence, but its public manager, scopes, traversal, restoration, focused-input hooks, and external route are superseded. The authoritative contract is the vouched [`useFocus` review](./runtime-public-api-review.md#usefocus), and its narrower implementation is complete.
 
 ```ts
 export type FocusTarget = Readonly<Ref<ComponentPublicInstance | null | undefined>>;
@@ -380,7 +380,7 @@ The earlier F4 validation remains useful scenario evidence, but the accepted Run
 
 The completed dependency order, at-most-one-active-item rule, and closure evidence are maintained in [the API foundation roadmap](./api-foundation-roadmap.md#priority-order). No foundation is currently Active or Queued, and R13 is not an automatic successor.
 
-The historical program order was rendering-mode session facts → rendered-target lifetime → normalized input and routing → the broader logical-focus experiment → semantic geometry and caret → Fullscreen targeted pointer → evidence-driven scroll composition → Fullscreen selection and copy → finite Runtime closure. The current item-by-item review supersedes those experimental public surfaces; application and component work may rely only on contracts accepted in the authoritative decision ledger.
+The historical program order was rendering-mode session facts → rendered-target lifetime → normalized input and routing → the broader logical-focus experiment → semantic geometry and caret → Fullscreen targeted pointer → evidence-driven scroll composition → Fullscreen selection and copy → finite Runtime closure. The later item-by-item review and delegated bounded pass supersede those experimental public surfaces; application and component work may rely only on Yunfei's judgments in the decision ledger and the implemented surface in the current API contract.
 
 ## Review template for each proposed API
 

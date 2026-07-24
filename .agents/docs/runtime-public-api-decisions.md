@@ -4,7 +4,7 @@ Judgments Yunfei actually expressed about the target public surface of `@vue-tui
 
 The current goal's three-layer direction is not duplicated here: `runtime ← use ← components`, with independent higher-level behavior in the optional, replaceable `@vue-tui/use` layer. This review also applies Yunfei's stated working constraint that higher layers use only public Runtime APIs and that Runtime expose only primitives requiring Runtime ownership. See [Package Layers & Dependency Direction](./package-layers.md).
 
-The branch's exact export inventory is guarded in code and tests. That inventory is implementation evidence, not a decision; this ledger records only Yunfei's expressed judgments and Open questions.
+The branch's exact export inventory is guarded in code and tests. Entries below record only Yunfei's expressed judgments; evidence-determined technical conclusions belong in the re-audit and API contract rather than this ledger.
 
 ## Decided
 
@@ -317,44 +317,4 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 ## Open
 
-For every Open entry, the current branch is a holding implementation and evidence, not a choice. Close an entry only after reviewing concrete user code, why Runtime must own it, whether a third party can compose it from smaller public primitives, host and lifecycle semantics, simpler alternatives, and measured peer behavior where peers are relevant.
-
-### Remaining `Static` host and placement semantics
-
-- **Question:** How are several simultaneously eligible live `Static` blocks ordered, and which live tree placements or nesting forms are valid?
-- **Holding:** The `/inline` entry, prop-free default-slot shape, one non-empty commit per instance, ordinary Vue mount and unmount meaning, explicit true-Fullscreen rejection, complete `renderToString()` behavior, and append-on-acceptance behavior in Inline non-TTY output are decided above. Simultaneous traversal order, hidden ancestors, placement, and nesting remain evidence rather than an accepted contract.
-
-### Root layout width
-
-- **Question:** Is `useLayoutWidth(): Readonly<Ref<number>>` the minimum stable layout fact only Runtime can provide on every host?
-- **Holding:** Keep `useLayoutWidth` as a candidate until concrete responsive-layout code, string and non-TTY semantics, and peer alternatives establish that a public reactive hook is necessary.
-
-### Finite viewport height
-
-- **Question:** Is setup-time nullable `useViewportHeight(): Readonly<Ref<number>> | null` the right capability gate, or can a simpler composition avoid publishing it?
-- **Holding:** Keep the current hook as a candidate. Review the call-site cost that Yunfei previously challenged, whether boundedness can change, and how Inline, Fullscreen, string, and non-TTY hosts behave.
-
-### Direct Box size
-
-- **Question:** Must Runtime expose `useBoxSize()` and `BoxSize`, and are direct-Box refs, accepted-paint timing, hidden or clipped behavior, and nullable last-size semantics the minimum stable contract?
-- **Holding:** Keep the current hook as a candidate until a real component or third-party behavior proves layout-only alternatives insufficient.
-
-### Devtools integration
-
-- **Question:** Should `connectDevtools(hot)` and its inline Vite-like `on` and `send` parameter contract remain on `@vue-tui/runtime/devtools`, move private, or be replaced by a different integration boundary?
-- **Holding:** Treat the current narrow Vite HMR adapter as evidence. Settle this from third-party integration needs and Vue/Vite precedent; first-party convenience alone does not justify a Runtime public subpath.
-
-### Testing integration
-
-- **Question:** Should `createTestHostBridge`, `TestHostBridge`, `TestHostBridgeOptions`, and `TestContentFrame` remain on `@vue-tui/runtime/testing`, including `onFrame`, `dynamic`, `staticOutput`, `mount`, `writeInput`, `suspend`, and `resume`?
-- **Holding:** Keep the current bridge as candidate evidence while proving that third-party tests need this stable host seam and that official testing support can use exactly the same public access without privileged Runtime internals.
-
-### Package metadata export
-
-- **Question:** Should `@vue-tui/runtime/package.json` remain an explicit supported export?
-- **Holding:** Keep the standard metadata path while checking repository and ecosystem conventions; this is a packaging compatibility question rather than a terminal-framework peer decision.
-
-### Completeness for currently non-public capabilities
-
-- **Question:** Can caret, focus, pointer targeting, selection, clipboard, external input forwarding, and coordinated output remain future additive work, or does at least one expected application-layer implementation prove that the foundation still lacks a smaller Runtime primitive?
-- **Holding:** Their current internal implementations and the absence of `/fullscreen` and `/internal` exports are not acceptance or rejection. Do not publish the old broad APIs, but do not call the Runtime foundation complete until representative public-only compositions show that missing capabilities can be added without redesigning Runtime ownership or data flow.
+No additional Yunfei judgment is currently queued for the Runtime foundation. The evidence-determined technical closure is recorded in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md), not as a decision-ledger entry. Future interaction features still require their own concrete user task and API review; the current closure does not vouch or preselect their exact public shape.

@@ -1,6 +1,6 @@
 # Autonomous iteration
 
-> **Status:** unstamped operating contract. Its work-selection and verification rules remain current, but its earlier claim that the Runtime foundation was complete has been withdrawn by the active [Runtime public API decision review](./runtime-public-api-decisions.md). F1 through F8 and R1 through R17 describe implementation evidence on the branch, not accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
+> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The Runtime public API review has a bounded technical closure recorded in the [current re-audit](./runtime-public-foundation-reaudit.md); F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
 
 ## Objective
 
@@ -10,18 +10,18 @@ The coding agent was the pilot journey, not the definition of all future work. I
 
 ## Current live objective
 
-The active foundation objective is to review the Runtime public API one item at a time in the [decision ledger](./runtime-public-api-decisions.md). An Open entry is not an autonomous implementation assignment: first establish the user task, minimum Runtime-owned primitive, public-only higher-layer composition, host semantics, peer evidence where relevant, and Yunfei's decision.
+No Runtime-foundation review item is currently active. New work starts from a selected application scenario, real consumer, or reproducible framework failure; adding or changing a public primitive still requires the minimum Runtime-owned task, public-only higher-layer composition, host semantics, relevant peer evidence, and Yunfei's judgment where the choice depends on product intent.
 
-The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and the exact public contracts it described are superseded by the current item-by-item review.
+The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and exact public contracts are superseded by the later item-by-item review and the bounded technical closure recorded in the current re-audit.
 
-No code change follows automatically from opening an entry. Implementation begins only after that entry has a justified target; higher-layer editor, finder, viewer, collection, overlay, command, and keymap work still requires representative application evidence.
+No code change follows automatically from a future proposal. Implementation begins only after it has a justified target; higher-layer editor, finder, viewer, collection, overlay, command, and keymap work still requires representative application evidence.
 
 ## Baseline for future work
 
 - PR [#264](https://github.com/vuejs-ai/vue-tui/pull/264) merged the lower baseline as `25df36d`.
 - F1 through F8 and Runtime R1 through R12 are historical implementation and verification evidence. Preserve sound internal mechanisms while reviewing their public names, package paths, and contracts through the decision ledger.
-- PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) was the development vehicle, but its remote head is older than the final local candidate. Its body and remote checks are historical until a maintainer-directed update occurs.
-- Do not broaden one top-level Text into a global selection document, merge clipboard into selection state, add an automatic clipboard fallback chain, expose private controllers or topology, or publish final-paint provenance without new accepted evidence. `/inline` and any possible `/fullscreen` surface are reviewed independently rather than preserved from the earlier candidate by default.
+- PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) remains the development vehicle. Its body, readiness, and remote checks are operational evidence rather than authority for the Runtime contract.
+- Do not broaden one top-level Text into a global selection document, merge clipboard into selection state, add an automatic clipboard fallback chain, expose private controllers or topology, or publish final-paint provenance without new accepted evidence. `/inline` is the supported history subpath; `/fullscreen` is absent because mode selection belongs to `mount()`.
 
 ## Pull-request policy
 
@@ -103,9 +103,9 @@ Run the same state machine with two view adapters:
 
 The comparison should record which behavior shares one public abstraction and where the terminal model requires a mode-specific capability. It must not hide differences behind a lowest-common-denominator API or choose a product hierarchy.
 
-## Work around the active foundation review
+## Work after the foundation review
 
-The earlier [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) now carries the active review. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently settle an Open public contract.
+The earlier [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) records only Yunfei's expressed judgments, while the [current re-audit](./runtime-public-foundation-reaudit.md) records the bounded technical closure. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently reopen or settle a future public contract.
 
 ## Distillation returned after each run
 

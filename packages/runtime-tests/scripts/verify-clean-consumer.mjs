@@ -1085,6 +1085,9 @@ const listener = () => {};
     writeFileSync(
       join(consumerDirectory, "runtime.mjs"),
       `import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
 import * as devtools from "@vue-tui/runtime/devtools";
@@ -1092,7 +1095,17 @@ import * as runtimeTesting from "@vue-tui/runtime/testing";
 import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
-import { defineComponent, h, isReadonly, nextTick, onMounted, onScopeDispose, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
+import { defineComponent, h, isReadonly, nextTick, onErrorCaptured, onMounted, onScopeDispose, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
+
+const require = createRequire(import.meta.url);
+const runtimeManifestPath = require.resolve("@vue-tui/runtime/package.json");
+const runtimeManifest = JSON.parse(readFileSync(runtimeManifestPath, "utf8"));
+assert.equal(runtimeManifest.name, "@vue-tui/runtime");
+const visualGuidePath = join(
+  dirname(runtimeManifestPath),
+  "docs/visual-development-feedback-loops.md",
+);
+assert.match(readFileSync(visualGuidePath, "utf8"), /Visual development feedback loop/);
 
 const { Box, createApp, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
@@ -1305,6 +1318,48 @@ const inlineHistory = await render(
 assert.equal(inlineHistory.frames.map((frame) => frame.staticOutput).join(""), "packed-history\\n");
 assert.equal(inlineHistory.lastFrame(), "packed-live");
 inlineHistory.dispose();
+
+const packedStaticCleanupFailure = new Error("packed Static cleanup failed");
+const packedStaticCleanupErrors = [];
+const packedStaticEntries = shallowRef([
+  { id: "first", text: "first" },
+  { id: "second", text: "second" },
+]);
+const PackedStaticCleanupItem = defineComponent({
+  props: { id: { type: String, required: true }, text: { type: String, required: true } },
+  setup(props) {
+    onScopeDispose(() => {
+      if (props.id === "second") throw packedStaticCleanupFailure;
+    });
+    return () => h(Text, null, () => props.text);
+  },
+});
+const packedStaticCleanup = await render(
+  defineComponent(() => {
+    onErrorCaptured((error) => {
+      packedStaticCleanupErrors.push(error);
+      return false;
+    });
+    return () => h(Box, null, () => [
+      ...packedStaticEntries.value.map((entry) =>
+        h(inline.Static, { key: entry.id }, () =>
+          h(PackedStaticCleanupItem, { id: entry.id, text: entry.text }),
+        ),
+      ),
+      h(Text, null, () => "packed-cleanup-live"),
+    ]);
+  }),
+);
+assert.deepEqual(packedStaticCleanupErrors, [packedStaticCleanupFailure]);
+packedStaticEntries.value = [...packedStaticEntries.value].reverse();
+await nextTick();
+await packedStaticCleanup.waitUntilRenderFlush();
+packedStaticEntries.value = [];
+await nextTick();
+await packedStaticCleanup.waitUntilRenderFlush();
+assert.deepEqual(packedStaticCleanupErrors, [packedStaticCleanupFailure]);
+assert.equal(packedStaticCleanup.lastFrame(), "packed-cleanup-live");
+packedStaticCleanup.dispose();
 
 const packedVShowVisible = shallowRef(false);
 const packedVShowRevision = shallowRef(0);

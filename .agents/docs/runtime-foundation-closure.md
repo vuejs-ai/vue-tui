@@ -1,10 +1,10 @@
 # Runtime foundation closure
 
-> **Status:** historical unstamped closure record for local candidate `e31aa1ae0dd69cb46e31416eb02a77ce83e4d491`. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes its “foundation complete,” F1–F8 Done, and R1–R12 Closed conclusions. Its packed-consumer, capacity, PTY, visual, restoration, and implementation results remain evidence rather than protection for the former public API. The later implemented candidate is documented in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). This does not imply that either candidate was pushed, merged, released, or verified by remote CI.
+> **Status:** historical unstamped closure record for local candidate `e31aa1ae0dd69cb46e31416eb02a77ce83e4d491`. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes its “foundation complete,” F1–F8 Done, and R1–R12 Closed conclusions. Its packed-consumer, capacity, PTY, visual, restoration, and implementation results remain evidence rather than protection for the former public API. The narrower implemented foundation and its delegated bounded closure are documented in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md). This does not imply that either candidate was pushed, merged, released, or verified by remote CI.
 
 ## Outcome and boundary
 
-This record previously classified `@vue-tui/runtime` as the minimum complete library foundation for the recorded conversational, monitoring, and multi-region workbench journeys. The current item-by-item review keeps that conclusion withdrawn while retaining the journeys and checks below as evidence about the existing mechanisms.
+This record previously classified a broader `@vue-tui/runtime` surface as the minimum complete library foundation for the recorded conversational, monitoring, and multi-region workbench journeys. The later item-by-item review withdrew that exact public boundary, while the 2026-07-24 delegated pass closed a narrower foundation in the current re-audit. The journeys and checks below remain evidence about the existing mechanisms rather than authority for the former exports.
 
 This is a bounded conclusion for the recorded scenarios. It does not claim that an unrelated future product can never require another Runtime change. Component-catalog breadth, editing and collection helpers, application data models, releases, compatibility work, 1.0 planning, and speculative optimization do not block closure.
 

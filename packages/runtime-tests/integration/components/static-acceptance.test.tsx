@@ -3,7 +3,7 @@ import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
-import { defineComponent, nextTick, ref, shallowRef } from "vue";
+import { defineComponent, nextTick, onScopeDispose, ref, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { Box, Text, createApp, useInput } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
@@ -131,6 +131,183 @@ test.each(acceptanceHosts)(
     }
   },
 );
+
+test("initial illegal Static nesting writes no history and exits with the mount error", async () => {
+  const marker = "ILLEGAL_STATIC_MUST_NOT_WRITE";
+  const App = defineComponent(() => () => (
+    <Static>
+      <Box>
+        <Static>
+          <Text>{marker}</Text>
+        </Static>
+      </Box>
+    </Static>
+  ));
+  const stdout = makeOutput({ isTTY: true });
+  const stderr = makeOutput({ isTTY: true });
+  const { stream: stdin } = makeFakeStdin();
+  const stdoutChunks: string[] = [];
+  stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk.toString()));
+  const app = createApp(App);
+  const exited = app.waitUntilExit();
+
+  try {
+    let mountError: unknown;
+    try {
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        mode: "inline",
+        patchConsole: false,
+        maxFps: 0,
+      } as InternalMountOptions);
+    } catch (error) {
+      mountError = error;
+    }
+
+    expect(mountError).toMatchObject({
+      message: "<Static> cannot be nested inside another <Static>",
+    });
+    await expect(exited).rejects.toBe(mountError);
+    expect(stdoutChunks).toEqual([]);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test("accepted-scope cleanup errors settle when an ancestor removes the Static host", async () => {
+  const cleanupFailure = new Error("ancestor-removed Static cleanup failed");
+  const events: string[] = [];
+  const captured: unknown[] = [];
+  const visible = shallowRef(true);
+  const live = shallowRef("live-1");
+  const Leaf = defineComponent(() => {
+    onScopeDispose(() => events.push("leaf"));
+    return () => <Text>RACE_STATIC</Text>;
+  });
+  const Item = defineComponent(() => {
+    onScopeDispose(() => {
+      events.push("parent");
+      throw cleanupFailure;
+    });
+    return () => (
+      <Box>
+        <Leaf />
+      </Box>
+    );
+  });
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      {visible.value ? (
+        <Box>
+          <Static>
+            <Item />
+          </Static>
+        </Box>
+      ) : null}
+      <Text>{live.value}</Text>
+    </Box>
+  ));
+  const stdout = makeOutput({ isTTY: true });
+  const stderr = makeOutput({ isTTY: true });
+  const { stream: stdin } = makeFakeStdin();
+  let removedFromWrite = false;
+  stdout.on("data", (chunk: Buffer) => {
+    if (!removedFromWrite && stripAnsi(chunk.toString()).includes("RACE_STATIC")) {
+      removedFromWrite = true;
+      visible.value = false;
+    }
+  });
+  const app = createApp(App);
+  app.config.errorHandler = (error) => captured.push(error);
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      patchConsole: false,
+      maxFps: 0,
+    } as InternalMountOptions);
+    await nextTick();
+    await nextTick();
+    await app.waitUntilRenderFlush();
+
+    expect(removedFromWrite).toBe(true);
+    expect(events).toEqual(["parent", "leaf"]);
+    expect(captured).toEqual([cleanupFailure]);
+
+    live.value = "live-2";
+    await nextTick();
+    await app.waitUntilRenderFlush();
+    expect(captured).toEqual([cleanupFailure]);
+
+    app.unmount();
+    await app.waitUntilExit();
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test("immediate app unmount rejects exit with an accepted-scope cleanup error", async () => {
+  const cleanupFailure = new Error("immediate Static teardown cleanup failed");
+  const laterCleanupFailure = new Error("later dynamic cleanup failed");
+  const events: string[] = [];
+  const Item = defineComponent(() => {
+    onScopeDispose(() => {
+      events.push("static");
+      throw cleanupFailure;
+    });
+    return () => <Text>IMMEDIATE_UNMOUNT_STATIC</Text>;
+  });
+  const DynamicSibling = defineComponent(() => {
+    onScopeDispose(() => {
+      events.push("dynamic");
+      throw laterCleanupFailure;
+    });
+    return () => <Text>dynamic</Text>;
+  });
+  const App = defineComponent(() => () => (
+    <Box>
+      <Static>
+        <Item />
+      </Static>
+      <DynamicSibling />
+    </Box>
+  ));
+  const stdout = makeOutput({ isTTY: true });
+  const stderr = makeOutput({ isTTY: true });
+  const { stream: stdin } = makeFakeStdin();
+  const app = createApp(App);
+  const exited = app.waitUntilExit();
+
+  try {
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      mode: "inline",
+      patchConsole: false,
+      maxFps: 0,
+    } as InternalMountOptions);
+    app.unmount();
+    await expect(exited).rejects.toBe(cleanupFailure);
+    expect(events).toEqual(["static", "dynamic"]);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
 
 test("an initially output-free Static appends when it later emits on final non-TTY output", async () => {
   const ready = shallowRef(false);

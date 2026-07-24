@@ -598,6 +598,36 @@ describe("renderToString", () => {
     expect(caught).toBe(unmountError);
   });
 
+  test("rethrows the first scope cleanup error after releasing descendant scopes", () => {
+    const events: string[] = [];
+    const cleanupError = new Error("scope cleanup failed");
+    const Leaf = defineComponent(() => {
+      onScopeDispose(() => events.push("leaf"));
+      return () => <Text>leaf</Text>;
+    });
+    const Parent = defineComponent(() => {
+      onScopeDispose(() => {
+        events.push("parent");
+        throw cleanupError;
+      });
+      return () => (
+        <Box>
+          <Leaf />
+        </Box>
+      );
+    });
+
+    let caught: unknown;
+    try {
+      renderToString(Parent);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(cleanupError);
+    expect(events).toEqual(["parent", "leaf"]);
+  });
+
   // ── Error handling ─────────────────────────────────────
 
   test("text outside Text component throws", () => {

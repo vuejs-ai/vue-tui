@@ -50,17 +50,9 @@ A candidate is **runtime work** (or blocked on a runtime addition) if it must:
   Spinner's frame counter, is not Runtime work;
 - require terminal, renderer-tree, or accepted-paint facts that cannot be implemented from accepted Runtime public primitives.
 
-Otherwise it belongs above Runtime. `useFocus()` is an accepted Runtime building block because unique ownership and rendered-component validity cannot be reproduced safely above Runtime; it exposes only an explicit handle and readonly ownership, so components still own disabled state, automatic focus, ordering, routing, scopes, modal policy, and names. The current branch's `useLayoutWidth()`, `useViewportHeight()`, and `useBoxSize()` remain candidates under item-by-item review rather than accepted building blocks; see the [Runtime public API decision ledger](./runtime-public-api-decisions.md). General accepted-tree presence is private rather than a public component dependency. Components may use an unresolved candidate to provide evidence, but that use does not settle its public contract.
+Otherwise it belongs above Runtime. `useFocus()` is an accepted Runtime building block because unique ownership and rendered-component validity cannot be reproduced safely above Runtime; it exposes only an explicit handle and readonly ownership, so components still own disabled state, automatic focus, ordering, routing, scopes, modal policy, and names. `useLayoutWidth()`, `useViewportHeight()`, and `useBoxSize()` are retained Runtime building blocks because real consumers need accepted root width, finite-viewport capability, and direct flex-resolved Box size that application code cannot derive. General accepted-tree presence remains private rather than a public component dependency.
 
-Targeted mouse input illustrates the unresolved edge: input decoding, terminal-mode ownership, hit
-testing, and capture require Runtime mechanisms, while application interaction policy can live above
-Runtime. The current branch retains internal mouse implementation material but exports neither
-`useMouseEvent()` nor `useMouseDrag()` and has no `/fullscreen` public subpath. The minimum public
-primitive, if one is needed, remains Open; see [targeted-pointer](./targeted-pointer.md). Anything
-driven entirely by already accepted public facts remains a higher-layer composition.
-(`overflow:"hidden"`
-clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
-the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
+Targeted mouse input illustrates a future additive edge: input decoding, terminal-mode ownership, hit testing, and capture require Runtime mechanisms, while application interaction policy can live above Runtime. The current branch retains internal mouse implementation material but exports neither `useMouseEvent()` nor `useMouseDrag()` and has no `/fullscreen` public subpath. If a selected product journey needs target-bound pointer behavior, review a narrow Runtime-owned operation then; the current foundation does not preselect its shape. See [targeted-pointer](./targeted-pointer.md). Anything driven entirely by already accepted public facts remains a higher-layer composition. (`overflow:"hidden"` clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
 
 ## Vue-idiomatic, Ink-inspired
 

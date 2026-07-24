@@ -1,4 +1,16 @@
-import { defineComponent, h, nextTick, onUnmounted, shallowRef, vShow, withDirectives } from "vue";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onBeforeUnmount,
+  onErrorCaptured,
+  onScopeDispose,
+  onUnmounted,
+  shallowRef,
+  vShow,
+  watchEffect,
+  withDirectives,
+} from "vue";
 import { expect, test } from "vite-plus/test";
 import { render, type ContentFrame, type RenderResult } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
@@ -150,10 +162,7 @@ test("accepting a ready sibling leaves an output-free Static open for later cont
   ready.value = true;
   completed.value = [...completed.value, "SIMULTANEOUS"];
   await flush(result);
-  const transcript = staticTranscript(result.frames);
-  expect(count(transcript, "IMMEDIATE")).toBe(1);
-  expect(count(transcript, "DEFERRED")).toBe(1);
-  expect(count(transcript, "SIMULTANEOUS")).toBe(1);
+  expect(staticTranscript(result.frames)).toBe("IMMEDIATE\nDEFERRED\nSIMULTANEOUS\n");
 });
 
 test("unmounting an open output-free Static produces no history block", async () => {
@@ -222,6 +231,34 @@ test("open sibling instances commit in current tree order", async () => {
   expect(staticTranscript(result.frames)).toBe("C\nA\nB\n");
 });
 
+test("pending keyed reorder uses host-tree order rather than reverse-flex visual order", async () => {
+  const ready = shallowRef(false);
+  const entries = shallowRef([
+    { id: "a", text: "A" },
+    { id: "b", text: "B" },
+  ]);
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column-reverse">
+      {entries.value.map((entry) => (
+        <Static key={entry.id}>
+          <Text>{ready.value ? entry.text : ""}</Text>
+        </Static>
+      ))}
+    </Box>
+  ));
+
+  const result = await render(App);
+  entries.value = [
+    { id: "b", text: "B" },
+    { id: "c", text: "C" },
+    { id: "a", text: "A" },
+  ];
+  ready.value = true;
+  await flush(result);
+
+  expect(staticTranscript(result.frames)).toBe("B\nC\nA\n");
+});
+
 test("a later instance inserted before accepted siblings still appends physically", async () => {
   const entries = shallowRef([{ id: 1, text: "A" }]);
   const App = defineComponent(() => () => (
@@ -263,6 +300,181 @@ test("acceptance releases the committed slot component subtree", async () => {
   expect(unmounted).toEqual(["A"]);
 });
 
+test("one accepted batch releases every slot scope before forwarding its first cleanup error", async () => {
+  const events: string[] = [];
+  const captured: unknown[] = [];
+  const firstFailure = new Error("first Static cleanup failed");
+  const live = shallowRef("live");
+
+  const Leaf = defineComponent({
+    props: { label: { type: String, required: true } },
+    setup(props) {
+      onScopeDispose(() => events.push(`${props.label}-leaf`));
+      return () => <Text>{props.label}</Text>;
+    },
+  });
+  const First = defineComponent(() => {
+    onScopeDispose(() => {
+      events.push("first-parent");
+      throw firstFailure;
+    });
+    return () => (
+      <Box>
+        <Leaf label="first" />
+      </Box>
+    );
+  });
+  const Second = defineComponent(() => {
+    onScopeDispose(() => events.push("second-parent"));
+    return () => (
+      <Box>
+        <Leaf label="second" />
+      </Box>
+    );
+  });
+  const App = defineComponent(() => {
+    onErrorCaptured((error) => {
+      captured.push(error);
+      return false;
+    });
+    return () => (
+      <Box flexDirection="column">
+        <Static>
+          <First />
+        </Static>
+        <Static>
+          <Second />
+        </Static>
+        <Text>{live.value}</Text>
+      </Box>
+    );
+  });
+
+  const result = await render(App);
+  try {
+    await flush(result);
+    expect(staticTranscript(result.frames)).toBe("first\nsecond\n");
+    expect(events).toEqual(["first-parent", "first-leaf", "second-parent", "second-leaf"]);
+    expect(captured).toEqual([firstFailure]);
+    expect(result.lastFrame()).toBe("live");
+
+    live.value = "still-live";
+    await flush(result);
+    expect(result.lastFrame()).toBe("still-live");
+  } finally {
+    result.dispose();
+  }
+});
+
+test("a handled accepted-scope cleanup error leaves keyed Static anchors patchable", async () => {
+  const cleanupFailure = new Error("accepted Static cleanup failed");
+  const captured: unknown[] = [];
+  const entries = shallowRef([
+    { id: "first", text: "first" },
+    { id: "second", text: "second" },
+  ]);
+  const Item = defineComponent({
+    props: {
+      id: { type: String, required: true },
+      text: { type: String, required: true },
+    },
+    setup(props) {
+      onScopeDispose(() => {
+        if (props.id === "second") throw cleanupFailure;
+      });
+      return () => <Text>{props.text}</Text>;
+    },
+  });
+  const App = defineComponent(() => {
+    onErrorCaptured((error) => {
+      captured.push(error);
+      return false;
+    });
+    return () => (
+      <Box>
+        {entries.value.map((entry) => (
+          <Static key={entry.id}>
+            <Item id={entry.id} text={entry.text} />
+          </Static>
+        ))}
+        <Text>[live]</Text>
+      </Box>
+    );
+  });
+
+  const result = await render(App);
+  try {
+    expect(captured).toEqual([cleanupFailure]);
+
+    entries.value = [...entries.value].reverse();
+    await flush(result);
+    expect(captured).toEqual([cleanupFailure]);
+
+    entries.value = [];
+    await flush(result);
+    expect(captured).toEqual([cleanupFailure]);
+    expect(result.lastFrame()).toBe("[live]");
+  } finally {
+    result.dispose();
+  }
+});
+
+test("Vue-handled watcher and lifecycle cleanup errors keep their native hook timing", async () => {
+  const events: string[] = [];
+  const watchFailure = new Error("watch cleanup failed");
+  const lifecycleFailure = new Error("before-unmount failed");
+
+  const Item = defineComponent({
+    props: { label: { type: String, required: true } },
+    setup(props) {
+      watchEffect((onCleanup) => {
+        onCleanup(() => {
+          events.push(`${props.label}-watch`);
+          if (props.label === "first") throw watchFailure;
+        });
+      });
+      onBeforeUnmount(() => {
+        events.push(`${props.label}-before`);
+        if (props.label === "first") throw lifecycleFailure;
+      });
+      onScopeDispose(() => events.push(`${props.label}-scope`));
+      return () => <Text>{props.label}</Text>;
+    },
+  });
+  const App = defineComponent(() => {
+    onErrorCaptured((error) => {
+      events.push(error === watchFailure ? "captured-watch" : "captured-before");
+      return false;
+    });
+    return () => (
+      <Box>
+        <Static>
+          <Item label="first" />
+        </Static>
+        <Static>
+          <Item label="second" />
+        </Static>
+      </Box>
+    );
+  });
+
+  const result = await render(App);
+  try {
+    expect(events).toEqual([
+      "first-before",
+      "captured-before",
+      "first-watch",
+      "captured-watch",
+      "first-scope",
+      "second-before",
+      "second-watch",
+      "second-scope",
+    ]);
+  } finally {
+    result.dispose();
+  }
+});
+
 test("multiple independently mounted Static regions are all honored", async () => {
   const result = await render(
     defineComponent(() => () => (
@@ -284,6 +496,30 @@ test("multiple independently mounted Static regions are all honored", async () =
 
   expect(staticTranscript(result.frames)).toBe("HEADER\nLOG\n");
   expect(result.lastFrame()).toBe("[live]");
+});
+
+test("component and Fragment wrappers are valid while ancestor Box layout stays outside the block", async () => {
+  const ThroughFragment = defineComponent(() => () => (
+    <>
+      <Static>
+        <Box flexDirection="row">
+          <Text>A</Text>
+          <Text>B</Text>
+        </Box>
+      </Static>
+    </>
+  ));
+  const result = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column-reverse" width={1} paddingLeft={4} overflow="hidden">
+        <ThroughFragment />
+        <Text>[live]</Text>
+      </Box>
+    )),
+  );
+
+  expect(staticTranscript(result.frames)).toBe("AB\n");
+  expect(result.lastFrame()).toBe("");
 });
 
 test("layout inside a Static block uses ordinary Box composition", async () => {
@@ -393,6 +629,47 @@ test("a Static under v-show waits for the Box to become visible", async () => {
   expect(staticTranscript(result.frames)).toBe("VSHOW\n");
 });
 
+test("nested hidden ancestors retain the latest pending tree until every ancestor is visible", async () => {
+  const outerVisible = shallowRef(false);
+  const innerVisible = shallowRef(false);
+  const entries = shallowRef([
+    { id: "a", text: "old-A" },
+    { id: "b", text: "old-B" },
+  ]);
+  const App = defineComponent(
+    () => () =>
+      h(Box, null, () => [
+        withDirectives(
+          h(Box, null, () =>
+            withDirectives(
+              h(Box, null, () =>
+                entries.value.map((entry) =>
+                  h(Static, { key: entry.id }, () => h(Text, null, () => entry.text)),
+                ),
+              ),
+              [[vShow, innerVisible.value]],
+            ),
+          ),
+          [[vShow, outerVisible.value]],
+        ),
+        h(Text, null, () => "[live]"),
+      ]),
+  );
+  const result = await render(App);
+
+  entries.value = [
+    { id: "b", text: "new-B" },
+    { id: "a", text: "new-A" },
+  ];
+  outerVisible.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("");
+
+  innerVisible.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("new-B\nnew-A\n");
+});
+
 test("hidden Static content stays absent from a synchronous document", () => {
   const App = defineComponent(
     () => () =>
@@ -432,6 +709,64 @@ test("nested Static is rejected by the synchronous document renderer", () => {
   ));
 
   expect(() => renderToString(App)).toThrow("<Static> cannot be nested inside another <Static>");
+});
+
+test("deep Static nesting through components and Box is rejected", async () => {
+  const Inner = defineComponent(() => () => (
+    <Box>
+      <Static>
+        <Text>inner</Text>
+      </Static>
+    </Box>
+  ));
+  const App = defineComponent(() => () => (
+    <Static>
+      <Box>
+        <Inner />
+      </Box>
+    </Static>
+  ));
+
+  await expect(render(App)).rejects.toThrow("<Static> cannot be nested inside another <Static>");
+});
+
+test("a handled later invalid insertion emits no history and an open block can recover", async () => {
+  const invalid = shallowRef(false);
+  const ready = shallowRef(false);
+  const captured: unknown[] = [];
+  const Pending = defineComponent(() => () => (
+    <Static>
+      <Box>
+        <Text>{ready.value ? "RECOVERED" : ""}</Text>
+        {invalid.value ? (
+          <Static>
+            <Text>INVALID</Text>
+          </Static>
+        ) : null}
+      </Box>
+    </Static>
+  ));
+  const App = defineComponent(() => {
+    onErrorCaptured((error) => {
+      captured.push(error);
+      return false;
+    });
+    return () => <Pending />;
+  });
+  const result = await render(App);
+
+  invalid.value = true;
+  await flush(result);
+  expect(captured).toHaveLength(1);
+  expect(captured[0]).toMatchObject({
+    message: "<Static> cannot be nested inside another <Static>",
+  });
+  expect(staticTranscript(result.frames)).toBe("");
+
+  invalid.value = false;
+  ready.value = true;
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("RECOVERED\n");
 });
 
 test("Static in a text context is rejected before Yoga insertion", async () => {

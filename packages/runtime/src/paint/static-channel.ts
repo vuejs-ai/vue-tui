@@ -55,8 +55,12 @@ interface PreparedStaticBatch {
 export interface PreparedStaticOutput {
   /** Combined open Static bytes, including each non-empty frame's trailing newline. */
   readonly output: string;
-  /** Confirm every non-empty block represented in this prepared transaction. */
-  accept(): void;
+  /**
+   * Confirm every non-empty block represented in this prepared transaction.
+   * A preparation hook may return a finalizer that runs after every component
+   * has received its acceptance notification, including when one throws.
+   */
+  accept(beforeNotify?: (accepted: readonly TuiStatic[]) => void | (() => void)): void;
   /** Prevent retry for every non-empty block in an indeterminate transaction. */
   abandon(): void;
 }
@@ -102,18 +106,31 @@ export function prepareStaticOutput(
 
   return {
     output,
-    accept() {
+    accept(beforeNotify) {
       const accepted = settle("accepted");
 
       // All hosts are sealed before the first callback can re-enter Vue. Run
       // every callback even if one fails so no accepted subtree remains live.
       const errors: unknown[] = [];
+      let afterNotify: (() => void) | undefined;
+      if (accepted.length > 0 && beforeNotify) {
+        try {
+          afterNotify = beforeNotify(accepted) ?? undefined;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
       for (const stat of accepted) {
         try {
           stat.onAccepted?.();
         } catch (error) {
           errors.push(error);
         }
+      }
+      try {
+        afterNotify?.();
+      } catch (error) {
+        errors.push(error);
       }
       if (errors.length === 1) throw errors[0];
       if (errors.length > 1) {

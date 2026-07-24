@@ -79,6 +79,7 @@ test("Static commits completed lines once while a small dynamic tail remains rep
   const { lines, output } = await runScenario("static-tail");
 
   expectNoMainScreenReset(output);
+  expect(output).not.toContain("[Vue warn]");
   expect(lines).toContain("PRE_APP_HISTORY");
   expect(lines.filter((line) => line === "DEFERRED")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 0")).toHaveLength(1);

@@ -11,7 +11,6 @@ import {
   createVNode,
   effectScope,
   getCurrentInstance,
-  isVNode,
   mergeProps,
   nextTick,
 } from "vue";
@@ -47,7 +46,7 @@ import {
   type InternalKittyKeyboardMountOptions,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
-import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
+import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
@@ -163,6 +162,7 @@ import {
 } from "./selection/selection-controller.ts";
 import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 import type { InternalSelectionPaintFrame } from "./selection/selection-paint.ts";
+import { createVueCleanupGuard, type VueCleanupErrorOwner } from "./vue-cleanup-guard.ts";
 
 export interface MountOptions {
   readonly stdout?: Writable;
@@ -284,15 +284,7 @@ export interface TuiApp extends ConsumerVuePublicAppSurface {
 
 type RootProps = Record<string, unknown>;
 
-interface VueTeardownEffect {
-  cleanup?: () => unknown;
-  onStop?: () => unknown;
-}
-
 interface VueTeardownScope {
-  effects?: VueTeardownEffect[];
-  cleanups?: Array<() => unknown>;
-  scopes?: VueTeardownScope[];
   on?(): void;
   stop(fromParent?: boolean): void;
 }
@@ -304,16 +296,6 @@ interface VueTeardownComponentInstance {
   subTree?: VNode;
   vnode?: VNode;
 }
-
-type VueTeardownVNode = VNode & {
-  component?: VueTeardownComponentInstance | null;
-  ssContent?: VNode;
-  ssFallback?: VNode;
-  suspense?: {
-    activeBranch?: VNode;
-    pendingBranch?: VNode;
-  };
-};
 
 type VueScopeCapture = (
   scope: VueTeardownScope,
@@ -666,87 +648,63 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     pendingExitErrorShouldReport = false;
   }
 
-  const guardedVueCleanupCallbacks = new WeakSet<() => unknown>();
-  const guardedVueScopes = new WeakSet<object>();
+  const vueCleanupGuard = createVueCleanupGuard();
+  interface AcceptedStaticCleanupFailure {
+    readonly error: unknown;
+    readonly owner: VueCleanupErrorOwner | null;
+    readonly sequence: number;
+  }
+  interface AcceptedStaticCleanupBatch {
+    readonly errors: AcceptedStaticCleanupFailure[];
+  }
+  const pendingAcceptedStaticCleanupBatches = new Set<AcceptedStaticCleanupBatch>();
+  let acceptedStaticCleanupFailureSequence = 0;
 
-  function guardVueCleanupCallback(callback: () => unknown): () => unknown {
-    if (guardedVueCleanupCallbacks.has(callback)) return callback;
-    const guarded = () => {
-      try {
-        return callback();
-      } catch (error) {
-        // Vue's EffectScope.stop() calls effect and scope cleanups directly.
-        // One throw would otherwise abort the component-unmount traversal after
-        // marking the scope inactive, so retrying cannot reach descendant
-        // scopes. Record the failure while allowing every remaining cleanup to
-        // receive its one turn.
-        recordTeardownError(error);
-      }
-    };
-    guardedVueCleanupCallbacks.add(guarded);
-    return guarded;
+  function captureAcceptedStaticCleanupFailure(
+    batch: AcceptedStaticCleanupBatch,
+    error: unknown,
+    owner: VueCleanupErrorOwner | null,
+  ): void {
+    batch.errors.push({
+      error,
+      owner,
+      sequence: acceptedStaticCleanupFailureSequence++,
+    });
+    // Preserve observation order during teardown without throwing into Vue's
+    // active host patch. The batch still owns delayed Vue reporting and keeps
+    // exit settlement pending until that patch has completed.
+    if (teardownStarted) recordTeardownError(error);
   }
 
-  function guardVueScopeOperations(scope: VueTeardownScope): void {
-    for (const effect of scope.effects ?? []) {
-      if (effect.cleanup) effect.cleanup = guardVueCleanupCallback(effect.cleanup);
-      if (effect.onStop) effect.onStop = guardVueCleanupCallback(effect.onStop);
+  function reserveFirstPendingAcceptedStaticCleanupFailure(): void {
+    let first: AcceptedStaticCleanupFailure | undefined;
+    for (const batch of pendingAcceptedStaticCleanupBatches) {
+      for (const failure of batch.errors) {
+        if (!first || failure.sequence < first.sequence) first = failure;
+      }
     }
-    const cleanups = scope.cleanups ?? [];
-    for (let index = 0; index < cleanups.length; index++) {
-      cleanups[index] = guardVueCleanupCallback(cleanups[index]!);
+    if (first) recordTeardownError(first.error);
+  }
+
+  function settleAcceptedStaticCleanup(batch: AcceptedStaticCleanupBatch): void {
+    if (!pendingAcceptedStaticCleanupBatches.delete(batch)) return;
+    const failure = batch.errors[0];
+    if (failure) {
+      if (teardownStarted) {
+        recordTeardownError(failure.error);
+      } else if (failure.owner) {
+        try {
+          failure.owner.report(failure.error);
+        } catch (error) {
+          // An error rejected by every Vue capture boundary is fatal to the
+          // Runtime session, but it is reported only after Vue finished patching.
+          requestRuntimeFailure(error, { silent: true });
+        }
+      } else {
+        requestRuntimeFailure(failure.error);
+      }
     }
-    for (const childScope of scope.scopes ?? []) guardVueScope(childScope);
-  }
-
-  function guardVueScope(scope: VueTeardownScope): void {
-    if (guardedVueScopes.has(scope)) return;
-    guardedVueScopes.add(scope);
-    const originalStop = scope.stop.bind(scope);
-    scope.stop = function stopGuardedVueScope(fromParent?: boolean): void {
-      // Run immediately before Vue stops the scope so a before-unmount hook
-      // that registered another cleanup is included too.
-      guardVueScopeOperations(scope);
-      originalStop(fromParent);
-    };
-    for (const childScope of scope.scopes ?? []) guardVueScope(childScope);
-  }
-
-  function guardMountedVueScopes(rootVNode: VNode): void {
-    const visitedVNodes = new Set<VNode>();
-    const visitedInstances = new Set<VueTeardownComponentInstance>();
-
-    const visitValue = (value: unknown): void => {
-      if (isVNode(value)) {
-        visitVNode(value);
-        return;
-      }
-      if (Array.isArray(value)) {
-        for (const child of value) visitValue(child);
-      }
-    };
-    const visitVNode = (vnode: VNode): void => {
-      if (visitedVNodes.has(vnode)) return;
-      visitedVNodes.add(vnode);
-      const teardownVNode = vnode as VueTeardownVNode;
-      const instance = teardownVNode.component;
-      if (instance && !visitedInstances.has(instance)) {
-        visitedInstances.add(instance);
-        if (instance.scope) guardVueScope(instance.scope);
-        if (instance.subTree) visitVNode(instance.subTree);
-      }
-      visitValue(vnode.children);
-      if (teardownVNode.ssContent) visitVNode(teardownVNode.ssContent);
-      if (teardownVNode.ssFallback) visitVNode(teardownVNode.ssFallback);
-      if (teardownVNode.suspense?.activeBranch) {
-        visitVNode(teardownVNode.suspense.activeBranch);
-      }
-      if (teardownVNode.suspense?.pendingBranch) {
-        visitVNode(teardownVNode.suspense.pendingBranch);
-      }
-    };
-
-    visitVNode(rootVNode);
+    if (teardownStarted) resolveExit();
   }
 
   function disposeMountedStreamLifecycle(): void {
@@ -793,9 +751,56 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     });
   }
 
+  function guardAcceptedStaticCleanup(statics: readonly TuiStatic[]): () => void {
+    const batch: AcceptedStaticCleanupBatch = {
+      errors: [],
+    };
+    pendingAcceptedStaticCleanupBatches.add(batch);
+    for (const stat of statics) {
+      let owner: VueCleanupErrorOwner | null = null;
+      const rootVNode = mountedOwnedVNode;
+      try {
+        owner =
+          rootVNode === null
+            ? null
+            : vueCleanupGuard.guardHostChildren(rootVNode, stat, (error) => {
+                captureAcceptedStaticCleanupFailure(batch, error, owner);
+              });
+      } catch (error) {
+        captureAcceptedStaticCleanupFailure(batch, error, null);
+      }
+      if (owner) continue;
+
+      // A normally rendered Static must have one exact tui-static host VNode.
+      // If a supported Vue version ever changes that invariant, fail the
+      // Runtime session and let whole-app guarded teardown release the tree
+      // instead of silently accepting history whose slot scopes may leak.
+      const error = new Error("Unable to guard an accepted <Static> slot subtree.");
+      captureAcceptedStaticCleanupFailure(batch, error, null);
+      requestRuntimeFailure(error);
+    }
+    return () => {
+      // Acceptance notifications queue the component patches that replace
+      // committed hosts with stable comment anchors. Report guarded scope
+      // failures only after that Vue flush completes: throwing from a host
+      // remove operation would leave the VNode patch half-finished.
+      void nextTick().then(
+        () => settleAcceptedStaticCleanup(batch),
+        (error) => {
+          captureAcceptedStaticCleanupFailure(batch, error, null);
+          settleAcceptedStaticCleanup(batch);
+        },
+      );
+    };
+  }
+
   function resolveExit() {
     if (abandonExitSettlement) return;
     if (settlementStarted) return;
+    if (pendingAcceptedStaticCleanupBatches.size > 0) {
+      pendingSettlement = true;
+      return;
+    }
     // A custom stream or renderer callback may synchronously call unmount()
     // from inside a terminal acquisition/repaint. Settling here would let the
     // exit promise resolve before the surrounding write has finished and before
@@ -1113,6 +1118,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return;
     }
     teardownStarted = true;
+    reserveFirstPendingAcceptedStaticCleanupFailure();
 
     if (lifecycleTransactionDepth > 0 && !immediateTermination) {
       pendingTeardown = true;
@@ -1585,7 +1591,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (!vueMountStarted) return;
     vueMountStarted = false;
     consoleTeardownWritesAllowed = mountedConsoleSink !== null;
-    if (mountedOwnedVNode) guardMountedVueScopes(mountedOwnedVNode);
+    if (mountedOwnedVNode) {
+      vueCleanupGuard.guardVNode(mountedOwnedVNode, (error) => recordTeardownError(error));
+    }
     try {
       originalUnmount();
     } catch (error) {
@@ -1601,7 +1609,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const rootNode = mountedRoot as (TuiRoot & { _vnode?: VNode | null }) | null;
     const vnode = mountedOwnedVNode;
     if (rootNode && vnode?.component) {
-      guardMountedVueScopes(vnode);
+      vueCleanupGuard.guardVNode(vnode, (error) => recordTeardownError(error));
       if (rootNode._vnode == null) rootNode._vnode = vnode;
       try {
         renderer.render(null, rootNode);
@@ -2874,7 +2882,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // A normally returned write, including `false`, owns this exact
           // history prefix. A later dynamic segment may still fail without
           // making the accepted history eligible for replay.
-          prepared.accept();
+          prepared.accept(guardAcceptedStaticCleanup);
         });
       }
 
@@ -3152,7 +3160,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             selectionFrame?.accept();
             mouseFrame?.accept();
             caretFrame?.accept();
-            preparedStatic?.accept();
+            preparedStatic?.accept(guardAcceptedStaticCleanup);
           } finally {
             releasePreparedState();
           }

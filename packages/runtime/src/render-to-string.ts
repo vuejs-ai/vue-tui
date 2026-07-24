@@ -27,6 +27,7 @@ import { createStringClipboardService } from "./clipboard/clipboard-service.ts";
 import { createInternalTextSelectionController } from "./selection/selection-controller.ts";
 import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
+import { createVueCleanupGuard } from "./vue-cleanup-guard.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -120,6 +121,15 @@ function renderStringDocument(
   let renderCompleted = false;
   let treeUnmounted = false;
   let vnode: VNode | undefined;
+  const vueCleanupGuard = createVueCleanupGuard();
+  let errored = false;
+  let caught: unknown;
+  const captureError = (error: unknown): void => {
+    if (errored) return;
+    errored = true;
+    caught = error;
+  };
+  app.config.errorHandler = captureError;
 
   try {
     attachYoga(root);
@@ -147,15 +157,6 @@ function renderStringDocument(
     // violating the documented "errors propagate to the caller" contract. First-wins
     // (guarded by `errored`) preserves the first Vue error observed by this
     // synchronous utility.
-    let errored = false;
-    let caught: unknown;
-    app.config.errorHandler = (err) => {
-      if (!errored) {
-        errored = true;
-        caught = err;
-      }
-    };
-
     // Synchronously render the Vue tree into the root.
     const ownedVNode = createVNode(component);
     ownedVNode.appContext = app._context;
@@ -188,6 +189,7 @@ function renderStringDocument(
 
     // Run component and host cleanup before deciding whether the first
     // uncaught lifecycle error should propagate to the caller.
+    if (vnode) vueCleanupGuard.guardVNode(vnode, captureError);
     renderer.render(null, root);
     treeUnmounted = true;
 
@@ -223,6 +225,7 @@ function renderStringDocument(
         container._vnode = vnode;
       }
       try {
+        vueCleanupGuard.guardVNode(vnode, captureError);
         renderer.render(null, root);
         treeUnmounted = true;
       } catch {

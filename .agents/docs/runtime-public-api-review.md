@@ -4,7 +4,7 @@ Evidence and results for the item-by-item review of `@vue-tui/runtime`. The [dec
 
 ## `createApp` and `TuiApp`
 
-**Status:** the Vue app surface, user-root mount result, complete app barriers, stream protocols and ownership, mount defaults and modes, Inline non-TTY output, transactional preflight, used-stream failures, component-error behavior, console protection, invalid exit input, named app and mount types, and named `UseAppReturn` were vouched by 2026-07-23. The separate `RenderMode` alias is absent because the accepted mode union is derivable as `NonNullable<MountOptions["mode"]>`. Screen-reader presentation, `RenderPresentation`, ARIA props and types, environment selection, internal helpers, and testing selectors have been explicitly removed. Implementation follow-ups remain in [TODOs](./todos.md#runtime-public-api-review).
+**Status:** the Vue app surface, user-root mount result, complete app barriers, stream protocols and ownership, mount defaults and modes, Inline non-TTY output, transactional preflight, used-stream failures, component-error behavior, console protection, invalid exit input, named app and mount types, and named `UseAppReturn` were vouched by 2026-07-23 and are implemented. The separate `RenderMode` alias is absent because the accepted mode union is derivable as `NonNullable<MountOptions["mode"]>`. Screen-reader presentation, `RenderPresentation`, ARIA props and types, environment selection, internal helpers, and testing selectors have been explicitly removed.
 
 ### User tasks
 
@@ -45,15 +45,15 @@ const root = app.mount();
 await app.waitUntilExit();
 ```
 
-### Problems in the current implementation
+### Problems found before implementation
 
-The current public type inherits `App<TuiNode>` wholesale. This keeps Vue's standard app methods but also exposes underscore-prefixed Vue fields and leaks the renderer-only `TuiNode` through `_container`. Those fields were an incidental consequence of reusing the whole Vue type, not a user capability.
+The earlier public type inherited `App<TuiNode>` wholesale. This kept Vue's standard app methods but also exposed underscore-prefixed Vue fields and leaked the renderer-only `TuiNode` through `_container`. Those fields were an incidental consequence of reusing the whole Vue type, not a user capability.
 
-Runtime also mounts a private `InternalErrorBoundary` as the actual Vue root and renders the user's component beneath it. Consequently `app.mount()` returns the private boundary proxy rather than the user's root instance. A root that exposes `ping()` produced `{ hasPing: false, pingType: "undefined" }`. The dev overlay can create the same wrapper problem and must be covered by the root-return fix.
+Runtime also mounted a private `InternalErrorBoundary` as the actual Vue root and rendered the user's component beneath it. Consequently `app.mount()` returned the private boundary proxy rather than the user's root instance. A root that exposed `ping()` produced `{ hasPing: false, pingType: "undefined" }`. The implementation removed this wrapper while preserving the dev overlay.
 
-A mount against an already-owned stdout currently warns, performs an inert no-op, and returns an empty object cast to `ComponentPublicInstance`. A real mount failure throws and rolls back, but leaves `waitUntilExit()` pending. Both behaviors report lifecycle state inaccurately.
+A mount against an already-owned stdout warned, performed an inert no-op, and returned an empty object cast to `ComponentPublicInstance`. A real mount failure threw and rolled back, but left `waitUntilExit()` pending. Both behaviors reported lifecycle state inaccurately and were replaced by the implemented preflight and consumed-attempt contract.
 
-The hidden boundary also returns `false` from `onErrorCaptured`, preventing ordinary descendant errors from reaching the user's `app.config.errorHandler`. The existing composition test manually invokes the handler and therefore does not test Vue's real error propagation.
+The hidden boundary also returned `false` from `onErrorCaptured`, preventing ordinary descendant errors from reaching the user's `app.config.errorHandler`. Removing it restored Vue's normal capture and application-handler propagation.
 
 ### Runtime boundary
 
@@ -71,9 +71,9 @@ Vue component-error policy is different. The user's root, `onErrorCaptured` hook
 
 Vue establishes the application shape and synchronous `unmount()`. Ink separately establishes the usefulness of terminal exit and flush barriers. No peer determines the exact vue-tui failure windows or justifies Ink's `rerender`, `cleanup`, `clear`, or automatic error screen.
 
-### Vouched decisions and current signature candidate
+### Vouched decisions and implemented signature
 
-The vouched Vue app shape and the current evidence-backed signature candidate are:
+The vouched and implemented Vue app shape is:
 
 ```ts
 export function createApp(root: Component, rootProps?: Record<string, unknown> | null): TuiApp;
@@ -95,7 +95,7 @@ The console option is decided: `patchConsole` defaults on, `false` is the escape
 
 - `unmount()` remains synchronous. `waitUntilExit()` resolves or rejects only after teardown, restoration, and accepted output complete or are abandoned.
 - Public option validation and stdout ownership checks happen before a real mount attempt and do not consume the app. An already-owned stdout throws synchronously without touching the owner, and the app may be retried after that stream becomes free.
-- The implementation must define one exact transition from preflight to a consumed mount attempt. Once consumed, a mount failure is single-use: Runtime rolls back, `mount()` throws the original failure synchronously, and `waitUntilExit()` rejects with the same failure after cleanup rather than remaining pending.
+- The implementation defines one exact transition from preflight to a consumed mount attempt. Once consumed, a mount failure is single-use: Runtime rolls back, `mount()` throws the original failure synchronously, and `waitUntilExit()` rejects with the same failure after cleanup rather than remaining pending.
 - Runtime does not insert `InternalErrorBoundary`, render `ErrorOverview`, override `app.config.errorHandler`, normalize Vue component errors into its own fatal policy, or automatically exit on errors that Vue or the application handles.
 - A future formatted error boundary or screen is deferred optional `@vue-tui/components` behavior built entirely from Vue and public Runtime APIs. It is not a Runtime mount option or foundation requirement.
 - `waitUntilRenderFlush()` resolves immediately before mount and after completed exit, waits for already accepted render and output work while mounted or tearing down, and never duplicates the exit result reported by `waitUntilExit()`.
@@ -104,7 +104,7 @@ The console option is decided: `patchConsole` defaults on, `false` is the escape
 
 Earlier records accepted full `App<TuiNode>` inheritance, an inert busy-stdout mount, a placeholder mount return, uniform Runtime error normalization, and an automatic `ErrorOverview`. Those choices remain implementation history but are superseded for the target above. The Vue-shaped `createApp → TuiApp → mount` sequence and absence of Ink aliases survive because they still have independent Vue and user evidence.
 
-### Required implementation evidence
+### Implementation evidence
 
 - A packed public-only consumer on the minimum supported Vue version proves `rootProps`, `app.use()`, `app.provide()`, `app.config.errorHandler`, component and directive registration, `runWithContext()`, mount, unmount, and the two barriers without Runtime internals or Vue 3.5-only assumptions.
 - Declaration checks prove Vue's supported public app operations remain available while `_container`, other private app fields, and `TuiNode` are absent.
@@ -152,9 +152,9 @@ Success and failure both unmount the temporary Vue tree, run component cleanup, 
 
 ### Live non-TTY and placement behavior
 
-For a mounted application whose output is redirected to a pipe or file, each accepted `Static` block is appended when committed, while the dynamic document writes only once during clean teardown. This preserves useful progress history without emitting cursor movement or erase sequences. The exact relative order of several blocks accepted in one render remains Open; later accepted history cannot erase bytes that were already written.
+For a mounted application whose output is redirected to a pipe or file, each accepted `Static` block is appended when committed, while the dynamic document writes only once during clean teardown. This preserves useful progress history without emitting cursor movement or erase sequences. Several blocks accepted in one transaction use current Vue host-tree preorder rather than registration, mount, Yoga visual, or reverse-flex order; later accepted history only appends and cannot erase or move bytes already written.
 
-Current evidence suggests that a hidden Box ancestor should keep a live `Static` pending until it becomes visible, ordinary components and Boxes should remain composable around it, and nesting inside another `Static` or Text has no coherent ownership. Those placement, hidden-ancestor, nesting, and simultaneous-order rules have not been vouched and remain in the ledger's focused Open item.
+An authored hidden Box ancestor keeps a live `Static` pending for its latest content until every such ancestor is visible. Root, component, Fragment, and ordinary Box placement is valid, but ancestor layout does not shape the isolated block; nested Static and Text or Transform placement reject before output. Initial invalid placement rolls back a consumed mount without Static bytes, while a handled later invalid insertion follows Vue update-error policy and can be repaired. A normal write seals the complete represented batch and lets Vue finish releasing every slot scope and host before Runtime forwards a captured effect-scope cleanup failure; Vue-handled watcher and lifecycle errors retain native timing. A throwing write abandons represented blocks without retry. These unstamped technical semantics were closed by the delegated bounded review and are recorded in the [implementation re-audit](./runtime-public-foundation-reaudit.md#path-2-inline-history).
 
 ### Peer evidence and deliberate Vue choices
 
@@ -166,11 +166,11 @@ Current evidence suggests that a hidden Box ancestor should keep a live `Static`
 
 ### Current implementation disposition
 
-The current public signature, synchronous result, 80-column default, bounded column validation, Static prefix, inert input services, and cleanup-after-error mechanisms are reusable. The current exceptional `useApp().exit()` service must become an inert no-op. The special checks for `mode`, `rows`, `fullscreen`, `alternateScreen`, symbol keys, and every unknown option are not required by the vouched minimum contract. A confirmed rollback bug is tracked in [TODOs](./todos.md#runtime-public-api-review): when host insertion throws after component setup but before `app.mount()` returns, the current guard releases Yoga but skips Vue scope cleanup.
+The current public signature, synchronous result, 80-column default, bounded column validation, Static prefix, inert input services, and cleanup-after-error mechanisms implement this contract. `useApp().exit()` is inert, unrelated runtime keys are ignored without being read, and initial host-insertion failure now guards and releases every reachable Vue scope as well as every Yoga and Runtime-owned resource before rethrowing the original error.
 
 ## `Box` and `Text`
 
-**Status:** the exact 46-field `BoxProps`, nine-field `TextProps`, and three named authoring types below were vouched as the minimum public API shape on 2026-07-23 after two bounded two-reviewer adversarial rounds and a follow-up field-by-field Text review against Ink, OpenTUI, Textual, Lip Gloss, Ratatui, and real Gemini CLI code. The second adversarial round's findings concern range enforcement and observable layout or paint behavior rather than another public field or named type. The follow-up Text review confirmed the six modifiers and all five width modes, added an explicit terminal-default escape for background as well as foreground, and corrected the evidence for `hard`: it deliberately ignores word boundaries, rather than merely breaking an over-wide word as ordinary `wrap` already does. Those behavior targets remain implementation evidence until the code and focused tests establish them; the surface vouch does not declare the current implementation complete. Earlier stamps on the closed 24-field `BoxProps` and five-field `TextProps` surface no longer describe the target.
+**Status:** the exact 46-field `BoxProps`, nine-field `TextProps`, and three named authoring types below were vouched as the minimum public API shape on 2026-07-23 after two bounded two-reviewer adversarial rounds and a follow-up field-by-field Text review against Ink, OpenTUI, Textual, Lip Gloss, Ratatui, and real Gemini CLI code. The implementation now establishes the reviewed range enforcement, layout and paint behavior, six modifiers, five width modes, independent terminal-default color channels, and closed unknown-attribute policy. Earlier stamps on the closed 24-field `BoxProps` and five-field `TextProps` surface no longer describe the target.
 
 The earlier 18-field proposal is withdrawn because it treated silence in vue-tui's small and already-migrated consumer sample as deletion evidence. The later edge-only proposal is also withdrawn because it confused fewer prop spellings with fewer concepts and made ordinary panel code unreasonable. Neither proposal is a fallback.
 
@@ -430,17 +430,17 @@ The target does not add `zIndex`, a portal or layer model, opacity, titles, mark
 - Gemini CLI at `87f785192c34067e4e8f26bda16cf9ce24014d83` is a real large Ink-style application rather than an API showcase. Its [SearchableList](https://github.com/google-gemini/gemini-cli/blob/87f785192c34067e4e8f26bda16cf9ce24014d83/packages/cli/src/ui/components/shared/SearchableList.tsx#L171-L262) uses percentage dimensions, `minWidth`, grow/shrink, both axes, alignment, `paddingX`, `marginX`, border, and width-aware truncation together; its [Table](https://github.com/google-gemini/gemini-cli/blob/87f785192c34067e4e8f26bda16cf9ce24014d83/packages/cli/src/ui/components/Table.tsx#L26-L84) uses grow/shrink/basis and border-edge flags. A complete source scan at that commit also finds actual UI use of all/axis/edge spacing and every proposed Text modifier, including italic help, underlined warnings and clickable results, strikethrough list items, and inverse table or match cells. This directly disproves treating shorthands, the coherent flex/edge families, or ordinary ANSI emphasis as speculative because vue-tui's much smaller consumer sample is silent. That commit uses an Ink fork based on 6.6.9, so it proves real demand for the API family, not exact behavioral parity with pinned Ink 7.0.4.
 - Bubble Tea core has no persistent Box or Text primitive, so it is evidence for a different architecture but not evidence that a Yoga-backed Vue renderer should omit individual layout facts.
 
-### Current implementation disposition
+### Implementation result
 
 Immediately before `f241d1c`, vue-tui publicly declared nearly the complete Ink Box/Text surface and tested it extensively. That commit mainly removed declarations, validators, examples, and public tests; the Yoga setters, spacing reconciliation, text modifiers, wrap implementation, border painter, clipping, and ANSI machinery largely remain private. The audit is therefore selecting from implemented and previously exercised mechanisms, not proposing a renderer rewrite.
 
-The retained mechanisms still require a fresh public implementation pass. The current closed validators reject most recommended fields, the public type fixtures assert the narrowed surface, and many positive tests were deleted. Overflow currently implements `hidden`-wins rather than the proposed axis precedence. Percentage parsing is inconsistent across setters. Current text truncation sends a complete multiline string through `cli-truncate` after one line exceeds the width. Boolean Text modifiers are additive wrappers rather than the proposed three-state cascade. The two foreground reset aliases must become one `default` spelling. Private mechanism presence is reusable material, not proof that the public contract is already implemented.
+The current implementation exposes exactly the reviewed fields and named authoring types. Eager validators enforce the bounded numeric, color, percentage, and unknown-attribute grammar before host creation; shorthand and axis-specific layout props reset and reconcile from current props; overflow uses the reviewed axis precedence; and layout and paint enforce the global cell-allocation bound.
 
-The implementation phase must rebuild eager validation, safe numeric and percentage envelopes before Yoga, current-prop reset behavior, shorthand precedence, the explicit LTR positioning rules, per-line grapheme-safe truncation, nested three-state modifiers, clean-consumer types, representative application fixtures, string/final-stream coverage, and terminal-visible clipping/style evidence. It must not restore percentage height, the old permissive arbitrary-string grammar, private host types, `BoxLayoutStyle`, custom border objects, ARIA, or deleted advanced border decoration merely because historical code exists.
+Text now performs per-logical-line grapheme-safe wrapping or truncation, applies nested three-state modifiers, and resolves foreground and background defaults independently. Type fixtures, clean consumers, representative applications, string and final-stream tests, and terminal-visible clipping and style acceptance cover the result. Percentage height, the old permissive arbitrary-string grammar, private host types, `BoxLayoutStyle`, custom border objects, ARIA, and deleted advanced border decoration remain absent.
 
 ## Mount host contract
 
-**Status:** the complete contract below was vouched on 2026-07-23 after Node stream review, run-verification of pinned Ink 7.0.4, comparison with Bubble Tea 2.0.6, OpenTUI 0.4.5, and Textual 8.2.8, and a bounded two-reviewer adversarial pass. Implementation is pending in [TODOs](./todos.md#runtime-public-api-review).
+**Status:** the complete contract below was vouched on 2026-07-23 after Node stream review, run-verification of pinned Ink 7.0.4, comparison with Bubble Tea 2.0.6, OpenTUI 0.4.5, and Textual 8.2.8, and a bounded two-reviewer adversarial pass. It is implemented with focused lifecycle, stream, host, package-consumer, PTY, and restoration coverage.
 
 ### User tasks and minimum public shape
 
@@ -524,18 +524,11 @@ try {
 
 If the `TypeError` escapes, normal surrounding Vue or input error handling may still end the application. Once exit or teardown has started, later calls remain no-ops and do not validate arguments. This differs from Ink's arbitrary success-result channel, which is not part of vue-tui's accepted TypeScript API.
 
-### Current implementation differences
+### Implementation result
 
-The current implementation is reusable material but does not yet satisfy this contract:
+The implemented public streams use base Node `Readable` and `Writable` protocols, `exitOnCtrlC` defaults to `false`, unavailable explicit Fullscreen fails during non-consuming preflight, empty final non-TTY output writes no bytes, and invalid `exit` input throws without choosing an exit result. Stream leasing, ordered output, reverse rollback, active-use failure detection, and first-cause settlement implement the borrowing and lifecycle rules above.
 
-- `stdin`, `stdout`, and `stderr` use TTY-oriented public types, forcing casts for ordinary Node streams.
-- `exitOnCtrlC` is currently rejected even though the accepted option defaults to `false`.
-- an explicit unavailable Fullscreen request currently falls back rather than throwing.
-- empty final non-TTY output currently writes a newline instead of no bytes.
-- invalid `exit` input is currently converted into a selected `TypeError` exit instead of throwing without consuming the result.
-- existing stream, lease, output-barrier, and rollback mechanisms need focused proof of the accepted borrowing, first-failure, preflight, and settlement details.
-
-### Required implementation evidence
+### Implementation evidence
 
 - Declaration and clean-consumer checks accept process streams, `PassThrough`, file streams, sockets, and other ordinary Node `Readable` and `Writable` values without casts; Web streams remain rejected without explicit adaptation.
 - Inline non-TTY tests cover current final output, empty output, existing line endings, Static and console exceptions, and clean versus error teardown without screen-control bytes or stale-frame replay.
@@ -547,7 +540,7 @@ The current implementation is reusable material but does not yet satisfy this co
 
 ## `useStdin`
 
-**Status:** retention and the complete low-level contract below were vouched on 2026-07-23 after local consumer and mechanism review, pinned Ink 7.0.4 source and runtime verification, and comparison with Bubble Tea, Textual, OpenTUI, and Ratatui. Implementation is pending in [TODOs](./todos.md#runtime-public-api-review).
+**Status:** retention and the complete low-level contract below were vouched on 2026-07-23 after local consumer and mechanism review, pinned Ink 7.0.4 source and runtime verification, and comparison with Bubble Tea, Textual, OpenTUI, and Ratatui. It is implemented with independent per-hook ownership and shared-stream, suspension, string-host, package-consumer, and restoration coverage.
 
 ### User task
 
@@ -604,13 +597,13 @@ Inline and Fullscreen share the same input contract. A non-TTY mounted stream re
 - OpenTUI exposes the entire renderer, including stdin and ordered consumable input handlers. It proves the low-level extension need but carries a much broader public renderer surface than vue-tui requires.
 - Ratatui deliberately owns no input and leaves the whole event loop to the application. That separation is coherent for a rendering library but does not fit a Runtime that already owns normalized input and terminal restoration.
 
-### Current implementation differences
+### Implementation result
 
-The current public hook returns only a frozen `{ stdin: NodeJS.ReadStream }`. It must use the accepted base `Readable`, restore the capability flag and raw-mode setter, and create per-hook logical ownership instead of re-exposing the internal context or restoring the former anonymous public counter. Existing internal raw-mode reconciliation, baseline restoration, suspension, shared-stream, and managed-input mechanisms are reusable.
+The public hook returns the exact base `Readable`, capability flag, and per-hook raw-mode setter. Each call owns one independent idempotent hold while Runtime's private reconciliation composes those holds with managed input, suspension, shared streams, and borrowed-stream baseline restoration.
 
-The current string host already creates an isolated input stream and destroys it during cleanup. That mechanism can remain inert while the public return shape and capability behavior are aligned. Internal ingress, parser, routing, Kitty, paste, mouse, and availability fields remain inaccessible to JavaScript as well as TypeScript consumers.
+The string host supplies and cleans up its isolated inert input stream. Internal ingress, parser, routing, Kitty, paste, mouse, and availability fields remain inaccessible to JavaScript as well as TypeScript consumers.
 
-### Required implementation evidence
+### Implementation evidence
 
 - Public and packed-consumer types expose exactly the three accepted fields with `stdin: Readable`; no internal context field is reachable.
 - Two `useStdin()` calls, active `useInput()`, and two apps sharing a stream cannot release one another's raw ownership. Repeated booleans are idempotent and scope cleanup releases forgotten holds.
@@ -621,7 +614,7 @@ The current string host already creates an isolated input stream and destroys it
 
 ## `useFocus`
 
-**Status:** the complete minimum contract below was accepted on 2026-07-24 and is governed by the [decision ledger](./runtime-public-api-decisions.md#focus-handles-and-component-targets-use-one-vue-shaped-contract). Implementation is pending in [TODOs](./todos.md#runtime-public-api-review).
+**Status:** the complete minimum contract below was accepted on 2026-07-24, is governed by the [decision ledger](./runtime-public-api-decisions.md#focus-handles-and-component-targets-use-one-vue-shaped-contract), and is implemented with focused component-root, host, lifecycle, public-only composition, declaration, and clean-consumer coverage.
 
 ### The two user tasks
 
@@ -799,7 +792,7 @@ The existing private per-app controller, unique ownership, rendered-target trans
 
 The completed implementation adds the targetless registration path without creating a second controller; changes the public handle to the accepted read-only `Ref` and void operations; removes navigation, restoration, scopes, manager, string lookup, focused-input routing, disabled policy, and automatic focus; and replaces first-descendant selection with the accepted component-root normalization. The private controller remains only for unique ownership and target validity. `useBoxPresence()` is removed rather than becoming a public prerequisite.
 
-### Required implementation evidence
+### Implementation evidence
 
 - Several targetless and targeted calls in one or several component scopes prove one current identity per app and atomic replacement across both forms.
 - Targetless focus survives ancestor `v-show` while its owning scope remains alive, and ends when that scope is disposed.
