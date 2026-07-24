@@ -5,22 +5,23 @@ import { Box, renderToString, Text } from "@vue-tui/runtime";
 const Document = defineComponent(() => () => <Text>document</Text>);
 
 test("ignores unrelated string and symbol options without reading them", () => {
-  let columnsReads = 0;
+  let widthReads = 0;
   let ignoredReads = 0;
   const presentation = Symbol("presentation");
   const options = Object.defineProperties(
     {
       mode: "fullscreen",
       rows: 24,
+      columns: 99,
       fullscreen: true,
       alternateScreen: true,
       isScreenReaderEnabled: true,
     },
     {
-      columns: {
+      width: {
         enumerable: true,
         get() {
-          columnsReads++;
+          widthReads++;
           return 20;
         },
       },
@@ -42,7 +43,7 @@ test("ignores unrelated string and symbol options without reading them", () => {
   );
 
   expect(renderToString(Document, options as never)).toBe("document");
-  expect(columnsReads).toBe(1);
+  expect(widthReads).toBe(1);
   expect(ignoredReads).toBe(0);
 });
 
@@ -51,16 +52,29 @@ test.each([null, [], "80", 80, true])("rejects non-option-object input %#", (opt
 });
 
 test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 65_536, "80"])(
-  "rejects invalid columns %#",
-  (columns) => {
-    expect(() => renderToString(Document, { columns } as never)).toThrow(
-      'renderToString option "columns" must be an integer between 1 and 65535',
+  "rejects invalid width %#",
+  (width) => {
+    expect(() => renderToString(Document, { width } as never)).toThrow(
+      'renderToString option "width" must be an integer between 1 and 65535',
+    );
+  },
+);
+
+test.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, 65_536, "24"])(
+  "rejects invalid height %#",
+  (height) => {
+    expect(() => renderToString(Document, { height } as never)).toThrow(
+      'renderToString option "height" must be a positive integer at most 65535, or Infinity',
     );
   },
 );
 
 test("accepts the largest terminal-sized string-render width", () => {
-  expect(renderToString(Document, { columns: 65_535 })).toBe("document");
+  expect(renderToString(Document, { width: 65_535 })).toBe("document");
+});
+
+test("accepts explicit unbounded height", () => {
+  expect(renderToString(Document, { height: Infinity })).toBe("document");
 });
 
 test("rejects an oversized final document before allocating its paint grid", () => {
@@ -70,14 +84,14 @@ test("rejects an oversized final document before allocating its paint grid", () 
     </Box>
   ));
 
-  expect(() => renderToString(OversizedDocument, { columns: 1_024 })).toThrow(
+  expect(() => renderToString(OversizedDocument, { width: 1_024, height: Infinity })).toThrow(
     new RangeError("Paint surface 1024x1025 exceeds the 1048576-cell resource limit."),
   );
 });
 
-test("reads an accepted columns accessor exactly once", () => {
+test("reads an accepted width accessor exactly once", () => {
   let reads = 0;
-  const options = Object.defineProperty({}, "columns", {
+  const options = Object.defineProperty({}, "width", {
     enumerable: true,
     get() {
       reads++;

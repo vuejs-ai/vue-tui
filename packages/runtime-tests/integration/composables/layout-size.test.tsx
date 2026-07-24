@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, createApp, Text, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, createApp, Text, useLayoutSize } from "@vue-tui/runtime";
 import {
   INTERNAL_RENDER_OBSERVER,
   type InternalRenderObserver,
@@ -38,14 +38,13 @@ function makeFakeStdin(): NodeJS.ReadStream {
 }
 
 test.each(["inline", "fullscreen"] as const)(
-  "layout width and viewport height react to a bounded %s resize",
+  "layout size reacts to a bounded %s resize from one coherent snapshot",
   async (mode) => {
     const App = defineComponent(() => {
-      const width = useLayoutWidth();
-      const viewportHeight = useViewportHeight();
+      const { width, height } = useLayoutSize();
       return () => (
         <Text>
-          {width.value}x{viewportHeight?.value ?? "unbounded"}
+          {width.value}x{height.value}
         </Text>
       );
     });
@@ -62,13 +61,12 @@ test.each(["inline", "fullscreen"] as const)(
   },
 );
 
-test("layout primitives return the initial bounded dimensions", async () => {
+test("layout size returns the initial bounded dimensions", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
+    const { width, height } = useLayoutSize();
     return () => (
       <Text>
-        {width.value}x{viewportHeight?.value ?? "unbounded"}
+        {width.value}x{height.value}
       </Text>
     );
   });
@@ -77,15 +75,13 @@ test("layout primitives return the initial bounded dimensions", async () => {
   expect(lastFrame()).toContain("100x40");
 });
 
-test("layout primitive refs retain their final values after unmount", async () => {
-  let width: ReturnType<typeof useLayoutWidth> | undefined;
-  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+test("layout size refs retain their final values after unmount", async () => {
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    width = useLayoutWidth();
-    viewportHeight = useViewportHeight();
+    layout = useLayoutSize();
     return () => (
       <Text>
-        {width!.value}x{viewportHeight?.value ?? "unbounded"}
+        {layout!.width.value}x{layout!.height.value}
       </Text>
     );
   });
@@ -95,15 +91,14 @@ test("layout primitive refs retain their final values after unmount", async () =
 
   unmount();
   await expect(terminal.resize(60, 20)).resolves.toBeUndefined();
-  expect(width!.value).toBe(80);
-  expect(viewportHeight!.value).toBe(24);
+  expect(layout!.width.value).toBe(80);
+  expect(layout!.height.value).toBe(24);
 });
 
-test("a visual stream remains row-unbounded", async () => {
+test("mounted non-TTY document host exposes fixed modeled 80x24 layout", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height } = useLayoutSize();
+    return () => <Text>{`${width.value}x${height.value}`}</Text>;
   });
 
   const result = await render(App, {
@@ -112,7 +107,7 @@ test("a visual stream remains row-unbounded", async () => {
     host: { stdout: "stream" },
   });
   try {
-    expect(result.lastFrame()).toContain("40xunbounded");
+    expect(result.lastFrame()).toContain("80x24");
   } finally {
     result.dispose();
   }
@@ -140,11 +135,10 @@ test("layout responds to terminal width change", async () => {
 
 test("multiple consecutive resizes all take effect", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
+    const { width, height } = useLayoutSize();
     return () => (
       <Text>
-        {width.value}x{viewportHeight?.value ?? "unbounded"}
+        {width.value}x{height.value}
       </Text>
     );
   });
@@ -164,7 +158,7 @@ test("multiple consecutive resizes all take effect", async () => {
 
 test("terminal width decrease triggers rerender", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
+    const { width } = useLayoutSize();
     return () => <Text>{width.value}</Text>;
   });
 
@@ -177,7 +171,7 @@ test("terminal width decrease triggers rerender", async () => {
 
 test("terminal width increase triggers rerender", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
+    const { width } = useLayoutSize();
     return () => <Text>{width.value}</Text>;
   });
 
@@ -191,14 +185,14 @@ test("terminal width increase triggers rerender", async () => {
 // Mirrors Ink terminal-resize.tsx:91-108 ("falls back to a positive column
 // count when stdout.columns is 0"). When the mount stdout reports columns 0,
 // the session must still choose a positive layout fallback (never 0).
-test("useLayoutWidth falls back to a positive width when stdout.columns is 0", async () => {
+test("useLayoutSize falls back to a positive width when stdout.columns is 0", async () => {
   const stdout = makeTtyStream(0, 24);
   const stderr = makeTtyStream(0, 24);
   const stdin = makeFakeStdin();
 
   let capturedColumns = -1;
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
+    const { width } = useLayoutSize();
     capturedColumns = width.value;
     return () => <Text>{String(width.value)}</Text>;
   });
@@ -217,7 +211,7 @@ test("useLayoutWidth falls back to a positive width when stdout.columns is 0", a
 // Mirrors Ink terminal-resize.tsx:43-64 ("removes resize listener on unmount").
 // One render session owns one resize listener. Calling the layout primitives
 // repeatedly must not register another environment resolver per consumer.
-test("multiple layout primitive consumers share one app resize listener", async () => {
+test("multiple layout size consumers share one app resize listener", async () => {
   const stdout = makeTtyStream(80, 24);
   const stderr = makeTtyStream(80, 24);
   const stdin = makeFakeStdin();
@@ -225,14 +219,11 @@ test("multiple layout primitive consumers share one app resize listener", async 
   const baseline = stdout.listenerCount("resize");
 
   const App = defineComponent(() => {
-    const firstWidth = useLayoutWidth();
-    const secondWidth = useLayoutWidth();
-    const firstHeight = useViewportHeight();
-    const secondHeight = useViewportHeight();
+    const first = useLayoutSize();
+    const second = useLayoutSize();
     return () => (
       <Text>
-        {firstWidth.value}x{firstHeight?.value ?? "unbounded"}:{secondWidth.value}x
-        {secondHeight?.value ?? "unbounded"}
+        {first.width.value}x{first.height.value}:{second.width.value}x{second.height.value}
       </Text>
     );
   });
@@ -247,16 +238,16 @@ test("multiple layout primitive consumers share one app resize listener", async 
   expect(stdout.listenerCount("resize")).toBe(baseline);
 });
 
-test("useViewportHeight derives a bounded height from an explicitly modeled terminal pair", async () => {
+test("useLayoutSize derives a bounded height from an explicitly modeled terminal pair", async () => {
   const stdout = makeTtyStream(0);
   const stderr = makeTtyStream(0);
   const stdin = makeFakeStdin();
 
   let capturedRows: number | null = null;
   const App = defineComponent(() => {
-    const viewportHeight = useViewportHeight();
-    capturedRows = viewportHeight?.value ?? null;
-    return () => <Text>{String(viewportHeight?.value ?? "unbounded")}</Text>;
+    const { height } = useLayoutSize();
+    capturedRows = height.value;
+    return () => <Text>{String(height.value)}</Text>;
   });
 
   const app = createApp(App);
@@ -293,9 +284,8 @@ test("rapid resize events commit only the newest layout and participate in the r
     },
   };
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height } = useLayoutSize();
+    return () => <Text>{`${width.value}x${height.value}`}</Text>;
   });
   const app = createApp(App);
 

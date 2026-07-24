@@ -1,7 +1,7 @@
 import type { Readable } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useInput, useLayoutSize, useStdin } from "@vue-tui/runtime";
 import { render, type RenderOptions } from "../src/index.ts";
 
 test("the default host renders a visual Inline surface", async () => {
@@ -33,9 +33,11 @@ test("stream omission selects production final-output cadence", async () => {
   expect([...afterUnmount.scrollback, ...afterUnmount.lines].join("\n")).toContain("stream");
 });
 
-test("a selected route owns deterministic TTY input independently from final output", async () => {
+test("document-host stream keeps TTY stdin observation without managed input ownership", async () => {
   const calls: string[] = [];
+  let stdin: ReturnType<typeof useStdin> | undefined;
   const App = defineComponent(() => {
+    stdin = useStdin();
     useInput((event) => {
       if (event.type === "text") calls.push(event.text);
     });
@@ -45,9 +47,12 @@ test("a selected route owns deterministic TTY input independently from final out
     host: { stdin: "tty", stdout: "stream" },
   });
 
-  expect(result.terminal.rawMode.current).toBe(true);
+  // Non-TTY stdout selects the document host: managed input is inert and raw
+  // mode is never claimed, even when the caller supplied a TTY stdin.
+  expect(result.terminal.rawMode.current).toBe(false);
+  expect(stdin?.isRawModeSupported).toBe(false);
   await result.stdin.write("x");
-  expect(calls).toEqual(["x"]);
+  expect(calls).toEqual([]);
 
   result.dispose();
   expect(result.terminal.rawMode.current).toBe(false);
@@ -74,11 +79,10 @@ test("a modeled non-TTY keeps direct stdin bytes available", async () => {
   }
 });
 
-test("final stream keeps its mounted layout while suspended", async () => {
+test("document-host stream keeps its fixed modeled layout while suspended", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`final:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`final:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -90,15 +94,15 @@ test("final stream keeps its mounted layout while suspended", async () => {
   await result.terminal.resize(24, 6);
   await result.terminal.resume();
 
-  expect(result.lastFrame()).toBe("final:30xunbounded");
+  // Mounted non-TTY uses fixed modeled 80×24 with no resize lifecycle.
+  expect(result.lastFrame()).toBe("final:80x24");
   result.dispose();
 });
 
 test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`full:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`full:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -114,10 +118,9 @@ test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
 
 test("modeled Inline suspension releases input and repaints at the continued size", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
+    const { width, height: viewportHeight } = useLayoutSize();
     useInput(() => {});
-    return () => <Text>{`inline:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    return () => <Text>{`inline:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });
 
@@ -143,9 +146,8 @@ test("modeled Inline suspension releases input and repaints at the continued siz
 
 test("modeled Fullscreen suspension restores and reacquires the alternate screen", async () => {
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`fullscreen:${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`fullscreen:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -166,7 +168,7 @@ test("modeled Fullscreen suspension restores and reacquires the alternate screen
   result.dispose();
 });
 
-test("modeled stream restores input modes without manufacturing a terminal surface", async () => {
+test("document-host stream never owns raw mode or a terminal surface", async () => {
   const App = defineComponent(() => {
     useInput(() => {});
     return () => <Text>stream</Text>;
@@ -175,11 +177,11 @@ test("modeled stream restores input modes without manufacturing a terminal surfa
     host: { stdout: "stream", mode: "inline" },
   });
 
-  expect(result.terminal.rawMode.current).toBe(true);
+  expect(result.terminal.rawMode.current).toBe(false);
   await result.terminal.suspend();
   expect(result.terminal.rawMode.current).toBe(false);
   await result.terminal.resume();
-  expect(result.terminal.rawMode.current).toBe(true);
+  expect(result.terminal.rawMode.current).toBe(false);
   expect((await result.screen()).activeBuffer).toBe("normal");
   result.dispose();
 });
@@ -231,11 +233,10 @@ test("resize updates public layout facts before the resulting frame is observed"
   let observedWidth = 0;
   let observedHeight = 0;
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
+    const { width, height: viewportHeight } = useLayoutSize();
     return () => {
       observedWidth = width.value;
-      observedHeight = viewportHeight?.value ?? 0;
+      observedHeight = viewportHeight.value;
       return <Text>{`${observedWidth}x${observedHeight}`}</Text>;
     };
   });

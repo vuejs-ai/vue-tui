@@ -326,7 +326,7 @@ test("wide characters do not add extra space inside fixed-width Box", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
   expect(lines[0]).toBe("\u{1F354}|");
@@ -342,7 +342,7 @@ test("CJK characters occupy correct width in fixed-width Box", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   expect(output).toBe("你好|");
 });
 
@@ -361,7 +361,7 @@ test("mixed ASCII and wide characters align correctly", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
   expect(lines[0]).toBe("ab\u{1F354}cd|");
@@ -377,7 +377,7 @@ test("ANSI styled text does not affect layout width", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const stripped = stripAnsi(output);
   expect(stripped).toBe("hello|");
 });
@@ -387,7 +387,7 @@ test("empty Text does not affect sibling layout", () => {
     () => () => h(Box, null, () => [h(Text), h(Text, null, () => "hello")]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   expect(output).toBe("hello");
 });
 
@@ -397,7 +397,7 @@ test("truncate CJK text at end", () => {
       h(Box, { width: 20 }, () => h(Text, { wrap: "truncate" }, () => "あいうえおかきくけこ|end")),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const stripped = stripAnsi(output);
   expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
 });
@@ -413,7 +413,7 @@ test("truncate CJK text does not exceed Box width", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(1);
 
@@ -433,7 +433,7 @@ test("overlay on 2nd cell of CJK character clears the full character", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あいうえ XYZきくけこ");
@@ -450,7 +450,7 @@ test("overlay on 1st cell of CJK character clears trailing placeholder", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あいうえおX きくけこ");
@@ -468,7 +468,7 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あい 漢字テスト けこ");
@@ -512,6 +512,6 @@ test("terminal-viewport empty write does not corrupt existing wide characters", 
       ]),
   );
 
-  const output = renderToString(App, { columns: 4 });
+  const output = renderToString(App, { width: 4 });
   expect(stripAnsi(output)).toBe("あい");
 });

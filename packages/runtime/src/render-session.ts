@@ -60,18 +60,11 @@ export interface StringRenderOutput {
 /** Where output goes and when dynamic frames are emitted. */
 export type RenderOutput = LiveRenderOutput | StringRenderOutput;
 
-export interface RenderCapabilities {
-  readonly stableOrigin: boolean;
-  readonly elementHitTesting: boolean;
-  readonly suspension: boolean;
-}
-
 export interface LiveRenderSession {
   readonly host: "live";
   readonly mode: RenderModeResolution;
   readonly output: LiveRenderOutput;
   readonly dimensions: RenderDimensions;
-  readonly capabilities: RenderCapabilities;
 }
 
 export interface StringRenderSession {
@@ -80,15 +73,7 @@ export interface StringRenderSession {
   readonly output: StringRenderOutput;
   readonly dimensions: {
     readonly terminal: null;
-    readonly layout: {
-      readonly columns: number;
-      readonly rows: null;
-    };
-  };
-  readonly capabilities: {
-    readonly stableOrigin: false;
-    readonly elementHitTesting: false;
-    readonly suspension: false;
+    readonly layout: RenderLayoutSize;
   };
 }
 
@@ -102,8 +87,6 @@ export type InternalRenderSessionSnapshot = RenderSession;
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
   readonly liveUpdatesOverride: boolean | undefined;
-  /** Whether this live host can coordinate restore-before-stop and resume. */
-  readonly suspensionSupported: boolean;
   readonly stdout: {
     readonly isTTY: boolean;
     readonly columns: unknown;
@@ -121,7 +104,7 @@ interface ResolvedLiveSurfaceBase {
 export type ResolvedLiveSurface =
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "final-stream";
-      readonly reason: "live-updates-disabled" | "terminal-size-unavailable";
+      readonly reason: "live-updates-disabled" | "terminal-size-unavailable" | "stdout-not-tty";
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "live-stream";
@@ -167,10 +150,22 @@ export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean
   return positiveCellCount(stdout.columns) === null || positiveCellCount(stdout.rows) === null;
 }
 
+/** Fixed modeled document layout shared by default `renderToString()` and non-TTY mounts. */
+export const MODELED_DOCUMENT_LAYOUT = Object.freeze({ columns: 80, rows: 24 }) as RenderLayoutSize;
+
 export function resolveLiveDimensions(
   stdout: LiveHostInput["stdout"],
   probe: TerminalSizeProbeResult,
 ): ResolvedLiveDimensions {
+  // Non-TTY mounts use the supported secondary document host with a fixed
+  // modeled 80×24 root. Stream-reported columns/rows are not live layout facts.
+  if (!stdout.isTTY) {
+    return {
+      terminal: null,
+      layout: { columns: MODELED_DOCUMENT_LAYOUT.columns, rows: MODELED_DOCUMENT_LAYOUT.rows },
+    };
+  }
+
   const stdoutColumns = positiveCellCount(stdout.columns);
   const stdoutRows = positiveCellCount(stdout.rows);
   const probeColumns = probe.kind === "detected" ? positiveCellCount(probe.size.columns) : null;
@@ -184,7 +179,7 @@ export function resolveLiveDimensions(
   // A physical terminal size is one coherent observation. Never splice a
   // column from one source together with a row from another source and then
   // claim the result as an addressable viewport.
-  const terminal = stdout.isTTY ? (stdoutSize ?? probeSize) : null;
+  const terminal = stdoutSize ?? probeSize;
   const layoutColumns = terminal?.columns ?? stdoutColumns ?? probeColumns ?? 80;
 
   return {
@@ -197,7 +192,6 @@ function sessionSnapshot(options: {
   mode: RenderModeResolution;
   output: LiveRenderOutput;
   dimensions: RenderDimensions;
-  capabilities: RenderCapabilities;
 }): InternalLiveRenderSessionSnapshot {
   return {
     host: "live",
@@ -207,21 +201,60 @@ function sessionSnapshot(options: {
       terminal: options.dimensions.terminal,
       layout: options.dimensions.layout,
     },
-    capabilities: options.capabilities,
-  };
-}
-
-function unavailableCapabilities(suspension: boolean): RenderCapabilities {
-  return {
-    stableOrigin: false,
-    elementHitTesting: false,
-    suspension,
   };
 }
 
 export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   const dimensions = resolveLiveDimensions(input.stdout, input.terminalProbe);
-  const liveUpdates = input.liveUpdatesOverride ?? input.stdout.isTTY;
+  // Fullscreen on a live TTY always uses live updates; the internal liveUpdates
+  // override cannot demote it. On non-TTY stdout the supported document host is
+  // selected instead and never owns a screen.
+  const liveUpdates =
+    input.stdout.isTTY && input.requestedMode === "fullscreen"
+      ? true
+      : (input.liveUpdatesOverride ?? input.stdout.isTTY);
+
+  // Non-TTY stdout is the supported secondary document host for both Inline and
+  // Fullscreen requests: fixed modeled 80×24, no terminal mode, no intermediate
+  // dynamic frames unless an internal liveUpdates override forces live stream tests.
+  if (!input.stdout.isTTY) {
+    const documentDimensions: ResolvedLiveDimensions = {
+      terminal: null,
+      layout: { columns: MODELED_DOCUMENT_LAYOUT.columns, rows: MODELED_DOCUMENT_LAYOUT.rows },
+    };
+    if (liveUpdates && input.liveUpdatesOverride === true) {
+      const reason = "stdout-not-tty" as const;
+      return {
+        kind: "live-stream",
+        reason,
+        liveUpdatesRequested: true,
+        dimensions: documentDimensions,
+        session: sessionSnapshot({
+          mode: { requested: input.requestedMode, effective: null, fallback: reason },
+          output: {
+            destination: "stream",
+            dynamicUpdates: "live",
+          },
+          dimensions: documentDimensions,
+        }),
+      };
+    }
+    const reason = "stdout-not-tty" as const;
+    return {
+      kind: "final-stream",
+      reason,
+      liveUpdatesRequested: false,
+      dimensions: documentDimensions,
+      session: sessionSnapshot({
+        mode: { requested: input.requestedMode, effective: null, fallback: reason },
+        output: {
+          destination: "stream",
+          dynamicUpdates: "at-teardown",
+        },
+        dimensions: documentDimensions,
+      }),
+    };
+  }
 
   if (!liveUpdates) {
     const reason = "live-updates-disabled" as const;
@@ -237,26 +270,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           dynamicUpdates: "at-teardown",
         },
         dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
-      }),
-    };
-  }
-
-  if (!input.stdout.isTTY) {
-    const reason = "stdout-not-tty" as const;
-    return {
-      kind: "live-stream",
-      reason,
-      liveUpdatesRequested: liveUpdates,
-      dimensions,
-      session: sessionSnapshot({
-        mode: { requested: input.requestedMode, effective: null, fallback: reason },
-        output: {
-          destination: "stream",
-          dynamicUpdates: "live",
-        },
-        dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -275,7 +288,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           dynamicUpdates: "at-teardown",
         },
         dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -297,11 +309,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
           dynamicUpdates: "live",
         },
         dimensions: terminalBoundedDimensions,
-        capabilities: {
-          stableOrigin: true,
-          elementHitTesting: true,
-          suspension: input.suspensionSupported,
-        },
       }),
     };
   }
@@ -317,7 +324,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         dynamicUpdates: "live",
       },
       dimensions: terminalBoundedDimensions,
-      capabilities: unavailableCapabilities(input.suspensionSupported),
     }),
   };
 }
@@ -360,7 +366,6 @@ export function createLiveRenderSessionService(
     mode: Object.freeze({ ...initial.mode }) as RenderModeResolution,
     output: Object.freeze({ ...initial.output }) as LiveRenderOutput,
     dimensions: frozenDimensions(initial.dimensions),
-    capabilities: Object.freeze({ ...initial.capabilities }),
   });
   let disposed = false;
 
@@ -378,6 +383,8 @@ export function createLiveRenderSessionService(
 
 export function createStringRenderSessionService(options: {
   readonly columns: number;
+  /** `null` is Runtime's private unbounded vertical layout representation. */
+  readonly rows: number | null;
 }): InternalStringRenderSessionService {
   const state = shallowReactive<InternalStringRenderSessionSnapshot>({
     host: "string",
@@ -388,12 +395,7 @@ export function createStringRenderSessionService(options: {
     }),
     dimensions: Object.freeze({
       terminal: null,
-      layout: Object.freeze({ columns: options.columns, rows: null }),
-    }),
-    capabilities: Object.freeze({
-      stableOrigin: false,
-      elementHitTesting: false,
-      suspension: false,
+      layout: Object.freeze({ columns: options.columns, rows: options.rows }),
     }),
   });
   return {

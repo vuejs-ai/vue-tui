@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent, isReadonly, nextTick, shallowRef, vShow, withDirectives } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, createApp, Text, useBoxSize, type BoxSize } from "@vue-tui/runtime";
+import { Box, createApp, Text, useBoxMetrics } from "@vue-tui/runtime";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(columns = 20, rows = 4): NodeJS.WriteStream {
@@ -30,11 +30,11 @@ function makeTtyInput(): NodeJS.ReadStream {
 test.each(["inline", "fullscreen"] as const)(
   "publishes the frozen accepted Box size in %s mode",
   async (mode) => {
-    let size!: ReturnType<typeof useBoxSize>;
+    let metrics!: ReturnType<typeof useBoxMetrics>;
     const stable = shallowRef("one");
     const App = defineComponent(() => {
       const target = shallowRef<InstanceType<typeof Box> | null>(null);
-      size = useBoxSize(target);
+      metrics = useBoxMetrics(target);
       return () => (
         <Box>
           <Box ref={target} width={4} height={2}>
@@ -46,15 +46,33 @@ test.each(["inline", "fullscreen"] as const)(
 
     const result = await render(App, { columns: 20, rows: 6, host: { mode } });
     try {
-      expect(size.value).toEqual({ width: 4, height: 2 });
-      expect(isReadonly(size)).toBe(true);
-      expect(Object.isFrozen(size.value)).toBe(true);
+      expect({
+        width: metrics.width.value,
+        height: metrics.height.value,
+        hasMeasured: metrics.hasMeasured.value,
+      }).toEqual({ width: 4, height: 2, hasMeasured: true });
+      expect(isReadonly(metrics.width)).toBe(true);
+      expect(isReadonly(metrics.height)).toBe(true);
+      expect(isReadonly(metrics.left)).toBe(true);
+      expect(isReadonly(metrics.top)).toBe(true);
+      expect(isReadonly(metrics.hasMeasured)).toBe(true);
+      expect(metrics.hasMeasured.value).toBe(true);
 
-      const accepted = size.value;
+      const accepted = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+      };
       stable.value = "two";
       await nextTick();
       await result.waitUntilRenderFlush();
-      expect(size.value).toBe(accepted);
+      expect({
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+      }).toEqual(accepted);
     } finally {
       result.dispose();
     }
@@ -64,10 +82,10 @@ test.each(["inline", "fullscreen"] as const)(
 test("updates after sibling-driven reflow and terminal resize without rerendering the Box", async () => {
   const sibling = shallowRef("one");
   let targetRenders = 0;
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const StableTarget = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () => {
       targetRenders++;
       return (
@@ -86,17 +104,29 @@ test("updates after sibling-driven reflow and terminal resize without rerenderin
 
   const result = await render(App, { columns: 100, rows: 10 });
   try {
-    expect(size.value).toEqual({ width: 100, height: 2 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 100, height: 2, hasMeasured: true });
     expect(targetRenders).toBe(1);
 
     sibling.value = "one\ntwo\nthree";
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toEqual({ width: 100, height: 2 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 100, height: 2, hasMeasured: true });
     expect(targetRenders).toBe(1);
 
     await result.terminal.resize(60, 10);
-    expect(size.value).toEqual({ width: 60, height: 2 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 60, height: 2, hasMeasured: true });
     expect(targetRenders).toBe(1);
   } finally {
     result.dispose();
@@ -108,10 +138,10 @@ test("distinguishes zero size, clipping, hidden state, and detachment", async ()
   const hidden = shallowRef(false);
   const clipped = shallowRef(false);
   const zero = shallowRef(true);
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () =>
       visible.value ? (
         <Box width={5} height={1} overflowY="hidden">
@@ -131,32 +161,52 @@ test("distinguishes zero size, clipping, hidden state, and detachment", async ()
 
   const result = await render(App, { columns: 10, rows: 3 });
   try {
-    expect(size.value).toEqual({ width: 0, height: 0 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 0, height: 0, hasMeasured: true });
 
     zero.value = false;
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toEqual({ width: 3, height: 1 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
 
     clipped.value = true;
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toEqual({ width: 3, height: 1 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
 
     hidden.value = true;
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toBeNull();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
 
     hidden.value = false;
     clipped.value = false;
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toEqual({ width: 3, height: 1 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
 
     visible.value = false;
     await nextTick();
-    expect(size.value).toBeNull();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
   } finally {
     result.dispose();
   }
@@ -164,10 +214,10 @@ test("distinguishes zero size, clipping, hidden state, and detachment", async ()
 
 test("clears a previous size while a replacement Box awaits accepted paint", async () => {
   const replacement = shallowRef(false);
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () =>
       replacement.value ? (
         <Box key="second" ref={target} width={7} height={2} />
@@ -178,35 +228,49 @@ test("clears a previous size while a replacement Box awaits accepted paint", asy
 
   const result = await render(App, { columns: 10, rows: 3 });
   try {
-    expect(size.value).toEqual({ width: 3, height: 1 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
     replacement.value = true;
     await nextTick();
     await result.waitUntilRenderFlush();
-    expect(size.value).toEqual({ width: 7, height: 2 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 7, height: 2, hasMeasured: true });
   } finally {
     result.dispose();
   }
 });
 
 test("a retained size becomes null when its setup scope is disposed", async () => {
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () => <Box ref={target} width={3} height={1} />;
   });
 
   const result = await render(App, { columns: 10, rows: 3 });
-  expect(size.value).toEqual({ width: 3, height: 1 });
+  expect({
+    width: metrics.width.value,
+    height: metrics.height.value,
+    hasMeasured: metrics.hasMeasured.value,
+  }).toEqual({ width: 3, height: 1, hasMeasured: true });
   result.dispose();
-  expect(size.value).toBeNull();
+  expect(metrics.hasMeasured.value).toBe(false);
+  expect(metrics.width.value).toBe(0);
+  expect(metrics.height.value).toBe(0);
 });
 
 test("publishes accepted Box size for a visual non-TTY document host", async () => {
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () => <Box ref={target} width={6} height={2} />;
   });
 
@@ -216,7 +280,11 @@ test("publishes accepted Box size for a visual non-TTY document host", async () 
     host: { stdout: "stream" },
   });
   try {
-    expect(size.value).toEqual({ width: 6, height: 2 });
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 6, height: 2, hasMeasured: true });
   } finally {
     result.dispose();
   }
@@ -225,34 +293,54 @@ test("publishes accepted Box size for a visual non-TTY document host", async () 
 test("retains accepted size while suspended and settles queued changes on resume", async () => {
   const width = shallowRef(4);
   const visible = shallowRef(true);
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () => (visible.value ? <Box ref={target} width={width.value} height={1} /> : null);
   });
 
   const result = await render(App, { columns: 20, rows: 4 });
   try {
-    expect(size.value).toEqual({ width: 4, height: 1 });
-    const accepted = size.value;
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 4, height: 1, hasMeasured: true });
+    const snapshot = () => ({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    });
+    const accepted = snapshot();
 
     await result.terminal.suspend();
     width.value = 7;
     await nextTick();
-    expect(size.value).toBe(accepted);
+    // Pending suspension retains the last accepted metrics.
+    expect(snapshot()).toEqual(accepted);
 
     await result.terminal.resume();
-    expect(size.value).toEqual({ width: 7, height: 1 });
+    expect(snapshot()).toEqual({
+      width: 7,
+      height: 1,
+      left: accepted.left,
+      top: accepted.top,
+      hasMeasured: true,
+    });
 
     await result.terminal.suspend();
-    const resized = size.value;
+    const resized = snapshot();
     visible.value = false;
     await nextTick();
-    expect(size.value).toBe(resized);
+    expect(snapshot()).toEqual(resized);
 
     await result.terminal.resume();
-    expect(size.value).toBeNull();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
   } finally {
     result.dispose();
   }
@@ -261,10 +349,10 @@ test("retains accepted size while suspended and settles queued changes on resume
 test("does not publish a candidate Box size before a failed output write is accepted", async () => {
   const width = shallowRef(4);
   const marker = shallowRef("ready");
-  let size!: ReturnType<typeof useBoxSize>;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    size = useBoxSize(target);
+    metrics = useBoxMetrics(target);
     return () => (
       <Box ref={target} width={width.value} height={1}>
         <Text>{marker.value}</Text>
@@ -276,13 +364,17 @@ test("does not publish a candidate Box size before a failed output write is acce
   const stderr = makeTtyOutput();
   const stdin = makeTtyInput();
   const originalWrite = stdout.write.bind(stdout);
-  const injected = new Error("injected Box-size frame failure");
-  let sizeDuringFailure: BoxSize | null | undefined;
+  const injected = new Error("injected Box-metrics frame failure");
+  let sizeDuringFailure: { width: number; height: number; hasMeasured: boolean } | undefined;
   let failNextFrameWrite = false;
   stdout.write = ((...args: unknown[]) => {
     if (failNextFrameWrite) {
       failNextFrameWrite = false;
-      sizeDuringFailure = size.value;
+      sizeDuringFailure = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        hasMeasured: metrics.hasMeasured.value,
+      };
       throw injected;
     }
     return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
@@ -301,8 +393,12 @@ test("does not publish a candidate Box size before a failed output write is acce
       }),
     );
     await app.waitUntilRenderFlush();
-    const accepted = size.value;
-    expect(accepted).toEqual({ width: 4, height: 1 });
+    const accepted = {
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    };
+    expect(accepted).toEqual({ width: 4, height: 1, hasMeasured: true });
 
     const exited = app.waitUntilExit();
     width.value = 7;
@@ -312,7 +408,7 @@ test("does not publish a candidate Box size before a failed output write is acce
     stdout.emit("resize");
 
     await expect(exited).rejects.toBe(injected);
-    expect(sizeDuringFailure).toBe(accepted);
+    expect(sizeDuringFailure).toEqual(accepted);
   } finally {
     app.unmount();
     stdin.destroy();
@@ -322,13 +418,13 @@ test("does not publish a candidate Box size before a failed output write is acce
 });
 
 test("rejects non-Box targets and use outside a vue-tui tree", async () => {
-  expect(() => useBoxSize(shallowRef<InstanceType<typeof Box> | null>(null))).toThrow(
+  expect(() => useBoxMetrics(shallowRef<InstanceType<typeof Box> | null>(null))).toThrow(
     "render session is unavailable outside a vue-tui render tree",
   );
 
   const App = defineComponent(() => {
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    useBoxSize(target);
+    useBoxMetrics(target);
     return () => <Text ref={target}>wrong target</Text>;
   });
   const stdout = makeTtyOutput();
@@ -349,9 +445,9 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
           patchConsole: false,
         }),
       ),
-    ).toThrow("useBoxSize() target must be a ref bound directly to <Box>");
+    ).toThrow("useBoxMetrics() target must be a ref bound directly to <Box>");
     await expect(exited).rejects.toThrow(
-      "useBoxSize() target must be a ref bound directly to <Box>",
+      "useBoxMetrics() target must be a ref bound directly to <Box>",
     );
   } finally {
     app.unmount();
@@ -359,5 +455,35 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
     stdin.destroy();
     stdout.destroy();
     stderr.destroy();
+  }
+});
+
+test("publishes parent-relative left and top for a sibling-positioned Box", async () => {
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => (
+      <Box flexDirection="row" width={20} height={3}>
+        <Box width={5} height={1}>
+          <Text>left</Text>
+        </Box>
+        <Box ref={target} width={3} height={2}>
+          <Text>box</Text>
+        </Box>
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 40, rows: 8 });
+  try {
+    await result.waitUntilRenderFlush();
+    expect(metrics.hasMeasured.value).toBe(true);
+    expect(metrics.width.value).toBe(3);
+    expect(metrics.height.value).toBe(2);
+    expect(metrics.left.value).toBe(5);
+    expect(metrics.top.value).toBe(0);
+  } finally {
+    result.dispose();
   }
 });

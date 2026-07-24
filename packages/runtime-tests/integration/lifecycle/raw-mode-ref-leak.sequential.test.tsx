@@ -12,10 +12,9 @@
 // nothing ref'd; this test pins the ref/unref balance after the throw.
 
 import { PassThrough } from "node:stream";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
-import { useInternalInputRoutingForTest } from "../../../runtime/dist/internal.mjs";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable } from "./test-streams.ts";
 
@@ -48,19 +47,9 @@ function makeRefCountingThrowingStdin(): {
 }
 
 test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd (ref/unref balanced)", () => {
-  let selectRoute!: () => () => void;
+  const inputActive = shallowRef(false);
   const App = defineComponent(() => {
-    const routing = useInternalInputRoutingForTest();
-    const boundary = routing.registerSemantic({
-      id: "boundary",
-      handle: () => ({
-        performed: false,
-        continue: true,
-        preventDefault: false,
-        blockExternal: false,
-      }),
-    });
-    selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+    useInput(() => undefined, { isActive: inputActive });
     return () => h(Text, null, () => "x");
   });
 
@@ -70,7 +59,9 @@ test.sequential("a throwing setRawMode during acquire does not leave stdin ref'd
 
   const app = createApp(App);
   app.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true }));
-  expect(selectRoute).toThrow("ERR_TTY_INIT_FAILED");
+  expect(() => {
+    inputActive.value = true;
+  }).toThrow("ERR_TTY_INIT_FAILED");
 
   // The leak guard: a throwing setRawMode must leave the stdin's ref count at 0.
   // Before the fix, ref() ran before the throwing setRawMode and dispose's unref

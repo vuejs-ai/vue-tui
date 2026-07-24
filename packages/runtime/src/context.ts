@@ -1,9 +1,5 @@
-import type { InjectionKey, Ref } from "vue";
-import type {
-  InternalInputRoutingDemandLease,
-  InternalInputRoutingRuntime,
-} from "./io/input-route-runtime.ts";
-import type { InputAvailability } from "./io/input-availability.ts";
+import type { InjectionKey } from "vue";
+import type { InternalInputSubscriptions } from "./io/input-subscriptions.ts";
 import type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 
 export interface AppContext {
@@ -20,19 +16,10 @@ export interface AppContext {
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
-  readonly inputAvailability: Readonly<Ref<InputAvailability>>;
-  internal_inputRouting: InternalInputRoutingRuntime;
+  inputSubscriptions: InternalInputSubscriptions;
   /** Acquire one independently releasable public raw-mode hold. */
   acquirePublicRawMode: () => () => void;
-  /** Returns false when output capacity must reconcile before raw input can activate. */
-  acquireRawMode: () => boolean | void;
-  releaseRawMode: () => void;
-  acquireSemanticInput: () => InternalInputRoutingDemandLease;
-  acquireSgrMouseMode: (level?: SgrMouseMode) => symbol;
-  releaseSgrMouseMode: (token: symbol) => void;
 }
-
-export type SgrMouseMode = "button" | "drag" | "hover";
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");

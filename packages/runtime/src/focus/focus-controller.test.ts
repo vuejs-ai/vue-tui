@@ -1,5 +1,5 @@
 import { effectScope } from "vue";
-import { describe, expect, test, vi } from "vite-plus/test";
+import { describe, expect, test } from "vite-plus/test";
 import Yoga from "yoga-layout";
 import type { AppContext } from "../context.ts";
 import { createBox, createRoot, type TuiBox, type TuiRoot } from "../host/nodes.ts";
@@ -30,7 +30,6 @@ describe("focus controller", () => {
     expect(second.focus()).toBeUndefined();
     expect(first.isFocused.value).toBe(false);
     expect(second.isFocused.value).toBe(true);
-    expect(focus.effectiveTarget.value).toBe(second);
 
     expect(first.blur()).toBeUndefined();
     expect(second.isFocused.value).toBe(true);
@@ -79,7 +78,6 @@ describe("focus controller", () => {
       detach = focus.attachTarget(target, second);
     });
     expect(target.isFocused.value).toBe(true);
-    expect(focus.effectiveTarget.value).toBe(target);
     focus.dispose();
   });
 
@@ -98,7 +96,6 @@ describe("focus controller", () => {
       detach();
     });
     expect(target.isFocused.value).toBe(true);
-    expect(focus.effectiveTarget.value).toBeNull();
 
     focus.transaction("reconcile", () => {});
     expect(target.isFocused.value).toBe(false);
@@ -142,28 +139,6 @@ describe("focus controller", () => {
     focus.dispose();
   });
 
-  test("notifies private host dependents and disposes them with the identity", () => {
-    const { root, focus } = createFixture();
-    const host = connect(root, createBox());
-    const target = focus.createTarget({ requiresRenderedTarget: true });
-    const hostChanged = vi.fn();
-    const disposed = vi.fn();
-    focus.registerTargetDependent(target, { hostChanged, disposed });
-
-    focus.transaction("reconcile", () => {
-      focus.attachTarget(target, host);
-    });
-    expect(hostChanged).toHaveBeenNthCalledWith(1, null);
-    expect(hostChanged).toHaveBeenNthCalledWith(2, host);
-
-    focus.removeTarget(target);
-    expect(disposed).toHaveBeenCalledOnce();
-    expect(target.focus()).toBeUndefined();
-    expect(target.blur()).toBeUndefined();
-    expect(target.isFocused.value).toBe(false);
-    focus.dispose();
-  });
-
   test("publishes false to a retained owner after its creating Vue scope stops", () => {
     const { focus } = createFixture();
     const scope = effectScope();
@@ -185,30 +160,21 @@ describe("focus controller", () => {
     const second = connect(root, createBox());
     const target = focus.createTarget({ requiresRenderedTarget: true });
     let detach = () => {};
-    let rejectHostChange = false;
-    focus.registerTargetDependent(target, {
-      hostChanged() {
-        if (rejectHostChange) throw new Error("dependent rejected host");
-      },
-      disposed() {},
-    });
     focus.transaction("reconcile", () => {
       detach = focus.attachTarget(target, first);
     });
     target.focus();
     expect(target.isFocused.value).toBe(true);
 
-    rejectHostChange = true;
     expect(() =>
       focus.transaction("reconcile", () => {
         detach();
         focus.attachTarget(target, second);
+        throw new Error("reconciliation failed");
       }),
-    ).toThrow("dependent rejected host");
+    ).toThrow("reconciliation failed");
     expect(target.isFocused.value).toBe(false);
-    expect(focus.effectiveTarget.value).toBeNull();
 
-    rejectHostChange = false;
     focus.transaction("reconcile", () => {});
     expect(target.isFocused.value).toBe(false);
     focus.dispose();
@@ -219,7 +185,6 @@ describe("focus controller", () => {
     const target = focus.createTarget();
     target.focus();
     expect(target.isFocused.value).toBe(false);
-    expect(focus.effectiveTarget.value).toBeNull();
 
     focus.dispose();
     target.focus();

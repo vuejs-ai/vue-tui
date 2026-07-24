@@ -34,22 +34,7 @@ import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
 import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
 import { attachYoga, detachYoga } from "../host/yoga.ts";
 import { isContentLayoutGuarded } from "../host/layout-guards.ts";
-import type {
-  InternalGeometryFragment,
-  InternalGeometryPaintFrame,
-} from "../geometry/geometry-service.ts";
-import {
-  createRectGeometry,
-  deriveTextGeometry,
-  virtualTextDescendants,
-} from "../geometry/paint-geometry.ts";
-import type {
-  InternalSelectionPaintFrame,
-  InternalSelectionPaintTarget,
-  InternalSelectionTraceCell,
-  InternalTextSelectionTrace,
-} from "../selection/selection-paint.ts";
-import { trustInternalSelectionPaintSnapshot } from "../selection/selection-policy.ts";
+import type { InternalGeometryPaintFrame } from "../geometry/geometry-service.ts";
 import { assertPaintSurfaceSize } from "../numeric-limits.ts";
 
 export type Transformer = (line: string, lineIndex: number) => string;
@@ -71,39 +56,12 @@ function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
   };
 }
 
-function firstSelectionCellAtOrAfterRow(
-  cells: readonly InternalSelectionTraceCell[],
-  localY: number,
-): number {
-  let low = 0;
-  let high = cells.length;
-  while (low < high) {
-    const middle = low + Math.floor((high - low) / 2);
-    if (cells[middle]!.y < localY) low = middle + 1;
-    else high = middle;
-  }
-  return low;
-}
-
 interface WriteOp {
   type: "write";
   x: number;
   y: number;
   lines: string[];
   transformers: Transformer[];
-  selection: readonly OutputSelectionTrace[];
-}
-
-interface OutputSelectionTrace {
-  readonly target: InternalSelectionPaintTarget;
-  readonly trace: InternalTextSelectionTrace;
-}
-
-interface OutputSelectionProvenance {
-  readonly target: InternalSelectionPaintTarget;
-  readonly cell: InternalSelectionTraceCell;
-  readonly surfaceX: number;
-  readonly surfaceY: number;
 }
 
 interface ClipOp {
@@ -335,42 +293,17 @@ class Output {
   private ops: Op[] = [];
   private readonly caches: OutputCaches;
   private readonly hardClip: ClipRect | undefined;
-  private readonly selectionFrame: InternalSelectionPaintFrame | undefined;
-  private readonly selectionTraces = new Map<object, OutputSelectionTrace>();
 
-  constructor(
-    width: number,
-    height: number,
-    clipToBounds = false,
-    selectionFrame?: InternalSelectionPaintFrame,
-    caches = new OutputCaches(),
-  ) {
+  constructor(width: number, height: number, clipToBounds = false, caches = new OutputCaches()) {
     assertPaintSurfaceSize(width, height);
     this.width = width;
     this.height = height;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
-    this.selectionFrame = selectionFrame;
     this.caches = caches;
   }
 
-  recordSelection(target: InternalSelectionPaintTarget, trace: InternalTextSelectionTrace): void {
-    const entry = { target, trace };
-    this.selectionTraces.set(target.key, entry);
-    this.selectionFrame?.record(target, trace);
-  }
-
-  recordUnavailableSelection(target: InternalSelectionPaintTarget): void {
-    this.selectionFrame?.record(target, null);
-  }
-
-  write(
-    x: number,
-    y: number,
-    lines: string[],
-    transformers: Transformer[],
-    selection: readonly OutputSelectionTrace[] = [],
-  ): void {
-    this.ops.push({ type: "write", x, y, lines, transformers, selection });
+  write(x: number, y: number, lines: string[], transformers: Transformer[]): void {
+    this.ops.push({ type: "write", x, y, lines, transformers });
   }
 
   clip(rect: ClipRect): void {
@@ -382,8 +315,8 @@ class Output {
   }
 
   get(): { output: string; height: number } {
-    // Blank cells are immutable in practice: every paint or selection change
-    // replaces the array slot with another StyledChar. Share one baseline cell
+    // Blank cells are immutable in practice: every paint change replaces the
+    // array slot with another StyledChar. Share one baseline cell
     // instead of allocating an object and an empty styles array per terminal
     // cell on every frame.
     const blankCell: StyledChar = {
@@ -395,27 +328,6 @@ class Output {
     const output: StyledChar[][] = Array.from({ length: this.height }, () =>
       Array.from({ length: this.width }, () => blankCell),
     );
-    const provenance: Array<Array<OutputSelectionProvenance | undefined>> | undefined = this
-      .selectionFrame
-      ? Array.from({ length: this.height }, () =>
-          Array.from<OutputSelectionProvenance | undefined>({ length: this.width }),
-        )
-      : undefined;
-
-    const clearProvenance = (x: number, y: number): void => {
-      if (!provenance) return;
-      const row = provenance[y];
-      if (!row || x < 0 || x >= this.width) return;
-      const previous = row[x];
-      if (!previous) {
-        row[x] = undefined;
-        return;
-      }
-      for (let offset = 0; offset < previous.cell.width; offset++) {
-        const candidateX: number = previous.surfaceX + offset;
-        if (row[candidateX] === previous) row[candidateX] = undefined;
-      }
-    };
 
     const clips: ClipRect[] = [];
 
@@ -443,33 +355,6 @@ class Output {
         undefined,
       );
       const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
-      const selectionBySurface = new Map<string, OutputSelectionProvenance>();
-      for (const entry of op.selection) {
-        const origin = entry.trace.surfaceOrigin;
-        const start =
-          clip?.y1 === undefined
-            ? 0
-            : firstSelectionCellAtOrAfterRow(entry.trace.cells, clip.y1 - origin.y);
-        for (let index = start; index < entry.trace.cells.length; index++) {
-          const cell = entry.trace.cells[index]!;
-          const surfaceX = origin.x + cell.x;
-          const surfaceY = origin.y + cell.y;
-          if (clip?.y2 !== undefined && surfaceY >= clip.y2) break;
-          if (
-            (clip?.x1 !== undefined && surfaceX < clip.x1) ||
-            (clip?.x2 !== undefined && surfaceX + cell.width > clip.x2) ||
-            (clip?.y1 !== undefined && surfaceY < clip.y1)
-          ) {
-            continue;
-          }
-          selectionBySurface.set(`${surfaceX}:${surfaceY}`, {
-            target: entry.target,
-            cell,
-            surfaceX,
-            surfaceY,
-          });
-        }
-      }
 
       if (clip) {
         const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
@@ -591,8 +476,6 @@ class Output {
           offsetX > 0 &&
           this.caches.getStringWidth(currentLine[offsetX - 1]?.value ?? "") > 1
         ) {
-          clearProvenance(offsetX - 1, y + offsetY);
-          clearProvenance(offsetX, y + offsetY);
           currentLine[offsetX - 1] = blankCell;
         }
 
@@ -622,31 +505,7 @@ class Output {
             continue;
           }
 
-          for (let i = 0; i < characterWidth; i++) {
-            clearProvenance(offsetX + i, y + offsetY);
-          }
-
           currentLine[offsetX] = character;
-
-          const source = selectionBySurface.get(`${offsetX}:${y + offsetY}`);
-          const exactSource =
-            source &&
-            source.cell.width === characterWidth &&
-            source.cell.text.normalize("NFC") === character.value.normalize("NFC")
-              ? source
-              : undefined;
-          if (
-            exactSource &&
-            provenance &&
-            y + offsetY >= 0 &&
-            y + offsetY < this.height &&
-            offsetX >= 0 &&
-            offsetX + characterWidth <= this.width
-          ) {
-            for (let i = 0; i < characterWidth; i++) {
-              provenance[y + offsetY]![offsetX + i] = exactSource;
-            }
-          }
 
           if (characterWidth > 1) {
             for (let i = 1; i < characterWidth; i++) {
@@ -663,7 +522,6 @@ class Output {
         }
 
         if (currentLine[offsetX]?.value === "") {
-          clearProvenance(offsetX, y + offsetY);
           currentLine[offsetX] = blankCell;
         }
 
@@ -671,105 +529,12 @@ class Output {
       }
     }
 
-    const baselineLines = output.map((line) =>
-      styledCharsToString(line.filter((item) => item !== undefined)).trimEnd(),
-    );
-    if (!provenance) return { output: baselineLines.join("\n"), height: output.length };
-
-    const baselineWidths = baselineLines.map((line) => this.caches.getStringWidth(line));
-    const visibleByTarget = new Map<object, Set<number>>();
-    const candidates = new Set<OutputSelectionProvenance>();
-    for (const row of provenance) {
-      for (const candidate of row) {
-        if (candidate) candidates.add(candidate);
-      }
-    }
-    for (const candidate of candidates) {
-      const { cell, target } = candidate;
-      let complete = true;
-      const row = provenance[candidate.surfaceY];
-      for (let offset = 0; offset < cell.width; offset++) {
-        const current = row?.[candidate.surfaceX + offset];
-        if (
-          current !== candidate ||
-          current.target.key !== target.key ||
-          current.cell.id !== cell.id
-        ) {
-          complete = false;
-          break;
-        }
-      }
-      if (
-        !complete ||
-        candidate.surfaceX < 0 ||
-        candidate.surfaceX + cell.width > (baselineWidths[candidate.surfaceY] ?? 0)
-      ) {
-        continue;
-      }
-      let visible = visibleByTarget.get(target.key);
-      if (!visible) visibleByTarget.set(target.key, (visible = new Set()));
-      visible.add(cell.id);
-    }
-    const highlighted = new Set<OutputSelectionProvenance>();
-    for (const entry of this.selectionTraces.values()) {
-      const visible = visibleByTarget.get(entry.target.key) ?? new Set<number>();
-      const origin = entry.trace.surfaceOrigin;
-      const snapshot = trustInternalSelectionPaintSnapshot({
-        text: entry.trace.text,
-        boundaries: entry.trace.boundaries,
-        surfaceOrigin: origin,
-        visibleCellIds: visible,
-        stops: entry.trace.stops,
-        cells: entry.trace.cells,
-      });
-      const range = this.selectionFrame?.prepare(entry.target, snapshot) ?? null;
-      if (!range) continue;
-      const start = Math.min(range.anchor, range.extent);
-      const end = Math.max(range.anchor, range.extent);
-      for (const row of provenance) {
-        for (const candidate of row) {
-          if (
-            candidate?.target.key === entry.target.key &&
-            visible.has(candidate.cell.id) &&
-            candidate.cell.start >= start &&
-            candidate.cell.end <= end
-          ) {
-            highlighted.add(candidate);
-          }
-        }
-      }
-    }
-
-    const inverseCode = Object.freeze({
-      type: "ansi" as const,
-      code: "\x1b[7m",
-      endCode: "\x1b[27m",
-    });
-    const highlightedRows = new Set<number>();
-    for (let y = 0; y < provenance.length; y++) {
-      for (let x = 0; x < provenance[y]!.length; x++) {
-        const candidate = provenance[y]![x];
-        if (!candidate || !highlighted.has(candidate)) continue;
-        const character = output[y]?.[x];
-        if (!character) continue;
-        const inverseIndex = character.styles.findIndex((style) => style.code === inverseCode.code);
-        const styles = [...character.styles];
-        if (inverseIndex >= 0) styles.splice(inverseIndex, 1);
-        else styles.push(inverseCode);
-        output[y]![x] = { ...character, styles };
-        highlightedRows.add(y);
-      }
-    }
-
-    const generatedOutput = output
-      .map((line, row) => {
-        if (!highlightedRows.has(row)) return baselineLines[row]!;
-        const emittedWidth = baselineWidths[row]!;
-        return emittedWidth === 0 ? "" : styledCharsToString(line.slice(0, emittedWidth));
-      })
-      .join("\n");
-
-    return { output: generatedOutput, height: output.length };
+    return {
+      output: output
+        .map((line) => styledCharsToString(line.filter((item) => item !== undefined)).trimEnd())
+        .join("\n"),
+      height: output.length,
+    };
   }
 }
 
@@ -1213,147 +978,16 @@ function prepareTextPaint(
   return entry;
 }
 
-interface HitRect {
+interface PaintRect {
   readonly x: number;
   readonly y: number;
   readonly width: number;
   readonly height: number;
 }
 
-function boundsOfRects(rects: readonly HitRect[]): HitRect {
-  const x = Math.min(...rects.map((rect) => rect.x));
-  const y = Math.min(...rects.map((rect) => rect.y));
-  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
-  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
-  return { x, y, width: right - x, height: bottom - y };
-}
-
-function subtractRect(rect: HitRect, cut: HitRect): HitRect[] {
-  const overlap = intersectHitRect(rect, cut);
-  if (!overlap) return [rect];
-  const pieces: HitRect[] = [];
-  const rectRight = rect.x + rect.width;
-  const rectBottom = rect.y + rect.height;
-  const overlapRight = overlap.x + overlap.width;
-  const overlapBottom = overlap.y + overlap.height;
-  if (overlap.y > rect.y) {
-    pieces.push({ x: rect.x, y: rect.y, width: rect.width, height: overlap.y - rect.y });
-  }
-  if (overlapBottom < rectBottom) {
-    pieces.push({
-      x: rect.x,
-      y: overlapBottom,
-      width: rect.width,
-      height: rectBottom - overlapBottom,
-    });
-  }
-  if (overlap.x > rect.x) {
-    pieces.push({
-      x: rect.x,
-      y: overlap.y,
-      width: overlap.x - rect.x,
-      height: overlap.height,
-    });
-  }
-  if (overlapRight < rectRight) {
-    pieces.push({
-      x: overlapRight,
-      y: overlap.y,
-      width: rectRight - overlapRight,
-      height: overlap.height,
-    });
-  }
-  return pieces;
-}
-
-function createTopTextGeometry(input: {
-  readonly parent: HitRect;
-  readonly surface: HitRect;
-  readonly clip?: HitRect;
-  readonly caretSlots: ReturnType<typeof deriveTextGeometry>["topCaretSlots"];
-  readonly fragments: ReturnType<typeof deriveTextGeometry>["topFragments"];
-}) {
-  if (input.fragments === null) {
-    return createRectGeometry({
-      parent: input.parent,
-      surface: input.surface,
-      clip: input.clip,
-      caretSlots: input.caretSlots,
-    });
-  }
-  const paintedFragments = input.fragments.map((fragment) => ({
-    ...fragment,
-    parent: {
-      ...fragment.parent,
-      x: input.parent.x + fragment.parent.x,
-      y: input.parent.y + fragment.parent.y,
-    },
-  }));
-  const extentBounds = [
-    input.surface,
-    ...paintedFragments
-      .map((fragment) => fragment.surface)
-      .filter((rect) => rect.width > 0 && rect.height > 0),
-  ];
-  const surface = boundsOfRects(extentBounds);
-  const parent = boundsOfRects([
-    input.parent,
-    ...paintedFragments
-      .map((fragment) => fragment.parent)
-      .filter((rect) => rect.width > 0 && rect.height > 0),
-  ]);
-  const fragments: InternalGeometryFragment[] = [];
-  if (input.surface.width > 0 && input.surface.height > 0) {
-    fragments.push({
-      local: { x: 0, y: 0, width: input.surface.width, height: input.surface.height },
-      parent: input.parent,
-      surface: input.surface,
-      visibleSurface: intersectHitRect(input.surface, input.clip) ?? null,
-    });
-  }
-  for (const fragment of paintedFragments) {
-    for (const piece of subtractRect(fragment.surface, input.surface)) {
-      const dx = piece.x - fragment.surface.x;
-      const dy = piece.y - fragment.surface.y;
-      fragments.push({
-        local: {
-          x: fragment.local.x + dx,
-          y: fragment.local.y + dy,
-          width: piece.width,
-          height: piece.height,
-        },
-        parent: {
-          x: fragment.parent.x + dx,
-          y: fragment.parent.y + dy,
-          width: piece.width,
-          height: piece.height,
-        },
-        surface: piece,
-        visibleSurface:
-          fragment.visibleSurface === null ? null : (intersectHitRect(piece, input.clip) ?? null),
-      });
-    }
-  }
-  const visible = fragments.some((fragment) => fragment.visibleSurface !== null);
-  const resolved = {
-    parent,
-    surface,
-    fragments,
-    caretSlots: input.caretSlots,
-  };
-  if (surface.width === 0 || surface.height === 0) {
-    return { status: "zero-size" as const, ...resolved };
-  }
-  return visible
-    ? { status: "visible" as const, ...resolved }
-    : { status: "fully-clipped" as const, ...resolved };
-}
-
 export interface PaintOptions {
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: InternalGeometryPaintFrame;
-  /** Private frame-local selectable-text collector. Publication follows a successful write. */
-  readonly selection?: InternalSelectionPaintFrame;
   /**
    * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
    * rendering uses this to keep off-screen layout from wrapping or scrolling
@@ -1362,7 +996,7 @@ export interface PaintOptions {
   readonly viewport?: { readonly width: number; readonly height: number };
 }
 
-function intersectHitRect(rect: HitRect, clip: HitRect | undefined): HitRect | undefined {
+function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): PaintRect | undefined {
   if (!clip) return rect.width > 0 && rect.height > 0 ? rect : undefined;
   const x1 = Math.max(rect.x, clip.x);
   const y1 = Math.max(rect.y, clip.y);
@@ -1375,8 +1009,6 @@ function intersectHitRect(rect: HitRect, clip: HitRect | undefined): HitRect | u
 
 function recordZeroContentGeometry(
   node: TuiNode,
-  x0: number,
-  y0: number,
   geometry: InternalGeometryPaintFrame | undefined,
 ): void {
   if (!geometry?.hasObservedSubtree(node)) return;
@@ -1389,31 +1021,15 @@ function recordZeroContentGeometry(
     geometry.recordSubtree(node, "hidden");
     return;
   }
-  let x = x0;
-  let y = y0;
-  let parent = { x: 0, y: 0, width: 0, height: 0 };
-  if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-transform") {
-    const layout = node.yoga.getComputedLayout();
-    x += layout.left;
-    y += layout.top;
-    parent = { x: layout.left, y: layout.top, width: 0, height: 0 };
-  }
-  if (
-    geometry.isObserved(node) &&
-    node.type !== "root" &&
-    node.type !== "text-leaf" &&
-    node.type !== "comment"
-  ) {
-    geometry.record(node, {
-      status: "zero-size",
-      parent,
-      surface: { x, y, width: 0, height: 0 },
-      fragments: [],
-      caretSlots: [],
-    });
+  if (node.type === "tui-box") {
+    const layout =
+      "yoga" in node && node.yoga && "getComputedLayout" in node.yoga
+        ? node.yoga.getComputedLayout()
+        : undefined;
+    geometry.record(node, 0, 0, Math.floor(layout?.left ?? 0), Math.floor(layout?.top ?? 0));
   }
   if (!isContainer(node)) return;
-  for (const child of node.children) recordZeroContentGeometry(child, x, y, geometry);
+  for (const child of node.children) recordZeroContentGeometry(child, geometry);
 }
 
 export function paint(root: TuiNode, options: PaintOptions = {}): string {
@@ -1421,15 +1037,9 @@ export function paint(root: TuiNode, options: PaintOptions = {}): string {
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
-  const out = new Output(
-    width,
-    height,
-    options.viewport !== undefined,
-    options.selection,
-    getRootOutputCaches(root),
-  );
+  const out = new Output(width, height, options.viewport !== undefined, getRootOutputCaches(root));
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry, options.selection);
+  paintNode(root, out, 0, 0, [], undefined, viewportClip, options.geometry);
   return out.get().output;
 }
 
@@ -1440,14 +1050,11 @@ function paintNode(
   y0: number,
   transformers: Transformer[],
   inheritedBg?: string,
-  clip?: HitRect,
+  clip?: PaintRect,
   geometry?: InternalGeometryPaintFrame,
-  selection?: InternalSelectionPaintFrame,
 ): void {
-  // Geometry is demand-driven. Once no observed target exists in this subtree,
-  // keep ordinary paint on its pre-geometry path: in particular, a large Text
-  // with no geometry consumer must not pay for grapheme provenance and fragment
-  // construction merely because every live root owns the private service.
+  // Box-size collection is demand-driven. Once no observed target exists in
+  // this subtree, keep ordinary paint on its pre-measurement path.
   if (geometry && !geometry.hasObservedSubtree(node)) geometry = undefined;
 
   // display:none — yoga collapses the node to zero size but still reports a
@@ -1456,7 +1063,7 @@ function paintNode(
   const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
     if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
-    else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, x0, y0, geometry);
+    else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, geometry);
     else geometry?.recordSubtree(node, "hidden");
     return;
   }
@@ -1464,7 +1071,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, x0, y0, transformers, undefined, clip, geometry, selection);
+        paintNode(child, output, x0, y0, transformers, undefined, clip, geometry);
       }
       return;
     }
@@ -1474,16 +1081,8 @@ function paintNode(
       const y = y0 + layout.top;
       const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
-      if (geometry?.isObserved(node)) {
-        geometry.record(
-          node,
-          createRectGeometry({
-            parent: { x: layout.left, y: layout.top, width: w, height: h },
-            surface: { x, y, width: w, height: h },
-            clip,
-          }),
-        );
-      }
+      // Parent-relative outer layout offsets — not terminal or root coordinates.
+      geometry?.record(node, w, h, Math.floor(layout.left), Math.floor(layout.top));
       // Split the Box's own bg from the value threaded to children — they use
       // different fallback rules, mirroring Ink's two separate guards:
       //   - FILL uses the Box's OWN bg with a FALSY guard (Ink render-background.ts:11
@@ -1542,7 +1141,7 @@ function paintNode(
       const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
       const childClip =
         clipH || clipV
-          ? (intersectHitRect(
+          ? (intersectPaintRect(
               {
                 x: clipH ? x + bl : (clip?.x ?? x - 1_000_000_000),
                 y: clipV ? y + bt : (clip?.y ?? y - 1_000_000_000),
@@ -1563,9 +1162,9 @@ function paintNode(
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
           if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, x, y, transformers, childBg, childClip, geometry, selection);
+            paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
           } else {
-            recordZeroContentGeometry(child, x, y, geometry);
+            recordZeroContentGeometry(child, geometry);
           }
         }
         if (clipped) output.unclip();
@@ -1573,7 +1172,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, x, y, transformers, childBg, childClip, geometry, selection);
+        paintNode(child, output, x, y, transformers, childBg, childClip, geometry);
       }
 
       if (clipped) output.unclip();
@@ -1581,16 +1180,13 @@ function paintNode(
     }
     case "tui-text": {
       const layout = node.yoga.getComputedLayout();
-      const x = x0 + layout.left;
       const y = y0 + layout.top;
-      const w = Math.max(0, Math.floor(layout.width));
       const h = Math.max(0, Math.floor(layout.height));
       // A Text entirely above or below an authoritative clip cannot affect the
-      // output grid. When no geometry or selection consumer needs its document
-      // mapping, skip composition and write-op allocation as well. Limit this
-      // to Text: a clipped Box may still contain an absolutely positioned or
+      // output grid. Skip composition and write-op allocation as well. Limit
+      // this to Text: a clipped Box may still contain an absolutely positioned or
       // overflow-visible descendant that re-enters the viewport.
-      if (!geometry && !selection && clip && (y + h <= clip.y || y >= clip.y + clip.height)) {
+      if (clip && (y + h <= clip.y || y >= clip.y + clip.height)) {
         return;
       }
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
@@ -1607,52 +1203,6 @@ function paintNode(
       // fast-path returns it verbatim.
       const wrapWidth = Math.floor(layout.width);
       const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth);
-      const selectionTargets = selection?.targetsFor(node) ?? [];
-      const outputSelection: OutputSelectionTrace[] = [];
-      const requiresTextGeometry = geometry?.requiresTextGeometry(node) ?? false;
-      let traced: ReturnType<typeof deriveTextGeometry> | null = null;
-      if (requiresTextGeometry || selectionTargets.length > 0) {
-        traced = deriveTextGeometry({
-          node,
-          renderedText: text,
-          wrapped,
-          wrapWidth,
-          wrapMode: node.props.wrap,
-          surfaceOrigin: { x, y },
-          clip,
-          provenanceAvailable: transformers.length === 0,
-          selectionTargets,
-          geometryRequested: requiresTextGeometry,
-        });
-        if (geometry && requiresTextGeometry) {
-          for (const [target, targetGeometry] of traced.virtual) {
-            geometry.record(target, targetGeometry);
-          }
-        }
-        for (const target of selectionTargets) {
-          const trace = traced.selection.get(target.key) ?? null;
-          if (trace) {
-            output.recordSelection(target, trace);
-            outputSelection.push({ target, trace });
-          } else {
-            output.recordUnavailableSelection(target);
-          }
-        }
-      }
-      if (geometry) {
-        geometry.record(
-          node,
-          transformers.length > 0
-            ? { status: "unavailable" }
-            : createTopTextGeometry({
-                parent: { x: layout.left, y: layout.top, width: w, height: h },
-                surface: { x, y, width: w, height: h },
-                clip,
-                caretSlots: traced?.topCaretSlots ?? [],
-                fragments: traced?.topFragments ?? [],
-              }),
-        );
-      }
       // Skip writing empty text — avoids applying line transformers to empty
       // content, which matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;
@@ -1668,7 +1218,7 @@ function paintNode(
       // pad, matching Ink (getMaxWidth=0 → no padding). Clamping to 1 here would
       // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
       // collides with a row-sibling at the 0-width box origin.
-      output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers, outputSelection);
+      output.write(x0 + layout.left, y0 + layout.top, wrapped, transformers);
       return;
     }
     case "tui-static": {
@@ -1681,30 +1231,6 @@ function paintNode(
       const layout = node.yoga.getComputedLayout();
       const x = x0 + layout.left;
       const y = y0 + layout.top;
-      if (geometry?.isObserved(node)) {
-        geometry.record(
-          node,
-          createRectGeometry({
-            parent: {
-              x: layout.left,
-              y: layout.top,
-              width: Math.max(0, Math.floor(layout.width)),
-              height: Math.max(0, Math.floor(layout.height)),
-            },
-            surface: {
-              x,
-              y,
-              width: Math.max(0, Math.floor(layout.width)),
-              height: Math.max(0, Math.floor(layout.height)),
-            },
-            clip,
-            caretSlots: null,
-          }),
-        );
-      }
-      for (const target of virtualTextDescendants(node)) {
-        geometry?.record(target, { status: "unavailable" });
-      }
       const next = [node.transform, ...transformers];
       // Standalone <Transform> with DIRECT inline children (bare strings,
       // <Newline>, and no yoga-carrying <Text>/<Box> child): Ink models
@@ -1728,7 +1254,7 @@ function paintNode(
       // — recurse so the child <Text>/<Box> lays out and paints normally, with
       // the transform pushed onto the line-transformers.
       for (const child of node.children) {
-        paintNode(child, output, x, y, next, inheritedBg, clip, geometry, selection);
+        paintNode(child, output, x, y, next, inheritedBg, clip, geometry);
       }
       return;
     }

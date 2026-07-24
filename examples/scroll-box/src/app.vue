@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, shallowRef, onMounted, onUnmounted } from "vue";
-import { Box, Text, useApp, useBoxSize, useInput, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useApp, useBoxMetrics, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 
 const { exit } = useApp();
-const viewportHeight = useViewportHeight();
-const rootHeight = computed(() => viewportHeight?.value);
+const { height: layoutHeight } = useLayoutSize();
+const rootHeight = computed(() => layoutHeight.value);
 
 const box = shallowRef<ScrollBoxExpose>();
 const scrollTarget = shallowRef<InstanceType<typeof Box> | null>(null);
-const scrollTargetSize = useBoxSize(scrollTarget);
+const scrollTargetMetrics = useBoxMetrics(scrollTarget);
 const lastScroll = shallowRef("ready");
 
 // ScrollBox follows the bottom on its own. It ships no built-in input — this app
@@ -34,7 +34,7 @@ onUnmounted(() => {
 });
 
 function pageLines(): number {
-  return Math.max(1, scrollTargetSize.value?.height ?? 1);
+  return Math.max(1, scrollTargetMetrics.hasMeasured.value ? scrollTargetMetrics.height.value : 1);
 }
 
 useInput((event) => {

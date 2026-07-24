@@ -1,7 +1,7 @@
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, onErrorCaptured, onScopeDispose, shallowRef } from "vue";
 import { afterEach, expect, test, vi } from "vite-plus/test";
-import { Box, createApp, Text, useApp, useInput, useLayoutWidth } from "@vue-tui/runtime";
+import { Box, createApp, Text, useApp, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
@@ -157,7 +157,7 @@ test.sequential("an unhandled later render error rejects Vue's tick but does not
 test.sequential("a component error during resize remains a Vue error without exiting Runtime", async () => {
   const originalError = new Error("unhandled resize render");
   const Root = defineComponent(() => {
-    const width = useLayoutWidth();
+    const { width } = useLayoutSize();
     return () => {
       if (width.value === 40) throw originalError;
       return <Text>{width.value}</Text>;

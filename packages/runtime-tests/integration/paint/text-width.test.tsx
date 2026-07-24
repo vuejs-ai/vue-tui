@@ -22,7 +22,7 @@ test("wide characters do not add extra space inside fixed-width Box", () => {
         </Box>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
@@ -40,7 +40,7 @@ test("CJK characters occupy correct width in fixed-width Box", () => {
         <Text>|</Text>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(output).toBe("你好|");
 });
@@ -63,7 +63,7 @@ test("mixed ASCII and wide characters align correctly", () => {
         </Box>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
@@ -81,7 +81,7 @@ test("ANSI styled text does not affect layout width", () => {
         <Text>|</Text>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(stripAnsi(output)).toBe("hello|");
 });
@@ -94,7 +94,7 @@ test("empty Text does not affect sibling layout", () => {
         <Text>hello</Text>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(output).toBe("hello");
 });
@@ -106,7 +106,7 @@ test("truncate CJK text at end", () => {
         <Text wrap="truncate">あいうえおかきくけこ|end</Text>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(stringWidth(stripAnsi(output))).toBeLessThanOrEqual(20);
 });
@@ -121,7 +121,7 @@ test("truncate CJK text does not exceed Box width", () => {
         <Text>|</Text>
       </Box>
     )),
-    { columns: 100 },
+    { width: 100 },
   );
   const lines = output.split("\n");
   expect(lines.length).toBe(1);
@@ -138,7 +138,7 @@ test("overlay on 2nd cell of CJK character clears the full character", () => {
         </Box>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
@@ -155,7 +155,7 @@ test("overlay on 1st cell of CJK character clears trailing placeholder", () => {
         </Box>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
@@ -172,7 +172,7 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
         </Box>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
@@ -198,7 +198,7 @@ test("wide char with in-bounds leading cell but out-of-bounds trailing cell stil
         </Box>
       </Box>
     )),
-    { columns: 4 },
+    { width: 4 },
   );
   expect(stripAnsi(output)).toBe("aa 你");
   expect(stringWidth(stripAnsi(output))).toBe(5);

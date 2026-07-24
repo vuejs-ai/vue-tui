@@ -2,10 +2,10 @@ import { createApp, Text } from "@vue-tui/runtime";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { defineComponent, h } from "vue";
 
-// Put the tail marker on its own logical line so terminal-width wrapping cannot
-// split the marker itself. The preceding payload is still large enough to force
-// stdout backpressure when the fixture is captured through a pipe.
-const payload = `${"x".repeat(256 * 1024)}\nFINAL_OUTPUT_TAIL_MARKER`;
+// Put the durable marker on the first modeled line so the fixed 80×24 non-TTY
+// document host cannot clip it away while still writing a large final payload
+// that can back-pressure a pipe.
+const payload = `FINAL_OUTPUT_TAIL_MARKER\n${"x".repeat(256 * 1024)}`;
 const App = defineComponent(() => () => h(Text, null, { default: () => payload }));
 
 const app = createApp(App);

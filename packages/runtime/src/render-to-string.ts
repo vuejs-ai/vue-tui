@@ -9,33 +9,32 @@ import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts
 import { paint } from "./paint/paint.ts";
 import { prepareStaticOutput } from "./paint/static-channel.ts";
 import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
-import { createInternalInputRoutingRuntime } from "./io/input-route-runtime.ts";
-import { createInputAvailabilityRef, stringInputUnavailable } from "./io/input-availability.ts";
+import { createInternalInputSubscriptions } from "./io/input-subscriptions.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { createInternalFocusController } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
-import { createInternalCaretController } from "./caret/caret-controller.ts";
-import { InternalCaretControllerKey } from "./caret/caret-context.ts";
 import { isErrorInput, messageForNonError } from "./error-value.ts";
 import {
   InternalRenderSessionKey,
   createStringRenderSessionService,
   type InternalStringRenderSessionService,
 } from "./render-session.ts";
-import { InternalClipboardServiceKey } from "./clipboard/context.ts";
-import { createStringClipboardService } from "./clipboard/clipboard-service.ts";
-import { createInternalTextSelectionController } from "./selection/selection-controller.ts";
-import { InternalTextSelectionControllerKey } from "./selection/context.ts";
 import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 import { createVueCleanupGuard } from "./vue-cleanup-guard.ts";
 
 export interface RenderToStringOptions {
   /**
-   * Width of the virtual terminal in columns.
+   * Modeled root layout width in terminal cells.
    *
    * @default 80
    */
-  readonly columns?: number;
+  readonly width?: number;
+  /**
+   * Modeled root layout height in terminal cells. Use `Infinity` for no vertical bound.
+   *
+   * @default 24
+   */
+  readonly height?: number;
 }
 
 /**
@@ -61,16 +60,20 @@ export function renderToString(component: Component, options?: RenderToStringOpt
   return renderToStringInternal(component, normalizePublicOptions(options));
 }
 
-function renderToStringInternal(
-  component: Component,
-  options: { readonly columns: number },
-): string {
+interface NormalizedStringOptions {
+  readonly width: number;
+  /** `null` is Runtime's private unbounded representation. */
+  readonly height: number | null;
+}
+
+function renderToStringInternal(component: Component, options: NormalizedStringOptions): string {
   const renderSession = createStringRenderSessionService({
-    columns: options.columns,
+    columns: options.width,
+    rows: options.height,
   });
-  const contexts = createStringContexts(options.columns);
+  const contexts = createStringContexts(options.width);
   try {
-    return renderStringDocument(component, options.columns, renderSession, contexts);
+    return renderStringDocument(component, options, renderSession, contexts);
   } finally {
     renderSession.dispose();
     contexts.dispose();
@@ -79,7 +82,7 @@ function renderToStringInternal(
 
 function renderStringDocument(
   component: Component,
-  columns: number,
+  options: NormalizedStringOptions,
   renderSession: InternalStringRenderSessionService,
   contexts: ReturnType<typeof createStringContexts>,
 ): string {
@@ -89,18 +92,6 @@ function renderStringDocument(
   const focusController = createInternalFocusController({
     root,
     inert: true,
-  });
-  const caretController = createInternalCaretController({
-    focus: focusController,
-    outputAvailable: false,
-    requestPaint: () => {},
-  });
-  const clipboard = createStringClipboardService();
-  const textSelection = createInternalTextSelectionController({
-    surfaceAvailable: false,
-    unavailableReason: "string-host",
-    requestPaint: () => {},
-    clipboard,
   });
   const renderedTargets = createRenderedTargetController(root, focusController);
   setRenderedTargetController(appContext, renderedTargets);
@@ -134,16 +125,13 @@ function renderStringDocument(
   try {
     attachYoga(root);
     rootAttached = true;
-    root.yoga.setWidth(columns);
+    root.yoga.setWidth(options.width);
 
     // Provide isolated string-host contexts so shared components can inject
     // their normal services without acquiring a terminal.
     app.provide(InternalRenderSessionKey, renderSession);
     app.provide(AppContextKey, appContext);
     app.provide(InternalFocusControllerKey, focusController);
-    app.provide(InternalCaretControllerKey, caretController);
-    app.provide(InternalClipboardServiceKey, clipboard);
-    app.provide(InternalTextSelectionControllerKey, textSelection);
     app.provide(StdinContextKey, stdinContext);
 
     // Capture the first uncaught error so we can re-throw after cleanup.
@@ -165,24 +153,50 @@ function renderStringDocument(
     renderCompleted = true;
     renderedTargets.reconcile();
 
-    const restoreLayoutGuards = calculateLayoutWithContentGuards(
+    // Finite height is a maximum available root layout bound. Map public
+    // Infinity to the private unbounded representation (`null`) and never pass
+    // JavaScript Infinity into Yoga. Compute natural height first so short
+    // documents are not padded or percentage-perturbed against an artificial max.
+    let restoreLayoutGuards = calculateLayoutWithContentGuards(
       root,
-      columns,
+      options.width,
       undefined,
       Yoga.DIRECTION_LTR,
     );
     let output: string;
     let capturedStaticOutput = "";
     try {
+      if (options.height !== null) {
+        const naturalHeight = Math.max(0, Math.floor(root.yoga.getComputedLayout().height));
+        if (naturalHeight > options.height) {
+          restoreLayoutGuards();
+          restoreLayoutGuards = calculateLayoutWithContentGuards(
+            root,
+            options.width,
+            options.height,
+            Yoga.DIRECTION_LTR,
+          );
+        }
+      }
+
       // String rendering has no physical handoff. Snapshot every complete open
       // Static subtree only after mount, then accept that local document prefix
       // before painting the mutable region that excludes Static hosts.
-      const preparedStatic = prepareStaticOutput(root, columns);
+      const preparedStatic = prepareStaticOutput(root, options.width);
       capturedStaticOutput = preparedStatic.output;
       preparedStatic.accept();
 
-      // Render the dynamic frame to a string.
+      // Paint the computed layout without manufacturing a hard paint viewport for
+      // short documents. Yoga already applied a finite height bound when content
+      // exceeded it; shorter output stays unpadded. Clip only by line count so
+      // ordinary horizontal overflow behavior matches the previous unbounded paint.
       output = paint(root);
+      if (options.height !== null && output !== "") {
+        const lines = output.split("\n");
+        if (lines.length > options.height) {
+          output = lines.slice(0, options.height).join("\n");
+        }
+      }
     } finally {
       restoreLayoutGuards();
     }
@@ -241,17 +255,6 @@ function renderStringDocument(
       // original render failure after the remaining host resources are freed.
     }
     try {
-      caretController.dispose();
-    } catch {
-      // Best-effort: F4/string-host cleanup below must still run.
-    }
-    try {
-      textSelection.dispose();
-      clipboard.dispose();
-    } catch {
-      // Best-effort: F4/string-host cleanup below must still run.
-    }
-    try {
       focusController.dispose();
     } catch {
       // Best-effort: F3/string-host cleanup below must still run.
@@ -273,7 +276,7 @@ function renderStringDocument(
   }
 }
 
-function normalizeColumns(value: unknown): number {
+function normalizeWidth(value: unknown): number {
   if (value === undefined) return 80;
   if (
     typeof value === "number" &&
@@ -284,7 +287,23 @@ function normalizeColumns(value: unknown): number {
     return value;
   }
   throw new TypeError(
-    `renderToString option "columns" must be an integer between 1 and ${MAX_LAYOUT_VALUE}.`,
+    `renderToString option "width" must be an integer between 1 and ${MAX_LAYOUT_VALUE}.`,
+  );
+}
+
+function normalizeHeight(value: unknown): number | null {
+  if (value === undefined) return 24;
+  if (value === Number.POSITIVE_INFINITY) return null;
+  if (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0 &&
+    value <= MAX_LAYOUT_VALUE
+  ) {
+    return value;
+  }
+  throw new TypeError(
+    `renderToString option "height" must be a positive integer at most ${MAX_LAYOUT_VALUE}, or Infinity.`,
   );
 }
 
@@ -296,9 +315,12 @@ function normalizeOptionsObject(options: unknown): Record<PropertyKey, unknown> 
   return options as Record<PropertyKey, unknown>;
 }
 
-function normalizePublicOptions(options: unknown): { readonly columns: number } {
+function normalizePublicOptions(options: unknown): NormalizedStringOptions {
   const object = normalizeOptionsObject(options);
-  return { columns: normalizeColumns(object.columns) };
+  return {
+    width: normalizeWidth(object.width),
+    height: normalizeHeight(object.height),
+  };
 }
 
 function createDiscardWritable(columns: number): NodeJS.WriteStream {
@@ -346,7 +368,7 @@ function createStringContexts(columns: number): {
     appContext,
     stdinContext,
     dispose() {
-      stdinContext.internal_inputRouting.clear();
+      stdinContext.inputSubscriptions.clear();
       stdin.destroy();
       stdout.destroy();
       stderr.destroy();
@@ -358,13 +380,7 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
   return {
     stdin,
     isRawModeSupported: false,
-    inputAvailability: createInputAvailabilityRef(stringInputUnavailable),
-    internal_inputRouting: createInternalInputRoutingRuntime(),
+    inputSubscriptions: createInternalInputSubscriptions(),
     acquirePublicRawMode: () => () => {},
-    acquireRawMode: () => {},
-    releaseRawMode: () => {},
-    acquireSemanticInput: () => Object.freeze({ activate() {}, release() {} }),
-    acquireSgrMouseMode: () => Symbol("noop-sgr-mouse"),
-    releaseSgrMouseMode: () => {},
   };
 }

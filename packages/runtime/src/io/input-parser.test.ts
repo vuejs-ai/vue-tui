@@ -110,7 +110,7 @@ describe("input-parser", () => {
     expect(parser.push("A")).toEqual(["\x1b[1;5A"]);
   });
 
-  test("holds an unfinished SGR mouse report without starting the finite Escape timer", () => {
+  test("holds a definite partial CSI report without starting the finite Escape timer", () => {
     const parser = createInputParser();
     expect(parser.push("\x1b[<64;1;")).toEqual([]);
     expect(parser.peekPending()).toBe("\x1b[<64;1;");

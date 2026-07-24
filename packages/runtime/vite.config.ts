@@ -28,9 +28,11 @@ export default defineConfig({
   pack: {
     entry: [
       "src/index.ts",
-      "src/devtools.ts",
       "src/inline.ts",
-      "src/testing.ts",
+      // Narrow privileged entries for official @vue-tui/vite and @vue-tui/testing.
+      // Not supported public APIs; no broad internal barrel is published.
+      "src/internal/devtools.ts",
+      "src/internal/testing.ts",
       // Built for repository integration tests so private symbol and injection
       // identities match the public bundle. It is not a package export and is
       // excluded from the published tarball.
@@ -51,6 +53,8 @@ export default defineConfig({
       }),
     ],
     dts: { vue: true },
+    // Keep the broad repository-only internal helper out of package exports.
+    // The narrow internal/devtools and internal/testing entries are exported.
     exports: { exclude: ["internal"] },
   },
 });

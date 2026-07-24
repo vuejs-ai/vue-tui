@@ -10,10 +10,9 @@
 export const MAX_LAYOUT_VALUE = 65_535;
 
 /**
- * Painting stores at least one array slot per terminal cell (and another when
- * selection provenance is requested). Bound the combined surface separately
- * from each individually valid layout value so a valid width and height cannot
- * accidentally request an unbounded grid allocation.
+ * Painting stores at least one array slot per terminal cell. Bound the combined
+ * surface separately from each individually valid layout value so a valid width
+ * and height cannot accidentally request an unbounded grid allocation.
  */
 export const MAX_PAINT_SURFACE_CELLS = 1_048_576;
 

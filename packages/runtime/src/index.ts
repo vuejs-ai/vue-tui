@@ -19,9 +19,8 @@ export { useFocus, type FocusTarget, type UseFocusReturn } from "./composables/u
 export { useInput } from "./composables/useInput.ts";
 export type { TuiInputEvent, TuiKey, TuiKeyName } from "./io/public-input.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
-export { useLayoutWidth } from "./composables/use-layout-width.ts";
-export { useViewportHeight } from "./composables/use-viewport-height.ts";
-export { useBoxSize, type BoxSize } from "./composables/use-box-size.ts";
+export { useLayoutSize, type UseLayoutSizeReturn } from "./composables/use-layout-size.ts";
+export { useBoxMetrics, type UseBoxMetricsReturn } from "./composables/use-box-metrics.ts";
 // `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
 // its `measure-text` module internal, and so do we. They remain internal helpers
 // (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.

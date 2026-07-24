@@ -149,7 +149,7 @@ test("public input and raw stdin ownership survive template, script, and full HM
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
-    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/devtools"] },
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal/devtools"] },
   });
   await server.listen();
   await waitFor(read, "INPUT-LABEL-A generation=1:A");

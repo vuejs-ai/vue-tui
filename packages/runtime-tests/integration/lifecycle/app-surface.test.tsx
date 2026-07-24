@@ -1,7 +1,7 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
-import { createTestHostBridge } from "@vue-tui/runtime/testing";
+import { createTestHostBridge } from "@vue-tui/runtime/internal/testing";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 function createExposedRoot() {

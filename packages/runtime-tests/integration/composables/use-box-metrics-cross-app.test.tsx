@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, createApp, Text, useBoxSize } from "@vue-tui/runtime";
+import { Box, createApp, Text, useBoxMetrics } from "@vue-tui/runtime";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyOutput(): NodeJS.WriteStream {
@@ -76,7 +76,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
     </Box>
   ));
   const Observer = defineComponent(() => {
-    useBoxSize(foreignTarget);
+    useBoxMetrics(foreignTarget);
     return () => <Text>observer</Text>;
   });
 
@@ -115,9 +115,9 @@ test("rejects a foreign Box without contaminating later apps", async () => {
           patchConsole: false,
         }),
       ),
-    ).toThrow("useBoxSize() target belongs to a different vue-tui app");
+    ).toThrow("useBoxMetrics() target belongs to a different vue-tui app");
     await expect(observerExited).rejects.toThrow(
-      "useBoxSize() target belongs to a different vue-tui app",
+      "useBoxMetrics() target belongs to a different vue-tui app",
     );
   } finally {
     observer.unmount();
@@ -138,7 +138,7 @@ test("rejects a dynamic non-Box retarget through Vue's update", async () => {
   const target = shallowRef<InstanceType<typeof Box> | null>(null);
   const renderBox = shallowRef(true);
   const Invalid = defineComponent(() => {
-    useBoxSize(target);
+    useBoxMetrics(target);
     return () =>
       renderBox.value ? (
         <Box ref={target}>
@@ -168,7 +168,7 @@ test("rejects a dynamic non-Box retarget through Vue's update", async () => {
     await app.waitUntilRenderFlush();
     renderBox.value = false;
     await expect(nextTick()).rejects.toThrow(
-      "useBoxSize() target must be a ref bound directly to <Box>",
+      "useBoxMetrics() target must be a ref bound directly to <Box>",
     );
     app.unmount();
     await expect(within(app.waitUntilExit(), "dynamic non-Box target clean exit")).resolves.toBe(

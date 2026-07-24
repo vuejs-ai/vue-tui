@@ -2,7 +2,7 @@
 
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Text, createApp, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, createApp, useLayoutSize } from "@vue-tui/runtime";
 import {
   captureWrites,
   getContentWrites,
@@ -17,9 +17,9 @@ test.sequential("INK_SCREEN_READER does not select a hidden presentation", async
 
   let app: ReturnType<typeof createApp> | undefined;
   try {
-    let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+    let layout: ReturnType<typeof useLayoutSize> | undefined;
     const App = defineComponent(() => {
-      viewportHeight = useViewportHeight();
+      layout = useLayoutSize();
       return () => (
         <Box borderStyle="round">
           <Text>visual output</Text>
@@ -36,7 +36,7 @@ test.sequential("INK_SCREEN_READER does not select a hidden presentation", async
     await nextTick();
     await app.waitUntilRenderFlush();
 
-    expect(viewportHeight?.value).toBe(24);
+    expect(layout!.height.value).toBe(24);
     const output = getContentWrites(writes).join("");
     expect(output).toContain("visual output");
     expect(output).toContain("─");

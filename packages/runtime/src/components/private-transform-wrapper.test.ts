@@ -24,5 +24,5 @@ test.each(emptySlotCases)("source-private Transform omits its host node for $nam
       ]),
   );
 
-  expect(renderToString(App, { columns: 20 })).toBe("a  b");
+  expect(renderToString(App, { width: 20 })).toBe("a  b");
 });

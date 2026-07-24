@@ -1,9 +1,8 @@
 import { defineComponent } from "vue";
-import { Text, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Text, useLayoutSize, useStdin } from "@vue-tui/runtime";
 
 export default defineComponent(() => {
-  const width = useLayoutWidth();
-  const viewportHeight = useViewportHeight();
+  const { width, height } = useLayoutSize();
   const { stdin, isRawModeSupported, setRawMode } = useStdin();
   void stdin;
   void isRawModeSupported;
@@ -11,7 +10,7 @@ export default defineComponent(() => {
 
   return () => (
     <Text>
-      {width.value}x{viewportHeight?.value ?? "unbounded"}
+      {width.value}x{height.value === Infinity ? "unbounded" : height.value}
     </Text>
   );
 });

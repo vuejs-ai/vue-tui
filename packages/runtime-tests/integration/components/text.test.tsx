@@ -194,7 +194,7 @@ test("nested Text terminal-default colors reset foreground and background indepe
           },
         ),
     ),
-    { columns: 4 },
+    { width: 4 },
   );
 
   expect(stripAnsi(output)).toBe("ABCD");
@@ -269,7 +269,7 @@ test("nested Text inherits the enclosing Text background over the surrounding Bo
         </Text>
       </Box>
     )),
-    { columns: 3 },
+    { width: 3 },
   );
 
   expect(stripAnsi(output)).toBe("ABC");
@@ -425,7 +425,7 @@ test("renderToString preserves nested terminal-default foreground through a narr
         AA<Text color="default">BBB</Text>CC
       </Text>
     )),
-    { columns: 4 },
+    { width: 4 },
   );
   expect(stripAnsi(output)).toBe("AABB\nBCC");
   expect(foregroundCharacters(output)).toEqual([
@@ -849,7 +849,7 @@ test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width",
         <Text>{`A${ESC}#8BC`}</Text>
       </Box>
     )),
-    { columns: 3 },
+    { width: 3 },
   );
   expect(output).not.toContain(`${ESC}#8`);
   expect(stripAnsi(output)).toBe("ABC");
@@ -1004,7 +1004,7 @@ test("do not wrap text with BEL-terminated OSC hyperlinks", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Click here");
 });
@@ -1017,7 +1017,7 @@ test("do not wrap text with ST-terminated OSC hyperlinks", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Click here");
 });
@@ -1030,7 +1030,7 @@ test("do not wrap text with non-hyperlink OSC (BEL-terminated) sequences", async
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Some text");
 });
@@ -1043,7 +1043,7 @@ test("do not wrap text with non-hyperlink OSC (ST-terminated) sequences", async 
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Some text");
 });
@@ -1059,7 +1059,7 @@ test("drop non-hyperlink OSC before hard-wrapping visible text", async () => {
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -1072,7 +1072,7 @@ test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -1097,7 +1097,7 @@ test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across 
         </Text>
       </Box>
     )),
-    { columns: 4 },
+    { width: 4 },
   );
   expect(stripAnsi(output)).toBe("abCD\nef");
   // Exact-byte lock against an SGR-ordering / reset regression: each wrapped line must
@@ -1121,7 +1121,7 @@ test("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -1129,7 +1129,7 @@ test("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
 test("ensure wrap-ansi doesn't trim leading whitespace", async () => {
   const output = renderToString(
     defineComponent(() => () => <Text color="red">{" ERROR "}</Text>),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(output).toBe(chalk.red(" ERROR "));
 });
@@ -1137,7 +1137,7 @@ test("ensure wrap-ansi doesn't trim leading whitespace", async () => {
 test("link ansi escapes are closed properly", async () => {
   const output = renderToString(
     defineComponent(() => () => <Text>{ansiEscapes.link("Example", "https://example.com")}</Text>),
-    { columns: 100 },
+    { width: 100 },
   );
   // Lock the EXACT bytes: the OSC-8 hyperlink must round-trip unchanged (open + label +
   // close). Ink components.tsx: t.is(output, ']8;;https://example.comExample]8;;') —

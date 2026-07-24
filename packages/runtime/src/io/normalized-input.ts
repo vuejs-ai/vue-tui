@@ -1,6 +1,5 @@
 import type { InputEvent } from "./input-parser.ts";
 import { nonAlphanumericKeys, parseKeypress, type Keypress } from "./parse-keypress.ts";
-import { parseSgrMouseReport, type SgrMouseEvent } from "./parse-mouse.ts";
 
 export interface InternalInputModifiers {
   readonly shift: boolean;
@@ -28,17 +27,6 @@ export interface InternalKeyDetail {
   readonly text: { readonly value: string; readonly origin: "reported" } | undefined;
 }
 
-export interface InternalPointerDetail {
-  readonly protocol: "sgr";
-  readonly wireButton: number;
-  readonly x: number;
-  readonly y: number;
-  readonly final: "M" | "m";
-  readonly modifiers: InternalInputModifiers;
-  /** Absent when the report is valid SGR input but its action is not interpreted yet. */
-  readonly event: Readonly<SgrMouseEvent> | undefined;
-}
-
 export type NormalizedInputFact =
   | {
       readonly kind: "key";
@@ -60,25 +48,9 @@ export type NormalizedInputFact =
       readonly text: string;
     }
   | {
-      readonly kind: "pointer";
-      readonly sequence: string;
-      readonly pointer: InternalPointerDetail;
-    }
-  | {
       readonly kind: "uninterpreted";
       readonly sequence: string;
     };
-
-const noModifiers = (): InternalInputModifiers => ({
-  shift: false,
-  alt: false,
-  ctrl: false,
-  super: false,
-  hyper: false,
-  meta: false,
-  capsLock: false,
-  numLock: false,
-});
 
 const modifiersFromKeypress = (keypress: Keypress): InternalInputModifiers =>
   Object.freeze({
@@ -103,30 +75,12 @@ const isPlainText = (sequence: string): boolean => {
   return codepoint !== undefined && codepoint >= 0x20 && !(codepoint >= 0x7f && codepoint <= 0x9f);
 };
 
+const sgrMouseReport = /^\x1b\[<\d+;\d+;\d+[mM]$/;
+
 const normalizeSequence = (sequence: string): NormalizedInputFact | undefined => {
-  const pointerReport = parseSgrMouseReport(sequence);
-  if (pointerReport) {
-    const event = pointerReport.event ? Object.freeze({ ...pointerReport.event }) : undefined;
-    const modifiers = Object.freeze({
-      ...noModifiers(),
-      shift: pointerReport.shift,
-      meta: pointerReport.meta,
-      ctrl: pointerReport.ctrl,
-    });
-    return Object.freeze({
-      kind: "pointer",
-      sequence,
-      pointer: Object.freeze({
-        protocol: "sgr",
-        wireButton: pointerReport.wireButton,
-        x: pointerReport.x,
-        y: pointerReport.y,
-        final: pointerReport.final,
-        modifiers,
-        event,
-      }),
-    });
-  }
+  // Runtime does not own mouse reporting. Ignore unsolicited complete SGR
+  // reports so terminal residue cannot surface as application key or text.
+  if (sgrMouseReport.test(sequence)) return undefined;
 
   if (isPlainText(sequence)) {
     return Object.freeze({

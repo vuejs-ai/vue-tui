@@ -1,12 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import {
-  Text,
-  renderToString,
-  useStdin,
-  useLayoutWidth,
-  useViewportHeight,
-} from "@vue-tui/runtime";
+import { Text, renderToString, useStdin, useLayoutSize } from "@vue-tui/runtime";
 import { useStderr } from "../../runtime/dist/internal.mjs";
 import { useStdout } from "../../runtime/dist/internal.mjs";
 
@@ -38,13 +32,14 @@ test.sequential("the string host avoids process terminal streams", () => {
     useStdin();
     useStdout();
     useStderr();
-    const width = useLayoutWidth();
-    const viewportHeight = useViewportHeight();
-    return () => <Text>{`${width.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    const { width, height } = useLayoutSize();
+    return () => (
+      <Text>{`${width.value}x${height.value === Infinity ? "unbounded" : height.value}`}</Text>
+    );
   });
 
   try {
-    expect(renderToString(App, { columns: 41 })).toBe("41xunbounded");
+    expect(renderToString(App, { width: 41, height: Infinity })).toBe("41xunbounded");
     expect(reads).toEqual({ stdin: 0, stdout: 0, stderr: 0 });
   } finally {
     for (const key of ["stdin", "stdout", "stderr"] as const) {

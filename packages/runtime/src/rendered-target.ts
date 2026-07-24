@@ -144,10 +144,9 @@ export function createRenderedTargetController(
     if (registration.target) detach(registration);
     if (!registration.active) return;
 
-    // Cleanup is user-observable and can synchronously change the ref (for
-    // example through a watcher of useMouseDrag().isDragging). Never attach the
-    // target that was resolved before cleanup; establish the current identity
-    // again after the old adapter is fully detached.
+    // Cleanup is user-observable and can synchronously change the ref. Never
+    // attach the target that was resolved before cleanup; establish the current
+    // identity again after the old adapter is fully detached.
     nextTarget = resolveRenderedTarget(registration);
     if (!nextTarget) return;
 

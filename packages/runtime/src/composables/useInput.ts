@@ -12,17 +12,9 @@ import { AppContextKey, StdinContextKey } from "../context.ts";
 import { isErrorInput, messageForNonError } from "../error-value.ts";
 import type { NormalizedInputFact } from "../io/normalized-input.ts";
 import { projectPublicInputEvent, type TuiInputEvent } from "../io/public-input.ts";
-import type { InternalInputRouteDecision } from "../io/input-route-policy.ts";
-import type { InternalInputApplicationGlobalRegistration } from "../io/input-route-runtime.ts";
+import type { InternalInputSubscription } from "../io/input-subscriptions.ts";
 
 type InputHandler = (event: TuiInputEvent) => void;
-
-const continuedDecision: InternalInputRouteDecision = Object.freeze({
-  performed: false,
-  continue: true,
-  preventDefault: false,
-  blockExternal: false,
-});
 
 function validateHandler(handler: unknown): asserts handler is InputHandler {
   if (typeof handler !== "function") {
@@ -80,18 +72,17 @@ export function useInput(
 
   let desiredActive = false;
   let attached = false;
-  let registration: InternalInputApplicationGlobalRegistration | undefined;
+  let registration: InternalInputSubscription | undefined;
   let reconciling = false;
   let reconcileRequested = false;
 
   function listener(fact: NormalizedInputFact) {
     try {
       const event = projectPublicInputEvent(fact);
-      if (!event) return continuedDecision;
+      if (!event) return;
       const currentHandler = resolveHandler();
       validateHandler(currentHandler);
       currentHandler(event);
-      return continuedDecision;
     } catch (error) {
       const fatalError = isErrorInput(error) ? error : new Error(messageForNonError(error));
       application.exit(fatalError);
@@ -112,10 +103,7 @@ export function useInput(
         reconcileRequested = false;
         try {
           if (desiredActive && !attached) {
-            registration = stdin!.internal_inputRouting.registerApplicationGlobal({
-              id: "useInput",
-              handle: listener,
-            });
+            registration = stdin!.inputSubscriptions.subscribe(listener);
             attached = true;
           } else if (!desiredActive && attached) {
             attached = false;

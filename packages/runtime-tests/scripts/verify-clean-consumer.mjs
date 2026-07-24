@@ -140,13 +140,11 @@ import {
   Box,
   Text,
   createApp,
-  useBoxSize,
+  useBoxMetrics,
   useFocus,
   useInput,
-  useLayoutWidth,
+  useLayoutSize,
   useStdin,
-  useViewportHeight,
-  type BoxSize,
   type BoxProps,
   type Color,
   type FocusTarget,
@@ -157,16 +155,19 @@ import {
   type TuiKeyName,
   type TuiApp,
   type TextProps,
+  type UseBoxMetricsReturn,
   type UseFocusReturn,
+  type UseLayoutSizeReturn,
   type UseStdinReturn,
 } from "@vue-tui/runtime";
-import { connectDevtools } from "@vue-tui/runtime/devtools";
+import { connectDevtools } from "@vue-tui/runtime/internal/devtools";
+// Official tooling channel — unsupported public contract.
 import {
   createTestHostBridge,
   type TestContentFrame,
   type TestHostBridge,
   type TestHostBridgeOptions,
-} from "@vue-tui/runtime/testing";
+} from "@vue-tui/runtime/internal/testing";
 import type { RenderResult, TestHost } from "@vue-tui/testing";
 import type { ComponentPublicInstance, MaybeRef, MaybeRefOrGetter, Ref } from "vue";
 
@@ -338,10 +339,12 @@ type _ExactColor = Expect<
     | \`#\${string}\`
   >
 >;
-type _ExactRenderToStringOptions = Expect<Equal<keyof RenderToStringOptions, "columns">>;
-const readonlyStringRenderOptions: RenderToStringOptions = { columns: 80 };
+type _ExactRenderToStringOptions = Expect<
+  Equal<keyof RenderToStringOptions, "width" | "height">
+>;
+const readonlyStringRenderOptions: RenderToStringOptions = { width: 80, height: 24 };
 // @ts-expect-error String-render layout input is readonly after construction.
-readonlyStringRenderOptions.columns = 40;
+readonlyStringRenderOptions.width = 40;
 type _ExactKeyName = Expect<
   Equal<
     TuiKeyName,
@@ -454,8 +457,17 @@ type _ExactInputOptions = Expect<
     { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
   >
 >;
-type _ExactBoxSize = Expect<
-  Equal<BoxSize, { readonly width: number; readonly height: number }>
+type _ExactBoxMetrics = Expect<
+  Equal<
+    UseBoxMetricsReturn,
+    {
+      readonly width: Readonly<Ref<number>>;
+      readonly height: Readonly<Ref<number>>;
+      readonly left: Readonly<Ref<number>>;
+      readonly top: Readonly<Ref<number>>;
+      readonly hasMeasured: Readonly<Ref<boolean>>;
+    }
+  >
 >;
 type _ExactFocusTarget = Expect<
   Equal<FocusTarget, Readonly<Ref<ComponentPublicInstance | null | undefined>>>
@@ -471,11 +483,11 @@ type _ExactFocusReturn = Expect<
   >
 >;
 type _ExactTargetedFocusParameter = Expect<Equal<Parameters<typeof useFocus>, [target: FocusTarget]>>;
-type _ExactLayoutWidth = Expect<
-  Equal<ReturnType<typeof useLayoutWidth>, Readonly<Ref<number>>>
+type _ExactLayoutSize = Expect<
+  Equal<ReturnType<typeof useLayoutSize>, UseLayoutSizeReturn>
 >;
-type _ExactViewportHeight = Expect<
-  Equal<ReturnType<typeof useViewportHeight>, Readonly<Ref<number>> | null>
+type _ExactBoxMetricsReturn = Expect<
+  Equal<ReturnType<typeof useBoxMetrics>, UseBoxMetricsReturn>
 >;
 type _ExactTestingBridge = Expect<
   Equal<ReturnType<typeof createTestHostBridge>, TestHostBridge>
@@ -532,34 +544,35 @@ declare const removedCapsLock: TuiKey["capsLock"];
 // @ts-expect-error Releases are suppressed rather than exposed as a public phase.
 declare const removedPhase: TuiKey["phase"];
 
-const layoutWidth = useLayoutWidth();
-const viewportHeight = useViewportHeight();
+const layoutSize: UseLayoutSizeReturn = useLayoutSize();
+const { width: layoutWidth, height: viewportHeight } = layoutSize;
 // @ts-expect-error Runtime-owned layout width is readonly.
 layoutWidth.value = 40;
-if (viewportHeight) {
-  // @ts-expect-error Runtime-owned viewport height is readonly.
-  viewportHeight.value = 24;
-}
+// @ts-expect-error Runtime-owned layout height is readonly.
+viewportHeight.value = 24;
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
-const boxSize = useBoxSize(boxHost);
-const measuredSize: BoxSize | null = boxSize.value;
-// @ts-expect-error Accepted Box size is readonly.
-boxSize.value = { width: 1, height: 1 };
-if (measuredSize) {
-  // @ts-expect-error Accepted Box size fields are readonly.
-  measuredSize.width = 2;
-}
+const boxMetrics: UseBoxMetricsReturn = useBoxMetrics(boxHost);
+// @ts-expect-error Accepted Box metrics width is readonly.
+boxMetrics.width.value = 1;
+// @ts-expect-error Accepted Box metrics height is readonly.
+boxMetrics.height.value = 1;
+// @ts-expect-error Accepted Box metrics left is readonly.
+boxMetrics.left.value = 1;
+// @ts-expect-error Accepted Box metrics top is readonly.
+boxMetrics.top.value = 1;
+// @ts-expect-error Accepted Box metrics hasMeasured is readonly.
+boxMetrics.hasMeasured.value = true;
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has different semantics and is not a Box target.
-useBoxSize(textHost);
+useBoxMetrics(textHost);
 const arbitraryHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error An arbitrary component ref does not identify one measurable Box.
-useBoxSize(arbitraryHost);
+useBoxMetrics(arbitraryHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
-useBoxSize(rawBoxHost);
+useBoxMetrics(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
-useBoxSize(() => boxHost.value);
+useBoxMetrics(() => boxHost.value);
 const logicalFocus = useFocus();
 const boxFocus = useFocus(boxHost);
 const textFocus = useFocus(textHost);
@@ -682,10 +695,12 @@ type _RemovedUseRawInput = typeof import("@vue-tui/runtime").useRawInput;
 type _RemovedUsePaste = typeof import("@vue-tui/runtime").usePaste;
 // @ts-expect-error The separate paste options were removed with usePaste().
 type _RemovedUsePasteOptions = import("@vue-tui/runtime").UsePasteOptions;
-// @ts-expect-error The combined layout hook was replaced by separate width and height primitives.
-type _RemovedUseLayoutSize = typeof import("@vue-tui/runtime").useLayoutSize;
-// @ts-expect-error The old combined layout wrapper was removed with its hook.
-type _RemovedUseLayoutSizeReturn = import("@vue-tui/runtime").UseLayoutSizeReturn;
+// @ts-expect-error Experimental layout width was replaced by useLayoutSize().
+type _RemovedUseLayoutWidth = typeof import("@vue-tui/runtime").useLayoutWidth;
+// @ts-expect-error Experimental viewport height was replaced by useLayoutSize().
+type _RemovedUseViewportHeight = typeof import("@vue-tui/runtime").useViewportHeight;
+// @ts-expect-error The considered finite-only viewport alias was never accepted.
+type _RemovedUseViewportSize = typeof import("@vue-tui/runtime").useViewportSize;
 // @ts-expect-error The broad render-session hook is private Runtime machinery.
 type _RemovedUseRenderSession = typeof import("@vue-tui/runtime").useRenderSession;
 // @ts-expect-error The broad render-session graph is private Runtime machinery.
@@ -752,14 +767,12 @@ type _RemovedTransformProps = import("@vue-tui/runtime").TransformProps;
 type _RemovedUseAnimationOptions = import("@vue-tui/runtime").UseAnimationOptions;
 // @ts-expect-error Removed timer policy has no public return type.
 type _RemovedUseAnimationReturn = import("@vue-tui/runtime").UseAnimationReturn;
-// @ts-expect-error Parent-only scalar metrics were replaced by semantic geometry.
-type _RemovedUseBoxMetrics = typeof import("@vue-tui/runtime").useBoxMetrics;
+// @ts-expect-error Experimental useBoxSize was replaced by useBoxMetrics().
+type _RemovedUseBoxSize = typeof import("@vue-tui/runtime").useBoxSize;
 // @ts-expect-error Imperative Yoga reads were removed.
 type _RemovedMeasureElement = typeof import("@vue-tui/runtime").measureElement;
-// @ts-expect-error The old scalar snapshot type was removed.
-type _RemovedBoxMetrics = import("@vue-tui/runtime").BoxMetrics;
-// @ts-expect-error The old composable return type was removed.
-type _RemovedUseBoxMetricsReturn = import("@vue-tui/runtime").UseBoxMetricsReturn;
+// @ts-expect-error The old frozen size snapshot type was removed.
+type _RemovedBoxSize = import("@vue-tui/runtime").BoxSize;
 // @ts-expect-error Targetless terminal cursor ownership was removed.
 type _RemovedUseCursor = typeof import("@vue-tui/runtime").useCursor;
 // @ts-expect-error The old focus-bound, cell-coordinate caret was withdrawn.
@@ -836,7 +849,7 @@ void removedDefaultColor;
     writeFileSync(
       join(consumerDirectory, "consumer.tsx"),
       `import { ScrollBox, Spinner, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, useFocus, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, onMounted, shallowRef } from "vue";
 
@@ -938,10 +951,9 @@ void unsupportedTextRevert;
 export const InputProbe = defineComponent(() => {
   const host = shallowRef<InstanceType<typeof Box> | null>(null);
   const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
-  const size = useBoxSize(host);
+  const metrics = useBoxMetrics(host);
   const focus = useFocus(host);
-  const layoutWidth = useLayoutWidth();
-  const viewportHeight = useViewportHeight();
+  const { width: layoutWidth, height: viewportHeight } = useLayoutSize();
   onMounted(() => focus.focus());
   useInput(
     (event) => {
@@ -965,7 +977,7 @@ export const InputProbe = defineComponent(() => {
     scrollBox.value.scrollToLine(2, true);
     void movementResults;
   }
-  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{size.value?.width ?? "pending"}:{layoutWidth.value}:{viewportHeight?.value ?? "unbounded"}:{String(focus.isFocused.value)}</Text></ScrollBox></Box>;
+  return () => <Box ref={host} height={2}><ScrollBox ref={scrollBox}><Text>{metrics.hasMeasured.value ? metrics.width.value : "pending"}:{layoutWidth.value}:{viewportHeight.value}:{String(focus.isFocused.value)}</Text></ScrollBox></Box>;
 });
 `,
     );
@@ -974,18 +986,17 @@ export const InputProbe = defineComponent(() => {
       `<script setup lang="ts">
 import { onMounted, shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, useFocus, useInput, useLayoutSize, useStdin } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 
 const host = shallowRef<InstanceType<typeof Box> | null>(null);
 const vShowVisible = shallowRef(true);
 const screen = shallowRef<"editor" | "confirm">("editor");
 const scrollBox = shallowRef<ScrollBoxExpose | null>(null);
-const size = useBoxSize(host);
+const metrics = useBoxMetrics(host);
 const focus = useFocus(host);
 const isFocused = focus.isFocused;
-const layoutWidth = useLayoutWidth();
-const viewportHeight = useViewportHeight();
+const { width: layoutWidth, height: viewportHeight } = useLayoutSize();
 const mountedStdin = useStdin();
 onMounted(() => focus.focus());
 useInput(
@@ -1020,7 +1031,7 @@ if (scrollBox.value) {
       <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
     </Static>
     <Box v-show="vShowVisible">
-      <ScrollBox ref="scrollBox"><Text>{{ size?.width ?? "pending" }}:{{ layoutWidth }}:{{ viewportHeight ?? "unbounded" }}:{{ isFocused }}</Text></ScrollBox>
+      <ScrollBox ref="scrollBox"><Text>{{ metrics.hasMeasured ? metrics.width : "pending" }}:{{ layoutWidth }}:{{ viewportHeight }}:{{ isFocused }}</Text></ScrollBox>
     </Box>
   </Box>
 </template>
@@ -1090,8 +1101,8 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
-import * as devtools from "@vue-tui/runtime/devtools";
-import * as runtimeTesting from "@vue-tui/runtime/testing";
+import * as internalDevtools from "@vue-tui/runtime/internal/devtools";
+import * as internalRuntimeTesting from "@vue-tui/runtime/internal/testing";
 import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
@@ -1107,11 +1118,11 @@ const visualGuidePath = join(
 );
 assert.match(readFileSync(visualGuidePath, "utf8"), /Visual development feedback loop/);
 
-const { Box, createApp, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
+const { Box, createApp, Text, useBoxMetrics, useFocus, useInput, useLayoutSize, useStdin } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
-assert.deepEqual(Object.keys(devtools).sort(), ["connectDevtools"]);
-assert.deepEqual(Object.keys(runtimeTesting).sort(), ["createTestHostBridge"]);
-for (const unsupportedSubpath of ["internal", "fullscreen"]) {
+assert.deepEqual(Object.keys(internalDevtools).sort(), ["connectDevtools"]);
+assert.deepEqual(Object.keys(internalRuntimeTesting).sort(), ["createTestHostBridge"]);
+for (const unsupportedSubpath of ["devtools", "testing", "fullscreen"]) {
   await assert.rejects(import("@vue-tui/runtime/" + unsupportedSubpath), (error) => {
     assert.equal(error?.code, "ERR_PACKAGE_PATH_NOT_EXPORTED");
     return true;
@@ -1121,7 +1132,7 @@ assert.equal("Static" in runtime, false);
 assert.equal("usePaste" in runtime, false);
 assert.equal("useRawInput" in runtime, false);
 assert.equal("useCursor" in runtime, false);
-assert.equal("useBoxMetrics" in runtime, false);
+assert.equal("useBoxMetrics" in runtime, true);
 assert.equal("measureElement" in runtime, false);
 assert.equal("useMouseInput" in runtime, false);
 assert.equal("useDraggable" in runtime, false);
@@ -1133,7 +1144,7 @@ assert.equal("Newline" in runtime, false);
 assert.equal("Spacer" in runtime, false);
 assert.equal("Transform" in runtime, false);
 assert.equal("useAnimation" in runtime, false);
-assert.equal("useLayoutSize" in runtime, false);
+assert.equal("useLayoutSize" in runtime, true);
 assert.equal("useRenderSession" in runtime, false);
 assert.equal("useElementGeometry" in runtime, false);
 assert.equal("useCaret" in runtime, false);
@@ -1146,9 +1157,8 @@ assert.equal("useFocusScope" in runtime, false);
 assert.equal("useFocusScopeInput" in runtime, false);
 assert.equal("kittyFlags" in runtime, false);
 assert.equal("kittyModifiers" in runtime, false);
-assert.equal(typeof useLayoutWidth, "function");
-assert.equal(typeof useViewportHeight, "function");
-assert.equal(typeof useBoxSize, "function");
+assert.equal(typeof useLayoutSize, "function");
+assert.equal(typeof useBoxMetrics, "function");
 assert.equal(typeof useFocus, "function");
 assert.equal(typeof useInput, "function");
 
@@ -1162,9 +1172,11 @@ for (const [componentName, component] of [["Box", Box], ["Text", Text]]) {
       {
         name: "Error",
         message:
-          "<" + componentName + '> does not accept the removed mouse listener "' +
+          "<" + componentName + '> does not accept the undeclared attribute "' +
           listenerName +
-          '". Targeted mouse input is outside the current Runtime foundation.',
+          '". Use a declared <' +
+          componentName +
+          "> prop.",
       },
     );
   }
@@ -1196,7 +1208,7 @@ const PackedPublicProps = defineComponent(() => () =>
     h(Text, { color: "gray", backgroundColor: "#12abEF" }, () => "packed-colors"),
   ),
 );
-assert.equal(runtime.renderToString(PackedPublicProps, { columns: 65_535 }).includes("packed-colors"), true);
+assert.equal(runtime.renderToString(PackedPublicProps, { width: 65_535 }).includes("packed-colors"), true);
 const CompleteBoxAndText = defineComponent(() => () =>
   h(
     Box,
@@ -1268,7 +1280,7 @@ const CompleteBoxAndText = defineComponent(() => () =>
 );
 assert.equal(
   runtime
-    .renderToString(CompleteBoxAndText, { columns: 80 })
+    .renderToString(CompleteBoxAndText, { width: 80, height: Infinity })
     .replace(/\\x1b\\[[0-9;]*m/g, "")
     .includes("complete-public-surface"),
   true,
@@ -1286,12 +1298,12 @@ const InvalidDimension = defineComponent(() => () =>
 );
 assert.throws(() => runtime.renderToString(InvalidDimension), /<Box> prop "width"/);
 assert.throws(
-  () => runtime.renderToString(PackedPublicProps, { columns: 65_536 }),
-  /option "columns" must be an integer between 1 and 65535/,
+  () => runtime.renderToString(PackedPublicProps, { width: 65_536 }),
+  /option "width" must be an integer between 1 and 65535/,
 );
 assert.equal(
   runtime.renderToString(PackedPublicProps, {
-    columns: 80,
+    width: 80,
     debug: true,
     mode: "fullscreen",
     rows: 24,
@@ -1303,7 +1315,7 @@ const OversizedDocument = defineComponent(() => () =>
   h(Box, { width: 1_024, height: 1_025, flexShrink: 0 }, () => h(Text, null, () => "large")),
 );
 assert.throws(
-  () => runtime.renderToString(OversizedDocument, { columns: 1_024 }),
+  () => runtime.renderToString(OversizedDocument, { width: 1_024, height: Infinity }),
   /Paint surface 1024x1025 exceeds the 1048576-cell resource limit/,
 );
 
@@ -1773,7 +1785,7 @@ bridgeBoundaryApp.mount = (options) => {
   interceptedBridgeMountOptions = options;
   return bridgeBoundaryMount(options);
 };
-const bridgeBoundary = runtimeTesting.createTestHostBridge();
+const bridgeBoundary = internalRuntimeTesting.createTestHostBridge();
 bridgeBoundary.mount(bridgeBoundaryApp, {
   stdin: new PassThrough(),
   stdout: new PassThrough(),
@@ -1847,14 +1859,15 @@ assert.equal(stringTargetedFocus.blur(), undefined);
 
 let layoutWidthProjection;
 let viewportHeightProjection;
-let boxSizeProjection;
+let boxMetricsProjection;
 let scrollBoxHandle;
 const LayoutProbe = defineComponent(() => {
   const host = shallowRef(null);
   scrollBoxHandle = shallowRef(null);
-  layoutWidthProjection = useLayoutWidth();
-  viewportHeightProjection = useViewportHeight();
-  boxSizeProjection = useBoxSize(host);
+  const layoutProjection = useLayoutSize();
+  layoutWidthProjection = layoutProjection.width;
+  viewportHeightProjection = layoutProjection.height;
+  boxMetricsProjection = useBoxMetrics(host);
   return () => h(Box, { ref: host, width: 8, height: 3 }, () =>
     h(ScrollBox, { ref: scrollBoxHandle }, { default: () => h(Text, null, () => "packed size") }),
   );
@@ -1862,12 +1875,15 @@ const LayoutProbe = defineComponent(() => {
 const layoutApp = await render(LayoutProbe, { columns: 20, rows: 5 });
 assert.equal(layoutWidthProjection.value, 20);
 assert.equal(viewportHeightProjection.value, 5);
-assert.deepEqual(boxSizeProjection.value, { width: 8, height: 3 });
-assert.deepEqual(Reflect.ownKeys(boxSizeProjection.value), ["width", "height"]);
+assert.equal(boxMetricsProjection.width.value, 8);
+assert.equal(boxMetricsProjection.height.value, 3);
+assert.equal(boxMetricsProjection.hasMeasured.value, true);
+assert.equal(typeof boxMetricsProjection.left.value, "number");
+assert.equal(typeof boxMetricsProjection.top.value, "number");
 assert.equal(isReadonly(layoutWidthProjection), true);
 assert.equal(isReadonly(viewportHeightProjection), true);
-assert.equal(isReadonly(boxSizeProjection), true);
-assert.equal(Object.isFrozen(boxSizeProjection.value), true);
+assert.equal(isReadonly(boxMetricsProjection.width), true);
+assert.equal(isReadonly(boxMetricsProjection.hasMeasured), true);
 assert.equal(typeof scrollBoxHandle.value.scrollByLines, "function");
 assert.equal(typeof scrollBoxHandle.value.scrollToLine, "function");
 assert.equal(typeof scrollBoxHandle.value.scrollToTop, "function");
@@ -1875,35 +1891,39 @@ assert.equal(typeof scrollBoxHandle.value.scrollToBottom, "function");
 assert.equal(layoutApp.lastFrame().includes("packed"), true);
 assert.equal(layoutApp.lastFrame().includes("size"), true);
 assert.equal("session" in layoutApp, false);
-const acceptedBoxSize = boxSizeProjection.value;
+const acceptedBoxWidth = boxMetricsProjection.width.value;
+const acceptedBoxHeight = boxMetricsProjection.height.value;
 await layoutApp.terminal.resize(24, 6);
 assert.equal(layoutWidthProjection.value, 24);
 assert.equal(viewportHeightProjection.value, 6);
-assert.equal(boxSizeProjection.value, acceptedBoxSize);
+assert.equal(boxMetricsProjection.width.value, acceptedBoxWidth);
+assert.equal(boxMetricsProjection.height.value, acceptedBoxHeight);
 layoutApp.dispose();
 assert.equal(layoutWidthProjection.value, 24);
 assert.equal(viewportHeightProjection.value, 6);
-assert.equal(boxSizeProjection.value, null);
+assert.equal(boxMetricsProjection.hasMeasured.value, false);
+assert.equal(boxMetricsProjection.width.value, 0);
 
 let streamLayoutWidth;
 let streamViewportHeight;
-const UnboundedLayoutProbe = defineComponent(() => {
-  streamLayoutWidth = useLayoutWidth();
-  streamViewportHeight = useViewportHeight();
+const DocumentHostLayoutProbe = defineComponent(() => {
+  const streamLayout = useLayoutSize();
+  streamLayoutWidth = streamLayout.width;
+  streamViewportHeight = streamLayout.height;
   return () => h(Text, null, () =>
-    String(streamLayoutWidth.value) + "x" + (streamViewportHeight?.value ?? "unbounded"),
+    String(streamLayoutWidth.value) + "x" + String(streamViewportHeight.value),
   );
 });
-const unboundedLayoutApp = await render(UnboundedLayoutProbe, {
+const documentHostLayoutApp = await render(DocumentHostLayoutProbe, {
   columns: 30,
   rows: 8,
   host: { stdout: "stream" },
 });
-assert.equal(streamLayoutWidth.value, 30);
-assert.equal(streamViewportHeight, null);
-assert.equal(unboundedLayoutApp.lastFrame(), "30xunbounded");
-assert.equal("session" in unboundedLayoutApp, false);
-unboundedLayoutApp.dispose();
+assert.equal(streamLayoutWidth.value, 80);
+assert.equal(streamViewportHeight.value, 24);
+assert.equal(documentHostLayoutApp.lastFrame(), "80x24");
+assert.equal("session" in documentHostLayoutApp, false);
+documentHostLayoutApp.dispose();
 
 let movementHandle;
 const MovementProbe = defineComponent(() => {

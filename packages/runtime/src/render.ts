@@ -27,19 +27,10 @@ import {
 import type { NormalizedInputFact } from "./io/normalized-input.ts";
 import { projectPublicInputEvent } from "./io/public-input.ts";
 import {
-  captureInternalInputRoutePlan,
-  dispatchInternalInput,
-  type InternalInputRouteCandidate,
-} from "./io/input-route-policy.ts";
-import {
-  createInternalInputRoutingRuntime,
-  type InternalInputRoutingDemandLease,
-  type InternalInputTopologySnapshot,
-} from "./io/input-route-runtime.ts";
-import {
-  classifyLiveInputAvailability,
-  createInputAvailabilityRef,
-} from "./io/input-availability.ts";
+  createInternalInputSubscriptions,
+  type InternalInputDemandLease,
+  type InternalInputSubscriber,
+} from "./io/input-subscriptions.ts";
 import {
   INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
@@ -76,25 +67,7 @@ import { registerConsoleSink, type ConsoleSinkRegistration } from "./io/console-
 import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER } from "./io/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
-import {
-  createFullscreenMouseController,
-  type FullscreenMouseController,
-  type FullscreenMouseInputSnapshot,
-  type PreparedMouseFrame,
-} from "./mouse/controller.ts";
-import { setFullscreenMouseController } from "./mouse/context.ts";
-import {
-  INTERNAL_TEST_INPUT_HOST,
-  createInternalTestMouseFact,
-  type InternalTestMouseEvent,
-} from "./io/test-input-host.ts";
-import {
-  AppContextKey,
-  StdinContextKey,
-  type AppContext,
-  type SgrMouseMode,
-  type StdinContext,
-} from "./context.ts";
+import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
 import {
   InternalRenderSessionKey,
   createLiveRenderSessionService,
@@ -135,26 +108,8 @@ import {
   type InternalFocusController,
 } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
-import {
-  createInternalCaretController,
-  type InternalCaretController,
-  type InternalPreparedCaretFrame,
-} from "./caret/caret-controller.ts";
-import { InternalCaretControllerKey } from "./caret/caret-context.ts";
 import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
 import { INTERNAL_SUSPENSION_HOST, processSuspensionHost } from "./process-suspension.ts";
-import {
-  createInternalClipboardService,
-  normalizeClipboardTransport,
-  type InternalClipboardService,
-} from "./clipboard/clipboard-service.ts";
-import { InternalClipboardServiceKey } from "./clipboard/context.ts";
-import {
-  createInternalTextSelectionController,
-  type InternalTextSelectionController,
-} from "./selection/selection-controller.ts";
-import { InternalTextSelectionControllerKey } from "./selection/context.ts";
-import type { InternalSelectionPaintFrame } from "./selection/selection-paint.ts";
 import { createVueCleanupGuard, type VueCleanupErrorOwner } from "./vue-cleanup-guard.ts";
 import { getInternalMountOptions, type InternalMountOptions } from "./internal-mount-options.ts";
 
@@ -170,9 +125,10 @@ export interface MountOptions {
   readonly stderr?: Writable;
   /**
    * Select the terminal screen model requested by this application.
-   * Omission requests Inline. An explicit Fullscreen request requires a TTY
-   * stdout with positive terminal dimensions and otherwise fails before setup
-   * or terminal mutation.
+   * Omission requests Inline. On a live TTY, an explicit Fullscreen request
+   * requires positive terminal dimensions and otherwise fails before setup or
+   * terminal mutation. On non-TTY stdout, Inline and Fullscreen select the same
+   * supported non-interactive document host.
    *
    * @default 'inline'
    */
@@ -341,7 +297,12 @@ const FULLSCREEN_STATIC_ERROR =
   "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
 
 function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
-  return classifyLiveInputAvailability(stdin).status === "available";
+  const input = stdin as NodeJS.ReadStream & {
+    readonly isRaw?: boolean;
+    readonly isTTY?: boolean;
+    readonly setRawMode?: (mode: boolean) => unknown;
+  };
+  return input.isTTY === true && (input.isRaw === true || typeof input.setRawMode === "function");
 }
 
 function isReadableHostLive(stdin: NodeJS.ReadStream): boolean {
@@ -350,10 +311,6 @@ function isReadableHostLive(stdin: NodeJS.ReadStream): boolean {
     readonly readableEnded?: boolean;
   };
   return !stream.destroyed && !stream.readableEnded && stream.readable !== false;
-}
-
-function supportsTerminalMouse(): boolean {
-  return process.env["TERM"] !== "dumb";
 }
 
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
@@ -426,9 +383,9 @@ function assertFullscreenCapability(
   stdout: NodeJS.WriteStream,
   terminalProbe: TerminalSizeProbeResult,
 ): void {
-  if (stdout.isTTY !== true) {
-    throw new Error('Fullscreen mode requires mount option "stdout" to be a TTY.');
-  }
+  // Non-TTY stdout selects the supported secondary document host for either
+  // mode; Fullscreen does not throw solely because no TTY exists.
+  if (stdout.isTTY !== true) return;
   const dimensions = resolveLiveDimensions(
     {
       isTTY: true,
@@ -500,12 +457,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
-  let mountedMouseController: FullscreenMouseController | null = null;
-  let mountedTestInputHostDetach: (() => void) | null = null;
   let mountedFocusController: InternalFocusController | null = null;
-  let mountedCaretController: InternalCaretController | null = null;
-  let mountedClipboard: InternalClipboardService | null = null;
-  let mountedTextSelection: InternalTextSelectionController | null = null;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
   // re-imports the entry. Held per-app so teardown() can unregister exactly its
@@ -969,18 +921,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     closeOutstandingSynchronizedOutput();
 
     runBestEffort(() => mountedScheduler?.cancel());
-    if (mountedMouseController) {
-      const mouseController = mountedMouseController;
-      mountedMouseController = null;
-      setFullscreenMouseController(appContext!, null);
-      runBestEffort(() => mouseController.beginSilentTeardown());
-      runBestEffort(() => mouseController.dispose());
-    }
-    if (mountedTestInputHostDetach) {
-      const detachTestInputHost = mountedTestInputHostDetach;
-      mountedTestInputHostDetach = null;
-      runBestEffort(detachTestInputHost);
-    }
     const emergencyKittyController = mountedKittyController ?? mountedEmergencyKittyController;
     mountedKittyController = null;
     mountedEmergencyKittyController = null;
@@ -996,13 +936,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     if (mountedWriter && mountedDynamicUpdatesLive && appContext) {
       const writer = mountedWriter;
-      const returnToBottom = writer.getCursorReturnToBottom();
-      if (returnToBottom !== "") writeBestEffort(appContext.stdout, returnToBottom, true);
       if (mountedNeedsTerminalLineAdvance?.()) {
         writeBestEffort(appContext.stdout, nextLineEscape, true);
       }
       if (writer.isCursorHidden()) writeBestEffort(appContext.stdout, "\x1b[?25h", true);
-      writer.reset({ cursorDirty: false, cursorHidden: false });
+      writer.reset({ cursorHidden: false });
     }
     if (mountedAlternateScreen && appContext) {
       if (writeBestEffort(appContext.stdout, ansiEscapes.exitAlternativeScreen, true)) {
@@ -1325,14 +1263,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const stdoutWritable = stdout
         ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
         : false;
-      if (mountedMouseController) {
-        runBestEffort(() => mountedMouseController?.beginSilentTeardown());
-      }
-      if (mountedTestInputHostDetach) {
-        const detachTestInputHost = mountedTestInputHostDetach;
-        mountedTestInputHostDetach = null;
-        runBestEffort(detachTestInputHost);
-      }
       if (mountedConsoleSink) {
         const consoleSink = mountedConsoleSink;
         mountedConsoleSink = null;
@@ -1345,17 +1275,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
-      if (mountedCaretController) {
-        const caretController = mountedCaretController;
-        mountedCaretController = null;
-        runBestEffort(() => caretController.dispose());
-      }
-      if (mountedMouseController) {
-        const mouseController = mountedMouseController;
-        mountedMouseController = null;
-        setFullscreenMouseController(appContext, null);
-        runBestEffort(() => mouseController.dispose());
-      }
       if (mountedGeometry) {
         const geometry = mountedGeometry;
         mountedGeometry = null;
@@ -1366,16 +1285,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const focusController = mountedFocusController;
         mountedFocusController = null;
         runBestEffort(() => focusController.dispose());
-      }
-      if (mountedClipboard) {
-        const clipboard = mountedClipboard;
-        mountedClipboard = null;
-        runBestEffort(() => clipboard.dispose());
-      }
-      if (mountedTextSelection) {
-        const textSelection = mountedTextSelection;
-        mountedTextSelection = null;
-        runBestEffort(() => textSelection.dispose());
       }
       if (mountedKittyController) {
         // Disable-kitty is a restore escape: on the signal path it must flush
@@ -1401,15 +1310,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // following shell prompt cannot append to the frame's final row. NEL moves
       // to column zero even when the terminal does not translate LF to CRLF.
       if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
-        // A declared application caret may leave the physical cursor above the
-        // bottom of either a short or full-height frame. Return to the writer's
-        // actual bottom before establishing the post-app line; otherwise the
-        // shell can overwrite retained application rows.
         const writer = mountedWriter;
-        const returnToBottom = writer.getCursorReturnToBottom();
-        if (returnToBottom !== "") {
-          writeBestEffort(mountedAppContext.stdout, returnToBottom, sync);
-        }
         if (mountedNeedsTerminalLineAdvance?.()) {
           writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
         }
@@ -1417,7 +1318,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (writer.isCursorHidden()) {
             writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", true);
           }
-          writer.reset({ cursorDirty: false, cursorHidden: false });
+          writer.reset({ cursorHidden: false });
         } else {
           runBestEffort(() => writer.done());
         }
@@ -1622,7 +1523,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const patchConsole = validatePatchConsole(
       (options as { readonly patchConsole?: unknown }).patchConsole,
     );
-    const clipboardTransport = normalizeClipboardTransport(internalOptions.clipboard);
     const onRender = internalOptions.onRender;
     const incrementalRendering = internalOptions.incrementalRendering;
     // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
@@ -1645,11 +1545,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
     const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
-    const testInputHost = internalOptions[INTERNAL_TEST_INPUT_HOST];
     const kittyKeyboard = internalOptions[INTERNAL_KITTY_KEYBOARD];
     const configuredTerminalSizeProbe = internalOptions[INTERNAL_TERMINAL_SIZE_PROBE];
     const suspensionHost = internalOptions[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
-    const suspensionSupported = suspensionHost.supported;
     // Process-global fallbacks describe the process's controlling terminal, not
     // an arbitrary custom WriteStream. A custom TTY must provide a complete
     // columns/rows pair; deterministic hosts can supply the internal modeled
@@ -1687,8 +1585,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     const surface = resolveLiveSurface({
       requestedMode,
-      liveUpdatesOverride: requestedMode === "fullscreen" ? true : liveUpdatesOverride,
-      suspensionSupported,
+      liveUpdatesOverride,
       stdout: stdoutFacts,
       terminalProbe,
     });
@@ -1696,9 +1593,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
     const boundedInlineSurface = surface.kind === "inline-terminal";
     const inlineTerminalSurface = surface.kind === "inline-terminal";
-    const mouseProtocolAvailable = supportsTerminalMouse() || testInputHost?.supportsMouse === true;
-    const targetedCaretOutputAvailable =
-      dynamicUpdatesLive && surface.session.output.destination === "terminal";
+    // Supported secondary document host: non-TTY final-stream with modeled layout.
+    const documentHostSurface =
+      surface.kind === "final-stream" && surface.reason === "stdout-not-tty";
+    const boundedDocumentSurface =
+      documentHostSurface ||
+      (surface.kind === "live-stream" && surface.reason === "stdout-not-tty");
 
     // Deterministic option, stream, capability, ownership, and surface
     // preflight ends here. From this point every consumed operation is covered
@@ -1737,6 +1637,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (boundedInlineSurface) {
           if (next.terminal === null) return null;
           return { ...next, layout: next.terminal };
+        }
+        // Document hosts keep the fixed modeled layout for the whole lifetime.
+        if (boundedDocumentSurface) {
+          return {
+            terminal: null,
+            layout: {
+              columns: surface.session.dimensions.layout.columns,
+              rows: surface.session.dimensions.layout.rows,
+            },
+          };
         }
         return next;
       }
@@ -1906,12 +1816,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         );
         if (!abandonment?.physicalStateUncertain) requestTerminalReconcile();
       };
-      type WriterCaretPosition = InternalPreparedCaretFrame["position"];
-      interface WriterCaretOwner {
-        readonly position: WriterCaretPosition;
-      }
-      let activeWriterCaretOwner: WriterCaretOwner | null = null;
-      let writerCaretDeclaration: WriterCaretPosition;
       mountedGetLastOutput = () => frameState.lastOutput;
       mountedNeedsTerminalLineAdvance = () =>
         inlineTerminalSurface &&
@@ -1946,8 +1850,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
         const writer = mountedWriter;
-        mountedCaretController?.setOutputAvailable(false, { surfaceReleased: true });
-        mountedTextSelection?.setSurfaceAvailable(false, { suspended: true });
         if (fixedFullscreenSurface) {
           fullscreenBaselineValid = false;
           mountedGeometry?.setSurfaceAvailable(false);
@@ -1963,7 +1865,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             }
           }
           if (writer) {
-            runSuspensionStep(() => writer.reset({ cursorDirty: false, cursorHidden: false }));
+            runSuspensionStep(() => writer.reset({ cursorHidden: false }));
           }
           frameState.lastOutput = "";
           frameState.lastOutputToRender = "";
@@ -1974,8 +1876,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (!inlineTerminalSurface || !dynamicUpdatesLive || !writer) return;
         mountedGeometry?.setSurfaceAvailable(false);
         if (rememberSurface) suspendedInlineSurface = true;
-        const returnToBottom = writer.getCursorReturnToBottom();
-        if (returnToBottom !== "") writeBestEffort(stdout, returnToBottom, true);
         if (mountedNeedsTerminalLineAdvance?.()) {
           writeBestEffort(stdout, nextLineEscape, true);
         }
@@ -1983,7 +1883,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const cursorShown = !cursorWasHidden || writeBestEffort(stdout, "\x1b[?25h", true);
         runSuspensionStep(() =>
           writer.reset({
-            cursorDirty: false,
             cursorHidden: cursorWasHidden && !cursorShown,
           }),
         );
@@ -2008,10 +1907,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runLifecycleTransaction(() => {
           terminalSuspended = true;
           terminalResumeInProgress = false;
-          runSuspensionStep(() => mountedClipboard?.suspend());
           runSuspensionStep(() => mountedScheduler?.cancel());
           runSuspensionStep(() => mountedKittyController?.suspend(true));
-          runSuspensionStep(() => mountedMouseController?.suspend());
           runSuspensionStep(() => mountedStdinController?.suspend(true));
           releaseOutputSurfaceForSuspension(true);
         });
@@ -2109,9 +2006,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 if (fixedFullscreenSurface && suspendedFullscreenSurface) {
                   ensureFullscreenSurface();
                 }
-                mountedMouseController?.resume();
                 mountedGeometry?.setSurfaceAvailable(true);
-                mountedTextSelection?.setSurfaceAvailable(fixedFullscreenSurface);
               });
             });
             if (!(await waitForAcceptedOutput(surfaceResult))) {
@@ -2168,7 +2063,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             runLifecycleTransaction(() => {
               terminalSuspended = false;
-              mountedClipboard?.resume();
               suspendedFullscreenSurface = false;
               suspendedInlineSurface = false;
               resizeHandledGeneration = Math.max(
@@ -2189,7 +2083,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (!teardownStarted) {
             runLifecycleTransaction(() => {
               runSuspensionStep(() => mountedKittyController?.suspend(true));
-              runSuspensionStep(() => mountedMouseController?.suspend());
               runSuspensionStep(() => mountedStdinController?.suspend(true));
               releaseOutputSurfaceForSuspension(false);
             });
@@ -2212,19 +2105,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       function restoreLastOutput() {
         if (!dynamicUpdatesLive) return;
-        // Clear() resets log-update's cursor state, so replay the latest cursor
-        // intent before restoring output after external stdout/stderr writes.
-        const caretPosition = activeWriterCaretOwner
-          ? activeWriterCaretOwner.position
-          : mountedCaretController?.writerPosition;
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
         // the first content commit or the value the resize-boundary path assigns —
         // must fall back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
         // null/undefined, so an
         // empty string would pass through and restore nothing after an external write.
-        withWriterCaretOwnership(caretPosition, () => {
-          writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
-        });
+        writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
       }
 
       function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
@@ -2360,8 +2246,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdout,
         stderr,
         stdin,
-        isRawModeSupported: hasRawInputCapability(stdin),
+        // Non-TTY document hosts never own managed terminal input, even when the
+        // caller supplied a TTY stdin for direct observation.
+        isRawModeSupported: boundedDocumentSurface ? false : hasRawInputCapability(stdin),
         setRawMode(mode: boolean) {
+          if (boundedDocumentSurface) return;
           if (
             typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
           ) {
@@ -2371,24 +2260,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writeToStdout,
         writeToStderr,
       };
-      const clipboard = createInternalClipboardService({
-        transport: clipboardTransport,
-        osc52Available: dynamicUpdatesLive && surface.session.output.destination === "terminal",
-        writeOsc52(text) {
-          if (teardownStarted) throw new Error("clipboard transport is disposed");
-          if (terminalSuspended) throw new Error("clipboard transport is suspended");
-          const result = runOutputTransaction(() => {
-            runLifecycleTransaction(() => {
-              const payload = Buffer.from(text, "utf8").toString("base64");
-              writeRuntimeOutput(stdout, `\x1b]52;c;${payload}\x07`);
-            });
-          });
-          if (result.status === "blocked") {
-            throw new Error("clipboard output is backpressured; retry after output is ready");
-          }
-        },
-      });
-      mountedClipboard = clipboard;
       mountedAppContext = appContext;
       // Reserve the stream only after every mount option and session fact needed
       // above has been read successfully. From this point teardown can always
@@ -2416,7 +2287,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       releaseMountedExitListener = acquireRuntimeResource("processListeners");
 
       // Termination cleanup is independent from output cadence. A final-output
-      // app can still acquire raw, paste, mouse, or explicit Kitty state through
+      // app can still acquire raw, paste, or explicit Kitty state through
       // input composables, so every real mount gets the same idempotent handler.
       // signal-exit re-raises the terminating signal as soon as this callback
       // returns, so this path has the same non-returning cleanup requirement as
@@ -2449,8 +2320,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const stdinController = createStdinController(stdin, {
         appCtx: appContext,
         exitOnCtrlC,
-        getMouseController: () => mountedMouseController,
-        mouseProtocolAvailable,
         beforeManagedInputAcquire: ensureFullscreenSurface,
         isManagedInputSurfaceReady: () =>
           !terminalSuspended &&
@@ -2463,19 +2332,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
           });
         },
-        onSgrMouseModeChange: testInputHost
-          ? (level) => testInputHost.onMouseReportingChange(level === "hover" ? "drag" : level)
-          : undefined,
         acquireKittyKeyboardDemand() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
+        inertManagedInput: boundedDocumentSurface,
       });
       mountedStdinController = stdinController;
-      if (testInputHost) {
-        mountedTestInputHostDetach = testInputHost.bind((event) => {
-          stdinController.injectTestMouse(event);
-        });
-      }
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
       // terminal: attachYoga() allocates a WASM yoga node, and later Vue setup
@@ -2526,39 +2388,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           root: tuiRoot,
         });
         mountedFocusController = focusController;
-        const caretController = createInternalCaretController({
-          focus: focusController,
-          outputAvailable: targetedCaretOutputAvailable,
-          requestPaint: () => scheduledCommit(),
-        });
-        mountedCaretController = caretController;
-        const geometry = createInternalGeometryService(tuiRoot, () => scheduledCommit());
+        const geometry = createInternalGeometryService(() => scheduledCommit());
         mountedGeometry = geometry;
         setInternalGeometryService(appContext, geometry);
-        const textSelection = createInternalTextSelectionController({
-          surfaceAvailable: fixedFullscreenSurface,
-          unavailableReason: "host-unavailable",
-          requestPaint: () => scheduledCommit(),
-          clipboard: mountedClipboard!,
-        });
-        mountedTextSelection = textSelection;
-        const mouseController = fixedFullscreenSurface
-          ? createFullscreenMouseController({
-              stdin: stdinController,
-              geometry,
-              protocolAvailable: mouseProtocolAvailable,
-              requestPaint: () => scheduledCommit(),
-              reportError(error) {
-                appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
-              },
-            })
-          : null;
-        mountedMouseController = mouseController;
-        setFullscreenMouseController(appContext, mouseController);
         const renderedTargets = createRenderedTargetController(tuiRoot, [
           focusController,
           geometry,
-          ...(mouseController ? [mouseController] : []),
         ]);
         mountedRenderedTargets = renderedTargets;
         setRenderedTargetController(appContext, renderedTargets);
@@ -2580,44 +2415,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       });
       mountedWriter = writer;
 
-      function writerCaretPositionsEqual(
-        left: WriterCaretPosition,
-        right: WriterCaretPosition,
-      ): boolean {
-        return left?.x === right?.x && left?.y === right?.y;
-      }
-
-      function setWriterCaretPosition(position: WriterCaretPosition): void {
-        if (writerCaretPositionsEqual(writerCaretDeclaration, position)) return;
-        writer.setCursorPosition(position);
-        writerCaretDeclaration = position;
-      }
-
-      function withWriterCaretOwnership<Value>(
-        position: WriterCaretPosition,
-        operation: () => Value,
-      ): Value {
-        const previousOwner = activeWriterCaretOwner;
-        const owner: WriterCaretOwner = { position };
-        activeWriterCaretOwner = owner;
-        setWriterCaretPosition(position);
-        try {
-          return operation();
-        } finally {
-          activeWriterCaretOwner = previousOwner;
-          // A nested coordinated write may have declared another caret. Restore
-          // the enclosing frame's candidate before its physical write resumes.
-          setWriterCaretPosition(previousOwner ? previousOwner.position : position);
-        }
-      }
-
       function createOutputStateRollback(): () => void {
         const rollbackWriter = writer.createRollback();
         const previousFrameState = { ...frameState };
         const previousInlineRegionStarted = inlineRegionStarted;
         const previousAlternateScreen = mountedAlternateScreen;
         const previousFullscreenCursorHidden = mountedFullscreenCursorHidden;
-        const previousWriterCaretDeclaration = writerCaretDeclaration;
         const previousFullscreenBaselineValid = fullscreenBaselineValid;
         const previousFullscreenBaselineColumns = fullscreenBaselineColumns;
         const previousFullscreenBaselineRows = fullscreenBaselineRows;
@@ -2633,7 +2436,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           inlineRegionStarted = previousInlineRegionStarted;
           setAlternateScreenOwned(previousAlternateScreen);
           setFullscreenCursorHidden(previousFullscreenCursorHidden);
-          writerCaretDeclaration = previousWriterCaretDeclaration;
           fullscreenBaselineValid = previousFullscreenBaselineValid;
           fullscreenBaselineColumns = previousFullscreenBaselineColumns;
           fullscreenBaselineRows = previousFullscreenBaselineRows;
@@ -2750,105 +2552,67 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           readonly writeBefore?: () => void;
           /** Side-channel output invalidates every row, even when frame text is unchanged. */
           readonly forceFull?: boolean;
-          /** Present for a new render frame, including an explicit hidden caret. */
-          readonly frameCaret?: { readonly position: InternalPreparedCaretFrame["position"] };
         } = {},
       ) {
-        const caretPosition = options.frameCaret
-          ? options.frameCaret.position
-          : activeWriterCaretOwner
-            ? activeWriterCaretOwner.position
-            : mountedCaretController?.writerPosition;
         const viewportColumns = renderSession.session.dimensions.layout.columns;
         const viewportRows = renderSession.session.dimensions.layout.rows;
         const dimensionsMatch =
           fullscreenBaselineColumns === viewportColumns && fullscreenBaselineRows === viewportRows;
-        // The enclosing frame owner has already applied the candidate declaration.
-        // Cursor dirtiness therefore records whether the physical baseline still
-        // needs a move, show, or hide even when every rendered row is unchanged.
         if (
           options.writeBefore === undefined &&
           fullscreenBaselineValid &&
           dimensionsMatch &&
-          output === frameState.lastOutput &&
-          !writer.isCursorDirty()
+          output === frameState.lastOutput
         ) {
           return;
         }
-        withWriterCaretOwnership(caretPosition, () =>
-          runLifecycleTransaction(() => {
-            ensureFullscreenSurface();
-            const previousRows = frameState.lastOutput.split("\n");
-            const nextRows = output.split("\n");
-            const canDiff =
-              options.forceFull !== true &&
-              fullscreenBaselineValid &&
-              dimensionsMatch &&
-              viewportRows !== null &&
-              previousRows.length === viewportRows &&
-              nextRows.length === viewportRows;
-            runCoordinatedWrite(
-              () => {
-                // A declared caret may be visible after the previous sync. Hide it
-                // before either a full repaint or absolute row replacements.
-                writeRuntimeOutput(stdout, hideCursorEscape);
-                options.writeBefore?.();
-              },
-              () => {
-                setWriterCaretPosition(caretPosition);
-                if (canDiff) {
-                  const changedRows: string[] = [];
-                  for (let row = 0; row < viewportRows; row++) {
-                    if (previousRows[row] === nextRows[row]) continue;
-                    changedRows.push(
-                      ansiEscapes.cursorTo(0, row),
-                      "\x1b[0m",
-                      nextRows[row]!,
-                      "\x1b[0m",
-                      ansiEscapes.eraseEndLine,
-                    );
-                  }
-                  // FrameWriter.sync() places a semantic caret relative to the
-                  // frame bottom. Re-establish that physical anchor even for a
-                  // caret-only update with no changed rows.
-                  changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, viewportRows - 1)));
-                  writeRuntimeOutput(stdout, changedRows.join(""));
-                } else {
-                  writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
+        runLifecycleTransaction(() => {
+          ensureFullscreenSurface();
+          const previousRows = frameState.lastOutput.split("\n");
+          const nextRows = output.split("\n");
+          const canDiff =
+            options.forceFull !== true &&
+            fullscreenBaselineValid &&
+            dimensionsMatch &&
+            viewportRows !== null &&
+            previousRows.length === viewportRows &&
+            nextRows.length === viewportRows;
+          runCoordinatedWrite(
+            () => {
+              writeRuntimeOutput(stdout, hideCursorEscape);
+              options.writeBefore?.();
+            },
+            () => {
+              if (canDiff) {
+                const changedRows: string[] = [];
+                for (let row = 0; row < viewportRows; row++) {
+                  if (previousRows[row] === nextRows[row]) continue;
+                  changedRows.push(
+                    ansiEscapes.cursorTo(0, row),
+                    "\x1b[0m",
+                    nextRows[row]!,
+                    "\x1b[0m",
+                    ansiEscapes.eraseEndLine,
+                  );
                 }
-                writer.sync(output);
-              },
-            );
+                // Keep the physical cursor at the frame bottom so later
+                // relative rewrites and teardown start from a known anchor.
+                changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, viewportRows - 1)));
+                writeRuntimeOutput(stdout, changedRows.join(""));
+              } else {
+                writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
+              }
+              writer.sync(output);
+            },
+          );
 
-            frameState.lastOutput = output;
-            frameState.lastOutputToRender = output;
-            frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
-            fullscreenBaselineValid = true;
-            fullscreenBaselineColumns = viewportColumns;
-            fullscreenBaselineRows = viewportRows;
-          }),
-        );
-      }
-
-      function renderInteractiveFrame(
-        output: string,
-        outputHeight: number,
-        preparedStatic: PreparedStaticOutput,
-        caretFrame: InternalPreparedCaretFrame,
-        staticHooks?: {
-          readonly onHandoff: () => void;
-          readonly onPrepared: () => void;
-        },
-      ) {
-        return withWriterCaretOwnership(caretFrame.position, () =>
-          renderInteractiveFrameWithOwnedCaret(
-            output,
-            outputHeight,
-            preparedStatic,
-            caretFrame,
-            staticHooks,
-          ),
-        );
+          frameState.lastOutput = output;
+          frameState.lastOutputToRender = output;
+          frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+          fullscreenBaselineValid = true;
+          fullscreenBaselineColumns = viewportColumns;
+          fullscreenBaselineRows = viewportRows;
+        });
       }
 
       function writePreparedStatic(
@@ -2858,18 +2622,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       ): void {
         writeRuntimeOutput(stdout, chunk, undefined, () => {
           onHandoff?.();
-          // A normally returned write, including `false`, owns this exact
-          // history prefix. A later dynamic segment may still fail without
-          // making the accepted history eligible for replay.
           prepared.accept(guardAcceptedStaticCleanup);
         });
       }
 
-      function renderInteractiveFrameWithOwnedCaret(
+      function renderInteractiveFrame(
         output: string,
         outputHeight: number,
         preparedStatic: PreparedStaticOutput,
-        caretFrame: InternalPreparedCaretFrame,
         staticHooks?: {
           readonly onHandoff: () => void;
           readonly onPrepared: () => void;
@@ -2881,11 +2641,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const viewportRows = renderSession.session.dimensions.layout.rows;
 
         if (fixedFullscreenSurface) {
-          repaintFullscreen(output, { frameCaret: { position: caretFrame.position } });
+          repaintFullscreen(output);
           return;
         }
 
-        if (output !== "" || hasStaticOutput || writer.isCursorDirty()) {
+        if (output !== "" || hasStaticOutput) {
           ensureInlineRegionStart();
         }
 
@@ -2903,34 +2663,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             writer.write(outputToRender);
           });
         } else {
-          // Mirror Ink's TWO-LEVEL commit gate, which keeps the synchronized-update
-          // wrapper and the "should we touch log-update at all" decision separate:
-          //
-          //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
-          //    decides whether to call the (throttled) log at all. It compares the RAW
-          //    frame (`output`, no trailing "\n") against the PREVIOUS frame
-          //    (frameState.lastOutput, set at the end of this fn) — NOT log-update's
-          //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
-          //    case: on the first commit of an app that renders nothing, both are ""
-          //    so the gate is false and log-update — including its LAZY cursor hide —
-          //    is never reached, so the initial empty commit emits no log-update
-          //    cursor escapes (the cursor stays visible), matching Ink. Using
-          //    willRender(outputToRender) here
-          //    instead would compare "\n" against "" and wrongly fire the hide. A
-          //    cursor-only move whose position is unchanged is still dirty, so the
-          //    `|| isCursorDirty` disjunct keeps it reaching log-update.
-          //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
-          //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
-          //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
-          //    flag is reset and the write no-ops cleanly — Ink emits ZERO bytes there,
-          //    not an empty `BSU`+`ESU` pair.
-          //
-          // willRender()/isCursorDirty() must be read BEFORE writer.write():
-          // log-update's render consumes/resets isCursorDirty, so reading them
-          // afterwards would be stale. Both reads are pure (no mutation), and the
-          // bsu/esu wrapper is gated on this single pre-write snapshot.
+          // Compare the raw frame so an initially empty app never enters
+          // log-update and therefore emits no cursor escapes.
           const willRender = writer.willRender(outputToRender);
-          if (output !== frameState.lastOutput || writer.isCursorDirty()) {
+          if (output !== frameState.lastOutput) {
             const shouldWrap = synchronize && willRender;
             if (shouldWrap) runSynchronizedOutput(() => writer.write(outputToRender));
             else writer.write(outputToRender);
@@ -2948,17 +2684,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
-        selection?: InternalSelectionPaintFrame,
       ): string {
         const output = paint(tuiRoot, {
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
           geometry,
-          selection,
         });
         // The hard paint viewport is the primary guard. Keep a final physical
         // row bound as defense-in-depth for future paint extensions: Inline
         // must never let an application frame exceed terminal-addressable rows.
-        return boundedInlineSurface && viewportRows !== undefined
+        return (boundedInlineSurface || boundedDocumentSurface) && viewportRows !== undefined
           ? output.split("\n").slice(0, viewportRows).join("\n")
           : output;
       }
@@ -3023,8 +2757,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           let surface: CoordinatedWriteResult;
           try {
             surface = runOutputTransaction(() => {
-              // A rendered focus or pointer target can establish managed-input
-              // demand only after Vue has attached its host node. Reconcile it
+              // A rendered target can establish state only after Vue has
+              // attached its host node. Reconcile it
               // before the first terminal mutation so a non-controllable stdin
               // fails without briefly entering and restoring Fullscreen.
               mountedRenderedTargets?.reconcile();
@@ -3114,17 +2848,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const leaveLifecycleTransaction = enterLifecycleTransaction();
         const releasePreparedFrame = acquireRuntimeResource("preparedFrames");
         let geometryFrame: InternalGeometryPaintFrame | undefined;
-        let selectionFrame: InternalSelectionPaintFrame | undefined;
-        let caretFrame: InternalPreparedCaretFrame | undefined;
-        let mouseFrame: PreparedMouseFrame | undefined;
         let preparedStatic: PreparedStaticOutput | undefined;
         let settled = false;
 
         const releasePreparedState = (): void => {
           try {
-            caretFrame?.discard();
-            mouseFrame?.discard();
-            selectionFrame?.discard();
             geometryFrame?.discard();
           } finally {
             releasePreparedFrame();
@@ -3136,9 +2864,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           settled = true;
           try {
             geometryFrame?.commit();
-            selectionFrame?.accept();
-            mouseFrame?.accept();
-            caretFrame?.accept();
             preparedStatic?.accept(guardAcceptedStaticCleanup);
           } finally {
             releasePreparedState();
@@ -3148,10 +2873,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (settled) return;
           settled = true;
           try {
-            if (caretFrame) setWriterCaretPosition(caretFrame.previousPosition);
             if (physicalFailure) {
               preparedStatic?.abandon();
-              mouseFrame?.abandon();
             }
           } finally {
             releasePreparedState();
@@ -3172,17 +2895,42 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (!dynamicUpdatesLive) {
           // Non-interactive: compute the dynamic frame now, write static output
           // after onRender, and defer dynamic frame output until unmount.
+          // The document host and other final-stream surfaces with a finite
+          // layout height use that bound as a maximum without padding shorter
+          // documents.
           tuiRoot.yoga.setWidth(w);
-          const restoreLayoutGuards = calculateLayoutWithContentGuards(
+          const documentMaximumRows = boundedDocumentSurface
+            ? (renderSession.session.dimensions.layout.rows ?? undefined)
+            : undefined;
+          let restoreLayoutGuards = calculateLayoutWithContentGuards(
             tuiRoot,
             w,
             undefined,
             Yoga.DIRECTION_LTR,
           );
           try {
+            if (
+              documentMaximumRows !== undefined &&
+              tuiRoot.yoga.getComputedLayout().height > documentMaximumRows
+            ) {
+              restoreLayoutGuards();
+              restoreLayoutGuards = calculateLayoutWithContentGuards(
+                tuiRoot,
+                w,
+                documentMaximumRows,
+                Yoga.DIRECTION_LTR,
+              );
+            }
+            const computedRootHeight = Math.max(
+              0,
+              Math.floor(tuiRoot.yoga.getComputedLayout().height),
+            );
+            const paintViewportRows =
+              documentMaximumRows === undefined
+                ? undefined
+                : Math.min(documentMaximumRows, computedRootHeight);
             geometryFrame = mountedGeometry?.beginFrame();
-            selectionFrame = mountedTextSelection?.beginFrame();
-            const frame = renderFrame(w, undefined, geometryFrame, selectionFrame);
+            const frame = renderFrame(w, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -3212,25 +2960,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           Yoga.DIRECTION_LTR,
         );
         try {
-          const inlineMaximumRows = boundedInlineSurface
-            ? (renderSession.session.dimensions.layout.rows ?? undefined)
-            : undefined;
-          if (
-            inlineMaximumRows !== undefined &&
-            tuiRoot.yoga.getComputedLayout().height > inlineMaximumRows
-          ) {
+          const maximumRows =
+            boundedInlineSurface || boundedDocumentSurface
+              ? (renderSession.session.dimensions.layout.rows ?? undefined)
+              : undefined;
+          if (maximumRows !== undefined && tuiRoot.yoga.getComputedLayout().height > maximumRows) {
             // A permanent Yoga max-height changes how nested percentage heights
             // resolve even when the natural tree is short (for example, 50% of a
             // six-row Box incorrectly becomes 50% of the terminal). Compute the
             // natural tree first, and only rerun with an exact available height
-            // when it actually exceeds Inline's maximum. This gives overflowing
+            // when it actually exceeds the available maximum. This gives overflowing
             // flex layouts a real rows-sized allocation without padding or
             // perturbing short layouts.
             restoreLayoutGuards();
             restoreLayoutGuards = calculateLayoutWithContentGuards(
               tuiRoot,
               w,
-              inlineMaximumRows,
+              maximumRows,
               Yoga.DIRECTION_LTR,
             );
           }
@@ -3238,27 +2984,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             0,
             Math.floor(tuiRoot.yoga.getComputedLayout().height),
           );
-          const inlineViewportRows = boundedInlineSurface
-            ? Math.min(
-                renderSession.session.dimensions.layout.rows ?? computedRootHeight,
-                computedRootHeight,
-              )
-            : undefined;
-          const paintViewportRows = exactViewportRows ?? inlineViewportRows;
+          const boundedViewportRows =
+            boundedInlineSurface || boundedDocumentSurface
+              ? Math.min(
+                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
+                  computedRootHeight,
+                )
+              : undefined;
+          const paintViewportRows = exactViewportRows ?? boundedViewportRows;
           geometryFrame = mountedGeometry?.beginFrame();
-          selectionFrame = mountedTextSelection?.beginFrame();
-          const frame = renderFrame(w, paintViewportRows, geometryFrame, selectionFrame);
-          if (geometryFrame && mountedMouseController) {
-            mouseFrame = mountedMouseController.prepareFrame(geometryFrame);
-          }
-          if (geometryFrame && mountedCaretController) {
-            caretFrame = mountedCaretController.prepareFrame(
-              geometryFrame,
-              terminalResumePainting
-                ? { outputAvailable: targetedCaretOutputAvailable }
-                : undefined,
-            );
-          }
+          const frame = renderFrame(w, paintViewportRows, geometryFrame);
           renderObserver?.onCommit?.({
             dynamic: frame,
             staticOutput: hasStaticOutput ? staticOutput : "",
@@ -3270,22 +3005,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             // A setup-owned managed-input demand may already have acquired
             // the surface after its capability preflight. Input-free mounts
             // reach this idempotent acquisition only after renderer-owned
-            // target, geometry, selection, mouse, and caret preparation has
+            // target and geometry preparation has
             // succeeded. Either path owns Fullscreen before a user onRender
             // callback can terminate the process synchronously.
             ensureFullscreenSurface();
             if (onRender) onRender({ renderTime: performance.now() - start });
-            renderInteractiveFrame(frame, outputHeight, preparedStatic, caretFrame!, {
+            renderInteractiveFrame(frame, outputHeight, preparedStatic, {
               onHandoff: hooks.markStaticHanded,
               onPrepared: hooks.capturePostStaticRollback,
             });
-            mouseFrame?.stage();
             return;
           }
 
           // Interactive path
           if (onRender) onRender({ renderTime: performance.now() - start });
-          renderInteractiveFrame(frame, outputHeight, preparedStatic, caretFrame!, {
+          renderInteractiveFrame(frame, outputHeight, preparedStatic, {
             onHandoff: hooks.markStaticHanded,
             onPrepared: hooks.capturePostStaticRollback,
           });
@@ -3323,9 +3057,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(InternalRenderSessionKey, renderSession);
       baseApp.provide(AppContextKey, appContext);
       baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
-      baseApp.provide(InternalCaretControllerKey, mountedCaretController!);
-      baseApp.provide(InternalClipboardServiceKey, mountedClipboard!);
-      baseApp.provide(InternalTextSelectionControllerKey, mountedTextSelection!);
       baseApp.provide(StdinContextKey, stdinController);
       if (isDevConnected()) {
         baseApp.provide(DevStateKey, devState);
@@ -3382,15 +3113,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // 55-59), and the onRender outer gate skips log-update entirely for an empty
       // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
       // commit). So an interactive app whose root renders nothing emits ZERO
-      // cursor escapes — the cursor stays visible — while a non-empty semantic-caret
-      // app hides on its first render via the same lazy path. The renderInteractive
+      // cursor escapes, while a non-empty app hides on its first render via the
+      // same lazy path. The renderInteractive
       // commit gate below mirrors that `output !== frameState.lastOutput` outer
       // condition so the empty-frame skip (and thus the no-hide behavior) holds.
-      //
-      // Ordering for a semantic-caret app is preserved without an eager hide: log-update
-      // hides-then-shows WITHIN a single render() (it hides at the top, then emits
-      // the showCursor + cursorTo suffix for the active position), so the last
-      // visibility change on the first frame is the SHOW — exactly Ink's ordering.
       //
       // Fullscreen acquisition is lazy as well: after managed-input capability
       // preflight, the first input demand or commit enters the alternate screen
@@ -3729,7 +3455,7 @@ interface StdinController extends StdinContext {
   /** Deliver input retained while Vue installed the application's first route. */
   activateInputDelivery: () => void;
   /** Register desired semantic input without requiring immediate output capacity. */
-  acquireSemanticInput: () => InternalInputRoutingDemandLease;
+  acquireSemanticInput: () => InternalInputDemandLease;
   /** Whether Runtime currently depends on this stream for managed input. */
   hasManagedInputDemand: () => boolean;
   /** Reconcile the newest semantic-input and terminal-mode desired state. */
@@ -3738,8 +3464,6 @@ interface StdinController extends StdinContext {
   abandonPendingTerminalOutput: (options?: { readonly physicalStateUncertain?: boolean }) => void;
   /** Adjust the private bracketed-paste reference count transactionally. */
   setBracketedPasteMode: (enabled: boolean) => void;
-  /** Deterministic host handoff after parser normalization, scoped to this app. */
-  injectTestMouse: (event: InternalTestMouseEvent) => void;
   /** Report independent cleanup failures without stopping later releases. */
   setCleanupErrorSink: (sink: ((error: unknown) => void) | null) => void;
 }
@@ -3789,17 +3513,18 @@ interface CreateStdinControllerOptions {
   exitOnCtrlC: boolean;
   acquireKittyKeyboardDemand: () => () => void;
   isKittyKeyboardReady: () => boolean;
-  getMouseController: () => FullscreenMouseController | null;
   /** Acquire the output surface after capability preflight and before input modes. */
   beforeManagedInputAcquire: () => boolean;
   isManagedInputSurfaceReady: () => boolean;
-  /** The mount's selected real or deterministic xterm-compatible SGR profile. */
-  mouseProtocolAvailable: boolean;
   /** Route async terminal-control bytes through the application's output gate. */
   writeTerminalOutput: (data: string, onHandoff?: () => void) => boolean;
   requestTerminalReconcile: () => void;
   reportManagedInputFailure: (error: unknown) => void;
-  onSgrMouseModeChange?: (level: SgrMouseMode | undefined) => void;
+  /**
+   * When true, accept `useInput()` registrations without managed terminal demand,
+   * parser delivery, or raw-mode acquisition (mounted document host).
+   */
+  inertManagedInput?: boolean;
 }
 
 function createStdinController(
@@ -3807,24 +3532,22 @@ function createStdinController(
   opts: CreateStdinControllerOptions,
 ): StdinController {
   const { appCtx } = opts;
-  const inputAvailability = createInputAvailabilityRef(classifyLiveInputAvailability(stdin));
+  const inertManagedInput = opts.inertManagedInput === true;
+  const managedInputAvailableAtMount = !inertManagedInput && hasRawInputCapability(stdin);
   let controller!: StdinController;
-  const inputRouting = createInternalInputRoutingRuntime([], {
-    acquire() {
-      return controller.acquireSemanticInput();
-    },
-  });
+  // Document hosts keep useInput() setup shared-component-friendly but never
+  // create managed input demand or deliver events.
+  const inputSubscriptions = inertManagedInput
+    ? createInternalInputSubscriptions()
+    : createInternalInputSubscriptions({
+        acquire() {
+          return controller.acquireSemanticInput();
+        },
+      });
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
-    readonly kind: "routes";
-    readonly topology: InternalInputTopologySnapshot;
-    readonly sgrMouseMode: SgrMouseMode | undefined;
-    readonly mouse:
-      | {
-          readonly controller: FullscreenMouseController;
-          readonly input: FullscreenMouseInputSnapshot;
-        }
-      | undefined;
+    readonly kind: "subscribers";
+    readonly subscribers: readonly InternalInputSubscriber[];
     /** Whether this app had a logical managed-input owner when the fact began. */
     readonly managedInputActive: boolean;
   }
@@ -3854,25 +3577,6 @@ function createStdinController(
   let reconcilingBracketedPaste = false;
   let bracketedPasteReconcileRequested = false;
   let bracketedPasteSyncRequested = false;
-  const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
-  let activeSgrMouseMode: SgrMouseMode | undefined;
-  let pendingSgrMouseTransition:
-    | { readonly kind: "enable"; readonly mode: SgrMouseMode }
-    | { readonly kind: "disable"; readonly mode: SgrMouseMode }
-    | { readonly kind: "cleanup" }
-    | {
-        readonly kind: "replace";
-        readonly previous: SgrMouseMode;
-        readonly mode: SgrMouseMode;
-      }
-    | undefined;
-  let lastReportedSgrMouseMode: SgrMouseMode | undefined;
-  let sgrMousePhysicalUncertain = false;
-  let sgrMouseReenableBlocked = false;
-  let reconcilingSgrMouse = false;
-  let sgrMouseReconcileRequested = false;
-  let sgrMouseSyncRequested = false;
-  const ownedSgrMouseModes = new Set<SgrMouseMode>();
   let suspended = false;
   let disposed = false;
   let releaseKittyKeyboardDemand: (() => void) | undefined;
@@ -3885,10 +3589,7 @@ function createStdinController(
   let managedRawRefs = 0;
   /** Raw refs owned by independent public useStdin() hook calls. */
   let publicRawRefs = 0;
-  // Physical semantic leases cover acquisition through deferred release. Their
-  // published subset alone grants public/selected route eligibility. Low-level
-  // mouse consumers are managed raw demand; public raw-only refs are excluded.
-  let semanticPhysicalRefs = 0;
+  // Only fully published semantic demands grant normalized input delivery.
   let publishedSemanticRefs = 0;
   interface SemanticInputDemand {
     activationRequested: boolean;
@@ -3906,7 +3607,6 @@ function createStdinController(
   // paste-OFF even after Vue's unmount already ran the async disable and zeroed
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
-  let everEnabledSgrMouse = false;
 
   // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
@@ -3917,10 +3617,6 @@ function createStdinController(
   function canWriteTerminalMode(): boolean {
     const stdout = appCtx.stdout;
     return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
-  }
-
-  function canUseSgrMouseMode(): boolean {
-    return !disposed && !suspended && canWriteTerminalMode() && opts.mouseProtocolAvailable;
   }
 
   function writeTerminalMode(
@@ -4048,245 +3744,9 @@ function createStdinController(
     bracketedPastePhysicalUncertain = false;
   }
 
-  function mouseDisableSequence(levels: Iterable<SgrMouseMode>): string {
-    const controls: string[] = [];
-    const unique = new Set(levels);
-    if (unique.has("hover")) controls.push("\x1b[?1003l");
-    if (unique.has("drag")) controls.push("\x1b[?1002l");
-    if (unique.has("button")) controls.push("\x1b[?1000l");
-    if (unique.size > 0) controls.push("\x1b[?1006l");
-    return controls.join("");
-  }
-
-  function disableSgrMouse(
-    levels: Iterable<SgrMouseMode>,
-    sync = false,
-    onHandoff?: () => void,
-  ): boolean {
-    const sequence = mouseDisableSequence(levels);
-    if (sequence === "") {
-      onHandoff?.();
-      return true;
-    }
-    return writeTerminalMode(sequence, sync, onHandoff);
-  }
-
   function reissueIdempotentTerminalDisables(sync: boolean): void {
     if (everEnabledBracketedPaste) {
       runTerminalCleanup(() => forceDisableBracketedPaste(sync));
-    }
-    if (everEnabledSgrMouse) {
-      runTerminalCleanup(() => {
-        if (disableSgrMouse(ownedSgrMouseModes, sync)) {
-          activeSgrMouseMode = undefined;
-          sgrMousePhysicalUncertain = false;
-        }
-      });
-    }
-  }
-
-  function mouseEnableSequence(level: SgrMouseMode): string {
-    switch (level) {
-      case "button":
-        return "\x1b[?1000h\x1b[?1006h";
-      case "drag":
-        return "\x1b[?1002h\x1b[?1006h";
-      case "hover":
-        return "\x1b[?1003h\x1b[?1006h";
-    }
-  }
-
-  function sgrMouseModeRank(level: SgrMouseMode): number {
-    switch (level) {
-      case "button":
-        return 1;
-      case "drag":
-        return 2;
-      case "hover":
-        return 3;
-    }
-  }
-
-  function highestRequestedSgrMouseMode(): SgrMouseMode | undefined {
-    let highest: SgrMouseMode | undefined;
-    for (const level of sgrMouseModeTokens.values()) {
-      if (!highest || sgrMouseModeRank(level) > sgrMouseModeRank(highest)) {
-        highest = level;
-      }
-    }
-    return highest;
-  }
-
-  function reconcileSgrMouseMode(sync = false): void {
-    sgrMouseSyncRequested ||= sync;
-    if (reconcilingSgrMouse) {
-      sgrMouseReconcileRequested = true;
-      return;
-    }
-
-    reconcilingSgrMouse = true;
-    try {
-      while (true) {
-        sgrMouseReconcileRequested = false;
-        const useSync = sgrMouseSyncRequested;
-        sgrMouseSyncRequested = false;
-        const next =
-          canUseSgrMouseMode() && !sgrMouseReenableBlocked
-            ? highestRequestedSgrMouseMode()
-            : undefined;
-        if (pendingSgrMouseTransition) break;
-
-        // A custom Writable may accept terminal bytes and then throw. Before
-        // trusting either the last handed mode or the newest desired mode,
-        // disable every mode Runtime may have enabled. Stop after that cleanup
-        // transaction. A surviving owner may reacquire on the requested
-        // reconcile turn unless the failed transition was an enable or
-        // replacement, in which case replaying its ON bytes remains blocked.
-        if (sgrMousePhysicalUncertain) {
-          const possiblyOwned = new Set(ownedSgrMouseModes);
-          if (activeSgrMouseMode) possiblyOwned.add(activeSgrMouseMode);
-          if (possiblyOwned.size === 0) {
-            activeSgrMouseMode = undefined;
-            sgrMousePhysicalUncertain = false;
-            break;
-          }
-          const pending = { kind: "cleanup" } as const;
-          pendingSgrMouseTransition = pending;
-          try {
-            const accepted = disableSgrMouse(possiblyOwned, useSync, () => {
-              if (pendingSgrMouseTransition !== pending) return;
-              pendingSgrMouseTransition = undefined;
-              activeSgrMouseMode = undefined;
-              sgrMousePhysicalUncertain = false;
-              if (lastReportedSgrMouseMode !== undefined) {
-                lastReportedSgrMouseMode = undefined;
-                opts.onSgrMouseModeChange?.(undefined);
-              }
-              if (!sgrMouseReenableBlocked) opts.requestTerminalReconcile();
-            });
-            if (!accepted) {
-              if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-              opts.requestTerminalReconcile();
-            }
-          } catch (error) {
-            if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-            sgrMousePhysicalUncertain = true;
-            throw error;
-          }
-          break;
-        }
-
-        if (next === activeSgrMouseMode && !sgrMousePhysicalUncertain) {
-          if (!sgrMouseReconcileRequested) break;
-          continue;
-        }
-
-        if (activeSgrMouseMode && next) {
-          const previous = activeSgrMouseMode;
-          const pending = { kind: "replace", previous, mode: next } as const;
-          pendingSgrMouseTransition = pending;
-          ownedSgrMouseModes.add(next);
-          everEnabledSgrMouse = true;
-          try {
-            const accepted = writeTerminalMode(
-              mouseDisableSequence([previous]) + mouseEnableSequence(next),
-              useSync,
-              () => {
-                if (pendingSgrMouseTransition !== pending) return;
-                pendingSgrMouseTransition = undefined;
-                activeSgrMouseMode = next;
-                sgrMousePhysicalUncertain = false;
-                ownedSgrMouseModes.add(next);
-                everEnabledSgrMouse = true;
-                if (lastReportedSgrMouseMode !== next) {
-                  lastReportedSgrMouseMode = next;
-                  opts.onSgrMouseModeChange?.(next);
-                }
-                opts.requestTerminalReconcile();
-              },
-            );
-            if (!accepted) {
-              if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-              opts.requestTerminalReconcile();
-              break;
-            }
-          } catch (error) {
-            if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-            sgrMousePhysicalUncertain = true;
-            throw error;
-          }
-          if (pendingSgrMouseTransition) break;
-          continue;
-        }
-
-        if (activeSgrMouseMode) {
-          const previous = activeSgrMouseMode;
-          const pending = { kind: "disable", mode: previous } as const;
-          pendingSgrMouseTransition = pending;
-          try {
-            const accepted = disableSgrMouse([previous], useSync, () => {
-              if (pendingSgrMouseTransition !== pending) return;
-              pendingSgrMouseTransition = undefined;
-              activeSgrMouseMode = undefined;
-              sgrMousePhysicalUncertain = false;
-              if (lastReportedSgrMouseMode !== undefined) {
-                lastReportedSgrMouseMode = undefined;
-                opts.onSgrMouseModeChange?.(undefined);
-              }
-              opts.requestTerminalReconcile();
-            });
-            if (!accepted) {
-              if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-              opts.requestTerminalReconcile();
-              break;
-            }
-          } catch (error) {
-            if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-            sgrMousePhysicalUncertain = true;
-            throw error;
-          }
-          if (pendingSgrMouseTransition) break;
-          continue;
-        }
-
-        if (next) {
-          const pending = { kind: "enable", mode: next } as const;
-          pendingSgrMouseTransition = pending;
-          // Record possible ownership before invoking a hostile stream. Its
-          // write() may accept the enable escape and then throw before the
-          // handoff callback can publish the known-active mode.
-          ownedSgrMouseModes.add(next);
-          everEnabledSgrMouse = true;
-          try {
-            const accepted = writeTerminalMode(mouseEnableSequence(next), useSync, () => {
-              if (pendingSgrMouseTransition !== pending) return;
-              pendingSgrMouseTransition = undefined;
-              activeSgrMouseMode = next;
-              sgrMousePhysicalUncertain = false;
-              ownedSgrMouseModes.add(next);
-              everEnabledSgrMouse = true;
-              if (lastReportedSgrMouseMode !== next) {
-                lastReportedSgrMouseMode = next;
-                opts.onSgrMouseModeChange?.(next);
-              }
-              opts.requestTerminalReconcile();
-            });
-            if (!accepted) {
-              if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-              opts.requestTerminalReconcile();
-              break;
-            }
-          } catch (error) {
-            if (pendingSgrMouseTransition === pending) pendingSgrMouseTransition = undefined;
-            sgrMousePhysicalUncertain = true;
-            throw error;
-          }
-          if (pendingSgrMouseTransition) break;
-          continue;
-        }
-      }
-    } finally {
-      reconcilingSgrMouse = false;
     }
   }
 
@@ -4300,11 +3760,7 @@ function createStdinController(
             (bracketedPasteModeCount === 0
               ? !bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain
               : bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain)) &&
-          pendingBracketedPasteMode === undefined &&
-          pendingSgrMouseTransition === undefined &&
-          !sgrMousePhysicalUncertain &&
-          activeSgrMouseMode ===
-            (canUseSgrMouseMode() ? highestRequestedSgrMouseMode() : undefined)))
+          pendingBracketedPasteMode === undefined))
     ) {
       resumeAwaitingTerminalModes = false;
     }
@@ -4389,18 +3845,10 @@ function createStdinController(
   }
 
   function snapshotCurrentApplicationInput(): ApplicationInputSnapshot {
-    const mouseController = opts.getMouseController();
     return Object.freeze({
-      kind: "routes",
-      topology: inputRouting.capture(),
-      sgrMouseMode: activeSgrMouseMode,
-      mouse: mouseController
-        ? Object.freeze({
-            controller: mouseController,
-            input: mouseController.captureInputSnapshot(),
-          })
-        : undefined,
-      managedInputActive: publishedSemanticRefs > 0 || managedRawRefs > semanticPhysicalRefs,
+      kind: "subscribers",
+      subscribers: inputSubscriptions.capture(),
+      managedInputActive: publishedSemanticRefs > 0,
     });
   }
 
@@ -4454,48 +3902,36 @@ function createStdinController(
     return ctrl && !shift && !alt && !meta && !superKey && !hyper;
   }
 
-  function deliverCapturedMouse(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
-    if (snapshot.sgrMouseMode && fact.kind === "pointer") {
-      const rawMouse = fact.pointer.event;
-      const mouse = snapshot.mouse;
-      if (
-        rawMouse &&
-        mouse &&
-        (rawMouse.type !== "drag" ||
-          snapshot.sgrMouseMode === "drag" ||
-          snapshot.sgrMouseMode === "hover")
-      ) {
-        mouse.controller.handleInput(rawMouse, mouse.input);
-      }
-      return true;
-    }
-    return false;
-  }
-
   function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed || !snapshot.managedInputActive) return;
-    if (deliverCapturedMouse(event, snapshot)) return;
     if (opts.exitOnCtrlC && isCtrlC(event)) {
       appCtx.exit();
       return;
     }
 
-    // Resolve the independent global layer and selected topology before the first callback.
-    // A callback may remove or replace later routes, but that only changes a
-    // re-entrant or later parser-defined fact.
-    const candidate: InternalInputRouteCandidate = inputRouting.resolve(
-      snapshot.topology,
-    ).candidate;
-    const plan = captureInternalInputRoutePlan(candidate);
-    dispatchInternalInput(event, plan);
+    // The subscriber list was captured when this parser-defined fact began.
+    // Changes made by one handler affect re-entrant or later facts, not peers
+    // that were already eligible for this one.
+    let firstError: unknown;
+    let failed = false;
+    for (const subscriber of snapshot.subscribers) {
+      try {
+        subscriber(event);
+      } catch (error) {
+        if (failed) continue;
+        failed = true;
+        firstError = error;
+      }
+    }
+    if (failed) throw firstError;
   }
 
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
-  // Managed routes fail transactionally on a host that cannot provide terminal
+  // Managed subscriptions fail transactionally on a host that cannot provide terminal
   // input. The actual stream remains available through useStdin().stdin.
   const throwManagedInputUnavailable = (): never => {
-    const expectedAtMount = inputAvailability.value.status === "unavailable";
+    const expectedAtMount = !managedInputAvailableAtMount;
     if (stdin === process.stdin) {
       throw createManagedInputUnavailableError(
         "Managed input is unavailable because the current process.stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
@@ -4705,7 +4141,6 @@ function createStdinController(
             setSemanticDemandPublished(demand, false);
             if (demand.physicalAcquired) {
               demand.physicalAcquired = false;
-              semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
               let releaseError: unknown;
               try {
                 controller.setBracketedPasteMode(false);
@@ -4713,7 +4148,7 @@ function createStdinController(
                 releaseError = error;
               }
               try {
-                controller.releaseRawMode();
+                releaseLogicalRawMode(true);
               } catch (error) {
                 releaseError ??= error;
               }
@@ -4726,19 +4161,8 @@ function createStdinController(
           }
 
           if (!demand.physicalAcquired && !suspended) {
-            // Count this raw lease as semantic before host callbacks can
-            // synchronously deliver input. Until the route is published, such a
-            // fact must resolve against the previously accepted topology.
-            semanticPhysicalRefs++;
-            let acquired = false;
-            try {
-              acquired = controller.acquireRawMode() !== false;
-            } catch (error) {
-              semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
-              throw error;
-            }
+            const acquired = acquireLogicalRawMode(true) !== false;
             if (!acquired) {
-              semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
               opts.requestTerminalReconcile();
               continue;
             }
@@ -4747,15 +4171,13 @@ function createStdinController(
               controller.setBracketedPasteMode(true);
             } catch (error) {
               demand.physicalAcquired = false;
-              semanticPhysicalRefs = Math.max(0, semanticPhysicalRefs - 1);
-              controller.releaseRawMode();
+              releaseLogicalRawMode(true);
               throw error;
             }
           }
         }
 
         reconcileBracketedPasteMode();
-        reconcileSgrMouseMode();
         const ready = semanticTerminalModesReady();
         for (const demand of semanticInputDemands) {
           setSemanticDemandPublished(
@@ -4899,13 +4321,9 @@ function createStdinController(
   controller = {
     stdin,
     isRawModeSupported: appCtx.isRawModeSupported,
-    inputAvailability,
-    internal_inputRouting: inputRouting,
+    inputSubscriptions,
     setCleanupErrorSink(sink) {
       cleanupErrorSink = sink;
-    },
-    injectTestMouse(event) {
-      acceptSharedInput(createInternalTestMouseFact(event), captureApplicationInputSnapshot());
     },
     acquirePublicRawMode() {
       acquireLogicalRawMode(false);
@@ -4915,9 +4333,6 @@ function createStdinController(
         active = false;
         releaseLogicalRawMode(false);
       };
-    },
-    acquireRawMode() {
-      return acquireLogicalRawMode(true);
     },
     acquireSemanticInput() {
       try {
@@ -4994,8 +4409,8 @@ function createStdinController(
     activateInputDelivery() {
       if (inputDeliveryActive || disposed) return;
       // Input received beside a synchronous Kitty query reply can predate Vue
-      // setup. Bind that bootstrap sentinel to the complete initial route set,
-      // then retain this exact snapshot even if a route changes before the
+      // setup. Bind that bootstrap sentinel to the complete initial subscriber
+      // set, then retain this exact snapshot even if a subscription changes before the
       // split event finishes.
       const initialSnapshot = snapshotCurrentApplicationInput();
       if (pendingBootstrapInputSnapshot) pendingBootstrapInputSnapshot.resolved = initialSnapshot;
@@ -5013,41 +4428,25 @@ function createStdinController(
     },
     reconcileTerminalState() {
       if (disposed) return;
-      // Resolve route replacements before retrying an ambiguous terminal mode.
-      // That gives bracketed paste the newest reference count, so a re-entrant
-      // false -> true transition converges straight to ON instead of replaying
-      // an obsolete OFF first.
+      // Resolve subscription changes before retrying an ambiguous terminal
+      // mode so bracketed paste observes the newest reference count.
       reconcileSemanticInputDemands();
       reconcileBracketedPasteMode();
-      reconcileSgrMouseMode();
       reconcileSharedSubscription();
       flushPendingApplicationInput();
     },
     abandonPendingTerminalOutput(options) {
       if (options?.physicalStateUncertain) {
         if (pendingBracketedPasteMode) bracketedPastePhysicalUncertain = true;
-        if (pendingSgrMouseTransition) {
-          sgrMousePhysicalUncertain = true;
-          if (
-            pendingSgrMouseTransition.kind === "enable" ||
-            pendingSgrMouseTransition.kind === "replace"
-          ) {
-            sgrMouseReenableBlocked = true;
-          }
-        }
       }
       pendingBracketedPasteMode = undefined;
-      pendingSgrMouseTransition = undefined;
       for (const demand of semanticInputDemands) {
         if (!semanticTerminalModesReady()) setSemanticDemandPublished(demand, false);
       }
       if (options?.physicalStateUncertain) {
         // The coordinator is idle before it reports a physical stream failure.
-        // Converge immediately to terminal-safe OFF states. Failed enable and
-        // replacement transitions remain blocked; failed disables may restore
-        // surviving demand after cleanup.
+        // Converge immediately to a terminal-safe paste-OFF state.
         runTerminalCleanup(reconcileBracketedPasteMode);
-        runTerminalCleanup(reconcileSgrMouseMode);
       } else {
         opts.requestTerminalReconcile();
       }
@@ -5088,41 +4487,6 @@ function createStdinController(
         }
       }
     },
-    acquireSgrMouseMode(level: SgrMouseMode = "button") {
-      const token = Symbol("sgr-mouse");
-      if (disposed) return token;
-      sgrMouseModeTokens.set(token, level);
-      changeRuntimeResource("mouseLeases", 1);
-      try {
-        reconcileSgrMouseMode();
-      } catch (error) {
-        // A throwing terminal write means this call never returns its token, so
-        // leaving it in the request map would create an ownerless SGR lease.
-        // Remove the logical request and attempt to restore the previous level
-        // without replacing the original acquisition error.
-        if (sgrMouseModeTokens.delete(token)) {
-          changeRuntimeResource("mouseLeases", -1);
-        }
-        runTerminalCleanup(reconcileSgrMouseMode);
-        throw error;
-      }
-      return token;
-    },
-    releaseSgrMouseMode(token: symbol) {
-      if (!sgrMouseModeTokens.delete(token)) return;
-      changeRuntimeResource("mouseLeases", -1);
-      if (!disposed) {
-        try {
-          reconcileSgrMouseMode();
-        } catch (error) {
-          runTerminalCleanup(reconcileSgrMouseMode);
-          throw error;
-        }
-      }
-    },
-    releaseRawMode() {
-      releaseLogicalRawMode(true);
-    },
     suspend(sync = false) {
       if (suspended) return;
       suspended = true;
@@ -5137,7 +4501,6 @@ function createStdinController(
       runTerminalCleanup(reconcileSharedSubscription);
 
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
-      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
 
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
@@ -5167,11 +4530,7 @@ function createStdinController(
         if (suspended || disposed) return;
         reconcileBracketedPasteMode();
         if (suspended || disposed) return;
-        reconcileSgrMouseMode();
-        if (suspended || disposed) return;
-        // Only expose buffered input after every parser-affecting terminal mode
-        // is active. A custom ReadStream may synchronously deliver from resume();
-        // SGR mouse must already be classified as mouse rather than useInput text.
+        // Only expose buffered input after parser-affecting terminal modes are active.
         reconcileSemanticInputDemands();
         reconcileSharedSubscription();
         flushPendingApplicationInput();
@@ -5185,7 +4544,6 @@ function createStdinController(
         if (!disposed) suspended = true;
         resumeAwaitingTerminalModes = false;
         runTerminalCleanup(reconcileBracketedPasteMode);
-        runTerminalCleanup(reconcileSgrMouseMode);
         if (state) {
           state.pendingDisable = false;
           runTerminalCleanup(() => reconcilePhysicalRawMode(state));
@@ -5212,27 +4570,24 @@ function createStdinController(
       drainingApplicationInput = false;
       sharedSubscriptionActive = false;
       // A hostile stream may throw while removing the final data listener.
-      // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
+      // Input ownership failure must not skip paste/Kitty/raw cleanup.
       runTerminalCleanup(() => sharedSubscription.dispose());
-      inputRouting.clear();
+      inputSubscriptions.clear();
       for (const demand of semanticInputDemands) {
         demand.released = true;
         demand.physicalAcquired = false;
         setSemanticDemandPublished(demand, false);
       }
       semanticInputDemands.clear();
-      semanticPhysicalRefs = 0;
       // Normal teardown itself owns one unhanded output transaction. Preserve
       // terminal-mode callbacks captured by Vue scope cleanup so the handoff
       // commits their physical state exactly once. Abrupt teardown aborts that
       // transaction and explicitly abandons these pending callbacks first.
       if (sync) {
         pendingBracketedPasteMode = undefined;
-        pendingSgrMouseTransition = undefined;
       }
       resumeAwaitingTerminalModes = false;
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
-      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
       if (sync && reissueAbruptTerminalDisables) {
         // Signal-exit path (Finding A): the paste-OFF escape must flush
         // synchronously. By the time dispose() runs, Vue's unmount has usually
@@ -5249,22 +4604,9 @@ function createStdinController(
         if (bracketedPastePhysicalUncertain) {
           runTerminalCleanup(() => forceDisableBracketedPaste(sync));
         }
-        if (sgrMousePhysicalUncertain) {
-          runTerminalCleanup(() => {
-            if (disableSgrMouse(ownedSgrMouseModes, sync)) {
-              activeSgrMouseMode = undefined;
-              sgrMousePhysicalUncertain = false;
-            }
-          });
-        }
       }
       changeRuntimeResource("pasteLeases", -bracketedPasteModeCount);
       bracketedPasteModeCount = 0;
-      changeRuntimeResource("mouseLeases", -sgrMouseModeTokens.size);
-      sgrMouseModeTokens.clear();
-      // Retain the at-most-three modes until this disposed controller is
-      // collected. A late output-transaction failure may need one synchronous,
-      // idempotent OFF retry through dispose(true).
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already

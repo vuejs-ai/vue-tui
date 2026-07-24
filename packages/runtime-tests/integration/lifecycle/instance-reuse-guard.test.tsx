@@ -127,17 +127,14 @@ test("stdout ownership wins before Fullscreen capability and leaves both failure
   owner.unmount();
   await owner.waitUntilExit();
 
-  expect(() =>
-    blocked.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      patchConsole: false,
-    }),
-  ).toThrow('Fullscreen mode requires mount option "stdout" to be a TTY.');
-
-  blocked.mount({ stdout, stderr, stdin, patchConsole: false });
+  // Fullscreen on non-TTY is the supported document host after ownership releases.
+  blocked.mount({
+    stdout,
+    stderr,
+    stdin,
+    mode: "fullscreen",
+    patchConsole: false,
+  });
   blocked.unmount();
   await blocked.waitUntilExit();
 });

@@ -58,12 +58,6 @@ export {
   type ManualSuspensionHost,
   type SuspensionHost,
 } from "./process-suspension.ts";
-export {
-  INTERNAL_TEST_INPUT_HOST,
-  type InternalTestInputHost,
-  type InternalTestMouseEvent,
-  type InternalTestMouseModifiers,
-} from "./io/test-input-host.ts";
 // Exposed for focused non-Error normalization tests used by Runtime-owned
 // failures and the synchronous string renderer.
 export { messageForNonError } from "./error-value.ts";
@@ -73,8 +67,3 @@ export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 export { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
 export { nextLineEscape } from "./io/cursor-helpers.ts";
 export { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
-// Private integration-test access for exercising F3's selected topology and
-// external fallthrough through a real outer terminal and a real child PTY.
-// Ordinary applications compose public focus targets, scopes, and external
-// receivers instead; fixtures must not mix this selector with F4 ownership.
-export { useInternalInputRoutingForTest } from "./io/input-route-test.ts";

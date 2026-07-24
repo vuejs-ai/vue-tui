@@ -194,8 +194,6 @@ describe("normalizeInputEvent", () => {
     "\x1b[97;1:1;3u",
     `\x1b[${"9".repeat(400)};1:1~`,
     "\x1b[9007199254740993;1:1~",
-    `\x1b[<${"9".repeat(400)};1;1M`,
-    "\x1b[<0;9007199254740993;1M",
   ])("keeps invalid protocol input uninterpreted: %j", (sequence) => {
     expect(fact(sequence)).toEqual({ kind: "uninterpreted", sequence });
   });
@@ -224,27 +222,13 @@ describe("normalizeInputEvent", () => {
     });
   });
 
-  test("keeps the complete SGR pointer report even when its action is unsupported", () => {
-    expect(fact("\x1b[<66;4;5M")).toMatchObject({
-      kind: "pointer",
-      sequence: "\x1b[<66;4;5M",
-      pointer: {
-        protocol: "sgr",
-        wireButton: 66,
-        x: 4,
-        y: 5,
-        final: "M",
-        event: { type: "wheel", direction: "left" },
-      },
-    });
-    expect(fact("\x1b[<3;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 3, event: undefined },
-    });
-    expect(fact("\x1b[<4294967296;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 4_294_967_296, event: undefined },
-    });
+  test("drops unsolicited complete SGR mouse reports", () => {
+    expect(normalizeInputEvent("\x1b[<66;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;4;5m")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<3;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<4294967296;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent(`\x1b[<${"9".repeat(400)};1;1M`)).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;9007199254740993;1M")).toBeUndefined();
   });
 });
 
@@ -349,7 +333,7 @@ describe("shared stdin normalization", () => {
       split: ["\x1b[20", "0~a\x03", "\x1b[A\x1b[20", "1~"],
     },
     {
-      title: "SGR pointer",
+      title: "ignored SGR mouse report",
       whole: ["\x1b[<66;4;5M"],
       split: ["\x1b[<", "66;4;", "5M"],
     },

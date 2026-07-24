@@ -2,13 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test, vi } from "vite-plus/test";
 import { render, type RenderOptions } from "@vue-tui/testing";
-import {
-  createApp,
-  renderToString,
-  Text,
-  useLayoutWidth,
-  useViewportHeight,
-} from "@vue-tui/runtime";
+import { createApp, renderToString, Text, useLayoutSize } from "@vue-tui/runtime";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
@@ -53,20 +47,18 @@ const unboundedLiveCases: readonly {
 ];
 
 test.each(unboundedLiveCases)(
-  "$name exposes a layout width but no finite visual viewport",
+  "$name exposes the fixed modeled document layout",
   async ({ options }) => {
-    let width: ReturnType<typeof useLayoutWidth> | undefined;
-    let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+    let layout: ReturnType<typeof useLayoutSize> | undefined;
     const App = defineComponent(() => {
-      width = useLayoutWidth();
-      viewportHeight = useViewportHeight();
-      return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+      layout = useLayoutSize();
+      return () => <Text>{`${layout!.width.value}x${layout!.height.value}`}</Text>;
     });
 
     const result = await render(App, options);
-    expect(width!.value).toBe(80);
-    expect(viewportHeight).toBeNull();
-    expect(result.lastFrame()).toBe("80xunbounded");
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(24);
+    expect(result.lastFrame()).toBe("80x24");
     result.dispose();
   },
 );
@@ -75,11 +67,9 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
   const stdout = makePublicTty();
   const stderr = makePublicTty();
   const stdin = makePublicStdin();
-  let width: ReturnType<typeof useLayoutWidth> | undefined;
-  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    width = useLayoutWidth();
-    viewportHeight = useViewportHeight();
+    layout = useLayoutSize();
     return () => <Text>unavailable</Text>;
   });
   const app = createApp(App);
@@ -98,8 +88,8 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
       }),
     );
 
-    expect(width!.value).toBe(80);
-    expect(viewportHeight).toBeNull();
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(Infinity);
   } finally {
     app.unmount();
     await app.waitUntilExit();
@@ -113,11 +103,9 @@ test("Fullscreen remains bounded when liveUpdates is false", async () => {
   const stdout = makePublicTty(80, 24);
   const stderr = makePublicTty(80, 24);
   const stdin = makePublicStdin();
-  let width: ReturnType<typeof useLayoutWidth> | undefined;
-  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    width = useLayoutWidth();
-    viewportHeight = useViewportHeight();
+    layout = useLayoutSize();
     return () => <Text>final</Text>;
   });
   const app = createApp(App);
@@ -135,8 +123,8 @@ test("Fullscreen remains bounded when liveUpdates is false", async () => {
       }),
     );
 
-    expect(width!.value).toBe(80);
-    expect(viewportHeight!.value).toBe(24);
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(24);
   } finally {
     app.unmount();
     await app.waitUntilExit();
@@ -147,22 +135,20 @@ test("Fullscreen remains bounded when liveUpdates is false", async () => {
 });
 
 test("bounded layout refs reject runtime mutation", async () => {
-  let width: ReturnType<typeof useLayoutWidth> | undefined;
-  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    width = useLayoutWidth();
-    viewportHeight = useViewportHeight();
-    return () => <Text>{width!.value}</Text>;
+    layout = useLayoutSize();
+    return () => <Text>{layout!.width.value}</Text>;
   });
   const result = await render(App, { columns: 80, rows: 24 });
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
   try {
-    (width as { value: number }).value = 1;
-    (viewportHeight as { value: number }).value = 1;
+    (layout!.width as { value: number }).value = 1;
+    (layout!.height as { value: number }).value = 1;
 
-    expect(width!.value).toBe(80);
-    expect(viewportHeight!.value).toBe(24);
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(24);
     expect(warn).toHaveBeenCalled();
   } finally {
     warn.mockRestore();
@@ -173,10 +159,7 @@ test("bounded layout refs reject runtime mutation", async () => {
 test("layout primitives fail clearly outside a vue-tui render tree", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   try {
-    expect(() => useLayoutWidth()).toThrow(
-      "render session is unavailable outside a vue-tui render tree",
-    );
-    expect(() => useViewportHeight()).toThrow(
+    expect(() => useLayoutSize()).toThrow(
       "render session is unavailable outside a vue-tui render tree",
     );
   } finally {
@@ -184,16 +167,22 @@ test("layout primitives fail clearly outside a vue-tui render tree", () => {
   }
 });
 
-test("the string host exposes width without a finite viewport", () => {
-  let width: ReturnType<typeof useLayoutWidth> | undefined;
-  let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+test("the string host exposes modeled finite layout by default and Infinity when requested", () => {
+  let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    width = useLayoutWidth();
-    viewportHeight = useViewportHeight();
-    return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+    layout = useLayoutSize();
+    return () => (
+      <Text>
+        {`${layout!.width.value}x${layout!.height.value === Infinity ? "unbounded" : layout!.height.value}`}
+      </Text>
+    );
   });
 
-  expect(renderToString(App, { columns: 37 })).toBe("37xunbounded");
-  expect(width!.value).toBe(37);
-  expect(viewportHeight).toBeNull();
+  expect(renderToString(App, { width: 37 })).toBe("37x24");
+  expect(layout!.width.value).toBe(37);
+  expect(layout!.height.value).toBe(24);
+
+  expect(renderToString(App, { width: 37, height: Infinity })).toBe("37xunbounded");
+  expect(layout!.width.value).toBe(37);
+  expect(layout!.height.value).toBe(Infinity);
 });

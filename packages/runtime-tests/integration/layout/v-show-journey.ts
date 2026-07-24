@@ -13,9 +13,9 @@ import {
 import {
   Box,
   Text,
-  useBoxSize,
+  useBoxMetrics,
   useFocus,
-  type BoxSize,
+  type UseBoxMetricsReturn,
   type UseFocusReturn,
 } from "@vue-tui/runtime";
 
@@ -24,7 +24,7 @@ interface VShowJourneyState {
   unmounts: number;
   value: Ref<number> | null;
   focus: UseFocusReturn | null;
-  size: Readonly<Ref<BoxSize | null>> | null;
+  size: UseBoxMetricsReturn | null;
 }
 
 export const vShowJourneyState: VShowJourneyState = {
@@ -59,7 +59,7 @@ export default defineComponent({
     const target = shallowRef<InstanceType<typeof Box> | null>(null);
     const value = ref(props.revision);
     const focus = useFocus(target);
-    const size = useBoxSize(target);
+    const metrics = useBoxMetrics(target);
 
     watch(
       () => props.revision,
@@ -71,7 +71,7 @@ export default defineComponent({
 
     vShowJourneyState.value = value;
     vShowJourneyState.focus = focus;
-    vShowJourneyState.size = size;
+    vShowJourneyState.size = metrics;
 
     onMounted(() => {
       vShowJourneyState.mounts++;

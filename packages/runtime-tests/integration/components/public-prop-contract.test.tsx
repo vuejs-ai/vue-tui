@@ -7,7 +7,7 @@ function renderBox(props: Record<string, unknown>): string {
     () => () =>
       h(Box, props as never, { default: () => h(Text, null, { default: () => "content" }) }),
   );
-  return renderToString(App, { columns: 40 });
+  return renderToString(App, { width: 40 });
 }
 
 /**
@@ -21,12 +21,12 @@ function validateBox(props: Record<string, unknown>): void {
         h(Box, props as never, { default: () => undefined }),
       ),
   );
-  renderToString(App, { columns: 40 });
+  renderToString(App, { width: 40 });
 }
 
 function renderText(props: Record<string, unknown>): string {
   const App = defineComponent(() => () => h(Text, props as never, { default: () => "content" }));
-  return renderToString(App, { columns: 40 });
+  return renderToString(App, { width: 40 });
 }
 
 const namedColors = [

@@ -298,7 +298,7 @@ export function createKittyKeyboardController(
       }
     } catch {
       // Terminal restoration is best-effort; a failed Kitty write must not
-      // prevent the remaining cursor, screen, paste, mouse, or raw cleanup. The
+      // prevent the remaining cursor, screen, paste, or raw cleanup. The
       // rejected POP leaves the old level owned so active demand needs no new
       // PUSH, while suspension or teardown can retry the POP.
       return false;

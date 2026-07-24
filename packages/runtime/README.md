@@ -135,7 +135,7 @@ Each mounted instance participates immediately and remains open until its first 
 
 On non-TTY output, an accepted block appends immediately before the current dynamic document is written once at clean teardown. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`. Component errors follow Vue's ordinary error handling, and output failures follow the app's general stream and lifecycle contract; Static does not add a separate public failure protocol.
 
-Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the ordinary component subtree mounted while removing hidden layout content from Yoga layout, paint, targeted focus availability, Box size, and Runtime-private Fullscreen hit testing. When it becomes true, the Box returns to its current layout and paint properties. Static is a mounted history boundary rather than a layout node, so ancestor or direct `v-show` does not affect its output. Applying `v-show` directly to `Text` is not supported.
+Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the ordinary component subtree mounted while removing hidden layout content from Yoga layout, paint, targeted focus availability, and Box size. When it becomes true, the Box returns to its current layout and paint properties. Static is a mounted history boundary rather than a layout node, so ancestor or direct `v-show` does not affect its output. Applying `v-show` directly to `Text` is not supported.
 
 Nested Text spans may nest and wrap safely. Each explicit color or modifier choice applies to its subtree, and the enclosing resolved values resume afterward; a nested `wrap` value has no independent effect because the outermost Text owns width handling for the composed content.
 
@@ -148,15 +148,14 @@ Runtime does not export layout conveniences as separate components. Write line b
 
 ## Composables
 
-| Composable                        | Description                                                                                                 |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `useInput(handler, opts?)`        | Frozen insertion text, complete paste payloads, and logical key identities; `isActive` gates input demand   |
-| `useFocus()` / `useFocus(target)` | One explicit logical focus identity, optionally limited by a rendered component target                      |
-| `useApp()`                        | In-tree exit request — `{ exit(error?) }`; host-owned lifecycle barriers stay on the app handle             |
-| `useLayoutWidth()`                | Readonly reactive width Runtime gives the root layout on every host                                         |
-| `useViewportHeight()`             | Readonly reactive visual viewport height, or `null` at setup when the document is not row-bounded           |
-| `useBoxSize(ref)`                 | Last accepted full width and height of one directly referenced `<Box>`, or `null` when no size is available |
-| `useStdin()`                      | Access the mounted stdin and independently coordinate one low-level raw-mode hold                           |
+| Composable                        | Description                                                                                                |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `useInput(handler, opts?)`        | Frozen insertion text, complete paste payloads, and logical key identities; `isActive` gates input demand  |
+| `useFocus()` / `useFocus(target)` | One explicit logical focus identity, optionally limited by a rendered component target                     |
+| `useApp()`                        | In-tree exit request — `{ exit(error?) }`; host-owned lifecycle barriers stay on the app handle            |
+| `useLayoutSize()`                 | Readonly reactive root-layout `width` and `height` from one accepted snapshot (`height` may be `Infinity`) |
+| `useBoxMetrics(ref)`              | Readonly parent-relative `width`/`height`/`left`/`top` plus `hasMeasured` for one direct `<Box>` target    |
+| `useStdin()`                      | Access the mounted stdin and independently coordinate one low-level raw-mode hold                          |
 
 `useInput()` delivers a frozen `TuiInputEvent` discriminated by `type`. A `"text"` event contains non-empty insertion-ready `text` and may contain a complete nested `key` only when Runtime has reliable logical-key identity. A `"key"` event contains that required nested `key` and no text. A `"paste"` event contains one complete decoded bracketed-paste payload, including an empty payload, and no key. Classification is paste before text before key; opaque text and IME commits remain text without an invented key, and input with no public text, paste, or logical key fact is not delivered.
 
@@ -234,52 +233,50 @@ Use the narrow fact that matches the application task:
 ```vue
 <script setup lang="ts">
 import { computed, shallowRef } from "vue";
-import { Box, Text, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, useLayoutSize } from "@vue-tui/runtime";
 
-const layoutWidth = useLayoutWidth();
-const viewportHeight = useViewportHeight();
+const { width: layoutWidth, height: layoutHeight } = useLayoutSize();
 
 const panel = shallowRef<InstanceType<typeof Box> | null>(null);
-const panelSize = useBoxSize(panel);
+const panelMetrics = useBoxMetrics(panel);
 
-const canCenterVertically = computed(() => viewportHeight !== null && viewportHeight.value > 20);
-const graphWidth = computed(() => panelSize.value?.width ?? 24);
+const canCenterVertically = computed(
+  () => Number.isFinite(layoutHeight.value) && layoutHeight.value > 20,
+);
+const graphWidth = computed(() => (panelMetrics.hasMeasured.value ? panelMetrics.width.value : 24));
 </script>
 
 <template>
   <Box ref="panel" flexGrow="1">
-    <Text>Root width: {{ layoutWidth }}</Text>
+    <Text>Root size: {{ layoutWidth }}x{{ layoutHeight }}</Text>
     <Text>Panel width: {{ graphWidth }}</Text>
     <Text>Can center: {{ canCenterVertically ? "yes" : "no" }}</Text>
   </Box>
 </template>
 ```
 
-`useLayoutWidth()` always returns a numeric readonly ref. It is the width Runtime actually gives the root layout, not an independent reading of `process.stdout.columns`. It reacts whenever a live host accepts a new layout width; string rendering uses the requested document width or 80 by default, and a stream without a usable width also falls back to 80.
+`useLayoutSize()` returns `{ width, height }` as readonly reactive refs from one accepted root-layout snapshot. These are the dimensions Runtime makes available to the root layout, not raw physical terminal properties and not a component's measured rectangle. Live TTY hosts always expose finite values that update coherently on accepted resize. `renderToString()` exposes its modeled options (default 80×24); explicit `height: Infinity` means no vertical bound. The mounted non-TTY document host exposes fixed modeled 80×24 with no resize lifecycle. Physical `columns`/`rows` remain private protocol facts.
 
-`useViewportHeight()` is for code that specifically needs a finite visual row bound. It returns a readonly numeric ref on live Inline and Fullscreen TTY surfaces. It returns `null` at setup for an unbounded stream or string document. The presence or absence of that ref is fixed for the render tree; when present, its number reacts to accepted resizes. Check for `null` once instead of carrying `number | null` through every width calculation.
+`useBoxMetrics()` accepts only a Vue ref bound directly to the exported `<Box>` in the current app. It returns readonly `width`, `height`, parent-relative `left`, parent-relative `top`, and `hasMeasured`. Before the first accepted measurement, and while the target is detached, unmounted, retargeted, or excluded by `v-show`, the four numbers are zero and `hasMeasured` is false. A real zero-sized Box reports zero size with `hasMeasured` true. Pending repaint or temporary suspension for the same target retains the last accepted values. String rendering has no live geometry service, so measurements stay unmeasured. There is no `measureElement()` or other spatial API.
 
-`useBoxSize()` accepts only a Vue ref bound directly to the exported `<Box>` component in the current vue-tui app. A raw component value, getter, non-Box target, or Box owned by another app is rejected instead of publishing a misleading size; callers that need a derived target can create a `computed()` ref themselves. The hook returns a readonly ref containing a frozen `{ width, height }` from the last accepted visual paint. Before the first accepted paint, after the target detaches, after retargeting, or while the Box is hidden, its value is `null`. A legitimate zero-sized Box is `{ width: 0, height: 0 }`, and a fully clipped Box still reports its full size. A failed output attempt or suspension does not replace the last accepted size for the same target; queued changes settle after resume and a successful repaint. String rendering returns `null` because it does not publish live Box geometry.
+| Render host                  | `useLayoutSize()`                                                  | `useBoxMetrics()`                                               |
+| ---------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Live Inline TTY              | Reactive finite width and max height                               | Unmeasured until paint, then accepted parent-relative rectangle |
+| Live Fullscreen TTY          | Reactive finite viewport width and height                          | Unmeasured until paint, then accepted parent-relative rectangle |
+| Mounted non-TTY document     | Fixed modeled 80×24                                                | Accepted metrics when available                                 |
+| Synchronous string rendering | Option width/height (default 80×24; `Infinity` allowed for height) | Unmeasured (no live geometry service)                           |
 
-| Render host                                       | `useLayoutWidth()`                    | `useViewportHeight()`          | `useBoxSize()`                                   |
-| ------------------------------------------------- | ------------------------------------- | ------------------------------ | ------------------------------------------------ |
-| Live Inline TTY                                   | Reactive numeric layout width         | Reactive maximum visual height | `null` before paint, then accepted full Box size |
-| Live Fullscreen TTY                               | Reactive numeric viewport width       | Reactive exact viewport height | `null` before paint, then accepted full Box size |
-| Live non-TTY stream                               | Reactive numeric width, defaulting 80 | `null`                         | Accepted document-paint size when available      |
-| Final-output stream, including a TTY forced final | Fixed numeric width, defaulting 80    | `null`                         | Accepted document-paint size when available      |
-| Synchronous string rendering                      | Option width, defaulting 80           | `null`                         | `null`                                           |
+During suspension, layout refs and same-target accepted Box metrics keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint. After unmount, layout refs keep their final values and stop updating, while Box metrics clear when the target detaches. Calling these hooks outside a vue-tui render tree throws.
 
-During suspension, the numeric layout refs and each same-target accepted Box size keep their last coherent values. Resume publishes new values only with the resumed accepted layout and paint; an invalid resize pair does not replace the last coherent dimensions. After unmount, layout refs keep their final values and stop updating, while Box size becomes `null` when the target detaches. Calling any of these layout and measurement hooks outside a vue-tui render tree throws.
+These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes.
 
-These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes. Runtime keeps those mechanisms internally for output and possible future terminal interaction primitives. Application and component code gets the smaller facts it can use without depending on how Runtime implements them.
-
-The earlier public focus-bound `useCaret()` experiment is withdrawn. Runtime still owns the private terminal cursor and its restoration, but a future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates. That decision belongs to the caret and editable-text review path; no current public caret API should be inferred from the private mechanism.
+The earlier public focus-bound `useCaret()` experiment and its semantic caret controller are removed. Runtime still owns generic terminal-cursor visibility and restoration, but a future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates. No current public caret API should be inferred from the generic cursor cleanup.
 
 ### Interaction capabilities outside this foundation
 
 Physical caret placement, targeted pointer routing, arbitrary-Text selection, and Runtime-owned clipboard transport are not public Runtime APIs in this foundation. Basic editable text and keyboard scrolling can be built from `useInput()`, Vue state, rendered glyphs, and component methods. A custom clipboard adapter is ordinary application dependency injection.
 
-Exact terminal-caret placement, pointer hit testing and capture, and arbitrary existing Text selection need final-paint facts that application code cannot derive. The current internal mechanisms remain private implementation material while a smaller, stable Runtime-only primitive is proven. OSC 52 support is also deferred; no public `/fullscreen` interaction subpath or `MountOptions.clipboard` contract should be inferred from the private code.
+Exact terminal-caret placement, pointer hit testing and capture, and arbitrary existing Text selection need final-paint facts that application code cannot derive. Their previous speculative controllers and services are removed, not retained as hidden policy. A future feature must first prove and add a smaller stable Runtime-only primitive. OSC 52 support is also deferred; no public `/fullscreen` interaction subpath or `MountOptions.clipboard` contract exists.
 
 ## App Lifecycle
 
@@ -316,7 +313,7 @@ Live component errors remain under Vue's normal policy. Runtime does not replace
 
 With the default `patchConsole: true`, setup-time, mounted, update, and cleanup console output is coordinated without content filtering. All mounted apps share one physical process-console patch; the most recently mounted active app receives output, removing it reveals the previous app, and the native console methods are restored after the last registration is released. `patchConsole: false` does not touch the process console.
 
-Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. An explicit Fullscreen request requires a TTY stdout and positive terminal columns and rows; otherwise `mount()` throws synchronously without falling back to Inline. `Box` and `Text` remain passive in both modes. Because the alternate screen is a fixed application-owned viewport, Fullscreen rejects `Static`; use application state and a viewport component for retained Fullscreen content.
+Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. On a live TTY, an explicit Fullscreen request requires positive terminal columns and rows; otherwise `mount()` throws synchronously. On non-TTY stdout, Inline and Fullscreen select the same non-interactive document host. `Box` and `Text` remain passive in both modes. Because the alternate screen is a fixed application-owned viewport, Fullscreen rejects `Static`; use application state and a viewport component for retained Fullscreen content.
 
 Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use one keyed `<Static>` instance from `@vue-tui/runtime/inline` per completed history block, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback. On non-TTY stdout, Inline emits no terminal-management bytes or intermediate dynamic frames: accepted Static history and coordinated console output append immediately, while clean teardown writes the current dynamic document once, adds a line ending only when non-empty output lacks one, and writes no bytes for an empty document.
 
@@ -324,7 +321,7 @@ Before its first visible managed output, Inline advances to a fresh terminal row
 
 If an application intentionally wants to discard main-screen history, do so before mounting or after teardown. Use Fullscreen when the application needs arbitrary repaint of a stable terminal-sized viewport; Inline does not expose a mounted destructive-reset policy.
 
-On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, mouse level, Kitty keyboard state, cursor state, and alternate screen that Runtime acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes its coherent internal dimensions when available, otherwise keeps the last coherent size. `useLayoutWidth()` and an available `useViewportHeight()` ref update with the resumed layout. Runtime then starts a fresh Inline region, transactionally re-enters and repaints Fullscreen, or repaints a live stream using its refreshed unbounded layout before restoring still-requested input modes. This does not reserve the Ctrl+Z input byte.
+On supported non-Windows hosts, external job-control suspension is coordinated automatically. When the process receives `SIGTSTP`, vue-tui releases only the raw mode, bracketed paste, Kitty keyboard state, cursor visibility, and alternate screen that Runtime acquired, then reliably stops itself with `SIGSTOP`. After `SIGCONT`, it refreshes its coherent internal dimensions when available, otherwise keeps the last coherent size. `useLayoutSize()` updates with the resumed layout snapshot. Runtime then starts a fresh Inline region, transactionally re-enters and repaints Fullscreen, or repaints a live stream before restoring still-requested input modes. This does not reserve the Ctrl+Z input byte.
 
 Normal Inline output remains on the main screen. Normal Fullscreen exit restores the previous main screen and does not replay the last viewport. An explicit `exit(error)` or Runtime-owned output, input, renderer, or terminal failure has no hidden visual error component: teardown restores owned terminal state and writes one sanitized report to stderr. Fullscreen restores the main screen before that report, and a final-stream error exit never prints a stale successful dynamic frame.
 
@@ -337,25 +334,29 @@ Mount, repaint, and teardown are exception-safe transactions. Preflight resolves
 
 ## Render to string
 
-Render a component as a synchronous, width-constrained visual document without acquiring a terminal. The document has no terminal mode, bounded row count, input, resize lifecycle, or live updates:
+Render a component as a synchronous modeled visual document without acquiring a terminal. The document has no terminal mode, input delivery, resize lifecycle, or live updates:
 
 ```ts
 import { renderToString } from "@vue-tui/runtime";
 
-const document = renderToString(App, { columns: 80 });
+const document = renderToString(App, { width: 80, height: 24 });
+// Complete documents that must not clip vertically:
+const full = renderToString(App, { width: 80, height: Infinity });
 ```
 
-The default width is 80 columns. The TypeScript surface is exactly `readonly columns?: number`; `columns` must be an integer from 1 through 65,535. At runtime, `renderToString()` reads only `columns` and ignores unrelated string or symbol keys without reading their values, so removed live-host fields do not become string-rendering options. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components receive the deliberate document width and isolated inert streams, and `useApp().exit()` is an inert no-op. Runtime owns the root VNode and tracks host Yoga allocations for this render, so an error during the initial Vue patch still disposes every created Vue scope and inert stream, frees the render's Yoga nodes, and rethrows the original error.
+Defaults are modeled 80×24. The TypeScript surface is exactly `readonly width?: number` and `readonly height?: number`. Width must be a positive integer through 65,535. Height must be a positive integer through 65,535 or positive `Infinity` (mapped to Runtime's private unbounded representation, never passed to Yoga). Finite height bounds ordinary dynamic paint without padding shorter output. At runtime, `renderToString()` reads only those two options and ignores unrelated keys without reading their values. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components observe the same values through `useLayoutSize()` and receive isolated inert streams; `useApp().exit()` is an inert no-op. Runtime owns the root VNode and tracks host Yoga allocations for this render, so an error during the initial Vue patch still disposes every created Vue scope and inert stream, frees the render's Yoga nodes, and rethrows the original error.
+
+Mounted non-TTY stdout is the supported secondary counterpart of this document model: Inline and Fullscreen requests share one fixed 80×24 document host with no terminal-management controls, no intermediate dynamic frames, inert `useInput()`, and a single final dynamic write on clean teardown.
 
 ## Package subpaths
 
 - `@vue-tui/runtime` is the common application surface.
 - `@vue-tui/runtime/inline` contains only `Static`, because terminal history is meaningful only for Inline applications.
-- `@vue-tui/runtime/devtools` contains only `connectDevtools(hot)`. A Vite-like adapter passes its structurally typed `on` and `send` context so Runtime can connect private overlay and reload teardown state. Repeating the same context is inert; a new hot context reconnects after a full reload.
-- `@vue-tui/runtime/testing` contains the one-shot `createTestHostBridge()` plus `TestHostBridge`, `TestHostBridgeOptions`, and `TestContentFrame`. `onFrame` observes accepted `{ dynamic, staticOutput }` commits, `writeInput()` uses Runtime's production parser, and `suspend()` / `resume()` expose deterministic host transitions. This is the low-level seam for test-tool authors; application tests should normally use `@vue-tui/testing`.
+- `@vue-tui/runtime/internal/devtools` is an unsupported, version-coupled bridge used only by the official `@vue-tui/vite` package (`connectDevtools(hot)`). It is not a supported public or third-party extension contract.
+- `@vue-tui/runtime/internal/testing` is an unsupported, version-coupled bridge used only by the official `@vue-tui/testing` package (`createTestHostBridge()` and bridge-only types). It is not a supported public or third-party extension contract.
 - `@vue-tui/runtime/package.json` is an explicit metadata export. It supports ordinary manifest resolution, including locating the version-matched visual-development guide shipped beside it, without promising that every JSON field is an independent stable API.
 
-There is no supported `/internal` or `/fullscreen` import. Fullscreen is selected with `mount({ mode: "fullscreen" })`; private parser, renderer, terminal-protocol, mouse, selection, and clipboard mechanisms are not package contracts.
+There is no supported broad `/internal` barrel and no `/devtools`, `/testing`, or `/fullscreen` public import. Fullscreen is selected with `mount({ mode: "fullscreen" })`; parser, renderer, and terminal-protocol mechanisms are private, while the withdrawn mouse, selection, and clipboard implementations are absent rather than hidden package contracts.
 
 ## Links
 

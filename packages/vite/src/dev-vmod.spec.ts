@@ -9,7 +9,7 @@ test("resolves the virtual id to its \\0 form and loads the connect snippet", ()
   expect(p.resolveId(DEV_VMOD_ID)).toBe(RESOLVED_DEV_VMOD_ID);
   expect(p.resolveId("other")).toBeUndefined();
   const code = p.load(RESOLVED_DEV_VMOD_ID)!;
-  expect(code).toContain('from "@vue-tui/runtime/devtools"');
+  expect(code).toContain('from "@vue-tui/runtime/internal/devtools"');
   expect(code).toContain("connectDevtools(import.meta.hot)");
   expect(p.load("other")).toBeUndefined();
 });

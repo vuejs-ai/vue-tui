@@ -185,7 +185,7 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
     }
   });
 
-  test("a host without Kitty control output still delivers semantic input", async () => {
+  test("a non-TTY document host keeps useInput inert without Kitty negotiation", async () => {
     const { stdin, refBalance } = makeTrackedStdin();
     const { stdout, writes } = makeTrackedStdout({ isTTY: false });
     const { app, inputs } = mountInputApp({ stdin, stdout });
@@ -193,7 +193,8 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
     try {
       stdin.write("x");
       await settleLifecycle();
-      expect(inputs).toEqual(["x"]);
+      // Document hosts accept useInput setup but never deliver events or negotiate.
+      expect(inputs).toEqual([]);
       expect(writes).not.toContain("\x1b[?u");
       expect(writes).not.toContain("\x1b[>1u");
     } finally {

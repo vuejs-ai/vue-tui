@@ -516,6 +516,38 @@ describe("handler results and failures", () => {
       streams.destroy();
     }
   });
+
+  test("a thrown handler does not block peers captured in the same app", async () => {
+    const streams = makeTrackedStreams();
+    const peerCalls: string[] = [];
+    const App = defineComponent(() => {
+      useInput(() => {
+        throw new Error("handler failed");
+      });
+      useInput((event) => {
+        peerCalls.push(eventLabel(event));
+      });
+      return () => <Text>listening</Text>;
+    });
+    const app = createApp(App);
+
+    try {
+      app.mount({
+        stdin: streams.stdin,
+        stdout: streams.stdout,
+        stderr: streams.stderr,
+        patchConsole: false,
+      });
+      const exited = app.waitUntilExit();
+
+      expect(() => streams.stdin.emit("data", "x")).toThrow("handler failed");
+      expect(peerCalls).toEqual(["text:x"]);
+      await expect(exited).rejects.toThrow("handler failed");
+    } finally {
+      app.unmount();
+      streams.destroy();
+    }
+  });
 });
 
 describe("semantic input terminal ownership", () => {

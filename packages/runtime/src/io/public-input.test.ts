@@ -119,7 +119,6 @@ describe("public input projection", () => {
     ["key release", "\x1b[99;5:3u", "key"],
     ["unknown private key", "\x1b[58000u", "key"],
     ["uninterpreted sequence", "\x1b[?25h", "uninterpreted"],
-    ["pointer report", "\x1b[<0;4;5M", "pointer"],
   ] as const)("drops %s", (_label, sequence, expectedInternalKind) => {
     const inputFact = fact(sequence);
     expect(inputFact.kind).toBe(expectedInternalKind);

@@ -1,32 +1,9 @@
 import type { Writable } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { changeRuntimeResource } from "../resource-tracker.ts";
-import {
-  type CursorPosition,
-  cursorPositionChanged,
-  buildCursorSuffix,
-  buildCursorOnlySequence,
-  buildReturnToBottomPrefix,
-  hideCursorEscape,
-  showCursorEscape,
-} from "./cursor-helpers.ts";
-
-export type { CursorPosition } from "./cursor-helpers.ts";
-
-export type SyncOptions = {
-  // When false, sync re-seats only the OUTPUT bookkeeping and emits NO cursor
-  // escape (no reposition, no show, and — because clear() has already set
-  // cursorWasShown=false — no hide either). Used by app.clear(): clear() erases
-  // the lines WITHOUT redrawing them, so re-asserting the persistent caret would
-  // float it on a blank screen. Defaults to true (the restoreLastOutput path,
-  // which DOES redraw, still re-shows the caret). Used by the fixed-viewport
-  // app.clear() path after clearViewport.
-  cursor?: boolean;
-};
+import { hideCursorEscape, showCursorEscape } from "./cursor-helpers.ts";
 
 export type ResetOptions = {
-  /** Override whether an active cursor declaration should force the next write. */
-  cursorDirty?: boolean;
   /** Override whether the writer believes it currently owns a hidden cursor. */
   cursorHidden?: boolean;
 };
@@ -37,42 +14,19 @@ export type LogUpdate = {
   clear: () => void;
   done: () => void;
   reset: (options?: ResetOptions) => void;
-  /** Return the bytes needed to leave a declared caret at the frame bottom. */
-  getCursorReturnToBottom: () => string;
-  sync: (str: string, options?: SyncOptions) => void;
-  setCursorPosition: (position: CursorPosition | undefined) => void;
+  sync: (str: string) => void;
   isCursorHidden: () => boolean;
-  isCursorDirty: () => boolean;
   willRender: (str: string) => boolean;
-  /** Restore writer bookkeeping when a captured transaction was not handed off. */
+  /** Restore bookkeeping when a captured transaction was not handed off. */
   createRollback: () => () => void;
   (str: string): boolean;
 };
 
-// Count visible lines in a string, ignoring the trailing empty element
-// that `split('\n')` produces when the string ends with '\n'.
 const visibleLineCount = (lines: string[], str: string): number =>
   str.endsWith("\n") ? lines.length - 1 : lines.length;
 
-// Cursor hide/show is a TTY-only concern. Ink routes every hide/show through
-// `cli-cursor`, which short-circuits `if (!stream.isTTY) return`
-// (cli-cursor/index.js:8-24), so a forced-interactive run on a piped/non-TTY
-// stream emits no cursor escapes. `stream` is typed `Writable`, which has no
-// `isTTY`, so we read it off the runtime object (WriteStream sets it).
 const isTtyStream = (stream: Writable): boolean => Boolean((stream as { isTTY?: boolean }).isTTY);
 
-// Terminal width for the D5 cursor-x clamp (see buildCursorSuffix). `stream` is
-// typed `Writable`, which has no `columns`; the runtime WriteStream sets it.
-// Returns undefined when unknown so the clamp falls back to the no-width path.
-const streamWidth = (stream: Writable): number | undefined =>
-  (stream as { columns?: number }).columns;
-
-// The show-cursor restore at done() runs on the teardown path, where stdout may
-// already be destroyed/ended. `isTTY` stays cached-truthy after destroy()/end(),
-// so gating cursor writes on isTTY alone throws ERR_STREAM_DESTROYED on a
-// teardown where the terminal is already gone. Mirror Ink's `canWriteToStdout =
-// !destroyed && !writableEnded` guard (App.tsx:620-624, the cursor-show on
-// unmount) so a TTY-gated cursor write is also skipped on a dead stream.
 const canWriteToStream = (stream: Writable): boolean =>
   !stream.destroyed && !(stream as { writableEnded?: boolean }).writableEnded;
 
@@ -82,18 +36,36 @@ const defaultWrite =
     stream.write(data);
 
 const hideCursor = (stream: Writable, write: LogUpdateWrite): void => {
-  if (!isTtyStream(stream) || !canWriteToStream(stream)) {
-    return;
-  }
-  write(hideCursorEscape);
+  if (isTtyStream(stream) && canWriteToStream(stream)) write(hideCursorEscape);
 };
 
 const showCursor = (stream: Writable, write: LogUpdateWrite): void => {
-  if (!isTtyStream(stream) || !canWriteToStream(stream)) {
-    return;
-  }
-  write(showCursorEscape);
+  if (isTtyStream(stream) && canWriteToStream(stream)) write(showCursorEscape);
 };
+
+function createCursorOwnership(stream: Writable, write: LogUpdateWrite, showCursorOption: boolean) {
+  let hidden = false;
+  return {
+    hideForRender() {
+      if (showCursorOption || hidden) return;
+      hideCursor(stream, write);
+      hidden = isTtyStream(stream) && canWriteToStream(stream);
+      if (hidden) changeRuntimeResource("cursorLeases", 1);
+    },
+    done() {
+      if (showCursorOption || !hidden) return;
+      showCursor(stream, write);
+      hidden = false;
+      changeRuntimeResource("cursorLeases", -1);
+    },
+    reset(next = hidden) {
+      if (hidden === next) return;
+      hidden = next;
+      changeRuntimeResource("cursorLeases", next ? 1 : -1);
+    },
+    isHidden: () => hidden,
+  };
+}
 
 const createStandard = (
   stream: Writable,
@@ -104,191 +76,48 @@ const createStandard = (
 ): LogUpdate => {
   let previousLineCount = 0;
   let previousOutput = "";
-  let hasHiddenCursor = false;
-  let cursorPosition: CursorPosition | undefined;
-  let cursorDirty = false;
-  let previousCursorPosition: CursorPosition | undefined;
-  let cursorWasShown = false;
-
-  const setHiddenCursor = (hidden: boolean): void => {
-    if (hasHiddenCursor === hidden) return;
-    hasHiddenCursor = hidden;
-    changeRuntimeResource("cursorLeases", hidden ? 1 : -1);
-  };
-
-  // Persistent-declaration: the active cursor is the LAST-declared position and
-  // is re-emitted at the end of EVERY commit, so a focused input's caret stays
-  // at its edit point across unrelated repaints (spinner/log/progress) in all
-  // component topologies — matching real terminal apps (vim/readline/nano
-  // re-place the caret each frame). It is NOT gated on cursorDirty: gating there
-  // dropped the caret on any commit that did not re-declare, zombieing it to the
-  // bottom-left corner (a deliberate divergence from Ink — see
-  // .agents/docs/ink-divergences.md). A CLEARED declaration (setCursorPosition
-  // undefined after the caller selects no visible caret) sets cursorPosition
-  // to undefined, so the next re-emit places no caret — the clear is not
-  // resurrected. cursorDirty still tracks "was re-declared this commit" purely
-  // to gate the commit/dedup paths (render.ts outer gate + frame-writer skip).
-  // A forced-live stream still has renderer commits, but it is not a targeted-
-  // caret transport. Treat the declaration as physically unavailable so the
-  // frame path cannot append movement/show bytes or later emit a return/hide
-  // sequence for a caret that was never valid on this destination.
-  const getActiveCursor = () => (isTtyStream(stream) ? cursorPosition : undefined);
-  const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
-    const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
-    return str !== previousOutput || cursorChanged;
-  };
+  const cursor = createCursorOwnership(stream, write, showCursorOption);
 
   const render = (str: string) => {
-    if (!showCursorOption && !hasHiddenCursor) {
-      hideCursor(stream, write);
-      setHiddenCursor(true);
-    }
-
-    const activeCursor = getActiveCursor();
-    const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
-
-    if (!hasChanges(str, activeCursor)) {
-      cursorDirty = false;
-      return false;
-    }
-
+    cursor.hideForRender();
+    if (str === previousOutput) return false;
     const lines = str.split("\n");
-    const visibleCount = visibleLineCount(lines, str);
-    const hasTrailingNewline = str.endsWith("\n");
-    const cursorSuffix = buildCursorSuffix(
-      visibleCount,
-      activeCursor,
-      streamWidth(stream),
-      hasTrailingNewline,
-    );
-
-    if (str === previousOutput && cursorChanged) {
-      write(
-        buildCursorOnlySequence({
-          cursorWasShown,
-          previousLineCount,
-          previousCursorPosition,
-          visibleLineCount: visibleCount,
-          cursorPosition: activeCursor,
-          width: streamWidth(stream),
-          hasTrailingNewline,
-        }),
-      );
-    } else {
-      const returnPrefix = buildReturnToBottomPrefix(
-        cursorWasShown,
-        previousLineCount,
-        previousCursorPosition,
-      );
-      write(returnPrefix + ansiEscapes.eraseLines(previousLineCount) + str + cursorSuffix);
-      previousOutput = str;
-      previousLineCount = lines.length;
-    }
-
-    previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
-    cursorWasShown = activeCursor !== undefined;
-    cursorDirty = false;
+    write(ansiEscapes.eraseLines(previousLineCount) + str);
+    previousOutput = str;
+    previousLineCount = lines.length;
     return true;
   };
 
   render.clear = () => {
-    const prefix = buildReturnToBottomPrefix(
-      cursorWasShown,
-      previousLineCount,
-      previousCursorPosition,
-    );
-    write(prefix + ansiEscapes.eraseLines(previousLineCount));
+    write(ansiEscapes.eraseLines(previousLineCount));
     previousOutput = "";
     previousLineCount = 0;
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
   };
 
   render.done = () => {
     previousOutput = "";
     previousLineCount = 0;
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
-
-    if (!showCursorOption && hasHiddenCursor) {
-      showCursor(stream, write);
-      setHiddenCursor(false);
-    }
+    cursor.done();
   };
 
   render.reset = (options?: ResetOptions) => {
     previousOutput = "";
     previousLineCount = 0;
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
-    cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
-    setHiddenCursor(options?.cursorHidden ?? hasHiddenCursor);
+    cursor.reset(options?.cursorHidden);
   };
 
-  render.getCursorReturnToBottom = () =>
-    buildReturnToBottomPrefix(cursorWasShown, previousLineCount, previousCursorPosition);
-
-  render.sync = (str: string, options?: SyncOptions) => {
-    // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
-    // gated), so a direct-output / restoreLastOutput sync re-seats the caret
-    // at the declared point too.
-    //
-    // options.cursor === false suppresses the cursor emit for THIS sync (the
-    // fixed-viewport app.clear() path). That operation erased WITHOUT redrawing, so
-    // re-asserting the persistent caret would float it on a blank screen — Ink
-    // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
-    // emits no caret either). We do NOT touch cursorPosition (the declaration
-    // persists), so the NEXT real render re-shows the caret normally. Treating
-    // the active cursor as undefined here also drives previousCursorPosition/
-    // cursorWasShown to the true post-clear blank state.
-    const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
-
-    const lines = str.split("\n");
-
-    // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
-    // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
-    // unlike render()/done()'s hide/show which DO route through cli-cursor.
-    // After clear() cursorWasShown is already false, so that path (which
-    // passes cursor:false → activeCursor undefined) writes no hide here either.
-    if (!activeCursor && cursorWasShown) {
-      write(hideCursorEscape);
-    }
-
-    if (activeCursor) {
-      write(
-        buildCursorSuffix(
-          visibleLineCount(lines, str),
-          activeCursor,
-          streamWidth(stream),
-          str.endsWith("\n"),
-        ),
-      );
-    }
-
+  render.sync = (str: string) => {
     previousOutput = str;
-    previousLineCount = lines.length;
-    previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
-    cursorWasShown = activeCursor !== undefined;
-    cursorDirty = false;
+    previousLineCount = str.split("\n").length;
   };
 
-  render.setCursorPosition = (position: CursorPosition | undefined) => {
-    cursorPosition = position;
-    cursorDirty = true;
-  };
-
-  render.isCursorHidden = () => hasHiddenCursor;
-  render.isCursorDirty = () => cursorDirty;
-  render.willRender = (str: string) => hasChanges(str, getActiveCursor());
+  render.isCursorHidden = cursor.isHidden;
+  render.willRender = (str: string) => str !== previousOutput;
   render.createRollback = () => {
     const snapshot = {
       previousLineCount,
       previousOutput,
-      hasHiddenCursor,
-      cursorPosition: cursorPosition ? { ...cursorPosition } : undefined,
-      cursorDirty,
-      previousCursorPosition: previousCursorPosition ? { ...previousCursorPosition } : undefined,
-      cursorWasShown,
+      cursorHidden: cursor.isHidden(),
     };
     let active = true;
     return () => {
@@ -296,11 +125,7 @@ const createStandard = (
       active = false;
       previousLineCount = snapshot.previousLineCount;
       previousOutput = snapshot.previousOutput;
-      setHiddenCursor(snapshot.hasHiddenCursor);
-      cursorPosition = snapshot.cursorPosition;
-      cursorDirty = snapshot.cursorDirty;
-      previousCursorPosition = snapshot.previousCursorPosition;
-      cursorWasShown = snapshot.cursorWasShown;
+      cursor.reset(snapshot.cursorHidden);
     };
   };
 
@@ -316,98 +141,26 @@ const createIncremental = (
 ): LogUpdate => {
   let previousLines: string[] = [];
   let previousOutput = "";
-  let hasHiddenCursor = false;
-  let cursorPosition: CursorPosition | undefined;
-  let cursorDirty = false;
-  let previousCursorPosition: CursorPosition | undefined;
-  let cursorWasShown = false;
-
-  const setHiddenCursor = (hidden: boolean): void => {
-    if (hasHiddenCursor === hidden) return;
-    hasHiddenCursor = hidden;
-    changeRuntimeResource("cursorLeases", hidden ? 1 : -1);
-  };
-
-  // Persistent-declaration (see createStandard for the full rationale): the
-  // active cursor is the last-declared position, re-emitted at the end of every
-  // commit so it survives unrelated repaints; a cleared declaration emits no
-  // caret. cursorDirty only gates the commit/dedup paths now.
-  // Keep incremental and standard writers identical: a non-TTY destination
-  // may receive live frame bytes only by explicit request, never terminal
-  // cursor controls.
-  const getActiveCursor = () => (isTtyStream(stream) ? cursorPosition : undefined);
-  const hasChanges = (str: string, activeCursor: CursorPosition | undefined): boolean => {
-    const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
-    return str !== previousOutput || cursorChanged;
-  };
+  const cursor = createCursorOwnership(stream, write, showCursorOption);
 
   const render = (str: string) => {
-    if (!showCursorOption && !hasHiddenCursor) {
-      hideCursor(stream, write);
-      setHiddenCursor(true);
-    }
-
-    const activeCursor = getActiveCursor();
-    const cursorChanged = cursorPositionChanged(activeCursor, previousCursorPosition);
-
-    if (!hasChanges(str, activeCursor)) {
-      cursorDirty = false;
-      return false;
-    }
+    cursor.hideForRender();
+    if (str === previousOutput) return false;
 
     const nextLines = str.split("\n");
     const visibleCount = visibleLineCount(nextLines, str);
     const previousVisible = visibleLineCount(previousLines, previousOutput);
 
-    if (str === previousOutput && cursorChanged) {
-      write(
-        buildCursorOnlySequence({
-          cursorWasShown,
-          previousLineCount: previousLines.length,
-          previousCursorPosition,
-          visibleLineCount: visibleCount,
-          cursorPosition: activeCursor,
-          width: streamWidth(stream),
-          hasTrailingNewline: str.endsWith("\n"),
-        }),
-      );
-      previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
-      cursorWasShown = activeCursor !== undefined;
-      cursorDirty = false;
-      return true;
-    }
-
-    const returnPrefix = buildReturnToBottomPrefix(
-      cursorWasShown,
-      previousLines.length,
-      previousCursorPosition,
-    );
-
     if (str === "\n" || previousOutput.length === 0) {
-      const cursorSuffix = buildCursorSuffix(
-        visibleCount,
-        activeCursor,
-        streamWidth(stream),
-        str.endsWith("\n"),
-      );
-      write(returnPrefix + ansiEscapes.eraseLines(previousLines.length) + str + cursorSuffix);
-      cursorWasShown = activeCursor !== undefined;
-      previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
+      write(ansiEscapes.eraseLines(previousLines.length) + str);
       previousOutput = str;
       previousLines = nextLines;
-      cursorDirty = false;
       return true;
     }
 
     const hasTrailingNewline = str.endsWith("\n");
-
-    // We aggregate all chunks for incremental rendering into a buffer,
-    // and then write them to stdout at the end.
     const buffer: string[] = [];
 
-    buffer.push(returnPrefix);
-
-    // Clear extra lines if the current content's line count is lower than the previous.
     if (visibleCount < previousVisible) {
       const previousHadTrailingNewline = previousOutput.endsWith("\n");
       const extraSlot = previousHadTrailingNewline ? 1 : 0;
@@ -419,146 +172,56 @@ const createIncremental = (
       buffer.push(ansiEscapes.cursorUp(previousLines.length - 1));
     }
 
-    for (let i = 0; i < visibleCount; i++) {
-      const isLastLine = i === visibleCount - 1;
-
-      // We do not write lines if the contents are the same. This prevents flickering during renders.
-      if (nextLines[i] === previousLines[i]) {
-        // Don't move past the last line when there's no trailing newline,
-        // otherwise the cursor overshoots the rendered block.
-        if (!isLastLine || hasTrailingNewline) {
-          buffer.push(ansiEscapes.cursorNextLine);
-        }
-
+    for (let index = 0; index < visibleCount; index++) {
+      const isLastLine = index === visibleCount - 1;
+      if (nextLines[index] === previousLines[index]) {
+        if (!isLastLine || hasTrailingNewline) buffer.push(ansiEscapes.cursorNextLine);
         continue;
       }
-
       buffer.push(
         ansiEscapes.cursorTo(0) +
-          nextLines[i]! +
+          nextLines[index]! +
           ansiEscapes.eraseEndLine +
-          // Don't append newline after the last line when the input
-          // has no trailing newline (for example, a viewport-filling frame).
           (isLastLine && !hasTrailingNewline ? "" : "\n"),
       );
     }
 
-    const cursorSuffix = buildCursorSuffix(
-      visibleCount,
-      activeCursor,
-      streamWidth(stream),
-      hasTrailingNewline,
-    );
-    buffer.push(cursorSuffix);
-
     write(buffer.join(""));
-
-    cursorWasShown = activeCursor !== undefined;
-    previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
     previousOutput = str;
     previousLines = nextLines;
-    cursorDirty = false;
     return true;
   };
 
   render.clear = () => {
-    const prefix = buildReturnToBottomPrefix(
-      cursorWasShown,
-      previousLines.length,
-      previousCursorPosition,
-    );
-    write(prefix + ansiEscapes.eraseLines(previousLines.length));
+    write(ansiEscapes.eraseLines(previousLines.length));
     previousOutput = "";
     previousLines = [];
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
   };
 
   render.done = () => {
     previousOutput = "";
     previousLines = [];
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
-
-    if (!showCursorOption && hasHiddenCursor) {
-      showCursor(stream, write);
-      setHiddenCursor(false);
-    }
+    cursor.done();
   };
 
   render.reset = (options?: ResetOptions) => {
     previousOutput = "";
     previousLines = [];
-    previousCursorPosition = undefined;
-    cursorWasShown = false;
-    cursorDirty = options?.cursorDirty ?? cursorPosition !== undefined;
-    setHiddenCursor(options?.cursorHidden ?? hasHiddenCursor);
+    cursor.reset(options?.cursorHidden);
   };
 
-  render.getCursorReturnToBottom = () =>
-    buildReturnToBottomPrefix(cursorWasShown, previousLines.length, previousCursorPosition);
-
-  render.sync = (str: string, options?: SyncOptions) => {
-    // Persistent-declaration: sync the LAST-declared position (not cursorDirty-
-    // gated), so a direct-output / restoreLastOutput sync re-seats the caret
-    // at the declared point too.
-    //
-    // options.cursor === false suppresses the cursor emit for THIS sync (the
-    // fixed-viewport app.clear() path). That operation erased WITHOUT redrawing, so
-    // re-asserting the persistent caret would float it on a blank screen — Ink
-    // leaves it hidden (its clear()-time sync sees cursorDirty=false, so it
-    // emits no caret either). We do NOT touch cursorPosition (the declaration
-    // persists), so the NEXT real render re-shows the caret normally. Treating
-    // the active cursor as undefined here also drives previousCursorPosition/
-    // cursorWasShown to the true post-clear blank state.
-    const activeCursor = options?.cursor === false ? undefined : getActiveCursor();
-
-    const lines = str.split("\n");
-
-    // NOT isTTY-gated: Ink's sync() writes the hide directly (Ink
-    // log-update.ts:149-151), NOT via cli-cursor, so it has no isTTY guard —
-    // unlike render()/done()'s hide/show which DO route through cli-cursor.
-    // After clear() cursorWasShown is already false, so that path (which
-    // passes cursor:false → activeCursor undefined) writes no hide here either.
-    if (!activeCursor && cursorWasShown) {
-      write(hideCursorEscape);
-    }
-
-    if (activeCursor) {
-      write(
-        buildCursorSuffix(
-          visibleLineCount(lines, str),
-          activeCursor,
-          streamWidth(stream),
-          str.endsWith("\n"),
-        ),
-      );
-    }
-
+  render.sync = (str: string) => {
     previousOutput = str;
-    previousLines = lines;
-    previousCursorPosition = activeCursor ? { ...activeCursor } : undefined;
-    cursorWasShown = activeCursor !== undefined;
-    cursorDirty = false;
+    previousLines = str.split("\n");
   };
 
-  render.setCursorPosition = (position: CursorPosition | undefined) => {
-    cursorPosition = position;
-    cursorDirty = true;
-  };
-
-  render.isCursorHidden = () => hasHiddenCursor;
-  render.isCursorDirty = () => cursorDirty;
-  render.willRender = (str: string) => hasChanges(str, getActiveCursor());
+  render.isCursorHidden = cursor.isHidden;
+  render.willRender = (str: string) => str !== previousOutput;
   render.createRollback = () => {
     const snapshot = {
       previousLines: [...previousLines],
       previousOutput,
-      hasHiddenCursor,
-      cursorPosition: cursorPosition ? { ...cursorPosition } : undefined,
-      cursorDirty,
-      previousCursorPosition: previousCursorPosition ? { ...previousCursorPosition } : undefined,
-      cursorWasShown,
+      cursorHidden: cursor.isHidden(),
     };
     let active = true;
     return () => {
@@ -566,11 +229,7 @@ const createIncremental = (
       active = false;
       previousLines = snapshot.previousLines;
       previousOutput = snapshot.previousOutput;
-      setHiddenCursor(snapshot.hasHiddenCursor);
-      cursorPosition = snapshot.cursorPosition;
-      cursorDirty = snapshot.cursorDirty;
-      previousCursorPosition = snapshot.previousCursorPosition;
-      cursorWasShown = snapshot.cursorWasShown;
+      cursor.reset(snapshot.cursorHidden);
     };
   };
 
@@ -584,13 +243,9 @@ const create = (
     incremental = false,
     write,
   }: { showCursor?: boolean; incremental?: boolean; write?: LogUpdateWrite } = {},
-): LogUpdate => {
-  if (incremental) {
-    return createIncremental(stream, { showCursor: showCursorOption, write });
-  }
+): LogUpdate =>
+  incremental
+    ? createIncremental(stream, { showCursor: showCursorOption, write })
+    : createStandard(stream, { showCursor: showCursorOption, write });
 
-  return createStandard(stream, { showCursor: showCursorOption, write });
-};
-
-const logUpdate = { create };
-export default logUpdate;
+export default { create };

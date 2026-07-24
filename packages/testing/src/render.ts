@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { Console as NodeConsole } from "node:console";
 import { nextTick, readonly, type Component } from "vue";
 import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
-import { createTestHostBridge, type TestContentFrame } from "@vue-tui/runtime/testing";
+import { createTestHostBridge, type TestContentFrame } from "@vue-tui/runtime/internal/testing";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";

@@ -8,7 +8,7 @@ export const RESOLVED_DEV_VMOD_ID = "\0" + DEV_VMOD_ID;
 // The snippet is TRANSFORMED by Vite (so its import.meta.hot is live, unlike the
 // externalized runtime), then hands that hot to the runtime's dev API.
 const SNIPPET =
-  'import { connectDevtools } from "@vue-tui/runtime/devtools";\n' +
+  'import { connectDevtools } from "@vue-tui/runtime/internal/devtools";\n' +
   "if (import.meta.hot) connectDevtools(import.meta.hot);\n";
 
 export function devVmodPlugin(): Plugin {

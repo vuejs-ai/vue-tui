@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { Text, useLayoutWidth, useStdin, useViewportHeight } from "@vue-tui/runtime";
+import { Text, useLayoutSize, useStdin } from "@vue-tui/runtime";
 
-const width = useLayoutWidth();
-const viewportHeight = useViewportHeight();
+const { width, height } = useLayoutSize();
 const { stdin, isRawModeSupported, setRawMode } = useStdin();
 void stdin;
 void isRawModeSupported;
@@ -10,5 +9,5 @@ setRawMode(false);
 </script>
 
 <template>
-  <Text>{{ width }}x{{ viewportHeight ?? "unbounded" }}</Text>
+  <Text>{{ width }}x{{ height === Infinity ? "unbounded" : height }}</Text>
 </template>

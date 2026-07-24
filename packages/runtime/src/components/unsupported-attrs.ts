@@ -1,12 +1,3 @@
-const rejectedMouseListenerNames = new Set([
-  "onMousedown",
-  "onMouseDown",
-  "onMouseup",
-  "onMouseUp",
-  "onClick",
-  "onWheel",
-]);
-
 /**
  * Box and Text deliberately have a closed attribute surface. Vue normally
  * treats undeclared component inputs as fallthrough attributes; because these
@@ -25,12 +16,6 @@ export function assertNoUnsupportedAttrs(
   for (const key of Reflect.ownKeys(attrs)) {
     if (typeof key === "symbol") {
       throw new Error(`<${component}> does not accept symbol attributes.`);
-    }
-    if (rejectedMouseListenerNames.has(key)) {
-      throw new Error(
-        `<${component}> does not accept the removed mouse listener "${key}". ` +
-          `Targeted mouse input is outside the current Runtime foundation.`,
-      );
     }
     throw new Error(
       `<${component}> does not accept the undeclared attribute ${JSON.stringify(key)}. ` +

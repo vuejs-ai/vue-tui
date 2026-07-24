@@ -3,7 +3,7 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text, renderToString } from "@vue-tui/runtime";
 
-const removedListeners = [
+const listenerAttributes = [
   "onMousedown",
   "onMouseDown",
   "onMouseup",
@@ -12,16 +12,16 @@ const removedListeners = [
   "onWheel",
 ] as const;
 
-function rejection(component: "Box" | "Text", listener: (typeof removedListeners)[number]): RegExp {
-  return new RegExp(
-    `^<${component}> does not accept the removed mouse listener "${listener}"\\. ` +
-      `Targeted mouse input is outside the current Runtime foundation\\.$`,
-  );
+function rejection(
+  component: "Box" | "Text",
+  listener: (typeof listenerAttributes)[number],
+): RegExp {
+  return new RegExp(`^<${component}> does not accept the undeclared attribute "${listener}"\\. `);
 }
 
-function withRemovedListener(
+function withListenerAttribute(
   component: Component,
-  listener: (typeof removedListeners)[number],
+  listener: (typeof listenerAttributes)[number],
   value: unknown = () => {},
 ): Component {
   return defineComponent(
@@ -32,27 +32,27 @@ function withRemovedListener(
   );
 }
 
-test.each(removedListeners)("Box rejects the removed %s prop from JavaScript/any", (listener) => {
-  expect(() => renderToString(withRemovedListener(Box, listener))).toThrow(
+test.each(listenerAttributes)("Box rejects the undeclared %s listener", (listener) => {
+  expect(() => renderToString(withListenerAttribute(Box, listener))).toThrow(
     rejection("Box", listener),
   );
 });
 
-test.each(removedListeners)("Text rejects the removed %s prop from JavaScript/any", (listener) => {
+test.each(listenerAttributes)("Text rejects the undeclared %s listener", (listener) => {
   const App = defineComponent(
     () => () => h(Text, { [listener]: () => {} } as Record<string, unknown>, () => "content"),
   );
   expect(() => renderToString(App)).toThrow(rejection("Text", listener));
 });
 
-test("childless Text still rejects a removed listener", () => {
+test("childless Text still rejects a listener attribute", () => {
   const App = defineComponent(
     () => () => h(Text, { onMousedown: undefined } as Record<string, unknown>),
   );
   expect(() => renderToString(App)).toThrow(rejection("Text", "onMousedown"));
 });
 
-test("a removed listener introduced by a later render rejects Vue's update", async () => {
+test("a listener attribute introduced by a later render rejects Vue's update", async () => {
   const rejected = shallowRef(false);
   const App = defineComponent(
     () => () =>

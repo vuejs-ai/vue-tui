@@ -36,7 +36,9 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.mounts).toBe(1);
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(result.lastFrame()).toBe("probe:0\ntail");
-      expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
+      expect(vShowJourneyState.size?.hasMeasured.value).toBe(true);
+      expect(vShowJourneyState.size?.width.value).toBe(12);
+      expect(vShowJourneyState.size?.height.value).toBe(1);
       expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
 
       visible.value = false;
@@ -45,7 +47,8 @@ test.each(["inline", "fullscreen"] as const)(
       expect(vShowJourneyState.mounts).toBe(1);
       expect(vShowJourneyState.unmounts).toBe(0);
       expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
-      expect(vShowJourneyState.size?.value).toBeNull();
+      expect(vShowJourneyState.size?.hasMeasured.value).toBe(false);
+      expect(vShowJourneyState.size?.width.value).toBe(0);
 
       // Reactive state and the rendered target can both change while the
       // directive keeps the mounted subtree out of layout and paint.
@@ -61,13 +64,16 @@ test.each(["inline", "fullscreen"] as const)(
       await flushUpdate(result);
       expect(result.lastFrame()).toBe("    probe:2\ntail");
       expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
-      expect(vShowJourneyState.size?.value).toEqual({ width: 12, height: 1 });
+      expect(vShowJourneyState.size?.hasMeasured.value).toBe(true);
+      expect(vShowJourneyState.size?.width.value).toBe(12);
+      expect(vShowJourneyState.size?.height.value).toBe(1);
       vShowJourneyState.focus?.focus();
       expect(vShowJourneyState.focus?.isFocused.value).toBe(true);
       result.unmount();
       expect(vShowJourneyState.unmounts).toBe(1);
       expect(vShowJourneyState.focus?.isFocused.value).toBe(false);
-      expect(vShowJourneyState.size?.value).toBeNull();
+      expect(vShowJourneyState.size?.hasMeasured.value).toBe(false);
+      expect(vShowJourneyState.size?.width.value).toBe(0);
     } finally {
       result.dispose();
     }

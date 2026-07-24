@@ -36,7 +36,7 @@ async function mountInteractive(columns: number, rows: number) {
   });
 
   const app = createApp(App);
-  // A TTY output owns live resize behavior. No managed input route is active,
+  // A TTY output owns live resize behavior. No managed input subscription is active,
   // so the operating system owns Ctrl+C.
   app.mount({ stdout, stdin, stderr });
 

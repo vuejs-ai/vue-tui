@@ -16,14 +16,12 @@ import {
   useInput,
   useApp,
   useStdin,
-  useBoxSize,
-  useLayoutWidth,
-  useViewportHeight,
+  useBoxMetrics,
+  useLayoutSize,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { useStderr } from "../../runtime/dist/internal.mjs";
 import { useStdout } from "../../runtime/dist/internal.mjs";
-import { useInternalInputRoutingForTest } from "../../runtime/dist/internal.mjs";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -32,7 +30,7 @@ describe("renderToString", () => {
         <Text>Hello</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 40 });
+    const output = renderToString(App, { width: 40 });
     expect(output).toContain("Hello");
   });
 
@@ -48,9 +46,11 @@ describe("renderToString", () => {
     let setupRan = 0;
     const App = defineComponent(() => () => <Text>x</Text>);
     const sharedOptions = {
-      columns: 20,
+      width: 20,
+      height: 24,
       mode: "fullscreen",
       rows: 24,
+      columns: 99,
       isScreenReaderEnabled: true,
     };
     const CountedApp = defineComponent(() => {
@@ -63,17 +63,21 @@ describe("renderToString", () => {
   });
 
   test("provides truthful string layout facts", () => {
-    let width: ReturnType<typeof useLayoutWidth> | undefined;
-    let viewportHeight: ReturnType<typeof useViewportHeight> | undefined;
+    let layout: ReturnType<typeof useLayoutSize> | undefined;
     const App = defineComponent(() => {
-      width = useLayoutWidth();
-      viewportHeight = useViewportHeight();
-      return () => <Text>{`${width!.value}x${viewportHeight?.value ?? "unbounded"}`}</Text>;
+      layout = useLayoutSize();
+      return () => (
+        <Text>{`${layout!.width.value}x${layout!.height.value === Infinity ? "unbounded" : layout!.height.value}`}</Text>
+      );
     });
 
-    expect(renderToString(App, { columns: 37 })).toBe("37xunbounded");
-    expect(width!.value).toBe(37);
-    expect(viewportHeight).toBeNull();
+    expect(renderToString(App, { width: 37, height: Infinity })).toBe("37xunbounded");
+    expect(layout!.width.value).toBe(37);
+    expect(layout!.height.value).toBe(Infinity);
+
+    expect(renderToString(App)).toBe("80x24");
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(24);
   });
 
   test("rethrows component errors after cleanup", () => {
@@ -90,7 +94,7 @@ describe("renderToString", () => {
         <Text>Line 2</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, 'Line 1\nLine 2')).
     expect(output).toBe("Line 1\nLine 2");
   });
@@ -102,34 +106,6 @@ describe("renderToString", () => {
     });
     const output = renderToString(App);
     expect(output).toContain("with input");
-  });
-
-  test.each([
-    ["success", false],
-    ["component error", true],
-  ] as const)("clears a selected string-host topology after %s", (_label, fail) => {
-    let routing: ReturnType<typeof useInternalInputRoutingForTest> | undefined;
-    const App = defineComponent(() => {
-      routing = useInternalInputRoutingForTest();
-      const boundary = routing.registerSemantic({
-        id: "string-boundary",
-        handle: () => ({
-          performed: false,
-          continue: true,
-          preventDefault: false,
-          blockExternal: false,
-        }),
-      });
-      routing.select({ activeBoundary: boundary.lease });
-      if (fail) throw new Error("string route failure");
-      return () => <Text>string route</Text>;
-    });
-
-    if (fail) expect(() => renderToString(App)).toThrow("string route failure");
-    else expect(renderToString(App)).toBe("string route");
-
-    expect(routing).toBeDefined();
-    expect(routing!.resolve(routing!.capture()).kind).toBe("unselected");
   });
 
   test("useApp does not throw in renderToString", () => {
@@ -215,7 +191,7 @@ describe("renderToString", () => {
       return () => <Text>isolated</Text>;
     });
 
-    expect(renderToString(App, { columns: 29 })).toBe("isolated");
+    expect(renderToString(App, { width: 29 })).toBe("isolated");
     expect(capturedStdin).not.toBe(process.stdin);
     expect(capturedStdout).not.toBe(process.stdout);
     expect(capturedStderr).not.toBe(process.stderr);
@@ -230,8 +206,8 @@ describe("renderToString", () => {
         <Text>full width</Text>
       </Box>
     ));
-    const narrow = renderToString(App, { columns: 20 });
-    const wide = renderToString(App, { columns: 60 });
+    const narrow = renderToString(App, { width: 20 });
+    const wide = renderToString(App, { width: 60 });
     // Both should contain the text
     expect(narrow).toContain("full width");
     expect(wide).toContain("full width");
@@ -243,7 +219,7 @@ describe("renderToString", () => {
         <Text>Padded</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, '  Padded')).
     expect(output).toBe("  Padded");
   });
@@ -349,7 +325,7 @@ describe("renderToString", () => {
         <Text>Bordered</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT boxen frame: a 20-wide single border (top corner + 18 ─ + corner,
     // content row "Bordered" + 10 fill spaces, bottom border). Byte-identical to Ink's
     // boxen('Bordered', { width: 20, borderStyle: 'single' }) (render-to-string.tsx).
@@ -465,7 +441,7 @@ describe("renderToString", () => {
   test("custom columns option", () => {
     const longText = "A".repeat(50);
     const App = defineComponent(() => () => <Text>{longText}</Text>);
-    const output = renderToString(App, { columns: 30 });
+    const output = renderToString(App, { width: 30 });
     const lines = output.split("\n");
     expect(lines.length).toBe(2);
     expect(lines[0]).toBe("A".repeat(30));
@@ -743,7 +719,7 @@ describe("renderToString", () => {
   // StdinContext. The
   // existing suite covers useInput/useApp/useStdin/useStdout/useStderr. These
   // pin the remaining common terminal composables — semantic input and
-  // useBoxSize — so that
+  // useBoxMetrics — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
@@ -761,17 +737,17 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useBoxSize reports null in renderToString", () => {
+    test("useBoxMetrics reports unmeasured state in renderToString", () => {
       const App = defineComponent(() => {
         const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
-        const size = useBoxSize(boxRef);
+        const metrics = useBoxMetrics(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{size.value === null ? "unavailable" : "measured"}</Text>
+            <Text>{metrics.hasMeasured.value ? "measured" : "unavailable"}</Text>
           </Box>
         );
       });
-      const output = renderToString(App, { columns: 40 });
+      const output = renderToString(App, { width: 40 });
       expect(output).toContain("unavailable");
     });
 
@@ -779,14 +755,14 @@ describe("renderToString", () => {
       const App = defineComponent(() => {
         useInput(() => undefined);
         const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
-        useBoxSize(boxRef);
+        useBoxMetrics(boxRef);
         return () => (
           <Box ref={boxRef}>
             <Text>all</Text>
           </Box>
         );
       });
-      const output = renderToString(App, { columns: 40 });
+      const output = renderToString(App, { width: 40 });
       expect(output).toContain("all");
     });
   });

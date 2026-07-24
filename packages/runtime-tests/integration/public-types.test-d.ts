@@ -20,16 +20,14 @@ import {
   Box,
   Text,
   useApp,
-  useBoxSize,
+  useBoxMetrics,
   useFocus,
   useInput,
-  useLayoutWidth,
+  useLayoutSize,
   useStdin,
-  useViewportHeight,
 } from "@vue-tui/runtime";
 import type {
   BoxProps,
-  BoxSize,
   Color,
   FocusTarget,
   TextProps,
@@ -40,7 +38,9 @@ import type {
   TuiKeyName,
   TuiApp,
   UseAppReturn,
+  UseBoxMetricsReturn,
   UseFocusReturn,
+  UseLayoutSizeReturn,
   UseStdinReturn,
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
@@ -72,10 +72,10 @@ const rejectedWebWritable: MountOptions = {
   stdout: webWritable,
 };
 
-const stringRenderOptions: RenderToStringOptions = { columns: 80 };
-expectTypeOf<keyof RenderToStringOptions>().toEqualTypeOf<"columns">();
+const stringRenderOptions: RenderToStringOptions = { width: 80, height: 24 };
+expectTypeOf<keyof RenderToStringOptions>().toEqualTypeOf<"width" | "height">();
 // @ts-expect-error String-render layout input is readonly after construction.
-stringRenderOptions.columns = 40;
+stringRenderOptions.width = 40;
 
 // @ts-expect-error Removed clean-slate option; use mode: "fullscreen".
 const removedFullscreenOption: MountOptions = { fullscreen: true };
@@ -310,17 +310,17 @@ export type _RemovedRenderPresentation = import("@vue-tui/runtime").RenderPresen
 
 // Runtime publishes only the layout facts applications have demonstrated.
 expectTypeOf<NonNullable<MountOptions["mode"]>>().toEqualTypeOf<"inline" | "fullscreen">();
-expectTypeOf<ReturnType<typeof useLayoutWidth>>().toEqualTypeOf<Readonly<Ref<number>>>();
-expectTypeOf<ReturnType<typeof useViewportHeight>>().toEqualTypeOf<Readonly<Ref<number>> | null>();
+expectTypeOf<ReturnType<typeof useLayoutSize>>().toEqualTypeOf<
+  import("@vue-tui/runtime").UseLayoutSizeReturn
+>();
 
-const layoutWidth = useLayoutWidth();
-const viewportHeight = useViewportHeight();
-// @ts-expect-error Runtime-owned layout facts are readonly.
+const layout: UseLayoutSizeReturn = useLayoutSize();
+const layoutWidth = layout.width;
+const layoutHeight = layout.height;
+// @ts-expect-error Runtime-owned layout width is readonly.
 layoutWidth.value = 40;
-if (viewportHeight) {
-  // @ts-expect-error Runtime-owned viewport facts are readonly.
-  viewportHeight.value = 24;
-}
+// @ts-expect-error Runtime-owned layout height is readonly.
+layoutHeight.value = 24;
 
 // @ts-expect-error The broad Runtime session graph is private.
 export type _RenderSessionWasRemoved = import("@vue-tui/runtime").RenderSession;
@@ -332,36 +332,47 @@ export type _RenderOutputWasRemoved = import("@vue-tui/runtime").RenderOutput;
 export type _RenderSizeWasRemoved = import("@vue-tui/runtime").RenderSize;
 // @ts-expect-error The old combined layout wrapper was removed.
 export type _RenderLayoutSizeWasRemoved = import("@vue-tui/runtime").RenderLayoutSize;
-// @ts-expect-error The old combined layout hook was removed.
-export type _UseLayoutSizeWasRemoved = typeof import("@vue-tui/runtime").useLayoutSize;
+// @ts-expect-error Experimental layout width was replaced by useLayoutSize().
+export type _UseLayoutWidthWasRemoved = typeof import("@vue-tui/runtime").useLayoutWidth;
+// @ts-expect-error Experimental viewport height was replaced by useLayoutSize().
+export type _UseViewportHeightWasRemoved = typeof import("@vue-tui/runtime").useViewportHeight;
+// @ts-expect-error Experimental box size was replaced by useBoxMetrics().
+export type _UseBoxSizeWasRemoved = typeof import("@vue-tui/runtime").useBoxSize;
 // @ts-expect-error The broad session hook was removed.
 export type _UseRenderSessionWasRemoved = typeof import("@vue-tui/runtime").useRenderSession;
 
 // @ts-expect-error useWindowSize and its numeric-row WindowSize type were removed.
 export type _WindowSizeWasRemoved = import("@vue-tui/runtime").WindowSize;
 
-expectTypeOf<BoxSize>().toEqualTypeOf<{
-  readonly width: number;
-  readonly height: number;
-}>();
-
 const boxHost = shallowRef<InstanceType<typeof Box> | null>(null);
-const boxSize = useBoxSize(boxHost);
-expectTypeOf(boxSize).toEqualTypeOf<Readonly<Ref<BoxSize | null>>>();
-// @ts-expect-error The accepted Box measurement is readonly.
-boxSize.value = { width: 1, height: 1 };
+const boxMetrics: UseBoxMetricsReturn = useBoxMetrics(boxHost);
+expectTypeOf(boxMetrics.width).toEqualTypeOf<Readonly<Ref<number>>>();
+expectTypeOf(boxMetrics.height).toEqualTypeOf<Readonly<Ref<number>>>();
+expectTypeOf(boxMetrics.left).toEqualTypeOf<Readonly<Ref<number>>>();
+expectTypeOf(boxMetrics.top).toEqualTypeOf<Readonly<Ref<number>>>();
+expectTypeOf(boxMetrics.hasMeasured).toEqualTypeOf<Readonly<Ref<boolean>>>();
+// @ts-expect-error Accepted Box metrics width is readonly.
+boxMetrics.width.value = 1;
+// @ts-expect-error Accepted Box metrics height is readonly.
+boxMetrics.height.value = 1;
+// @ts-expect-error Accepted Box metrics left is readonly.
+boxMetrics.left.value = 1;
+// @ts-expect-error Accepted Box metrics top is readonly.
+boxMetrics.top.value = 1;
+// @ts-expect-error Accepted Box metrics hasMeasured is readonly.
+boxMetrics.hasMeasured.value = true;
 
 const textHost = shallowRef<InstanceType<typeof Text> | null>(null);
 // @ts-expect-error Text layout has separate semantics and is not a Box size target.
-useBoxSize(textHost);
+useBoxMetrics(textHost);
 const customHost = shallowRef<ComponentPublicInstance | null>(null);
 // @ts-expect-error Arbitrary component refs do not mean one measurable Box.
-useBoxSize(customHost);
+useBoxMetrics(customHost);
 declare const rawBoxHost: InstanceType<typeof Box>;
 // @ts-expect-error A raw component value cannot represent target attachment and detachment.
-useBoxSize(rawBoxHost);
+useBoxMetrics(rawBoxHost);
 // @ts-expect-error Callers can wrap a derived target in computed(); Runtime accepts refs only.
-useBoxSize(() => boxHost.value);
+useBoxMetrics(() => boxHost.value);
 
 // @ts-expect-error Rich paint geometry is private.
 export type _UseElementGeometryWasRemoved = typeof import("@vue-tui/runtime").useElementGeometry;
@@ -373,11 +384,9 @@ export type _CellRectWasRemoved = import("@vue-tui/runtime").CellRect;
 export type _ElementGeometryFragmentWasRemoved = import("@vue-tui/runtime").ElementGeometryFragment;
 // @ts-expect-error The old geometry wrapper type was removed.
 export type _OldGeometryReturn = import("@vue-tui/runtime").UseElementGeometryReturn;
-// @ts-expect-error useBoxMetrics was replaced, not retained as an alias.
-export type _UseBoxMetricsWasRemoved = typeof import("@vue-tui/runtime").useBoxMetrics;
-// @ts-expect-error Its named return type was removed with the composable.
-export type _UseBoxMetricsReturnWasRemoved = import("@vue-tui/runtime").UseBoxMetricsReturn;
-// @ts-expect-error Its parent-relative scalar snapshot type was removed too.
+// @ts-expect-error The old frozen size snapshot type was removed.
+export type _BoxSizeWasRemoved = import("@vue-tui/runtime").BoxSize;
+// @ts-expect-error The old parent-relative scalar snapshot type was removed.
 export type _BoxMetricsWasRemoved = import("@vue-tui/runtime").BoxMetrics;
 // @ts-expect-error Imperative Yoga measurement has no semantic geometry contract.
 export type _MeasureElementWasRemoved = typeof import("@vue-tui/runtime").measureElement;

@@ -22,7 +22,6 @@ function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
   return {
     requestedMode: "inline",
     liveUpdatesOverride: undefined,
-    suspensionSupported: false,
     stdout: { isTTY: true, columns: 100, rows: 30 },
     terminalProbe: unavailable,
     ...overrides,
@@ -34,28 +33,6 @@ test("normalizes the finite mount mode input", () => {
   expect(normalizeRequestedMode({ mode: undefined })).toBe("inline");
   expect(normalizeRequestedMode({ mode: "inline" })).toBe("inline");
   expect(normalizeRequestedMode({ mode: "fullscreen" })).toBe("fullscreen");
-});
-
-test("reports host suspension independently from output cadence and effective mode", () => {
-  const surfaces = [
-    resolveLiveSurface(liveInput({ suspensionSupported: true })),
-    resolveLiveSurface(liveInput({ suspensionSupported: true, liveUpdatesOverride: false })),
-    resolveLiveSurface(
-      liveInput({
-        suspensionSupported: true,
-        stdout: { isTTY: false, columns: undefined, rows: undefined },
-        liveUpdatesOverride: true,
-      }),
-    ),
-    resolveLiveSurface(liveInput({ suspensionSupported: true, requestedMode: "fullscreen" })),
-  ];
-
-  expect(surfaces.map((surface) => surface.session.capabilities.suspension)).toEqual([
-    true,
-    true,
-    true,
-    true,
-  ]);
 });
 
 test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode"), 1n])(
@@ -89,7 +66,7 @@ test("resolves one dimensions snapshot with source provenance", () => {
 
   expect(resolveLiveDimensions({ isTTY: false, columns: 120, rows: 40 }, detected80x24)).toEqual({
     terminal: null,
-    layout: { columns: 120, rows: null },
+    layout: { columns: 80, rows: 24 },
   });
 });
 
@@ -121,7 +98,7 @@ test("rejects terminal axes outside Runtime's accepted layout range", () => {
     resolveLiveDimensions({ isTTY: false, columns: outsideLayoutRange, rows: 24 }, unavailable),
   ).toEqual({
     terminal: null,
-    layout: { columns: 80, rows: null },
+    layout: { columns: 80, rows: 24 },
   });
   expect(
     resolveLiveDimensions(
@@ -153,18 +130,45 @@ test("accepts the maximum layout value on either terminal axis", () => {
   });
 });
 
-test("live updates disabled has first fallback priority", () => {
+test("non-TTY Fullscreen and Inline select the same document host", () => {
+  for (const requestedMode of ["inline", "fullscreen"] as const) {
+    const surface = resolveLiveSurface(
+      liveInput({
+        requestedMode,
+        liveUpdatesOverride: undefined,
+        stdout: { isTTY: false, columns: 120, rows: 40 },
+      }),
+    );
+
+    expect(surface.kind).toBe("final-stream");
+    expect(surface.session.mode).toEqual({
+      requested: requestedMode,
+      effective: null,
+      fallback: "stdout-not-tty",
+    });
+    expect(surface.session.output).toEqual({
+      destination: "stream",
+      dynamicUpdates: "at-teardown",
+    });
+    expect(surface.session.dimensions).toEqual({
+      terminal: null,
+      layout: { columns: 80, rows: 24 },
+    });
+  }
+});
+
+test("live updates disabled still applies on a live TTY", () => {
   const surface = resolveLiveSurface(
     liveInput({
-      requestedMode: "fullscreen",
+      requestedMode: "inline",
       liveUpdatesOverride: false,
-      stdout: { isTTY: false, columns: undefined, rows: undefined },
+      stdout: { isTTY: true, columns: 100, rows: 30 },
     }),
   );
 
   expect(surface.kind).toBe("final-stream");
   expect(surface.session.mode).toEqual({
-    requested: "fullscreen",
+    requested: "inline",
     effective: null,
     fallback: "live-updates-disabled",
   });
@@ -190,7 +194,10 @@ test("a forced non-TTY updater remains a stream without a terminal mode", () => 
     fallback: "stdout-not-tty",
   });
   expect(surface.session.output.dynamicUpdates).toBe("live");
-  expect(surface.session.dimensions.terminal).toBeNull();
+  expect(surface.session.dimensions).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
 });
 
 test("visual TTY without detected dimensions falls back to final stream", () => {
@@ -215,10 +222,9 @@ test("visual Inline exposes terminal rows as a maximum layout bound", () => {
     terminal: { columns: 100, rows: 30 },
     layout: { columns: 100, rows: 30 },
   });
-  expect(surface.session.capabilities.stableOrigin).toBe(false);
 });
 
-test("visual Fullscreen owns an exact detected viewport and hit map", () => {
+test("visual Fullscreen owns an exact detected viewport", () => {
   const surface = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
 
   expect(surface.kind).toBe("fullscreen-terminal");
@@ -230,11 +236,6 @@ test("visual Fullscreen owns an exact detected viewport and hit map", () => {
   expect(surface.session.dimensions).toEqual({
     terminal: { columns: 100, rows: 30 },
     layout: { columns: 100, rows: 30 },
-  });
-  expect(surface.session.capabilities).toEqual({
-    stableOrigin: true,
-    elementHitTesting: true,
-    suspension: false,
   });
 });
 
@@ -253,7 +254,6 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
     terminal: { columns: 70, rows: 20 },
     layout: { columns: 70, rows: 20 },
   });
-  expect(session.capabilities.elementHitTesting).toBe(true);
 
   service.dispose();
   service.updateDimensions({
@@ -261,26 +261,24 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
     layout: { columns: 60, rows: 10 },
   });
   expect(session.dimensions.layout).toEqual({ columns: 70, rows: 20 });
-  expect(session.capabilities.elementHitTesting).toBe(true);
 });
 
 test("string service exposes one fixed document snapshot", () => {
-  const service = createStringRenderSessionService({ columns: 37 });
+  const service = createStringRenderSessionService({ columns: 37, rows: 24 });
   const session = service.session;
 
   expect(session).toEqual({
     host: "string",
     mode: null,
     output: { destination: "document", dynamicUpdates: "none" },
-    dimensions: { terminal: null, layout: { columns: 37, rows: null } },
-    capabilities: {
-      stableOrigin: false,
-      elementHitTesting: false,
-      suspension: false,
-    },
+    dimensions: { terminal: null, layout: { columns: 37, rows: 24 } },
   });
   service.dispose();
   expect(service.session).toBe(session);
-  expect(session.dimensions.layout).toEqual({ columns: 37, rows: null });
-  expect(session.capabilities.elementHitTesting).toBe(false);
+  expect(session.dimensions.layout).toEqual({ columns: 37, rows: 24 });
+});
+
+test("string service maps unbounded height to private null rows", () => {
+  const service = createStringRenderSessionService({ columns: 80, rows: null });
+  expect(service.session.dimensions.layout).toEqual({ columns: 80, rows: null });
 });

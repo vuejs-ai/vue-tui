@@ -1,80 +1,40 @@
 import { shallowRef, type ShallowRef } from "vue";
 import type { AppContext } from "../context.ts";
-import type { TuiNode, TuiRoot, TuiText } from "../host/nodes.ts";
+import type { TuiBox, TuiNode } from "../host/nodes.ts";
 import type { RenderedTargetTransactionHost } from "../rendered-target.ts";
 import { changeRuntimeResource } from "../resource-tracker.ts";
 
-export interface InternalCellPoint {
-  readonly x: number;
-  readonly y: number;
-}
-
-export interface InternalCellRect extends InternalCellPoint {
-  readonly width: number;
-  readonly height: number;
-}
-
-export interface InternalGeometryFragment {
-  readonly local: InternalCellRect;
-  readonly parent: InternalCellRect;
-  readonly surface: InternalCellRect;
-  readonly visibleSurface: InternalCellRect | null;
-}
-
-/** Exact legal insertion boundary. Wide-glyph continuation cells have no slot. */
-export interface InternalCaretSlot {
-  readonly local: InternalCellPoint;
-  readonly surface: InternalCellPoint;
-  readonly visible: boolean;
-}
-
-export interface InternalResolvedGeometry {
-  readonly parent: InternalCellRect;
-  readonly surface: InternalCellRect;
-  readonly fragments: readonly InternalGeometryFragment[];
-  /** null means paint cannot preserve insertion provenance for this target. */
-  readonly caretSlots: readonly InternalCaretSlot[] | null;
-}
-
-export type InternalElementGeometry =
+export type InternalBoxSizeState =
   | { readonly status: "unavailable" }
   | { readonly status: "detached" }
   | { readonly status: "pending" }
   | { readonly status: "hidden" }
-  | (InternalResolvedGeometry & {
-      readonly status: "zero-size" | "fully-clipped" | "visible";
-    });
+  | {
+      readonly status: "resolved";
+      readonly width: number;
+      readonly height: number;
+      readonly left: number;
+      readonly top: number;
+    };
 
-export interface InternalGeometryBinding {
-  readonly geometry: Readonly<ShallowRef<InternalElementGeometry>>;
-  observe(
-    observer: (geometry: InternalElementGeometry, target: TuiNode | null) => void,
-  ): () => void;
-  attach(target: TuiNode): () => void;
+export interface InternalBoxSizeBinding {
+  readonly state: Readonly<ShallowRef<InternalBoxSizeState>>;
+  observe(observer: (state: InternalBoxSizeState, target: TuiBox | null) => void): () => void;
+  attach(target: TuiBox): () => void;
   dispose(): void;
 }
 
 export interface InternalGeometryPaintFrame {
-  readonly generation: number;
-  /** True only for a target that had a live geometry binding when this frame began. */
-  isObserved(target: TuiNode): boolean;
   /** True when this target or one of its descendants was observed at frame start. */
   hasObservedSubtree(target: TuiNode): boolean;
-  /** Whether a Text needs grapheme fragments/caret slots instead of its Yoga rectangle. */
-  requiresTextGeometry(target: TuiText): boolean;
-  /** Read this frame's frozen paint result without publishing the generation. */
-  geometryFor(target: TuiNode): InternalElementGeometry;
-  /** Paint traversal order for an observed target recorded in this frame. */
-  paintOrderFor(target: TuiNode): number | undefined;
-  record(target: TuiNode, geometry: InternalElementGeometry): void;
+  record(target: TuiBox, width: number, height: number, left: number, top: number): void;
   recordSubtree(target: TuiNode, status: "hidden" | "unavailable"): void;
   commit(): void;
   discard(): void;
 }
 
 export interface InternalGeometryService extends RenderedTargetTransactionHost {
-  readonly generation: number;
-  createBinding(options?: { readonly textGeometry?: "full" | "rect" }): InternalGeometryBinding;
+  createBinding(): InternalBoxSizeBinding;
   beginFrame(): InternalGeometryPaintFrame;
   setSurfaceAvailable(available: boolean): void;
   invalidateSurface(): void;
@@ -86,48 +46,14 @@ const DETACHED = Object.freeze({ status: "detached" as const });
 const PENDING = Object.freeze({ status: "pending" as const });
 const HIDDEN = Object.freeze({ status: "hidden" as const });
 
-function freezeRect(rect: InternalCellRect): InternalCellRect {
-  return Object.freeze({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
-}
-
-function freezePoint(point: InternalCellPoint): InternalCellPoint {
-  return Object.freeze({ x: point.x, y: point.y });
-}
-
-export function freezeInternalGeometry(geometry: InternalElementGeometry): InternalElementGeometry {
-  if (geometry.status === "unavailable") return UNAVAILABLE;
-  if (geometry.status === "detached") return DETACHED;
-  if (geometry.status === "pending") return PENDING;
-  if (geometry.status === "hidden") return HIDDEN;
-  const fragments = geometry.fragments.map((fragment) =>
-    Object.freeze({
-      local: freezeRect(fragment.local),
-      parent: freezeRect(fragment.parent),
-      surface: freezeRect(fragment.surface),
-      visibleSurface: fragment.visibleSurface ? freezeRect(fragment.visibleSurface) : null,
-    }),
-  );
-  const caretSlots = geometry.caretSlots?.map((slot) =>
-    Object.freeze({
-      local: freezePoint(slot.local),
-      surface: freezePoint(slot.surface),
-      visible: slot.visible,
-    }),
-  );
-  return Object.freeze({
-    status: geometry.status,
-    parent: freezeRect(geometry.parent),
-    surface: freezeRect(geometry.surface),
-    fragments: Object.freeze(fragments),
-    caretSlots: caretSlots === undefined ? null : Object.freeze(caretSlots),
-  });
+function resolved(width: number, height: number, left: number, top: number): InternalBoxSizeState {
+  return Object.freeze({ status: "resolved" as const, width, height, left, top });
 }
 
 interface MutableBinding {
-  readonly value: ShallowRef<InternalElementGeometry>;
-  readonly observers: Set<(geometry: InternalElementGeometry, target: TuiNode | null) => void>;
-  target: TuiNode | null;
-  textGeometry: "full" | "rect";
+  readonly state: ShallowRef<InternalBoxSizeState>;
+  readonly observers: Set<(state: InternalBoxSizeState, target: TuiBox | null) => void>;
+  target: TuiBox | null;
   active: boolean;
 }
 
@@ -146,80 +72,61 @@ export function getInternalGeometryService(app: AppContext): InternalGeometrySer
 }
 
 function belongsToSubtree(node: TuiNode, ancestor: TuiNode): boolean {
-  let current: TuiNode | null = node;
-  while (current) {
+  for (let current: TuiNode | null = node; current; current = current.parent) {
     if (current === ancestor) return true;
-    current = current.parent;
   }
   return false;
 }
 
 export function createInternalGeometryService(
-  _root: TuiRoot,
   requestPaint: () => void = () => {},
 ): InternalGeometryService {
   const bindings = new Set<MutableBinding>();
-  const bindingsByTarget = new Map<TuiNode, Set<MutableBinding>>();
-  const queued = new Map<MutableBinding, InternalElementGeometry>();
-  let currentGeneration = 0;
+  const queued = new Map<MutableBinding, InternalBoxSizeState>();
   let transactionDepth = 0;
   let surfaceAvailable = true;
   let disposed = false;
 
-  const detachedState = (): InternalElementGeometry => (surfaceAvailable ? DETACHED : UNAVAILABLE);
+  const detachedState = (): InternalBoxSizeState => (surfaceAvailable ? DETACHED : UNAVAILABLE);
 
-  const assign = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
-    if (binding.value.value === geometry) return;
-    binding.value.value = geometry;
-    for (const observer of binding.observers) observer(geometry, binding.target);
+  const assign = (binding: MutableBinding, state: InternalBoxSizeState): void => {
+    if (binding.state.value === state) return;
+    binding.state.value = state;
+    for (const observer of binding.observers) observer(state, binding.target);
   };
 
-  const publishFrozen = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
+  const publish = (binding: MutableBinding, state: InternalBoxSizeState): void => {
     if (!binding.active) return;
-    if (transactionDepth > 0) queued.set(binding, geometry);
-    else assign(binding, geometry);
-  };
-
-  const publish = (binding: MutableBinding, geometry: InternalElementGeometry): void => {
-    publishFrozen(binding, freezeInternalGeometry(geometry));
+    if (transactionDepth > 0) queued.set(binding, state);
+    else assign(binding, state);
   };
 
   const flush = (): void => {
     if (transactionDepth > 0 || queued.size === 0) return;
-    for (const [binding, geometry] of queued) {
-      if (binding.active) assign(binding, geometry);
+    for (const [binding, state] of queued) {
+      if (binding.active) assign(binding, state);
     }
     queued.clear();
   };
 
-  const unlink = (binding: MutableBinding, target: TuiNode): void => {
-    const targetBindings = bindingsByTarget.get(target);
-    targetBindings?.delete(binding);
-    if (targetBindings?.size === 0) bindingsByTarget.delete(target);
-  };
-
   const service: InternalGeometryService = {
-    get generation() {
-      return currentGeneration;
-    },
-    createBinding(bindingOptions = {}) {
+    createBinding() {
       if (disposed) throw new Error("geometry service is disposed");
       const binding: MutableBinding = {
-        value: shallowRef<InternalElementGeometry>(detachedState()),
+        state: shallowRef<InternalBoxSizeState>(detachedState()),
         observers: new Set(),
         target: null,
-        textGeometry: bindingOptions.textGeometry ?? "full",
         active: true,
       };
       bindings.add(binding);
       changeRuntimeResource("geometryBindings", 1);
       return {
-        geometry: binding.value,
+        state: binding.state,
         observe(observer) {
           if (!binding.active) throw new Error("geometry binding is disposed");
           binding.observers.add(observer);
           try {
-            observer(binding.value.value, binding.target);
+            observer(binding.state.value, binding.target);
           } catch (error) {
             binding.observers.delete(observer);
             throw error;
@@ -233,11 +140,7 @@ export function createInternalGeometryService(
         },
         attach(target) {
           if (!binding.active) throw new Error("geometry binding is disposed");
-          if (binding.target && binding.target !== target) unlink(binding, binding.target);
           binding.target = target;
-          let targetBindings = bindingsByTarget.get(target);
-          if (!targetBindings) bindingsByTarget.set(target, (targetBindings = new Set()));
-          targetBindings.add(binding);
           publish(binding, surfaceAvailable ? PENDING : UNAVAILABLE);
           if (surfaceAvailable) requestPaint();
           let attached = true;
@@ -245,103 +148,58 @@ export function createInternalGeometryService(
             if (!attached) return;
             attached = false;
             if (binding.target !== target) return;
-            unlink(binding, target);
             binding.target = null;
             publish(binding, detachedState());
           };
         },
         dispose() {
           if (!binding.active) return;
-          if (binding.target) unlink(binding, binding.target);
           binding.target = null;
           assign(binding, DETACHED);
           binding.active = false;
           bindings.delete(binding);
-          changeRuntimeResource("geometryBindings", -1);
           queued.delete(binding);
           binding.observers.clear();
+          changeRuntimeResource("geometryBindings", -1);
         },
       };
     },
     beginFrame() {
       if (disposed) throw new Error("geometry service is disposed");
-      const generation = currentGeneration + 1;
-      const records = new Map<TuiNode, InternalElementGeometry>();
-      const paintOrders = new Map<TuiNode, number>();
-      let nextPaintOrder = 0;
-      const observedTargets = new Set<TuiNode>();
+      const records = new Map<TuiBox, InternalBoxSizeState>();
+      const observedTargets = new Set<TuiBox>();
       const observedSubtrees = new Set<TuiNode>();
-      const fullTextGeometry = new Set<TuiText>();
       for (const binding of bindings) {
         if (!binding.target) continue;
         observedTargets.add(binding.target);
-        let current: TuiNode | null = binding.target;
-        let textRoot: TuiText | null = null;
-        while (current) {
+        for (let current: TuiNode | null = binding.target; current; current = current.parent) {
           observedSubtrees.add(current);
-          if (current.type === "tui-text") textRoot = current;
-          current = current.parent;
-        }
-        // A top-level Text used only as a pointer hit target needs its Yoga
-        // rectangle, not tens of thousands of caret slots. Nested virtual Text
-        // has no Yoga rectangle, so even a pointer binding needs the full trace.
-        if (
-          textRoot &&
-          (binding.textGeometry === "full" || binding.target.type === "tui-virtual-text")
-        ) {
-          fullTextGeometry.add(textRoot);
         }
       }
       let settled = false;
-      const recordSubtree = (target: TuiNode, status: "hidden" | "unavailable"): void => {
-        const geometry = status === "hidden" ? HIDDEN : UNAVAILABLE;
-        for (const observed of observedTargets) {
-          if (belongsToSubtree(observed, target)) records.set(observed, geometry);
-        }
-      };
       return {
-        generation,
-        isObserved(target) {
-          return observedTargets.has(target);
-        },
         hasObservedSubtree(target) {
           return observedSubtrees.has(target);
         },
-        requiresTextGeometry(target) {
-          return fullTextGeometry.has(target);
-        },
-        geometryFor(target) {
+        record(target, width, height, left, top) {
           if (settled) throw new Error("geometry paint frame is already settled");
-          if (!observedTargets.has(target)) {
-            throw new Error("geometry target was not observed when this paint frame began");
-          }
-          return records.get(target) ?? PENDING;
-        },
-        paintOrderFor(target) {
-          if (settled) throw new Error("geometry paint frame is already settled");
-          return paintOrders.get(target);
-        },
-        record(target, geometry) {
-          if (settled) throw new Error("geometry paint frame is already settled");
-          if (observedTargets.has(target)) {
-            records.set(target, freezeInternalGeometry(geometry));
-            if (!paintOrders.has(target)) paintOrders.set(target, nextPaintOrder++);
-          }
+          if (observedTargets.has(target)) records.set(target, resolved(width, height, left, top));
         },
         recordSubtree(target, status) {
           if (settled) throw new Error("geometry paint frame is already settled");
-          recordSubtree(target, status);
+          const state = status === "hidden" ? HIDDEN : UNAVAILABLE;
+          for (const observed of observedTargets) {
+            if (belongsToSubtree(observed, target)) records.set(observed, state);
+          }
         },
         commit() {
           if (settled) throw new Error("geometry paint frame is already settled");
           settled = true;
           if (!surfaceAvailable || disposed) return;
-          currentGeneration = generation;
           transactionDepth++;
           try {
             for (const binding of bindings) {
-              if (!binding.target) continue;
-              publishFrozen(binding, records.get(binding.target) ?? PENDING);
+              if (binding.target) publish(binding, records.get(binding.target) ?? PENDING);
             }
           } finally {
             transactionDepth--;
@@ -375,7 +233,7 @@ export function createInternalGeometryService(
       transactionDepth++;
       try {
         for (const binding of bindings) {
-          if (binding.target && binding.value.value.status !== "unavailable") {
+          if (binding.target && binding.state.value.status !== "unavailable") {
             publish(binding, PENDING);
           }
         }
@@ -396,7 +254,6 @@ export function createInternalGeometryService(
     beforeInvalidateSubtree(target) {
       for (const binding of bindings) {
         if (binding.target && belongsToSubtree(binding.target, target)) {
-          unlink(binding, binding.target);
           binding.target = null;
           publish(binding, detachedState());
         }
@@ -413,7 +270,6 @@ export function createInternalGeometryService(
         binding.observers.clear();
       }
       bindings.clear();
-      bindingsByTarget.clear();
       queued.clear();
     },
   };

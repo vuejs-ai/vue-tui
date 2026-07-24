@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { computed, shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
-import { Box, Text, useBoxSize, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useBoxMetrics, useLayoutSize } from "@vue-tui/runtime";
 import Target from "./target.vue";
 
 const label = "LABEL-A";
 const count = shallowRef(0);
-const layoutWidth = useLayoutWidth();
-const viewportHeight = useViewportHeight();
-const layoutSize = computed(() => `${layoutWidth.value}x${viewportHeight?.value ?? "unbounded"}`);
+const { width: layoutWidth, height: viewportHeight } = useLayoutSize();
+const layoutSize = computed(() => `${layoutWidth.value}x${viewportHeight.value}`);
 const boxTarget = shallowRef<InstanceType<typeof Box> | null>(null);
-const boxSize = useBoxSize(boxTarget);
-const acceptedBoxSize = computed(() => {
-  const size = boxSize.value;
-  return size === null ? "pending" : `${size.width}x${size.height}`;
-});
+const boxMetrics = useBoxMetrics(boxTarget);
+const acceptedBoxSize = computed(() =>
+  boxMetrics.hasMeasured.value ? `${boxMetrics.width.value}x${boxMetrics.height.value}` : "pending",
+);
 const target = shallowRef<InstanceType<typeof Target> | null>(null);
 const targetGlobal = globalThis as {
   __VT_TARGET_INSTANCE__?: object;

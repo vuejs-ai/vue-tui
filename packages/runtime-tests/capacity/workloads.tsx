@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import stringWidth from "string-width";
 import { computed, defineComponent, nextTick, shallowReactive, shallowRef } from "vue";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
-import { Box, Text, useApp, useInput, useLayoutWidth, useViewportHeight } from "@vue-tui/runtime";
+import { Box, Text, useApp, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { useStderr } from "../../runtime/dist/internal.mjs";
 import { useStdout } from "../../runtime/dist/internal.mjs";
@@ -675,16 +675,17 @@ async function runJ4(maxFps: number): Promise<JourneyExecution> {
   const sequence = shallowRef(0);
   const last = shallowRef({ row: 0, point: 0, value: 0, action: "update" });
   let exit!: () => void;
-  let layoutWidth!: ReturnType<typeof useLayoutWidth>;
-  let viewportHeight!: NonNullable<ReturnType<typeof useViewportHeight>>;
+  let layoutWidth!: ReturnType<typeof useLayoutSize>["width"];
+  let viewportHeight!: ReturnType<typeof useLayoutSize>["height"];
   const checksum = (): number => rows.reduce((sum, row) => sum + row.value, 0);
   const marker = (side: "TOP" | "BOTTOM"): string =>
     `__J4_${side}__ seq=${sequence.value} action=${last.value.action} row=${last.value.row} value=${last.value.value} point=${last.value.point} checksum=${checksum()}`;
 
   const App = defineComponent(() => {
     exit = useApp().exit;
-    layoutWidth = useLayoutWidth();
-    const resolvedViewportHeight = useViewportHeight();
+    const layout = useLayoutSize();
+    layoutWidth = layout.width;
+    const resolvedViewportHeight = layout.height;
     if (!resolvedViewportHeight) {
       throw new Error("J4 requires the bounded Fullscreen viewport configured by its host");
     }

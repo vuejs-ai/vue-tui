@@ -262,7 +262,6 @@ export function projectPublicInputEvent(fact: NormalizedInputFact): TuiInputEven
       }
       break;
     }
-    case "pointer":
     case "uninterpreted":
       event = null;
       break;

@@ -621,7 +621,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       // while a following CSI or paste prefix from the same chunk is already
       // pending; invalidation must be able to retain this exact framing unit.
       // Its recipient contents are refreshed after the earlier complete facts
-      // run, so route selection does not depend on Node's chunk boundaries.
+      // run, so subscriber selection does not depend on Node's chunk boundaries.
       newPendingRecipients = { recipients: segment.recipients.recipients };
       pendingInputRecipients = newPendingRecipients;
     }

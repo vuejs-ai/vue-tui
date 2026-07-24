@@ -6,7 +6,6 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { useStdout } from "../../../runtime/dist/internal.mjs";
-import { useInternalInputRoutingForTest } from "../../../runtime/dist/internal.mjs";
 import { bsu, esu } from "../../../runtime/dist/internal.mjs";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
@@ -127,19 +126,9 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
     refBalance--;
     return stdin;
   };
-  let selectRoute!: () => () => void;
+  const inputActive = shallowRef(false);
   const App = defineComponent(() => {
-    const routing = useInternalInputRoutingForTest();
-    const boundary = routing.registerSemantic({
-      id: "boundary",
-      handle: () => ({
-        performed: false,
-        continue: true,
-        preventDefault: false,
-        blockExternal: false,
-      }),
-    });
-    selectRoute = () => routing.select({ activeBoundary: boundary.lease });
+    useInput(() => undefined, { isActive: inputActive });
     return () => null;
   });
   const app = createApp(App);
@@ -154,7 +143,9 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
       patchConsole: false,
     }),
   );
-  expect(selectRoute).toThrow("stdin.ref failed");
+  expect(() => {
+    inputActive.value = true;
+  }).toThrow("stdin.ref failed");
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
     isRaw: false,

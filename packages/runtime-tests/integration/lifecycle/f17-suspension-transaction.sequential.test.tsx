@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useInput, useLayoutWidth, type TuiApp } from "@vue-tui/runtime";
+import { createApp, Text, useInput, useLayoutSize, type TuiApp } from "@vue-tui/runtime";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import {
   INTERNAL_SUSPENSION_HOST,
@@ -283,13 +283,13 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
 test.sequential("a resize reported by the continued frame is repainted before input resumes", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
-  Object.assign(stdout, { isTTY: false, columns: 30 });
-  Object.assign(stderr, { isTTY: false, columns: 30 });
+  Object.assign(stdout, { isTTY: true, columns: 30, rows: 10 });
+  Object.assign(stderr, { isTTY: true, columns: 30, rows: 10 });
   const stdin = makeRawTrackingStdin();
   const suspensionHost = createManualSuspensionHost();
   const renderedFacts: string[] = [];
   const App = defineComponent(() => {
-    const width = useLayoutWidth();
+    const { width } = useLayoutSize();
     useInput(() => {});
     const frame = () => {
       const facts = `${width.value}:raw=${String(stdin.isRaw)}`;

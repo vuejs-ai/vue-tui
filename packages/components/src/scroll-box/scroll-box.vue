@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, shallowRef, watch } from "vue";
-import { Box, useBoxSize } from "@vue-tui/runtime";
+import { Box, useBoxMetrics } from "@vue-tui/runtime";
 import {
   assertNoRejectedMouseListeners,
   scrollBoxProps,
@@ -16,8 +16,8 @@ const componentInstance = instance;
 
 const viewportRef = shallowRef<InstanceType<typeof Box> | null>(null);
 const contentRef = shallowRef<InstanceType<typeof Box> | null>(null);
-const viewportSize = useBoxSize(viewportRef);
-const contentSize = useBoxSize(contentRef);
+const viewportMetrics = useBoxMetrics(viewportRef);
+const contentMetrics = useBoxMetrics(contentRef);
 const viewportHeight = shallowRef(0);
 const contentHeight = shallowRef(0);
 const scrollTop = shallowRef(0);
@@ -83,12 +83,18 @@ const exposed: ScrollBoxExpose = { scrollToLine, scrollByLines, scrollToTop, scr
 defineExpose(exposed);
 
 watch(
-  () => [contentSize.value, viewportSize.value] as const,
-  ([nextContent, nextViewport]) => {
+  () =>
+    [
+      contentMetrics.hasMeasured.value,
+      contentMetrics.height.value,
+      viewportMetrics.hasMeasured.value,
+      viewportMetrics.height.value,
+    ] as const,
+  ([contentMeasured, nextContentHeight, viewportMeasured, nextViewportHeight]) => {
     // Keep the last accepted dimensions while an ancestor is hidden. Runtime
     // already retains them across a suspended or temporarily unavailable paint.
-    if (nextContent !== null) contentHeight.value = nextContent.height;
-    if (nextViewport !== null) viewportHeight.value = nextViewport.height;
+    if (contentMeasured) contentHeight.value = nextContentHeight;
+    if (viewportMeasured) viewportHeight.value = nextViewportHeight;
 
     if (sticky.value) scrollTop.value = maxScroll.value;
     else scrollTop.value = clampScrollTop(scrollTop.value);

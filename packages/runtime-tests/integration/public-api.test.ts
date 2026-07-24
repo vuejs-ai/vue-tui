@@ -1,8 +1,8 @@
 import { expect, test } from "vite-plus/test";
 import * as api from "@vue-tui/runtime";
-import * as devtoolsApi from "@vue-tui/runtime/devtools";
+import * as devtoolsApi from "@vue-tui/runtime/internal/devtools";
 import * as inlineApi from "@vue-tui/runtime/inline";
-import * as testingApi from "@vue-tui/runtime/testing";
+import * as testingApi from "@vue-tui/runtime/internal/testing";
 import * as internalApi from "../../runtime/dist/internal.mjs";
 
 // The EXACT public runtime (value) export surface of `@vue-tui/runtime`. The test below snapshots
@@ -19,12 +19,11 @@ const PUBLIC_VALUE_EXPORTS = [
   "Text",
   // Composables
   "useApp",
-  "useBoxSize",
+  "useBoxMetrics",
   "useFocus",
   "useInput",
-  "useLayoutWidth",
+  "useLayoutSize",
   "useStdin",
-  "useViewportHeight",
   // Rendering
   "renderToString",
 ];
@@ -65,6 +64,10 @@ test("keeps pointer, selection, and clipboard policy outside the Runtime foundat
 test("does not retain the superseded render-fact hooks", () => {
   expect(api).not.toHaveProperty("useWindowSize");
   expect(api).not.toHaveProperty("useIsScreenReaderEnabled");
+  expect(api).not.toHaveProperty("useLayoutWidth");
+  expect(api).not.toHaveProperty("useViewportHeight");
+  expect(api).not.toHaveProperty("useViewportSize");
+  expect(api).not.toHaveProperty("useBoxSize");
 });
 
 test("does not retain the superseded split input API", () => {
@@ -96,17 +99,18 @@ test("does not publish application-level rendering conveniences", () => {
   expect(api).not.toHaveProperty("useAnimation");
 });
 
-test("replaces broad geometry with accepted Box size", () => {
-  expect(api).toHaveProperty("useBoxSize");
-  expect(api).not.toHaveProperty("useElementGeometry");
-  expect(api).not.toHaveProperty("useBoxMetrics");
+test("publishes Box metrics without measureElement", () => {
+  expect(api).toHaveProperty("useBoxMetrics");
+  expect(api).not.toHaveProperty("useBoxSize");
   expect(api).not.toHaveProperty("measureElement");
+  expect(api).not.toHaveProperty("useElementGeometry");
 });
 
 test("publishes narrow layout facts without the internal session graph", () => {
-  expect(api).toHaveProperty("useLayoutWidth");
-  expect(api).toHaveProperty("useViewportHeight");
-  expect(api).not.toHaveProperty("useLayoutSize");
+  expect(api).toHaveProperty("useLayoutSize");
+  expect(api).not.toHaveProperty("useLayoutWidth");
+  expect(api).not.toHaveProperty("useViewportHeight");
+  expect(api).not.toHaveProperty("useViewportSize");
   expect(api).not.toHaveProperty("useRenderSession");
 });
 

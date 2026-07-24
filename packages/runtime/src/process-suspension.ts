@@ -77,7 +77,7 @@ function runBestEffort(callback: () => void): void {
     callback();
   } catch {
     // Signal handling must continue through every registered session. A failed session cleanup
-    // must not leave later sessions holding raw mode, mouse reporting, or the alternate screen.
+    // must not leave later sessions holding raw mode or the alternate screen.
   }
 }
 
