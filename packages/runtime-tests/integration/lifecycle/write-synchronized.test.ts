@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { test, expect } from "vite-plus/test";
 import isInCi from "is-in-ci";
-import { bsu, esu, shouldSynchronize } from "../../../runtime/src/io/write-synchronized.ts";
+import { bsu, esu, shouldSynchronize } from "../../../runtime/dist/internal.mjs";
 
 const createStream = ({ tty = false } = {}) => {
   const stream = new EventEmitter() as unknown as NodeJS.WriteStream;

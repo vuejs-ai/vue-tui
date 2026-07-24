@@ -1,7 +1,18 @@
 import process from "node:process";
 import ansiEscapes from "ansi-escapes";
-import { Box, Static, Text, createApp, useApp, useCursor, useStdout } from "@vue-tui/runtime";
-import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
+import { Box, Text, createApp, useApp, type TuiApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onMounted,
+  onScopeDispose,
+  shallowRef,
+  vShow,
+  watch,
+  withDirectives,
+} from "vue";
 
 type Scenario =
   | "current-full"
@@ -12,28 +23,23 @@ type Scenario =
   | "fullscreen"
   | "explicit-preclear"
   | "partial-row"
-  | "partial-row-screen-reader"
-  | "partial-row-empty-cursor"
-  | "partial-row-coordinated"
   | "partial-row-static"
-  | "post-teardown"
-  | "post-teardown-cursor"
-  | "post-teardown-cursor-incremental"
-  | "post-teardown-short-cursor";
+  | "post-teardown";
 
 const rows = Number(process.argv[2]) || 6;
 const scenario = (process.argv[3] ?? "current-full") as Scenario;
 const revision = shallowRef(0);
+let app: TuiApp;
+const DeferredHistory = defineComponent(
+  () => () => h(Text, null, () => (revision.value > 0 ? "DEFERRED" : "")),
+);
 
 process.stdout.rows = rows;
 process.stdout.write(scenario.startsWith("partial-row") ? "PRE_APP_PARTIAL" : "PRE_APP_HISTORY\n");
 if (scenario === "explicit-preclear") process.stdout.write(ansiEscapes.clearTerminal);
 
 const App = defineComponent(() => {
-  const { exit, waitUntilRenderFlush } = useApp();
-  const cursor =
-    scenario === "partial-row-empty-cursor" || scenario.includes("teardown-") ? useCursor() : null;
-  const coordinated = scenario === "partial-row-coordinated" ? useStdout() : null;
+  const { exit } = useApp();
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   watch(
@@ -45,7 +51,7 @@ const App = defineComponent(() => {
         else {
           revision.value++;
           await nextTick();
-          await waitUntilRenderFlush();
+          await app.waitUntilRenderFlush();
           if (scenario === "current-shrink" && revision.value === 1) {
             process.stdout.write("\x1b]0;INLINE_OVERFLOW_SHORTER_COMMITTED\x07");
           }
@@ -56,36 +62,34 @@ const App = defineComponent(() => {
   );
 
   onMounted(() => {
-    coordinated?.write("COMMITTED");
     process.stdout.write("\x1b]0;INLINE_OVERFLOW_MOUNTED\x07");
   });
   onScopeDispose(() => clearTimeout(timer));
 
   return () => {
-    if (cursor) cursor.setCursorPosition({ x: 0, y: 0 });
-
-    if (scenario === "partial-row-empty-cursor" || scenario === "partial-row-coordinated") {
-      return null;
-    }
-
     if (scenario === "partial-row-static") {
       return (
-        <Static items={["COMMITTED"]}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+        <Static>
+          <Text>COMMITTED</Text>
         </Static>
       );
     }
 
     if (scenario === "static-tail") {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
-      return (
-        <>
-          <Static items={completed}>
-            {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-          </Static>
-          <Text>TAIL {revision.value}</Text>
-        </>
-      );
+      return h(Box, { flexDirection: "column" }, () => [
+        withDirectives(
+          h(Box, { key: "deferred" }, () => h(Static, null, () => h(DeferredHistory))),
+          [[vShow, false]],
+        ),
+        ...completed.map((item) =>
+          withDirectives(
+            h(Static, { key: item }, () => h(Text, null, () => item)),
+            [[vShow, false]],
+          ),
+        ),
+        h(Text, null, () => `TAIL ${revision.value}`),
+      ]);
     }
 
     if (scenario === "bounded" || scenario === "bounded-tail" || scenario === "explicit-preclear") {
@@ -110,12 +114,7 @@ const App = defineComponent(() => {
       );
     }
 
-    const targetHeight =
-      scenario === "post-teardown-short-cursor"
-        ? 2
-        : scenario === "current-shrink" && revision.value > 0
-          ? rows - 1
-          : rows + 1;
+    const targetHeight = scenario === "current-shrink" && revision.value > 0 ? rows - 1 : rows + 1;
     const height = scenario === "current-full" ? rows : targetHeight;
 
     return (
@@ -128,13 +127,9 @@ const App = defineComponent(() => {
   };
 });
 
-const app = createApp(App);
+app = createApp(App);
 app.mount({
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
-  isScreenReaderEnabled: scenario === "partial-row-screen-reader",
-  exitOnCtrlC: false,
-  maxFps: 0,
-  incrementalRendering: scenario === "post-teardown-cursor-incremental",
 });
 
 if (scenario.startsWith("post-teardown")) {

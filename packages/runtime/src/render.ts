@@ -1,63 +1,73 @@
 import Yoga from "yoga-layout";
 import {
   type Component,
+  type ComponentOptions,
   type ComponentPublicInstance,
+  type Directive,
+  type InjectionKey,
+  type Plugin,
+  type VNode,
   type App as VueApp,
-  defineComponent,
-  h,
+  createVNode,
+  effectScope,
+  getCurrentInstance,
+  mergeProps,
   nextTick,
-  onErrorCaptured,
-  shallowRef,
 } from "vue";
 import { createRenderer } from "vue";
 import { writeSync as fsWriteSync } from "node:fs";
-import isInCi from "is-in-ci";
+import type { Readable, Writable } from "node:stream";
 import { onExit } from "signal-exit";
-import patchConsoleFn from "patch-console";
 import ansiEscapes from "ansi-escapes";
-import wrapAnsi from "wrap-ansi";
 import {
   getSharedStdinIngress,
   type SharedStdinIngress,
   type SharedStdinSubscription,
 } from "./io/stdin-ingress.ts";
 import type { NormalizedInputFact } from "./io/normalized-input.ts";
+import { projectPublicInputEvent } from "./io/public-input.ts";
 import {
-  createInternalInputRouteRegistry,
-  type InternalInputRouteSnapshot,
-} from "./io/input-routes.ts";
-import { toMouseInputEvent } from "./io/parse-mouse.ts";
+  createInternalInputSubscriptions,
+  type InternalInputDemandLease,
+  type InternalInputSubscriber,
+} from "./io/input-subscriptions.ts";
 import {
+  INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
-  type KittyKeyboardOptions,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
-import { createRoot, emitLayoutListeners, type TuiRoot, type TuiNode } from "./host/nodes.ts";
+import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
-import { createCommitScheduler } from "./scheduler.ts";
-import { createAnimationScheduler } from "./animation-scheduler.ts";
-import { paint } from "./paint/paint.ts";
-import { renderScreenReaderOutput } from "./paint/screen-reader.ts";
-import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
-import { findStatics, paintStaticNode } from "./paint/static-channel.ts";
-import { createFrameWriter } from "./io/frame-writer.ts";
-import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
-import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./io/render-observer.ts";
-import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
-import { createMouseController, type MouseHitMapEntry } from "./mouse/controller.ts";
 import {
-  AppContextKey,
-  FocusContextKey,
-  StdinContextKey,
-  AnimationSchedulerKey,
-  type AppContext,
-  type CursorPosition,
-  type FocusContext,
-  type SgrMouseMode,
-  type StdinContext,
-} from "./context.ts";
+  createHostYogaAllocationLedger,
+  type HostYogaAllocationLedger,
+} from "./host/yoga-allocation-ledger.ts";
+import { createCommitScheduler } from "./scheduler.ts";
+import { acquireRuntimeResource, changeRuntimeResource } from "./resource-tracker.ts";
+import { paint, releasePaintCaches } from "./paint/paint.ts";
+import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
+import {
+  findStatics,
+  prepareStaticOutput,
+  type PreparedStaticOutput,
+} from "./paint/static-channel.ts";
+import { createFrameWriter } from "./io/frame-writer.ts";
+import {
+  createOutputCoordinator,
+  type CoordinatedWriteResult,
+  type OutputCoordinator,
+} from "./io/output-coordinator.ts";
+import {
+  createMountedStreamLifecycle,
+  type MountedStreamLifecycle,
+} from "./io/stream-lifecycle.ts";
+import { registerConsoleSink, type ConsoleSinkRegistration } from "./io/console-manager.ts";
+import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
+import { INTERNAL_RENDER_OBSERVER } from "./io/render-observer.ts";
+import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
+import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
 import {
   InternalRenderSessionKey,
   createLiveRenderSessionService,
@@ -65,6 +75,7 @@ import {
   normalizeRequestedMode,
   resolveLiveDimensions,
   resolveLiveSurface,
+  validateExitOnCtrlC,
   validateLiveUpdates,
   type InternalRenderSessionService,
   type ResolvedLiveDimensions,
@@ -88,60 +99,40 @@ import {
 import { createDevOverlayWrapper } from "./overlay.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import {
-  ErrorOverview,
-  formatErrorForStderr,
-  isErrorInput,
-  messageForNonError,
-} from "./components/error-overview.ts";
+  createInternalGeometryService,
+  setInternalGeometryService,
+  type InternalGeometryPaintFrame,
+} from "./geometry/geometry-service.ts";
 import {
-  INTERNAL_SUSPENSION_HOST,
-  processSuspensionHost,
-  type SuspensionHost,
-} from "./process-suspension.ts";
+  createInternalFocusController,
+  type InternalFocusController,
+} from "./focus/focus-controller.ts";
+import { InternalFocusControllerKey } from "./focus/focus-context.ts";
+import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
+import { INTERNAL_SUSPENSION_HOST, processSuspensionHost } from "./process-suspension.ts";
+import { createVueCleanupGuard, type VueCleanupErrorOwner } from "./vue-cleanup-guard.ts";
+import { getInternalMountOptions, type InternalMountOptions } from "./internal-mount-options.ts";
+
+export {
+  createInternalMountOptions,
+  type InternalMountOptions,
+  type InternalMountOptionsInput,
+} from "./internal-mount-options.ts";
 
 export interface MountOptions {
-  stdout?: NodeJS.WriteStream;
-  stdin?: NodeJS.ReadStream;
-  stderr?: NodeJS.WriteStream;
+  readonly stdout?: Writable;
+  readonly stdin?: Readable;
+  readonly stderr?: Writable;
   /**
    * Select the terminal screen model requested by this application.
-   * Omission requests Inline. A host that cannot acquire a live terminal
-   * surface still produces stream output without pretending the mode became
-   * effective.
+   * Omission requests Inline. On a live TTY, an explicit Fullscreen request
+   * requires positive terminal dimensions and otherwise fails before setup or
+   * terminal mutation. On non-TTY stdout, Inline and Fullscreen select the same
+   * supported non-interactive document host.
    *
    * @default 'inline'
    */
-  mode?: RenderMode;
-  exitOnCtrlC?: boolean;
-  /**
-   * Controls when the app holds the terminal's raw mode, which suppresses the
-   * terminal's own echo and line-editing.
-   *
-   * - `'always'` (default): raw mode is enabled at mount and held for the whole
-   *   run, even when no input composable is mounted, so typed keys never echo
-   *   into the rendered frame and Ctrl+C behaves the same on every screen.
-   * - `'auto'`: raw mode is enabled only while a `useInput`, `useFocus`, or
-   *   `usePaste` is mounted, and released when the last one unmounts — so a
-   *   screen with no input handler returns to the terminal's normal cooked mode
-   *   (native echo, line-editing, Ctrl+C/Ctrl+Z). This is Ink's original behavior.
-   *
-   * Has no effect when stdin is not a TTY (raw mode is unsupported there).
-   *
-   * @default 'always'
-   */
-  rawMode?: "always" | "auto";
-  /**
-   * Override whether the dynamic output region updates while the app is
-   * mounted. This is an output policy, not a statement about stdin or logical
-   * interaction support.
-   *
-   * By default, live updates are disabled in CI and when stdout is not a TTY.
-   * Setting this to true may emit ANSI update bytes to a non-TTY stream, but it
-   * cannot acquire a terminal screen mode there.
-   *
-   * @default true outside CI when stdout is a TTY; false otherwise
-   */
-  liveUpdates?: boolean;
+  readonly mode?: RenderMode;
   /**
    * Patch `console.*` methods to route output through the TUI frame
    * coordinator (writeToStdout / writeToStderr) so that console.log
@@ -149,78 +140,177 @@ export interface MountOptions {
    *
    * @default true
    */
-  patchConsole?: boolean;
+  readonly patchConsole?: boolean;
   /**
-   * Callback invoked after each render commit with timing information.
-   */
-  onRender?: (info: { renderTime: number }) => void;
-  /**
-   * Maximum frames per second. Controls the render-throttle window
-   * (`ceil(1000 / maxFps)` ms) that throttles both the commit scheduler and
-   * the useAnimation tick coalescing. Defaults to 30 (≈34ms), matching Ink.
-   *
-   * Ignored in screen-reader mode and when non-positive (commits are immediate).
-   * @default 30
-   */
-  maxFps?: number;
-  /**
-   * Enable screen reader mode. When enabled, the commit scheduler bypasses
-   * throttling (immediate commits) so every frame is flushed without delay.
-   *
-   * @default true when `process.env["INK_SCREEN_READER"] === "true"`, otherwise false
-   */
-  isScreenReaderEnabled?: boolean;
-  /**
-   * Enable incremental rendering. When enabled, the frame writer uses
-   * line-diffing to minimize terminal writes — only changed lines are
-   * rewritten instead of erasing and repainting the entire frame.
-   *
-   * Fixed fullscreen rendering currently favors coordinate correctness and
-   * always repaints the complete viewport, so this option has no effect there.
+   * Exit before delivering an exact Ctrl+C key. Omission leaves Ctrl+C as
+   * ordinary managed input; bracketed paste never triggers this option.
    *
    * @default false
    */
-  incrementalRendering?: boolean;
-  /**
-   * Configure kitty keyboard protocol support for enhanced keyboard input.
-   * Enables additional modifiers (super, hyper, capsLock, numLock) and
-   * disambiguated key events in terminals that support the protocol.
-   *
-   * @see https://sw.kovidgoyal.net/kitty/keyboard-protocol/
-   */
-  kittyKeyboard?: KittyKeyboardOptions;
+  readonly exitOnCtrlC?: boolean;
 }
 
-// Extends `App<TuiNode>` (the renderer's real app type) so `TuiApp` inherits Vue's full app
-// surface — `use`/`component`/`provide`/`config`/… — for free.
-//
-// This DOES surface the internal `TuiNode` host-node type in the published `.d.ts`: Vue's
-// `App<HostElement>` uses the generic only in `mount(rootContainer: HostElement)` (which we
-// `Omit`+redefine) and the internal `_container: HostElement | null`, so `TuiNode` rides out
-// on `_container`. That is KNOWN AND ACCEPTED — not a big deal: `_container` is a Vue-internal
-// field consumers never touch, so the exposure is purely cosmetic (zero functional/usability
-// impact), and a type-only surface isn't held to strict SemVer, so it imposes no real public
-// contract. Hiding it (`App<unknown>`, or a `Pick<App, …>` allowlist) was considered and
-// deliberately skipped: it's ceremony for a cosmetic gain on a pre-1.0 library. Please don't
-// re-flag this. See .agents/docs/api-contract.md.
-export interface TuiApp extends Omit<VueApp<TuiNode>, "mount"> {
+const acceptedMountOptionKeys = new Set<PropertyKey>([
+  "stdout",
+  "stdin",
+  "stderr",
+  "mode",
+  "patchConsole",
+  "exitOnCtrlC",
+]);
+
+function assertKnownMountOptionKeys(options: unknown): asserts options is MountOptions {
+  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+    throw new TypeError("Mount options must be an object or undefined.");
+  }
+  for (const key of Reflect.ownKeys(options)) {
+    if (acceptedMountOptionKeys.has(key)) continue;
+    if (typeof key === "symbol") throw new TypeError("Unknown symbol mount option.");
+    throw new TypeError(`Unknown mount option ${JSON.stringify(key)}.`);
+  }
+}
+
+type ConsumerVuePrivateAppKey = Extract<keyof VueApp<unknown>, `_${string}`>;
+type ConsumerVueFluentAppKey = "use" | "mixin" | "component" | "directive" | "provide" | "filter";
+type ConsumerVuePublicAppSurface = Omit<
+  VueApp<unknown>,
+  ConsumerVuePrivateAppKey | ConsumerVueFluentAppKey | "mount"
+>;
+type ConsumerVueCompatFilter = Parameters<NonNullable<VueApp<unknown>["filter"]>>[1];
+
+/**
+ * A Vue application whose mount target is a terminal host.
+ *
+ * The ordinary public Vue application surface comes from the consumer's
+ * installed Vue version. Runtime replaces Vue's DOM-oriented `mount()` and
+ * excludes underscore-prefixed renderer internals.
+ */
+export interface TuiApp extends ConsumerVuePublicAppSurface {
+  use<Options extends unknown[]>(plugin: Plugin<Options>, ...options: NoInfer<Options>): this;
+  use<Options>(plugin: Plugin<Options>, options: NoInfer<Options>): this;
+  mixin(mixin: ComponentOptions): this;
+  component(name: string): Component | undefined;
+  component<T extends Component>(name: string, component: T): this;
+  directive<T = unknown, V = unknown>(name: string): Directive<T, V> | undefined;
+  directive<T = unknown, V = unknown>(name: string, directive: Directive<T, V>): this;
+  provide<T, K = InjectionKey<T> | string | number>(
+    key: K,
+    value: K extends InjectionKey<infer V> ? V : T,
+  ): this;
+  filter?(name: string): ConsumerVueCompatFilter | undefined;
+  filter?(name: string, filter: ConsumerVueCompatFilter): this;
   mount(options?: MountOptions): ComponentPublicInstance;
-  waitUntilExit(): Promise<unknown>;
+  waitUntilExit(): Promise<void>;
   waitUntilRenderFlush(): Promise<void>;
-  clear(): void;
+}
+
+type InternalMountInvoker = (this: void, options: InternalMountOptions) => ComponentPublicInstance;
+const internalMountInvokers = new WeakMap<TuiApp, InternalMountInvoker>();
+
+export function mountWithInternalOptions(
+  app: TuiApp,
+  options: InternalMountOptions,
+): ComponentPublicInstance {
+  const mount = internalMountInvokers.get(app);
+  if (!mount) {
+    throw new TypeError("Internal test mounting requires an app created by this Runtime instance.");
+  }
+  return mount(options);
 }
 
 type RootProps = Record<string, unknown>;
 
-const FULLSCREEN_STATIC_WARNING =
-  "[vue-tui] <Static> output is not retained in fullscreen mode because fullscreen owns a fixed viewport. Render persistent history inside the app (for example with ScrollBox), or use inline mode.\n";
-// Screen-reader Inline can remain live without a coherent terminal row count.
-// A large relative move is clamped by terminal emulators at the bottom margin,
-// giving resize recovery a truthful bottom boundary without inventing 24 rows.
-const TERMINAL_BOTTOM_CLAMP_ROWS = 9999;
+interface VueTeardownScope {
+  on?(): void;
+  stop(fromParent?: boolean): void;
+}
 
-function supportsTerminalMouse(): boolean {
-  return process.env["TERM"] !== "dumb";
+interface VueTeardownComponentInstance {
+  appContext?: { readonly app?: unknown };
+  parent?: VueTeardownComponentInstance | null;
+  scope?: VueTeardownScope;
+  subTree?: VNode;
+  vnode?: VNode;
+}
+
+type VueScopeCapture = (
+  scope: VueTeardownScope,
+  instance: ReturnType<typeof getCurrentInstance>,
+) => void;
+
+interface VueScopeCaptureRegistration {
+  readonly capture: VueScopeCapture;
+}
+
+interface VueScopePrototype {
+  on(this: VueTeardownScope): void;
+}
+
+const activeVueScopeCaptures: VueScopeCaptureRegistration[] = [];
+let installedVueScopeCapture:
+  | {
+      readonly prototype: VueScopePrototype;
+      readonly originalOn: VueScopePrototype["on"];
+      readonly patchedOn: VueScopePrototype["on"];
+    }
+  | undefined;
+
+function acquireVueScopeCapture(capture: VueScopeCapture): () => void {
+  const registration = { capture };
+  if (activeVueScopeCaptures.length === 0) {
+    const probe = effectScope(true) as unknown as VueTeardownScope;
+    const prototype = Object.getPrototypeOf(probe) as Partial<VueScopePrototype> | null;
+    probe.stop();
+    if (typeof prototype?.on === "function") {
+      const originalOn = prototype.on;
+      const patchedOn = function captureVueScope(this: VueTeardownScope): void {
+        const active = activeVueScopeCaptures.at(-1);
+        active?.capture(this, getCurrentInstance());
+        originalOn.call(this);
+      };
+      prototype.on = patchedOn;
+      installedVueScopeCapture = {
+        prototype: prototype as VueScopePrototype,
+        originalOn,
+        patchedOn,
+      };
+    }
+  }
+  activeVueScopeCaptures.push(registration);
+
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    const index = activeVueScopeCaptures.lastIndexOf(registration);
+    if (index !== -1) activeVueScopeCaptures.splice(index, 1);
+    if (activeVueScopeCaptures.length !== 0) return;
+    const installed = installedVueScopeCapture;
+    installedVueScopeCapture = undefined;
+    if (installed && installed.prototype.on === installed.patchedOn) {
+      installed.prototype.on = installed.originalOn;
+    }
+  };
+}
+
+const FULLSCREEN_STATIC_ERROR =
+  "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
+
+function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
+  const input = stdin as NodeJS.ReadStream & {
+    readonly isRaw?: boolean;
+    readonly isTTY?: boolean;
+    readonly setRawMode?: (mode: boolean) => unknown;
+  };
+  return input.isTTY === true && (input.isRaw === true || typeof input.setRawMode === "function");
+}
+
+function isReadableHostLive(stdin: NodeJS.ReadStream): boolean {
+  const stream = stdin as NodeJS.ReadStream & {
+    readonly readable?: boolean;
+    readonly readableEnded?: boolean;
+  };
+  return !stream.destroyed && !stream.readableEnded && stream.readable !== false;
 }
 
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
@@ -230,9 +320,8 @@ function supportsTerminalMouse(): boolean {
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
 
-// `isErrorInput` (the cross-realm Error brand check) now lives in
-// ./components/error-overview.ts, co-located with messageForNonError and shared
-// with render-to-string.ts so the classification is a single source of truth.
+// Error classification and fallback messages share one UI-independent source
+// with render-to-string so fatal settlement stays consistent across hosts.
 
 type MaybeWritableStream = NodeJS.WriteStream & {
   writable?: boolean;
@@ -252,28 +341,92 @@ function getWritableStreamState(stdout: MaybeWritableStream): {
   };
 }
 
+function assertReadableStream(value: unknown, option: "stdin"): asserts value is Readable {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null ||
+    typeof (value as Readable).on !== "function" ||
+    typeof (value as Readable).once !== "function" ||
+    typeof (value as Readable).off !== "function"
+  ) {
+    throw new TypeError(`Mount option "${option}" must be a Node Readable stream.`);
+  }
+}
+
+function assertWritableStream(
+  value: unknown,
+  option: "stdout" | "stderr",
+): asserts value is Writable {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null ||
+    typeof (value as Writable).write !== "function" ||
+    typeof (value as Writable).on !== "function" ||
+    typeof (value as Writable).once !== "function" ||
+    typeof (value as Writable).off !== "function"
+  ) {
+    throw new TypeError(`Mount option "${option}" must be a Node Writable stream.`);
+  }
+  const stream = value as MaybeWritableStream;
+  if (stream.destroyed || stream.writableEnded || stream.writable === false) {
+    throw new Error(`Mount option "${option}" must be writable when mount() begins.`);
+  }
+}
+
+function validatePatchConsole(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value === "boolean") return value;
+  throw new TypeError('Mount option "patchConsole" must be a boolean.');
+}
+
+function assertFullscreenCapability(
+  stdout: NodeJS.WriteStream,
+  terminalProbe: TerminalSizeProbeResult,
+): void {
+  // Non-TTY stdout selects the supported secondary document host for either
+  // mode; Fullscreen does not throw solely because no TTY exists.
+  if (stdout.isTTY !== true) return;
+  const dimensions = resolveLiveDimensions(
+    {
+      isTTY: true,
+      columns: stdout.columns,
+      rows: stdout.rows,
+    },
+    terminalProbe,
+  );
+  if (dimensions.terminal === null) {
+    throw new Error("Fullscreen mode requires positive terminal columns and rows.");
+  }
+}
+
+const expectedManagedInputUnavailableError = Symbol("expected-managed-input-unavailable");
+
+function createManagedInputUnavailableError(message: string, expectedAtMount: boolean): Error {
+  const error = new Error(message);
+  if (expectedAtMount) {
+    Object.defineProperty(error, expectedManagedInputUnavailableError, { value: true });
+  }
+  return error;
+}
+
+function isExpectedManagedInputUnavailableError(error: Error): boolean {
+  return (
+    (error as Error & { [expectedManagedInputUnavailableError]?: boolean })[
+      expectedManagedInputUnavailableError
+    ] === true
+  );
+}
+
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
-  let exitResolve!: (result?: unknown) => void;
-  let exitReject!: (e: Error) => void;
-  const exitPromise = new Promise<unknown>((res, rej) => {
+  let exitResolve!: () => void;
+  let exitReject!: (reason?: unknown) => void;
+  const exitPromise = new Promise<void>((res, rej) => {
     exitResolve = res;
     exitReject = rej;
   });
   exitPromise.catch(() => {});
-
-  // Exit-with-error function, wired after mount sets up appContext.
-  // Used by the error boundary to route errors through exit().
-  let exitWithError: (e: Error) => void = () => {};
-
-  // Record-exit-error bridge, wired alongside exitWithError after mount. The
-  // error boundary calls this SYNCHRONOUSLY (before the deferred exitWithError)
-  // to set pendingExitError up front, so a racing unmount() that runs
-  // resolveExit() before the deferred exit rejects with the thrown error instead
-  // of resolving clean (BUG #2). Mirrors exitWithError's after-mount indirection
-  // because pendingExitError/exitInitiated/teardownStarted are all in this scope.
-  let recordExitError: (e: Error) => void = () => {};
 
   // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
   // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
@@ -289,18 +442,22 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedStdinController: StdinController | null = null;
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
+  let releaseMountedResizeListener: (() => void) | null = null;
   let mountedResizeRefresh: Promise<void> | null = null;
   let mountedExitListener: (() => void) | null = null;
+  let releaseMountedExitListener: (() => void) | null = null;
   // signal-exit unsubscribe fn (Ink parity G18). Registered at interactive
   // mount so SIGINT/SIGTERM/SIGHUP route to teardown(); called in teardown()
   // to remove the handler so it can't leak or double-run.
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
+  let releaseMountedBeforeExitListener: (() => void) | null = null;
   let mountedUnsubscribeSuspension: (() => void) | null = null;
   let mountedDynamicUpdatesLive = true;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
-  let mountedBoundaryErrorsAreDurable = false;
+  let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
+  let mountedFocusController: InternalFocusController | null = null;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
   // re-imports the entry. Held per-app so teardown() can unregister exactly its
@@ -308,18 +465,31 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedDevTeardown: (() => void) | null = null;
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedNeedsTerminalLineAdvance: (() => boolean) | null = null;
-  let mountedRestoreConsole: (() => void) | null = null;
+  let mountedConsoleSink: ConsoleSinkRegistration | null = null;
+  let mountedHostYogaLedger: HostYogaAllocationLedger | null = null;
+  let mountedOwnedVNode: VNode | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
-  let mountedAnimationScheduler: ReturnType<typeof createAnimationScheduler> | null = null;
-  let mountedCommit: (() => void) | null = null;
+  let mountedOutputCoordinator: OutputCoordinator | null = null;
+  let mountedStreamLifecycle: MountedStreamLifecycle | null = null;
+  let mountedCommit: (() => CoordinatedWriteResult) | null = null;
+  let mountedCreateOutputStateRollback: (() => () => void) | null = null;
   let mountedAlternateScreen = false;
   let mountedFullscreenCursorHidden = false;
-  let mountedClear: (() => void) | null = null;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
+  let mountedEmergencyKittyController: ReturnType<typeof createKittyKeyboardController> | null =
+    null;
+  let mountedEmergencyStdinController: StdinController | null = null;
+  let mountedSynchronizedOutputReleases: Set<() => void> | null = null;
+  let mountedAbandonPendingTerminalOutput:
+    | ((options?: { readonly physicalStateUncertain?: boolean }) => void)
+    | null = null;
+  let mountedTerminalReconcile: Promise<void> | null = null;
   // True once Vue's original mount has begun. Pre-Vue terminal setup failures
   // still need our teardown, but calling Vue unmount before mount begins emits
   // an internal "app is not mounted" warning to the user's stderr.
   let vueMountStarted = false;
+  let vueCleanupCompleted = false;
+  let consoleTeardownWritesAllowed = false;
   // Tracks whether this app currently owns the liveInstances entry for its
   // stdout — set when a mount() actually wires a renderer, cleared when
   // teardown() evicts the entry. A mount() that hits the instance-reuse guard
@@ -330,6 +500,51 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // app DID wire).
   let mountedAsOwner = false;
 
+  function setAlternateScreenOwned(owned: boolean): void {
+    if (mountedAlternateScreen === owned) return;
+    mountedAlternateScreen = owned;
+    changeRuntimeResource("surfaceLeases", owned ? 1 : -1);
+  }
+
+  function setFullscreenCursorHidden(hidden: boolean): void {
+    if (mountedFullscreenCursorHidden === hidden) return;
+    mountedFullscreenCursorHidden = hidden;
+    changeRuntimeResource("cursorLeases", hidden ? 1 : -1);
+  }
+
+  function acquireSynchronizedOutputLease(): () => void {
+    const releaseResource = acquireRuntimeResource("synchronizedOutputLeases");
+    const releases = mountedSynchronizedOutputReleases;
+    let active = true;
+    const release = (): void => {
+      if (!active) return;
+      active = false;
+      releases?.delete(release);
+      releaseResource();
+    };
+    releases?.add(release);
+    return release;
+  }
+
+  function closeOutstandingSynchronizedOutput(): void {
+    const releases = mountedSynchronizedOutputReleases;
+    if (!releases || releases.size === 0) return;
+    const appContext = mountedAppContext;
+    if (appContext) writeBestEffort(appContext.stdout, esu, true);
+    for (const release of releases) release();
+  }
+
+  function trackProcessListenerCleanup(cleanup: () => void): () => void {
+    const release = acquireRuntimeResource("processListeners");
+    let active = true;
+    return () => {
+      if (!active) return;
+      cleanup();
+      active = false;
+      release();
+    };
+  }
+
   // The renderer's onCommit closure is wired at createApp time but only does
   // real work after mount swaps in scheduler.schedule. One renderer per app
   // even though it's not used until mount.
@@ -338,16 +553,186 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // Pending exit state — stored so resolveExit() can flush stdout before
   // settling the exit promise.
   let pendingExitError: unknown = undefined;
-  let pendingExitResult: unknown = undefined;
-  let pendingExitErrorWasRendered = false;
-  let pendingBoundaryError: Error | undefined;
-  let pendingBoundaryFrameReady: Error | undefined;
-  let pendingBoundaryFrameWriteFailed = false;
+  let pendingExitFailure = false;
+  let pendingExitErrorIsSilent = false;
+  let pendingExitErrorShouldReport = false;
   let pendingFatalReport: string | null = null;
   let settlementStarted = false;
+  let abandonExitSettlement = false;
+  let consumedMountInProgress = false;
+  let pendingMountRuntimeFailure: Error | undefined;
+  let mountFailurePending = false;
+
+  function recordTeardownError(error: unknown, options?: { readonly report?: boolean }): void {
+    if (pendingExitFailure) return;
+    pendingExitError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+    pendingExitFailure = true;
+    pendingExitErrorShouldReport = options?.report !== false;
+  }
+
+  function recordVueMountFailure(error: unknown): void {
+    if (pendingExitFailure) return;
+    // An unhandled initial component throw escaped through Vue itself. Preserve
+    // that exact JavaScript value at the consumed mount boundary; Runtime does
+    // not install a hidden component boundary or turn it into a durable report.
+    pendingExitError = error;
+    pendingExitFailure = true;
+    pendingExitErrorShouldReport = false;
+  }
+
+  const vueCleanupGuard = createVueCleanupGuard();
+  interface AcceptedStaticCleanupFailure {
+    readonly error: unknown;
+    readonly owner: VueCleanupErrorOwner | null;
+    readonly sequence: number;
+  }
+  interface AcceptedStaticCleanupBatch {
+    readonly errors: AcceptedStaticCleanupFailure[];
+  }
+  const pendingAcceptedStaticCleanupBatches = new Set<AcceptedStaticCleanupBatch>();
+  let acceptedStaticCleanupFailureSequence = 0;
+
+  function captureAcceptedStaticCleanupFailure(
+    batch: AcceptedStaticCleanupBatch,
+    error: unknown,
+    owner: VueCleanupErrorOwner | null,
+  ): void {
+    batch.errors.push({
+      error,
+      owner,
+      sequence: acceptedStaticCleanupFailureSequence++,
+    });
+    // Preserve observation order during teardown without throwing into Vue's
+    // active host patch. The batch still owns delayed Vue reporting and keeps
+    // exit settlement pending until that patch has completed.
+    if (teardownStarted) recordTeardownError(error);
+  }
+
+  function reserveFirstPendingAcceptedStaticCleanupFailure(): void {
+    let first: AcceptedStaticCleanupFailure | undefined;
+    for (const batch of pendingAcceptedStaticCleanupBatches) {
+      for (const failure of batch.errors) {
+        if (!first || failure.sequence < first.sequence) first = failure;
+      }
+    }
+    if (first) recordTeardownError(first.error);
+  }
+
+  function settleAcceptedStaticCleanup(batch: AcceptedStaticCleanupBatch): void {
+    if (!pendingAcceptedStaticCleanupBatches.delete(batch)) return;
+    const failure = batch.errors[0];
+    if (failure) {
+      if (teardownStarted) {
+        recordTeardownError(failure.error);
+      } else if (failure.owner) {
+        try {
+          failure.owner.report(failure.error);
+        } catch (error) {
+          // An error rejected by every Vue capture boundary is fatal to the
+          // Runtime session, but it is reported only after Vue finished patching.
+          requestRuntimeFailure(error, { silent: true });
+        }
+      } else {
+        requestRuntimeFailure(failure.error);
+      }
+    }
+    if (teardownStarted) resolveExit();
+  }
+
+  function disposeMountedStreamLifecycle(): void {
+    const streamLifecycle = mountedStreamLifecycle;
+    mountedStreamLifecycle = null;
+    if (!streamLifecycle) return;
+    try {
+      streamLifecycle.dispose();
+    } catch (error) {
+      recordTeardownError(error);
+    }
+  }
+
+  let runtimeFailureTeardownQueued = false;
+  let runtimeFailurePending = false;
+  function requestRuntimeFailure(error: unknown, options?: { readonly silent?: boolean }): void {
+    const normalizedError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+    runtimeFailurePending = true;
+    if (!pendingExitFailure) {
+      pendingExitError = normalizedError;
+      pendingExitFailure = true;
+      pendingExitErrorIsSilent = options?.silent === true;
+      pendingExitErrorShouldReport = true;
+    }
+    if (consumedMountInProgress) {
+      pendingMountRuntimeFailure ??= normalizedError;
+      return;
+    }
+    if (abandonExitSettlement && teardownStarted) return;
+    if (teardownStarted) {
+      resolveExit();
+      return;
+    }
+    if (exitInitiated || runtimeFailureTeardownQueued) return;
+    exitInitiated = true;
+    runtimeFailureTeardownQueued = true;
+    queueMicrotask(() => {
+      runtimeFailureTeardownQueued = false;
+      try {
+        teardown();
+      } finally {
+        resolveExit();
+      }
+    });
+  }
+
+  function guardAcceptedStaticCleanup(statics: readonly TuiStatic[]): () => void {
+    const batch: AcceptedStaticCleanupBatch = {
+      errors: [],
+    };
+    pendingAcceptedStaticCleanupBatches.add(batch);
+    for (const stat of statics) {
+      let owner: VueCleanupErrorOwner | null = null;
+      const rootVNode = mountedOwnedVNode;
+      try {
+        owner =
+          rootVNode === null
+            ? null
+            : vueCleanupGuard.guardHostChildren(rootVNode, stat, (error) => {
+                captureAcceptedStaticCleanupFailure(batch, error, owner);
+              });
+      } catch (error) {
+        captureAcceptedStaticCleanupFailure(batch, error, null);
+      }
+      if (owner) continue;
+
+      // A normally rendered Static must have one exact tui-static host VNode.
+      // If a supported Vue version ever changes that invariant, fail the
+      // Runtime session and let whole-app guarded teardown release the tree
+      // instead of silently accepting history whose slot scopes may leak.
+      const error = new Error("Unable to guard an accepted <Static> slot subtree.");
+      captureAcceptedStaticCleanupFailure(batch, error, null);
+      requestRuntimeFailure(error);
+    }
+    return () => {
+      // Acceptance notifications queue the component patches that replace
+      // committed hosts with stable comment anchors. Report guarded scope
+      // failures only after that Vue flush completes: throwing from a host
+      // remove operation would leave the VNode patch half-finished.
+      void nextTick().then(
+        () => settleAcceptedStaticCleanup(batch),
+        (error) => {
+          captureAcceptedStaticCleanupFailure(batch, error, null);
+          settleAcceptedStaticCleanup(batch);
+        },
+      );
+    };
+  }
 
   function resolveExit() {
+    if (abandonExitSettlement) return;
     if (settlementStarted) return;
+    if (pendingAcceptedStaticCleanupBatches.size > 0) {
+      pendingSettlement = true;
+      return;
+    }
     // A custom stream or renderer callback may synchronously call unmount()
     // from inside a terminal acquisition/repaint. Settling here would let the
     // exit promise resolve before the surrounding write has finished and before
@@ -358,80 +743,110 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return;
     }
     settlementStarted = true;
-    // Nothing wired: this app never mounted a renderer (every mount() either
-    // never happened or hit the instance-reuse guard, which wires nothing).
-    // Settle the exit promise directly without any write-barrier so no stream
-    // — in particular a guarded stream's owner — is ever touched. Apps that
-    // DID wire a renderer always have mountedAppContext set, so a guarded
-    // call can never reroute their exit settling away from the real stream.
+    // Nothing wired: this app never reached stream reservation.
     if (!mountedAppContext) {
-      if (isErrorInput(pendingExitError)) {
+      disposeMountedStreamLifecycle();
+      if (pendingExitFailure) {
         exitReject(pendingExitError);
       } else {
-        exitResolve(pendingExitResult);
+        exitResolve();
       }
       return;
     }
     const appContext = mountedAppContext;
+
     const stdout = (appContext?.stdout ?? process.stdout) as MaybeWritableStream;
 
     const finish = () => {
-      if (isErrorInput(pendingExitError)) {
+      disposeMountedStreamLifecycle();
+      if (pendingExitFailure) {
         exitReject(pendingExitError);
       } else {
-        exitResolve(pendingExitResult);
-      }
-    };
-
-    const afterBarrier = (stream: MaybeWritableStream, callback: () => void) => {
-      const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
-      if (!canWriteToStdout || !hasWritableState) {
-        setImmediate(callback);
-        return;
-      }
-      try {
-        stream.write("", callback);
-      } catch {
-        setImmediate(callback);
+        exitResolve();
       }
     };
 
     const report = pendingFatalReport;
     pendingFatalReport = null;
-    if (!report || !appContext) {
-      afterBarrier(stdout, finish);
+    void (async () => {
+      try {
+        try {
+          await mountedStreamLifecycle?.waitForIdle();
+        } catch (error) {
+          recordTeardownError(error);
+        }
+        try {
+          await writeOutputBarrier(stdout);
+        } catch (error) {
+          recordTeardownError(error);
+        }
+        if (report) {
+          const stderr = appContext.stderr as MaybeWritableStream;
+          try {
+            await writeOutputBarrier(stderr, report);
+          } catch (error) {
+            recordTeardownError(error);
+          }
+        }
+        try {
+          await mountedStreamLifecycle?.waitForIdle();
+        } catch (error) {
+          recordTeardownError(error);
+        }
+      } finally {
+        finish();
+      }
+    })();
+  }
+
+  async function writeOutputBarrier(stream: MaybeWritableStream, data = ""): Promise<void> {
+    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
+    if (!canWriteToStdout) {
+      throw new Error("Runtime output stream became unwritable before exit settlement.");
+    }
+
+    const coordinator = mountedOutputCoordinator;
+    if (!coordinator) {
+      await new Promise<void>((resolve, reject) => {
+        const done = (error?: Error | null) => {
+          if (error) reject(error);
+          else resolve();
+        };
+        try {
+          if (hasWritableState) stream.write(data, done);
+          else stream.write(data);
+          if (!hasWritableState) setImmediate(done);
+        } catch (error) {
+          reject(error);
+        }
+      });
       return;
     }
 
-    const stderr = appContext.stderr as MaybeWritableStream;
-    const writeReport = () => {
-      const { canWriteToStdout, hasWritableState } = getWritableStreamState(stderr);
-      if (!canWriteToStdout) {
-        setImmediate(finish);
-        return;
-      }
-      try {
-        if (hasWritableState) {
-          stderr.write(report, finish);
-        } else {
-          stderr.write(report);
-          setImmediate(finish);
-        }
-      } catch {
-        setImmediate(finish);
-      }
-    };
-
-    // When both channels share one stream, the report write itself is ordered
-    // after every queued restore and its callback is the single completion
-    // barrier. With distinct streams, first drain stdout restoration, then emit
-    // stderr so the durable error cannot race ahead of leaving Fullscreen.
-    if (stderr === stdout) writeReport();
-    else afterBarrier(stdout, writeReport);
+    for (;;) {
+      await coordinator.waitForIdle();
+      let bodyRan = false;
+      const result = coordinator.run(() => {
+        bodyRan = true;
+        coordinator.write(stream, data);
+      });
+      if (result.status === "blocked") continue;
+      if (!bodyRan) continue;
+      if (!result.writable) await result.ready;
+      await mountedStreamLifecycle?.waitForIdle();
+      return;
+    }
   }
 
   function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false): boolean {
-    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) return false;
+    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) {
+      if (!sync) {
+        requestRuntimeFailure(
+          new Error("Runtime output stream became unwritable during terminal restoration."),
+        );
+      }
+      return false;
+    }
     try {
       if (sync) {
         // Signal-exit path (G18, Finding A): signal-exit re-raises the signal
@@ -456,13 +871,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         } else {
           stream.write(data);
         }
+      } else if (mountedOutputCoordinator) {
+        const result = mountedOutputCoordinator.continue(() => {
+          mountedOutputCoordinator?.write(stream, data);
+        });
+        if (result.status === "blocked") return false;
       } else {
         stream.write(data);
       }
       return true;
-    } catch {
+    } catch (error) {
       // Stream may already be destroyed during shutdown, or the fd may be
       // unwritable; restore is best-effort.
+      if (!sync) requestRuntimeFailure(error);
       return false;
     }
   }
@@ -476,10 +897,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let pendingSettlement = false;
   let flushingDeferredLifecycle = false;
   let emergencyTerminalRestoreStarted = false;
+  let teardownOutputWaitStarted = false;
+  let teardownConsoleWaitStarted = false;
+  let teardownFinalCommitCompleted = false;
 
   function performEmergencyTerminalRestore(): void {
     if (emergencyTerminalRestoreStarted) return;
     emergencyTerminalRestoreStarted = true;
+    mountedOutputCoordinator?.abort(
+      new Error("Output transaction was interrupted by emergency terminal restoration."),
+    );
+    mountedAbandonPendingTerminalOutput?.();
     const runBestEffort = (operation: () => void): void => {
       try {
         operation();
@@ -490,35 +918,39 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     };
     const appContext = mountedAppContext;
 
+    closeOutstandingSynchronizedOutput();
+
     runBestEffort(() => mountedScheduler?.cancel());
-    if (mountedStdinController) {
-      const stdinController = mountedStdinController;
-      mountedStdinController = null;
-      runBestEffort(() => stdinController.dispose(true));
+    const emergencyKittyController = mountedKittyController ?? mountedEmergencyKittyController;
+    mountedKittyController = null;
+    mountedEmergencyKittyController = null;
+    if (emergencyKittyController) {
+      runBestEffort(() => emergencyKittyController.dispose(true));
     }
-    if (mountedKittyController) {
-      const kittyController = mountedKittyController;
-      mountedKittyController = null;
-      runBestEffort(() => kittyController.dispose(true));
+    const emergencyStdinController = mountedStdinController ?? mountedEmergencyStdinController;
+    mountedStdinController = null;
+    mountedEmergencyStdinController = null;
+    if (emergencyStdinController) {
+      runBestEffort(() => emergencyStdinController.dispose(true));
     }
 
     if (mountedWriter && mountedDynamicUpdatesLive && appContext) {
       const writer = mountedWriter;
-      const returnToBottom = writer.getCursorReturnToBottom();
-      if (returnToBottom !== "") writeBestEffort(appContext.stdout, returnToBottom, true);
       if (mountedNeedsTerminalLineAdvance?.()) {
         writeBestEffort(appContext.stdout, nextLineEscape, true);
       }
       if (writer.isCursorHidden()) writeBestEffort(appContext.stdout, "\x1b[?25h", true);
-      writer.reset({ cursorDirty: false, cursorHidden: false });
+      writer.reset({ cursorHidden: false });
     }
     if (mountedAlternateScreen && appContext) {
-      writeBestEffort(appContext.stdout, ansiEscapes.exitAlternativeScreen, true);
-      mountedAlternateScreen = false;
+      if (writeBestEffort(appContext.stdout, ansiEscapes.exitAlternativeScreen, true)) {
+        setAlternateScreenOwned(false);
+      }
     }
     if (mountedFullscreenCursorHidden && appContext) {
-      writeBestEffort(appContext.stdout, "\x1b[?25h", true);
-      mountedFullscreenCursorHidden = false;
+      if (writeBestEffort(appContext.stdout, "\x1b[?25h", true)) {
+        setFullscreenCursorHidden(false);
+      }
     }
   }
 
@@ -550,11 +982,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   function enterLifecycleTransaction(): () => void {
     lifecycleTransactionDepth++;
+    changeRuntimeResource("lifecycleTransactions", 1);
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       lifecycleTransactionDepth--;
+      changeRuntimeResource("lifecycleTransactions", -1);
       if (lifecycleTransactionDepth === 0) flushDeferredLifecycle();
     };
   }
@@ -568,10 +1002,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   }
 
-  // `sync` is set only when teardown is driven by the signal-exit callback
-  // (G18, Finding A). On that path the restore escapes must be written
-  // synchronously (fs.writeSync) so they reach the fd before signal-exit
-  // re-raises the signal. The normal unmount()/exit() path keeps async writes.
+  // `sync` abandons accepted/backpressured output before cleanup. Abrupt process
+  // and signal exits additionally need synchronous restore escapes before the
+  // process terminates; a Vite full reload uses the same immediate cleanup path
+  // only so the replacement app can reserve the streams without waiting.
   function teardown(sync = false, immediateTermination = false) {
     // Nothing wired: this app never mounted a renderer (never mounted, or
     // every mount() hit the instance-reuse guard, which wires nothing), so
@@ -602,6 +1036,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return;
     }
     teardownStarted = true;
+    reserveFirstPendingAcceptedStaticCleanupFailure();
 
     if (lifecycleTransactionDepth > 0 && !immediateTermination) {
       pendingTeardown = true;
@@ -618,8 +1053,181 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       teardownCompleted = true;
       return;
     }
-    teardownExecutionStarted = true;
+    const coordinator = mountedOutputCoordinator;
+    if (sync || immediateTermination) {
+      coordinator?.abort(new Error("Output transaction was interrupted by synchronous teardown."));
+      mountedAbandonPendingTerminalOutput?.();
+    }
 
+    const waitForCoordinator = (): void => {
+      if (!coordinator || teardownOutputWaitStarted) return;
+      teardownOutputWaitStarted = true;
+      void coordinator.waitForIdle().then(
+        () => {
+          teardownOutputWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) {
+            const effectiveSync = pendingTeardownSync;
+            pendingTeardownSync = false;
+            performTeardown(effectiveSync, false);
+          }
+        },
+        () => {
+          teardownOutputWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) performTeardown(false, false);
+        },
+      );
+    };
+
+    const waitForConsoleSink = (): void => {
+      const consoleSink = mountedConsoleSink;
+      if (!consoleSink || teardownConsoleWaitStarted) return;
+      teardownConsoleWaitStarted = true;
+      void consoleSink.waitForIdle().then(
+        () => {
+          teardownConsoleWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) {
+            const effectiveSync = pendingTeardownSync;
+            pendingTeardownSync = false;
+            performTeardown(effectiveSync, false);
+          }
+        },
+        () => {
+          teardownConsoleWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) performTeardown(false, false);
+        },
+      );
+    };
+
+    // Freeze new work before waiting for an accepted transaction. The component
+    // tree remains mounted so one final commit can still read the newest state.
+    scheduledCommit = () => {};
+    mountedScheduler?.cancel();
+    if (!sync && !immediateTermination && coordinator?.isBlocked()) {
+      waitForCoordinator();
+      return;
+    }
+
+    const stdout = mountedAppContext.stdout;
+    const stdoutWritable = getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout;
+    if (
+      !sync &&
+      !immediateTermination &&
+      !teardownFinalCommitCompleted &&
+      !mountFailurePending &&
+      !pendingExitErrorIsSilent &&
+      mountedCommit &&
+      stdoutWritable &&
+      (mountedDynamicUpdatesLive || !pendingExitFailure)
+    ) {
+      teardownFinalCommitCompleted = true;
+      try {
+        const finalCommit = mountedCommit();
+        if (finalCommit.status === "blocked") {
+          teardownFinalCommitCompleted = false;
+          waitForCoordinator();
+          return;
+        }
+        if (!finalCommit.writable) {
+          waitForCoordinator();
+          return;
+        }
+      } catch {
+        // Final rendering is best-effort. Continue with terminal restoration.
+      }
+    } else {
+      teardownFinalCommitCompleted = true;
+    }
+
+    // Vue cleanup is synchronous once the final component-backed frame has
+    // either been accepted or deliberately skipped. Keep this app's console
+    // registration active throughout cleanup, then wait for every intercepted
+    // record to enter and drain through the output coordinator before restoring
+    // the previous console owner.
+    if (!immediateTermination && !vueCleanupCompleted) {
+      runMountedVueCleanup();
+    }
+    if (!sync && !immediateTermination && mountedConsoleSink?.isIdle() === false) {
+      waitForConsoleSink();
+      return;
+    }
+    if ((sync || immediateTermination) && mountedConsoleSink?.isIdle() === false) {
+      coordinator?.abort(
+        new Error("Console output was abandoned by synchronous terminal teardown."),
+      );
+    }
+
+    const completeTeardown = (): void => {
+      if (teardownCompleted) return;
+      if (mountedAsOwner && mountedAppContext) {
+        if (liveInstances.delete(mountedAppContext.stdout)) {
+          changeRuntimeResource("streamReservations", -1);
+        }
+        mountedAsOwner = false;
+      }
+      mountedCreateOutputStateRollback = null;
+      mountedEmergencyKittyController = null;
+      mountedEmergencyStdinController = null;
+      mountedAbandonPendingTerminalOutput = null;
+      mountedTerminalReconcile = null;
+      closeOutstandingSynchronizedOutput();
+      mountedSynchronizedOutputReleases = null;
+      teardownCompleted = true;
+      if (abandonExitSettlement) {
+        // A Vite full reload replaces this application without representing an
+        // application exit. Release stream observers and retained host
+        // references, but deliberately leave waitUntilExit() unsettled so the
+        // dev-server exit channel is not triggered.
+        pendingSettlement = false;
+        disposeMountedStreamLifecycle();
+        mountedOutputCoordinator = null;
+        mountedAppContext = null;
+        mountedCommit = null;
+        mountedGetLastOutput = null;
+        return;
+      }
+      flushDeferredLifecycle();
+    };
+
+    teardownExecutionStarted = true;
+    if (sync || immediateTermination || !coordinator) {
+      performTeardownNow(sync, immediateTermination);
+      completeTeardown();
+      return;
+    }
+
+    const rollbackRestoration = mountedCreateOutputStateRollback?.();
+    try {
+      const restoration = coordinator.run(() => performTeardownNow(sync, immediateTermination), {
+        onUnhandedFailure: rollbackRestoration,
+      });
+      if (restoration.status === "blocked") {
+        // A synchronous host re-entry can claim the gate between the idle check
+        // and this call. No cleanup body ran, so retry after that owner drains.
+        teardownExecutionStarted = false;
+        waitForCoordinator();
+        return;
+      }
+      if (restoration.writable) completeTeardown();
+      else {
+        void restoration.ready.then(completeTeardown, (error) => {
+          recordTeardownError(error);
+          rollbackRestoration?.();
+          performEmergencyTerminalRestore();
+          completeTeardown();
+        });
+      }
+    } catch (error) {
+      recordTeardownError(error);
+      // Restore the logical writer snapshot before using idempotent synchronous
+      // terminal releases. A custom stream may throw before or after accepting
+      // the captured restoration transaction, so the physical state is unknown.
+      rollbackRestoration?.();
+      performEmergencyTerminalRestore();
+      completeTeardown();
+    }
+  }
+
+  function performTeardownNow(sync: boolean, immediateTermination: boolean) {
     try {
       // Terminal cleanup is a best-effort transaction. One failed release must
       // never strand a later lease (for example a Kitty write must not prevent
@@ -628,11 +1236,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const runBestEffort = (operation: () => void): void => {
         try {
           operation();
-        } catch {
-          // Continue through every remaining release.
+        } catch (error) {
+          recordTeardownError(error);
         }
       };
-      const appContext = mountedAppContext;
+      const appContext = mountedAppContext!;
 
       if (mountedUnsubscribeSuspension) {
         const unsubscribe = mountedUnsubscribeSuspension;
@@ -651,115 +1259,58 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runBestEffort(unsubscribe);
       }
 
-      // Remove this app from the live-instances registry so a subsequent mount()
-      // on the same stdout works normally. Only the owning app removes its entry;
-      // a no-op second mount (mountedAsOwner=false) must NOT evict the first
-      // app's entry.
-      if (mountedAsOwner && mountedAppContext) {
-        liveInstances.delete(mountedAppContext.stdout);
-        mountedAsOwner = false;
-      }
-
-      // Cancel any pending trailing-edge timer first, then do a final
-      // synchronous commit so the latest state is always flushed before
-      // unmount (matching Ink ink.tsx:755-761).
-      // teardownStarted=true lets the last Inline state render before its bounded
-      // region is left on the main screen. Fixed Fullscreen repaints once more
-      // before the alternate screen is restored instead.
-      scheduledCommit = () => {};
-      if (mountedScheduler) runBestEffort(() => mountedScheduler?.cancel());
-      // Prevent post-unmount app.clear() from writing to a torn-down stream.
-      mountedClear = null;
       const stdout = mountedAppContext?.stdout;
       const stdoutWritable = stdout
         ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
         : false;
-      // Final commit at unmount, mirroring Ink's settleThrottle path
-      // (ink.tsx:749-762): unmount FLUSHES the throttled render so lastOutput
-      // reflects the CURRENT tree before any teardown write. We just cancel()ed
-      // the scheduler, which DISCARDS a pending trailing-edge commit — so a
-      // reactive change deferred to that trailing edge would be lost. Re-running
-      // commit() here recomputes the frame against the live tree and refreshes
-      // frameState.lastOutput. Live output repaints; final-stream output only
-      // refreshes frameState and writes write-once <Static>, deferring the dynamic
-      // frame to the trailing-write block below. So this
-      //     refresh feeds the correct, latest `lastFrame + "\n"` into that write
-      //     (matching Ink's `this.lastOutput + '\n'`, ink.tsx:817-818) WITHOUT
-      //     double-writing the dynamic frame. Before this, a deferred trailing
-      //     change unmounted within the throttle window emitted the STALE
-      //     last-committed frame instead of the latest tree.
-      // EXCEPTION — final-stream ERROR teardown: do NOT re-commit. A re-commit
-      // could replace the retained successful frame with an overview or replay
-      // stale output. Fatal final-stream completion skips the dynamic frame and
-      // emits the durable report to stderr below. Live output still commits so an
-      // Inline/transcript overview can remain when its stdout write succeeds.
-      if (
-        !immediateTermination &&
-        mountedCommit &&
-        stdoutWritable &&
-        (mountedDynamicUpdatesLive || !isErrorInput(pendingExitError))
-      ) {
-        try {
-          mountedCommit();
-        } catch {
-          // Final render is best-effort; don't block teardown cleanup.
-        }
+      if (mountedConsoleSink) {
+        const consoleSink = mountedConsoleSink;
+        mountedConsoleSink = null;
+        runBestEffort(consoleSink.release);
       }
-      // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
-      if (mountedRestoreConsole) {
-        const restoreConsole = mountedRestoreConsole;
-        mountedRestoreConsole = null;
-        runBestEffort(restoreConsole);
-      }
-      if (vueMountStarted) {
-        vueMountStarted = false;
-        // A non-returning process/signal exit must not invoke application
-        // lifecycle hooks: mount may still be on the stack, and user cleanup can
-        // re-enter process.exit() before terminal restoration completes. Runtime
-        // resources below are released directly instead.
-        if (!immediateTermination) runBestEffort(originalUnmount);
-      }
+      consoleTeardownWritesAllowed = false;
       if (mountedRenderedTargets) {
         const renderedTargets = mountedRenderedTargets;
         mountedRenderedTargets = null;
         setRenderedTargetController(appContext, null);
         runBestEffort(() => renderedTargets.dispose());
       }
-      // Dispose the animation scheduler after Vue unmount: each useAnimation's
-      // onScopeDispose has already unsubscribed, so this is an idempotent backstop.
-      if (mountedAnimationScheduler) {
-        const animationScheduler = mountedAnimationScheduler;
-        runBestEffort(() => animationScheduler.dispose());
+      if (mountedGeometry) {
+        const geometry = mountedGeometry;
+        mountedGeometry = null;
+        setInternalGeometryService(appContext, null);
+        runBestEffort(() => geometry.dispose());
       }
-      mountedAnimationScheduler = null;
+      if (mountedFocusController) {
+        const focusController = mountedFocusController;
+        mountedFocusController = null;
+        runBestEffort(() => focusController.dispose());
+      }
       if (mountedKittyController) {
         // Disable-kitty is a restore escape: on the signal path it must flush
         // synchronously too (Finding A).
         const kittyController = mountedKittyController;
+        mountedEmergencyKittyController = kittyController;
         mountedKittyController = null;
         runBestEffort(() => kittyController.dispose(sync));
       }
-      if (!mountedDynamicUpdatesLive && mountedAppContext && !isErrorInput(pendingExitError)) {
+      if (!mountedDynamicUpdatesLive && mountedAppContext && !pendingExitFailure) {
         // The dynamic frame was deferred during rendering. The final commit()
         // above refreshed lastOutput to the current tree, so write that latest
-        // frame now as `lastFrame + "\n"`.
+        // frame once, adding a line ending only when it needs one.
         const lastFrame = mountedGetLastOutput?.() ?? "";
-        writeBestEffort(mountedAppContext.stdout, lastFrame + "\n", sync);
+        const finalDocument =
+          lastFrame === "" || lastFrame.endsWith("\n") ? lastFrame : `${lastFrame}\n`;
+        if (finalDocument !== "") {
+          writeBestEffort(mountedAppContext.stdout, finalDocument, sync);
+        }
       }
       // A viewport-filling Inline frame intentionally has no trailing newline
       // while it is live. Advance exactly once before restoring the cursor so a
       // following shell prompt cannot append to the frame's final row. NEL moves
       // to column zero even when the terminal does not translate LF to CRLF.
       if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
-        // A declared application caret may leave the physical cursor above the
-        // bottom of either a short or full-height frame. Return to the writer's
-        // actual bottom before establishing the post-app line; otherwise the
-        // shell can overwrite retained application rows.
         const writer = mountedWriter;
-        const returnToBottom = writer.getCursorReturnToBottom();
-        if (returnToBottom !== "") {
-          writeBestEffort(mountedAppContext.stdout, returnToBottom, sync);
-        }
         if (mountedNeedsTerminalLineAdvance?.()) {
           writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
         }
@@ -767,43 +1318,68 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (writer.isCursorHidden()) {
             writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", true);
           }
-          writer.reset({ cursorDirty: false, cursorHidden: false });
+          writer.reset({ cursorHidden: false });
         } else {
           runBestEffort(() => writer.done());
         }
       }
       if (mountedAlternateScreen && mountedAppContext) {
-        writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync);
-        mountedAlternateScreen = false;
+        if (writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync)) {
+          setAlternateScreenOwned(false);
+        }
       }
       if (mountedFullscreenCursorHidden && mountedAppContext) {
-        writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync);
-        mountedFullscreenCursorHidden = false;
+        if (writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync)) {
+          setFullscreenCursorHidden(false);
+        }
       }
-      if (mountedRoot) runBestEffort(() => detachYoga(mountedRoot!));
+      if (mountedRoot) {
+        runBestEffort(() => releasePaintCaches(mountedRoot!));
+      }
+      runBestEffort(() => mountedHostYogaLedger?.rollback());
+      if (mountedRoot) {
+        runBestEffort(() => detachYoga(mountedRoot!));
+      }
       mountedRoot = null;
+      mountedHostYogaLedger = null;
+      mountedOwnedVNode = null;
       if (mountedResizeHandler && mountedAppContext) {
         const resizeHandler = mountedResizeHandler;
-        runBestEffort(() => mountedAppContext?.stdout.off("resize", resizeHandler));
+        runBestEffort(() => {
+          mountedAppContext?.stdout.off("resize", resizeHandler);
+          releaseMountedResizeListener?.();
+          releaseMountedResizeListener = null;
+        });
         mountedResizeHandler = null;
       }
       if (mountedExitListener) {
         const exitListener = mountedExitListener;
-        runBestEffort(() => process.off("exit", exitListener));
+        runBestEffort(() => {
+          process.off("exit", exitListener);
+          releaseMountedExitListener?.();
+          releaseMountedExitListener = null;
+        });
         mountedExitListener = null;
       }
       if (mountedBeforeExitHandler) {
         const beforeExitHandler = mountedBeforeExitHandler;
-        runBestEffort(() => process.off("beforeExit", beforeExitHandler));
+        runBestEffort(() => {
+          process.off("beforeExit", beforeExitHandler);
+          releaseMountedBeforeExitListener?.();
+          releaseMountedBeforeExitListener = null;
+        });
         mountedBeforeExitHandler = null;
       }
       if (mountedStdinController) {
-        // Pass sync through so the bracketed-paste-disable escape flushes
-        // synchronously on the signal-exit path (Finding A), mirroring the
-        // kitty/cursor/alt-screen restores above.
+        // Pass sync through so an HMR replacement cannot wait behind stale
+        // control output. Only a non-returning process/signal exit needs the
+        // extra idempotent OFF reissue after Vue's ordinary lease cleanup.
         const stdinController = mountedStdinController;
+        mountedEmergencyStdinController = stdinController;
         mountedStdinController = null;
-        runBestEffort(() => stdinController.dispose(sync));
+        stdinController.setCleanupErrorSink(recordTeardownError);
+        runBestEffort(() => stdinController.dispose(sync, immediateTermination));
+        stdinController.setCleanupErrorSink(null);
       }
       if (mountedRenderSession) {
         const renderSession = mountedRenderSession;
@@ -821,11 +1397,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       if (
-        isErrorInput(pendingExitError) &&
-        (!pendingExitErrorWasRendered || !mountedBoundaryErrorsAreDurable)
+        pendingExitErrorShouldReport &&
+        !pendingExitErrorIsSilent &&
+        isErrorInput(pendingExitError)
       ) {
         const report = sanitizeAnsiMultiline(formatErrorForStderr(pendingExitError));
-        const output = `${appContext.stderr.isTTY ? nextLineEscape : ""}${report}`;
+        // A TTY stderr alone does not imply that this application owns a live
+        // terminal surface. Redirected/non-TTY stdout selects the document host,
+        // which must never emit cursor controls even when diagnostics still go
+        // to the user's terminal.
+        const output = `${
+          appContext.stdout.isTTY && appContext.stderr.isTTY ? nextLineEscape : ""
+        }${report}`;
         if (sync) {
           writeBestEffort(appContext.stderr, output, true);
         } else {
@@ -838,133 +1421,139 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // deliberately observes this final readonly reference through the closure.
       mountedAppContext = appContext;
     } finally {
-      teardownCompleted = true;
-      // A write performed by cleanup itself can synchronously re-enter
-      // app.unmount() and request settlement. It is safe to honor that request
-      // only after every owned terminal resource above has had its release turn.
-      flushDeferredLifecycle();
+      // The caller releases stream ownership and settles lifecycle work only
+      // after this restoration transaction has drained (or definitively failed).
     }
   }
 
+  const hostYogaLedger = createHostYogaAllocationLedger();
+  mountedHostYogaLedger = hostYogaLedger;
   const renderer = createRenderer<TuiNode, TuiNode>(
-    buildNodeOps({ onCommit: () => scheduledCommit() }),
+    buildNodeOps({
+      onCommit: () => scheduledCommit(),
+      hostYogaLifetime: hostYogaLedger.lifetime,
+    }),
   );
+
+  let mountedUserRoot: ComponentPublicInstance | null = null;
+  const captureUserRoot = (instance: ComponentPublicInstance | null): void => {
+    mountedUserRoot = instance;
+  };
   if (isDevConnected()) {
     // initHmrBridge already ran inside connectDevtools() with a live hot.
     // Clear any dev status left in the module-global `devState` by a previous
     // app in this dev process, so this fresh app never renders a stale Build
     // Error / HMR-update overlay instead of its own content.
     resetDevState();
-    root = createDevOverlayWrapper(root, rootProps ?? undefined);
+    root = createDevOverlayWrapper(root, rootProps ?? undefined, captureUserRoot);
     rootProps = undefined;
   }
 
-  // Internal error boundary wrapper: catches all descendant errors (setup,
-  // render, lifecycle) via onErrorCaptured, renders an ErrorOverview frame,
-  // then routes the error through exit(). This prevents yoga WASM corruption
-  // that would occur if errors propagated uncaught during Vue's render phase.
-  const userRoot = root;
-  const userRootProps = rootProps;
-  const ErrorBoundaryRoot = defineComponent({
-    name: "InternalErrorBoundary",
-    setup() {
-      // Two refs by design: `caught` is the ORIGINAL thrown value, passed to
-      // ErrorOverview for a faithful display (Ink stores the raw value —
-      // ErrorBoundary.tsx:18 — and ErrorOverview only renders a stack when the
-      // value has one). `errored` marks that an error occurred (the value may be
-      // a falsy primitive, so we can't test `caught` for truthiness). The
-      // exit/reject machinery still receives a wrapped Error — semantics
-      // unchanged.
-      const caught = shallowRef<unknown>(null);
-      const errored = shallowRef(false);
-
-      onErrorCaptured((err) => {
-        // First-wins: only the FIRST captured error is recorded and routed to
-        // exit(). If two descendants throw in the SAME synchronous flush, the
-        // displayed `caught` and the rejected exit error must stay the SAME
-        // error — `caught` is last-wins by assignment, while exit() is
-        // first-wins, so without this guard the overview would show error #2
-        // while waitUntilExit() rejects with error #1 (e17 display/reject
-        // mismatch). Guarding on `errored` keeps both on the first thrown value.
-        if (!errored.value) {
-          // Preserve a genuine Error — including a cross-realm one (fails
-          // `instanceof Error`, passes the `[object Error]` brand check) — so the
-          // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
-          // matching Ink's ErrorBoundary (rejects with the thrown value itself).
-          // A true non-Error throw (`throw "x"`, `throw 0`, `throw {message:'x'}`)
-          // is wrapped with the SAME message ErrorOverview displays
-          // (messageForNonError), so the shown and rejected messages agree (e17).
-          const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
-          caught.value = err;
-          errored.value = true;
-          // Record the exit error SYNCHRONOUSLY, but keep the teardown DEFERRED.
-          // Two distinct concerns, decoupled:
-          //   1. recordExitError(e) sets pendingExitError NOW (first-wins). A host
-          //      that throws during a flush and then synchronously unmounts in the
-          //      SAME task would otherwise have its racing unmount() run
-          //      resolveExit() while pendingExitError is still undefined —
-          //      resolving CLEAN and swallowing the error (the deferred-exit race,
-          //      BUG #2). Recording it up front makes that resolveExit() reject
-          //      with the thrown error.
-          //   2. exitWithError(e) stays on nextTick so teardown is DEFERRED until
-          //      AFTER the current flush. teardown() runs the final mountedCommit()
-          //      that paints the ErrorOverview frame on live-output mounts,
-          //      and the boundary's errored→true re-render must commit BEFORE that
-          //      final commit. A synchronous exit here would let teardown's
-          //      microtask run before the re-render, dropping the overview frame.
-          //      Deferring keeps frame/paint timing byte-identical to main. (In the
-          //      racing-unmount case the unmount sets teardownStarted, so this
-          //      later exit() no-ops via the exitInitiated||teardownStarted guard;
-          //      with no race it proceeds normally.)
-          recordExitError(e);
-          void nextTick(() => {
-            exitWithError(e);
-          });
-        }
-        return false; // stop propagation
-      });
-
-      return () => {
-        if (errored.value) {
-          // Rendering this vnode only means the error frame is ready to paint.
-          // Durability is recorded later, after the terminal write succeeds.
-          pendingBoundaryFrameReady = pendingBoundaryError;
-          return h(ErrorOverview, { error: caught.value });
-        }
-        return h(userRoot, userRootProps ?? undefined);
-      };
+  const rootPropsWithCapture = mergeProps(
+    {
+      onVnodeBeforeMount(vnode: VNode) {
+        // This hook runs for stateful and functional roots after Vue has
+        // created the actual app-owned VNode but before the first host patch.
+        // It complements the setup-time scope capture below for Vue 3.4,
+        // whose app.mount() ignores app._ceVNode.
+        mountedOwnedVNode = vnode;
+      },
     },
-  });
-
-  const baseApp = renderer.createApp(ErrorBoundaryRoot);
+    rootProps ?? {},
+  );
+  const baseApp = renderer.createApp(root, rootPropsWithCapture);
+  const ownedVNode = createVNode(root, rootPropsWithCapture);
+  (
+    baseApp as typeof baseApp & {
+      _ceVNode?: VNode;
+    }
+  )._ceVNode = ownedVNode;
+  mountedOwnedVNode = ownedVNode;
   const originalMount = baseApp.mount.bind(baseApp);
   const originalUnmount = baseApp.unmount.bind(baseApp);
 
-  const app = baseApp as unknown as TuiApp;
+  function runMountedVueCleanup(): void {
+    if (vueCleanupCompleted) return;
+    vueCleanupCompleted = true;
+    if (!vueMountStarted) return;
+    vueMountStarted = false;
+    consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    if (mountedOwnedVNode) {
+      vueCleanupGuard.guardVNode(mountedOwnedVNode, (error) => recordTeardownError(error));
+    }
+    try {
+      originalUnmount();
+    } catch (error) {
+      recordTeardownError(error);
+    }
+  }
 
-  app.mount = function mount(options: MountOptions = {}): ComponentPublicInstance {
+  function rollbackPartialVueMount(): void {
+    if (vueCleanupCompleted) return;
+    vueCleanupCompleted = true;
+    vueMountStarted = false;
+    consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    const rootNode = mountedRoot as (TuiRoot & { _vnode?: VNode | null }) | null;
+    const vnode = mountedOwnedVNode;
+    if (rootNode && vnode?.component) {
+      vueCleanupGuard.guardVNode(vnode, (error) => recordTeardownError(error));
+      if (rootNode._vnode == null) rootNode._vnode = vnode;
+      try {
+        renderer.render(null, rootNode);
+      } catch (error) {
+        recordTeardownError(error);
+      }
+    }
+    hostYogaLedger.rollback();
+  }
+
+  const app = baseApp as unknown as TuiApp;
+  let mountAttemptConsumed = false;
+
+  const runtimeMount = function mount(
+    this: void,
+    options: MountOptions = {},
+  ): ComponentPublicInstance {
+    if (mountAttemptConsumed) {
+      throw new Error("A vue-tui app instance can only be mounted once");
+    }
     // The mount contract is validated before reading stream getters, checking
-    // stream ownership, or mutating Vue/terminal state. Removed-option errors
-    // deliberately win over an invalid mode value.
+    // stream ownership, or mutating Vue/terminal state.
+    assertKnownMountOptionKeys(options);
+    const internalOptions = getInternalMountOptions(options);
     const requestedMode = normalizeRequestedMode(options);
-    const liveUpdatesOverride = validateLiveUpdates(
-      (options as { readonly liveUpdates?: unknown }).liveUpdates,
+    const liveUpdatesOverride = validateLiveUpdates(internalOptions.liveUpdates);
+    const exitOnCtrlC = validateExitOnCtrlC(
+      (options as { readonly exitOnCtrlC?: unknown }).exitOnCtrlC,
     );
-    const stdout = options.stdout ?? process.stdout;
-    const stdin = options.stdin ?? process.stdin;
-    const stderr = options.stderr ?? process.stderr;
+    const patchConsole = validatePatchConsole(
+      (options as { readonly patchConsole?: unknown }).patchConsole,
+    );
+    const onRender = internalOptions.onRender;
+    const incrementalRendering = internalOptions.incrementalRendering;
+    // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
+    // the render throttle engages by default — without this the animation
+    // coalescing (G02) never kicks in on an unthrottled path.
+    const maxFps = internalOptions.maxFps ?? 30;
+    const resolvedStdout = options.stdout ?? process.stdout;
+    const resolvedStdin = options.stdin ?? process.stdin;
+    const resolvedStderr = options.stderr ?? process.stderr;
+    assertWritableStream(resolvedStdout, "stdout");
+    assertReadableStream(resolvedStdin, "stdin");
+    assertWritableStream(resolvedStderr, "stderr");
+    const stdout = resolvedStdout as NodeJS.WriteStream;
+    const stdin = resolvedStdin as NodeJS.ReadStream;
+    const stderr = resolvedStderr as NodeJS.WriteStream;
+    if (liveInstances.has(stdout)) {
+      throw new Error("Cannot mount vue-tui: the selected stdout already has a live app.");
+    }
 
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
-    const renderObserver = (options as { [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver })[
-      INTERNAL_RENDER_OBSERVER
-    ];
-    const configuredTerminalSizeProbe = (
-      options as { [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe }
-    )[INTERNAL_TERMINAL_SIZE_PROBE];
-    const suspensionHost =
-      (options as { [INTERNAL_SUSPENSION_HOST]?: SuspensionHost })[INTERNAL_SUSPENSION_HOST] ??
-      processSuspensionHost;
+    const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
+    const kittyKeyboard = internalOptions[INTERNAL_KITTY_KEYBOARD];
+    const configuredTerminalSizeProbe = internalOptions[INTERNAL_TERMINAL_SIZE_PROBE];
+    const suspensionHost = internalOptions[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
     // Process-global fallbacks describe the process's controlling terminal, not
     // an arbitrary custom WriteStream. A custom TTY must provide a complete
     // columns/rows pair; deterministic hosts can supply the internal modeled
@@ -989,28 +1578,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             })
         : () => ({ kind: "unavailable" }));
 
-    // Instance-reuse guard (Ink parity G14): if a live Vue TUI instance is
-    // already rendering to this stdout, warn on stderr and skip wiring a second
-    // competing renderer. The second mount is a deliberate no-op: the caller
-    // must unmount() the first app before mounting on the same stream.
-    // We write the warning directly to native process.stderr so an existing
-    // alternate-screen renderer cannot swallow it via patchConsole.
-    // The skip is scoped to THIS call only: it wires nothing, mutates no
-    // per-app state, and returns an inert handle. unmount()/teardown()/
-    // resolveExit() consult the actually-wired state (mountedAppContext /
-    // mountedAsOwner), so a guarded call never affects the app's ability to
-    // tear down a mount it really wired (audit e18: a sticky skip flag here
-    // made the owner's double-fire — and even targeting someone else's busy
-    // stream — permanently disable the app's own teardown).
-    if (liveInstances.has(stdout)) {
-      process.stderr.write(
-        "Warning: this stdout already has a live app, so this mount() was ignored. To update the current view, change its reactive state instead of remounting; to mount another app, unmount() the existing one first.\n",
-      );
-      return {} as ComponentPublicInstance;
-    }
-
-    const requestedScreenReaderPresentation =
-      options.isScreenReaderEnabled ?? process.env["INK_SCREEN_READER"] === "true";
     const stdoutFacts = {
       isTTY: Boolean(stdout.isTTY),
       columns: stdout.columns,
@@ -1019,83 +1586,201 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     const terminalProbe: TerminalSizeProbeResult = needsTerminalSizeProbe(stdoutFacts)
       ? terminalSizeProbe()
       : { kind: "unavailable" };
+    if (requestedMode === "fullscreen") {
+      assertFullscreenCapability(stdout, terminalProbe);
+    }
     const surface = resolveLiveSurface({
       requestedMode,
       liveUpdatesOverride,
-      isCI: isInCi,
-      presentation: requestedScreenReaderPresentation ? "screen-reader" : "visual",
-      suspensionSupported: suspensionHost.supported,
       stdout: stdoutFacts,
       terminalProbe,
     });
-    const renderSession = createLiveRenderSessionService(surface);
-    renderObserver?.onSession?.(renderSession.session);
-    const isScreenReaderEnabled = surface.session.output.presentation === "screen-reader";
     const dynamicUpdatesLive = surface.session.output.dynamicUpdates === "live";
-    // F3 will replace this temporary input-lifecycle policy. It intentionally
-    // remains separate from the effective output surface now: a visual TTY can
-    // lose live output because its dimensions are unavailable without changing
-    // what the caller requested for input acquisition.
-    const inputLifecycleActive = surface.liveUpdatesRequested;
     const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
-    const boundedInlineSurface =
-      surface.kind === "inline-terminal" && surface.session.output.presentation === "visual";
+    const boundedInlineSurface = surface.kind === "inline-terminal";
     const inlineTerminalSurface = surface.kind === "inline-terminal";
-    const targetedMouseInputAvailable =
-      fixedFullscreenSurface &&
-      supportsTerminalMouse() &&
-      Boolean((stdin as { isTTY?: boolean }).isTTY);
+    // Supported secondary document host: non-TTY final-stream with modeled layout.
+    const documentHostSurface =
+      surface.kind === "final-stream" && surface.reason === "stdout-not-tty";
+    const boundedDocumentSurface =
+      documentHostSurface ||
+      (surface.kind === "live-stream" && surface.reason === "stdout-not-tty");
 
-    function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
-      const currentStdout = {
-        isTTY: Boolean(stdout.isTTY),
-        columns: stdout.columns,
-        rows: stdout.rows,
-      } as const;
-      const currentProbe = preferFreshProbe
-        ? resumeTerminalSizeProbe()
-        : needsTerminalSizeProbe(currentStdout)
-          ? terminalSizeProbe()
-          : ({ kind: "unavailable" } as const);
-      const dimensionsSource =
-        preferFreshProbe && currentProbe.kind === "detected"
-          ? {
-              isTTY: currentStdout.isTTY,
-              columns: currentProbe.size.columns,
-              rows: currentProbe.size.rows,
-            }
-          : currentStdout;
-      const next = resolveLiveDimensions(dimensionsSource, currentProbe);
-
-      if (surface.kind === "fullscreen-terminal") {
-        if (next.terminal === null) return null;
-        return { ...next, layout: next.terminal };
-      }
-      if (boundedInlineSurface) {
-        if (next.terminal === null) return null;
-        return { ...next, layout: next.terminal };
-      }
-      return next;
-    }
-
-    const exitOnCtrlC = options.exitOnCtrlC ?? true;
-    // 'always' (default): own raw mode for the whole interactive run; 'auto':
-    // Ink's lazy model where input composables acquire it on demand. See the
-    // MountOptions.rawMode docs and .agents/docs/ink-divergences.md.
-    const rawMode = options.rawMode ?? "always";
-    const onRender = options.onRender;
-    const incrementalRendering = options.incrementalRendering;
-    const patchConsole = options.patchConsole;
-    const kittyKeyboard = options.kittyKeyboard;
-    // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
-    // the render throttle engages by default — without this the animation
-    // coalescing (G02) never kicks in on an unthrottled path.
-    const maxFps = options.maxFps ?? 30;
-    mountedDynamicUpdatesLive = dynamicUpdatesLive;
-    mountedBoundaryErrorsAreDurable = dynamicUpdatesLive && !fixedFullscreenSurface;
-
+    // Deterministic option, stream, capability, ownership, and surface
+    // preflight ends here. From this point every consumed operation is covered
+    // by the rollback catch below.
     let leaveMountLifecycleTransaction: (() => void) | null = null;
+    mountAttemptConsumed = true;
+    consumedMountInProgress = true;
     try {
+      const renderSession = createLiveRenderSessionService(surface);
+
+      function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
+        const currentStdout = {
+          isTTY: Boolean(stdout.isTTY),
+          columns: stdout.columns,
+          rows: stdout.rows,
+        } as const;
+        const currentProbe = preferFreshProbe
+          ? resumeTerminalSizeProbe()
+          : needsTerminalSizeProbe(currentStdout)
+            ? terminalSizeProbe()
+            : ({ kind: "unavailable" } as const);
+        const dimensionsSource =
+          preferFreshProbe && currentProbe.kind === "detected"
+            ? {
+                isTTY: currentStdout.isTTY,
+                columns: currentProbe.size.columns,
+                rows: currentProbe.size.rows,
+              }
+            : currentStdout;
+        const next = resolveLiveDimensions(dimensionsSource, currentProbe);
+
+        if (surface.kind === "fullscreen-terminal") {
+          if (next.terminal === null) return null;
+          return { ...next, layout: next.terminal };
+        }
+        if (boundedInlineSurface) {
+          if (next.terminal === null) return null;
+          return { ...next, layout: next.terminal };
+        }
+        // Document hosts keep the fixed modeled layout for the whole lifetime.
+        if (boundedDocumentSurface) {
+          return {
+            terminal: null,
+            layout: {
+              columns: surface.session.dimensions.layout.columns,
+              rows: surface.session.dimensions.layout.rows,
+            },
+          };
+        }
+        return next;
+      }
+
+      mountedDynamicUpdatesLive = dynamicUpdatesLive;
+
+      let failureOutputCoordinator: OutputCoordinator | null = null;
+      const streamLifecycle = createMountedStreamLifecycle({
+        stdin,
+        stdout,
+        stderr,
+        hasManagedInputDemand: () => mountedStdinController?.hasManagedInputDemand() ?? false,
+        onFailure(error) {
+          failureOutputCoordinator?.abort(error);
+          requestRuntimeFailure(error);
+        },
+      });
+      mountedStreamLifecycle = streamLifecycle;
+      const outputCoordinator = createOutputCoordinator({
+        trackWrite: (stream) => streamLifecycle.trackWrite(stream),
+        onDeferredError(error) {
+          mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
+          // A prior BSU may already have been accepted while its matching ESU was
+          // still queued behind the failed segment. Close that terminal mode
+          // synchronously before the fatal lifecycle turn starts.
+          closeOutstandingSynchronizedOutput();
+          requestRuntimeFailure(error);
+        },
+      });
+      failureOutputCoordinator = outputCoordinator;
+      mountedOutputCoordinator = outputCoordinator;
+      mountedSynchronizedOutputReleases = new Set();
+      let terminalReconcileTurn: Promise<void> | null = null;
+      let terminalReconcileRequested = false;
+      let reconcileManagedTerminalOutput: () => void = () => {};
+
+      function requestTerminalReconcile(): void {
+        if (teardownStarted) return;
+        if (terminalReconcileTurn) {
+          terminalReconcileRequested = true;
+          return;
+        }
+        terminalReconcileRequested = false;
+        let turn!: Promise<void>;
+        turn = outputCoordinator
+          .waitForIdle()
+          .then(
+            () => {
+              if (!teardownStarted) reconcileManagedTerminalOutput();
+            },
+            () => {},
+          )
+          .finally(() => {
+            if (terminalReconcileTurn === turn) terminalReconcileTurn = null;
+            if (mountedTerminalReconcile === turn) mountedTerminalReconcile = null;
+            if (terminalReconcileRequested && !teardownStarted) requestTerminalReconcile();
+          });
+        terminalReconcileTurn = turn;
+        mountedTerminalReconcile = turn;
+        void turn.catch(() => {});
+      }
+
+      function writeRuntimeOutput(
+        stream: NodeJS.WriteStream,
+        data: string,
+        callback?: () => void,
+        onHandoff?: () => void,
+      ): boolean {
+        let writable = false;
+        const result = outputCoordinator.continue(() => {
+          writable = outputCoordinator.write(stream, data, callback, onHandoff);
+        });
+        if (result.status === "blocked") {
+          throw new Error("Runtime output transaction is backpressured.");
+        }
+        // `false` from Node means accepted backpressure, not rejected bytes. The
+        // output gate itself prevents a later transaction until drain.
+        return writable;
+      }
+
+      function writeTerminalOutput(data: string, onHandoff?: () => void): boolean {
+        let captured = false;
+        let result: CoordinatedWriteResult;
+        try {
+          result = outputCoordinator.continue(() => {
+            captured = outputCoordinator.write(stdout, data, undefined, onHandoff);
+          });
+        } catch (error) {
+          mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
+          closeOutstandingSynchronizedOutput();
+          throw error;
+        }
+        if (result.status === "blocked") {
+          requestTerminalReconcile();
+          return false;
+        }
+        if (!result.writable) requestTerminalReconcile();
+        return captured;
+      }
+
+      function blockedCoordinatedWrite(): Extract<CoordinatedWriteResult, { status: "blocked" }> {
+        return Object.freeze({ status: "blocked", ready: outputCoordinator.waitForIdle() });
+      }
+
+      function runOutputTransaction(
+        body: () => void,
+        options?: {
+          readonly onFullyHanded?: () => void;
+          readonly onUnhandedFailure?: (error: unknown) => void;
+        },
+      ): CoordinatedWriteResult {
+        try {
+          return outputCoordinator.run(body, options);
+        } catch (error) {
+          // The coordinator is idle again before a synchronous handoff error is
+          // rethrown. If BSU reached the stream but ESU did not, close that mode
+          // now rather than leaving recovery to whichever caller catches it.
+          mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
+          closeOutstandingSynchronizedOutput();
+          throw error;
+        }
+      }
+
+      const acceptedCoordinatedWrite = Object.freeze({
+        status: "accepted",
+        writable: true,
+      }) satisfies CoordinatedWriteResult;
+
       // Frame coordination state — tracks the last rendered output so
       // writeToStdout/writeToStderr can clear and restore the active frame.
       // Frame state: lastOutput is the most recent rendered frame string and
@@ -1107,6 +1792,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         lastOutputToRender: "" as string | undefined,
         outputHeight: 0,
       };
+      let fullscreenBaselineValid = false;
+      let fullscreenBaselineColumns: number | null = null;
+      let fullscreenBaselineRows: number | null = null;
+      let fullscreenEnterPending = false;
+      let fullscreenCursorHidePending = false;
       let inlineRegionStarted = false;
       let terminalSuspended = false;
       let pendingMountSuspension = false;
@@ -1116,17 +1806,44 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let resizeHandledGeneration = 0;
       let resizePaintPending = false;
       let requestPendingResizeRefresh: () => void = () => {};
-      let prepareResumeSurface: (() => (() => void) | null) | null = null;
+      let prepareResumeSurface: (() => (() => CoordinatedWriteResult) | null) | null = null;
       let suspendedFullscreenSurface = false;
       let suspendedInlineSurface = false;
-      let warnedFullscreenStatic = false;
-      let cursorPosition: CursorPosition | undefined;
+      let rejectedFullscreenStatic = false;
+      mountedAbandonPendingTerminalOutput = (abandonment) => {
+        fullscreenEnterPending = false;
+        fullscreenCursorHidePending = false;
+        if (fixedFullscreenSurface && abandonment?.physicalStateUncertain) {
+          fullscreenBaselineValid = false;
+        }
+        (mountedKittyController ?? mountedEmergencyKittyController)?.abandonPendingOutput();
+        (mountedStdinController ?? mountedEmergencyStdinController)?.abandonPendingTerminalOutput(
+          abandonment,
+        );
+        if (!abandonment?.physicalStateUncertain) requestTerminalReconcile();
+      };
       mountedGetLastOutput = () => frameState.lastOutput;
       mountedNeedsTerminalLineAdvance = () =>
         inlineTerminalSurface &&
         frameState.lastOutputToRender !== undefined &&
         frameState.lastOutputToRender !== "" &&
         !frameState.lastOutputToRender.endsWith("\n");
+
+      function rejectUnsupportedFullscreenStatic(statics = findStatics(tuiRoot)): boolean {
+        if (!fixedFullscreenSurface || statics.length === 0) return false;
+        if (!rejectedFullscreenStatic) {
+          // Static is terminal history, not fixed-viewport layout. Reject on
+          // component presence (including an empty region) before preparation,
+          // layout, observers, onRender, commit-time surface reacquisition, or
+          // frame output.
+          // Existing setup-owned terminal leases are released by the ordinary
+          // fatal teardown before its durable stderr report is written.
+          rejectedFullscreenStatic = true;
+          mountedScheduler?.cancel();
+          requestRuntimeFailure(new Error(FULLSCREEN_STATIC_ERROR));
+        }
+        return true;
+      }
 
       const runSuspensionStep = (operation: () => void): void => {
         try {
@@ -1140,19 +1857,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
         const writer = mountedWriter;
         if (fixedFullscreenSurface) {
+          fullscreenBaselineValid = false;
+          mountedGeometry?.setSurfaceAvailable(false);
           if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
           if (mountedAlternateScreen) {
             if (writeBestEffort(stdout, ansiEscapes.exitAlternativeScreen, true)) {
-              mountedAlternateScreen = false;
+              setAlternateScreenOwned(false);
             }
           }
           if (mountedFullscreenCursorHidden) {
             if (writeBestEffort(stdout, "\x1b[?25h", true)) {
-              mountedFullscreenCursorHidden = false;
+              setFullscreenCursorHidden(false);
             }
           }
           if (writer) {
-            runSuspensionStep(() => writer.reset({ cursorDirty: false, cursorHidden: false }));
+            runSuspensionStep(() => writer.reset({ cursorHidden: false }));
           }
           frameState.lastOutput = "";
           frameState.lastOutputToRender = "";
@@ -1161,9 +1880,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
 
         if (!inlineTerminalSurface || !dynamicUpdatesLive || !writer) return;
+        mountedGeometry?.setSurfaceAvailable(false);
         if (rememberSurface) suspendedInlineSurface = true;
-        const returnToBottom = writer.getCursorReturnToBottom();
-        if (returnToBottom !== "") writeBestEffort(stdout, returnToBottom, true);
         if (mountedNeedsTerminalLineAdvance?.()) {
           writeBestEffort(stdout, nextLineEscape, true);
         }
@@ -1171,7 +1889,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const cursorShown = !cursorWasHidden || writeBestEffort(stdout, "\x1b[?25h", true);
         runSuspensionStep(() =>
           writer.reset({
-            cursorDirty: false,
             cursorHidden: cursorWasHidden && !cursorShown,
           }),
         );
@@ -1190,6 +1907,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           pendingMountSuspension = true;
           return;
         }
+        outputCoordinator.abort(new Error("Output transaction was interrupted by suspension."));
+        mountedAbandonPendingTerminalOutput?.();
+        closeOutstandingSynchronizedOutput();
         runLifecycleTransaction(() => {
           terminalSuspended = true;
           terminalResumeInProgress = false;
@@ -1208,7 +1928,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           return;
         }
         if (teardownStarted || !terminalSuspended || terminalResumeInProgress) return;
-        let applyPreparedSurface: (() => void) | null = null;
+        let applyPreparedSurface: (() => CoordinatedWriteResult) | null = null;
         let resumeCoveredResizeGeneration = resizeHandledGeneration;
         let resumed = false;
         const prepareContinuedSurface = (): void => {
@@ -1218,6 +1938,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             const repaint = mountedCommit;
             if (!repaint) throw new Error("continued surface repaint is not ready");
             applyPreparedSurface = repaint;
+          }
+        };
+        const awaitVueUpdate = async (): Promise<boolean> => {
+          try {
+            await nextTick();
+            return true;
+          } catch {
+            // Vue owns component update errors. A failed render invalidates the
+            // prepared host paint, but it is not a Runtime resume failure and
+            // must not trigger terminal reacquisition or application teardown.
+            applyPreparedSurface = null;
+            return false;
           }
         };
         try {
@@ -1236,7 +1968,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // component that consumed them before the host tree can be repainted
           // accurately. Keep input and terminal ownership suspended across this
           // microtask boundary.
-          if (applyPreparedSurface) await nextTick();
+          if (applyPreparedSurface && !(await awaitVueUpdate())) return;
           while (
             applyPreparedSurface &&
             !teardownStarted &&
@@ -1244,64 +1976,98 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             resumeCoveredResizeGeneration !== resizeEventGeneration
           ) {
             runLifecycleTransaction(prepareContinuedSurface);
-            await nextTick();
+            if (!(await awaitVueUpdate())) return;
           }
 
           let retryForNewerResize = false;
+          const waitForAcceptedOutput = async (
+            result: CoordinatedWriteResult,
+          ): Promise<boolean> => {
+            if (result.status === "blocked") {
+              await result.ready;
+              return false;
+            }
+            if (!result.writable) await result.ready;
+            return true;
+          };
           do {
+            if (retryForNewerResize) {
+              runLifecycleTransaction(prepareContinuedSurface);
+              if (!(await awaitVueUpdate())) return;
+              while (
+                !teardownStarted &&
+                terminalSuspended &&
+                resumeCoveredResizeGeneration !== resizeEventGeneration
+              ) {
+                runLifecycleTransaction(prepareContinuedSurface);
+                if (!(await awaitVueUpdate())) return;
+              }
+            }
             retryForNewerResize = false;
-            runLifecycleTransaction(() => {
-              if (teardownStarted || !terminalSuspended || !terminalResumeInProgress) return;
-              if (fixedFullscreenSurface && suspendedFullscreenSurface) {
-                if (
-                  !mountedAlternateScreen &&
-                  !writeBestEffort(stdout, ansiEscapes.enterAlternativeScreen + "\x1b[H")
-                ) {
-                  throw new Error("failed to re-enter the Fullscreen surface");
-                }
-                mountedAlternateScreen = true;
-                if (teardownStarted) return;
-                if (!mountedFullscreenCursorHidden && !writeBestEffort(stdout, "\x1b[?25l")) {
-                  throw new Error("failed to hide the Fullscreen cursor");
-                }
-                mountedFullscreenCursorHidden = true;
-                if (teardownStarted) return;
-              }
-              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
-                retryForNewerResize = true;
-                return;
-              }
-              terminalResumePainting = true;
-              try {
-                applyPreparedSurface?.();
-              } finally {
-                terminalResumePainting = false;
-              }
-              if (teardownStarted) return;
-              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
-                retryForNewerResize = true;
-                return;
-              }
+            if (teardownStarted || !terminalSuspended || !terminalResumeInProgress) break;
+            if (rejectUnsupportedFullscreenStatic()) break;
 
-              // Input is reacquired only after the output surface is complete. A
-              // re-entrant stream can report another resize while the repaint or
-              // input-mode escapes are being written; release any partial input
-              // acquisition and repaint that newer geometry before returning.
-              mountedStdinController?.resume();
-              if (teardownStarted) return;
-              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
-                runSuspensionStep(() => mountedStdinController?.suspend(true));
-                retryForNewerResize = true;
-                return;
+            const surfaceResult = runOutputTransaction(() => {
+              runLifecycleTransaction(() => {
+                if (fixedFullscreenSurface && suspendedFullscreenSurface) {
+                  ensureFullscreenSurface();
+                }
+                mountedGeometry?.setSurfaceAvailable(true);
+              });
+            });
+            if (!(await waitForAcceptedOutput(surfaceResult))) {
+              retryForNewerResize = true;
+              continue;
+            }
+            if (teardownStarted) break;
+            if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+              retryForNewerResize = true;
+              continue;
+            }
+
+            terminalResumePainting = true;
+            try {
+              const paint = applyPreparedSurface as (() => CoordinatedWriteResult) | null;
+              if (paint) {
+                const paintResult = runLifecycleTransaction(() => paint());
+                if (!(await waitForAcceptedOutput(paintResult))) {
+                  retryForNewerResize = true;
+                  continue;
+                }
               }
-              mountedKittyController?.resume();
-              if (teardownStarted) return;
-              if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
-                runSuspensionStep(() => mountedKittyController?.suspend(true));
-                runSuspensionStep(() => mountedStdinController?.suspend(true));
-                retryForNewerResize = true;
-                return;
-              }
+            } finally {
+              terminalResumePainting = false;
+            }
+            if (teardownStarted) break;
+            if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+              retryForNewerResize = true;
+              continue;
+            }
+
+            // Input is reacquired only after the output surface is complete. All
+            // mode escapes share one gate transaction, so a false return delays
+            // later setup instead of letting it overtake the repaint.
+            const inputResult = runOutputTransaction(() => {
+              runLifecycleTransaction(() => {
+                mountedKittyController?.resume();
+                mountedStdinController?.resume();
+              });
+            });
+            if (!(await waitForAcceptedOutput(inputResult))) {
+              runSuspensionStep(() => mountedKittyController?.suspend(true));
+              runSuspensionStep(() => mountedStdinController?.suspend(true));
+              retryForNewerResize = true;
+              continue;
+            }
+            if (teardownStarted) break;
+            if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
+              runSuspensionStep(() => mountedKittyController?.suspend(true));
+              runSuspensionStep(() => mountedStdinController?.suspend(true));
+              retryForNewerResize = true;
+              continue;
+            }
+
+            runLifecycleTransaction(() => {
               terminalSuspended = false;
               suspendedFullscreenSurface = false;
               suspendedInlineSurface = false;
@@ -1309,26 +2075,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 resizeHandledGeneration,
                 resumeCoveredResizeGeneration,
               );
+              reconcileManagedTerminalOutput();
               resumed = true;
             });
-
-            if (
-              retryForNewerResize &&
-              !teardownStarted &&
-              terminalSuspended &&
-              terminalResumeInProgress
-            ) {
-              runLifecycleTransaction(prepareContinuedSurface);
-              await nextTick();
-              while (
-                !teardownStarted &&
-                terminalSuspended &&
-                resumeCoveredResizeGeneration !== resizeEventGeneration
-              ) {
-                runLifecycleTransaction(prepareContinuedSurface);
-                await nextTick();
-              }
-            }
           } while (
             retryForNewerResize &&
             !teardownStarted &&
@@ -1356,27 +2105,23 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // asynchronous terminal query. Start on a new physical row so later
         // erase-line operations can never delete a pre-mount partial line. Delay
         // this until the first visible write so an empty app emits no initial NEL.
-        stdout.write(nextLineEscape);
+        writeRuntimeOutput(stdout, nextLineEscape);
         inlineRegionStarted = true;
       }
 
       function restoreLastOutput() {
         if (!dynamicUpdatesLive) return;
-        // Clear() resets log-update's cursor state, so replay the latest cursor
-        // intent before restoring output after external stdout/stderr writes.
-        writer.setCursorPosition(cursorPosition);
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
-        // the first content commit, the value the resize-boundary path assigns,
-        // and what an empty screen-reader frame leaves — must fall
-        // back to `lastOutput + "\n"`, matching Ink (ink.tsx:507) and vue's own
-        // mountedClear (render.ts:668). `??` only falls back for null/undefined, so an
+        // the first content commit or the value the resize-boundary path assigns —
+        // must fall back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
+        // null/undefined, so an
         // empty string would pass through and restore nothing after an external write.
         writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
       }
 
       function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
         if (data !== "") ensureInlineRegionStart();
-        stream.write(data);
+        writeRuntimeOutput(stream, data);
         // Coordinated output becomes terminal-owned history before the dynamic
         // region is restored. If the payload did not finish its row, NEL creates
         // the line boundary without relying on the terminal's LF/CRLF mode.
@@ -1386,75 +2131,83 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           !data.endsWith("\n") &&
           (stream === stdout || Boolean(stream.isTTY))
         ) {
-          stream.write(nextLineEscape);
+          writeRuntimeOutput(stream, nextLineEscape);
         }
       }
 
-      function writeToStdout(data: string) {
-        runLifecycleTransaction(() => {
-          // Mirror Ink ink.tsx:673: return early after teardown so a late write
-          // (e.g. a stray useStdout().write after unmount) cannot run
-          // clear()/write/restore on an already-torn-down renderer.
-          if (teardownStarted || terminalSuspended) return;
-          const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
-          if (outputData === "") return;
-          if (fixedFullscreenSurface) {
-            repaintFullscreen(frameState.lastOutput, {
-              writeBefore: () => stdout.write(outputData),
+      function writeToStdout(data: string): CoordinatedWriteResult {
+        // A late or suspended write is not retained. Its ready promise covers
+        // only the current output gate; lifecycle availability must still be
+        // re-checked by a caller that chooses to retry.
+        if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
+          return blockedCoordinatedWrite();
+        }
+        const rollback = createOutputStateRollback();
+        return runOutputTransaction(
+          () => {
+            runLifecycleTransaction(() => {
+              const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
+              if (outputData === "") return;
+              if (fixedFullscreenSurface) {
+                repaintFullscreen(frameState.lastOutput, {
+                  writeBefore: () => writeRuntimeOutput(stdout, outputData),
+                  forceFull: true,
+                });
+                return;
+              }
+              if (!dynamicUpdatesLive) {
+                writeRuntimeOutput(stdout, outputData);
+                return;
+              }
+              // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
+              // terminal supports synchronized updates, so the three-step sequence is
+              // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
+              runCoordinatedWrite(() => {
+                writer.clear();
+                writeCommittedInlineOutput(stdout, outputData);
+              }, restoreLastOutput);
             });
-            return;
-          }
-          if (isScreenReaderEnabled && dynamicUpdatesLive) {
-            repaintTranscript(() => writeCommittedInlineOutput(stdout, outputData));
-            return;
-          }
-          if (!dynamicUpdatesLive) {
-            stdout.write(outputData);
-            return;
-          }
-          // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
-          // terminal supports synchronized updates, so the three-step sequence is
-          // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
-          runCoordinatedWrite(() => {
-            writer.clear();
-            writeCommittedInlineOutput(stdout, outputData);
-          }, restoreLastOutput);
-        });
+          },
+          { onUnhandedFailure: rollback },
+        );
       }
 
-      function writeToStderr(data: string) {
-        runLifecycleTransaction(() => {
-          // Mirror Ink ink.tsx:702: return early after teardown so a late write
-          // cannot corrupt the restored terminal state.
-          if (teardownStarted || terminalSuspended) return;
-          const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
-          if (outputData === "") return;
-          if (fixedFullscreenSurface) {
-            repaintFullscreen(frameState.lastOutput, {
-              writeBefore: () => stderr.write(outputData),
+      function writeToStderr(data: string): CoordinatedWriteResult {
+        if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
+          return blockedCoordinatedWrite();
+        }
+        const rollback = createOutputStateRollback();
+        return runOutputTransaction(
+          () => {
+            runLifecycleTransaction(() => {
+              const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
+              if (outputData === "") return;
+              if (fixedFullscreenSurface) {
+                repaintFullscreen(frameState.lastOutput, {
+                  writeBefore: () => writeRuntimeOutput(stderr, outputData),
+                  forceFull: true,
+                });
+                return;
+              }
+              if (!dynamicUpdatesLive) {
+                writeRuntimeOutput(stderr, outputData);
+                return;
+              }
+              // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
+              // because synchronized-update mode is a stdout capability, while the
+              // actual data goes to stderr. The sync gate also uses stdout's isTTY.
+              runCoordinatedWrite(() => {
+                writer.clear();
+                writeCommittedInlineOutput(stderr, outputData);
+              }, restoreLastOutput);
             });
-            return;
-          }
-          if (isScreenReaderEnabled && dynamicUpdatesLive) {
-            repaintTranscript(() => writeCommittedInlineOutput(stderr, outputData));
-            return;
-          }
-          if (!dynamicUpdatesLive) {
-            stderr.write(outputData);
-            return;
-          }
-          // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
-          // because synchronized-update mode is a stdout capability, while the
-          // actual data goes to stderr. The sync gate also uses stdout's isTTY.
-          runCoordinatedWrite(() => {
-            writer.clear();
-            writeCommittedInlineOutput(stderr, outputData);
-          }, restoreLastOutput);
-        });
+          },
+          { onUnhandedFailure: rollback },
+        );
       }
 
       const appContext: AppContext = {
-        exit(errorOrResult?: unknown) {
+        exit(error?: Error) {
           // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
           // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
           // exit() captures its value/error and initiates teardown; any
@@ -1465,30 +2218,25 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // app.unmount() runs teardown()+resolveExit() WITHOUT setting
           // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
           // unmount teardown (or any exit() after unmount) would otherwise pass
-          // the exitInitiated check, overwrite pendingExitResult/pendingExitError
+          // the exitInitiated check, overwrite the selected exit error
           // and queue a microtask — letting that late value win over the unmount.
           // Gating on teardownStarted too makes exit() a no-op once unmount/
           // teardown is in progress. At the FIRST exit() both flags are false, so
           // a normal exit-from-Vue-cycle still proceeds.
           if (exitInitiated || teardownStarted) return;
+          if (error !== undefined && !isErrorInput(error)) {
+            throw new TypeError("useApp().exit() accepts only an Error or no argument");
+          }
           exitInitiated = true;
           // Record the FIRST value/error synchronously (before the deferred
           // teardown microtask) so a re-entrant exit() — which is blocked above
           // anyway — and the eventual resolveExit() always settle on this value.
-          if (isErrorInput(errorOrResult)) {
-            // Don't clobber an error already recorded synchronously by
-            // recordExitError() (the boundary captured first): first-wins keeps the
-            // displayed and rejected error the SAME. pendingExitError is undefined on
-            // a normal first exit(), so `??=` is identical to `=` in every other case.
-            // (The race: a descendant throws Error1 → onErrorCaptured shows Error1 and
-            // recordExitError sets pendingExitError=Error1 WITHOUT setting exitInitiated,
-            // then app code calls exit(Error2) before the deferred exitWithError(Error1)
-            // microtask runs — exitInitiated is still false so we reach here. `=` would
-            // overwrite to Error2, making the overview show Error1 while waitUntilExit()
-            // rejects Error2.)
-            pendingExitError ??= errorOrResult;
-          } else {
-            pendingExitResult = errorOrResult;
+          if (error !== undefined) {
+            if (!pendingExitFailure) {
+              pendingExitError = error;
+              pendingExitFailure = true;
+              pendingExitErrorShouldReport = true;
+            }
           }
           // Defer teardown to a microtask: exit() is frequently called from
           // inside the Vue update cycle (useInput handler, setup(), errorHandler)
@@ -1501,12 +2249,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             }
           });
         },
-        waitUntilRenderFlush,
         stdout,
         stderr,
         stdin,
-        isRawModeSupported: !!(stdin as { isTTY?: boolean }).isTTY,
+        // Non-TTY document hosts never own managed terminal input, even when the
+        // caller supplied a TTY stdin for direct observation.
+        isRawModeSupported: boundedDocumentSurface ? false : hasRawInputCapability(stdin),
         setRawMode(mode: boolean) {
+          if (boundedDocumentSurface) return;
           if (
             typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
           ) {
@@ -1515,22 +2265,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         },
         writeToStdout,
         writeToStderr,
-        cursorPosition: undefined,
-        setCursorPosition(pos: CursorPosition | undefined) {
-          cursorPosition = pos;
-          appContext.cursorPosition = pos;
-          // Mirror Ink's single setCursorPosition (ink.tsx:494-497), which sets
-          // BOTH the instance field AND this.log.setCursorPosition(position) on
-          // every render. Forwarding to the frame writer updates log-update's
-          // last-declared position (persistently re-emitted at every commit) and
-          // marks cursorDirty so the commit gate (output !== lastOutput ||
-          // isCursorDirty) fires even on a cursor-only move (same output, new pos).
-          // Without this the cursor is never shown/moved on the interactive path.
-          // `writer` is created below in mount() but is always initialized before
-          // any render/setup can call this (originalMount runs after writer creation),
-          // so the optional-chain guards only the pre-mount appContext shape.
-          mountedWriter?.setCursorPosition(pos);
-        },
       };
       mountedAppContext = appContext;
       // Reserve the stream only after every mount option and session fact needed
@@ -1538,7 +2272,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // find mountedAppContext and release the reservation on a setup failure.
       liveInstances.set(stdout, app);
       mountedAsOwner = true;
+      changeRuntimeResource("streamReservations", 1);
       mountedRenderSession = renderSession;
+      streamLifecycle.activate();
+      if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
       // From stream reservation through Vue's first render and final listener
       // wiring, a synchronous host callback may request teardown but may not run
       // it in the middle of terminal acquisition or before Vue finishes mount.
@@ -1553,24 +2290,29 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const exitListener = () => teardown(true, true);
       process.on("exit", exitListener);
       mountedExitListener = exitListener;
+      releaseMountedExitListener = acquireRuntimeResource("processListeners");
 
       // Termination cleanup is independent from output cadence. A final-output
-      // app can still acquire raw, paste, mouse, or explicit Kitty state through
+      // app can still acquire raw, paste, or explicit Kitty state through
       // input composables, so every real mount gets the same idempotent handler.
       // signal-exit re-raises the terminating signal as soon as this callback
       // returns, so this path has the same non-returning cleanup requirement as
       // process.exit().
-      mountedUnsubscribeExit = onExit(() => teardown(true, true), { alwaysLast: false });
+      mountedUnsubscribeExit = trackProcessListenerCleanup(
+        onExit(() => teardown(true, true), { alwaysLast: false }),
+      );
 
       // Install job-control interception before raw mode, Kitty, cursor, or the
       // alternate screen can be acquired. The stable delegates above inspect
       // only resources that have become available so far, so even a signal in a
       // partially initialized mount restores what that mount already owns.
       if (suspensionHost.supported) {
-        mountedUnsubscribeSuspension = suspensionHost.register({
-          suspend: suspendSession,
-          resume: resumeSession,
-        });
+        mountedUnsubscribeSuspension = trackProcessListenerCleanup(
+          suspensionHost.register({
+            suspend: suspendSession,
+            resume: resumeSession,
+          }),
+        );
       }
 
       // Register beforeExit on successful reservation rather than waiting for a
@@ -1578,21 +2320,35 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // deferred final frame and its stream barrier before Node exits.
       mountedBeforeExitHandler = () => app.unmount();
       process.once("beforeExit", mountedBeforeExitHandler);
+      releaseMountedBeforeExitListener = acquireRuntimeResource("processListeners");
 
-      const focusContext: FocusContext = createFocusController();
+      let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
       const stdinController = createStdinController(stdin, {
-        exitOnCtrlC,
         appCtx: appContext,
-        focusContext,
+        exitOnCtrlC,
+        beforeManagedInputAcquire: ensureFullscreenSurface,
+        isManagedInputSurfaceReady: () =>
+          !terminalSuspended &&
+          (!fixedFullscreenSurface || (mountedAlternateScreen && mountedFullscreenCursorHidden)),
+        isKittyKeyboardReady: () => kittyController?.isReady ?? true,
+        writeTerminalOutput,
+        requestTerminalReconcile,
+        reportManagedInputFailure(error) {
+          requestRuntimeFailure(error, {
+            silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
+          });
+        },
+        acquireKittyKeyboardDemand() {
+          return kittyController?.acquireDemand() ?? (() => {});
+        },
+        inertManagedInput: boundedDocumentSurface,
       });
       mountedStdinController = stdinController;
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
-      // terminal: holdRawModeForLifetime() → stdin.setRawMode(true) raises
-      // ERR_TTY_INIT_FAILED when the ioctl fails (real on some SSH/container PTYs
-      // that still report isTTY=true); kittyController.init() may stdout.write()
-      // to enable the protocol (throws on a broken stream); attachYoga() allocates
-      // a WASM yoga node. liveInstances.set(stdout, app) already ran above, so a
+      // terminal: attachYoga() allocates a WASM yoga node, and later Vue setup
+      // may acquire semantic input against a TTY whose raw-mode or protocol
+      // operations fail. liveInstances.set(stdout, app) already ran above, so a
       // throw HERE — before the originalMount try/catch — would leak the registry entry
       // (poisoning the stdout: every later mount() hits the reuse guard and
       // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
@@ -1600,33 +2356,32 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // (idempotent; safe at this early stage — it derives all cleanup from the
       // wired state set so far) restores everything and frees the registry entry,
       // while the caller still sees the original error.
-      let kittyController: ReturnType<typeof createKittyKeyboardController>;
       let tuiRoot: ReturnType<typeof createRoot>;
       try {
-        // rawMode 'always': the App itself acquires a lifetime raw-mode ref now, so
-        // the refcount floor never drops to 0 while the app runs — raw mode is held
-        // continuously regardless of which input composables come and go, and there
-        // is no cooked-mode oscillation between input and no-input screens. Gated on
-        // interactive + isRawModeSupported (a TTY stdin): a non-interactive/piped run
-        // must not seize raw mode. The matching release happens in the controller's
-        // dispose() at teardown. (Diverges from Ink's lazy default — see
-        // .agents/docs/ink-divergences.md.)
-        if (rawMode === "always" && inputLifecycleActive && stdinController.isRawModeSupported) {
-          stdinController.holdRawModeForLifetime();
-        }
-
         kittyController = createKittyKeyboardController(
           stdin,
           stdout,
           stdinController.startKittyQueryResponseDetection,
+          kittyKeyboard,
+          writeTerminalOutput,
+          requestTerminalReconcile,
         );
-        // Register BEFORE init(): in auto mode, init() asks StdinController's
-        // single ingress to detect the reply and only THEN writes the support
-        // query ("\x1b[?u") — which can throw on a broken stream. Assigning
-        // mountedKittyController first lets teardown's dispose() cancel that
-        // pending detector and its timer on such a throw.
+        // Register before Vue setup. Configuration is inert at mount; the first
+        // semantic input demand asks this controller to query or push Kitty only
+        // after raw mode, stdin ref ownership, and the shared listener exist.
         mountedKittyController = kittyController;
-        kittyController.init(kittyKeyboard, inputLifecycleActive);
+        reconcileManagedTerminalOutput = () => {
+          try {
+            kittyController?.reconcile();
+            stdinController.reconcileTerminalState();
+          } catch (error) {
+            if (!teardownStarted) {
+              requestRuntimeFailure(error, {
+                silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
+              });
+            }
+          }
+        };
 
         tuiRoot = createRoot(appContext);
         attachYoga(tuiRoot);
@@ -1635,10 +2390,21 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // setWidth (or anything below) throws.
         mountedRoot = tuiRoot;
         tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
-        const renderedTargets = createRenderedTargetController(tuiRoot);
+        const focusController = createInternalFocusController({
+          root: tuiRoot,
+        });
+        mountedFocusController = focusController;
+        const geometry = createInternalGeometryService(() => scheduledCommit());
+        mountedGeometry = geometry;
+        setInternalGeometryService(appContext, geometry);
+        const renderedTargets = createRenderedTargetController(tuiRoot, [
+          focusController,
+          geometry,
+        ]);
         mountedRenderedTargets = renderedTargets;
         setRenderedTargetController(appContext, renderedTargets);
       } catch (err) {
+        recordTeardownError(err);
         try {
           teardown(); // best-effort: free yoga, restore raw mode/kitty, evict registry entry
         } catch {
@@ -1651,38 +2417,73 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       const writer = createFrameWriter(stdout, {
         incremental: incrementalRendering,
+        write: (data) => writeRuntimeOutput(stdout, data),
       });
       mountedWriter = writer;
-      mountedClear = () => {
-        runLifecycleTransaction(() => {
-          if (!dynamicUpdatesLive || terminalSuspended) return;
-          if (fixedFullscreenSurface) {
-            runSynchronizedOutput(() => {
-              stdout.write(hideCursorEscape + ansiEscapes.clearViewport);
-              writer.sync("", { cursor: false });
-            });
-            return;
+
+      function createOutputStateRollback(): () => void {
+        const rollbackWriter = writer.createRollback();
+        const previousFrameState = { ...frameState };
+        const previousInlineRegionStarted = inlineRegionStarted;
+        const previousAlternateScreen = mountedAlternateScreen;
+        const previousFullscreenCursorHidden = mountedFullscreenCursorHidden;
+        const previousFullscreenBaselineValid = fullscreenBaselineValid;
+        const previousFullscreenBaselineColumns = fullscreenBaselineColumns;
+        const previousFullscreenBaselineRows = fullscreenBaselineRows;
+        let active = true;
+
+        return () => {
+          if (!active) return;
+          active = false;
+          rollbackWriter();
+          frameState.lastOutput = previousFrameState.lastOutput;
+          frameState.lastOutputToRender = previousFrameState.lastOutputToRender;
+          frameState.outputHeight = previousFrameState.outputHeight;
+          inlineRegionStarted = previousInlineRegionStarted;
+          setAlternateScreenOwned(previousAlternateScreen);
+          setFullscreenCursorHidden(previousFullscreenCursorHidden);
+          fullscreenBaselineValid = previousFullscreenBaselineValid;
+          fullscreenBaselineColumns = previousFullscreenBaselineColumns;
+          fullscreenBaselineRows = previousFullscreenBaselineRows;
+        };
+      }
+      mountedCreateOutputStateRollback = createOutputStateRollback;
+
+      function ensureFullscreenSurface(): boolean {
+        if (!fixedFullscreenSurface) return true;
+        let accepted = true;
+        if (!mountedAlternateScreen && !fullscreenEnterPending) {
+          fullscreenBaselineValid = false;
+          fullscreenEnterPending = true;
+          if (
+            !writeTerminalOutput(ansiEscapes.enterAlternativeScreen + "\x1b[H", () => {
+              if (!fullscreenEnterPending) return;
+              fullscreenEnterPending = false;
+              setAlternateScreenOwned(true);
+              requestTerminalReconcile();
+            })
+          ) {
+            fullscreenEnterPending = false;
+            accepted = false;
           }
-          if (isScreenReaderEnabled) {
-            runSynchronizedOutput(() => {
-              if (frameState.outputHeight > 0) {
-                stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
-              }
-              frameState.lastOutput = "";
-              frameState.lastOutputToRender = "";
-              frameState.outputHeight = 0;
-            });
-            return;
+        }
+        if (!mountedFullscreenCursorHidden && !fullscreenCursorHidePending) {
+          fullscreenCursorHidePending = true;
+          if (
+            !writeTerminalOutput("\x1b[?25l", () => {
+              if (!fullscreenCursorHidePending) return;
+              fullscreenCursorHidePending = false;
+              setFullscreenCursorHidden(true);
+              requestTerminalReconcile();
+            })
+          ) {
+            fullscreenCursorHidePending = false;
+            accepted = false;
           }
-          writer.clear();
-          // The physical frame is now blank. Forget its row bookkeeping without
-          // writing anything: recording the erased frame as a live baseline would
-          // make a second clear/update walk upward into pre-app history. The logical
-          // frameState remains available for a coordinated write to restore later,
-          // while a real commit can paint it again from this owned origin.
-          writer.reset({ cursorDirty: false });
-        });
-      };
+        }
+        return accepted;
+      }
+
       const synchronize = shouldSynchronize(stdout, dynamicUpdatesLive);
 
       function runSynchronizedOutput(body: () => void): void {
@@ -1692,14 +2493,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
 
         let error: unknown;
+        let releaseSynchronizedOutput: (() => void) | undefined;
         try {
-          stdout.write(bsu);
+          writeRuntimeOutput(stdout, bsu, undefined, () => {
+            releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
+          });
           body();
         } catch (caught) {
           error = caught;
         } finally {
           try {
-            stdout.write(esu);
+            writeRuntimeOutput(stdout, esu, undefined, () => {
+              releaseSynchronizedOutput?.();
+              releaseSynchronizedOutput = undefined;
+            });
           } catch (caught) {
             error ??= caught;
           }
@@ -1711,9 +2518,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         let error: unknown;
         let bodyStarted = false;
         let syncStarted = false;
+        let releaseSynchronizedOutput: (() => void) | undefined;
         try {
           if (synchronize) {
-            stdout.write(bsu);
+            writeRuntimeOutput(stdout, bsu, undefined, () => {
+              releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
+            });
             syncStarted = true;
           }
           bodyStarted = true;
@@ -1730,7 +2540,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           }
           if (syncStarted) {
             try {
-              stdout.write(esu);
+              writeRuntimeOutput(stdout, esu, undefined, () => {
+                releaseSynchronizedOutput?.();
+                releaseSynchronizedOutput = undefined;
+              });
             } catch (caught) {
               error ??= caught;
             }
@@ -1739,41 +2552,62 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (error !== undefined) throw error;
       }
 
-      function repaintTranscript(writeBefore: () => void) {
-        runCoordinatedWrite(
-          () => {
-            if (frameState.outputHeight > 0) {
-              stdout.write(ansiEscapes.eraseLines(frameState.outputHeight));
-            }
-            writeBefore();
-          },
-          () => {
-            // Preserve the existing transcript updater's empty-frame fallback:
-            // after a coordinated write an empty live region still restores one
-            // newline (`lastOutput + "\n"`), matching the pinned Ink behavior.
-            stdout.write(frameState.lastOutput || "\n");
-          },
-        );
-      }
-
-      function repaintFullscreen(output: string, options: { writeBefore?: () => void } = {}) {
+      function repaintFullscreen(
+        output: string,
+        options: {
+          readonly writeBefore?: () => void;
+          /** Side-channel output invalidates every row, even when frame text is unchanged. */
+          readonly forceFull?: boolean;
+        } = {},
+      ) {
+        const viewportColumns = renderSession.session.dimensions.layout.columns;
+        const viewportRows = renderSession.session.dimensions.layout.rows;
+        const dimensionsMatch =
+          fullscreenBaselineColumns === viewportColumns && fullscreenBaselineRows === viewportRows;
+        if (
+          options.writeBefore === undefined &&
+          fullscreenBaselineValid &&
+          dimensionsMatch &&
+          output === frameState.lastOutput
+        ) {
+          return;
+        }
         runLifecycleTransaction(() => {
-          // A fullscreen app owns a fixed alternate-screen surface. Re-anchor and
-          // clear that surface after every coordinated side-channel write instead
-          // of restoring relative to the cursor position that the write left
-          // behind. This keeps paint geometry, cursor coordinates, and the mouse
-          // hit map in the same viewport coordinate system.
+          ensureFullscreenSurface();
+          const previousRows = frameState.lastOutput.split("\n");
+          const nextRows = output.split("\n");
+          const canDiff =
+            options.forceFull !== true &&
+            fullscreenBaselineValid &&
+            dimensionsMatch &&
+            viewportRows !== null &&
+            previousRows.length === viewportRows &&
+            nextRows.length === viewportRows;
           runCoordinatedWrite(
             () => {
-              // Hide first even on terminals without synchronized updates. A declared
-              // caret may be visible after the previous sync; leaving it visible while
-              // a full repaint streams produces a corner-to-caret flash.
-              stdout.write(hideCursorEscape);
+              writeRuntimeOutput(stdout, hideCursorEscape);
               options.writeBefore?.();
             },
             () => {
-              writer.setCursorPosition(cursorPosition);
-              stdout.write(ansiEscapes.clearViewport + output);
+              if (canDiff) {
+                const changedRows: string[] = [];
+                for (let row = 0; row < viewportRows; row++) {
+                  if (previousRows[row] === nextRows[row]) continue;
+                  changedRows.push(
+                    ansiEscapes.cursorTo(0, row),
+                    "\x1b[0m",
+                    nextRows[row]!,
+                    "\x1b[0m",
+                    ansiEscapes.eraseEndLine,
+                  );
+                }
+                // Keep the physical cursor at the frame bottom so later
+                // relative rewrites and teardown start from a known anchor.
+                changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, viewportRows - 1)));
+                writeRuntimeOutput(stdout, changedRows.join(""));
+              } else {
+                writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
+              }
               writer.sync(output);
             },
           );
@@ -1781,88 +2615,64 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           frameState.lastOutput = output;
           frameState.lastOutputToRender = output;
           frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
+          fullscreenBaselineValid = true;
+          fullscreenBaselineColumns = viewportColumns;
+          fullscreenBaselineRows = viewportRows;
         });
       }
 
-      function renderInteractiveFrame(output: string, outputHeight: number, staticOutput: string) {
+      function writePreparedStatic(
+        prepared: PreparedStaticOutput,
+        chunk: string,
+        onHandoff?: () => void,
+      ): void {
+        writeRuntimeOutput(stdout, chunk, undefined, () => {
+          onHandoff?.();
+          prepared.accept(guardAcceptedStaticCleanup);
+        });
+      }
+
+      function renderInteractiveFrame(
+        output: string,
+        outputHeight: number,
+        preparedStatic: PreparedStaticOutput,
+        staticHooks?: {
+          readonly onHandoff: () => void;
+          readonly onPrepared: () => void;
+        },
+      ) {
+        const staticOutput = preparedStatic.output;
         const hasStaticOutput = staticOutput !== "";
         const isTty = !!stdout.isTTY;
         const viewportRows = renderSession.session.dimensions.layout.rows;
 
         if (fixedFullscreenSurface) {
-          const shouldWarnStatic = hasStaticOutput && !warnedFullscreenStatic;
-          if (shouldWarnStatic) {
-            warnedFullscreenStatic = true;
-          }
-          repaintFullscreen(output, {
-            // Keep the write-once stream observable to stream consumers, but do
-            // not let it become fullscreen layout/history or move the live
-            // surface. The repaint below immediately restores the fixed viewport.
-            writeBefore:
-              hasStaticOutput || shouldWarnStatic
-                ? () => {
-                    if (shouldWarnStatic) stderr.write(FULLSCREEN_STATIC_WARNING);
-                    if (hasStaticOutput) stdout.write(staticOutput);
-                  }
-                : undefined,
-          });
+          repaintFullscreen(output);
           return;
         }
 
-        if (output !== "" || hasStaticOutput || writer.isCursorDirty()) {
+        if (output !== "" || hasStaticOutput) {
           ensureInlineRegionStart();
         }
 
         // A frame that fills or exceeds the viewport gets no trailing newline.
         // Only apply when writing to a real TTY — piped output always gets trailing newlines.
         const fillsViewport = isTty && viewportRows !== null && outputHeight >= viewportRows;
-        // SR parity (G17 + G46): Ink's screen-reader branch (ink.tsx:617-621)
-        // writes the wrapped output verbatim — `stdout.write(erase + wrappedOutput)`
-        // with `lastOutputToRender = wrappedOutput` (NO appended "\n" in ANY case)
-        // and `lastOutputHeight = wrappedOutput === "" ? 0 : split("\n").length`.
-        // So EVERY SR frame, empty or not, must skip the trailing newline: an empty
-        // frame emits zero lines instead of a spurious blank line (G17), and a
-        // non-empty multi-line frame keeps its true line count so the next-frame
-        // erase is eraseLines(N), not eraseLines(N+1) (G46 off-by-one). Non-SR
-        // interactive frames are untouched — they still append "\n" as before.
-        const outputToRender = fillsViewport || isScreenReaderEnabled ? output : output + "\n";
+        const outputToRender = fillsViewport ? output : output + "\n";
 
         if (hasStaticOutput) {
           // Clear frame -> write static -> re-render frame via log-update
           runSynchronizedOutput(() => {
             writer.clear();
-            stdout.write(staticOutput);
+            writePreparedStatic(preparedStatic, staticOutput, staticHooks?.onHandoff);
+            staticHooks?.onPrepared();
             writer.write(outputToRender);
           });
         } else {
-          // Mirror Ink's TWO-LEVEL commit gate, which keeps the synchronized-update
-          // wrapper and the "should we touch log-update at all" decision separate:
-          //
-          //  - Outer gate (ink.tsx:1094 `output !== lastOutput || log.isCursorDirty()`):
-          //    decides whether to call the (throttled) log at all. It compares the RAW
-          //    frame (`output`, no trailing "\n") against the PREVIOUS frame
-          //    (frameState.lastOutput, set at the end of this fn) — NOT log-update's
-          //    \n-suffixed previousOutput. This is load-bearing for the empty-frame
-          //    case: on the first commit of an app that renders nothing, both are ""
-          //    so the gate is false and log-update — including its LAZY cursor hide —
-          //    is never reached, so the initial empty commit emits no log-update
-          //    cursor escapes (the cursor stays visible), matching Ink. Using
-          //    willRender(outputToRender) here
-          //    instead would compare "\n" against "" and wrongly fire the hide. A
-          //    cursor-only move whose position is unchanged is still dirty, so the
-          //    `|| isCursorDirty` disjunct keeps it reaching log-update.
-          //  - Inner gate (ink.tsx:372-382, inside throttledLog): wraps the write in
-          //    BSU/ESU only when `willRender(output)` is true. The cursor-dirty-but-not-
-          //    willRender case calls log-update WITHOUT the BSU/ESU wrapper, so the dirty
-          //    flag is reset and the write no-ops cleanly — Ink emits ZERO bytes there,
-          //    not an empty `BSU`+`ESU` pair.
-          //
-          // willRender()/isCursorDirty() must be read BEFORE writer.write():
-          // log-update's render consumes/resets isCursorDirty, so reading them
-          // afterwards would be stale. Both reads are pure (no mutation), and the
-          // bsu/esu wrapper is gated on this single pre-write snapshot.
+          // Compare the raw frame so an initially empty app never enters
+          // log-update and therefore emits no cursor escapes.
           const willRender = writer.willRender(outputToRender);
-          if (output !== frameState.lastOutput || writer.isCursorDirty()) {
+          if (output !== frameState.lastOutput) {
             const shouldWrap = synchronize && willRender;
             if (shouldWrap) runSynchronizedOutput(() => writer.write(outputToRender));
             else writer.write(outputToRender);
@@ -1874,267 +2684,377 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.outputHeight = outputHeight;
       }
 
-      function markBoundaryErrorFrameRendered(frame: string): void {
-        const errorMessage =
-          pendingBoundaryError === undefined ? "" : messageForNonError(pendingBoundaryError);
-        // A successful write is not enough when the bounded viewport clipped the
-        // entire error message. In that case the rich overview is not durable and
-        // teardown must still emit the complete plain-text report to stderr.
-        const messageIsVisible =
-          errorMessage === "" ? frame.trim().length > 0 : frame.includes(errorMessage);
-        if (
-          messageIsVisible &&
-          !pendingBoundaryFrameWriteFailed &&
-          mountedBoundaryErrorsAreDurable &&
-          pendingBoundaryError !== undefined &&
-          pendingBoundaryFrameReady === pendingBoundaryError &&
-          pendingExitError === pendingBoundaryError
-        ) {
-          pendingExitErrorWasRendered = true;
-        }
-      }
-
-      // Produce the dynamic frame for a given terminal width. In screen-reader
-      // mode the tree is linearized to flat plain text (no borders / 2D grid)
-      // via renderScreenReaderOutput, then wrapped with wrapAnsi(trim:false,
-      // hard:true) — matching Ink's onRender SR branch (ink.tsx:598-603). The
-      // <Static> channel is excluded here (skipStaticElements) just like
-      // render-to-string.ts; static output is handled separately by commit().
+      // Produce the visual dynamic frame for a given terminal width. Static
+      // output is handled separately by commit().
       function renderFrame(
         width: number,
-        hitMap?: MouseHitMapEntry[],
         viewportRows?: number,
+        geometry?: InternalGeometryPaintFrame,
       ): string {
-        if (!isScreenReaderEnabled) {
-          const output = paint(tuiRoot, {
-            hitMap,
-            viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
-          });
-          // The hard paint viewport is the primary guard. Keep a final physical
-          // row bound as defense-in-depth for future paint extensions: Inline
-          // must never let an application frame exceed terminal-addressable rows.
-          return boundedInlineSurface && viewportRows !== undefined
-            ? output.split("\n").slice(0, viewportRows).join("\n")
-            : output;
-        }
-        const linear = renderScreenReaderOutput(tuiRoot, { skipStaticElements: true });
-        return wrapAnsi(linear, width, { trim: false, hard: true });
+        const output = paint(tuiRoot, {
+          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+          geometry,
+        });
+        // The hard paint viewport is the primary guard. Keep a final physical
+        // row bound as defense-in-depth for future paint extensions: Inline
+        // must never let an application frame exceed terminal-addressable rows.
+        return (boundedInlineSurface || boundedDocumentSurface) && viewportRows !== undefined
+          ? output.split("\n").slice(0, viewportRows).join("\n")
+          : output;
       }
 
-      function commit() {
-        if (terminalSuspended && !terminalResumePainting) return;
-        const leaveLifecycleTransaction = enterLifecycleTransaction();
-        try {
-          const start = onRender ? performance.now() : 0;
+      let blockedFrameRetryPending = false;
+
+      function requestBlockedFrameRetry(ready: Promise<void>): void {
+        if (blockedFrameRetryPending || teardownStarted) return;
+        blockedFrameRetryPending = true;
+        void ready.then(
+          () => {
+            blockedFrameRetryPending = false;
+            if (!teardownStarted && !terminalSuspended) scheduledCommit();
+          },
+          () => {
+            // The coordinator reports the deferred stream failure through the
+            // application's fatal lifecycle boundary.
+            blockedFrameRetryPending = false;
+          },
+        );
+      }
+
+      interface CommitSettlementHooks {
+        readonly register: (
+          accept: () => void,
+          abandon: (options: { readonly physicalFailure: boolean }) => void,
+        ) => void;
+        readonly markStaticHanded: () => void;
+        readonly capturePostStaticRollback: () => void;
+      }
+
+      function commit(
+        options: {
+          readonly beforeFrame?: () => void;
+          readonly onAccepted?: () => void;
+          readonly retryWhenBlocked?: boolean;
+        } = {},
+      ): CoordinatedWriteResult {
+        if (outputCoordinator.isBlocked()) {
+          const blocked = blockedCoordinatedWrite();
+          if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(blocked.ready);
+          return blocked;
+        }
+        if (runtimeFailurePending || mountFailurePending) return acceptedCoordinatedWrite;
+        if (rejectedFullscreenStatic) return acceptedCoordinatedWrite;
+        if (terminalSuspended && !terminalResumePainting) {
+          // Suspension pauses physical terminal ownership, not Vue or accepted
+          // component lifetimes. Keep rendered-target validity current so a
+          // hidden or detached focus boundary cannot retain logical ownership
+          // until the terminal resumes.
           mountedRenderedTargets?.reconcile();
+          return acceptedCoordinatedWrite;
+        }
+        if (rejectUnsupportedFullscreenStatic()) return acceptedCoordinatedWrite;
 
-          // Capture static output as a string (for both interactive and non-interactive paths)
-          const w = renderSession.session.dimensions.layout.columns;
-          let staticOutput = "";
-          for (const stat of findStatics(tuiRoot)) {
-            const staticFrame = paintStaticNode(stat, w, isScreenReaderEnabled);
-            if (staticFrame.length > 0) {
-              staticOutput += staticFrame + "\n";
+        // Fullscreen ownership must be physically established before user
+        // onRender callbacks run. Keep acquisition as its own finite transaction:
+        // if it backpressures, the frame is prepared only after drain; if a callback
+        // terminates during the later frame, emergency teardown can restore a
+        // surface that the stream has already accepted.
+        if (fixedFullscreenSurface && (!mountedAlternateScreen || !mountedFullscreenCursorHidden)) {
+          let surface: CoordinatedWriteResult;
+          try {
+            surface = runOutputTransaction(() => {
+              // A rendered target can establish state only after Vue has
+              // attached its host node. Reconcile it
+              // before the first terminal mutation so a non-controllable stdin
+              // fails without briefly entering and restoring Fullscreen.
+              mountedRenderedTargets?.reconcile();
+              ensureFullscreenSurface();
+            });
+          } catch (error) {
+            if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
+              mountedScheduler?.cancel();
+              requestRuntimeFailure(error, { silent: true });
+              return acceptedCoordinatedWrite;
             }
+            throw error;
           }
-          const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-          if (!dynamicUpdatesLive) {
-            // Non-interactive: compute the dynamic frame now, write static output
-            // after onRender, and defer dynamic frame output until unmount.
-            tuiRoot.yoga.setWidth(w);
-            const restoreLayoutGuards = calculateLayoutWithContentGuards(
-              tuiRoot,
-              w,
-              undefined,
-              Yoga.DIRECTION_LTR,
-            );
-            try {
-              emitLayoutListeners(tuiRoot);
-              const frame = renderFrame(w);
-              renderObserver?.onCommit?.({
-                dynamic: frame,
-                staticOutput: hasStaticOutput ? staticOutput : "",
-                phase: teardownStarted ? "teardown" : "update",
+          if (surface.status === "blocked") {
+            if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(surface.ready);
+            return surface;
+          }
+          if (!surface.writable) {
+            if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(surface.ready);
+            return surface;
+          }
+        }
+
+        let acceptCommit = () => {};
+        let abandonCommit = (_options: { readonly physicalFailure: boolean }) => {};
+        let settlementRegistered = false;
+        let bodyCompleted = false;
+        let staticHanded = false;
+        const initialRollback = createOutputStateRollback();
+        let postStaticRollback: (() => void) | undefined;
+
+        let result: CoordinatedWriteResult;
+        try {
+          result = runOutputTransaction(
+            () => {
+              options.beforeFrame?.();
+              commitFrame({
+                register(accept, abandon) {
+                  if (settlementRegistered) {
+                    throw new Error("A render commit registered settlement more than once.");
+                  }
+                  settlementRegistered = true;
+                  acceptCommit = accept;
+                  abandonCommit = abandon;
+                },
+                markStaticHanded() {
+                  staticHanded = true;
+                },
+                capturePostStaticRollback() {
+                  postStaticRollback ??= createOutputStateRollback();
+                },
               });
-              frameState.lastOutput = frame;
-              frameState.lastOutputToRender = frame + "\n";
-              frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-              if (onRender) onRender({ renderTime: performance.now() - start });
-              if (hasStaticOutput) {
-                stdout.write(staticOutput);
-              }
-            } finally {
-              restoreLayoutGuards();
-            }
-            return;
+              bodyCompleted = true;
+            },
+            {
+              onFullyHanded() {
+                acceptCommit();
+                options.onAccepted?.();
+              },
+              onUnhandedFailure() {
+                if (staticHanded && postStaticRollback) postStaticRollback();
+                else initialRollback();
+                abandonCommit({ physicalFailure: bodyCompleted });
+              },
+            },
+          );
+        } catch (error) {
+          if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
+            mountedScheduler?.cancel();
+            requestRuntimeFailure(error, { silent: true });
+            return acceptedCoordinatedWrite;
           }
+          throw error;
+        }
+        if (result.status === "blocked" && options.retryWhenBlocked !== false) {
+          requestBlockedFrameRetry(result.ready);
+        }
+        return result;
+      }
 
-          const exactViewportRows = fixedFullscreenSurface
+      function commitFrame(hooks: CommitSettlementHooks) {
+        if (runtimeFailurePending || mountFailurePending) return;
+        if (rejectedFullscreenStatic) return;
+        if (terminalSuspended && !terminalResumePainting) return;
+        const staticNodes = findStatics(tuiRoot);
+        if (rejectUnsupportedFullscreenStatic(staticNodes)) return;
+        const leaveLifecycleTransaction = enterLifecycleTransaction();
+        const releasePreparedFrame = acquireRuntimeResource("preparedFrames");
+        let geometryFrame: InternalGeometryPaintFrame | undefined;
+        let preparedStatic: PreparedStaticOutput | undefined;
+        let settled = false;
+
+        const releasePreparedState = (): void => {
+          try {
+            geometryFrame?.discard();
+          } finally {
+            releasePreparedFrame();
+            leaveLifecycleTransaction();
+          }
+        };
+        const accept = (): void => {
+          if (settled) return;
+          settled = true;
+          try {
+            geometryFrame?.commit();
+            preparedStatic?.accept(guardAcceptedStaticCleanup);
+          } finally {
+            releasePreparedState();
+          }
+        };
+        const abandon = ({ physicalFailure }: { readonly physicalFailure: boolean }): void => {
+          if (settled) return;
+          settled = true;
+          try {
+            if (physicalFailure) {
+              preparedStatic?.abandon();
+            }
+          } finally {
+            releasePreparedState();
+          }
+        };
+        hooks.register(accept, abandon);
+
+        const start = onRender ? performance.now() : 0;
+        mountedRenderedTargets?.reconcile();
+
+        // Only non-empty Static blocks participate in settlement; output-free
+        // instances stay open for later content or ordinary Vue unmount. A
+        // prepared block is accepted only after its stdout write returns normally.
+        const w = renderSession.session.dimensions.layout.columns;
+        preparedStatic = prepareStaticOutput(tuiRoot, w, staticNodes);
+        const staticOutput = preparedStatic.output;
+        const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
+        if (!dynamicUpdatesLive) {
+          // Non-interactive: compute the dynamic frame now, write static output
+          // after onRender, and defer dynamic frame output until unmount.
+          // The document host and other final-stream surfaces with a finite
+          // layout height use that bound as a maximum without padding shorter
+          // documents.
+          tuiRoot.yoga.setWidth(w);
+          const documentMaximumRows = boundedDocumentSurface
             ? (renderSession.session.dimensions.layout.rows ?? undefined)
             : undefined;
-          tuiRoot.yoga.setWidth(w);
           let restoreLayoutGuards = calculateLayoutWithContentGuards(
             tuiRoot,
             w,
-            exactViewportRows,
+            undefined,
             Yoga.DIRECTION_LTR,
           );
           try {
-            const inlineMaximumRows = boundedInlineSurface
-              ? (renderSession.session.dimensions.layout.rows ?? undefined)
-              : undefined;
             if (
-              inlineMaximumRows !== undefined &&
-              tuiRoot.yoga.getComputedLayout().height > inlineMaximumRows
+              documentMaximumRows !== undefined &&
+              tuiRoot.yoga.getComputedLayout().height > documentMaximumRows
             ) {
-              // A permanent Yoga max-height changes how nested percentage heights
-              // resolve even when the natural tree is short (for example, 50% of a
-              // six-row Box incorrectly becomes 50% of the terminal). Compute the
-              // natural tree first, and only rerun with an exact available height
-              // when it actually exceeds Inline's maximum. This gives overflowing
-              // flex layouts a real rows-sized allocation without padding or
-              // perturbing short layouts.
               restoreLayoutGuards();
               restoreLayoutGuards = calculateLayoutWithContentGuards(
                 tuiRoot,
                 w,
-                inlineMaximumRows,
+                documentMaximumRows,
                 Yoga.DIRECTION_LTR,
               );
             }
-            emitLayoutListeners(tuiRoot);
-            const hitMap = renderSession.session.capabilities.elementHitTesting ? [] : undefined;
             const computedRootHeight = Math.max(
               0,
               Math.floor(tuiRoot.yoga.getComputedLayout().height),
             );
-            const inlineViewportRows = boundedInlineSurface
-              ? Math.min(
-                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
-                  computedRootHeight,
-                )
-              : undefined;
-            const paintViewportRows = exactViewportRows ?? inlineViewportRows;
-            const frame = renderFrame(w, hitMap, paintViewportRows);
+            const paintViewportRows =
+              documentMaximumRows === undefined
+                ? undefined
+                : Math.min(documentMaximumRows, computedRootHeight);
+            geometryFrame = mountedGeometry?.beginFrame();
+            const frame = renderFrame(w, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
               phase: teardownStarted ? "teardown" : "update",
             });
-            mouseController.updateHitMap(hitMap ?? []);
-            const outputHeight = frame === "" ? 0 : frame.split("\n").length;
-
-            if (fixedFullscreenSurface) {
-              if (onRender) onRender({ renderTime: performance.now() - start });
-              renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
-              return;
-            }
-
-            if (isScreenReaderEnabled) {
-              // Dedicated screen-reader write path (Ink parity G59), mirroring Ink's
-              // onRender SR branch (ink.tsx:573-625). It writes the transcript with a
-              // RAW stdout.write using manual ansiEscapes.eraseLines(previousHeight) +
-              // (inline static, if any) + the wrapped output, then RETURNS — before the
-              // normal interactive frame path. Crucially it:
-              //   - never emits a whole-terminal reset, so a tall transcript cannot
-              //     delete terminal-owned scrollback;
-              //   - emits new Static content once instead of retaining/replaying it;
-              //   - never routes through the log-update writer (raw writes only);
-              //   - leaves the cursor visible (the mount-time hide is skipped for SR).
-              // `frame` is already the wrapped SR output (renderFrame -> wrapAnsi), so
-              // it plays the role of Ink's `wrappedOutput`.
-              if (onRender) onRender({ renderTime: performance.now() - start });
-              if (frame !== "" || hasStaticOutput) ensureInlineRegionStart();
-              runSynchronizedOutput(() => {
-                if (hasStaticOutput) {
-                  // Erase the previous main output before writing new static output
-                  // (ink.tsx:579-588), then reset the tracked height to 0.
-                  const erase =
-                    frameState.outputHeight > 0
-                      ? ansiEscapes.eraseLines(frameState.outputHeight)
-                      : "";
-                  stdout.write(erase + staticOutput);
-                  frameState.outputHeight = 0;
-                }
-
-                if (frame === frameState.lastOutput && !hasStaticOutput) return;
-
-                if (hasStaticOutput) {
-                  // Already erased above; write the wrapped output directly.
-                  stdout.write(frame);
-                } else {
-                  const erase =
-                    frameState.outputHeight > 0
-                      ? ansiEscapes.eraseLines(frameState.outputHeight)
-                      : "";
-                  stdout.write(erase + frame);
-                }
-
-                // Match Ink: lastOutputToRender = wrappedOutput (NO appended "\n" in ANY
-                // case — empty frame => 0 lines, multi-line frame keeps its true count so
-                // the next-frame erase is eraseLines(N), not eraseLines(N+1)).
-                frameState.lastOutput = frame;
-                frameState.lastOutputToRender = frame;
-                frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-              });
-              markBoundaryErrorFrameRendered(frame);
-              return;
-            }
-
-            // Interactive path
+            frameState.lastOutput = frame;
+            frameState.lastOutputToRender = frame + "\n";
+            frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
             if (onRender) onRender({ renderTime: performance.now() - start });
-            renderInteractiveFrame(frame, outputHeight, hasStaticOutput ? staticOutput : "");
-            markBoundaryErrorFrameRendered(frame);
+            if (hasStaticOutput) {
+              writePreparedStatic(preparedStatic, staticOutput, hooks.markStaticHanded);
+            }
           } finally {
             restoreLayoutGuards();
           }
-        } catch (error) {
-          if (
-            pendingBoundaryError !== undefined &&
-            pendingBoundaryFrameReady === pendingBoundaryError &&
-            pendingExitError === pendingBoundaryError
-          ) {
-            // Writer implementations update their dedup baseline before calling
-            // the host stream. If that stream throws, teardown's final commit may
-            // be deduplicated even though no durable frame reached the terminal.
-            // Preserve the failed attempt so a later no-op commit cannot suppress
-            // the plain-text stderr fallback.
-            pendingBoundaryFrameWriteFailed = true;
+          return;
+        }
+
+        const exactViewportRows = fixedFullscreenSurface
+          ? (renderSession.session.dimensions.layout.rows ?? undefined)
+          : undefined;
+        tuiRoot.yoga.setWidth(w);
+        let restoreLayoutGuards = calculateLayoutWithContentGuards(
+          tuiRoot,
+          w,
+          exactViewportRows,
+          Yoga.DIRECTION_LTR,
+        );
+        try {
+          const maximumRows =
+            boundedInlineSurface || boundedDocumentSurface
+              ? (renderSession.session.dimensions.layout.rows ?? undefined)
+              : undefined;
+          if (maximumRows !== undefined && tuiRoot.yoga.getComputedLayout().height > maximumRows) {
+            // A permanent Yoga max-height changes how nested percentage heights
+            // resolve even when the natural tree is short (for example, 50% of a
+            // six-row Box incorrectly becomes 50% of the terminal). Compute the
+            // natural tree first, and only rerun with an exact available height
+            // when it actually exceeds the available maximum. This gives overflowing
+            // flex layouts a real rows-sized allocation without padding or
+            // perturbing short layouts.
+            restoreLayoutGuards();
+            restoreLayoutGuards = calculateLayoutWithContentGuards(
+              tuiRoot,
+              w,
+              maximumRows,
+              Yoga.DIRECTION_LTR,
+            );
           }
-          throw error;
+          const computedRootHeight = Math.max(
+            0,
+            Math.floor(tuiRoot.yoga.getComputedLayout().height),
+          );
+          const boundedViewportRows =
+            boundedInlineSurface || boundedDocumentSurface
+              ? Math.min(
+                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
+                  computedRootHeight,
+                )
+              : undefined;
+          const paintViewportRows = exactViewportRows ?? boundedViewportRows;
+          geometryFrame = mountedGeometry?.beginFrame();
+          const frame = renderFrame(w, paintViewportRows, geometryFrame);
+          renderObserver?.onCommit?.({
+            dynamic: frame,
+            staticOutput: hasStaticOutput ? staticOutput : "",
+            phase: teardownStarted ? "teardown" : "update",
+          });
+          const outputHeight = frame === "" ? 0 : frame.split("\n").length;
+
+          if (fixedFullscreenSurface) {
+            // A setup-owned managed-input demand may already have acquired
+            // the surface after its capability preflight. Input-free mounts
+            // reach this idempotent acquisition only after renderer-owned
+            // target and geometry preparation has
+            // succeeded. Either path owns Fullscreen before a user onRender
+            // callback can terminate the process synchronously.
+            ensureFullscreenSurface();
+            if (onRender) onRender({ renderTime: performance.now() - start });
+            renderInteractiveFrame(frame, outputHeight, preparedStatic, {
+              onHandoff: hooks.markStaticHanded,
+              onPrepared: hooks.capturePostStaticRollback,
+            });
+            return;
+          }
+
+          // Interactive path
+          if (onRender) onRender({ renderTime: performance.now() - start });
+          renderInteractiveFrame(frame, outputHeight, preparedStatic, {
+            onHandoff: hooks.markStaticHanded,
+            onPrepared: hooks.capturePostStaticRollback,
+          });
         } finally {
-          leaveLifecycleTransaction();
+          restoreLayoutGuards();
         }
       }
 
-      // A single render-throttle window derived from maxFps drives BOTH the
-      // commit scheduler and the animation scheduler, mirroring Ink where one
-      // `renderThrottleMs` (from `maxFps ?? 30`) throttles renders and is handed
-      // to useAnimation (ink.tsx:337-344, 650). Screen-reader paths and
-      // non-positive maxFps are unthrottled (0 = commit every tick), matching
-      // Ink's `unthrottled` gate.
-      const unthrottled = isScreenReaderEnabled || maxFps <= 0;
+      // A render-throttle window derived from maxFps drives terminal commits.
+      const unthrottled = maxFps <= 0;
       const renderThrottleMs =
         !unthrottled && maxFps > 0 ? Math.max(1, Math.ceil(1000 / maxFps)) : 0;
 
-      // Unthrottled screen-reader or maxFps<=0 commits fire every tick, so the
-      // throttle window is unused there — renderThrottleMs is already 0. Otherwise
-      // it's the maxFps-derived window (34ms at the default maxFps=30).
+      // Non-positive maxFps commits fire every tick. Otherwise this is the
+      // maxFps-derived window (34ms at the default maxFps=30).
       const scheduler = createCommitScheduler(commit, {
         immediate: unthrottled,
         throttleMs: renderThrottleMs,
+        onError(error) {
+          if (!teardownStarted) requestRuntimeFailure(error);
+        },
       });
-      const mouseController = createMouseController({
-        stdin: stdinController,
-        fullscreen: targetedMouseInputAvailable,
-        now: scheduler.now,
-      });
-      appContext.internal_mouse = mouseController;
       mountedScheduler = scheduler;
       mountedCommit = commit;
       prepareResumeSurface = () => commit;
       scheduledCommit = () => {
-        if (!terminalSuspended && !resizePaintPending) scheduler.schedule();
+        if (!runtimeFailurePending && !mountFailurePending && !resizePaintPending) {
+          scheduler.schedule();
+        }
       };
 
       // Internal provides — set before the actual mount so components can inject
@@ -2142,16 +3062,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // our keys are Symbols so there's no collision risk.
       baseApp.provide(InternalRenderSessionKey, renderSession);
       baseApp.provide(AppContextKey, appContext);
-      baseApp.provide(FocusContextKey, focusContext);
+      baseApp.provide(InternalFocusControllerKey, mountedFocusController!);
       baseApp.provide(StdinContextKey, stdinController);
-      // useAnimation coalesces ticks within this same window so committed deltas
-      // accumulate to the real wall-clock elapsed time (the value committed to
-      // stdout), rather than a single scheduler interval. It shares the exact
-      // renderThrottleMs the commit scheduler uses, so the animation cadence
-      // tracks the actual commit cadence (Ink ink.tsx:650).
-      const animationScheduler = createAnimationScheduler(renderThrottleMs);
-      mountedAnimationScheduler = animationScheduler;
-      baseApp.provide(AnimationSchedulerKey, animationScheduler);
       if (isDevConnected()) {
         baseApp.provide(DevStateKey, devState);
         // Register this app's INTERNAL teardown (not unmount()) with the HMR
@@ -2159,7 +3071,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // the runner re-imports the entry. Using teardown() — not unmount() —
         // deliberately does NOT settle the exit promise, so a reload is not seen
         // as an app exit and the dev-server-close hook below stays untriggered.
-        mountedDevTeardown = () => teardown();
+        mountedDevTeardown = () => {
+          abandonExitSettlement = true;
+          teardown(true);
+        };
         registerDevApp(mountedDevTeardown);
         // App-exit → dev-server teardown. In dev the app runs in-process under the
         // Vite dev server, which holds the event loop open (ports, watchers, the
@@ -2176,60 +3091,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         void exitPromise.finally(() => notifyDevExit()).catch(() => {});
       }
 
-      // Wire exit-with-error for the error boundary (must be set before mount).
-      exitWithError = (e: Error) => appContext.exit(e);
-      recordExitError = (e: Error) => {
-        // First-wins: don't overwrite an exit already decided (a clean exit() or a
-        // prior error). Records the error so a racing unmount()'s resolveExit()
-        // rejects with it instead of resolving clean (BUG #2). Mirrors the
-        // synchronous record in appContext.exit() — pendingExitError is set here,
-        // then the deferred exitWithError() drives teardown/resolveExit().
-        if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
-          pendingExitError = e;
-          pendingBoundaryError = e;
-          pendingExitErrorWasRendered = false;
-          pendingBoundaryFrameWriteFailed = false;
-        }
-      };
-
-      // Enter the alternate screen before rendering starts when the resolved
-      // surface is an effective fullscreen terminal. Emit home explicitly so
-      // targeted mouse hit-testing can treat the frame origin as screen (0,0).
-      if (fixedFullscreenSurface) {
-        // These are acquisitions, not best-effort restores. A thrown write aborts
-        // the mount transaction; each lease is recorded only after its enable
-        // bytes were accepted, so rollback never disables an unacquired mode.
-        stdout.write(ansiEscapes.enterAlternativeScreen + "\x1b[H");
-        mountedAlternateScreen = true;
-        stdout.write("\x1b[?25l");
-        mountedFullscreenCursorHidden = true;
-      }
-
       // Patch console.log/warn/error etc. to route through writeToStdout /
       // writeToStderr so console output doesn't corrupt the rendered frame.
-      // Installed BEFORE originalMount (matching Ink, which patches in its
-      // constructor before the first render — ink.tsx:435-436): a dev-only
-      // [Vue warn] emitted DURING the initial mount (e.g. the missing-render-
-      // function warn when the root's setup() throws) must hit the filter too.
+      // Installed before originalMount so setup-time user and dependency output
+      // is coordinated from the first component turn.
       // The mount-throw catch below runs teardown(), which restores the console,
       // so a synchronous mount failure cannot leak a patched console.
-      if (patchConsole !== false) {
-        try {
-          mountedRestoreConsole = patchConsoleFn((stream, data) => {
+      if (patchConsole) {
+        mountedConsoleSink = registerConsoleSink((stream, data) => {
+          try {
             if (stream === "stdout") {
-              appContext.writeToStdout(data);
+              return appContext.writeToStdout(data);
             }
             if (stream === "stderr") {
-              // Filter Vue internal warnings
-              if (!data.startsWith("[Vue warn]")) {
-                appContext.writeToStderr(data);
-              }
+              return appContext.writeToStderr(data);
             }
-          });
-        } catch {
-          // patch-console uses console.Console which may not be available in
-          // some environments (e.g., vitest workers). Degrade gracefully.
-        }
+          } catch (error) {
+            requestRuntimeFailure(error);
+          }
+          return undefined;
+        });
       }
 
       // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
@@ -2238,55 +3119,64 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // 55-59), and the onRender outer gate skips log-update entirely for an empty
       // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
       // commit). So an interactive app whose root renders nothing emits ZERO
-      // cursor escapes — the cursor stays visible — while a non-empty / useCursor
-      // app hides on its first render via the same lazy path. The renderInteractive
+      // cursor escapes, while a non-empty app hides on its first render via the
+      // same lazy path. The renderInteractive
       // commit gate below mirrors that `output !== frameState.lastOutput` outer
       // condition so the empty-frame skip (and thus the no-hide behavior) holds.
       //
-      // Ordering for a useCursor app is preserved without an eager hide: log-update
-      // hides-then-shows WITHIN a single render() (it hides at the top, then emits
-      // the showCursor + cursorTo suffix for the active position), so the last
-      // visibility change on the first frame is the SHOW — exactly Ink's ordering.
-      //
-      // Screen-reader mode leaves the cursor VISIBLE (Ink parity G59): its
-      // dedicated write branch never routes through log-update, so no hide. The
-      // only mount-time hide that remains is the alt-screen one above
-      // (setAlternateScreen, alt-screen + isTTY gated), mirroring Ink.
+      // Fullscreen acquisition is lazy as well: after managed-input capability
+      // preflight, the first input demand or commit enters the alternate screen
+      // and hides the cursor before acquiring input modes or repainting.
 
       // Process-exit, termination, and suspension handlers are already wired
       // before terminal acquisition. This catch still routes renderer/patch-level
-      // vnode failures that bypass onErrorCaptured through the same idempotent
-      // rollback before preserving the original mount error.
+      // and Vue-propagated initial failures through partial-tree cleanup and the
+      // same idempotent terminal rollback before preserving the original error.
       let proxy: ComponentPublicInstance;
       vueMountStarted = true;
       try {
-        proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
-        // Kitty auto-detection begins before Vue mounts so a synchronous terminal
-        // reply cannot race past the shared stdin ingress. Ordinary input beside
-        // that reply is retained until setup has installed the application's
-        // first input handlers, then delivered in its original order here.
+        const releaseVueScopeCapture = acquireVueScopeCapture((scope, instance) => {
+          const teardownInstance = instance as unknown as VueTeardownComponentInstance | null;
+          if (teardownInstance?.scope === scope && teardownInstance.appContext?.app === baseApp) {
+            let rootInstance = teardownInstance;
+            while (rootInstance.parent) rootInstance = rootInstance.parent;
+            // Vue 3.4 creates its root VNode inside app.mount() and does not
+            // honor app._ceVNode. Capture that exact VNode as the component
+            // tree's first scope becomes current, before setup/default factories
+            // can throw, so partial rollback can unmount the real tree on every
+            // supported Vue minor. Walking parents also covers a functional root
+            // whose own scope never becomes current.
+            if (rootInstance.vnode) mountedOwnedVNode = rootInstance.vnode;
+          }
+        });
+        try {
+          proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+          mountedOwnedVNode =
+            (tuiRoot as TuiRoot & { _vnode?: VNode | null })._vnode ?? mountedOwnedVNode;
+        } finally {
+          releaseVueScopeCapture();
+        }
+        // A semantic route created during Vue setup can begin Kitty detection,
+        // but its shared stdin ingress already exists. Ordinary input beside a
+        // synchronous reply is retained until setup has installed the complete
+        // initial route set, then delivered in its original order here.
         stdinController.activateInputDelivery();
+        if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
       } catch (err) {
+        mountFailurePending = true;
+        recordVueMountFailure(err);
+        const mountError = pendingExitError;
+        rollbackPartialVueMount();
         try {
           teardown(); // best-effort cursor/alt-screen restore
         } catch {
           // teardown's restore write (mountedWriter.done() -> log-update
           // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
-          // stdout.write fails. A failing best-effort restore must NOT replace
-          // `err` — the ORIGINAL mount error must always survive and be rethrown.
+          // stdout.write fails. A failing best-effort restore must not replace
+          // the first Runtime failure or Vue error selected for this mount.
         }
-        throw err;
+        throw mountError;
       }
-
-      // errorHandler as fallback for errors that bypass onErrorCaptured (e.g.
-      // async errors in Vue's internal scheduler). The error boundary returns
-      // false to stop propagation, so caught errors won't reach here.
-      baseApp.config.errorHandler = (err) => {
-        // Preserve a genuine (incl. cross-realm) Error so the original survives to
-        // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
-        // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
-        appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
-      };
 
       // Only listen for resize when dynamic output is live (matching Ink).
       // A resize is a discrete event that changes the viewport, so it bypasses
@@ -2303,7 +3193,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const prepareDimensionUpdate = (
           preferFreshProbe: boolean,
           allowWhileResuming: boolean,
-        ): (() => void) | null => {
+        ): (() => CoordinatedWriteResult) | null => {
           if (terminalSuspended && !allowWhileResuming) return null;
           const nextDimensions = readCurrentDimensions(preferFreshProbe);
           // Once a visual terminal mode is acquired its immutable mode does not
@@ -2317,7 +3207,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               scheduler.cancel();
               return () => {
                 scheduler.cancel();
-                commit();
+                return commit();
               };
             }
             return null;
@@ -2334,52 +3224,54 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           const currentRows = nextDimensions.terminal?.rows ?? null;
           const dimensionsChanged =
             currentWidth !== previousTerminalWidth || currentRows !== lastPaintedTerminalRows;
-          // A screen-reader transcript intentionally works even when rows are
-          // unknown. Treat every resize event as invalidating its old physical
-          // row mapping; an unbounded layout cannot prove otherwise.
-          const inlineMappingChanged = dimensionsChanged || isScreenReaderEnabled;
+          const inlineMappingChanged = dimensionsChanged;
 
-          return () => {
-            // Vue may have scheduled a host commit while reacting to the new
-            // dimensions. This explicit commit is the authoritative paint for
-            // the resize/continue boundary.
-            scheduler.cancel();
-            if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
-              // Terminal reflow makes the old logical-line baseline untrustworthy:
-              // erasing it could touch terminal-owned rows. Leave that snapshot
-              // immutable, move to the bottom of the resized viewport, establish a
-              // fresh row, forget writer bookkeeping without emitting erase bytes,
-              // and paint the new bounded region from scratch.
-              runSynchronizedOutput(() => {
-                if (!isScreenReaderEnabled) stdout.write(hideCursorEscape);
-                let bottomClampRows: number;
-                if (isScreenReaderEnabled) bottomClampRows = TERMINAL_BOTTOM_CLAMP_ROWS;
-                else if (currentRows !== null) bottomClampRows = currentRows;
-                else return;
-                stdout.write(ansiEscapes.cursorDown(bottomClampRows) + nextLineEscape);
-                writer.reset();
-                frameState.lastOutput = "";
-                frameState.lastOutputToRender = "";
-                frameState.outputHeight = 0;
-              });
-            } else if (currentWidth < previousTerminalWidth && !fixedFullscreenSurface) {
-              // Live non-terminal streams retain the existing relative-writer
-              // narrowing behavior; they do not claim terminal history ownership.
-              writer.clear();
-              frameState.lastOutput = "";
-              frameState.lastOutputToRender = "";
-            }
-            commit();
-            lastPaintedTerminalWidth = currentWidth;
-            lastPaintedTerminalRows = currentRows;
-          };
+          return () =>
+            commit({
+              retryWhenBlocked: false,
+              beforeFrame() {
+                // Vue may have scheduled a host commit while reacting to the new
+                // dimensions. This explicit commit is the authoritative paint for
+                // the resize/continue boundary.
+                scheduler.cancel();
+                if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
+                  // Terminal reflow makes the old logical-line baseline untrustworthy:
+                  // erasing it could touch terminal-owned rows. Leave that snapshot
+                  // immutable, move to the bottom of the resized viewport, establish a
+                  // fresh row, forget writer bookkeeping without emitting erase bytes,
+                  // and paint the new bounded region from scratch.
+                  runSynchronizedOutput(() => {
+                    writeRuntimeOutput(stdout, hideCursorEscape);
+                    if (currentRows === null) return;
+                    writeRuntimeOutput(
+                      stdout,
+                      ansiEscapes.cursorDown(currentRows) + nextLineEscape,
+                    );
+                    writer.reset();
+                    frameState.lastOutput = "";
+                    frameState.lastOutputToRender = "";
+                    frameState.outputHeight = 0;
+                  });
+                } else if (currentWidth < previousTerminalWidth && !fixedFullscreenSurface) {
+                  // Live non-terminal streams retain the existing relative-writer
+                  // narrowing behavior; they do not claim terminal history ownership.
+                  writer.clear();
+                  frameState.lastOutput = "";
+                  frameState.lastOutputToRender = "";
+                }
+              },
+              onAccepted() {
+                lastPaintedTerminalWidth = currentWidth;
+                lastPaintedTerminalRows = currentRows;
+              },
+            });
         };
 
         let resizeRefreshRunning = false;
         const refreshPendingResize = async (): Promise<void> => {
           if (resizeRefreshRunning) return;
           resizeRefreshRunning = true;
-          let preparedPaint: (() => void) | null = null;
+          let preparedPaint: (() => CoordinatedWriteResult) | null = null;
           try {
             while (
               !teardownStarted &&
@@ -2391,23 +3283,36 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               const nextPaint = runLifecycleTransaction(() => prepareDimensionUpdate(false, false));
               if (nextPaint) {
                 preparedPaint = nextPaint;
-                await nextTick();
+                try {
+                  await nextTick();
+                } catch {
+                  // A reactive component update shares this flush, but remains
+                  // governed by Vue's error propagation. Discard only the host
+                  // paint prepared for the failed generation and keep Runtime
+                  // mounted; a newer resize generation will still be processed.
+                  preparedPaint = null;
+                  resizeHandledGeneration = observedGeneration;
+                  continue;
+                }
               }
 
               if (teardownStarted || terminalSuspended) break;
               if (observedGeneration !== resizeEventGeneration) continue;
 
               if (preparedPaint) {
-                runLifecycleTransaction(preparedPaint);
+                const paintResult = runLifecycleTransaction(preparedPaint);
                 preparedPaint = null;
+                if (paintResult.status === "blocked") {
+                  await paintResult.ready;
+                  continue;
+                }
+                if (!paintResult.writable) await paintResult.ready;
               }
               resizeHandledGeneration = observedGeneration;
             }
           } catch (error) {
             resizeHandledGeneration = resizeEventGeneration;
-            if (!teardownStarted) {
-              appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
-            }
+            if (!teardownStarted) requestRuntimeFailure(error);
           } finally {
             resizePaintPending = false;
             resizeRefreshRunning = false;
@@ -2440,6 +3345,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         prepareResumeSurface = () => prepareDimensionUpdate(true, true);
         stdout.on("resize", onResize);
         mountedResizeHandler = onResize;
+        releaseMountedResizeListener = acquireRuntimeResource("streamListeners");
       }
 
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
@@ -2449,17 +3355,32 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         pendingMountSuspension = false;
         suspendSession();
       }
-      return proxy;
+      if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
+      consumedMountInProgress = false;
+      return mountedUserRoot ?? proxy;
     } catch (error) {
+      mountFailurePending = true;
+      consumedMountInProgress = false;
+      recordTeardownError(error);
+      const mountError = pendingExitError;
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
       leaveMountLifecycleTransaction = null;
       leaveLifecycleTransaction?.();
-      teardown();
-      throw error;
+      try {
+        teardown();
+      } catch (teardownError) {
+        recordTeardownError(teardownError);
+      } finally {
+        resolveExit();
+      }
+      throw mountError;
     }
   };
+  app.mount = runtimeMount;
+  internalMountInvokers.set(app, runtimeMount as InternalMountInvoker);
 
   app.unmount = function unmount(): void {
+    mountAttemptConsumed = true;
     try {
       teardown();
     } finally {
@@ -2467,260 +3388,90 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   };
 
-  app.waitUntilExit = function waitUntilExit(): Promise<unknown> {
+  app.waitUntilExit = function waitUntilExit(): Promise<void> {
     return exitPromise;
   };
 
   // Hoisted so the injected appContext (built inside mount()) can expose the
-  // SAME implementation via useApp().waitUntilRenderFlush — both the
-  // TuiApp handle and the in-tree composable resolve identically.
+  // The app owner can wait for Vue, console, renderer, and stream work to settle.
   async function waitUntilRenderFlush(): Promise<void> {
-    const stream = (mountedAppContext?.stdout ?? process.stdout) as MaybeWritableStream;
-    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
-
-    // A resize updates the public dimensions first, waits for Vue consumers,
-    // then performs one authoritative paint outside the normal throttle. Wait
-    // through the latest coalesced resize before inspecting the scheduler.
-    while (mountedResizeRefresh) await mountedResizeRefresh;
-
-    // Flush any pending OR scheduled render. Gating on hasPending() alone
-    // misses the window after schedule() queues a commit but before the
-    // post-flush callback sets hasPendingFlag, letting this resolve early.
-    // When stdout cannot be written, match Ink's settleThrottle behavior:
-    // cancel instead of flushing so delayed callbacks cannot write later.
-    if (mountedScheduler) {
-      if (canWriteToStdout) {
-        await mountedScheduler.flush();
-      } else {
-        mountedScheduler.cancel();
+    if (!mountedAppContext || !vueMountStarted || teardownStarted) {
+      if (teardownStarted && !teardownCompleted) {
+        await exitPromise.catch(() => {});
       }
+      return;
     }
-    // Wait for stdout write barrier — ensures the written frame is
-    // flushed to the underlying stream.
-    await new Promise<void>((resolve) => {
-      if (!canWriteToStdout || !hasWritableState) {
-        setImmediate(resolve);
-        return;
+    const stream = mountedAppContext.stdout as MaybeWritableStream;
+    const coordinator = mountedOutputCoordinator;
+
+    // A blocked commit resolves its scheduler turn immediately, then registers
+    // exactly one retry for `drain`. Loop through both layers so a waiter cannot
+    // observe the old frame between those two turns.
+    while (true) {
+      await mountedConsoleSink?.waitForIdle();
+      while (mountedResizeRefresh) await mountedResizeRefresh;
+      const terminalReconcile = mountedTerminalReconcile;
+      if (terminalReconcile) {
+        await terminalReconcile;
+        continue;
       }
-      // PassThrough (test fakes) may not support the write callback form;
-      // fall back to setImmediate so we still yield the event loop.
-      try {
-        stream.write("", () => resolve());
-      } catch {
-        setImmediate(resolve);
+      if (coordinator?.isBlocked()) {
+        try {
+          await coordinator.waitForIdle();
+        } catch {
+          // The deferred failure is routed through app exit. Continue to the
+          // ordinary writable-state fallback so this waiter never wedges.
+        }
       }
-    });
+
+      const { canWriteToStdout } = getWritableStreamState(stream);
+      if (mountedScheduler) {
+        if (canWriteToStdout) await mountedScheduler.flush();
+        else mountedScheduler.cancel();
+      }
+
+      if (!coordinator?.isBlocked() && !mountedResizeRefresh && !mountedTerminalReconcile) break;
+    }
+
+    try {
+      await writeOutputBarrier(stream);
+    } catch (error) {
+      requestRuntimeFailure(error);
+      await exitPromise.catch(() => {});
+    }
   }
   app.waitUntilRenderFlush = waitUntilRenderFlush;
 
-  app.clear = function clear(): void {
-    mountedClear?.();
-  };
-
   return app;
-}
-
-// --- Focus controller ----------------------------------------------------
-
-interface Focusable {
-  readonly id: string;
-  isActive: boolean;
-}
-
-// Test-only probe: lets a unit test observe the internal `subs` Map size to prove
-// auto-id focusables don't leak empty Sets (see focus-subs-leak test). The double
-// underscore + this comment mark it internal; nothing in production reads it.
-export interface FocusControllerForTest extends FocusContext {
-  __subscriberMapSize: () => number;
-}
-
-export function createFocusController(): FocusControllerForTest {
-  const focusables: Focusable[] = [];
-  const subs = new Map<string, Set<(focused: boolean) => void>>();
-  let activeFocusable: Focusable | null = null;
-  let activeId: string | null = null;
-  const activeIdRef = shallowRef<string | null>(null);
-
-  function notify(id: string, focused: boolean) {
-    subs.get(id)?.forEach((fn) => fn(focused));
-  }
-
-  function setActiveFocusable(next: Focusable | null) {
-    if (next !== null && !focusables.includes(next)) {
-      next = null;
-    }
-    if (activeFocusable === next) return;
-
-    const prev = activeId;
-    activeFocusable = next;
-    const nextId = next?.id ?? null;
-
-    if (prev === nextId) return;
-
-    activeId = nextId;
-    ctx.activeId = activeId;
-    activeIdRef.value = activeId;
-    if (prev) notify(prev, false);
-    if (nextId) notify(nextId, true);
-  }
-
-  function findNextActive(startIdx: number, direction: 1 | -1): Focusable | null {
-    const len = focusables.length;
-    for (let i = 0; i < len; i++) {
-      const idx = (startIdx + direction * (i + 1) + len * len) % len;
-      if (focusables[idx]!.isActive) return focusables[idx]!;
-    }
-    return null;
-  }
-
-  // The start index a directional search begins FROM (it scans from the next slot
-  // in `direction`). With duplicate ids, public `activeId` is not enough to know
-  // which registry entry the user is leaving, so we track the active entry object
-  // internally and only expose its id. With no current focus we begin just outside
-  // the end we're moving away from, so the first candidate is the first focusable
-  // (forward) or the last (backward) — symmetric for both directions.
-  function startSearchIndex(direction: 1 | -1): number {
-    if (activeFocusable) {
-      const i = focusables.indexOf(activeFocusable);
-      if (i >= 0) return i;
-    }
-    if (activeId) {
-      const i = focusables.findIndex((f) => f.id === activeId);
-      if (i >= 0) return i;
-    }
-    return direction === 1 ? -1 : focusables.length;
-  }
-
-  const ctx: FocusContext = {
-    activeId: null,
-    activeIdRef,
-    enabled: true,
-    enableFocus() {
-      ctx.enabled = true;
-    },
-    disableFocus() {
-      ctx.enabled = false;
-    },
-    // Ink parity (App.tsx focusNext/focusPrevious): NO isFocusEnabled guard here —
-    // a programmatic focusNext()/focusPrevious() moves focus even while focus is
-    // disabled. The isFocusEnabled check lives only in the Tab/Shift-Tab handler
-    // (see focusInputListener). The focusables.length === 0 short-circuit stays so
-    // focusing on an empty tree is a harmless no-op; with 0 focusables activeId is
-    // already null (remove() clears it), matching Ink (findNextFocusable and
-    // firstFocusableId both undefined → activeFocusId undefined), and it also avoids
-    // the `% 0` NaN in findNextActive.
-    //
-    // Ink (App.tsx:455-470 / 472-487): focusNext = `findNextFocusable(...) ??
-    // firstFocusableId` and ALWAYS reassigns activeFocusId. findNextActive already
-    // wraps to the first active (or null if none), so it's equivalent to Ink's
-    // `next ?? first` — including the clear-to-null case when NO focusable is active.
-    // We must call setActiveFocusable UNCONDITIONALLY: a null result clears a stale activeId
-    // (e.g. left by focus(id) pinning an isActive=false item), matching Ink.
-    focusNext() {
-      if (focusables.length === 0) return;
-      setActiveFocusable(findNextActive(startSearchIndex(1), 1));
-    },
-    focusPrevious() {
-      if (focusables.length === 0) return;
-      setActiveFocusable(findNextActive(startSearchIndex(-1), -1));
-    },
-    focus(id) {
-      const entry = focusables.find((f) => f.id === id);
-      if (entry) setActiveFocusable(entry);
-    },
-    blur() {
-      setActiveFocusable(null);
-    },
-    // Ink treats focus ids as registration entries, not unique keys: duplicate
-    // explicit ids are user-created ambiguity, but they still participate in
-    // focus order. Matching that means add pushes every registration, while
-    // remove/activate/deactivate affect every entry with the same id.
-    add(id, options) {
-      const entry: Focusable = { id, isActive: true };
-      focusables.push(entry);
-      if (options.autoFocus && activeFocusable == null) {
-        setActiveFocusable(entry);
-      }
-    },
-    // remove() intentionally does NOT touch `subs`: a consumer's unsubscribe
-    // (see subscribe()) is what frees its Set entry, and useFocus unsubscribes
-    // before calling remove(). Deleting the Set here would also break duplicate
-    // ids — two components sharing one id share one Set, and removing one entry
-    // must not silence the survivor's focus notifications.
-    remove(id) {
-      const removingActive = activeFocusable?.id === id;
-      for (let i = focusables.length - 1; i >= 0; i--) {
-        if (focusables[i]!.id === id) focusables.splice(i, 1);
-      }
-      if (removingActive) setActiveFocusable(null);
-    },
-    activate(id) {
-      for (const entry of focusables) {
-        if (entry.id === id) entry.isActive = true;
-      }
-    },
-    deactivate(id) {
-      let changed = false;
-      for (const entry of focusables) {
-        if (entry.id === id) {
-          entry.isActive = false;
-          changed = true;
-        }
-      }
-      if (changed && activeFocusable?.id === id) {
-        setActiveFocusable(null);
-      }
-    },
-    subscribe(id, fn) {
-      let set = subs.get(id);
-      if (!set) {
-        set = new Set();
-        subs.set(id, set);
-      }
-      set.add(fn);
-      return () => {
-        set!.delete(fn);
-        // Drop the now-empty Set so the Map doesn't accumulate dead entries.
-        // useFocus() with no explicit id mints a fresh `__auto-N` id per mount,
-        // so without this every mount/unmount cycle would leak one empty Set —
-        // unbounded growth over a long session. A later subscribe() for the same
-        // id re-creates the Set (the `if (!set)` branch above), so re-subscription
-        // still works.
-        //
-        // `subs.get(id) === set` keeps this idempotent across a re-subscribe: a
-        // stale call to THIS closure (e.g. unsubscribe invoked twice) must not
-        // delete a fresh Set created by a later subscribe(id) for the same id —
-        // only the Set this closure actually owns is eligible for removal.
-        if (set!.size === 0 && subs.get(id) === set) subs.delete(id);
-      };
-    },
-  };
-
-  return Object.assign(ctx, {
-    __subscriberMapSize: () => subs.size,
-  });
 }
 
 // --- Stdin controller ----------------------------------------------------
 
 interface StdinController extends StdinContext {
-  // sync (Finding A): on the signal-exit teardown path the restore escapes — here
-  // the bracketed-paste-disable `\x1b[?2004l` — must be flushed synchronously
-  // (fs.writeSync) so they reach the fd before signal-exit re-raises the signal.
-  // Defaults to the async stdout.write path for normal unmount/exit.
-  dispose: (sync?: boolean) => void;
+  // sync writes terminal restores immediately. Abrupt teardown additionally
+  // reissues idempotent OFF modes after Vue cleanup because a non-returning
+  // process/signal exit cannot rely on an earlier asynchronous write flushing.
+  dispose: (sync?: boolean, reissueAbruptTerminalDisables?: boolean) => void;
   /** Temporarily release physical input modes without dropping logical consumers. */
   suspend: (sync?: boolean) => void;
   /** Reacquire the physical input modes still requested by logical consumers. */
   resume: () => void;
-  // rawMode 'always': take a lifetime raw-mode hold (raw on + keep-alive + input
-  // listener) that input composables stack on top of, with the per-consumer
-  // input-state cleanup re-based to this floor.
-  holdRawModeForLifetime: () => void;
   /** Own the Kitty support reply on this controller's single physical stdin ingress. */
   startKittyQueryResponseDetection: StartKittyQueryResponseDetection;
   /** Deliver input retained while Vue installed the application's first route. */
   activateInputDelivery: () => void;
+  /** Register desired semantic input without requiring immediate output capacity. */
+  acquireSemanticInput: () => InternalInputDemandLease;
+  /** Whether Runtime currently depends on this stream for managed input. */
+  hasManagedInputDemand: () => boolean;
+  /** Reconcile the newest semantic-input and terminal-mode desired state. */
+  reconcileTerminalState: () => void;
+  /** Forget control writes captured by a transaction that never handed them off. */
+  abandonPendingTerminalOutput: (options?: { readonly physicalStateUncertain?: boolean }) => void;
+  /** Adjust the private bracketed-paste reference count transactionally. */
+  setBracketedPasteMode: (enabled: boolean) => void;
+  /** Report independent cleanup failures without stopping later releases. */
+  setCleanupErrorSink: (sink: ((error: unknown) => void) | null) => void;
 }
 
 interface RawModeState {
@@ -2764,22 +3515,47 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
 }
 
 interface CreateStdinControllerOptions {
-  exitOnCtrlC: boolean;
   appCtx: AppContext;
-  focusContext: FocusContext;
+  exitOnCtrlC: boolean;
+  acquireKittyKeyboardDemand: () => () => void;
+  isKittyKeyboardReady: () => boolean;
+  /** Acquire the output surface after capability preflight and before input modes. */
+  beforeManagedInputAcquire: () => boolean;
+  isManagedInputSurfaceReady: () => boolean;
+  /** Route async terminal-control bytes through the application's output gate. */
+  writeTerminalOutput: (data: string, onHandoff?: () => void) => boolean;
+  requestTerminalReconcile: () => void;
+  reportManagedInputFailure: (error: unknown) => void;
+  /**
+   * When true, accept `useInput()` registrations without managed terminal demand,
+   * parser delivery, or raw-mode acquisition (mounted document host).
+   */
+  inertManagedInput?: boolean;
 }
 
 function createStdinController(
   stdin: NodeJS.ReadStream,
   opts: CreateStdinControllerOptions,
 ): StdinController {
-  const { appCtx, focusContext } = opts;
-  const inputRoutes = createInternalInputRouteRegistry();
+  const { appCtx } = opts;
+  const inertManagedInput = opts.inertManagedInput === true;
+  const managedInputAvailableAtMount = !inertManagedInput && hasRawInputCapability(stdin);
+  let controller!: StdinController;
+  // Document hosts keep useInput() setup shared-component-friendly but never
+  // create managed input demand or deliver events.
+  const inputSubscriptions = inertManagedInput
+    ? createInternalInputSubscriptions()
+    : createInternalInputSubscriptions({
+        acquire() {
+          return controller.acquireSemanticInput();
+        },
+      });
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
-    readonly kind: "routes";
-    readonly routes: InternalInputRouteSnapshot;
-    readonly sgrMouseMode: SgrMouseMode | undefined;
+    readonly kind: "subscribers";
+    readonly subscribers: readonly InternalInputSubscriber[];
+    /** Whether this app had a logical managed-input owner when the fact began. */
+    readonly managedInputActive: boolean;
   }
   interface BootstrapApplicationInputSnapshot {
     readonly kind: "bootstrap";
@@ -2794,7 +3570,6 @@ function createStdinController(
   }
   let sharedSubscription: SharedStdinSubscription;
   let sharedSubscriptionActive = false;
-  let activeKittyQueryDetections = 0;
   let inputDeliveryActive = false;
   let drainingApplicationInput = false;
   const pendingApplicationInput: PendingApplicationInput[] = [];
@@ -2802,33 +3577,42 @@ function createStdinController(
     kind: "bootstrap",
     resolved: undefined,
   };
+  let cleanupErrorSink: ((error: unknown) => void) | null = null;
   let bracketedPasteModeCount = 0;
+  let pendingBracketedPasteMode: { readonly enabled: boolean } | undefined;
   let reconcilingBracketedPaste = false;
   let bracketedPasteReconcileRequested = false;
   let bracketedPasteSyncRequested = false;
-  const sgrMouseModeTokens = new Map<symbol, SgrMouseMode>();
-  let activeSgrMouseMode: SgrMouseMode | undefined;
-  let sgrMousePhysicalUncertain = false;
-  let reconcilingSgrMouse = false;
-  let sgrMouseReconcileRequested = false;
-  let sgrMouseSyncRequested = false;
-  const ownedSgrMouseModes = new Set<SgrMouseMode>();
   let suspended = false;
   let disposed = false;
+  let releaseKittyKeyboardDemand: (() => void) | undefined;
+  let reconcilingKittyDemand = false;
+  let kittyDemandReconcileRequested = false;
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
-  // 0 normally; 1 once the App takes a lifetime raw-mode hold (rawMode 'always').
-  // The hold keeps raw mode + the shared data ingress alive for the whole run,
-  // so the per-consumer input-state cleanup is re-based to this floor.
-  let lifetimeFloor = 0;
+  /** Raw refs that require Runtime's parser and negotiated input protocols. */
+  let managedRawRefs = 0;
+  /** Raw refs owned by independent public useStdin() hook calls. */
+  let publicRawRefs = 0;
+  // Only fully published semantic demands grant normalized input delivery.
+  let publishedSemanticRefs = 0;
+  interface SemanticInputDemand {
+    activationRequested: boolean;
+    physicalAcquired: boolean;
+    published: boolean;
+    released: boolean;
+  }
+  const semanticInputDemands = new Set<SemanticInputDemand>();
+  let reconcilingSemanticInput = false;
+  let semanticInputReconcileRequested = false;
+  let resumeAwaitingTerminalModes = false;
 
   // True once bracketed paste has been enabled at least once on this controller
-  // (a usePaste mounted). Lets the signal-exit teardown re-issue a SYNCHRONOUS
+  // (semantic input was active). Lets signal-exit teardown re-issue a SYNCHRONOUS
   // paste-OFF even after Vue's unmount already ran the async disable and zeroed
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
-  let everEnabledSgrMouse = false;
 
   // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
@@ -2841,11 +3625,11 @@ function createStdinController(
     return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
   }
 
-  function canUseSgrMouseMode(): boolean {
-    return !disposed && !suspended && canWriteTerminalMode() && supportsTerminalMouse();
-  }
-
-  function writeTerminalMode(data: string, sync = false): boolean {
+  function writeTerminalMode(
+    data: string,
+    sync = false,
+    onHandoff: () => void = () => {},
+  ): boolean {
     if (!canWriteTerminalMode()) return false;
     const stdout = appCtx.stdout;
     if (sync) {
@@ -2862,19 +3646,20 @@ function createStdinController(
       } else {
         stdout.write(data);
       }
+      onHandoff();
       return true;
     }
-    stdout.write(data);
-    return true;
+    return opts.writeTerminalOutput(data, onHandoff);
   }
 
   function runTerminalCleanup(operation: () => void): void {
     try {
       operation();
-    } catch {
+    } catch (error) {
       // Terminal restoration is a best-effort transaction. A failed write for
       // one mode must not prevent the remaining modes or raw stdin from being
       // restored.
+      cleanupErrorSink?.(error);
     }
   }
 
@@ -2886,9 +3671,6 @@ function createStdinController(
     }
 
     reconcilingBracketedPaste = true;
-    let firstError: unknown;
-    let hasError = false;
-    let recoveringAfterError = false;
     try {
       while (true) {
         bracketedPasteReconcileRequested = false;
@@ -2896,45 +3678,66 @@ function createStdinController(
         bracketedPasteSyncRequested = false;
         const shouldEnable =
           !disposed && !suspended && bracketedPasteModeCount > 0 && canWriteTerminalMode();
+        if (pendingBracketedPasteMode) break;
+        if (bracketedPastePhysicalUncertain) {
+          const pending = { enabled: false } as const;
+          pendingBracketedPasteMode = pending;
+          try {
+            const accepted = writeTerminalMode("\x1b[?2004l", useSync, () => {
+              if (pendingBracketedPasteMode !== pending) return;
+              pendingBracketedPasteMode = undefined;
+              bracketedPastePhysicallyEnabled = false;
+              bracketedPastePhysicalUncertain = false;
+              opts.requestTerminalReconcile();
+            });
+            if (!accepted) {
+              if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
+              opts.requestTerminalReconcile();
+            }
+          } catch (error) {
+            if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
+            bracketedPastePhysicalUncertain = true;
+            throw error;
+          }
+          break;
+        }
         if (shouldEnable === bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain) {
           if (!bracketedPasteReconcileRequested) break;
           continue;
         }
 
-        bracketedPastePhysicallyEnabled = shouldEnable;
-        bracketedPastePhysicalUncertain = false;
-        if (shouldEnable) everEnabledBracketedPaste = true;
+        const pending = { enabled: shouldEnable } as const;
+        pendingBracketedPasteMode = pending;
         try {
-          if (!writeTerminalMode(shouldEnable ? "\x1b[?2004h" : "\x1b[?2004l", useSync)) {
-            bracketedPastePhysicallyEnabled = false;
+          const accepted = writeTerminalMode(
+            shouldEnable ? "\x1b[?2004h" : "\x1b[?2004l",
+            useSync,
+            () => {
+              if (pendingBracketedPasteMode !== pending) return;
+              pendingBracketedPasteMode = undefined;
+              bracketedPastePhysicallyEnabled = shouldEnable;
+              bracketedPastePhysicalUncertain = false;
+              if (shouldEnable) everEnabledBracketedPaste = true;
+              opts.requestTerminalReconcile();
+            },
+          );
+          if (!accepted) {
+            if (pendingBracketedPasteMode === pending) {
+              pendingBracketedPasteMode = undefined;
+            }
+            opts.requestTerminalReconcile();
             break;
           }
         } catch (error) {
-          // stdout.write() can throw before or after it hands the escape to the
-          // terminal. Keep an explicit unknown state so acquisition rollback or
-          // teardown sends the idempotent OFF escape instead of assuming the
-          // terminal never entered paste mode.
+          if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
           bracketedPastePhysicalUncertain = true;
-          if (!hasError) {
-            firstError = error;
-            hasError = true;
-            // OFF is an idempotent safety restore. Retry it once even without
-            // re-entry because a custom stdout may throw before handing the
-            // escape to the terminal. ON is retried only for a surviving
-            // re-entrant owner; an ordinary failed acquisition rolls back to
-            // OFF in setBracketedPasteMode().
-            recoveringAfterError = bracketedPasteReconcileRequested || !shouldEnable;
-            if (recoveringAfterError) bracketedPasteSyncRequested ||= useSync;
-          } else {
-            break;
-          }
-          if (!recoveringAfterError) break;
+          throw error;
         }
+        if (pendingBracketedPasteMode) break;
       }
     } finally {
       reconcilingBracketedPaste = false;
     }
-    if (hasError) throw firstError;
   }
 
   // On an abrupt signal path Vue cleanup may already have issued the normal
@@ -2942,154 +3745,116 @@ function createStdinController(
   // idempotent and guarantees the restore reaches the terminal before re-raise.
   function forceDisableBracketedPaste(sync: boolean): void {
     writeTerminalMode("\x1b[?2004l", sync);
+    pendingBracketedPasteMode = undefined;
     bracketedPastePhysicallyEnabled = false;
     bracketedPastePhysicalUncertain = false;
   }
 
-  function mouseDisableSequence(levels: Iterable<SgrMouseMode>): string {
-    const controls: string[] = [];
-    const unique = new Set(levels);
-    if (unique.has("hover")) controls.push("\x1b[?1003l");
-    if (unique.has("drag")) controls.push("\x1b[?1002l");
-    if (unique.has("button")) controls.push("\x1b[?1000l");
-    if (unique.size > 0) controls.push("\x1b[?1006l");
-    return controls.join("");
-  }
-
-  function disableSgrMouse(levels: Iterable<SgrMouseMode>, sync = false): boolean {
-    const sequence = mouseDisableSequence(levels);
-    return sequence === "" || writeTerminalMode(sequence, sync);
-  }
-
-  function mouseEnableSequence(level: SgrMouseMode): string {
-    switch (level) {
-      case "button":
-        return "\x1b[?1000h\x1b[?1006h";
-      case "drag":
-        return "\x1b[?1002h\x1b[?1006h";
-      case "hover":
-        return "\x1b[?1003h\x1b[?1006h";
+  function reissueIdempotentTerminalDisables(sync: boolean): void {
+    if (everEnabledBracketedPaste) {
+      runTerminalCleanup(() => forceDisableBracketedPaste(sync));
     }
-  }
-
-  function sgrMouseModeRank(level: SgrMouseMode): number {
-    switch (level) {
-      case "button":
-        return 1;
-      case "drag":
-        return 2;
-      case "hover":
-        return 3;
-    }
-  }
-
-  function highestRequestedSgrMouseMode(): SgrMouseMode | undefined {
-    let highest: SgrMouseMode | undefined;
-    for (const level of sgrMouseModeTokens.values()) {
-      if (!highest || sgrMouseModeRank(level) > sgrMouseModeRank(highest)) {
-        highest = level;
-      }
-    }
-    return highest;
-  }
-
-  function reconcileSgrMouseMode(sync = false): void {
-    sgrMouseSyncRequested ||= sync;
-    if (reconcilingSgrMouse) {
-      sgrMouseReconcileRequested = true;
-      return;
-    }
-
-    reconcilingSgrMouse = true;
-    let firstError: unknown;
-    let hasError = false;
-    let recoveringAfterError = false;
-    try {
-      while (true) {
-        sgrMouseReconcileRequested = false;
-        const useSync = sgrMouseSyncRequested;
-        sgrMouseSyncRequested = false;
-        const next = canUseSgrMouseMode() ? highestRequestedSgrMouseMode() : undefined;
-        if (next === activeSgrMouseMode && !sgrMousePhysicalUncertain) {
-          if (!sgrMouseReconcileRequested) break;
-          continue;
-        }
-
-        if (activeSgrMouseMode) {
-          const previous = activeSgrMouseMode;
-          activeSgrMouseMode = undefined;
-          sgrMousePhysicalUncertain = false;
-          try {
-            if (!disableSgrMouse([previous], useSync)) {
-              break;
-            }
-          } catch (error) {
-            activeSgrMouseMode = previous;
-            sgrMousePhysicalUncertain = true;
-            if (!hasError) {
-              firstError = error;
-              hasError = true;
-              // A disable escape is idempotent. During suspension/disposal no
-              // mouse owner survives, so retry once before declaring the
-              // terminal restored even when no callback re-entered us.
-              recoveringAfterError = sgrMouseReconcileRequested || next === undefined;
-              if (recoveringAfterError) sgrMouseSyncRequested ||= useSync;
-            } else {
-              break;
-            }
-            if (!recoveringAfterError) break;
-          }
-          continue;
-        }
-
-        if (next) {
-          activeSgrMouseMode = next;
-          sgrMousePhysicalUncertain = false;
-          ownedSgrMouseModes.add(next);
-          everEnabledSgrMouse = true;
-          try {
-            if (!writeTerminalMode(mouseEnableSequence(next), useSync)) {
-              activeSgrMouseMode = undefined;
-              break;
-            }
-          } catch (error) {
-            // Keep the attempted mode as possibly owned. If the logical
-            // acquisition rolls back, the next pass emits an idempotent OFF;
-            // if a re-entrant owner survives, it retries until that owner's
-            // requested mode is known to be active.
-            sgrMousePhysicalUncertain = true;
-            if (!hasError) {
-              firstError = error;
-              hasError = true;
-              recoveringAfterError = sgrMouseReconcileRequested;
-              if (recoveringAfterError) sgrMouseSyncRequested ||= useSync;
-            } else {
-              break;
-            }
-            if (!recoveringAfterError) break;
-          }
-          continue;
-        }
-      }
-    } finally {
-      reconcilingSgrMouse = false;
-    }
-    if (hasError) throw firstError;
   }
 
   function reconcileSharedSubscription(): void {
+    if (
+      resumeAwaitingTerminalModes &&
+      (managedRawRefs === 0 ||
+        (opts.isManagedInputSurfaceReady() &&
+          opts.isKittyKeyboardReady() &&
+          (!canWriteTerminalMode() ||
+            (bracketedPasteModeCount === 0
+              ? !bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain
+              : bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain)) &&
+          pendingBracketedPasteMode === undefined))
+    ) {
+      resumeAwaitingTerminalModes = false;
+    }
     const shouldBeActive =
-      !disposed && !suspended && (localRefs > 0 || activeKittyQueryDetections > 0);
+      !disposed && !suspended && !resumeAwaitingTerminalModes && managedRawRefs > 0;
     if (shouldBeActive === sharedSubscriptionActive) return;
     sharedSubscriptionActive = shouldBeActive;
     sharedSubscription.setActive(shouldBeActive);
   }
 
+  function reconcileKittyDemand(): void {
+    if (reconcilingKittyDemand) {
+      kittyDemandReconcileRequested = true;
+      return;
+    }
+
+    reconcilingKittyDemand = true;
+    let firstError: unknown;
+    let hasError = false;
+    let retriedAfterReentry = false;
+    try {
+      while (true) {
+        kittyDemandReconcileRequested = false;
+        const shouldHoldDemand = !disposed && managedRawRefs > 0;
+
+        if (shouldHoldDemand && !releaseKittyKeyboardDemand) {
+          let release: (() => void) | undefined;
+          try {
+            release = opts.acquireKittyKeyboardDemand();
+          } catch (error) {
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+            }
+            // A host callback can create a surviving nested stdin demand before
+            // the outer Kitty acquisition fails. Give that newly committed
+            // desired state one chance to acquire its own lease.
+            if (kittyDemandReconcileRequested && !retriedAfterReentry) {
+              retriedAfterReentry = true;
+              continue;
+            }
+            break;
+          }
+
+          if (!disposed && managedRawRefs > 0) {
+            releaseKittyKeyboardDemand = release;
+          } else {
+            try {
+              release();
+            } catch (error) {
+              if (!hasError) {
+                firstError = error;
+                hasError = true;
+              }
+            }
+          }
+          continue;
+        }
+
+        if (!shouldHoldDemand && releaseKittyKeyboardDemand) {
+          const release = releaseKittyKeyboardDemand;
+          // Commit the desired state before calling the host-facing release so
+          // a reentrant acquisition can request a fresh lease.
+          releaseKittyKeyboardDemand = undefined;
+          try {
+            release();
+          } catch (error) {
+            if (!hasError) {
+              firstError = error;
+              hasError = true;
+            }
+          }
+          continue;
+        }
+
+        if (!kittyDemandReconcileRequested) break;
+      }
+    } finally {
+      reconcilingKittyDemand = false;
+    }
+    if (hasError) throw firstError;
+  }
+
   function snapshotCurrentApplicationInput(): ApplicationInputSnapshot {
     return Object.freeze({
-      kind: "routes",
-      routes: inputRoutes.snapshot(),
-      sgrMouseMode: activeSgrMouseMode,
+      kind: "subscribers",
+      subscribers: inputSubscriptions.capture(),
+      managedInputActive: publishedSemanticRefs > 0,
     });
   }
 
@@ -3135,134 +3900,69 @@ function createStdinController(
     }
   }
 
-  function emitInput(fact: NormalizedInputFact, snapshot: ApplicationInputSnapshot) {
-    // exitOnCtrlC: intercept Ctrl+C here — at the always-on stdin controller,
-    // BEFORE dispatching to any listener — so the app exits no matter which
-    // composable holds raw mode (useInput / useFocus / usePaste, or none), and
-    // there's a single source of truth (useInput no longer carries its own
-    // copy). Legacy Ctrl+C is the bare \x03 byte; the kitty keyboard protocol
-    // encodes it as a CSI-u sequence (\x1b[99;5u). The shared ingress has
-    // already normalized both forms, so this default reads the same fact every
-    // hook will receive instead of parsing the source a second time.
-    if (opts.exitOnCtrlC && fact.kind === "key" && fact.key.phase !== "release") {
-      const { modifiers } = fact.key;
-      const isCtrlC =
-        modifiers.ctrl &&
-        !modifiers.shift &&
-        !modifiers.alt &&
-        !modifiers.super &&
-        !modifiers.hyper &&
-        !modifiers.meta &&
-        (fact.key.name === "c" ||
-          fact.key.primaryCodepoint === 99 ||
-          fact.key.baseLayoutCodepoint === 99);
-      if (isCtrlC) {
-        appCtx.exit();
-        return;
-      }
-    }
-    if (snapshot.sgrMouseMode && fact.kind === "pointer") {
-      const rawMouse = fact.pointer.event;
-      const mouse = rawMouse ? toMouseInputEvent(rawMouse) : undefined;
-      // Freeze both pointer recipient groups before either callback runs. An
-      // internal handler may reconfigure routes, but that affects only the next
-      // physical event, not the public half of this one.
-      const internalMouseRecipients = inputRoutes.resolve(snapshot.routes, "internal_mouse");
-      const mouseRecipients = inputRoutes.resolve(snapshot.routes, "mouse");
-      if (rawMouse) {
-        for (const listener of internalMouseRecipients) listener(rawMouse);
-      }
-      if (mouse) {
-        for (const listener of mouseRecipients) listener(mouse);
-      }
-      return;
-    }
-
-    // Esc resets focus when focus is enabled
-    if (
-      fact.kind === "key" &&
-      fact.key.name === "escape" &&
-      fact.key.phase !== "release" &&
-      focusContext.enabled
-    ) {
-      const { modifiers } = fact.key;
-      if (
-        !modifiers.shift &&
-        !modifiers.alt &&
-        !modifiers.ctrl &&
-        !modifiers.super &&
-        !modifiers.hyper &&
-        !modifiers.meta
-      ) {
-        focusContext.blur();
-      }
-    }
-    inputRoutes.emit(snapshot.routes, "input", fact);
+  function isCtrlC(fact: NormalizedInputFact): boolean {
+    const event = projectPublicInputEvent(fact);
+    const key = event?.type === "paste" ? undefined : event?.key;
+    if (!key || key.character !== "c") return false;
+    const { shift, alt, ctrl, meta, super: superKey, hyper } = key;
+    return ctrl && !shift && !alt && !meta && !superKey && !hyper;
   }
 
   function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
-    if (suspended || disposed) return;
-    if (event.kind === "paste") {
-      // Preserve paste as a shared framing fact, then adapt it to the current
-      // Ink-compatible channels at this app boundary.
-      if (inputRoutes.had(snapshot.routes, "paste")) {
-        inputRoutes.emit(snapshot.routes, "paste", event.text);
-      } else {
-        // The old useInput hook still receives one compatibility projection,
-        // but application defaults never reinterpret paste contents as Ctrl+C,
-        // focus navigation, pointer input, or a terminal query response.
-        inputRoutes.emit(snapshot.routes, "input", event);
-      }
-    } else {
-      emitInput(event, snapshot);
+    if (suspended || disposed || !snapshot.managedInputActive) return;
+    if (opts.exitOnCtrlC && isCtrlC(event)) {
+      appCtx.exit();
+      return;
     }
-  }
 
-  function finishKittyQueryDetection(): void {
-    activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
-    // Query detection temporarily subscribes the app before Vue has installed
-    // its routes. Once mount is ready and no real input consumer exists, end
-    // that temporary generation so an unfinished CSI/paste cannot keep stdin
-    // flowing forever after the detector settles.
-    if (activeKittyQueryDetections === 0 && localRefs === 0 && inputDeliveryActive) {
-      sharedSubscription.invalidate();
-      pendingApplicationInput.length = 0;
+    // The subscriber list was captured when this parser-defined fact began.
+    // Changes made by one handler affect re-entrant or later facts, not peers
+    // that were already eligible for this one.
+    let firstError: unknown;
+    let failed = false;
+    for (const subscriber of snapshot.subscribers) {
+      try {
+        subscriber(event);
+      } catch (error) {
+        if (failed) continue;
+        failed = true;
+        firstError = error;
+      }
     }
-    reconcileSharedSubscription();
+    if (failed) throw firstError;
   }
 
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
-  // Focus Tab / Shift+Tab navigation (Esc blur handled in emitInput)
-  const focusInputListener = (fact: NormalizedInputFact) => {
-    // Ink parity (handleTabNavigation): Tab/Shift-Tab navigation is gated by the
-    // focus-enabled flag here — disableFocus() makes Tab a no-op, but a
-    // programmatic focusNext()/focusPrevious() still works (see createFocusController).
-    if (!focusContext.enabled) return;
-    if (fact.kind !== "key" || fact.key.name !== "tab" || fact.key.phase === "release") return;
-    const { modifiers } = fact.key;
-    if (modifiers.ctrl || modifiers.alt || modifiers.super || modifiers.hyper || modifiers.meta) {
-      return;
-    }
-    if (modifiers.shift) focusContext.focusPrevious();
-    else focusContext.focusNext();
-  };
-  const detachFocusInputRoute = inputRoutes.attach("input", focusInputListener);
-
-  // Match Ink's handleSetRawMode (App.tsx): raw mode on an unsupported stdin
-  // throws a descriptive error rather than silently no-opping. Two messages —
-  // one for the default process.stdin, one for a custom stream — both pointing
-  // at the isRawModeSupported docs.
-  const throwRawModeUnsupported = (): never => {
+  // Managed subscriptions fail transactionally on a host that cannot provide terminal
+  // input. The actual stream remains available through useStdin().stdin.
+  const throwManagedInputUnavailable = (): never => {
+    const expectedAtMount = !managedInputAvailableAtMount;
     if (stdin === process.stdin) {
-      throw new Error(
-        "Raw mode is not supported on the current process.stdin, which Vue TUI uses as input stream by default.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+      throw createManagedInputUnavailableError(
+        "Managed input is unavailable because the current process.stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
+        expectedAtMount,
       );
     }
-    throw new Error(
-      "Raw mode is not supported on the stdin provided to Vue TUI.\nRead about how to prevent this error on https://github.com/vadimdemedes/ink/#israwmodesupported",
+    throw createManagedInputUnavailableError(
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
+      expectedAtMount,
     );
   };
+
+  function assertManagedInputAvailable(): void {
+    if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin) || !isReadableHostLive(stdin)) {
+      throwManagedInputUnavailable();
+    }
+  }
+
+  function assertPublicRawModeAvailable(): void {
+    if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin) || !isReadableHostLive(stdin)) {
+      throw new Error(
+        "Raw mode is unavailable because the mounted stdin is not a controllable TTY.",
+      );
+    }
+  }
 
   function reconcilePhysicalRawMode(state: RawModeState): void {
     if (state.reconcilingPhysical) {
@@ -3415,124 +4115,291 @@ function createStdinController(
     }
   }
 
-  const controller: StdinController = {
-    stdin,
-    setRawMode(mode: boolean) {
-      if (disposed) {
-        throw new Error("Cannot change raw mode after the vue-tui application has unmounted");
+  function setSemanticDemandPublished(demand: SemanticInputDemand, published: boolean): void {
+    if (demand.published === published) return;
+    demand.published = published;
+    publishedSemanticRefs += published ? 1 : -1;
+  }
+
+  function semanticTerminalModesReady(): boolean {
+    const pasteReady =
+      !canWriteTerminalMode() ||
+      (bracketedPastePhysicallyEnabled &&
+        !bracketedPastePhysicalUncertain &&
+        pendingBracketedPasteMode === undefined);
+    return (
+      !suspended && opts.isManagedInputSurfaceReady() && opts.isKittyKeyboardReady() && pasteReady
+    );
+  }
+
+  function reconcileSemanticInputDemands(): void {
+    if (reconcilingSemanticInput) {
+      semanticInputReconcileRequested = true;
+      return;
+    }
+    reconcilingSemanticInput = true;
+    try {
+      do {
+        semanticInputReconcileRequested = false;
+
+        for (const demand of semanticInputDemands) {
+          if (demand.released) {
+            setSemanticDemandPublished(demand, false);
+            if (demand.physicalAcquired) {
+              demand.physicalAcquired = false;
+              let releaseError: unknown;
+              try {
+                controller.setBracketedPasteMode(false);
+              } catch (error) {
+                releaseError = error;
+              }
+              try {
+                releaseLogicalRawMode(true);
+              } catch (error) {
+                releaseError ??= error;
+              }
+              semanticInputDemands.delete(demand);
+              if (releaseError !== undefined) throw releaseError;
+              continue;
+            }
+            semanticInputDemands.delete(demand);
+            continue;
+          }
+
+          if (!demand.physicalAcquired && !suspended) {
+            const acquired = acquireLogicalRawMode(true) !== false;
+            if (!acquired) {
+              opts.requestTerminalReconcile();
+              continue;
+            }
+            demand.physicalAcquired = true;
+            try {
+              controller.setBracketedPasteMode(true);
+            } catch (error) {
+              demand.physicalAcquired = false;
+              releaseLogicalRawMode(true);
+              throw error;
+            }
+          }
+        }
+
+        reconcileBracketedPasteMode();
+        const ready = semanticTerminalModesReady();
+        for (const demand of semanticInputDemands) {
+          setSemanticDemandPublished(
+            demand,
+            !demand.released && demand.activationRequested && demand.physicalAcquired && ready,
+          );
+        }
+      } while (semanticInputReconcileRequested);
+    } finally {
+      reconcilingSemanticInput = false;
+    }
+  }
+
+  function acquireLogicalRawMode(managed: boolean): boolean {
+    if (disposed) {
+      throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
+    }
+    if (managed) {
+      // Managed semantic routes surface this failure transactionally before
+      // publishing their replacement. Rechecking the structural capability
+      // also prevents a setterless host that was pre-raw at mount from silently
+      // attaching after its external owner returns it to cooked mode.
+      assertManagedInputAvailable();
+      if (!suspended && !opts.beforeManagedInputAcquire()) return false;
+    } else {
+      assertPublicRawModeAvailable();
+    }
+
+    const state = getRawModeState(stdin);
+    const firstSharedRef = state.refs === 0;
+    const localRefsBefore = localRefs;
+    const kindRefsBefore = managed ? managedRawRefs : publicRawRefs;
+    let committedRef = false;
+    try {
+      if (
+        firstSharedRef &&
+        !state.pendingDisable &&
+        !state.physicalActive &&
+        !state.physicalRawUncertain &&
+        !state.physicalRefHeld &&
+        !state.physicalRefUncertain
+      ) {
+        state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
+        state.changedRawMode = !state.baselineRaw;
       }
-      // Guard at the TOP — BEFORE the enable/disable split — so the PUBLIC
-      // useStdin().setRawMode throws symmetrically on an unsupported stdin,
-      // matching Ink's handleSetRawMode (App.tsx:317-327): both setRawMode(true)
-      // and setRawMode(false) throw. The guard lives here (not in the internal
-      // releaseRawMode) because the framework's own composables — useInput /
-      // useFocus / usePaste — call acquireRawMode()/releaseRawMode() DIRECTLY at
-      // teardown, and that internal release MUST stay a no-op so an unsupported-
-      // stdin app can unmount cleanly. Only this public wrapper enforces the
-      // symmetric throw. (acquireRawMode also throws on its own, so the enable
-      // path is unchanged for the unguarded useInput consumer.)
-      if (!appCtx.isRawModeSupported) throwRawModeUnsupported();
-      if (mode) {
-        controller.acquireRawMode();
-      } else {
-        controller.releaseRawMode();
+      if (managed && managedRawRefs === 0 && inputDeliveryActive) {
+        // A newly active managed route starts a fresh application delivery
+        // generation. A public raw-only hold deliberately has no parser
+        // generation and therefore does not affect this boundary.
+        sharedSubscription.invalidate();
       }
-    },
-    isRawModeSupported: appCtx.isRawModeSupported,
-    internal_routes: inputRoutes,
-    internal_exitOnCtrlC: opts.exitOnCtrlC,
-    acquireRawMode() {
-      if (disposed) {
-        throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
+      const participatesPhysically = !suspended;
+      state.refs++;
+      if (participatesPhysically) state.activeRefs++;
+      localRefs++;
+      if (managed) managedRawRefs++;
+      else publicRawRefs++;
+      changeRuntimeResource("rawLeases", 1);
+      committedRef = true;
+      if (participatesPhysically) state.pendingDisable = false;
+      reconcilePhysicalRawMode(state);
+      reconcileSharedSubscription();
+      reconcileKittyDemand();
+    } catch (error) {
+      // A re-entrant dispose/release may already have consumed this logical
+      // acquisition. Roll back only this still-surviving kind of ref.
+      const kindRefs = managed ? managedRawRefs : publicRawRefs;
+      if (committedRef && !disposed && localRefs > localRefsBefore && kindRefs > kindRefsBefore) {
+        state.refs = Math.max(0, state.refs - 1);
+        if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
+        localRefs = Math.max(0, localRefs - 1);
+        if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
+        else publicRawRefs = Math.max(0, publicRawRefs - 1);
+        changeRuntimeResource("rawLeases", -1);
       }
-      if (!appCtx.isRawModeSupported) {
-        // The unguarded useInput path surfaces this throw directly; useFocus
-        // guards before calling (see composables/useFocus.ts), so it degrades to
-        // a no-op like Ink.
-        throwRawModeUnsupported();
-      }
-      const state = getRawModeState(stdin);
-      const firstSharedRef = state.refs === 0;
-      const localRefsBefore = localRefs;
-      let committedRef = false;
+      if (state.activeRefs === 0) state.pendingDisable = false;
+      runTerminalCleanup(() => reconcilePhysicalRawMode(state));
+      resetRawModeStateIfIdle(state);
+      runTerminalCleanup(reconcileSharedSubscription);
+      runTerminalCleanup(reconcileKittyDemand);
+      throw error;
+    }
+    return true;
+  }
+
+  function releaseLogicalRawMode(managed: boolean): void {
+    if (!appCtx.isRawModeSupported) return;
+    if (managed ? managedRawRefs === 0 : publicRawRefs === 0) return;
+    const state = getRawModeState(stdin);
+    state.refs = Math.max(0, state.refs - 1);
+    if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
+    localRefs = Math.max(0, localRefs - 1);
+    if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
+    else publicRawRefs = Math.max(0, publicRawRefs - 1);
+    changeRuntimeResource("rawLeases", -1);
+    let firstError: unknown;
+    try {
+      reconcileKittyDemand();
+    } catch (error) {
+      firstError = error;
+    }
+    if (managed && managedRawRefs === 0) {
+      // End the managed delivery generation even when a public raw-only owner
+      // keeps the physical terminal raw.
       try {
-        if (
-          firstSharedRef &&
-          !state.pendingDisable &&
-          !state.physicalActive &&
-          !state.physicalRawUncertain &&
-          !state.physicalRefHeld &&
-          !state.physicalRefUncertain
-        ) {
-          state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
-          state.changedRawMode = !state.baselineRaw;
-        }
-        if (localRefs === lifetimeFloor && inputDeliveryActive) {
-          // A lifetime raw hold keeps protocol/default processing alive even
-          // while no composable consumes application input. Starting the next
-          // consumer invalidates framing units that began on that idle screen.
-          // Initial Vue setup is different: a terminal can synchronously send
-          // the prefix of an event beside the Kitty capability query before
-          // setup installs the first route. That prefix belongs to the initial
-          // bootstrap snapshot and must survive until activateInputDelivery()
-          // binds it to the complete initial route set.
-          sharedSubscription.invalidate();
-        }
-        const participatesPhysically = !suspended;
-        state.refs++;
-        if (participatesPhysically) state.activeRefs++;
-        localRefs++;
-        committedRef = true;
-        if (participatesPhysically) state.pendingDisable = false;
-        reconcilePhysicalRawMode(state);
-        reconcileSharedSubscription();
+        sharedSubscription.invalidate();
       } catch (error) {
-        // A re-entrant dispose/release may already have consumed this logical
-        // acquisition. Roll it back only while its local count still exists.
-        if (committedRef && !disposed && localRefs > localRefsBefore) {
-          state.refs = Math.max(0, state.refs - 1);
-          if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
-          localRefs = Math.max(0, localRefs - 1);
-        }
-        if (state.activeRefs === 0) state.pendingDisable = false;
+        firstError = error;
+      }
+      pendingApplicationInput.length = 0;
+    }
+    try {
+      reconcileSharedSubscription();
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (
+      state.activeRefs === 0 &&
+      (state.physicalActive ||
+        state.physicalRawUncertain ||
+        state.physicalRefHeld ||
+        state.physicalRefUncertain)
+    ) {
+      // Defer only the shared physical toggle, allowing a same-tick replacement
+      // hook or managed route to inherit the already-active terminal state.
+      state.pendingDisable = true;
+      queueMicrotask(() => {
+        if (!state.pendingDisable || state.activeRefs > 0) return;
+        state.pendingDisable = false;
         runTerminalCleanup(() => reconcilePhysicalRawMode(state));
         resetRawModeStateIfIdle(state);
-        runTerminalCleanup(reconcileSharedSubscription);
+      });
+    } else {
+      resetRawModeStateIfIdle(state);
+    }
+    // Release is cleanup. Preserve progress across a hostile listener removal;
+    // controller disposal retries physical restoration.
+    void firstError;
+  }
+
+  controller = {
+    stdin,
+    isRawModeSupported: appCtx.isRawModeSupported,
+    inputSubscriptions,
+    setCleanupErrorSink(sink) {
+      cleanupErrorSink = sink;
+    },
+    acquirePublicRawMode() {
+      acquireLogicalRawMode(false);
+      let active = true;
+      return () => {
+        if (!active) return;
+        active = false;
+        releaseLogicalRawMode(false);
+      };
+    },
+    acquireSemanticInput() {
+      try {
+        assertManagedInputAvailable();
+        const demand: SemanticInputDemand = {
+          activationRequested: false,
+          physicalAcquired: false,
+          published: false,
+          released: false,
+        };
+        semanticInputDemands.add(demand);
+        try {
+          reconcileSemanticInputDemands();
+        } catch (error) {
+          demand.released = true;
+          runTerminalCleanup(reconcileSemanticInputDemands);
+          throw error;
+        }
+        return Object.freeze({
+          activate() {
+            if (demand.released || demand.activationRequested) return;
+            demand.activationRequested = true;
+            try {
+              reconcileSemanticInputDemands();
+            } catch (error) {
+              opts.reportManagedInputFailure(error);
+              throw error;
+            }
+          },
+          release() {
+            if (demand.released) return;
+            demand.activationRequested = false;
+            setSemanticDemandPublished(demand, false);
+            // Vue removes an old branch before mounting its same-tick replacement.
+            // Keep the physical lease until the microtask boundary so a
+            // replacement can acquire without a listener/raw-mode gap.
+            queueMicrotask(() => {
+              if (demand.released) return;
+              demand.released = true;
+              runTerminalCleanup(reconcileSemanticInputDemands);
+            });
+          },
+        });
+      } catch (error) {
+        opts.reportManagedInputFailure(error);
         throw error;
       }
     },
-    holdRawModeForLifetime() {
-      // Same as acquireRawMode (raw on + ref + data listener), but marks the
-      // resulting ref as the App's lifetime floor: input composables stack above
-      // it, and releaseRawMode's input-state cleanup fires when the last consumer
-      // returns localRefs to this floor (1) rather than 0. So raw mode and the
-      // listener stay alive across no-input screens, but a buffered partial escape
-      // is still cleared when an input composable unmounts — no bleed into the next.
-      controller.acquireRawMode();
-      if (!disposed) lifetimeFloor = 1;
+    hasManagedInputDemand() {
+      return !disposed && managedRawRefs > 0;
     },
     startKittyQueryResponseDetection(onResult) {
       let settled = false;
       let cancelSharedDetection:
         | ReturnType<SharedStdinIngress["startKittyQueryResponseDetection"]>
         | undefined;
-      activeKittyQueryDetections++;
-      try {
-        reconcileSharedSubscription();
-        cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
-          if (settled) return;
-          settled = true;
-          try {
-            onResult(supported);
-          } finally {
-            finishKittyQueryDetection();
-          }
-        }, sharedSubscription);
-      } catch (error) {
-        activeKittyQueryDetections = Math.max(0, activeKittyQueryDetections - 1);
-        runTerminalCleanup(reconcileSharedSubscription);
-        throw error;
-      }
+      cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
+        if (settled) return;
+        settled = true;
+        onResult(supported);
+      }, sharedSubscription);
       return (options) => {
         if (settled) return;
         settled = true;
@@ -3541,12 +4408,6 @@ function createStdinController(
           cancelSharedDetection?.(options);
         } catch (error) {
           firstError = error;
-        } finally {
-          try {
-            finishKittyQueryDetection();
-          } catch (error) {
-            firstError ??= error;
-          }
         }
         if (firstError !== undefined) throw firstError;
       };
@@ -3554,8 +4415,8 @@ function createStdinController(
     activateInputDelivery() {
       if (inputDeliveryActive || disposed) return;
       // Input received beside a synchronous Kitty query reply can predate Vue
-      // setup. Bind that bootstrap sentinel to the complete initial route set,
-      // then retain this exact snapshot even if a route changes before the
+      // setup. Bind that bootstrap sentinel to the complete initial subscriber
+      // set, then retain this exact snapshot even if a subscription changes before the
       // split event finishes.
       const initialSnapshot = snapshotCurrentApplicationInput();
       if (pendingBootstrapInputSnapshot) pendingBootstrapInputSnapshot.resolved = initialSnapshot;
@@ -3565,117 +4426,78 @@ function createStdinController(
       pendingBootstrapInputSnapshot = undefined;
       inputDeliveryActive = true;
       flushPendingApplicationInput();
-      if (activeKittyQueryDetections === 0 && localRefs === 0) {
+      if (managedRawRefs === 0) {
         sharedSubscription.invalidate();
         pendingApplicationInput.length = 0;
         reconcileSharedSubscription();
       }
     },
+    reconcileTerminalState() {
+      if (disposed) return;
+      // Resolve subscription changes before retrying an ambiguous terminal
+      // mode so bracketed paste observes the newest reference count.
+      reconcileSemanticInputDemands();
+      reconcileBracketedPasteMode();
+      reconcileSharedSubscription();
+      flushPendingApplicationInput();
+    },
+    abandonPendingTerminalOutput(options) {
+      if (options?.physicalStateUncertain) {
+        if (pendingBracketedPasteMode) bracketedPastePhysicalUncertain = true;
+      }
+      pendingBracketedPasteMode = undefined;
+      for (const demand of semanticInputDemands) {
+        if (!semanticTerminalModesReady()) setSemanticDemandPublished(demand, false);
+      }
+      if (options?.physicalStateUncertain) {
+        // The coordinator is idle before it reports a physical stream failure.
+        // Converge immediately to a terminal-safe paste-OFF state.
+        runTerminalCleanup(reconcileBracketedPasteMode);
+      } else {
+        opts.requestTerminalReconcile();
+      }
+    },
     setBracketedPasteMode(enabled: boolean) {
       if (disposed) return;
       if (enabled) {
+        const bracketedPasteModeCountBefore = bracketedPasteModeCount;
         bracketedPasteModeCount++;
+        changeRuntimeResource("pasteLeases", 1);
         try {
           reconcileBracketedPasteMode();
         } catch (error) {
-          bracketedPasteModeCount = Math.max(0, bracketedPasteModeCount - 1);
+          if (!disposed && bracketedPasteModeCount > bracketedPasteModeCountBefore) {
+            bracketedPasteModeCount--;
+            changeRuntimeResource("pasteLeases", -1);
+          }
           runTerminalCleanup(reconcileBracketedPasteMode);
           throw error;
         }
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
+        changeRuntimeResource("pasteLeases", -1);
+        // Let the semantic release finish before retrying an ambiguous OFF. A
+        // re-entrant replacement can then establish the newest desired count,
+        // so reconciliation emits ON directly instead of an obsolete second
+        // OFF followed by ON.
         try {
           reconcileBracketedPasteMode();
         } catch (error) {
+          // A custom stream may accept OFF and then throw while this reconciler
+          // is still on the stack. Retry the idempotent cleanup after it has
+          // unwound, then preserve the original release error for the caller's
+          // existing best-effort cleanup boundary.
           runTerminalCleanup(reconcileBracketedPasteMode);
           throw error;
         }
       }
     },
-    acquireSgrMouseMode(level: SgrMouseMode = "button") {
-      const token = Symbol("sgr-mouse");
-      if (disposed) return token;
-      sgrMouseModeTokens.set(token, level);
-      try {
-        reconcileSgrMouseMode();
-      } catch (error) {
-        // A throwing terminal write means this call never returns its token, so
-        // leaving it in the request map would create an ownerless SGR lease.
-        // Remove the logical request and attempt to restore the previous level
-        // without replacing the original acquisition error.
-        sgrMouseModeTokens.delete(token);
-        runTerminalCleanup(reconcileSgrMouseMode);
-        throw error;
-      }
-      return token;
-    },
-    releaseSgrMouseMode(token: symbol) {
-      if (!sgrMouseModeTokens.delete(token)) return;
-      if (!disposed) {
-        try {
-          reconcileSgrMouseMode();
-        } catch (error) {
-          runTerminalCleanup(reconcileSgrMouseMode);
-          throw error;
-        }
-      }
-    },
-    releaseRawMode() {
-      if (!appCtx.isRawModeSupported) return;
-      if (localRefs === 0) return;
-      const state = getRawModeState(stdin);
-      state.refs = Math.max(0, state.refs - 1);
-      if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
-      localRefs = Math.max(0, localRefs - 1);
-      let firstError: unknown;
-      if (localRefs === lifetimeFloor) {
-        // End this app-level delivery generation. Handler-level route snapshots
-        // belong to the later routing/lifetime checkpoint; once no app consumer remains, orphaned
-        // framing is discarded and the physical listener may detach.
-        try {
-          sharedSubscription.invalidate();
-        } catch (error) {
-          firstError = error;
-        }
-        pendingApplicationInput.length = 0;
-      }
-      try {
-        reconcileSharedSubscription();
-      } catch (error) {
-        firstError ??= error;
-      }
-      if (
-        state.activeRefs === 0 &&
-        (state.physicalActive ||
-          state.physicalRawUncertain ||
-          state.physicalRefHeld ||
-          state.physicalRefUncertain)
-      ) {
-        // Defer ONLY the SHARED terminal raw-mode toggle (Ink defers just disableRawMode,
-        // App.tsx:359-368): when components swap (v-if/key change), Vue unmounts
-        // the old before mounting the new, so activeRefs briefly hits 0. Disabling
-        // synchronously would drop raw mode between the two mounts; the microtask
-        // short-circuits if a replacement re-acquired in the meantime — which it
-        // signals by clearing pendingDisable (matching Ink's flag, App.tsx:362-365).
-        state.pendingDisable = true;
-        queueMicrotask(() => {
-          if (!state.pendingDisable || state.activeRefs > 0) return;
-          state.pendingDisable = false;
-          runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-          resetRawModeStateIfIdle(state);
-        });
-      } else {
-        resetRawModeStateIfIdle(state);
-      }
-      // Release is terminal cleanup. Preserve progress across a hostile
-      // listener removal instead of surfacing an error that could abort the
-      // remaining Vue scope disposals; dispose() retries the physical restore.
-      void firstError;
-    },
     suspend(sync = false) {
       if (suspended) return;
       suspended = true;
+      resumeAwaitingTerminalModes = false;
+      for (const demand of semanticInputDemands) setSemanticDemandPublished(demand, false);
       // Keep a physical framing unit that began before suspension long enough
       // to find its boundary, but invalidate this app as a recipient. That lets
       // a sole app resume after a split CSI/paste/UTF-8 unit without receiving
@@ -3685,7 +4507,6 @@ function createStdinController(
       runTerminalCleanup(reconcileSharedSubscription);
 
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
-      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
 
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
@@ -3701,6 +4522,7 @@ function createStdinController(
       let addedActiveRawRefs = 0;
 
       suspended = false;
+      resumeAwaitingTerminalModes = true;
       try {
         // Reacquire raw input first. The shared reconciler re-checks desired
         // counts after every host callback, so a synchronous re-entrant suspend
@@ -3714,11 +4536,8 @@ function createStdinController(
         if (suspended || disposed) return;
         reconcileBracketedPasteMode();
         if (suspended || disposed) return;
-        reconcileSgrMouseMode();
-        if (suspended || disposed) return;
-        // Only expose buffered input after every parser-affecting terminal mode
-        // is active. A custom ReadStream may synchronously deliver from resume();
-        // SGR mouse must already be classified as mouse rather than useInput text.
+        // Only expose buffered input after parser-affecting terminal modes are active.
+        reconcileSemanticInputDemands();
         reconcileSharedSubscription();
         flushPendingApplicationInput();
       } catch (error) {
@@ -3729,8 +4548,8 @@ function createStdinController(
           );
         }
         if (!disposed) suspended = true;
+        resumeAwaitingTerminalModes = false;
         runTerminalCleanup(reconcileBracketedPasteMode);
-        runTerminalCleanup(reconcileSgrMouseMode);
         if (state) {
           state.pendingDisable = false;
           runTerminalCleanup(() => reconcilePhysicalRawMode(state));
@@ -3740,58 +4559,60 @@ function createStdinController(
         throw error;
       }
     },
-    dispose(sync = false) {
-      if (disposed) return;
+    dispose(sync = false, reissueAbruptTerminalDisables = sync) {
+      if (disposed) {
+        // A captured asynchronous restoration can fail only when its transaction
+        // reaches the stream. Keep repeated synchronous disposal useful so the
+        // emergency path can re-send terminal OFF modes after that late failure.
+        if (sync && reissueAbruptTerminalDisables) {
+          reissueIdempotentTerminalDisables(true);
+        }
+        return;
+      }
       disposed = true;
+      runTerminalCleanup(reconcileKittyDemand);
       pendingApplicationInput.length = 0;
       inputDeliveryActive = false;
       drainingApplicationInput = false;
       sharedSubscriptionActive = false;
       // A hostile stream may throw while removing the final data listener.
-      // Input ownership failure must not skip paste/mouse/Kitty/raw cleanup.
+      // Input ownership failure must not skip paste/Kitty/raw cleanup.
       runTerminalCleanup(() => sharedSubscription.dispose());
-      detachFocusInputRoute();
-      inputRoutes.clear();
-      runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
-      runTerminalCleanup(() => reconcileSgrMouseMode(sync));
+      inputSubscriptions.clear();
+      for (const demand of semanticInputDemands) {
+        demand.released = true;
+        demand.physicalAcquired = false;
+        setSemanticDemandPublished(demand, false);
+      }
+      semanticInputDemands.clear();
+      // Normal teardown itself owns one unhanded output transaction. Preserve
+      // terminal-mode callbacks captured by Vue scope cleanup so the handoff
+      // commits their physical state exactly once. Abrupt teardown aborts that
+      // transaction and explicitly abandons these pending callbacks first.
       if (sync) {
+        pendingBracketedPasteMode = undefined;
+      }
+      resumeAwaitingTerminalModes = false;
+      runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
+      if (sync && reissueAbruptTerminalDisables) {
         // Signal-exit path (Finding A): the paste-OFF escape must flush
         // synchronously. By the time dispose() runs, Vue's unmount has usually
-        // already fired usePaste's onScopeDispose → detach → setBracketedPasteMode
-        // (false), which wrote `\x1b[?2004l` ASYNC and zeroed the count — and that
+        // already disposed the semantic-input lease, which wrote `\x1b[?2004l`
+        // ASYNC and zeroed the count — and that
         // async write is exactly what signal-exit's immediate re-raise can drop.
         // So re-issue it SYNCHRONOUSLY here whenever paste was ever enabled, not
         // gated on the (now-zero) live count. Re-sending paste-OFF is idempotent:
         // disabling an already-disabled mode is a terminal no-op, so a redundant
         // sync write after a surviving async one is harmless. If detach hasn't run
         // yet (count still > 0), this single sync write still covers it.
-        if (everEnabledBracketedPaste) {
-          runTerminalCleanup(() => forceDisableBracketedPaste(true));
-        }
-        if (everEnabledSgrMouse) {
-          runTerminalCleanup(() => {
-            if (disableSgrMouse(ownedSgrMouseModes, true)) {
-              activeSgrMouseMode = undefined;
-              sgrMousePhysicalUncertain = false;
-            }
-          });
-        }
+        reissueIdempotentTerminalDisables(true);
       } else {
         if (bracketedPastePhysicalUncertain) {
-          runTerminalCleanup(() => forceDisableBracketedPaste(false));
-        }
-        if (sgrMousePhysicalUncertain) {
-          runTerminalCleanup(() => {
-            if (disableSgrMouse(ownedSgrMouseModes)) {
-              activeSgrMouseMode = undefined;
-              sgrMousePhysicalUncertain = false;
-            }
-          });
+          runTerminalCleanup(() => forceDisableBracketedPaste(sync));
         }
       }
+      changeRuntimeResource("pasteLeases", -bracketedPasteModeCount);
       bracketedPasteModeCount = 0;
-      sgrMouseModeTokens.clear();
-      ownedSgrMouseModes.clear();
       if (appCtx.isRawModeSupported) {
         const state = getRawModeState(stdin);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already
@@ -3801,8 +4622,11 @@ function createStdinController(
             state.activeRefs = Math.max(0, state.activeRefs - localRefs);
           }
           state.refs = Math.max(0, state.refs - localRefs);
+          changeRuntimeResource("rawLeases", -localRefs);
           localRefs = 0;
         }
+        managedRawRefs = 0;
+        publicRawRefs = 0;
         // Reconcile terminal raw mode synchronously when ownership changes. This
         // covers BOTH teardown orderings:
         //   (1) dispose() ran while this controller still held refs (above), or

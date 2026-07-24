@@ -34,21 +34,3 @@ it("patched console.log appears above the on-screen frame", async () => {
   expect(firstIdx).toBeLessThan(frameIdx);
   expect(frameIdx).toBeLessThan(secondIdx);
 });
-
-it("useStdout.write in real terminal", async () => {
-  const output = await run("use-stdout");
-  expect(output).toContain("Hello from vue-tui to stdout");
-  expect(output).toContain("exited");
-});
-
-// Port of Ink hooks.tsx:92-103 ("useStdout - write to stdout"): an external
-// useStdout().write while a frame is on screen is hoisted ABOVE the preserved
-// frame. After stripping ANSI and splitting on \r\n, the inner lines (dropping
-// the leading initial-frame line and the trailing empty segment) are EXACTLY
-// the external write, the preserved frame, and the post-exit log — in order.
-it("useStdout.write appears above the preserved frame (exact ordering)", async () => {
-  const output = await run("use-stdout");
-
-  const lines = stripAnsi(output).split("\r\n");
-  expect(lines.slice(1, -1)).toEqual(["Hello from vue-tui to stdout", "Hello World", "exited"]);
-});

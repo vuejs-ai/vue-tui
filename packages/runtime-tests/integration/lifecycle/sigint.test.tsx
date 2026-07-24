@@ -1,66 +1,150 @@
 import { defineComponent } from "vue";
-import { expect, test, vi } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Text, useInput } from "@vue-tui/runtime";
+import { Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
 
-test("exitOnCtrlC intercepts \\x03 and exits the app", async () => {
-  const handler = vi.fn();
+const noModifiers = {
+  shift: false,
+  alt: false,
+  ctrl: false,
+  meta: false,
+  super: false,
+  hyper: false,
+} as const;
+
+test.each([
+  ["omitted", undefined],
+  ["false", false],
+] as const)("exitOnCtrlC %s delivers Ctrl+C as ordinary input", async (_label, exitOnCtrlC) => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput(handler);
+    useInput((event) => {
+      events.push(event);
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+  const host = exitOnCtrlC === undefined ? {} : { exitOnCtrlC };
+  const result = await render(App, { host });
 
-  await stdin.write("\x03");
-  // \x03 is intercepted before reaching useInput handlers
-  expect(handler).not.toHaveBeenCalled();
-  await expect(waitUntilExit()).resolves.toBeUndefined();
+  await result.stdin.write("\x03");
+  await result.stdin.write("x");
+
+  expect(events).toEqual([
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true },
+    },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
 });
 
-test("exitOnCtrlC=false does not intercept \\x03", async () => {
-  const calls: Array<{ input: string }> = [];
+test.each(["inline", "fullscreen"] as const)(
+  "exitOnCtrlC true exits %s before delivering the exact key",
+  async (mode) => {
+    const events: TuiInputEvent[] = [];
+    const App = defineComponent(() => {
+      useInput((event) => {
+        events.push(event);
+      });
+      return () => <Text>x</Text>;
+    });
+    const result = await render(App, { host: { mode, exitOnCtrlC: true } });
+
+    await result.stdin.write("\x03");
+
+    expect(events).toEqual([]);
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+    expect(result.terminal.rawMode.current).toBe(false);
+    result.dispose();
+  },
+);
+
+test("exitOnCtrlC true delivers Ctrl+C with any other command modifier", async () => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput((input) => calls.push({ input }));
+    useInput((event) => {
+      events.push(event);
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, unmount } = await render(App, { exitOnCtrlC: false });
+  const result = await render(App, { host: { exitOnCtrlC: true } });
 
-  await stdin.write("\x03");
-  // With exitOnCtrlC=false, Ctrl+C reaches the useInput handler
-  expect(calls.length).toBe(1);
-  expect(calls[0]?.input).toBe("c");
-  unmount();
-});
-
-test("exitOnCtrlC does not intercept Ctrl+C with another command modifier", async () => {
-  const calls: string[] = [];
-  const App = defineComponent(() => {
-    useInput((input) => calls.push(input));
-    return () => <Text>x</Text>;
-  });
-  const { stdin, unmount } = await render(App, { exitOnCtrlC: true });
-
-  // Ctrl+Alt, Ctrl+Super, Ctrl+Hyper, and Ctrl+Meta are distinct shortcuts.
-  for (const encodedModifiers of [7, 13, 21, 37]) {
-    await stdin.write(`\x1b[99;${encodedModifiers}u`);
+  for (const encodedModifiers of [6, 7, 13, 21, 37]) {
+    await result.stdin.write(`\x1b[99;${encodedModifiers}u`);
   }
 
-  expect(calls).toEqual(["c", "c", "c", "c"]);
-  unmount();
+  expect(events).toEqual([
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, shift: true, ctrl: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, alt: true, ctrl: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, super: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, hyper: true },
+    },
+    {
+      type: "key",
+      key: { character: "c", ...noModifiers, ctrl: true, meta: true },
+    },
+  ]);
+
+  await result.stdin.write("\x03");
+  expect(events).toHaveLength(5);
+  await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  result.dispose();
 });
 
-test("exitOnCtrlC recognizes a Kitty base-layout Ctrl+C", async () => {
-  const handler = vi.fn();
+test("exitOnCtrlC uses logical primary identity rather than Kitty base-layout metadata", async () => {
+  const events: TuiInputEvent[] = [];
   const App = defineComponent(() => {
-    useInput(handler);
+    useInput((event) => {
+      events.push(event);
+    });
     return () => <Text>x</Text>;
   });
-  const { stdin, waitUntilExit } = await render(App, { exitOnCtrlC: true });
+  const result = await render(App, { host: { exitOnCtrlC: true } });
 
-  // The primary key follows the active layout; the protocol reports the US
-  // base-layout key separately so framework shortcuts can remain stable.
-  await stdin.write("\x1b[1089::99;5u");
+  await result.stdin.write("\x1b[1089::99;5u");
+  await result.stdin.write("x");
 
-  expect(handler).not.toHaveBeenCalled();
-  await expect(waitUntilExit()).resolves.toBeUndefined();
+  expect(events).toEqual([
+    {
+      type: "key",
+      key: { character: "с", ...noModifiers, ctrl: true },
+    },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
+});
+
+test("exitOnCtrlC never interprets pasted Ctrl+C as the exit shortcut", async () => {
+  const events: TuiInputEvent[] = [];
+  const App = defineComponent(() => {
+    useInput((event) => {
+      events.push(event);
+    });
+    return () => <Text>x</Text>;
+  });
+  const result = await render(App, { host: { exitOnCtrlC: true } });
+
+  await result.stdin.write("\x1b[200~\x03\x1b[201~");
+  await result.stdin.write("x");
+
+  expect(events).toEqual([
+    { type: "paste", text: "\x03" },
+    { type: "text", text: "x" },
+  ]);
+  expect(result.terminal.rawMode.current).toBe(true);
+  result.unmount();
 });

@@ -1,5 +1,7 @@
 # Mouse input — design & decision record
 
+> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath and removes the old decoder, controller, targeting, capture, reporting, and test-host implementations. Unsolicited complete SGR mouse reports are ignored before they can become public key or text input. A future target-bound pointer feature must prove and add a narrow Runtime-owned operation from a real journey; this conclusion does not alter the accepted `Static` contract, preselect the operation's public shape, or add a vouch.
+
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:
 > [#207](https://github.com/vuejs-ai/vue-tui/issues/207). Builds on the low-level stream
@@ -12,24 +14,13 @@
 > visible surface and hit map at the same origin is recorded in
 > [fullscreen-output.md](./fullscreen-output.md). §5 records the shipped v1 event shape as historical
 > evidence; the experimental API-stability policy does not require the target API to preserve it.
-> Target-ref, dispatch, bubbling, low-level raw-mouse shape, hover, selection/clipboard, side
-> buttons, and pixel mode remain open or deferred as described below.
+> At that checkpoint, target refs, dispatch, bubbling, low-level raw-mouse shape, hover,
+> selection/clipboard, side buttons, and pixel mode remained open or deferred. The current
+> correction below supersedes those future-facing v1 conclusions.
 >
-> **Current API-design correction (2026-07-11):** this file records the shipped v1 implementation
-> and its historical rationale; it no longer settles the future public placement or authoring shape
-> of targeted pointer APIs. Under the [experimental API-stability policy](./goal.md#api-stability-during-experimentation), shipped v1 APIs may be replaced or removed directly once their target contracts are accepted. The working direction removes targeted listeners from common `Box` and
-> `Text`, does not add a `PointerBox`, and validates a ref-bound composable such as
-> `usePointerEvent(target, type, handler)` from `@vue-tui/runtime/fullscreen`. Under the proposed
-> contract, full-screen targeted composables acquire mouse reporting only while a rendered target
-> needs it, while interactive inline use is rejected because it has no reliable element hit-test
-> origin. Terminal-wide raw mouse remains conceptually separate from targeted pointer delivery, but
-> the current root `useMouseInput` name, export path, coordinate base, and vertical-wheel-only shape
-> are reopened rather than preserved for compatibility. The accepted mount target is one
-> `createApp` with optional `mode: "inline" | "fullscreen"` and an Inline omission default. F1.4
-> now implements that mount contract and removes `fullscreen`, `alternateScreen`, and `interactive`
-> directly. The targeted-pointer replacement itself remains F6 work.
+> **Current API-design correction (2026-07-14):** this file records the shipped v1 implementation and its historical rationale; it no longer describes the current public authoring surface. The selected unstamped F6 contract is implemented in [Fullscreen targeted pointer](./targeted-pointer.md): common components reject listener fallthrough; `@vue-tui/runtime/fullscreen` supplies a keyed `useMouseEvent()` for click and wheel plus one rendered-host-owned `useMouseDrag()` lifecycle; accepted paint geometry drives targeting; active visible demand selects `1000` or `1002`; effective visual Inline fails while expected non-targetable presentations remain inert. It adds no separate mouse authorization or availability API. It directly removes v1 listener props, root `useDraggable()`, root `useMouseInput()`, and their historical mutable/clipped event types without compatibility shims. The one-`createApp`, optional-`mode`, default-Inline mount contract remains unchanged. Automated, PTY, headless visual, direct native macOS Terminal selection/wheel, and cleanup evidence pass, so F6 is Done.
 >
-> **F2 implementation update (2026-07-12, unstamped):** current `useDraggable()` now consumes the shared internal [rendered-target lifetime](./rendered-target-lifetime.md). It follows insertion, keyed inner-root replacement, removal, scope disposal, HMR, and stale Vue 3.4 component refs by resolved host identity; active capture and raw/SGR ownership end when that host disappears. This fixes the lifecycle mechanism without accepting the current root export, public signature, event model, or common-component listeners as the F6 target API.
+> **F2 implementation update (2026-07-12, unstamped):** at the F2 checkpoint, `useDraggable()` consumed the shared internal [rendered-target lifetime](./rendered-target-lifetime.md). It followed insertion, keyed inner-root replacement, removal, scope disposal, HMR, and stale Vue 3.4 component refs by resolved host identity; active capture and raw/SGR ownership ended when that host disappeared. This fixed the lifetime mechanism without accepting the then-current root export, public signature, event model, or common-component listeners as the F6 target API. F6 later removed that public hook while reusing the mechanism.
 >
 > Carry new design work through [api-design.md](./api-design.md) and the bounded
 > [terminal UI prior-art record](./terminal-ui-prior-art.md), not the superseded v1 conclusions below.
@@ -89,12 +80,7 @@ top-left sits on the physical screen.
   row, so an absolute click cannot currently be mapped reliably to a node. Content flushed outside
   the tracked layout, such as `<Static>`, can also shift the live region.
 
-- **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount.
-  Every commit clears and homes that viewport, then paints the complete frame from screen origin
-  `(0,0)`. Yoga receives the current terminal height, and paint plus hit testing are clipped to the
-  addressable rows. Coordinated Static/stdout/stderr/console writes are followed by the same repaint,
-  so they cannot move the visible frame away from the hit map. Direct `process.stdout.write()` calls
-  bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
+- **Full-screen (alternate buffer):** vue-tui owns a terminal-sized viewport for the whole mount. After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, `app.clear()`, uncertain physical output state, and coordinated stdout/stderr/console output clear, home, and repaint the complete viewport. Yoga receives the current terminal height, and paint plus hit testing are clipped to the addressable rows, so output cannot move the visible frame away from the hit map. `/inline` Static presence is rejected before a new Fullscreen target frame, so it cannot move or publish stale hit geometry. Direct `process.stdout.write()` calls bypass this coordination; see [fullscreen-output.md](./fullscreen-output.md).
 
 Full-screen is sufficient for the current implementation, not a universal requirement. fzf proves
 that a bounded main-screen application can query its physical origin, translate SGR coordinates,
@@ -401,7 +387,7 @@ must not change the public event / `MouseTarget.rect` contract.
   and `alternateScreen` its deprecated alias in shipped v1. F1.4 replaced both with `mode`, without
   a compatibility alias. This naming decision does not settle
   whether full-screen or inline should be the product's primary mode; see
-  [goal.md](./goal.md#rendering-modes).
+  [intent.md](./intent.md#rendering-modes).
 
 ## 9. Deliberately out of scope (v1)
 

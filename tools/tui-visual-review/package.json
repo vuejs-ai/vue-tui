@@ -7,7 +7,10 @@
   "scripts": {
     "start": "tsx controller.ts",
     "fullscreen-origin": "tsx controller.ts --target fullscreen-origin",
-    "input-routing": "tsx controller.ts --target input-routing",
+    "scroll-box": "tsx controller.ts --target scroll-box",
+    "spinner": "tsx controller.ts --target spinner",
+    "inline-history": "tsx controller.ts --target inline-history",
+    "v-show": "tsx controller.ts --target v-show",
     "smoke": "tsx smoke.ts",
     "check:type": "tsc --noEmit"
   },

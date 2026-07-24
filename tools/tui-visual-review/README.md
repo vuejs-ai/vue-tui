@@ -16,16 +16,27 @@ For the fullscreen fixed-origin regression fixture, use:
 vp run visual:fullscreen-origin
 ```
 
-Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-wide|horizontal-transform|screen-reader>` after `--` to choose a focused state; `static` is the default.
-
-For input routing across multiple facts in one PTY write, use:
+For the public ScrollBox example and its imperative scrolling behavior, use:
 
 ```sh
-vp run visual:input-routing -- --scenario inline
-vp run visual:input-routing -- --scenario fullscreen
+vp run visual:scroll-box
 ```
 
-The fixture starts with route B active. Send `x` and Backspace in one `input` request; the visible trace must finish with `A:x | B:x | A:Backspace | C:Backspace`, exercising the end-to-end route transition and terminal restoration. The deterministic fake-stream matrix proves the exact one-chunk grouping because one PTY write does not require Node to emit one `data` chunk.
+Wait for several streamed lines, observe the sticky-bottom state, then use Up or Home to leave the bottom. Let more lines arrive and confirm the viewport keeps its chosen offset; use End to restore sticky-bottom following before quitting with `q` and checking terminal restoration.
+
+Pass `--scenario <static|stdout|stderr|console|rerender|overflow|horizontal-overflow|horizontal-left-wide|horizontal-wide|horizontal-transform|foreground-reset|box-text-contract>` after `--` to choose a focused state; `static` is the default.
+
+For the public Spinner component and its component-owned timer, use:
+
+```sh
+vp run visual:spinner
+```
+
+Observe the `0 current glyph` line, wait for a visible revision, then observe again and confirm that the leading glyph advances while the label stays fixed. Load both PNGs. Quit with `q` from an observation (use `allowStale` with the reason that the animated glyph may advance), wait for `__VT_APP_EXIT__:0`, and observe the restored shell before closing the controller.
+
+Use `vp run visual:fullscreen-origin -- --scenario foreground-reset` to inspect nested `color="default"` foreground behavior, wrapping, sibling colors, inherited background, literal private-use characters, and shell restoration. Use `--scenario box-text-contract` for the complete Box/Text phase: inspect the reverse wrapped panels, gap and border-edge state, independent foreground/background defaults, modifier cascade, clipping, truncation, hard wrapping, and absolute badge; resize narrower, press `t` to withdraw the explicit gap, padding, border-edge, bold, and dim overrides, then quit with `q` and verify shell restoration. Use `vp run visual:inline-history` to inspect the final Inline committed `Static` history plus newest live tail. Use `vp run visual:v-show` to inspect hide, hidden-state update, show-again without automatic Focus restoration, explicit `f` reacquisition, measurement, and terminal restoration one observed action at a time.
+
+The former targeted-pointer, arbitrary-Text selection, and Runtime clipboard visual journeys are intentionally absent. Those capabilities are outside the current minimum public Runtime foundation; a future public journey should be added only after a smaller Runtime-only primitive is justified.
 
 The command builds the workspace targets required by its selected review target, then prints a JSON `ready` event. Keep the process running and send one JSON object per line. Start by waiting for a named state and observing it:
 

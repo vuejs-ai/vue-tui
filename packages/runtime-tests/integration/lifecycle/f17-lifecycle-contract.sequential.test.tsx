@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useStdout } from "@vue-tui/runtime";
-import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { useStdout } from "../../../runtime/dist/internal.mjs";
+import { bsu, esu } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 function makeTtyWritable(): NodeJS.WriteStream & { chunks: string[] } {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
@@ -53,17 +55,17 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
   const app = createApp(defineComponent(() => () => null));
   let mountError: unknown;
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      rawMode: "always",
-      exitOnCtrlC: false,
-      maxFps: 0,
-      patchConsole: false,
-    });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
   } catch (error) {
     mountError = error;
   }
@@ -86,7 +88,7 @@ test.sequential("a resize-listener registration failure rolls the whole mount tr
     error: "resize registration failed",
     leftAlternateScreen: true,
     rawMode: false,
-    rawModeCalls: [true, false],
+    rawModeCalls: [],
   });
 });
 
@@ -96,16 +98,16 @@ test.sequential("raw-mode teardown restores a pre-existing raw stdin baseline", 
   const { stream: stdin } = makeRawTrackingStdin(true);
   const app = createApp(defineComponent(() => () => null));
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "always",
-    exitOnCtrlC: false,
-    maxFps: 0,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   app.unmount();
 
   expect(stdin.isRaw).toBe(true);
@@ -124,26 +126,33 @@ test.sequential("raw-mode acquisition rolls back when stdin.ref throws after tak
     refBalance--;
     return stdin;
   };
-  const app = createApp(defineComponent(() => () => null));
+  const inputActive = shallowRef(false);
+  const App = defineComponent(() => {
+    useInput(() => undefined, { isActive: inputActive });
+    return () => null;
+  });
+  const app = createApp(App);
 
-  expect(() =>
-    app.mount({
+  app.mount(
+    createInternalMountOptions({
       stdout,
       stderr,
       stdin,
       liveUpdates: true,
-      rawMode: "always",
-      exitOnCtrlC: false,
       maxFps: 0,
       patchConsole: false,
     }),
-  ).toThrow("stdin.ref failed");
+  );
+  expect(() => {
+    inputActive.value = true;
+  }).toThrow("stdin.ref failed");
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance }).toEqual({
     isRaw: false,
     rawModeCalls: [true, false],
     refBalance: 0,
   });
+  app.unmount();
 });
 
 test.sequential("raw-byte ingress never installs a stream-level text decoder", () => {
@@ -164,18 +173,23 @@ test.sequential("raw-byte ingress never installs a stream-level text decoder", (
     setEncodingCalls++;
     throw new Error("stdin.setEncoding failed");
   }) as NodeJS.ReadStream["setEncoding"];
-  const app = createApp(defineComponent(() => () => null));
+  const app = createApp(
+    defineComponent(() => {
+      useInput(() => undefined);
+      return () => null;
+    }),
+  );
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "always",
-    exitOnCtrlC: false,
-    maxFps: 0,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
 
   expect({ isRaw: stdin.isRaw, rawModeCalls, refBalance, setEncodingCalls }).toEqual({
     isRaw: true,
@@ -202,18 +216,23 @@ test.sequential("raw-mode teardown restores a custom stdin without ref or unref"
     ref: { configurable: true, value: undefined },
     unref: { configurable: true, value: undefined },
   });
-  const app = createApp(defineComponent(() => () => null));
+  const app = createApp(
+    defineComponent(() => {
+      useInput(() => undefined);
+      return () => null;
+    }),
+  );
 
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "always",
-    exitOnCtrlC: false,
-    maxFps: 0,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   app.unmount();
 
   expect({ isRaw: stdin.isRaw, rawModeCalls }).toEqual({
@@ -235,15 +254,15 @@ test.sequential("exit settlement and beforeExit ownership are idempotent after t
 
   const beforeExitListeners = new Set(process.listeners("beforeExit"));
   const app = createApp(defineComponent(() => () => <Text>final</Text>));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: false,
-    rawMode: "auto",
-    exitOnCtrlC: false,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: false,
+      patchConsole: false,
+    }),
+  );
 
   app.unmount();
   app.unmount();
@@ -289,16 +308,16 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
     return () => <Text>ACTIVE_FRAME</Text>;
   });
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "auto",
-    exitOnCtrlC: false,
-    maxFps: 0,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -312,24 +331,25 @@ test.sequential("a failed coordinated Inline write closes synchronized output an
   failPayload = false;
 
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) => chunk.includes("COORDINATED_FAILURE"));
-  const restoreIndex = failureWrites.findIndex(
-    (chunk, index) => index > payloadIndex && chunk.includes("ACTIVE_FRAME"),
-  );
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("COORDINATED_FAILURE");
+  const restoreIndex = failureTransaction.indexOf("ACTIVE_FRAME", payloadIndex);
+  const endIndex = failureTransaction.indexOf(esu, restoreIndex);
   const observed = {
     error: writeError instanceof Error ? writeError.message : undefined,
-    beganSynchronizedOutput: failureWrites.includes(bsu),
-    endedSynchronizedOutput: failureWrites.includes(esu),
+    beganBeforePayload: beginIndex >= 0 && beginIndex < payloadIndex,
     restoredFrameAfterPayload: restoreIndex > payloadIndex,
+    endedAfterRestore: endIndex > restoreIndex,
   };
 
   app.unmount();
 
   expect(observed).toEqual({
     error: "coordinated data failed",
-    beganSynchronizedOutput: true,
-    endedSynchronizedOutput: true,
+    beganBeforePayload: true,
     restoredFrameAfterPayload: true,
+    endedAfterRestore: true,
   });
 });
 
@@ -343,7 +363,7 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   stdout.write = ((...args: unknown[]) => {
     const chunk = String(args[0]);
     writes.push(chunk);
-    if (failNextResizeBoundary && chunk === "\x1b[?25l") {
+    if (failNextResizeBoundary && chunk.includes("\x1b[?25l")) {
       failNextResizeBoundary = false;
       throw new Error("resize boundary failed");
     }
@@ -351,16 +371,16 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   }) as NodeJS.WriteStream["write"];
 
   const app = createApp(defineComponent(() => () => <Text>ACTIVE_FRAME</Text>));
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "auto",
-    exitOnCtrlC: false,
-    maxFps: 0,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   const writesBeforeFailure = writes.length;
@@ -371,12 +391,14 @@ test.sequential("a failed Inline resize boundary still closes synchronized outpu
   await expect(exited).rejects.toThrow("resize boundary failed");
 
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) => chunk === "\x1b[?25l");
-  const esuIndex = failureWrites.findIndex((chunk, index) => index > payloadIndex && chunk === esu);
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("\x1b[?25l", beginIndex);
+  const esuIndex = failureTransaction.indexOf(esu, payloadIndex);
   app.unmount();
 
   expect({
-    beganSynchronizedOutput: failureWrites.includes(bsu),
+    beganSynchronizedOutput: beginIndex >= 0 && beginIndex < payloadIndex,
     closedAfterFailure: esuIndex > payloadIndex,
   }).toEqual({
     beganSynchronizedOutput: true,
@@ -406,19 +428,19 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
   const content = shallowRef("initial");
   const App = defineComponent(() => () => <Text>{content.value}</Text>);
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    liveUpdates: true,
-    rawMode: "auto",
-    exitOnCtrlC: false,
-    // Keep the update below pending so unmount's synchronous final commit drives
-    // the ordinary frame writer without throwing out of Vue's global post-flush
-    // queue and contaminating another test in this worker.
-    maxFps: 1,
-    patchConsole: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      liveUpdates: true,
+      // Keep the update below pending so unmount's synchronous final commit drives
+      // the ordinary frame writer without throwing out of Vue's global post-flush
+      // queue and contaminating another test in this worker.
+      maxFps: 1,
+      patchConsole: false,
+    }),
+  );
   await app.waitUntilRenderFlush();
 
   content.value = "ORDINARY_RENDER_FAILURE";
@@ -428,14 +450,14 @@ test.sequential("a failed ordinary Inline render still closes synchronized outpu
   failNextFrame = true;
   app.unmount();
   const failureWrites = writes.slice(writesBeforeFailure);
-  const payloadIndex = failureWrites.findIndex((chunk) =>
-    chunk.includes("ORDINARY_RENDER_FAILURE"),
-  );
-  const esuIndex = failureWrites.findIndex((chunk, index) => index > payloadIndex && chunk === esu);
+  const failureTransaction = failureWrites.join("");
+  const beginIndex = failureTransaction.indexOf(bsu);
+  const payloadIndex = failureTransaction.indexOf("ORDINARY_RENDER_FAILURE", beginIndex);
+  const esuIndex = failureTransaction.indexOf(esu, payloadIndex);
 
   expect({
     failedRenderAttempts,
-    beganSynchronizedOutput: failureWrites.includes(bsu),
+    beganSynchronizedOutput: beginIndex >= 0 && beginIndex < payloadIndex,
     closedAfterFailure: esuIndex > payloadIndex,
   }).toEqual({
     failedRenderAttempts: 1,
@@ -474,8 +496,11 @@ test.sequential("process.exit during a commit restores Fullscreen before the pro
 
   expect(exit).toEqual({ code: 0, signal: null });
   expect(stderr).toBe("");
-  expect(stdout).toContain(ansiEscapes.enterAlternativeScreen);
-  expect(stdout).toContain(ansiEscapes.exitAlternativeScreen);
+  const enterIndex = stdout.indexOf(ansiEscapes.enterAlternativeScreen);
+  const exitIndex = stdout.indexOf(ansiEscapes.exitAlternativeScreen);
+  expect(enterIndex).toBeGreaterThanOrEqual(0);
+  expect(exitIndex).toBeGreaterThan(enterIndex);
+  expect(stdout).not.toContain("frame");
 });
 
 test.sequential("process.exit during teardown's final commit still restores Fullscreen", async () => {

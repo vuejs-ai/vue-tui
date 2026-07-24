@@ -1,13 +1,13 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, createApp, Static, Text } from "@vue-tui/runtime";
+import { Box, createApp, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import ansiEscapes from "ansi-escapes";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
-test("unmount does not write to ended stdout stream", async () => {
-  // Port of Ink's "unmount does not write to ended stdout stream" — verifies
-  // that unmounting after stdout.end() does not trigger ERR_STREAM_WRITE_AFTER_END.
+test("an ended stdout rejects exit without writing after end", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   stdout.columns = 100;
 
@@ -22,7 +22,7 @@ test("unmount does not write to ended stdout stream", async () => {
   const stderr = makeFakeWritable({ columns: 100 });
   const { stream: stdin } = makeFakeStdin();
 
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await nextTick();
   await nextTick();
 
@@ -31,7 +31,9 @@ test("unmount does not write to ended stdout stream", async () => {
   stdout.end();
   app.unmount();
 
-  await exitPromise;
+  await expect(exitPromise).rejects.toThrow(
+    "Runtime output stream became unwritable during terminal restoration.",
+  );
   // Two ticks: first flushes Vue unmount callbacks, second lets stream
   // error events (fired via process.nextTick internally) propagate.
   await nextTick();
@@ -70,8 +72,6 @@ test("non-interactive mode writes only last frame at unmount", async () => {
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -83,6 +83,7 @@ test("non-interactive mode writes only last frame at unmount", async () => {
   expect(preUnmountOutput).not.toContain("the-content");
 
   app.unmount();
+  await app.waitUntilExit();
 
   // After unmount, the last frame should be written
   const postUnmountOutput = chunks.join("");
@@ -95,11 +96,11 @@ test("non-TTY default writes Static immediately and only the latest dynamic fram
   const App = defineComponent(() => {
     return () => (
       <Box flexDirection="column">
-        <Static items={items.value}>
-          {{
-            default: ({ item }: { item: string }) => <Text key={item}>{item}</Text>,
-          }}
-        </Static>
+        {items.value.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>{dynamic.value}</Text>
       </Box>
     );
@@ -116,7 +117,7 @@ test("non-TTY default writes Static immediately and only the latest dynamic fram
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -141,7 +142,7 @@ test("non-TTY default writes Static immediately and only the latest dynamic fram
   expect(finalOutput).not.toContain("dynamic-one");
 });
 
-test("explicit interactive override writes live frames to non-TTY without alternate screen", async () => {
+test("explicit liveUpdates writes live Inline frames to non-TTY without terminal ownership", async () => {
   const value = shallowRef("first-frame");
   const App = defineComponent(() => () => <Text>{value.value}</Text>);
 
@@ -156,14 +157,15 @@ test("explicit interactive override writes live frames to non-TTY without altern
   });
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    exitOnCtrlC: false,
-    liveUpdates: true,
-    mode: "fullscreen",
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr,
+      liveUpdates: true,
+      mode: "inline",
+    }),
+  );
 
   await nextTick();
   await app.waitUntilRenderFlush();
@@ -186,9 +188,7 @@ test("explicit interactive override writes live frames to non-TTY without altern
   expect(chunks.join("")).not.toContain(ansiEscapes.exitAlternativeScreen);
 });
 
-test("non-interactive empty final frame still writes trailing newline at unmount", async () => {
-  // Ink writes `lastOutput + "\n"` during non-interactive teardown even when
-  // `lastOutput` is empty. This is observable in scripts/pipes as a final newline.
+test("non-interactive empty final frame writes no bytes at unmount", async () => {
   const App = defineComponent(() => () => null);
 
   const stdout = makeFakeWritable({ columns: 80 });
@@ -207,8 +207,6 @@ test("non-interactive empty final frame still writes trailing newline at unmount
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
-    liveUpdates: false,
   });
 
   await nextTick();
@@ -217,11 +215,12 @@ test("non-interactive empty final frame still writes trailing newline at unmount
   expect(chunks.join("")).toBe("");
 
   app.unmount();
+  await app.waitUntilExit();
 
-  expect(chunks.join("")).toBe("\n");
+  expect(chunks.join("")).toBe("");
 });
 
-test("non-interactive unmount skips final frame when stdout is not writable", async () => {
+test("mount rejects a non-writable stdout before consuming the app", async () => {
   const App = defineComponent(() => () => <Text>the-content</Text>);
 
   const stdout = makeFakeWritable({ columns: 80 });
@@ -237,21 +236,21 @@ test("non-interactive unmount skips final frame when stdout is not writable", as
   });
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    exitOnCtrlC: false,
-    liveUpdates: false,
-  });
+  expect(() =>
+    app.mount({
+      stdout,
+      stdin,
+      stderr,
+    }),
+  ).toThrow('Mount option "stdout" must be writable when mount() begins.');
+  expect(chunks).toEqual([]);
 
+  (stdout as NodeJS.WriteStream & { writable?: boolean }).writable = true;
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
-  await nextTick();
-
   app.unmount();
   await app.waitUntilExit();
-
-  expect(chunks.join("")).not.toContain("the-content");
+  expect(chunks.join("")).toContain("the-content");
 });
 
 test("non-interactive mode does not emit erase or cursor sequences", async () => {
@@ -275,14 +274,13 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
-    liveUpdates: false,
   });
 
   await nextTick();
   await nextTick();
 
   app.unmount();
+  await app.waitUntilExit();
 
   const fullOutput = chunks.join("");
 
@@ -298,10 +296,7 @@ test("non-interactive mode does not emit erase or cursor sequences", async () =>
   expect(fullOutput).not.toMatch(/\x1b\[\d*[KJ]/);
 });
 
-test("non-interactive unmount does not crash on ended stdout", async () => {
-  // Combines the non-interactive and ended-stream edge cases: verifies that
-  // unmounting a non-interactive app after stdout.end() handles the write
-  // gracefully without ERR_STREAM_WRITE_AFTER_END propagating as uncaught.
+test("ended non-interactive stdout rejects exit without an uncaught write-after-end error", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   stdout.columns = 100;
   (stdout as unknown as { isTTY: boolean }).isTTY = false;
@@ -321,13 +316,12 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
     stdout,
     stdin,
     stderr,
-    exitOnCtrlC: false,
-    liveUpdates: false,
   });
 
   await nextTick();
   await nextTick();
 
+  const exited = app.waitUntilExit();
   // End the stream before unmount
   stdout.end();
 
@@ -335,6 +329,9 @@ test("non-interactive unmount does not crash on ended stdout", async () => {
   // The runtime's writeBestEffort() should catch the write error,
   // preventing it from propagating as an uncaught exception.
   app.unmount();
+  await expect(exited).rejects.toThrow(
+    "Runtime output stream became unwritable during terminal restoration.",
+  );
 
   // Two ticks: first flushes Vue unmount callbacks, second lets stream
   // error events (fired via process.nextTick internally) propagate.

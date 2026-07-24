@@ -7,7 +7,7 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useInput } from "@vue-tui/runtime";
-import { yogaNodeTracker } from "@vue-tui/runtime/internal";
+import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test.sequential("50 render/unmount cycles leak zero process listeners", async () => {
@@ -42,7 +42,7 @@ test.sequential("raw mode stays on when one of two useInput components unmounts"
   const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>x</Text>;
   });
 
@@ -71,12 +71,12 @@ test.sequential("mount owns one beforeExit listener until unmount", async () => 
   const { stream: stdin } = makeFakeStdin();
   const beforeMountCount = process.listenerCount("beforeExit");
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount + 1);
 
   app.unmount();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 
-  await app.waitUntilRenderFlush();
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 });

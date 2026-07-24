@@ -53,18 +53,21 @@ test("sibling interpolation ''->'hi' directly under <Box> rejects (setText path)
   ));
 
   // Mounts fine: the empty leaf is a skipped fragment anchor.
-  const { waitUntilExit } = await render(App, { columns: 100 });
-  const exited = waitUntilExit();
+  const result = await render(App, { columns: 100 });
 
   // The reactive update drives setText('', 'hi') on the already-mounted anchor.
-  // The throw happens during Vue's patch (a host node-op), so vue-tui's error
-  // boundary routes it through exit() → waitUntilExit() rejects.
-  maybe.value = "hi";
-  await nextTick();
-
-  await expect(exited).rejects.toThrow(
-    /^Text string "hi" must be rendered inside <Text> component$/,
-  );
+  // The throw happens during Vue's patch (a host node-op), so Vue rejects the
+  // update without turning the component error into an automatic Runtime exit.
+  try {
+    maybe.value = "hi";
+    await expect(nextTick()).rejects.toThrow(
+      /^Text string "hi" must be rendered inside <Text> component$/,
+    );
+    result.unmount();
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  } finally {
+    result.dispose();
+  }
 });
 
 // Control: the SAME interpolation INSIDE a <Text> is valid inline text. Going
@@ -89,7 +92,7 @@ test("sibling interpolation ''->'hi' inside <Text> renders and does not throw", 
   await nextTick();
 
   expect(lastFrame()).toBe("hi");
-  // Give any (incorrect) error-boundary exit a microtask/tick to surface.
+  // Give any (incorrect) automatic Runtime exit a microtask/tick to surface.
   await nextTick();
   await Promise.resolve();
   expect(rejected).toBe(false);

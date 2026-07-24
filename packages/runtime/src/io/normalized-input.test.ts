@@ -1,10 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import { PassThrough } from "node:stream";
-import {
-  getLegacyInputProjection,
-  normalizeInputEvent,
-  type NormalizedInputFact,
-} from "./normalized-input.ts";
+import { normalizeInputEvent, type NormalizedInputFact } from "./normalized-input.ts";
 import { getSharedStdinIngress } from "./stdin-ingress.ts";
 
 function fact(event: string | { readonly paste: string }): NormalizedInputFact {
@@ -157,7 +153,7 @@ describe("normalizeInputEvent", () => {
     });
   });
 
-  test("preserves a Kitty pure-text phase in the fact and current projection", () => {
+  test("preserves a Kitty pure-text phase in the fact", () => {
     const inputFact = fact("\x1b[0;1:3;229u");
     expect(inputFact).toMatchObject({
       kind: "text",
@@ -165,10 +161,6 @@ describe("normalizeInputEvent", () => {
       phase: "release",
       primaryCodepoint: 0,
       textOrigin: "reported",
-    });
-    expect(getLegacyInputProjection(inputFact)).toMatchObject({
-      input: "å",
-      key: { eventType: "release" },
     });
   });
 
@@ -202,8 +194,6 @@ describe("normalizeInputEvent", () => {
     "\x1b[97;1:1;3u",
     `\x1b[${"9".repeat(400)};1:1~`,
     "\x1b[9007199254740993;1:1~",
-    `\x1b[<${"9".repeat(400)};1;1M`,
-    "\x1b[<0;9007199254740993;1M",
   ])("keeps invalid protocol input uninterpreted: %j", (sequence) => {
     expect(fact(sequence)).toEqual({ kind: "uninterpreted", sequence });
   });
@@ -232,71 +222,13 @@ describe("normalizeInputEvent", () => {
     });
   });
 
-  test("keeps the complete SGR pointer report even when its action is unsupported", () => {
-    expect(fact("\x1b[<66;4;5M")).toMatchObject({
-      kind: "pointer",
-      sequence: "\x1b[<66;4;5M",
-      pointer: {
-        protocol: "sgr",
-        wireButton: 66,
-        x: 4,
-        y: 5,
-        final: "M",
-        event: { type: "wheel", direction: "left" },
-      },
-    });
-    expect(fact("\x1b[<3;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 3, event: undefined },
-    });
-    expect(fact("\x1b[<4294967296;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 4_294_967_296, event: undefined },
-    });
-  });
-});
-
-describe("getLegacyInputProjection", () => {
-  test("keeps the current Ink-shaped text and key behavior at the old hook edge", () => {
-    expect(getLegacyInputProjection(fact("A"))).toMatchObject({
-      input: "A",
-      key: { shift: true, ctrl: false },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[A"))).toMatchObject({
-      input: "",
-      key: { upArrow: true },
-    });
-    expect(getLegacyInputProjection(fact("\x1bOP"))).toMatchObject({
-      input: "",
-      key: { upArrow: false },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[?25h"))).toMatchObject({
-      input: "[?25h",
-    });
-  });
-
-  test("projects Kitty phase and text while keeping richer identity internal", () => {
-    expect(getLegacyInputProjection(fact("\x1b[97;1:2;65u"))).toMatchObject({
-      input: "A",
-      key: { eventType: "repeat", shift: true },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[57376u"))).toMatchObject({
-      input: "",
-      key: { eventType: "press" },
-    });
-  });
-
-  test("caches one compatibility projection for all current listeners", () => {
-    const inputFact = fact("\x1b[97;1:2;65u");
-    expect(getLegacyInputProjection(inputFact)).toBe(getLegacyInputProjection(inputFact));
-  });
-
-  test("projects paste payload verbatim without manufacturing key or protocol meaning", () => {
-    const text = "\x03\x1b[A\x1b[?31u";
-    expect(getLegacyInputProjection(fact({ paste: text }))).toMatchObject({
-      input: text,
-      key: { ctrl: false, upArrow: false },
-    });
+  test("drops unsolicited complete SGR mouse reports", () => {
+    expect(normalizeInputEvent("\x1b[<66;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;4;5m")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<3;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<4294967296;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent(`\x1b[<${"9".repeat(400)};1;1M`)).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;9007199254740993;1M")).toBeUndefined();
   });
 });
 
@@ -338,6 +270,23 @@ describe("shared stdin normalization", () => {
     expect(first[0]).toBe(second[0]);
     firstSubscription.dispose();
     secondSubscription.dispose();
+    stdin.destroy();
+  });
+
+  test("disposing an application removes its unresolved Kitty query tombstones", () => {
+    const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
+    const ingress = getSharedStdinIngress(stdin);
+    const subscription = ingress.subscribe(
+      () => undefined,
+      () => {},
+    );
+    const cancel = ingress.startKittyQueryResponseDetection(() => {}, subscription);
+
+    cancel();
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    subscription.dispose();
+    expect(stdin.listenerCount("data")).toBe(0);
     stdin.destroy();
   });
 
@@ -384,7 +333,7 @@ describe("shared stdin normalization", () => {
       split: ["\x1b[20", "0~a\x03", "\x1b[A\x1b[20", "1~"],
     },
     {
-      title: "SGR pointer",
+      title: "ignored SGR mouse report",
       whole: ["\x1b[<66;4;5M"],
       split: ["\x1b[<", "66;4;", "5M"],
     },

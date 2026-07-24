@@ -1,6 +1,3 @@
-import type { DeepReadonly } from "vue";
-import type { InternalLiveRenderSessionSnapshot } from "../render-session.ts";
-
 /** One renderer content commit before output-writer transformation. */
 export interface InternalContentFrame {
   /**
@@ -24,8 +21,9 @@ export interface InternalContentFrame {
  * so broken test instrumentation cannot turn into a passing assertion.
  */
 export interface InternalRenderObserver {
-  onSession?(session: DeepReadonly<InternalLiveRenderSessionSnapshot>): void;
   onCommit?(frame: InternalContentFrame): void;
 }
 
-export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol("vue-tui.internal.renderObserver");
+export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-render-observer",
+);

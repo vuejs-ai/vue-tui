@@ -34,7 +34,7 @@
   },
   "peerDependencies": {
     "@vitejs/plugin-vue": "^6",
-    "@vue-tui/runtime": "workspace:^",
+    "@vue-tui/runtime": "0.1.1",
     "vite": "^8"
   },
   "peerDependenciesMeta": {

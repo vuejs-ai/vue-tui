@@ -1,30 +1,27 @@
-import { defineComponent, onMounted, onScopeDispose, shallowRef, watchSyncEffect } from "vue";
+import {
+  defineComponent,
+  onMounted,
+  onScopeDispose,
+  onUnmounted,
+  shallowRef,
+  watchSyncEffect,
+} from "vue";
+import type { Readable } from "node:stream";
 import chalk from "chalk";
 import { describe, test, expect } from "vite-plus/test";
 import {
   renderToString,
   Box,
   Text,
-  Newline,
-  Spacer,
-  Static,
-  Transform,
   useInput,
   useApp,
-  useFocus,
-  useFocusManager,
   useStdin,
-  useStdout,
-  useStderr,
-  useCursor,
-  useLayoutSize,
-  usePaste,
-  useRenderSession,
-  useAnimation,
   useBoxMetrics,
-  type RenderSession,
+  useLayoutSize,
 } from "@vue-tui/runtime";
-import { renderToStringWithScreenReader } from "@vue-tui/runtime/internal";
+import { Static } from "@vue-tui/runtime/inline";
+import { useStderr } from "../../runtime/dist/internal.mjs";
+import { useStdout } from "../../runtime/dist/internal.mjs";
 
 describe("renderToString", () => {
   test("renders component to string", () => {
@@ -33,7 +30,7 @@ describe("renderToString", () => {
         <Text>Hello</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 40 });
+    const output = renderToString(App, { width: 40 });
     expect(output).toContain("Hello");
   });
 
@@ -45,71 +42,42 @@ describe("renderToString", () => {
     expect(output).toBe("test");
   });
 
-  test("public renderToString rejects hidden screen-reader passthrough before rendering", () => {
-    let setupRan = false;
+  test("ignores terminal-host properties supplied by untyped callers", () => {
+    let setupRan = 0;
     const App = defineComponent(() => () => <Text>x</Text>);
-    const guarded = Object.defineProperty({ isScreenReaderEnabled: undefined }, "columns", {
-      enumerable: true,
-      get() {
-        setupRan = true;
-        throw new Error("columns getter must not run");
-      },
+    const sharedOptions = {
+      width: 20,
+      height: 24,
+      mode: "fullscreen",
+      rows: 24,
+      columns: 99,
+      isScreenReaderEnabled: true,
+    };
+    const CountedApp = defineComponent(() => {
+      setupRan++;
+      return () => <App />;
     });
 
-    expect(() => {
-      // @ts-expect-error - screen-reader presentation is selected only by the internal helper
-      renderToString(App, guarded);
-    }).toThrow('renderToString option "isScreenReaderEnabled" is unavailable');
-    expect(setupRan).toBe(false);
+    expect(renderToString(CountedApp, sharedOptions as never)).toBe("x");
+    expect(setupRan).toBe(1);
   });
 
-  test("public renderToString rejects terminal-surface passthrough", () => {
-    const App = defineComponent(() => () => <Text>x</Text>);
-    expect(() => {
-      // @ts-expect-error - a synchronous document has no requested terminal mode
-      renderToString(App, { mode: "fullscreen" });
-    }).toThrow('renderToString option "mode" is unavailable');
-    expect(() => {
-      // @ts-expect-error - a synchronous document has unbounded rows
-      renderToString(App, { rows: 24 });
-    }).toThrow('renderToString option "rows" is unavailable');
-  });
-
-  test("public and internal helpers select fixed visual and screen-reader documents", () => {
-    const App = defineComponent(() => () => (
-      <Box ariaLabel="accessible label">
-        <Text>visual child</Text>
-      </Box>
-    ));
-
-    expect(renderToString(App)).toContain("visual child");
-    expect(renderToString(App)).not.toContain("accessible label");
-    expect(renderToStringWithScreenReader(App)).toContain("accessible label");
-    expect(renderToStringWithScreenReader(App)).not.toContain("visual child");
-  });
-
-  test.each([
-    ["visual", renderToString],
-    ["screen-reader", renderToStringWithScreenReader],
-  ] as const)("provides one truthful %s string session", (presentation, renderDocument) => {
-    let captured: RenderSession | undefined;
+  test("provides truthful string layout facts", () => {
+    let layout: ReturnType<typeof useLayoutSize> | undefined;
     const App = defineComponent(() => {
-      captured = useRenderSession();
-      return () => <Text>session</Text>;
+      layout = useLayoutSize();
+      return () => (
+        <Text>{`${layout!.width.value}x${layout!.height.value === Infinity ? "unbounded" : layout!.height.value}`}</Text>
+      );
     });
 
-    expect(renderDocument(App, { columns: 37 })).toContain("session");
-    expect(captured).toEqual({
-      host: "string",
-      mode: null,
-      output: { destination: "document", dynamicUpdates: "none", presentation },
-      dimensions: { terminal: null, layout: { columns: 37, rows: null } },
-      capabilities: {
-        stableOrigin: false,
-        elementHitTesting: false,
-        suspension: false,
-      },
-    });
+    expect(renderToString(App, { width: 37, height: Infinity })).toBe("37xunbounded");
+    expect(layout!.width.value).toBe(37);
+    expect(layout!.height.value).toBe(Infinity);
+
+    expect(renderToString(App)).toBe("80x24");
+    expect(layout!.width.value).toBe(80);
+    expect(layout!.height.value).toBe(24);
   });
 
   test("rethrows component errors after cleanup", () => {
@@ -126,14 +94,14 @@ describe("renderToString", () => {
         <Text>Line 2</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, 'Line 1\nLine 2')).
     expect(output).toBe("Line 1\nLine 2");
   });
 
   test("useInput does not throw in renderToString", () => {
     const App = defineComponent(() => {
-      useInput(() => {});
+      useInput(() => undefined);
       return () => <Text>with input</Text>;
     });
     const output = renderToString(App);
@@ -151,57 +119,43 @@ describe("renderToString", () => {
     expect(output).toContain("with exit");
   });
 
-  test("useApp exit is explicitly unavailable in a string render", () => {
-    const App = defineComponent(() => {
-      useApp().exit();
-      return () => <Text>unreachable</Text>;
-    });
-
-    expect(() => renderToString(App)).toThrow(
-      "useApp().exit() is unavailable during renderToString()",
+  test("useApp exit is inert in a string render", () => {
+    let inspected = 0;
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          inspected++;
+          throw new Error("string-host exit must not inspect its argument");
+        },
+      },
     );
-  });
-
-  test("useApp render flush is explicitly unavailable in a string render", async () => {
-    let waitUntilRenderFlush: (() => Promise<void>) | undefined;
     const App = defineComponent(() => {
-      waitUntilRenderFlush = useApp().waitUntilRenderFlush;
-      return () => <Text>document</Text>;
+      const exit = useApp().exit as (value?: unknown) => void;
+      exit();
+      exit(new Error("ignored"));
+      exit("invalid but ignored");
+      exit(null);
+      exit(hostile);
+      return () => <Text>still rendered</Text>;
     });
 
-    expect(renderToString(App)).toBe("document");
-    await expect(waitUntilRenderFlush?.()).rejects.toThrow(
-      "useApp().waitUntilRenderFlush() is unavailable during renderToString()",
-    );
-  });
-
-  test("useFocus does not throw in renderToString", () => {
-    const App = defineComponent(() => {
-      const { isFocused } = useFocus();
-      return () => <Text>focused: {String(isFocused.value)}</Text>;
-    });
-    const output = renderToString(App);
-    expect(output).toContain("focused:");
-  });
-
-  test("useFocusManager does not throw in renderToString", () => {
-    const App = defineComponent(() => {
-      const fm = useFocusManager();
-      void fm;
-      return () => <Text>with focus manager</Text>;
-    });
-    const output = renderToString(App);
-    expect(output).toContain("with focus manager");
+    expect(renderToString(App)).toBe("still rendered");
+    expect(inspected).toBe(0);
   });
 
   test("useStdin does not throw in renderToString", () => {
+    let captured: ReturnType<typeof useStdin> | undefined;
     const App = defineComponent(() => {
-      const stdin = useStdin();
-      void stdin;
+      captured = useStdin();
       return () => <Text>with stdin</Text>;
     });
     const output = renderToString(App);
     expect(output).toContain("with stdin");
+    expect(Reflect.ownKeys(captured!)).toEqual(["stdin", "isRawModeSupported", "setRawMode"]);
+    expect(Reflect.get(captured!.stdin, "isTTY")).toBe(false);
+    expect(captured?.isRawModeSupported).toBe(false);
+    expect(() => captured?.setRawMode(true)).not.toThrow();
   });
 
   test("useStdout does not throw in renderToString", () => {
@@ -225,7 +179,7 @@ describe("renderToString", () => {
   });
 
   test("string terminal streams are isolated and direct writes remain inert", () => {
-    let capturedStdin: NodeJS.ReadStream | undefined;
+    let capturedStdin: Readable | undefined;
     let capturedStdout: NodeJS.WriteStream | undefined;
     let capturedStderr: NodeJS.WriteStream | undefined;
     const App = defineComponent(() => {
@@ -237,11 +191,11 @@ describe("renderToString", () => {
       return () => <Text>isolated</Text>;
     });
 
-    expect(renderToString(App, { columns: 29 })).toBe("isolated");
+    expect(renderToString(App, { width: 29 })).toBe("isolated");
     expect(capturedStdin).not.toBe(process.stdin);
     expect(capturedStdout).not.toBe(process.stdout);
     expect(capturedStderr).not.toBe(process.stderr);
-    expect(capturedStdin?.isTTY).toBe(false);
+    expect(Reflect.get(capturedStdin!, "isTTY")).toBe(false);
     expect(capturedStdout?.isTTY).toBe(false);
     expect(capturedStdout?.columns).toBe(29);
   });
@@ -252,8 +206,8 @@ describe("renderToString", () => {
         <Text>full width</Text>
       </Box>
     ));
-    const narrow = renderToString(App, { columns: 20 });
-    const wide = renderToString(App, { columns: 60 });
+    const narrow = renderToString(App, { width: 20 });
+    const wide = renderToString(App, { width: 60 });
     // Both should contain the text
     expect(narrow).toContain("full width");
     expect(wide).toContain("full width");
@@ -265,7 +219,7 @@ describe("renderToString", () => {
         <Text>Padded</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT bytes (Ink render-to-string.tsx: t.is(output, '  Padded')).
     expect(output).toBe("  Padded");
   });
@@ -344,9 +298,9 @@ describe("renderToString", () => {
 
   // ── Layout ─────────────────────────────────────────────
 
-  test("renders margin", () => {
+  test("renders left padding", () => {
     const App = defineComponent(() => () => (
-      <Box marginLeft={2}>
+      <Box paddingLeft={2}>
         <Text>Margined</Text>
       </Box>
     ));
@@ -371,7 +325,7 @@ describe("renderToString", () => {
         <Text>Bordered</Text>
       </Box>
     ));
-    const output = renderToString(App, { columns: 20 });
+    const output = renderToString(App, { width: 20 });
     // Lock the EXACT boxen frame: a 20-wide single border (top corner + 18 ─ + corner,
     // content row "Bordered" + 10 fill spaces, bottom border). Byte-identical to Ink's
     // boxen('Bordered', { width: 20, borderStyle: 'single' }) (render-to-string.tsx).
@@ -403,22 +357,6 @@ describe("renderToString", () => {
     expect(output).toBe("A B");
   });
 
-  // Byte-exact gap variants (Ink gap.tsx). The live render() gap tests use
-  // trimLines:true, which masks trailing-space regressions; the renderToString path
-  // is byte-exact, so these lock the WRAP and COLUMN gaps without that mask.
-  test("renders gap with flexWrap (wraps to a new row separated by a row gap)", () => {
-    const App = defineComponent(() => () => (
-      <Box gap={1} width={3} flexWrap="wrap">
-        <Text>A</Text>
-        <Text>B</Text>
-        <Text>C</Text>
-      </Box>
-    ));
-    // Ink: t.is(output, 'A B\n\nC') — "A B" fills width 3, "C" wraps below, the
-    // blank line is the row gap between the two wrapped rows.
-    expect(renderToString(App)).toBe("A B\n\nC");
-  });
-
   test("renders column gap (blank line between stacked items)", () => {
     const App = defineComponent(() => () => (
       <Box flexDirection="column" gap={1}>
@@ -430,11 +368,11 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe("A\n\nB");
   });
 
-  test("renders spacer pushing content apart", () => {
+  test("renders an empty growing Box pushing content apart", () => {
     const App = defineComponent(() => () => (
       <Box width={20}>
         <Text>Left</Text>
-        <Spacer />
+        <Box flexGrow={1} flexShrink={1} />
         <Text>Right</Text>
       </Box>
     ));
@@ -442,11 +380,11 @@ describe("renderToString", () => {
     expect(output).toBe("Left           Right");
   });
 
-  test("renders newline inserting blank line", () => {
+  test("renders explicit newline text as a standalone layout item", () => {
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
         <Text>Above</Text>
-        <Newline />
+        <Text>{"\n"}</Text>
         <Text>Below</Text>
       </Box>
     ));
@@ -503,32 +441,22 @@ describe("renderToString", () => {
   test("custom columns option", () => {
     const longText = "A".repeat(50);
     const App = defineComponent(() => () => <Text>{longText}</Text>);
-    const output = renderToString(App, { columns: 30 });
+    const output = renderToString(App, { width: 30 });
     const lines = output.split("\n");
     expect(lines.length).toBe(2);
     expect(lines[0]).toBe("A".repeat(30));
     expect(lines[1]).toBe("A".repeat(20));
   });
 
-  // ── Components ─────────────────────────────────────────
-
-  test("renders Transform component", () => {
-    const App = defineComponent(() => () => (
-      <Transform transform={(output: string) => output.toUpperCase()}>
-        <Text>hello</Text>
-      </Transform>
-    ));
-    const output = renderToString(App);
-    expect(output).toBe("HELLO");
-  });
-
-  test("renders Static component with items", () => {
+  test("renders keyed Static instances", () => {
     const items = ["A", "B", "C"];
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
-        <Static items={items}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-        </Static>
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>Dynamic</Text>
       </Box>
     ));
@@ -539,9 +467,13 @@ describe("renderToString", () => {
   test("render static-only output has no trailing newline", () => {
     const items = ["A", "B"];
     const App = defineComponent(() => () => (
-      <Static items={items}>
-        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-      </Static>
+      <Box flexDirection="column">
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
+      </Box>
     ));
     const output = renderToString(App);
     expect(output).toBe("A\nB");
@@ -551,14 +483,35 @@ describe("renderToString", () => {
     const items = ["A", "B"];
     const App = defineComponent(() => () => (
       <Box flexDirection="column">
-        <Static items={items}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-        </Static>
+        {items.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>Dynamic</Text>
       </Box>
     ));
     const output = renderToString(App);
     expect(output).toBe("A\nB\nDynamic");
+  });
+
+  test("an output-free Static adds no bytes to a string document", () => {
+    const WithDynamicOutput = defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Static>
+          <Text>{""}</Text>
+        </Static>
+        <Text>Dynamic</Text>
+      </Box>
+    ));
+    const StaticOnly = defineComponent(() => () => (
+      <Static>
+        <Text>{""}</Text>
+      </Static>
+    ));
+
+    expect(renderToString(WithDynamicOutput)).toBe("Dynamic");
+    expect(renderToString(StaticOnly)).toBe("");
   });
 
   // ── Effect behavior ────────────────────────────────────
@@ -600,6 +553,55 @@ describe("renderToString", () => {
     const output = renderToString(App);
     expect(output).toBe("Cleanup test");
     expect(cleanupRan).toBe(true);
+  });
+
+  test("rethrows an unmount lifecycle error after host cleanup", () => {
+    const unmountError = new Error("unmount failed");
+    const App = defineComponent(() => {
+      onUnmounted(() => {
+        throw unmountError;
+      });
+      return () => <Text>cleanup error</Text>;
+    });
+    let caught: unknown;
+
+    try {
+      renderToString(App);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(unmountError);
+  });
+
+  test("rethrows the first scope cleanup error after releasing descendant scopes", () => {
+    const events: string[] = [];
+    const cleanupError = new Error("scope cleanup failed");
+    const Leaf = defineComponent(() => {
+      onScopeDispose(() => events.push("leaf"));
+      return () => <Text>leaf</Text>;
+    });
+    const Parent = defineComponent(() => {
+      onScopeDispose(() => {
+        events.push("parent");
+        throw cleanupError;
+      });
+      return () => (
+        <Box>
+          <Leaf />
+        </Box>
+      );
+    });
+
+    let caught: unknown;
+    try {
+      renderToString(Parent);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(cleanupError);
+    expect(events).toEqual(["parent", "leaf"]);
   });
 
   // ── Error handling ─────────────────────────────────────
@@ -654,8 +656,8 @@ describe("renderToString", () => {
   //
   // Ink composes nested <Text> by WRAPPING: squash-text-nodes.ts concatenates a
   // node's already-styled children, then the PARENT Text's internal_transform
-  // wraps the WHOLE concatenation. So a parent's boolean styles (bold/italic/
-  // underline/strikethrough/dim) stay OPEN across a nested child — the child only
+  // wraps the WHOLE concatenation. So a parent's retained styles (bold and dim)
+  // stay OPEN across a nested child — the child only
   // ADDS its own style on top. The Ink composition is literally
   // `chalk.<style>("A" + chalk.<childStyle>("B"))`, which is what we assert here.
   // (The earlier merge-down + per-leaf model closed the parent SGR at the nested
@@ -669,15 +671,6 @@ describe("renderToString", () => {
       </Text>
     ));
     expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B")));
-  });
-
-  test("nested <Text> inherits ancestor underline across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text underline>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.underline("A" + chalk.green("B")));
   });
 
   test("ancestor bold stays open across a PLAIN nested child", () => {
@@ -698,24 +691,6 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe(chalk.dim("A" + chalk.green("B")));
   });
 
-  test("nested <Text> inherits ancestor italic across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text italic>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.italic("A" + chalk.green("B")));
-  });
-
-  test("nested <Text> inherits ancestor strikethrough across a colored child", () => {
-    const App = defineComponent(() => () => (
-      <Text strikethrough>
-        A<Text color="green">B</Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.strikethrough("A" + chalk.green("B")));
-  });
-
   test("ancestor bold survives leading/trailing parent text around a nested child", () => {
     const App = defineComponent(() => () => (
       <Text bold>
@@ -723,18 +698,6 @@ describe("renderToString", () => {
       </Text>
     ));
     expect(renderToString(App)).toBe(chalk.bold("A" + chalk.green("B") + "C"));
-  });
-
-  test("deep nesting wraps each level's style around its already-styled children", () => {
-    const App = defineComponent(() => () => (
-      <Text bold>
-        A
-        <Text underline>
-          B<Text color="green">C</Text>
-        </Text>
-      </Text>
-    ));
-    expect(renderToString(App)).toBe(chalk.bold("A" + chalk.underline("B" + chalk.green("C"))));
   });
 
   test("nested child's own color composes on top of inherited bold (child stays bold too)", () => {
@@ -749,79 +712,22 @@ describe("renderToString", () => {
     expect(renderToString(App)).toBe(chalk.bold(chalk.green("B")));
   });
 
-  // BONUS: a nested inline <Text backgroundColor=""> inside a green Box. The inner
-  // "" is INVISIBLE here. The inner Text's effective bg is `"" ?? inheritedGreen`,
-  // which is `""` (not the green) — so "b" is composed with NO bg of its own and
-  // contributes RAW. But the OUTER plain Text inherits the green Box bg and wraps
-  // the WHOLE "a"+"b"+"c" concatenation in one green span, so its inherited green
-  // covers "b" uniformly along with "a" and "c". Because nothing applies a bg
-  // INSIDE that outer span, there is no inner bg-reset: the bytes are a single
-  // `chalk.bgGreen("abc")` (one bg-open, one trailing bg-reset, no inner \x1b[49m).
-  // The inner "" would only become visible if the outer Text had no inherited bg.
-  test("BONUS: nested inline backgroundColor='' inside a green Box", () => {
-    const App = defineComponent(() => () => (
-      <Box backgroundColor="green" alignSelf="flex-start">
-        <Text>
-          a<Text backgroundColor="">b</Text>c
-        </Text>
-      </Box>
-    ));
-    // The outer Text's inherited green wraps the whole concatenation; the inner ""
-    // is invisible (no inner \x1b[49m before the final reset — see chalk bytes below).
-    expect(renderToString(App, { columns: 100 })).toBe(chalk.bgGreen("a" + "b" + "c"));
-  });
-
-  // LOCK (high blast radius): a bare text-leaf inside a <Transform> under a
-  // <Box backgroundColor> renders WITHOUT the Box bg on its glyphs. This is
-  // Ink-faithful: in Ink only <Box> provides backgroundContext and <Transform>
-  // does NOT consume it — the bare "#text" carries no internal_transform, so its
-  // glyphs are RAW. The Box bg surfaces ONLY as the trailing fill padding the Box
-  // paints to reach its width. Branch behavior: bare text-leaves return RAW text
-  // (no inherited bg applied at the leaf), so the `[hi]` glyphs are uncolored and
-  // only the 6-space fill is green. Byte-matched against Ink v7.0.4 (40b3a75):
-  //   renderToString(<Box bg=green width=10><Transform>hi</Transform></Box>)
-  //     === "[hi]\x1b[42m      \x1b[49m"  (i.e. "[hi]" + chalk.bgGreen("      "))
-  // NOTE: this is a NEW lock (not a red→green fix) — it documents and pins the
-  // already-correct branch behavior so a future change can't silently regress it.
-  test("LOCK: bare text in <Transform> under a Box bg has no bg on its glyphs", () => {
-    const App = defineComponent(() => () => (
-      <Box backgroundColor="green" width={10}>
-        <Transform transform={(s: string) => "[" + s + "]"}>hi</Transform>
-      </Box>
-    ));
-    // "[hi]" glyphs are RAW (no bg SGR); only the trailing Box-fill padding is green.
-    expect(renderToString(App, { columns: 100 })).toBe("[hi]" + chalk.bgGreen("      "));
-  });
-
   // ── B29: renderToString serves the TERMINAL composables with inert no-op
   // contexts ──────────────────────────────────────────────────────────────
   //
   // renderToString runs with NO terminal session: it provides no-op AppContext +
-  // StdinContext + a no-op AnimationScheduler (render-to-string.ts:93-96). The
-  // existing suite covers useInput/useApp/useFocus/useFocusManager/useStdin/
-  // useStdout/useStderr. These pin the remaining terminal composables —
-  // useCursor, usePaste, useAnimation, useBoxMetrics — so that
+  // StdinContext. The
+  // existing suite covers useInput/useApp/useStdin/useStdout/useStderr. These
+  // pin the remaining common terminal composables — semantic input and
+  // useBoxMetrics — so that
   // rendering a component which CALLS them degrades to inert values instead of
   // throwing (they must still return a string).
   describe("terminal composables degrade to no-ops (do not throw)", () => {
-    test("useCursor does not throw in renderToString", () => {
-      const App = defineComponent(() => {
-        // setCursorPosition forwards to the no-op AppContext.setCursorPosition.
-        const { setCursorPosition } = useCursor();
-        setCursorPosition({ x: 2, y: 0 });
-        return () => <Text>with cursor</Text>;
-      });
-      const output = renderToString(App);
-      expect(output).toBe("with cursor");
-    });
-
-    test("usePaste does not throw in renderToString", () => {
+    test("paste handling through useInput stays inert in renderToString", () => {
       let pasted = "";
       const App = defineComponent(() => {
-        // usePaste injects StdinContext (no-op here) and attaches to its
-        // internal route registry — no terminal session, so the handler never fires.
-        usePaste((text) => {
-          pasted = text;
+        useInput((event) => {
+          if (event.type === "paste") pasted = event.text;
         });
         return () => <Text>with paste</Text>;
       });
@@ -831,63 +737,33 @@ describe("renderToString", () => {
       expect(pasted).toBe("");
     });
 
-    test("useLayoutSize reads the unbounded document layout from the shared session", () => {
+    test("useBoxMetrics reports unmeasured state in renderToString", () => {
       const App = defineComponent(() => {
-        const { columns, rows } = useLayoutSize();
-        return () => (
-          <Text>
-            {columns.value}x{rows.value ?? "unbounded"}
-          </Text>
-        );
-      });
-      expect(renderToString(App, { columns: 13 })).toBe("13xunbounded");
-    });
-
-    test("useAnimation does not throw in renderToString (frame frozen at 0)", () => {
-      const App = defineComponent(() => {
-        // The no-op AnimationScheduler never ticks, so frame stays 0 and no timer
-        // leaks (subscribe returns an inert unsubscribe).
-        const { frame } = useAnimation({ interval: 50 });
-        return () => <Text>{`frame:${frame.value}`}</Text>;
-      });
-      const output = renderToString(App);
-      expect(output).toBe("frame:0");
-    });
-
-    test("useBoxMetrics does not throw in renderToString", () => {
-      const App = defineComponent(() => {
-        // useBoxMetrics tracks a Box ref via the root layout listener. In the
-        // synchronous renderToString teardown the post-flush measurement may not
-        // have run, so hasMeasured can still be false — the point is it must NOT
-        // throw and the frame must still render.
-        const boxRef = shallowRef(null);
-        const { hasMeasured } = useBoxMetrics(boxRef);
+        const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
+        const metrics = useBoxMetrics(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{hasMeasured.value ? "measured" : "metrics"}</Text>
+            <Text>{metrics.hasMeasured.value ? "measured" : "unavailable"}</Text>
           </Box>
         );
       });
-      const output = renderToString(App, { columns: 40 });
-      expect(output).toContain("metrics");
+      const output = renderToString(App, { width: 40 });
+      expect(output).toContain("unavailable");
     });
 
-    test("all four terminal composables together render to a string without throwing", () => {
+    test("input and box size render together without throwing", () => {
       const App = defineComponent(() => {
-        const { setCursorPosition } = useCursor();
-        setCursorPosition({ x: 1, y: 0 });
-        usePaste(() => {});
-        const { frame } = useAnimation({ interval: 30 });
-        const boxRef = shallowRef(null);
+        useInput(() => undefined);
+        const boxRef = shallowRef<InstanceType<typeof Box> | null>(null);
         useBoxMetrics(boxRef);
         return () => (
           <Box ref={boxRef}>
-            <Text>{`all:${frame.value}`}</Text>
+            <Text>all</Text>
           </Box>
         );
       });
-      const output = renderToString(App, { columns: 40 });
-      expect(output).toContain("all:0");
+      const output = renderToString(App, { width: 40 });
+      expect(output).toContain("all");
     });
   });
 });

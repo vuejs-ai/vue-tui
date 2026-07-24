@@ -1,5 +1,7 @@
 # ScrollBox — decision record
 
+> **Status:** the four-operation boolean movement contract remains current: `true` means only that the effective top content line changed after flooring and clamping, while a sticky-following re-arm without movement returns `false`. `ScrollBox` remains common, passive, and input-free. The F4/F6/F8 routing, pointer, selection, and clipboard composition below is historical closure evidence for the broader candidate, not current Runtime API guidance. Current `useInput()` broadcasts and ignores handler returns, so an application explicitly uses the boolean to decide whether to call another scroll owner.
+
 > Decisions specific to `@vue-tui/components`'s `ScrollBox`. Shared conventions live in
 > [components-design-principles.md](../components-design-principles.md). Tracking: #221.
 
@@ -13,23 +15,22 @@ component itself listens to **no** mouse or keyboard input.
 - Use it for an **app-owned bounded scroll region** in either rendering mode — for example a log pane
   in a full-screen dashboard or a fixed-height preview inside an inline workflow. The parent must
   allocate a height; mode does not create that bound by itself.
-- For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static`: let
+- For **inline streaming output** (a coding agent's transcript, a long log), prefer `Static` from `@vue-tui/runtime/inline`: let
   the content flow into the terminal's scrollback, where the terminal owns scrolling and text
   selection natively. vue-tui's own `coding-agent` example does exactly this — it uses `Static`, not
   `ScrollBox`. Bounding streaming output in an inline `ScrollBox` fights the grain (see below).
-- Fullscreen does not retain `<Static>` output on its fixed surface: new Static bytes are emitted to
-  stream observers and then repainted away. Keep fullscreen history in reactive state inside a
-  `ScrollBox`; see [fullscreen-output.md](../fullscreen-output.md).
+- Effective visual Fullscreen rejects `<Static>` before committing its history or a new viewport frame. Keep fullscreen history in reactive state inside a `ScrollBox`; see [fullscreen-output.md](../fullscreen-output.md).
 
 ## No built-in input — imperative handle only
 
 `ScrollBox` deliberately ships **no `wheel` / `keyboard` props**. It exposes an imperative handle
 (`ScrollBoxExpose`) via `defineExpose`, grabbed with a template ref:
 
-- `scrollToLine(line)` — absolute position in content lines (clamped)
-- `scrollByLines(lines)` — relative (positive = toward the bottom)
-- `scrollToTop()` / `scrollToBottom()` — jump to top / bottom (`scrollToBottom` re-arms sticky, so
-  streaming output is followed again)
+- `scrollToLine(line)` — move to an absolute content line after flooring and clamping, then return whether the effective top line changed
+- `scrollByLines(lines)` — move relatively, with positive values toward the bottom, then return whether the effective top line changed
+- `scrollToTop()` / `scrollToBottom()` — jump to the top or bottom and return whether the effective top line changed; `scrollToBottom()` always re-arms sticky following, even when it returns `false`
+
+`line` and `lines` must be finite numbers. JavaScript values that bypass the TypeScript surface fail synchronously with a `TypeError` before scroll position or sticky-following state changes. The public `scrollToLine()` wrapper accepts only its documented line argument; the private sticky-policy control is not reachable through an extra JavaScript argument.
 
 The consumer wires whatever mouse / keyboard it wants onto these actions. Why input is the app's
 job, not a built-in prop:
@@ -49,36 +50,74 @@ job, not a built-in prop:
   configuration and modes that vue-tui does not currently negotiate. Keyboard bindings remain a
   valid application policy, but they do not imply portable wheel support.
 
-Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse
-ownership, reliable geometry, and hit testing. Preserving application-controlled text selection and
-copy after mouse capture would additionally require a selection and clipboard model. Both concerns
-are out of scope for this input-free component; see
-[terminal UI prior art](../terminal-ui-prior-art.md) and [api-design.md](../api-design.md).
+Targeted wheel, click, and drag are separate framework-level concerns. They require terminal mouse ownership, reliable geometry, and hit testing. The historical F8 candidate supplied a separate application-controlled Text selection and clipboard model after mouse capture; neither concern became `ScrollBox` state or input. See [Fullscreen text selection and clipboard](../fullscreen-selection-and-copy.md), [terminal UI prior art](../terminal-ui-prior-art.md), and [api-design.md](../api-design.md).
 
-The current unstamped API direction composes full-screen wheel behavior through a ref-bound runtime
+> **Historical F6/F8 composition:** the pointer code and route-result discussion below records the earlier `/fullscreen` candidate. The current minimum Runtime does not publish those pointer, selection, clipboard, or route-result APIs.
+
+The implemented unstamped F6 contract composes Fullscreen wheel behavior through a ref-bound runtime
 composable rather than a `PointerScrollBox`, a `PointerBox`, or `@wheel` on `ScrollBox`:
 
 ```ts
-import { usePointerEvent } from "@vue-tui/runtime/fullscreen";
+import { useMouseEvent } from "@vue-tui/runtime/fullscreen";
 
-usePointerEvent(wheelTarget, "wheel", (event) => {
-  const moved = scrollBox.value?.scrollByLines(event.deltaY);
-  if (moved) event.stopPropagation();
+useMouseEvent(wheelTarget, "wheel", (event) => {
+  const moved = scrollBox.value?.scrollByLines(event.delta.y) ?? false;
+  return moved ? "consume" : "continue";
 });
 ```
 
-That example requires the proposed scroll methods to report whether the position actually changed;
-the return-type change and exact pointer-composable signature are not yet accepted. The durable
-boundary is that pointer input composes outside this component and follows the rendered target's
-lifetime.
+The boolean lets a nested handler consume wheel input while its viewport moves and continue to the registered ancestor at an edge. An outer owner may still choose its own policy when it also cannot move. The durable boundary is that targeted mouse input composes outside this component and follows the rendered target's lifetime.
+
+## F7 accepted contract and closure evidence
+
+The former `void` surface could not implement correct nested routing without duplicating `ScrollBox`'s private offset. Four target specifications first retained that gap as expected failures:
+
+- one component-mechanics journey applies relative, clamped, repeated, absolute, top, bottom, and page-sized line movements and requires the same synchronous changed-versus-unchanged observation;
+- the bounded conversational journey runs in deterministic Inline and Fullscreen, with an F4 focused inner viewport followed by its outer focus scope;
+- the Fullscreen workbench journey uses F6's deepest wheel target followed by its registered rendered ancestor;
+- the desired trace moves only the inner owner while it can move, continues to the outer owner at the inner edge, and returns to the inner owner immediately when direction reverses.
+
+Before implementation, running those tests without `test.fails` produced the intended red evidence. All component observations collapsed to `undefined`, both keyboard modes ran the outer scope after every recognized inner operation, and Fullscreen wheel bubbled after every inner operation. They are now ordinary passing tests that consume the public boolean directly, with no multi-shape adapter.
+
+### Accepted public contract
+
+```ts
+export interface ScrollBoxExpose {
+  scrollToLine(line: number): boolean;
+  scrollByLines(lines: number): boolean;
+  scrollToTop(): boolean;
+  scrollToBottom(): boolean;
+}
+```
+
+The result has one exact meaning:
+
+- the result is synchronous so application code can immediately decide whether to call another scroll owner; it is not a `useInput()` return value;
+- it reports whether the effective top rendered row changed after flooring and clamping, including partial movement toward an edge;
+- `false` covers the top or bottom edge, the same absolute row, zero movement, values whose floored result is the same row, and a non-overflowing viewport;
+- Page Up/Down need no new component method: the application binds `useBoxMetrics()` directly to the wrapper Box, reads its accepted `height`, and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
+- the result is not an input propagation result: current `useInput()` ignores handler returns, so an application that owns nested keyboard policy explicitly tries the inner ScrollBox and calls the outer owner only when the inner method returns `false`;
+- the component remains the sole offset and sticky-following owner and still acquires no keyboard or mouse input.
+
+One existing edge makes the return meaning precise. Content shrink or viewport growth can clamp a non-sticky offset to the current bottom without re-arming follow. A later `scrollToBottom()` can therefore re-arm sticky following without changing the top row; appended content then follows. That call returns `false` even though internal follow policy changed.
+
+All four existing names and parameters are retained, and their `void` return is replaced directly without an alias or compatibility shim. The named `ScrollBoxExpose` type and `InstanceType<typeof ScrollBox>` both expose the boolean. Template, TSX, and packed JavaScript consumers cover the type and runtime surface; the packed consumer uses Vue 3.4.38 and TypeScript 6.0.3 with `skipLibCheck: false` and proves both movement outcomes, invalid values, and continued use after an error.
+
+Component tests cover relative, absolute, fractional, zero, clamped, repeated, top, bottom, non-overflowing, sticky-rearm, invalid-value, and extra-argument behavior. Historical closure tests also ran F4 focus routing in Inline and Fullscreen and F6 target-to-ancestor wheel routing in Fullscreen; page movement read the then-public F5 wrapper height. A shared real-PTY fixture repeated the two keyboard modes and raw SGR wheel journey, including exact terminal-mode cleanup. Repository visual sessions inspected the same visible offsets and routes step by step, then proved normal-buffer, cursor, input-mode, termios, and post-exit shell restoration. That evidence remains useful for the boolean movement mechanism without making the removed routing surfaces current.
+
+### Alternatives considered
+
+The bounded pinned-peer check does not settle the vue-tui shape. Textual's private non-animated pointer helper [returns whether clamped position changed](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L2718-L2822), and its wheel handler [stops bubbling only after movement](https://github.com/Textualize/textual/blob/1d99508b928a771b51e1a527319c6b87dcff9e05/src/textual/widget.py#L4777-L4805), but its public semantic scroll methods return `None` and its keyboard edge behavior differs. OpenTUI's [`scrollBy()` and `scrollTo()` return `void`](https://github.com/anomalyco/opentui/blob/a0b90640761aa89a303c6b5b0d74ef3e6b945652/packages/core/src/renderables/ScrollBox.ts#L404-L473); recognized keyboard commands are handled regardless of movement and wheel can reach multiple ancestors. Ratatui [leaves input to the application](https://github.com/ratatui/ratatui/blob/de5168de6ba2f4b310565c287764f213f249a61f/ratatui/src/lib.rs#L268-L289), while its stateful list scroll methods return unit. These sources support the mechanism and passive boundary, not one public Vue encoding.
+
+The selected boolean is the smallest conventional encoding of the one fact every journey consumes and lets application code decide whether to try another owner without duplicating ScrollBox state. A named `"moved" | "unchanged"` result would carry the same bit with a new public type and more verbose control flow. A structured `{ moved, followingChanged }` result could expose the no-move sticky re-arm, but that internal policy fact is unused by every representative handler and would broaden every operation. Those alternatives remain decision history, not queued compatibility surfaces.
 
 ## Future direction (not in scope now)
 
 Add these when a real need shows up — shaped to _not_ leak internal state:
 
 - **Page scrolling.** A "page" needs the viewport height (how many lines fit). That is a _size_, so
-  a consumer can already measure it with the public `useBoxMetrics` on the box it wraps `ScrollBox`
-  in, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
+  a consumer can bind public `useBoxMetrics()` directly to the Box that wraps `ScrollBox`, read
+  `metrics.height.value` when `metrics.hasMeasured.value` is true, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
   (`scrollByPage(pages)`) — that is fine, it's sugar over a public capability, not a leak. Don't
   bake a fixed "page = half / full viewport" policy into the core; let the consumer (or a `pages`
   argument) decide the size.
@@ -94,10 +133,11 @@ Add these when a real need shows up — shaped to _not_ leak internal state:
 
 ## Implementation notes
 
-- The viewport and content boxes are measured with `useBoxMetrics`.
+- The viewport and content refs bind directly to public `Box` instances and read full accepted heights through `useBoxMetrics()`. A fully clipped Box still reports that full size. ScrollBox caches the last measured heights so an accepted hidden or detached state does not reset a non-sticky scroll position; Runtime itself retains the last accepted same-target metrics through suspension and failed output.
 - Scrolling is `scrollTop` state applied as a negative `marginTop` on the inner content box, while
   the outer box clips with `overflowY: "hidden"`.
 - Sticky-bottom: while sticky, content growth follows the bottom; after the app scrolls up (via the
   handle) growth preserves the current viewport. Any scroll that lands at `maxScroll` (incl.
   `scrollToBottom`) re-arms sticky.
+- The two accepted size refs are reconciled in one batched watcher, so ScrollBox never clamps against one old and one new height during the same paint commit.
 - Built only from the runtime public barrel (`Box`, `useBoxMetrics`); no `@vue-tui/runtime/internal`.

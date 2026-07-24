@@ -37,15 +37,7 @@ export async function startCommandSession(
   target: VisualReviewCommand,
 ): Promise<BasicTemplateSession> {
   if (process.platform === "win32") {
-    return {
-      session: await VisualTerminalSession.create({
-        file: target.file,
-        args: target.args,
-        cwd: target.cwd,
-        artifactDir,
-      }),
-      mode: "direct-process",
-    };
+    return startDirectCommandSession(artifactDir, target);
   }
 
   const session = await VisualTerminalSession.create({
@@ -65,6 +57,21 @@ export async function startCommandSession(
   ].join("; ");
   session.sendSystem(`${command}\r`, `launch-${target.label}-with-restoration-markers`);
   return { session, mode: "persistent-posix-shell" };
+}
+
+export async function startDirectCommandSession(
+  artifactDir: string,
+  target: VisualReviewCommand,
+): Promise<BasicTemplateSession> {
+  return {
+    session: await VisualTerminalSession.create({
+      file: target.file,
+      args: target.args,
+      cwd: target.cwd,
+      artifactDir,
+    }),
+    mode: "direct-process",
+  };
 }
 
 function shellQuote(value: string): string {

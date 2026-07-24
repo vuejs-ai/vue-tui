@@ -1,4 +1,4 @@
-import { defineComponent, shallowRef, nextTick } from "vue";
+import { defineComponent, h, shallowRef, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { renderToString, Box, Text } from "@vue-tui/runtime";
@@ -49,6 +49,396 @@ test("text with standard color", async () => {
   expect(lastFrame()).toBe(chalk.green("Test"));
 });
 
+type TestForeground = "default" | "red" | "green" | "blue" | "other";
+
+function foregroundCharacters(
+  value: string,
+): Array<{ character: string; foreground: TestForeground }> {
+  const result: Array<{ character: string; foreground: TestForeground }> = [];
+  const sgr = /\x1b\[([0-9;]*)m/g;
+  let foreground: TestForeground = "default";
+  let cursor = 0;
+
+  const append = (text: string) => {
+    for (const character of text) {
+      if (character !== "\n") result.push({ character, foreground });
+    }
+  };
+
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    append(value.slice(cursor, match.index));
+    for (const parameter of (match[1] || "0").split(";").map(Number)) {
+      if (parameter === 0 || parameter === 39) foreground = "default";
+      else if (parameter === 31) foreground = "red";
+      else if (parameter === 32) foreground = "green";
+      else if (parameter === 34) foreground = "blue";
+      else if ((parameter >= 30 && parameter <= 37) || parameter === 38) foreground = "other";
+    }
+    cursor = match.index + match[0].length;
+  }
+  append(value.slice(cursor));
+  return result;
+}
+
+type TestBackground = "default" | "red" | "green" | "blue" | "other";
+type TestModifier = "dimColor" | "bold" | "italic" | "underline" | "strikethrough" | "inverse";
+
+interface StyledCharacter {
+  character: string;
+  foreground: TestForeground;
+  background: TestBackground;
+  modifiers: TestModifier[];
+}
+
+function styledCharacters(value: string): StyledCharacter[] {
+  const result: StyledCharacter[] = [];
+  const sgr = /\x1b\[([0-9;]*)m/g;
+  let foreground: TestForeground = "default";
+  let background: TestBackground = "default";
+  const modifiers = new Set<TestModifier>();
+  let cursor = 0;
+
+  const append = (text: string) => {
+    for (const character of text) {
+      if (character === "\n") continue;
+      result.push({
+        character,
+        foreground,
+        background,
+        modifiers: [...modifiers].sort(),
+      });
+    }
+  };
+
+  const reset = () => {
+    foreground = "default";
+    background = "default";
+    modifiers.clear();
+  };
+
+  for (let match = sgr.exec(value); match; match = sgr.exec(value)) {
+    append(value.slice(cursor, match.index));
+    for (const parameter of (match[1] || "0").split(";").map(Number)) {
+      if (parameter === 0) reset();
+      else if (parameter === 1) modifiers.add("bold");
+      else if (parameter === 2) modifiers.add("dimColor");
+      else if (parameter === 3) modifiers.add("italic");
+      else if (parameter === 4) modifiers.add("underline");
+      else if (parameter === 7) modifiers.add("inverse");
+      else if (parameter === 9) modifiers.add("strikethrough");
+      else if (parameter === 22) {
+        modifiers.delete("bold");
+        modifiers.delete("dimColor");
+      } else if (parameter === 23) modifiers.delete("italic");
+      else if (parameter === 24) modifiers.delete("underline");
+      else if (parameter === 27) modifiers.delete("inverse");
+      else if (parameter === 29) modifiers.delete("strikethrough");
+      else if (parameter === 39) foreground = "default";
+      else if (parameter === 49) background = "default";
+      else if (parameter === 31) foreground = "red";
+      else if (parameter === 32) foreground = "green";
+      else if (parameter === 34) foreground = "blue";
+      else if (parameter === 41) background = "red";
+      else if (parameter === 42) background = "green";
+      else if (parameter === 44) background = "blue";
+      else if ((parameter >= 30 && parameter <= 37) || parameter === 38) foreground = "other";
+      else if ((parameter >= 40 && parameter <= 47) || parameter === 48) background = "other";
+    }
+    cursor = match.index + match[0].length;
+  }
+  append(value.slice(cursor));
+  return result;
+}
+
+test("nested Text color=default keeps terminal-default foreground through wrapping", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text>
+        <Text color="red">
+          AA<Text color="default">BBB</Text>CC
+        </Text>
+        <Text color="blue">Z</Text>
+      </Text>
+    )),
+    { columns: 4 },
+  );
+
+  const frame = lastFrame({ trimLines: true });
+  expect(stripAnsi(frame)).toBe("AABB\nBCCZ");
+  expect(foregroundCharacters(frame)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "A", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "C", foreground: "red" },
+    { character: "C", foreground: "red" },
+    { character: "Z", foreground: "blue" },
+  ]);
+});
+
+test("nested Text terminal-default colors reset foreground and background independently", () => {
+  const output = renderToString(
+    defineComponent(
+      () => () =>
+        h(
+          Text,
+          { color: "red", backgroundColor: "blue" },
+          {
+            default: () => [
+              "A",
+              h(Text, { color: "default" }, { default: () => "B" }),
+              h(Text, { backgroundColor: "default" }, { default: () => "C" }),
+              "D",
+            ],
+          },
+        ),
+    ),
+    { width: 4 },
+  );
+
+  expect(stripAnsi(output)).toBe("ABCD");
+  expect(styledCharacters(output)).toEqual([
+    {
+      character: "A",
+      foreground: "red",
+      background: "blue",
+      modifiers: [],
+    },
+    {
+      character: "B",
+      foreground: "default",
+      background: "blue",
+      modifiers: [],
+    },
+    {
+      character: "C",
+      foreground: "red",
+      background: "default",
+      modifiers: [],
+    },
+    {
+      character: "D",
+      foreground: "red",
+      background: "blue",
+      modifiers: [],
+    },
+  ]);
+});
+
+test("removing nested Text color keys restores both inherited channels", async () => {
+  const explicit = shallowRef(true);
+  const App = defineComponent(
+    () => () =>
+      h(
+        Text,
+        { color: "red", backgroundColor: "blue" },
+        {
+          default: () => [
+            "A",
+            h(Text, explicit.value ? { color: "green", backgroundColor: "red" } : {}, {
+              default: () => "B",
+            }),
+            "C",
+          ],
+        },
+      ),
+  );
+  const { lastFrame, waitUntilRenderFlush } = await render(App, { columns: 3 });
+
+  const stylesFor = (character: string) =>
+    styledCharacters(lastFrame())
+      .filter((entry) => entry.character === character)
+      .map(({ foreground, background }) => ({ foreground, background }));
+
+  expect(stylesFor("B")).toEqual([{ foreground: "green", background: "red" }]);
+
+  // The next VNode has neither key. Vue sends null to the host patcher for
+  // each removal; both channels must become unspecified and inherit again.
+  explicit.value = false;
+  await waitUntilRenderFlush();
+  expect(stylesFor("B")).toEqual([{ foreground: "red", background: "blue" }]);
+});
+
+test("nested Text inherits the enclosing Text background over the surrounding Box", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box backgroundColor="blue" width={3}>
+        <Text backgroundColor="red">
+          A<Text>B</Text>C
+        </Text>
+      </Box>
+    )),
+    { width: 3 },
+  );
+
+  expect(stripAnsi(output)).toBe("ABC");
+  expect(
+    styledCharacters(output)
+      .filter(({ character }) => "ABC".includes(character))
+      .map(({ character, background }) => ({ character, background })),
+  ).toEqual([
+    { character: "A", background: "red" },
+    { character: "B", background: "red" },
+    { character: "C", background: "red" },
+  ]);
+});
+
+const textModifiers = [
+  "dimColor",
+  "bold",
+  "italic",
+  "underline",
+  "strikethrough",
+  "inverse",
+] as const satisfies readonly TestModifier[];
+
+test.each(textModifiers)(
+  "nested Text %s supports true, false, and withdrawal back to inheritance",
+  async (modifier) => {
+    const childMode = shallowRef<"false" | "true" | "omitted">("false");
+    const App = defineComponent(
+      () => () =>
+        h(Text, { [modifier]: true } as never, {
+          default: () => [
+            "A",
+            h(
+              Text,
+              (childMode.value === "omitted"
+                ? {}
+                : { [modifier]: childMode.value === "true" }) as never,
+              { default: () => "B" },
+            ),
+            h(Text, { [modifier]: false } as never, {
+              default: () =>
+                h(Text, { [modifier]: true } as never, {
+                  default: () => "C",
+                }),
+            }),
+            "D",
+          ],
+        }),
+    );
+    const { lastFrame, waitUntilRenderFlush } = await render(App, { columns: 4 });
+
+    const expectModifiers = (expected: Record<"A" | "B" | "C" | "D", boolean>) => {
+      const characters = styledCharacters(lastFrame()!).filter(({ character }) =>
+        "ABCD".includes(character),
+      );
+      expect(
+        characters.map(({ character, modifiers }) => ({
+          character,
+          active: modifiers.includes(modifier),
+        })),
+      ).toEqual(
+        Object.entries(expected).map(([character, active]) => ({
+          character,
+          active,
+        })),
+      );
+    };
+
+    // Explicit false blocks the true ancestor, while a deeper explicit true
+    // re-enables the same channel.
+    expectModifiers({ A: true, B: false, C: true, D: true });
+
+    childMode.value = "true";
+    await waitUntilRenderFlush();
+    expectModifiers({ A: true, B: true, C: true, D: true });
+
+    // Withdrawing the key entirely restores ordinary inheritance. This is
+    // intentionally different from retaining the key with an undefined value:
+    // Vue patches a removed v-bind key to the host as null.
+    childMode.value = "omitted";
+    await waitUntilRenderFlush();
+    expectModifiers({ A: true, B: true, C: true, D: true });
+  },
+);
+
+test("bold and dimColor remain independently overridable despite sharing SGR 22", async () => {
+  const { lastFrame } = await render(
+    defineComponent(
+      () => () =>
+        h(
+          Text,
+          { bold: true, dimColor: true },
+          {
+            default: () => [
+              "A",
+              h(Text, { bold: false }, { default: () => "B" }),
+              h(Text, { dimColor: false }, { default: () => "C" }),
+              "D",
+            ],
+          },
+        ),
+    ),
+    { columns: 4 },
+  );
+
+  expect(
+    styledCharacters(lastFrame()).map(({ character, modifiers }) => ({
+      character,
+      modifiers,
+    })),
+  ).toEqual([
+    { character: "A", modifiers: ["bold", "dimColor"] },
+    { character: "B", modifiers: ["dimColor"] },
+    { character: "C", modifiers: ["bold"] },
+    { character: "D", modifiers: ["bold", "dimColor"] },
+  ]);
+});
+
+test("foreground reset preserves literal private-use characters and nested reset semantics", async () => {
+  const privateUse = "\uE000\uE001";
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Text color="red">
+        A{privateUse}
+        <Text color="default">
+          B<Text color="green">C</Text>
+          <Text color="default">D</Text>E
+        </Text>
+        F
+      </Text>
+    )),
+    { columns: 100 },
+  );
+
+  const frame = lastFrame();
+  expect(stripAnsi(frame)).toBe(`A${privateUse}BCDEF`);
+  expect(foregroundCharacters(frame)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "\uE000", foreground: "red" },
+    { character: "\uE001", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "C", foreground: "green" },
+    { character: "D", foreground: "default" },
+    { character: "E", foreground: "default" },
+    { character: "F", foreground: "red" },
+  ]);
+});
+
+test("renderToString preserves nested terminal-default foreground through a narrow wrap", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="red">
+        AA<Text color="default">BBB</Text>CC
+      </Text>
+    )),
+    { width: 4 },
+  );
+  expect(stripAnsi(output)).toBe("AABB\nBCC");
+  expect(foregroundCharacters(output)).toEqual([
+    { character: "A", foreground: "red" },
+    { character: "A", foreground: "red" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "B", foreground: "default" },
+    { character: "C", foreground: "red" },
+    { character: "C", foreground: "red" },
+  ]);
+});
+
 test("text with dim+bold", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -82,22 +472,6 @@ test("text with hex color", async () => {
   expect(lastFrame()).toBe(chalk.hex("#FF8800")("Test"));
 });
 
-test("text with rgb color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text color="rgb(255, 136, 0)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.rgb(255, 136, 0)("Test"));
-});
-
-test("text with ansi256 color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text color="ansi256(194)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.ansi256(194)("Test"));
-});
-
 test("text with standard background color", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => <Text backgroundColor="green">Test</Text>),
@@ -112,30 +486,6 @@ test("text with hex background color", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe(chalk.bgHex("#FF8800")("Test"));
-});
-
-test("text with rgb background color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text backgroundColor="rgb(255, 136, 0)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.bgRgb(255, 136, 0)("Test"));
-});
-
-test("text with ansi256 background color", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text backgroundColor="ansi256(194)">Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.bgAnsi256(194)("Test"));
-});
-
-test("text with inversion", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => <Text inverse>Test</Text>),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe(chalk.inverse("Test"));
 });
 
 test("text with empty-to-nonempty sibling does not wrap", async () => {
@@ -322,61 +672,6 @@ test("don't wrap text if there is enough space", async () => {
   expect(lastFrame()).toBe("Hello World");
 });
 
-test("hard wrap text", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="hard">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hello W\norld");
-});
-
-test("hard wrap with long word", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={5}>
-        <Text wrap="hard">aaaaaaaaaa</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("aaaaa\naaaaa");
-});
-
-test("hard wrap inside a zero-width Box does not reserve invisible child rows", async () => {
-  // A Box whose resolved inner content width is 0 has no legal child paint area.
-  // The child text should therefore neither paint nor inflate the row height, even
-  // though Ink's zero-width hard-wrap path produces extra invisible rows.
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box flexDirection="row">
-        <Box width={0}>
-          <Text wrap="hard">a b c</Text>
-        </Box>
-        <Text>X</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  const lines = stripAnsi(lastFrame()!).split("\n");
-  expect(lines).toEqual(["X"]);
-});
-
-test("don't hard wrap text if there is enough space", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={20}>
-        <Text wrap="hard">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hello World");
-});
-
 test("truncate text in the end", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -387,30 +682,6 @@ test("truncate text in the end", async () => {
     { columns: 100 },
   );
   expect(lastFrame()).toBe("Hello …");
-});
-
-test("truncate text in the middle", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="truncate-middle">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("Hel…rld");
-});
-
-test("truncate text in the beginning", async () => {
-  const { lastFrame } = await render(
-    defineComponent(() => () => (
-      <Box width={7}>
-        <Text wrap="truncate-start">Hello World</Text>
-      </Box>
-    )),
-    { columns: 100 },
-  );
-  expect(lastFrame()).toBe("… World");
 });
 
 // --- Ink ANSI sanitization tests ---
@@ -578,7 +849,7 @@ test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width",
         <Text>{`A${ESC}#8BC`}</Text>
       </Box>
     )),
-    { columns: 3 },
+    { width: 3 },
   );
   expect(output).not.toContain(`${ESC}#8`);
   expect(stripAnsi(output)).toBe("ABC");
@@ -733,7 +1004,7 @@ test("do not wrap text with BEL-terminated OSC hyperlinks", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Click here");
 });
@@ -746,7 +1017,7 @@ test("do not wrap text with ST-terminated OSC hyperlinks", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Click here");
 });
@@ -759,7 +1030,7 @@ test("do not wrap text with non-hyperlink OSC (BEL-terminated) sequences", async
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Some text");
 });
@@ -772,7 +1043,7 @@ test("do not wrap text with non-hyperlink OSC (ST-terminated) sequences", async 
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 20 },
+    { width: 20 },
   );
   expect(stripAnsi(output)).toBe("Some text");
 });
@@ -788,7 +1059,7 @@ test("drop non-hyperlink OSC before hard-wrapping visible text", async () => {
         <Text wrap="wrap">{text}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -801,7 +1072,7 @@ test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -826,7 +1097,7 @@ test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across 
         </Text>
       </Box>
     )),
-    { columns: 4 },
+    { width: 4 },
   );
   expect(stripAnsi(output)).toBe("abCD\nef");
   // Exact-byte lock against an SGR-ordering / reset regression: each wrapped line must
@@ -850,7 +1121,7 @@ test("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
         <Text wrap="wrap">{hyperlink}</Text>
       </Box>
     )),
-    { columns: 5 },
+    { width: 5 },
   );
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
@@ -858,7 +1129,7 @@ test("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
 test("ensure wrap-ansi doesn't trim leading whitespace", async () => {
   const output = renderToString(
     defineComponent(() => () => <Text color="red">{" ERROR "}</Text>),
-    { columns: 100 },
+    { width: 100 },
   );
   expect(output).toBe(chalk.red(" ERROR "));
 });
@@ -866,7 +1137,7 @@ test("ensure wrap-ansi doesn't trim leading whitespace", async () => {
 test("link ansi escapes are closed properly", async () => {
   const output = renderToString(
     defineComponent(() => () => <Text>{ansiEscapes.link("Example", "https://example.com")}</Text>),
-    { columns: 100 },
+    { width: 100 },
   );
   // Lock the EXACT bytes: the OSC-8 hyperlink must round-trip unchanged (open + label +
   // close). Ink components.tsx: t.is(output, ']8;;https://example.comExample]8;;') —

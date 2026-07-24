@@ -12,7 +12,8 @@
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
-this package owns everything you can build by arranging `Box` / `Text` / `Static` / `Transform`
+this package owns everything you can build by arranging common `Box` / `Text`
+primitives, the mode-limited `Static` primitive from `@vue-tui/runtime/inline`,
 and reacting to the public composables. Every principle below follows from that one.
 
 ## What this package is — and isn't
@@ -25,7 +26,7 @@ re-enumerate it: a second copy would drift.
 
 ## Inclusion bar — product-driven and evidence-backed
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 A component earns its place by closing a recurring need in an [active product scenario](./product-scenarios.md#active-application-scenarios) or a real consumer. A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
 
@@ -45,19 +46,13 @@ The runtime owns anything that touches the terminal I/O boundary or the layout/c
 A candidate is **runtime work** (or blocked on a runtime addition) if it must:
 
 - emit a new escape sequence, or flip a terminal mode;
-- hook the commit/animation scheduler _directly_ — note `useAnimation` already exposes
-  frame-driven animation, so needing animation is _not_ runtime work;
-- read geometry the runtime primitives (incl. `useBoxMetrics` / `measureElement`) don't already
-  expose.
+- hook the terminal commit scheduler _directly_; an ordinary component-owned timer, such as
+  Spinner's frame counter, is not Runtime work;
+- require terminal, renderer-tree, or accepted-paint facts that cannot be implemented from accepted Runtime public primitives.
 
-Otherwise it is a component. The clean illustration: **pointer/mouse input is runtime work** —
-input decoding, terminal-mode ownership, hit testing, and dispatch live in the runtime
-(`useMouseInput` and candidate full-screen target-ref composables such as `usePointerEvent` and
-`useDraggable`; see [mouse-input.md](./mouse-input.md)) — whereas anything driven by existing
-keyboard input plus measured layout is a pure composition.
-(`overflow:"hidden"`
-clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see
-the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
+Otherwise it belongs above Runtime. `useFocus()` is an accepted Runtime building block because unique ownership and rendered-component validity cannot be reproduced safely above Runtime; it exposes only an explicit handle and readonly ownership, so components still own disabled state, automatic focus, ordering, routing, scopes, modal policy, and names. `useLayoutWidth()`, `useViewportHeight()`, and `useBoxSize()` are retained Runtime building blocks because real consumers need accepted root width, finite-viewport capability, and direct flex-resolved Box size that application code cannot derive. General accepted-tree presence remains private rather than a public component dependency.
+
+Targeted mouse input illustrates a future additive edge: input decoding, terminal-mode ownership, hit testing, and capture require Runtime mechanisms, while application interaction policy can live above Runtime. The experimental mouse implementation was removed together with its public hooks and `/fullscreen` subpath. If a selected product journey needs target-bound pointer behavior, review and implement the smallest Runtime-owned operation then; the current foundation does not preselect its shape. See the historical [targeted-pointer](./targeted-pointer.md) record. Anything driven entirely by already accepted public facts remains a higher-layer composition. (`overflow:"hidden"` clipping is paint-only and does not change Yoga layout, so clipped content stays measurable; see the related layout-model guidance in [ink-divergences.md](./ink-divergences.md).)
 
 ## Vue-idiomatic, Ink-inspired
 
@@ -85,9 +80,7 @@ component's types should be treated as contract — the same principle
 - typed props, typed `v-model` (`defineModel<T>()`), typed scoped-slot payloads, and typed
   `defineExpose` handles — so a wrong-typed prop, a mismatched `v-model` binding, or a misused
   slot variable is a **compile error**, not a silent no-op;
-- a component over a collection or value is **generic** and infers it — the way `Static<T>` flows
-  its item type into the `{ item, index }` slot — so the consumer annotates nothing and misuse
-  still type-checks;
+- a higher-level component that owns a collection or value is **generic** and infers it, so a typed `{ item, index }` scoped payload can flow without consumer annotations; Runtime's one-slot `Static` deliberately owns no collection;
 - no leaked `any` (it silently switches checking off); keep the `WithChildren` shim so JSX
   children stay typed;
 - **prove it by running the checker** against real template _and_ TSX usage (`vue-tsc` for
@@ -104,8 +97,8 @@ consistent and to flag real authoring traps:
 - **Two-way value** → author with `defineModel()` (Vue 3.4+); it generates `modelValue` +
   `update:modelValue`. Use named models (`defineModel("query")`) when there is more than one
   binding. Display-only components have no model — the pattern simply doesn't apply.
-- **Slots (correctness constraint, not just a pattern)** → primary / repeated content goes in the
-  **default** scoped slot exposing `{ item, index }` (mirrors `Static`). This is load-bearing:
+- **Slots (correctness constraint, not just a pattern)** → when a higher-level collection component supplies repeated content, it uses the
+  **default** scoped slot exposing one `{ item, index }` object. Runtime's `Static` is not that wrapper; applications normally compose keyed `Static` instances with `v-for`. The object rule remains load-bearing for a future collection wrapper:
   Vue's automatic JSX runtime routes JSX children to a `children` prop that resolves to the
   **default** slot (the `WithChildren` shim only makes that type-check), so primary content placed
   in a **named** slot silently drops for JSX consumers. Reserve **named** scoped slots for
@@ -118,10 +111,7 @@ consistent and to flag real authoring traps:
   `props.onInput(...)` at event time. This is the load-bearing half of the
   [AGENTS.md](../../AGENTS.md) handler rule; the `MaybeRef<Handler> + unref()` form is for a
   composable you _author_, not for component props.
-- **Imperative handles** → prefer props / `v-model` / events / slots and the existing runtime
-  composables (`useFocus`, `useFocusManager`) first. Reach for `defineExpose` only for genuinely
-  imperative actions that can't be modeled declaratively (`reset()`, `scrollTo()`) — never to
-  re-implement focus control the runtime already owns.
+- **Imperative handles** → prefer props / `v-model` / events / slots first. Reach for `defineExpose` only for genuinely imperative actions that can't be modeled declaratively (`reset()`, `scrollTo()`). Runtime's accepted `useFocus()` handle is the primitive for explicit unique ownership and optional rendered-target lifetime; it does not justify exposing a manager or embedding traversal, scopes, string lookup, restoration, automatic focus, or input routing in Runtime. A component or higher layer composes those policies with Vue state and gates `useInput()` through the handle's readonly `isFocused` ref.
 - **Authoring mechanics** → for the parts that generalize, defer to
   [component-authoring.md](./component-authoring.md): SFC by default, and a render function only
   when a component must inspect its own child vnodes. (That doc is mostly about the runtime's
@@ -130,7 +120,7 @@ consistent and to flag real authoring traps:
 
 ## Boolean prop naming & defaults
 
-[VOUCHED @hyf0]
+[VOUCHED @hyfdev]
 
 Component boolean props follow Vue-ecosystem and terminal-UI convention — not verb-prefixed toggles.
 
@@ -139,10 +129,6 @@ Component boolean props follow Vue-ecosystem and terminal-UI convention — not 
 - **Name for precision — what is toggled, not the device.** A bare device noun reads ambiguously; prefer the specific behavior it controls (e.g. `wheel` for mouse-wheel scrolling rather than `mouse`, which would also imply clicks).
 - **A prop with a global / terminal-wide side effect is opt-in (`false` by default), and the side effect is documented.** Example: enabling terminal mouse tracking suppresses the terminal's native text selection window-wide (users bypass with Shift) — so such a prop must be opt-in, not on by default.
 
-## Deliberately omitted
+## Accessibility is not a current component contract
 
-[VOUCHED @hyf0 2026-07-10]
-
-- **No accessibility requirement.** Components are not required to set `ariaRole` / `ariaState`.
-  It isn't always cheap to get right, and mandating it would tax contribution; a component may opt
-  in where it's natural.
+Runtime no longer exposes a screen-reader presentation or `ariaRole` / `ariaState` primitives, so components cannot claim built-in terminal accessibility by setting those removed props. A future accessibility design must define a complete semantic Runtime contract before component-level conventions are added. The previous vouch covered optional use of the now-removed ARIA experiment; changing that premise removes the stamp rather than carrying it onto this new decision.

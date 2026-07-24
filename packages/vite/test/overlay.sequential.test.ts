@@ -12,35 +12,48 @@
 // and both files mutate their fixture's app.vue; if they shared one file the edits would
 // race (one test's restore/edit clobbers the other's syntax error before the overlay
 // renders), which is exactly what made this test flake in the full suite.
-import { test, expect, afterEach } from "vite-plus/test";
+import { test, expect, afterEach, beforeEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
-import { capture, waitFor } from "./helpers.ts";
+import { capture, waitFor, waitUntil } from "./helpers.ts";
 
 const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
 const appVue = fileURLToPath(new URL("./fixtures/overlay/src/app.vue", import.meta.url));
 let server: ViteDevServer | undefined;
-const origAppVue = readFileSync(appVue, "utf8");
+// Canonical fixture text is pinned at module load. Tests may introduce a temporary
+// syntax error; beforeEach/afterEach always restore so a killed prior run cannot
+// leave the broken file as the next suite's starting state.
+const SYNTAX_ERROR_MARK = "const count = shallowRef(0); const x =;";
+const CLEAN_COUNT_LINE = "const count = shallowRef(0);";
+function readCleanFixture(): string {
+  const raw = readFileSync(appVue, "utf8");
+  return raw.includes(SYNTAX_ERROR_MARK) ? raw.replace(SYNTAX_ERROR_MARK, CLEAN_COUNT_LINE) : raw;
+}
+const origAppVue = readCleanFixture();
+writeFileSync(appVue, origAppVue);
+
+beforeEach(() => {
+  writeFileSync(appVue, origAppVue);
+});
 
 afterEach(async () => {
   const testGlobal = globalThis as Record<string, unknown>;
   const app = testGlobal.__VT_TEST_APP__ as { unmount(): void } | undefined;
   app?.unmount();
-  await server?.close();
+  await server?.close().catch(() => {});
   server = undefined;
   writeFileSync(appVue, origAppVue);
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
-  delete (globalThis as Record<string, unknown>).__VT_RENDER_SESSION__;
   delete (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   delete (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
   delete (globalThis as Record<string, unknown>).__VT_TEST_APP__;
 });
 
-test("a script hot update preserves the render-session object", async () => {
-  const read = capture();
+test("a script hot update preserves public layout observations", async () => {
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -48,21 +61,26 @@ test("a script hot update preserves the render-session object", async () => {
     plugins: [vue(), vueTui()],
   });
   await server.listen();
-  await waitFor(read, "session=stable");
+  await waitFor(read, "box=7x2");
 
   writeFileSync(
     appVue,
     origAppVue.replace('const label = "LABEL-A";', 'const label = "LABEL-B-HOT";'),
   );
   await waitFor(read, "LABEL-B-HOT");
+  await waitUntil(() => {
+    const latest = read().slice(read().lastIndexOf("LABEL-B-HOT"));
+    return latest.includes("box=7x2");
+  });
 
   const updatedOutput = read().slice(read().lastIndexOf("LABEL-B-HOT"));
-  expect(updatedOutput).toContain("session=stable");
-  expect(updatedOutput).not.toContain("session=changed");
+  expect(updatedOutput).toMatch(/layout=\d+x24/);
+  expect(updatedOutput).toContain("box=7x2");
+  expect(updatedOutput).not.toContain("box=pending");
 });
 
 test("a build error renders the in-process dev overlay", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

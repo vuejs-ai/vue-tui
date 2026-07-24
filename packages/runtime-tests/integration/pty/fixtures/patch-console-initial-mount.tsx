@@ -1,20 +1,16 @@
-import { createApp } from "@vue-tui/runtime";
-import { defineComponent } from "vue";
+import { createApp, Text } from "@vue-tui/runtime";
+import { defineComponent, inject } from "vue";
 
-// Root setup() throws during the INITIAL mount. In a dev build Vue then emits
-// its "[Vue warn]: Component is missing template or render function." line on
-// stderr. patchConsole is at its default (on), so that warn
-// must be filtered even though it fires during the first mount.
+// A real Vue warning emitted during initial setup must be intercepted before
+// the first user component runs and forwarded without content filtering.
 const App = defineComponent(() => {
-  throw new Error("setup boom");
+  inject("intentionally-missing-injection");
+  return () => <Text>{{ default: () => "mounted after warning" }}</Text>;
 });
 
 const app = createApp(App);
 app.mount();
-
-try {
-  await app.waitUntilExit();
-  console.log("waitUntilExit:resolved");
-} catch (error: unknown) {
-  console.log(`waitUntilExit:rejected:${(error as Error).message}`);
-}
+await app.waitUntilRenderFlush();
+app.unmount();
+await app.waitUntilExit();
+console.log("waitUntilExit:resolved");

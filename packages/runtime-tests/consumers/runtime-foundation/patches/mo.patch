@@ -1,0 +1,111 @@
+diff --git a/src/components/selector.vue b/src/components/selector.vue
+index f8d650e..5c3e42e 100644
+--- a/src/components/selector.vue
++++ b/src/components/selector.vue
+@@ -95,61 +95,61 @@ const footerText = computed(() =>
+ )
+ const showBody = computed(() => state.value === 'list' || state.value === 'search')
+
+-useInput((input, key) => {
++useInput(event => {
+   if (state.value === 'succeed' || state.value === 'error') {
+     return
+   }
+
+-  if (key.ctrl && input === 'c') {
++  if (event.type === 'key' && event.key.character === 'c' && event.key.ctrl) {
+     cancel()
+-    return
++    return
+   }
+
+-  if (key.escape) {
++  if (event.type === 'key' && event.key.name === 'escape') {
+     if (query.value) {
+       query.value = ''
+       resetCursor(listItems.value)
+     } else {
+       cancel()
+     }
+     return
+   }
+
+-  if (key.return) {
++  if (event.type === 'key' && event.key.name === 'enter') {
+     if (currentPath.value) {
+       state.value = 'succeed'
+       selectedPath.value = currentPath.value
+       onSelect(currentPath.value)
+     }
+     return
+   }
+
+-  if (key.upArrow) {
++  if (event.type === 'key' && event.key.name === 'up') {
+     moveCursor(-1)
+     return
+   }
+
+-  if (key.downArrow) {
++  if (event.type === 'key' && event.key.name === 'down') {
+     moveCursor(1)
+     return
+   }
+
+-  if (key.tab) {
++  if (event.type === 'key' && event.key.name === 'tab') {
+     return
+   }
+
+-  if (key.backspace || key.delete) {
++  if (event.type === 'key' && (event.key.name === 'backspace' || event.key.name === 'delete')) {
+     const newQuery = query.value.slice(0, -1)
+     query.value = newQuery
+     resetCursor(newQuery ? searchItems(newQuery, groups, root) : listItems.value)
+     return
+   }
+
+-  if (input && !key.ctrl && !key.meta) {
+-    const newQuery = query.value + input
++  if (event.type === 'text' || event.type === 'paste') {
++    const newQuery = query.value + event.text
+     query.value = newQuery
+     resetCursor(searchItems(newQuery, groups, root))
+   }
+ })
+
+ function buildListItems(root: string, groups: RepoGroup[]): ListItem[] {
+diff --git a/src/utils/selector.ts b/src/utils/selector.ts
+index 753eb1f..61a74b7 100644
+--- a/src/utils/selector.ts
++++ b/src/utils/selector.ts
+@@ -45,20 +45,18 @@ export async function withPathSelector<T>(
+     const app = createApp(Selector, {
+       root,
+       groups,
+-      onSelect: (selectedPath: string) => {
+-        setTimeout(() => {
+-          app.unmount()
+-          resolve(action(selectedPath))
+-        }, 50)
++      onSelect: async (selectedPath: string) => {
++        await app.waitUntilRenderFlush()
++        app.unmount()
++        resolve(action(selectedPath))
+       },
+-      onCancel: () => {
+-        setTimeout(() => {
+-          app.unmount()
+-          reject(new Error('Canceled.'))
+-        }, 50)
++      onCancel: async () => {
++        await app.waitUntilRenderFlush()
++        app.unmount()
++        reject(new Error('Canceled.'))
+       }
+     })
+
+-    app.mount({ exitOnCtrlC: false })
++    app.mount()
+   })
+ }

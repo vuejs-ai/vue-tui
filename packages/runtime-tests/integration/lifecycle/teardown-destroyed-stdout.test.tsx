@@ -1,3 +1,5 @@
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 /**
  * Item 2.5b — every teardown stdout write must be skipped when stdout is already
  * destroyed/ended, not just gated on `isTTY`.
@@ -21,7 +23,7 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, nextTick } from "vue";
 import { describe, test, expect } from "vite-plus/test";
-import { createApp, Text, useCursor } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 
 const SHOW_CURSOR = "\x1b[?25h";
 const DISABLE_KITTY = "\x1b[<u";
@@ -91,15 +93,11 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-const CursorApp = defineComponent(() => {
-  // useCursor makes the frame writer carry a live cursor, but the show-cursor
-  // restore at done() fires for ANY interactive app — the cursor was hidden at
-  // mount and the frame writer's done() shows it again on teardown.
-  useCursor();
-  return () => <Text>cursor</Text>;
-});
-
 const PlainApp = defineComponent(() => () => <Text>plain</Text>);
+const InputApp = defineComponent(() => {
+  useInput(() => {});
+  return () => <Text>plain</Text>;
+});
 
 describe("teardown stdout writes on destroyed stdout", () => {
   test("teardown skips the show-cursor write (frame writer done) when stdout was destroyed", async () => {
@@ -108,7 +106,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PlainApp);
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr });
 
     // Let the initial render settle (cursor hidden at mount).
     await new Promise<void>((r) => setTimeout(r, 60));
@@ -126,35 +124,21 @@ describe("teardown stdout writes on destroyed stdout", () => {
     ).toBe(0);
   });
 
-  test("teardown skips the show-cursor write for a useCursor app when stdout was destroyed", async () => {
-    const stdout = makeRecordingTtyStream();
-    const stderr = makeRecordingTtyStream();
-    const stdin = makeFakeStdin();
-
-    const app = createApp(CursorApp);
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
-
-    await new Promise<void>((r) => setTimeout(r, 60));
-    stdout.hardDestroy();
-
-    expect(() => app.unmount()).not.toThrow();
-    expect(stdout.showCursorWhileDead).toBe(0);
-  });
-
   test("teardown skips the disable-kitty write when stdout was destroyed", async () => {
     const stdout = makeRecordingTtyStream();
     const stderr = makeRecordingTtyStream();
     const stdin = makeFakeStdin();
 
-    const app = createApp(PlainApp);
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      exitOnCtrlC: false,
-      // Force kitty enabled so dispose() attempts the disable-kitty escape.
-      kittyKeyboard: { mode: "enabled" },
-    });
+    const app = createApp(InputApp);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        // Force kitty enabled so dispose() attempts the disable-kitty escape.
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    );
 
     await new Promise<void>((r) => setTimeout(r, 60));
     // Kitty enable escape should have gone out on the live stream.
@@ -175,7 +159,7 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PlainApp);
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr });
 
     await new Promise<void>((r) => setTimeout(r, 60));
 
@@ -191,14 +175,15 @@ describe("teardown stdout writes on destroyed stdout", () => {
     const stderr = makeRecordingTtyStream();
     const stdin = makeFakeStdin();
 
-    const app = createApp(PlainApp);
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      exitOnCtrlC: false,
-      kittyKeyboard: { mode: "enabled" },
-    });
+    const app = createApp(InputApp);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    );
 
     await new Promise<void>((r) => setTimeout(r, 60));
 

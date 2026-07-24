@@ -11,8 +11,10 @@
 import { createRequire } from "node:module";
 import { defineComponent } from "vue";
 import { expect, test, vi, afterEach } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
-import { yogaNodeTracker } from "@vue-tui/runtime/internal";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { yogaNodeTracker } from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeWritable, makeFakeStdin } from "./test-streams.ts";
 
 afterEach(() => {
@@ -31,11 +33,15 @@ function spyOnGuardWarnings(): { warnings: string[]; restore: () => void } {
 
 const GUARD_WARNING = "this stdout already has a live app";
 
-test.sequential("a synchronous setRawMode throw during mount() runs teardown: rethrows + does not poison the stdout", async () => {
+test.sequential("a setRawMode failure during first semantic demand tears down without poisoning stdout", async () => {
   yogaNodeTracker.reset();
   const liveBefore = yogaNodeTracker.snapshot().live;
 
-  const App = defineComponent(() => () => <Text>hello</Text>);
+  const App = defineComponent(() => {
+    useInput(() => {});
+    return () => <Text>hello</Text>;
+  });
+  const PlainApp = defineComponent(() => () => <Text>hello</Text>);
 
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
@@ -50,13 +56,15 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
 
   const { warnings, restore } = spyOnGuardWarnings();
 
-  // (1) mount() must rethrow the injected error (the caller still sees it).
-  // rawMode defaults to "always" + interactive (TTY stdout) → the App acquires
-  // a lifetime raw-mode hold, which calls the throwing setRawMode.
+  // Vue surfaces the setup error synchronously from mount(), while Runtime
+  // rejects the app lifetime after every partially acquired resource is released.
   const app1 = createApp(App);
-  expect(() => app1.mount({ stdout, stdin, stderr, liveUpdates: true })).toThrow(
-    "ERR_TTY_INIT_FAILED",
-  );
+  app1.config.warnHandler = () => {};
+  const exited = app1.waitUntilExit();
+  expect(() =>
+    app1.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true })),
+  ).toThrow(ttyError);
+  await expect(exited).rejects.toBe(ttyError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) The stdout is NOT poisoned: a subsequent mount() on the SAME stdout
@@ -64,8 +72,8 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
   // (before the fix this warned + no-op'd). Use a stdin that does NOT throw.
   const { stream: stdin2 } = makeFakeStdin();
   const writes = captureWrites(stdout);
-  const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
+  const app2 = createApp(PlainApp);
+  app2.mount(createInternalMountOptions({ stdout, stdin: stdin2, stderr, maxFps: 0 }));
   await app2.waitUntilRenderFlush();
 
   restore();
@@ -78,8 +86,12 @@ test.sequential("a synchronous setRawMode throw during mount() runs teardown: re
   expect(yogaNodeTracker.snapshot().live).toBe(liveBefore);
 });
 
-test.sequential("a synchronous stdout.write throw during kitty enable runs teardown (no poison)", async () => {
-  const App = defineComponent(() => () => <Text>kitty</Text>);
+test.sequential("a Kitty push failure during first semantic demand tears down without poisoning stdout", async () => {
+  const App = defineComponent(() => {
+    useInput(() => {});
+    return () => <Text>kitty</Text>;
+  });
+  const PlainApp = defineComponent(() => () => <Text>kitty</Text>);
 
   // A stdout whose write throws once kitty tries to enable the protocol.
   const stdout = makeFakeWritable();
@@ -96,25 +108,29 @@ test.sequential("a synchronous stdout.write throw during kitty enable runs teard
   const { stream: stdin } = makeFakeStdin();
   const { warnings, restore } = spyOnGuardWarnings();
 
-  // (1) mount() rethrows the kitty-enable error.
   const app1 = createApp(App);
+  app1.config.warnHandler = () => {};
+  const exited = app1.waitUntilExit();
   expect(() =>
-    app1.mount({
-      stdout,
-      stdin,
-      stderr,
-      liveUpdates: true,
-      kittyKeyboard: { mode: "enabled" },
-    }),
-  ).toThrow("BROKEN_STREAM_ON_KITTY_ENABLE");
+    app1.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      }),
+    ),
+  ).toThrow(enableError);
+  await expect(exited).rejects.toBe(enableError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) Not poisoned: a fresh mount on the same stdout must NOT warn (the
   // registry entry was evicted by teardown). Repair the stream first.
   stdout.write = originalWrite as NodeJS.WriteStream["write"];
   const { stream: stdin2 } = makeFakeStdin();
-  const app2 = createApp(App);
-  app2.mount({ stdout, stdin: stdin2, stderr, maxFps: 0, exitOnCtrlC: false });
+  const app2 = createApp(PlainApp);
+  app2.mount(createInternalMountOptions({ stdout, stdin: stdin2, stderr, maxFps: 0 }));
   expect(warnings.join("")).not.toContain(GUARD_WARNING);
   restore();
   app2.unmount();
@@ -150,9 +166,15 @@ test.sequential("a throw AFTER attachYoga (during setWidth) still frees the yoga
 
   // (1) mount() rethrows the setWidth error.
   const app1 = createApp(App);
-  expect(() => app1.mount({ stdout, stdin, stderr, liveUpdates: false })).toThrow(
-    "YOGA_SET_WIDTH_FAILED",
+  const exited = app1.waitUntilExit().then(
+    () => ({ kind: "resolved" as const, error: undefined }),
+    (error: unknown) => ({ kind: "rejected" as const, error }),
   );
+  expect(() =>
+    app1.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: false })),
+  ).toThrow(widthError);
+  const outcome = await exited;
+  expect(outcome).toEqual({ kind: "rejected", error: widthError });
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   restore();

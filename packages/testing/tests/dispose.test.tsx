@@ -43,3 +43,22 @@ test("disposal wins races with screen and resize before either touches disposed 
   expect(result.terminal.columns).toBe(40);
   expect(result.terminal.rows).toBe(10);
 });
+
+test("resize remains available after unmount without asking Runtime to render", async () => {
+  const result = await render(() => <Text>unmounted</Text>, { columns: 40, rows: 10 });
+  result.unmount();
+
+  await expect(result.terminal.resize(80, 24)).resolves.toBeUndefined();
+  expect(result.terminal.columns).toBe(80);
+  expect(result.terminal.rows).toBe(24);
+  expect((await result.screen()).dimensions).toEqual({ columns: 80, rows: 24 });
+});
+
+test("a pending exit wait keeps the Runtime outcome when disposal releases the emulator", async () => {
+  const result = await render(() => <Text>pending exit</Text>);
+  const exited = result.waitUntilExit();
+
+  result.dispose();
+
+  await expect(exited).resolves.toBeUndefined();
+});

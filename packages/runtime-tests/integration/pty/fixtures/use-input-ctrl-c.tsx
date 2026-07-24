@@ -5,8 +5,8 @@ import { defineComponent, onMounted } from "vue";
 const UserInput = defineComponent(() => {
   const { exit } = useApp();
 
-  useInput((input, key) => {
-    if (input === "c" && key.ctrl) {
+  useInput((event) => {
+    if (event.type === "key" && event.key.character === "c" && event.key.ctrl && !event.key.shift) {
       exit();
       return;
     }
@@ -22,6 +22,6 @@ const UserInput = defineComponent(() => {
 });
 
 const app = createApp(UserInput);
-app.mount({ exitOnCtrlC: false });
+app.mount();
 await app.waitUntilExit();
 console.log("exited");

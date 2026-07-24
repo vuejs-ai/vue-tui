@@ -3,12 +3,14 @@ import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput, useLayoutSize, type TuiApp } from "@vue-tui/runtime";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import {
   INTERNAL_SUSPENSION_HOST,
-  INTERNAL_TERMINAL_SIZE_PROBE,
   createManualSuspensionHost,
   type SuspensionHost,
-} from "@vue-tui/runtime/internal";
+} from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
 
 function makeWritable(): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -57,20 +59,80 @@ test.sequential("registers suspension before the first terminal acquisition", ()
   const app = createApp(defineComponent(() => () => <Text>frame</Text>));
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      rawMode: "always",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
 
     expect(stateAtRegistration).toEqual({ writes: [], isRaw: false });
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test.sequential("activating managed input while Fullscreen is suspended defers every acquisition", async () => {
+  const stdout = makeWritable();
+  const stderr = makeWritable();
+  const stdin = makeRawTrackingStdin();
+  const suspensionHost = createManualSuspensionHost();
+  const active = shallowRef(false);
+  const writes: string[] = [];
+  const originalWrite = stdout.write.bind(stdout);
+  stdout.write = ((...args: unknown[]) => {
+    writes.push(String(args[0]));
+    return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+  }) as NodeJS.WriteStream["write"];
+  const App = defineComponent(() => {
+    useInput(() => {}, { isActive: active });
+    return () => <Text>frame</Text>;
+  });
+  const app = createApp(App);
+
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
+    await app.waitUntilRenderFlush();
+    await suspensionHost.suspend();
+    expect(stdin.isRaw).toBe(false);
+
+    const activationOffset = writes.length;
+    active.value = true;
+    await nextTick();
+
+    expect(writes.slice(activationOffset)).toEqual([]);
+    expect(stdin.isRaw).toBe(false);
+
+    await suspensionHost.resume();
+    const resumedOutput = writes.slice(activationOffset).join("");
+    const enterIndex = resumedOutput.indexOf(ansiEscapes.enterAlternativeScreen);
+    const pasteIndex = resumedOutput.indexOf("\x1b[?2004h");
+    const kittyIndex = resumedOutput.indexOf("\x1b[>1u");
+    expect(enterIndex).toBeGreaterThanOrEqual(0);
+    expect(pasteIndex).toBeGreaterThan(enterIndex);
+    expect(kittyIndex).toBeGreaterThan(enterIndex);
+    expect(stdin.isRaw).toBe(true);
   } finally {
     app.unmount();
     stdin.destroy();
@@ -89,7 +151,10 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     const stdin = makeRawTrackingStdin();
     const suspensionHost = createManualSuspensionHost();
     const content = shallowRef("before-suspend");
-    const App = defineComponent(() => () => <Text>{content.value}</Text>);
+    const App = defineComponent(() => {
+      useInput(() => {});
+      return () => <Text>{content.value}</Text>;
+    });
     const app = createApp(App);
     const forwardedWrites: string[] = [];
     const attemptedWrites: string[] = [];
@@ -103,7 +168,7 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
       const shouldFail =
         !failureObserved &&
         ((armedFailure === "enter" && chunk.includes(ansiEscapes.enterAlternativeScreen)) ||
-          (armedFailure === "hide" && chunk === "\x1b[?25l") ||
+          (armedFailure === "hide" && chunk.includes("\x1b[?25l")) ||
           (armedFailure === "repaint" && chunk.includes(ansiEscapes.clearViewport)));
       if (shouldFail) {
         failureObserved = true;
@@ -114,18 +179,18 @@ test.sequential.each<ResumeFailureStage>(["enter", "hide", "repaint"])(
     }) as NodeJS.WriteStream["write"];
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode: "fullscreen",
-        liveUpdates: true,
-        rawMode: "always",
-        maxFps: 0,
-        patchConsole: false,
-        exitOnCtrlC: false,
-        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      } as Parameters<TuiApp["mount"]>[0]);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode: "fullscreen",
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+        }),
+      );
       expect(stdin.isRaw).toBe(true);
 
       await suspensionHost.suspend();
@@ -181,18 +246,18 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
   const app = createApp(defineComponent(() => () => <Text>frame</Text>));
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      rawMode: "always",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
 
@@ -218,16 +283,16 @@ test.sequential("unmount during the continuation gap cancels repaint and input r
 test.sequential("a resize reported by the continued frame is repainted before input resumes", async () => {
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
   const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
-  Object.assign(stdout, { isTTY: false, columns: 30 });
-  Object.assign(stderr, { isTTY: false, columns: 30 });
+  Object.assign(stdout, { isTTY: true, columns: 30, rows: 10 });
+  Object.assign(stderr, { isTTY: true, columns: 30, rows: 10 });
   const stdin = makeRawTrackingStdin();
   const suspensionHost = createManualSuspensionHost();
   const renderedFacts: string[] = [];
   const App = defineComponent(() => {
-    const { columns } = useLayoutSize();
+    const { width } = useLayoutSize();
     useInput(() => {});
     const frame = () => {
-      const facts = `${columns.value}:raw=${String(stdin.isRaw)}`;
+      const facts = `${width.value}:raw=${String(stdin.isRaw)}`;
       renderedFacts.push(facts);
       return facts;
     };
@@ -249,17 +314,17 @@ test.sequential("a resize reported by the continued frame is repainted before in
   }) as NodeJS.WriteStream["write"];
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      rawMode: "always",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await app.waitUntilRenderFlush();
     await suspensionHost.suspend();
     expect(stdin.isRaw).toBe(false);
@@ -304,18 +369,18 @@ test.sequential("a reentrant unmount cannot forward a Fullscreen repaint after r
 
   app = createApp(defineComponent(() => () => <Text>frame</Text>));
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      rawMode: "always",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-    } as Parameters<TuiApp["mount"]>[0]);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
     await suspensionHost.suspend();
 
     const resumeOffset = events.length;
@@ -366,17 +431,17 @@ test.sequential("a reentrant unmount cannot forward the initial Fullscreen paint
 
   app = createApp(defineComponent(() => () => <Text>first-frame</Text>));
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      rawMode: "always",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-    });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
     await app.waitUntilExit();
 
     expect(reenterOnFirstPaint).toBe(false);
@@ -416,19 +481,19 @@ test.sequential.each(["inline", "fullscreen"] as const)(
     const app = createApp(defineComponent(() => () => <Text>{`${mode}-frame`}</Text>));
 
     try {
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        mode,
-        liveUpdates: true,
-        rawMode: "auto",
-        maxFps: 0,
-        patchConsole: false,
-        exitOnCtrlC: false,
-        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-      } as Parameters<TuiApp["mount"]>[0]);
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          mode,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+          [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+          [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+        }),
+      );
 
       await suspensionHost.suspend();
       (stdout as { columns?: number }).columns = undefined;

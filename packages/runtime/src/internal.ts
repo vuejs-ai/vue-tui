@@ -1,25 +1,44 @@
 export { yogaNodeTracker, attachYoga } from "./host/yoga.ts";
 export {
+  runtimeResourceKinds,
+  runtimeResourceTracker,
+  type RuntimeResourceKind,
+  type RuntimeResourceSnapshot,
+} from "./resource-tracker.ts";
+export {
   createRoot,
   createBox,
   createText,
   createTextLeaf,
+  observeTuiNodeCreations,
   type TuiRoot,
   type TuiBox,
   type TuiText,
   type TuiNode,
 } from "./host/nodes.ts";
-export { renderScreenReaderOutput, type ScreenReaderOptions } from "./paint/screen-reader.ts";
-export { renderToStringWithScreenReader } from "./render-to-string.ts";
 export type { DevState, DevErrorInfo } from "./hmr.ts";
-export { connectDevtools, isDevConnected } from "./hmr.ts";
+export {
+  connectDevtools,
+  disconnectDevtools,
+  isDevConnected,
+  getDevtoolsSessionId,
+  type ConnectDevtoolsOptions,
+} from "./hmr.ts";
 export type { AppContext } from "./context.ts";
 export {
+  createInternalMountOptions,
+  type InternalMountOptions,
+  type InternalMountOptionsInput,
+} from "./internal-mount-options.ts";
+export {
+  INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
   matchKittyQueryResponse,
   hasCompleteKittyQueryResponse,
   stripKittyQueryResponsesAndTrailingPartial,
   resolveFlags,
+  type InternalKittyKeyboardMountOptions,
+  type KittyKeyboardOptions,
   type KittyKeyboardController,
   type StartKittyQueryResponseDetection,
 } from "./io/kitty-keyboard.ts";
@@ -45,11 +64,12 @@ export {
   type ManualSuspensionHost,
   type SuspensionHost,
 } from "./process-suspension.ts";
-// Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
-// runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
-// pure-function test of this helper must reach it through the built dist.
-export { messageForNonError } from "./components/error-overview.ts";
-// Exposed for unit testing the focus-subscriber leak fix: the returned controller
-// carries a `__subscriberMapSize()` probe so a test can assert empty subscriber
-// Sets are dropped on unsubscribe. See render.ts createFocusController.
-export { createFocusController, type FocusControllerForTest } from "./render.ts";
+// Exposed for focused non-Error normalization tests used by Runtime-owned
+// failures and the synchronous string renderer.
+export { messageForNonError } from "./error-value.ts";
+export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
+export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";
+export type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
+export { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
+export { nextLineEscape } from "./io/cursor-helpers.ts";
+export { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";

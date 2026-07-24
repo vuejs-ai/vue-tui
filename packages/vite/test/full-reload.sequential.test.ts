@@ -37,7 +37,7 @@ function counts(chunk: string): number[] {
 }
 
 test("an entry-level (non-HMR) change restarts the app in-process with no zombie", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -94,7 +94,7 @@ test("an entry-level (non-HMR) change restarts the app in-process with no zombie
 });
 
 test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the published-install path)", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   // A real `npm install` puts @vue-tui/runtime in node_modules, which Vite's SSR runner
   // EXTERNALIZES — so the runtime's module-globals persist across full reloads. The
   // workspace-bundled monorepo path (the test above) re-executes the runtime each reload,
@@ -106,7 +106,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
-    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal/devtools"] },
     server: { middlewareMode: true },
   });
   const env = server.environments.ssr as unknown as {
@@ -145,7 +145,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
 });
 
 test("a genuine app exit closes the in-process dev server", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root: exitRoot,
     logLevel: "silent",

@@ -2,6 +2,12 @@ import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
+import {
+  ansiCodesToString,
+  styledCharsFromTokens,
+  tokenize as tokenizeStyledAnsi,
+  type StyledChar,
+} from "@alcalzone/ansi-tokenize";
 import { tokenizeAnsi } from "../paint/ansi-tokenizer.ts";
 import { sanitizeAnsiMultiline } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiTransform, TuiVirtualText } from "./nodes.ts";
@@ -117,6 +123,47 @@ export function flattenTransformLeaves(node: TuiTransform): string {
 
 export type WrapMode = NonNullable<TextProps["wrap"]>;
 
+const boldOpen = "\u001B[1m";
+const dimOpen = "\u001B[2m";
+
+function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
+  return style.code === boldOpen || style.code === dimOpen;
+}
+
+function firstStyledCharacterInSlice(
+  text: string,
+  start: number,
+  end: number,
+): StyledChar | undefined {
+  let column = 0;
+  for (const character of styledCharsFromTokens(tokenizeStyledAnsi(text))) {
+    const width = Math.max(1, stringWidth(character.value));
+    if (column >= start && column < end) return character;
+    column += width;
+  }
+  return undefined;
+}
+
+/**
+ * Preserve the complete intensity state at the first retained grapheme.
+ *
+ * `slice-ansi` drops an initial bold or dim open when both are active and a
+ * later SGR 22 closes only one logical channel. Prefix any missing intensity
+ * from the source cell after the library has selected the requested graphemes.
+ */
+export function sliceAnsiPreservingIntensity(text: string, start: number, end: number): string {
+  const sliced = sliceAnsi(text, start, end);
+  const expected = firstStyledCharacterInSlice(text, start, end);
+  if (!expected) return sliced;
+
+  const actual = styledCharsFromTokens(tokenizeStyledAnsi(sliced))[0];
+  const actualCodes = new Set(actual?.styles.map((style) => style.code) ?? []);
+  const missing = expected.styles.filter(
+    (style) => isIntensityStyle(style) && !actualCodes.has(style.code),
+  );
+  return missing.length === 0 ? sliced : ansiCodesToString(missing) + sliced;
+}
+
 /**
  * Slice `text` from the start so the result is at most `maxCols` columns wide.
  * `slice-ansi` can overshoot when a wide character straddles the boundary, so
@@ -125,11 +172,11 @@ export type WrapMode = NonNullable<TextProps["wrap"]>;
 export function safeSliceEnd(text: string, maxCols: number): string {
   if (maxCols <= 0) return "";
   let end = maxCols;
-  let sliced = sliceAnsi(text, 0, end);
+  let sliced = sliceAnsiPreservingIntensity(text, 0, end);
   let w = stringWidth(sliced);
   while (w > maxCols && end > 0) {
     end--;
-    sliced = sliceAnsi(text, 0, end);
+    sliced = sliceAnsiPreservingIntensity(text, 0, end);
     w = stringWidth(sliced);
   }
   return sliced;
@@ -229,7 +276,7 @@ function wrapZeroWidthAnsi(text: string, mode: "wrap" | "hard"): string[] {
       const graphemeCount = [...graphemeSegmenter.segment(line)].length;
       graphemeIndex += graphemeCount;
       const endSlot = slotEnds[graphemeIndex - 1] ?? startSlot;
-      result.push(sliceAnsi(styledLine, startSlot, endSlot));
+      result.push(sliceAnsiPreservingIntensity(styledLine, startSlot, endSlot));
     }
   }
   return result;
@@ -283,18 +330,18 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");
   }
 
-  // truncate variants — delegate to cli-truncate (grapheme-aware, ellipsis
-  // within budget, preserves \n). Matches Ink's wrapText truncate path.
-  //
-  // Optimisation: if every line already fits within `width`, return lines
-  // as-is. This avoids cliTruncate treating the whole multi-line string as
-  // a single run when no truncation is actually needed (which would collapse
-  // perfectly-fitting multi-line text to one truncated line).
+  // Truncate each hard-newline segment independently. Passing the complete
+  // multiline string to cli-truncate lets one over-wide line discard or merge
+  // every later line. The per-line path keeps hard breaks, uses one budgeted
+  // ellipsis only when that line is shortened, and inherits cli-truncate's
+  // ANSI-, grapheme-, and terminal-cell-aware slicing.
   const lines = text.split("\n");
-  if (lines.every((l) => stringWidth(l) <= width)) return lines;
   const position =
     mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
-  return cliTruncate(text, width, { position }).split("\n");
+  const budget = Math.max(0, width);
+  return lines.map((line) =>
+    stringWidth(line) <= budget ? line : cliTruncate(line, budget, { position }),
+  );
 }
 
 /**

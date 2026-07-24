@@ -1,6 +1,7 @@
 import type { AppContext } from "../context.ts";
 import type { Node as YogaNode } from "yoga-layout";
-import type { MouseHandlerProps } from "../mouse/events.ts";
+
+export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";
 
 export type YogaNodeRef = YogaNode;
 
@@ -17,7 +18,12 @@ export interface TextProps {
   underline?: boolean;
   strikethrough?: boolean;
   inverse?: boolean;
-  wrap?: "wrap" | "hard" | "truncate" | "truncate-end" | "truncate-middle" | "truncate-start";
+  wrap?: "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
+}
+
+/** Minimal DOM-style surface used by Vue's built-in `v-show` directive. */
+export interface TuiHostStyle {
+  display: string;
 }
 
 interface NodeBase {
@@ -30,23 +36,15 @@ export interface TuiRoot extends NodeBase {
   children: TuiNode[];
   yoga: YogaNodeRef;
   appContext: AppContext;
-  /** Currently mounted <Static> node (if any). Updated on insert/remove. */
-  staticNode?: TuiStatic;
-  /** Listeners invoked after every layout calculation (yoga.calculateLayout). */
-  layoutListeners: Set<() => void>;
 }
 
 export interface TuiBox extends NodeBase {
   type: "tui-box";
   children: TuiNode[];
   yoga: YogaNodeRef;
+  style: TuiHostStyle;
   props: BoxProps;
-  mouseHandlers?: Partial<MouseHandlerProps>;
   paintDirty: boolean;
-  internal_accessibility?: {
-    role?: string;
-    state?: Record<string, boolean>;
-  };
 }
 
 export interface TuiText extends NodeBase {
@@ -54,8 +52,9 @@ export interface TuiText extends NodeBase {
   children: TuiInlineNode[];
   yoga: YogaNodeRef;
   props: TextProps;
-  mouseHandlers?: Partial<MouseHandlerProps>;
   measuredCache?: string;
+  /** Increments whenever cached text composition or measurement can become stale. */
+  textRevision: number;
 }
 
 export interface TuiVirtualText extends NodeBase {
@@ -65,7 +64,6 @@ export interface TuiVirtualText extends NodeBase {
   parent: TuiText | TuiVirtualText | TuiTransform | null;
   children: TuiInlineNode[];
   props: TextProps;
-  mouseHandlers?: Partial<MouseHandlerProps>;
 }
 
 export interface TuiTextLeaf extends NodeBase {
@@ -86,26 +84,20 @@ export interface TuiStatic extends NodeBase {
   type: "tui-static";
   children: TuiNode[];
   yoga: YogaNodeRef;
+  style: TuiHostStyle;
   props: BoxProps;
   /**
-   * Host child nodes already written to the static channel. Static items are
-   * write-once: each commit only paints the children NOT in this set. We track
-   * by node identity rather than a count because a single logical item expands
-   * to several host nodes (the <Text>/<Box> plus empty text-leaf fragment
-   * anchors Vue inserts), so a positional `writtenCount` would mis-slice. Once a
-   * child is painted it is recorded here, then the <Static> component advances
-   * its cursor and unmounts it (mirroring Ink's `setIndex(items.length)`).
+   * Runtime-owned write-once state for this mounted host instance. A normally
+   * returned write accepts it; an indeterminate throwing write abandons it.
+   * Either terminal state permanently prevents replay.
    */
-  writtenNodes: Set<TuiNode>;
+  commitState: "open" | "accepted" | "abandoned";
   /**
-   * Callback registered by the <Static> component, invoked by the renderer AFTER
-   * a commit has painted freshly-written items. It advances the component's
-   * reactive cursor (Ink's `index`) so the just-written items are sliced out and
-   * unmount on the next render — the vue-tui analogue of Ink's post-commit
-   * `useLayoutEffect(() => setIndex(items.length))`. Advancing AFTER paint (never
-   * during render) guarantees items are written before they are dropped.
+   * Internal component callback invoked after Runtime has marked the host
+   * accepted. It releases the accepted slot subtree while retaining the public
+   * component instance as the write-once identity.
    */
-  onWritten?: () => void;
+  onAccepted?: () => void;
 }
 
 export interface TuiTransform extends NodeBase {
@@ -119,67 +111,89 @@ export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment | TuiTrans
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiTransform | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 
+// Host identity is nominal inside one runtime instance. Structural checks such
+// as `typeof value.type === "string"` can mistake an ordinary Vue component's
+// public prop for a renderer node, while this registry also recognizes direct
+// host refs used by renderer-internal adapters without exposing a public brand.
+const tuiNodes = new WeakSet<object>();
+const tuiNodeCreationObservers = new Set<(node: TuiNode) => void>();
+
+/**
+ * Observe every host-node identity at construction time. This internal test
+ * seam is intentionally synchronous: an instrumentation failure must invalidate
+ * the run instead of silently producing incomplete lifetime evidence.
+ */
+export function observeTuiNodeCreations(observer: (node: TuiNode) => void): () => void {
+  tuiNodeCreationObservers.add(observer);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    tuiNodeCreationObservers.delete(observer);
+  };
+}
+
+function trackTuiNode<T extends TuiNode>(node: T): T {
+  tuiNodes.add(node);
+  for (const observer of tuiNodeCreationObservers) observer(node);
+  return node;
+}
+
+export function isTuiNode(value: unknown): value is TuiNode {
+  return typeof value === "object" && value !== null && tuiNodes.has(value);
+}
+
 // Constructors take the bare minimum and leave yoga binding to yoga.ts.
 // The `yoga` field is set to a sentinel and replaced by `attachYoga(node)`.
 const UNATTACHED_YOGA = Symbol("vue-tui:yoga-unattached") as unknown as YogaNodeRef;
 
 export function createRoot(appContext: AppContext): TuiRoot {
-  return {
+  return trackTuiNode({
     type: "root",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     appContext,
-    layoutListeners: new Set(),
-  };
-}
-
-/**
- * Register a callback to be invoked after every layout calculation.
- * Returns an unsubscribe function.
- */
-export function addLayoutListener(root: TuiRoot, listener: () => void): () => void {
-  root.layoutListeners.add(listener);
-  return () => {
-    root.layoutListeners.delete(listener);
-  };
-}
-
-/** Invoke all registered layout listeners. Called after `yoga.calculateLayout`. */
-export function emitLayoutListeners(root: TuiRoot): void {
-  for (const listener of root.layoutListeners) {
-    listener();
-  }
+  });
 }
 
 export function createBox(): TuiBox {
-  return {
+  const node = {
     type: "tui-box",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    // buildNodeOps replaces this placeholder with a Yoga-backed accessor after
+    // attaching the Yoga node. Keeping the field on the bare constructor makes
+    // the host shape truthful even in renderer-internal unit tests.
+    style: { display: "" },
     props: {},
     paintDirty: true,
-  };
+  } satisfies TuiBox;
+  // Host compatibility shims are implementation details, not declarative
+  // props or tree state. Keep them out of node enumeration and snapshots.
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createText(): TuiText {
-  return {
+  return trackTuiNode({
     type: "tui-text",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     props: {},
-  };
+    textRevision: 0,
+  });
 }
 
 export function createVirtualText(): TuiVirtualText {
-  return {
+  return trackTuiNode({
     type: "tui-virtual-text",
     parent: null,
     children: [],
     props: {},
-  };
+  });
 }
 
 export function createTextLeaf(value: string): TuiTextLeaf {
@@ -188,36 +202,48 @@ export function createTextLeaf(value: string): TuiTextLeaf {
   // createTextNode also routes through. Vue's runtime-core already stringifies
   // text/number children, so this is a defensive safety-net for direct host-op
   // calls. Guard on typeof so normal string values are untouched (no double-work).
-  return {
+  return trackTuiNode({
     type: "text-leaf",
     parent: null,
     value: typeof value === "string" ? value : String(value),
-  };
+  });
 }
 
 export function createStatic(): TuiStatic {
-  return {
+  const style = {} as TuiHostStyle;
+  Object.defineProperty(style, "display", {
+    enumerable: true,
+    get: () => "",
+    set: () => {},
+  });
+  const node = {
     type: "tui-static",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    // Static is an output boundary rather than a layout node. Keep Vue's
+    // built-in v-show directive operational while deliberately ignoring its
+    // display writes: mounted identity, not visual display, controls eligibility.
+    style,
     props: {},
-    writtenNodes: new Set(),
-  };
+    commitState: "open",
+  } satisfies TuiStatic;
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createTransform(fn: (line: string, lineIndex: number) => string): TuiTransform {
-  return {
+  return trackTuiNode({
     type: "tui-transform",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
     transform: fn,
-  };
+  });
 }
 
 export function createComment(value: string): TuiComment {
-  return { type: "comment", parent: null, value };
+  return trackTuiNode({ type: "comment", parent: null, value });
 }
 
 export function isContainer(node: TuiNode): node is TuiContainer {

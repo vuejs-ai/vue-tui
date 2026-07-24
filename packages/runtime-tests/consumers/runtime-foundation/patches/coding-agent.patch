@@ -1,0 +1,187 @@
+diff --git a/examples/coding-agent/src/app.vue b/examples/coding-agent/src/app.vue
+index 5dd7fdb..081011e 100644
+--- a/examples/coding-agent/src/app.vue
++++ b/examples/coding-agent/src/app.vue
+@@ -1,23 +1,36 @@
+ <script setup lang="ts">
+ import { shallowRef } from "vue";
+-import { Box, Text, Static, useInput, useApp } from "@vue-tui/runtime";
++import { Box, Text, useInput, useApp } from "@vue-tui/runtime";
++import { Static } from "@vue-tui/runtime/inline";
+ import { runAgentLoop, type Message, type ToolCall } from "./agent";
+ import MessageList from "./components/message-list.vue";
+
+ type AppState = "idle" | "streaming" | "approving";
++interface CompletedMessage {
++  id: number;
++  message: Message;
++}
+
+ const state = shallowRef<AppState>("idle");
+ const inputText = shallowRef("");
+-const completedMessages = shallowRef<Message[]>([]);
++const completedMessages = shallowRef<CompletedMessage[]>([]);
+ const streamingText = shallowRef("");
+ const pendingCommand = shallowRef("");
+ const messages: Message[] = [];
++let nextCompletedMessageId = 0;
+
+ let approvalResolve: ((approved: boolean) => void) | null = null;
+ const { exit } = useApp();
+
+ const autoApprove = process.argv.includes("--yolo");
+
++function appendCompletedMessages(...pending: Message[]) {
++  completedMessages.value = [
++    ...completedMessages.value,
++    ...pending.map((message) => ({ id: nextCompletedMessageId++, message })),
++  ];
++}
++
+ async function submit() {
+   const text = inputText.value.trim();
+   if (!text) return;
+@@ -26,7 +39,7 @@ async function submit() {
+   state.value = "streaming";
+   streamingText.value = "";
+
+-  completedMessages.value = [...completedMessages.value, { role: "user" as const, content: text }];
++  appendCompletedMessages({ role: "user", content: text });
+
+   try {
+     const updated = await runAgentLoop(text, messages, {
+@@ -35,28 +48,21 @@ async function submit() {
+       },
+       onToolCall(tc: ToolCall, command: string) {
+         if (streamingText.value) {
+-          completedMessages.value = [
+-            ...completedMessages.value,
+-            { role: "assistant", content: streamingText.value },
+-          ];
++          appendCompletedMessages({ role: "assistant", content: streamingText.value });
+           streamingText.value = "";
+         }
+         pendingCommand.value = command;
+       },
+       onToolResult(tc: ToolCall, output: string) {
+-        completedMessages.value = [
+-          ...completedMessages.value,
++        appendCompletedMessages(
+           { role: "assistant", tool_calls: [tc] },
+           { role: "tool", tool_call_id: tc.id, content: output },
+-        ];
++        );
+         pendingCommand.value = "";
+       },
+       onComplete() {
+         if (streamingText.value) {
+-          completedMessages.value = [
+-            ...completedMessages.value,
+-            { role: "assistant", content: streamingText.value },
+-          ];
++          appendCompletedMessages({ role: "assistant", content: streamingText.value });
+           streamingText.value = "";
+         }
+       },
+@@ -78,7 +84,7 @@ async function submit() {
+       errParts.push({ role: "assistant", content: streamingText.value });
+     }
+     errParts.push({ role: "assistant", content: `Error: ${err.message}` });
+-    completedMessages.value = [...completedMessages.value, ...errParts];
++    appendCompletedMessages(...errParts);
+   }
+
+   streamingText.value = "";
+@@ -86,50 +92,52 @@ async function submit() {
+   state.value = "idle";
+ }
+
+-useInput((input, key) => {
+-  if (key.ctrl && input === "c") {
+-    exit();
+-    return;
+-  }
+-
++useInput((event) => {
++  if (event.type === "key" && event.key.character === "c" && event.key.ctrl) {
++    exit();
++    return;
++  }
++
+   if (state.value === "approving") {
+-    if (key.return) {
+-      state.value = "streaming";
+-      approvalResolve?.(true);
+-      approvalResolve = null;
+-    } else if (key.escape) {
+-      state.value = "streaming";
+-      approvalResolve?.(false);
+-      approvalResolve = null;
+-    }
++    if (event.type !== "key" || (event.key.name !== "enter" && event.key.name !== "escape")) {
++      return;
++    }
++    state.value = "streaming";
++    approvalResolve?.(event.key.name === "enter");
++    approvalResolve = null;
+     return;
+   }
+
+   if (state.value !== "idle") return;
+-
+-  if (key.return) {
+-    void submit();
+-  } else if (key.backspace || key.delete) {
++  if (event.type === "text" || event.type === "paste") {
++    inputText.value += event.text;
++    return;
++  }
++  if (event.key.name === "backspace" || event.key.name === "delete") {
+     inputText.value = inputText.value.slice(0, -1);
+-  } else if (input && !key.ctrl && !key.meta) {
+-    inputText.value += input;
++  } else if (event.key.name === "enter") {
++    void submit();
+   }
+ });
+ </script>
+
+ <template>
+   <Box flexDirection="column">
+-    <Static :items="completedMessages">
+-      <template #default="{ item, index }">
+-        <MessageList :key="index" :message="item" />
+-      </template>
++    <Static v-for="entry in completedMessages" :key="entry.id">
++      <MessageList :message="entry.message" />
+     </Static>
+
+     <Box v-if="streamingText">
+       <Text>{{ streamingText }}</Text>
+     </Box>
+
+-    <Box v-if="state === 'approving'" borderStyle="round" borderColor="yellow" :paddingX="1">
++    <Box
++      v-if="state === 'approving'"
++      borderStyle="round"
++      borderColor="yellow"
++      :paddingLeft="1"
++      :paddingRight="1"
++    >
+       <Text color="yellow">{{ pendingCommand }}</Text>
+       <Text dimColor>{{ "  [Enter] run / [Esc] skip" }}</Text>
+     </Box>
+diff --git a/examples/coding-agent/src/components/message-list.vue b/examples/coding-agent/src/components/message-list.vue
+index 3525824..a6aac50 100644
+--- a/examples/coding-agent/src/components/message-list.vue
++++ b/examples/coding-agent/src/components/message-list.vue
+@@ -23,7 +23,8 @@ function parseCommand(tc: { function: { arguments: string } }): string {
+       :key="tc.id"
+       borderStyle="round"
+       borderColor="yellow"
+-      :paddingX="1"
++      :paddingLeft="1"
++      :paddingRight="1"
+     >
+       <Text color="yellow">{{ parseCommand(tc) }}</Text>
+     </Box>

@@ -1,143 +1,88 @@
+import type { Readable } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import {
-  Box,
-  Text,
-  useInput,
-  useLayoutSize,
-  useRenderSession,
-  useStdin,
-  useStdout,
-  type RenderSession,
-} from "@vue-tui/runtime";
-import { render, type RenderOptions, type TestRenderSession } from "../src/index.ts";
+import { Box, Text, useInput, useLayoutSize, useStdin } from "@vue-tui/runtime";
+import { render, type RenderOptions } from "../src/index.ts";
 
-test("result.session is the exact public session object seen by the component", async () => {
-  let componentSession: RenderSession | undefined;
-  const App = defineComponent(() => {
-    componentSession = useRenderSession();
-    return () => <Text>default</Text>;
-  });
+test("the default host renders a visual Inline surface", async () => {
+  const result = await render(() => <Text>default</Text>);
 
-  const result = await render(App);
-  const publicLiveSession: TestRenderSession = result.session;
-  expect(result.session).toBe(componentSession);
-  expect(result.session).toBe(publicLiveSession);
-  expect(result.session).toEqual({
-    host: "live",
-    mode: { requested: "inline", effective: "inline", fallback: null },
-    output: { destination: "terminal", dynamicUpdates: "live", presentation: "visual" },
-    dimensions: {
-      terminal: { columns: 100, rows: 100 },
-      layout: { columns: 100, rows: 100 },
-    },
-    capabilities: {
-      stableOrigin: false,
-      elementHitTesting: false,
-      suspension: true,
-    },
-  });
+  expect(Object.hasOwn(result, "session")).toBe(false);
+  expect(result.lastFrame()).toBe("default");
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("normal");
+  expect(screen.dimensions).toEqual({ columns: 100, rows: 100 });
+  expect([...screen.scrollback, ...screen.lines].join("\n")).toContain("default");
 });
 
 test("stream omission selects production final-output cadence", async () => {
   const result = await render(() => <Text>stream</Text>, {
     columns: 72,
     rows: 16,
-    host: { stdout: "stream", mode: "fullscreen" },
+    host: { stdout: "stream", mode: "inline" },
   });
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: null,
-    fallback: "live-updates-disabled",
-  });
-  expect(result.session.output).toEqual({
-    destination: "stream",
-    dynamicUpdates: "at-teardown",
-    presentation: "visual",
-  });
-  expect(result.session.dimensions).toEqual({
-    terminal: null,
-    layout: { columns: 72, rows: null },
-  });
+  expect(result.lastFrame()).toBe("stream");
+  const beforeUnmount = await result.screen();
+  expect(beforeUnmount.activeBuffer).toBe("normal");
+  expect([...beforeUnmount.scrollback, ...beforeUnmount.lines].join("\n")).not.toContain("stream");
   expect(result.terminal.rows).toBe(16);
+
+  result.unmount();
+  const afterUnmount = await result.screen();
+  expect([...afterUnmount.scrollback, ...afterUnmount.lines].join("\n")).toContain("stream");
 });
 
-test("explicit live stream cannot manufacture a terminal mode", async () => {
-  const result = await render(() => <Text>stream</Text>, {
-    host: { stdout: "stream", updates: "live", mode: "fullscreen" },
-  });
-
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: null,
-    fallback: "stdout-not-tty",
-  });
-  expect(result.session.output.dynamicUpdates).toBe("live");
-  expect(result.session.capabilities.stableOrigin).toBe(false);
-});
-
-test("forced live stream refreshes its public layout and frame before input resumes", async () => {
-  const rawModeSeenByFrame: boolean[] = [];
+test("document-host stream keeps TTY stdin observation without managed input ownership", async () => {
+  const calls: string[] = [];
+  let stdin: ReturnType<typeof useStdin> | undefined;
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    const { stdin } = useStdin();
-    useInput(() => {});
-    const frame = () => {
-      rawModeSeenByFrame.push(Boolean((stdin as NodeJS.ReadStream & { isRaw?: boolean }).isRaw));
-      return `stream:${columns.value}x${rows.value ?? "unbounded"}`;
-    };
-    return () => <Text>{frame()}</Text>;
+    stdin = useStdin();
+    useInput((event) => {
+      if (event.type === "text") calls.push(event.text);
+    });
+    return () => <Text>selected input</Text>;
   });
   const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { stdout: "stream", updates: "live" },
+    host: { stdin: "tty", stdout: "stream" },
   });
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
-  await result.terminal.suspend();
-  await result.terminal.resize(24, 6);
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
-
-  const resume = result.terminal.resume();
-  expect(result.session.dimensions.layout).toEqual({ columns: 24, rows: null });
+  // Non-TTY stdout selects the document host: managed input is inert and raw
+  // mode is never claimed, even when the caller supplied a TTY stdin.
   expect(result.terminal.rawMode.current).toBe(false);
-  await resume;
+  expect(stdin?.isRawModeSupported).toBe(false);
+  await result.stdin.write("x");
+  expect(calls).toEqual([]);
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 24, rows: null });
-  expect(result.lastFrame()).toBe("stream:24xunbounded");
-  expect(rawModeSeenByFrame.at(-1)).toBe(false);
-  expect(result.terminal.rawMode.current).toBe(true);
   result.dispose();
+  expect(result.terminal.rawMode.current).toBe(false);
 });
 
-test("a live resize never commits a frame derived from the previous layout", async () => {
+test("a modeled non-TTY keeps direct stdin bytes available", async () => {
+  const directCalls: string[] = [];
+  let physicalStdin: Readable | undefined;
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    const frame = () => `stream:${columns.value}x${rows.value ?? "unbounded"}`;
-    return () => <Text>{frame()}</Text>;
+    physicalStdin = useStdin().stdin;
+    return () => <Text>non-tty</Text>;
   });
-  const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { stdout: "stream", updates: "live" },
-  });
-  const resizeFrameOffset = result.frames.length;
+  const result = await render(App, { host: { stdin: "non-tty" } });
+  const directListener = (chunk: Buffer | string) => directCalls.push(String(chunk));
+  physicalStdin!.on("data", directListener);
+  try {
+    expect(result.terminal.rawMode.history).toEqual([]);
 
-  await result.terminal.resize(24, 6);
-
-  const resizeFrames = result.frames.slice(resizeFrameOffset).map((frame) => frame.dynamic);
-  expect(resizeFrames.length).toBeGreaterThan(0);
-  expect(resizeFrames).not.toContain("stream:30xunbounded");
-  expect(resizeFrames.at(-1)).toBe("stream:24xunbounded");
-  result.dispose();
+    await result.stdin.write("x");
+    expect(directCalls).toEqual(["x"]);
+  } finally {
+    physicalStdin!.off("data", directListener);
+    result.dispose();
+  }
 });
 
-test("final stream keeps its mounted layout while suspended", async () => {
+test("document-host stream keeps its fixed modeled layout while suspended", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`final:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`final:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -149,35 +94,33 @@ test("final stream keeps its mounted layout while suspended", async () => {
   await result.terminal.resize(24, 6);
   await result.terminal.resume();
 
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: null });
-  expect(result.lastFrame()).toBe("final:30xunbounded");
+  // Mounted non-TTY uses fixed modeled 80×24 with no resize lifecycle.
+  expect(result.lastFrame()).toBe("final:80x24");
   result.dispose();
 });
 
 test("Fullscreen TTY exposes a fixed modeled viewport", async () => {
-  const result = await render(() => <Text>full</Text>, {
+  const App = defineComponent(() => {
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`full:${width.value}x${viewportHeight.value}`}</Text>;
+  });
+  const result = await render(App, {
     columns: 30,
     rows: 8,
     host: { mode: "fullscreen" },
   });
 
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: "fullscreen",
-    fallback: null,
-  });
-  expect(result.session.dimensions.layout).toEqual({ columns: 30, rows: 8 });
-  expect(result.session.capabilities).toEqual({
-    stableOrigin: true,
-    elementHitTesting: true,
-    suspension: true,
-  });
+  expect(result.lastFrame()).toBe("full:30x8");
+  const screen = await result.screen();
+  expect(screen.activeBuffer).toBe("alternate");
+  expect(screen.dimensions).toEqual({ columns: 30, rows: 8 });
 });
 
 test("modeled Inline suspension releases input and repaints at the continued size", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`inline:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    useInput(() => {});
+    return () => <Text>{`inline:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, { columns: 30, rows: 8 });
 
@@ -203,8 +146,8 @@ test("modeled Inline suspension releases input and repaints at the continued siz
 
 test("modeled Fullscreen suspension restores and reacquires the alternate screen", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`fullscreen:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => <Text>{`fullscreen:${width.value}x${viewportHeight.value}`}</Text>;
   });
   const result = await render(App, {
     columns: 30,
@@ -225,68 +168,23 @@ test("modeled Fullscreen suspension restores and reacquires the alternate screen
   result.dispose();
 });
 
-test("Fullscreen screen-reader request resolves to an Inline transcript", async () => {
-  const result = await render(() => <Text>transcript</Text>, {
-    host: { mode: "fullscreen", presentation: "screen-reader" },
-  });
-
-  expect(result.session.mode).toEqual({
-    requested: "fullscreen",
-    effective: "inline",
-    fallback: "screen-reader-transcript",
-  });
-  expect(result.session.output.presentation).toBe("screen-reader");
-  expect(result.session.dimensions.layout).toEqual({ columns: 100, rows: null });
-  expect((await result.screen()).activeBuffer).toBe("normal");
-});
-
-test("modeled screen-reader transcript suspends and resumes without acquiring Fullscreen", async () => {
+test("document-host stream never owns raw mode or a terminal surface", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
     useInput(() => {});
-    return () => <Text>{`transcript:${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    return () => <Text>stream</Text>;
   });
   const result = await render(App, {
-    columns: 30,
-    rows: 8,
-    host: { mode: "fullscreen", presentation: "screen-reader" },
+    host: { stdout: "stream", mode: "inline" },
   });
 
-  expect(result.lastFrame()).toContain("transcript:30xunbounded");
+  expect(result.terminal.rawMode.current).toBe(false);
   await result.terminal.suspend();
   expect(result.terminal.rawMode.current).toBe(false);
-  expect((await result.screen()).activeBuffer).toBe("normal");
-  await result.terminal.resize(24, 6);
   await result.terminal.resume();
-
-  expect(result.terminal.rawMode.current).toBe(true);
-  expect(result.lastFrame()).toContain("transcript:24xunbounded");
+  expect(result.terminal.rawMode.current).toBe(false);
   expect((await result.screen()).activeBuffer).toBe("normal");
   result.dispose();
 });
-
-test.each(["at-teardown", "live"] as const)(
-  "modeled %s stream restores input modes without manufacturing a terminal surface",
-  async (updates) => {
-    const App = defineComponent(() => {
-      useInput(() => {});
-      return () => <Text>{`stream:${updates}`}</Text>;
-    });
-    const result = await render(App, {
-      host: { stdout: "stream", updates, mode: "fullscreen" },
-    });
-
-    expect(result.session.mode.effective).toBeNull();
-    expect(result.session.capabilities.suspension).toBe(true);
-    expect(result.terminal.rawMode.current).toBe(true);
-    await result.terminal.suspend();
-    expect(result.terminal.rawMode.current).toBe(false);
-    await result.terminal.resume();
-    expect(result.terminal.rawMode.current).toBe(true);
-    expect((await result.screen()).activeBuffer).toBe("normal");
-    result.dispose();
-  },
-);
 
 test("Inline clamps tall dynamic output without padding short output", async () => {
   const short = await render(() => <Text>short</Text>, { columns: 20, rows: 3 });
@@ -331,22 +229,23 @@ test("Inline hard-clips a non-shrinking wide child before terminal wrapping", as
   }
 });
 
-test("resize updates the same session before the resulting frame is observed", async () => {
-  const result = await render(() => {
-    const session = useRenderSession();
-    return (
-      <Text>
-        {session.dimensions.layout.columns}x{session.dimensions.layout.rows}
-      </Text>
-    );
+test("resize updates public layout facts before the resulting frame is observed", async () => {
+  let observedWidth = 0;
+  let observedHeight = 0;
+  const App = defineComponent(() => {
+    const { width, height: viewportHeight } = useLayoutSize();
+    return () => {
+      observedWidth = width.value;
+      observedHeight = viewportHeight.value;
+      return <Text>{`${observedWidth}x${observedHeight}`}</Text>;
+    };
   });
-  const session = result.session;
+  const result = await render(App);
 
   await result.terminal.resize(64, 12);
 
-  expect(result.session).toBe(session);
-  expect(session.dimensions.terminal).toEqual({ columns: 64, rows: 12 });
-  expect(session.dimensions.layout).toEqual({ columns: 64, rows: 12 });
+  expect(observedWidth).toBe(64);
+  expect(observedHeight).toBe(12);
   expect(result.lastFrame()).toBe("64x12");
 });
 
@@ -371,27 +270,36 @@ test("resize rejects invalid dimensions without partially changing the host", as
     );
     expect(result.terminal.columns).toBe(40);
     expect(result.terminal.rows).toBe(10);
-    expect(result.session.dimensions.terminal).toEqual({ columns: 40, rows: 10 });
   }
 });
 
-test("resize reaches the emulator after output already accepted by the host", async () => {
-  let write: ((data: string) => void) | undefined;
-  const App = defineComponent(() => {
-    write = useStdout().write;
-    return () => null;
-  });
-  const result = await render(App, {
-    columns: 4,
-    rows: 2,
-    host: { stdout: "stream" },
-  });
+test("render and resize reject dimensions outside the modeled terminal envelope", async () => {
+  await expect(render(() => <Text>too wide</Text>, { columns: 65_536, rows: 1 })).rejects.toThrow(
+    "render columns must be no greater than 65535",
+  );
+  await expect(render(() => <Text>too tall</Text>, { columns: 1, rows: 65_536 })).rejects.toThrow(
+    "render rows must be no greater than 65535",
+  );
+  await expect(
+    render(() => <Text>too many cells</Text>, { columns: 2_048, rows: 1_024 }),
+  ).rejects.toThrow("modeled terminal 2048x1024 exceeds the 1048576-cell test-host limit");
 
-  write?.("\x1b[?1049h\x1b[2J\x1b[HABCDEFGH");
-  await result.terminal.resize(8, 2);
-
-  const screen = await result.screen();
-  expect(screen.lines.map((line) => line.trimEnd())).toEqual(["ABCD", "EFGH"]);
+  const result = await render(() => <Text>resize</Text>, { columns: 40, rows: 10 });
+  try {
+    await expect(result.terminal.resize(65_536, 1)).rejects.toThrow(
+      "terminal columns must be no greater than 65535",
+    );
+    await expect(result.terminal.resize(1, 65_536)).rejects.toThrow(
+      "terminal rows must be no greater than 65535",
+    );
+    await expect(result.terminal.resize(2_048, 1_024)).rejects.toThrow(
+      "modeled terminal 2048x1024 exceeds the 1048576-cell test-host limit",
+    );
+    expect(result.terminal.columns).toBe(40);
+    expect(result.terminal.rows).toBe(10);
+  } finally {
+    result.dispose();
+  }
 });
 
 test("render snapshots every root and host accessor exactly once", async () => {
@@ -408,8 +316,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
     {},
     {
       mode: getter("mode", "inline", "sideways"),
-      presentation: getter("presentation", "visual", "audio"),
-      updates: getter("updates", "live", "sometimes"),
       stdin: getter("stdin", "tty", "maybe"),
       stdout: getter("stdout", "tty", "file"),
     },
@@ -421,7 +327,6 @@ test("render snapshots every root and host accessor exactly once", async () => {
       columns: getter("columns", 40, 0),
       rows: getter("rows", 10, 0),
       props: getter("props", { label: "first" }, null),
-      exitOnCtrlC: getter("exitOnCtrlC", false, "yes"),
     },
   );
 
@@ -434,16 +339,13 @@ test("render snapshots every root and host accessor exactly once", async () => {
     columns: 1,
     rows: 1,
     props: 1,
-    exitOnCtrlC: 1,
     mode: 1,
-    presentation: 1,
-    updates: 1,
     stdin: 1,
     stdout: 1,
   });
 });
 
-test("an invalid accessor value fails before component setup", async () => {
+test("a removed option fails before its accessor or component setup runs", async () => {
   let setupRan = false;
   let reads = 0;
   const App = defineComponent(() => {
@@ -459,27 +361,49 @@ test("an invalid accessor value fails before component setup", async () => {
   });
 
   await expect(render(App, options as RenderOptions)).rejects.toThrow(
-    "render option exitOnCtrlC must be a boolean or undefined",
+    'Unknown render option "exitOnCtrlC"',
   );
-  expect(reads).toBe(1);
+  expect(reads).toBe(0);
   expect(setupRan).toBe(false);
 });
+
+test.each([undefined, "visual", "screen-reader"])(
+  "removed render-host presentation value %# fails before another host option is read",
+  async (presentation) => {
+    let setupRan = false;
+    const App = defineComponent(() => {
+      setupRan = true;
+      return () => <Text>invalid presentation</Text>;
+    });
+    const host = Object.defineProperty({ presentation }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
+
+    await expect(render(App, { host } as never)).rejects.toThrow(
+      'Unknown render host option "presentation"',
+    );
+    expect(setupRan).toBe(false);
+  },
+);
 
 test.each([
   [{ host: { mode: "sideways" } }, "render host mode"],
   [{ host: { mode: null } }, "render host mode"],
-  [{ host: { presentation: "audio" } }, "render host presentation"],
-  [{ host: { presentation: null } }, "render host presentation"],
-  [{ host: { updates: "sometimes" } }, "render host updates"],
-  [{ host: { updates: null } }, "render host updates"],
   [{ host: { stdin: "maybe" } }, "render host stdin"],
   [{ host: { stdin: null } }, "render host stdin"],
   [{ host: { stdout: "file" } }, "render host stdout"],
   [{ host: { stdout: null } }, "render host stdout"],
+  [{ host: { exitOnCtrlC: "yes" } }, "render host exitOnCtrlC"],
+  [{ host: { updates: "live" } }, 'Unknown render host option "updates"'],
+  [{ host: { clipboard: "copied" } }, 'Unknown render host option "clipboard"'],
   [{ columns: 0 }, "render columns"],
   [{ rows: Number.NaN }, "render rows"],
   [{ liveUpdates: false }, 'render option "liveUpdates" was removed'],
   [{ debug: true }, 'render option "debug" was removed'],
+  [{ exitOnCtrlC: false }, 'Unknown render option "exitOnCtrlC"'],
 ] as const)("invalid modeled host %# fails before component setup", async (options, message) => {
   let setupRan = false;
   const App = defineComponent(() => {

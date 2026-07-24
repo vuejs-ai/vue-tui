@@ -4,7 +4,7 @@
 
 ## The three levels
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 Keep three different concepts separate:
 
@@ -16,7 +16,7 @@ Coding agent, task monitor, and terminal workspace are application scenarios. Wo
 
 ## Active application scenarios
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 ### Conversational applications
 
@@ -44,7 +44,7 @@ This is a valid scenario for an application built with vue-tui, but it does not 
 
 ## Shared interaction flows
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 The first reusable building blocks should come from behavior that repeats across the active scenarios:
 
@@ -58,7 +58,7 @@ Conversation can use all three: editable prompt and approval are workflow behavi
 
 ## Terminal-workspace responsibility boundary
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 | vue-tui framework responsibility                                                                                                                 | Application or specialized-engine responsibility                                                                     |
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
@@ -71,7 +71,7 @@ The boundary is about responsibility, not whether a vue-tui application can deli
 
 ## How scenarios drive framework work
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 A scenario becomes useful product input through a deterministic representative journey or a real consumer, not by adding its name to a list. Record the user action, visible result, failure, and terminal mode. Then ask:
 
@@ -86,7 +86,7 @@ Reference coverage is journey-based, not showcase-count-based. Several scenarios
 
 ## Compatibility and stress workloads
 
-[VOUCHED @hyf0 2026-07-10]
+[VOUCHED @hyfdev 2026-07-10]
 
 Simple one-shot commands, prompts, and progress output may use vue-tui, but they are not the center of its application-framework design when ordinary CLI techniques already solve the job well.
 
@@ -95,8 +95,8 @@ Complete text editors, terminal emulators, multiplexer backends, and game engine
 ## Current reference evidence
 
 - **Conversational:** the first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent).
-- **Inline workflow and finder:** the external vue-tui consumer [mo](https://github.com/liangmiQwQ/mo/tree/6bea467a6995f4912e809b417b5c56a3964cc556).
-- **Full-screen monitoring and control:** the external vue-tui consumer [machud](https://github.com/hyf0/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36).
+- **Inline workflow and finder:** an application-owned selector for search, filtering, preview, selection, and shell handoff (scenario only; not external-consumer proof).
+- **Full-screen monitoring and control:** a live full-screen dashboard with optional one-shot document output (scenario only; not external-consumer proof).
 - **Terminal workspace:** [Herdr](https://herdr.dev/) and its pinned [source](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6). It is prior-art evidence for the scenario and responsibility boundary, not a vue-tui consumer.
 
 This list is evidence, not a permanent scenario ranking. Add or replace references when a stronger real consumer or deterministic journey gives the framework better product input.

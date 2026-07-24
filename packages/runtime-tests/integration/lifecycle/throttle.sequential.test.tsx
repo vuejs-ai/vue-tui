@@ -6,7 +6,8 @@ import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test, vi } from "vite-plus/test";
 import { Box, createApp, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
-import { bsu, esu } from "../../../runtime/src/io/write-synchronized.ts";
+import { bsu, esu } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeStdin,
   makeFakeWritable,
@@ -39,13 +40,14 @@ test.sequential("throttle renders to maxFps", async () => {
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      exitOnCtrlC: false,
-      maxFps: 1, // 1 Hz => ~1000ms throttle window
-    });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        maxFps: 1, // 1 Hz => ~1000ms throttle window
+      }),
+    );
 
     // Flush Vue scheduler so the initial commit fires (leading edge)
     await nextTick();
@@ -98,7 +100,7 @@ test.sequential("trailing commit fires at lastCall+wait, re-armed per deferred c
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 }); // wait = 1000ms
+    app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 })); // wait = 1000ms
     await nextTick();
     await nextTick();
     // Let the mount-time throttle window fully expire so "vA" starts idle.
@@ -160,7 +162,7 @@ test.sequential("sustained deferred calls hold a ~wait cadence (maxWait edge)", 
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 }); // wait = 1000ms
+    app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 })); // wait = 1000ms
     await nextTick();
     await nextTick();
     vi.advanceTimersByTime(2000);
@@ -205,13 +207,14 @@ test.sequential("unthrottled scheduler commits every mutation", async () => {
   const { stream: stdin } = makeFakeStdin();
   const writes = captureWrites(stdout);
 
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    maxFps: 0,
-    exitOnCtrlC: false,
-  });
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stdin,
+      stderr,
+      maxFps: 0,
+    }),
+  );
 
   await nextTick();
   await nextTick();
@@ -230,43 +233,6 @@ test.sequential("unthrottled scheduler commits every mutation", async () => {
   app.unmount();
 });
 
-test.sequential("screen reader mode bypasses throttle (immediate commits)", async () => {
-  // Port of Ink's screen reader behavior: isScreenReaderEnabled causes
-  // the scheduler to use immediate mode, ensuring every frame is flushed
-  // without delay for assistive technology.
-  const msg = shallowRef("Hello");
-
-  const App = defineComponent(() => {
-    return () => <Text>{msg.value}</Text>;
-  });
-
-  const app = createApp(App);
-  const stdout = makeFakeWritable({ columns: 80 });
-  const stderr = makeFakeWritable({ columns: 80 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    exitOnCtrlC: false,
-    isScreenReaderEnabled: true,
-  });
-
-  await nextTick();
-  await nextTick();
-  expect(writes.some((w) => w.includes("Hello"))).toBe(true);
-
-  // Even rapid mutations should commit immediately (no throttle)
-  msg.value = "World";
-  await nextTick();
-  await nextTick();
-  expect(writes.some((w) => w.includes("World"))).toBe(true);
-
-  app.unmount();
-});
-
 test.sequential("no throttled renders after unmount", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
@@ -278,7 +244,7 @@ test.sequential("no throttled renders after unmount", async () => {
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+    app.mount({ stdout, stdin, stderr });
     await nextTick();
     await nextTick();
 
@@ -310,7 +276,7 @@ test.sequential("unmount forces pending throttled render", async () => {
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 });
+    app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 }));
     await nextTick();
     await nextTick();
 
@@ -346,7 +312,7 @@ test.sequential("unmount cancels pending throttled log writes when stdout is end
     const stderr = makeFakeWritable({ columns: 80 });
     const { stream: stdin } = makeFakeStdin();
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 });
+    app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 }));
     await nextTick();
     await nextTick();
 
@@ -377,13 +343,14 @@ test.sequential("unmount cancels pending throttled render when stdout is ended",
     const baseApp = createApp(BaseApp);
     const baseStderr = makeFakeWritable({ columns: 80 });
     const { stream: baseStdin } = makeFakeStdin();
-    baseApp.mount({
-      stdout: baseStdout,
-      stdin: baseStdin,
-      stderr: baseStderr,
-      exitOnCtrlC: false,
-      maxFps: 1,
-    });
+    baseApp.mount(
+      createInternalMountOptions({
+        stdout: baseStdout,
+        stdin: baseStdin,
+        stderr: baseStderr,
+        maxFps: 1,
+      }),
+    );
     await nextTick();
     await nextTick();
     baseStdout.end();
@@ -399,7 +366,7 @@ test.sequential("unmount cancels pending throttled render when stdout is ended",
     const app = createApp(App);
     const stderr = makeFakeWritable({ columns: 80 });
     const { stream: stdin } = makeFakeStdin();
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, maxFps: 1 });
+    app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 1 }));
     await nextTick();
     await nextTick();
 
@@ -433,7 +400,15 @@ test.sequential("resize consumes a pending throttled commit without a second pai
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        maxFps: 1,
+      }),
+    );
     await nextTick();
     await nextTick();
 
@@ -480,13 +455,21 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        maxFps: 1,
+      }),
+    );
     await nextTick();
     await nextTick();
 
     // Leading call wrote bsu + content + esu.
-    expect(writes.includes(bsu)).toBe(true);
-    expect(writes.includes(esu)).toBe(true);
+    expect(writes.join("")).toContain(bsu);
+    expect(writes.join("")).toContain(esu);
 
     // Mutate inside the throttle window — the trailing commit is deferred.
     writes.length = 0;
@@ -500,11 +483,12 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
     writes.length = 0;
     vi.advanceTimersByTime(1000);
 
-    expect(writes.includes(bsu)).toBe(true);
-    expect(writes.includes(esu)).toBe(true);
-    expect(writes.some((w) => w.includes("World"))).toBe(true);
-    // bsu precedes esu.
-    expect(writes.indexOf(bsu)).toBeLessThan(writes.indexOf(esu));
+    const transaction = writes.join("");
+    expect(transaction).toContain(bsu);
+    expect(transaction).toContain(esu);
+    expect(transaction).toContain("World");
+    expect(transaction.indexOf(bsu)).toBeLessThan(transaction.indexOf("World"));
+    expect(transaction.indexOf("World")).toBeLessThan(transaction.indexOf(esu));
 
     app.unmount();
   } finally {
@@ -534,12 +518,20 @@ test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
     const { stream: stdin } = makeFakeStdin();
     const writes = captureWrites(stdout);
 
-    app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true, maxFps: 1 });
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        maxFps: 1,
+      }),
+    );
     await nextTick();
     await nextTick();
 
     // Initial (leading) render emitted bsu (proves synchronization is active).
-    expect(writes.includes(bsu)).toBe(true);
+    expect(writes.join("")).toContain(bsu);
 
     // Force an identical-output rerender inside the throttle window, then cross
     // the window so the trailing commit runs.
@@ -550,8 +542,8 @@ test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
     vi.advanceTimersByTime(1000);
 
     // Output was unchanged → willRender is false → neither barrier is emitted.
-    expect(writes.includes(bsu)).toBe(false);
-    expect(writes.includes(esu)).toBe(false);
+    expect(writes.join("")).not.toContain(bsu);
+    expect(writes.join("")).not.toContain(esu);
 
     app.unmount();
   } finally {

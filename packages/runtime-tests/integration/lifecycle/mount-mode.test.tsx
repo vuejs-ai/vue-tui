@@ -3,7 +3,8 @@ import ansiEscapes from "ansi-escapes";
 import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
-import { INTERNAL_TERMINAL_SIZE_PROBE } from "@vue-tui/runtime/internal";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const App = defineComponent(() => () => <Text>Hello</Text>);
@@ -16,10 +17,29 @@ function chunksFrom(stream: NodeJS.WriteStream): string[] {
   return chunks;
 }
 
-test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
-  "removed %s option fails before another mount option is read",
-  (removedKey) => {
-    const options = Object.defineProperty({ [removedKey]: undefined }, "stdout", {
+test.each([
+  "fullscreen",
+  "alternateScreen",
+  "interactive",
+  "debug",
+  "rawMode",
+  "kittyKeyboard",
+] as const)("removed %s option uses the generic closed-option guard", (key) => {
+  const options = Object.defineProperty({ [key]: undefined }, "stdout", {
+    enumerable: true,
+    get() {
+      throw new Error("stdout getter must not run");
+    },
+  });
+
+  const app = createApp(App);
+  expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
+});
+
+test.each([null, 0, "true", {}, []])(
+  "invalid exitOnCtrlC %# fails before another mount option is read",
+  (exitOnCtrlC) => {
+    const options = Object.defineProperty({ exitOnCtrlC }, "stdout", {
       enumerable: true,
       get() {
         throw new Error("stdout getter must not run");
@@ -27,7 +47,9 @@ test.each(["fullscreen", "alternateScreen", "interactive", "debug"] as const)(
     });
 
     const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow(`Mount option "${removedKey}" was removed`);
+    expect(() => app.mount(options as never)).toThrow(
+      'Mount option "exitOnCtrlC" must be a boolean or undefined',
+    );
   },
 );
 
@@ -48,10 +70,10 @@ test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode")
   },
 );
 
-test.each([null, 0, "true", {}, []])(
-  "invalid liveUpdates %# fails before another mount option is read",
-  (liveUpdates) => {
-    const options = Object.defineProperty({ liveUpdates }, "stdout", {
+test.each([undefined, "visual", "screen-reader", null, false, 0, {}, []])(
+  "unknown presentation value %# fails before another mount option is read",
+  (presentation) => {
+    const options = Object.defineProperty({ presentation }, "stdout", {
       enumerable: true,
       get() {
         throw new Error("stdout getter must not run");
@@ -59,41 +81,41 @@ test.each([null, 0, "true", {}, []])(
     });
 
     const app = createApp(App);
-    expect(() => app.mount(options as never)).toThrow(
-      'Mount option "liveUpdates" must be a boolean or undefined',
-    );
+    expect(() => app.mount(options as never)).toThrow('Unknown mount option "presentation"');
   },
 );
 
-test("screen-reader Fullscreen request stays on the main screen", async () => {
-  const stdout = makeFakeWritable({ columns: 80, rows: 24 });
-  const stderr = makeFakeWritable({ columns: 80, rows: 24 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = chunksFrom(stdout);
+test.each(["isScreenReaderEnabled", "unrecognizedOption"])(
+  "unknown mount key %s fails through the generic closed-option guard",
+  (key) => {
+    const options = Object.defineProperty({ [key]: undefined }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
 
-  const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-    liveUpdates: true,
-    isScreenReaderEnabled: true,
-    exitOnCtrlC: false,
-  } as never);
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
+  },
+);
 
-  await nextTick();
-  await app.waitUntilRenderFlush();
-  app.unmount();
-  await app.waitUntilExit();
+test.each(["liveUpdates", "onRender", "maxFps", "incrementalRendering", "clipboard"] as const)(
+  "repository-only string mount key %s is unavailable to public JavaScript callers",
+  (key) => {
+    const options = Object.defineProperty({ [key]: undefined }, "stdout", {
+      enumerable: true,
+      get() {
+        throw new Error("stdout getter must not run");
+      },
+    });
 
-  const output = writes.join("");
-  expect(output).toContain("Hello");
-  expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(output).not.toContain(ansiEscapes.exitAlternativeScreen);
-});
+    const app = createApp(App);
+    expect(() => app.mount(options as never)).toThrow(`Unknown mount option "${key}"`);
+  },
+);
 
-test("visual TTY without detected dimensions uses final stream output", async () => {
+test("Fullscreen without detected dimensions fails before output and remains retryable", async () => {
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -102,28 +124,33 @@ test("visual TTY without detected dimensions uses final stream output", async ()
   delete (stdout as { rows?: number }).rows;
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-    liveUpdates: true,
-    exitOnCtrlC: false,
-    [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-  } as Parameters<typeof app.mount>[0]);
+  expect(() =>
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        mode: "fullscreen",
+        liveUpdates: true,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
+      }),
+    ),
+  ).toThrow("Fullscreen mode requires positive terminal columns and rows");
+  expect(writes).toEqual([]);
+
+  Object.assign(stdout, { columns: 80, rows: 24 });
+  app.mount({ stdout, stdin, stderr, mode: "fullscreen", patchConsole: false });
 
   await nextTick();
   await app.waitUntilRenderFlush();
-  expect(writes.join("")).not.toContain("Hello");
-  expect(writes.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
-
+  expect(writes.join("")).toContain(ansiEscapes.enterAlternativeScreen);
   app.unmount();
   await app.waitUntilExit();
   expect(writes.join("")).toContain("Hello");
-  expect(writes.join("")).not.toContain(ansiEscapes.exitAlternativeScreen);
+  expect(writes.join("")).toContain(ansiEscapes.exitAlternativeScreen);
 });
 
-test("a partial custom TTY size never borrows dimensions from the process terminal", async () => {
+test("a partial custom TTY size fails instead of borrowing process dimensions", async () => {
   const stdout = makeFakeWritable({ columns: 140, rows: 40 });
   const stderr = makeFakeWritable({ columns: 80, rows: 24 });
   const { stream: stdin } = makeFakeStdin();
@@ -131,19 +158,15 @@ test("a partial custom TTY size never borrows dimensions from the process termin
   delete (stdout as { rows?: number }).rows;
 
   const app = createApp(App);
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    mode: "fullscreen",
-    liveUpdates: true,
-    exitOnCtrlC: false,
-  });
+  expect(() => app.mount({ stdout, stdin, stderr, mode: "fullscreen" })).toThrow(
+    "Fullscreen mode requires positive terminal columns and rows",
+  );
+  expect(writes).toEqual([]);
 
-  await nextTick();
+  Object.assign(stdout, { rows: 40 });
+  app.mount({ stdout, stdin, stderr, mode: "fullscreen", patchConsole: false });
   await app.waitUntilRenderFlush();
-  expect(writes.join("")).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(writes.join("")).not.toContain("Hello");
+  expect(writes.join("")).toContain(ansiEscapes.enterAlternativeScreen);
 
   app.unmount();
   await app.waitUntilExit();

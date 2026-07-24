@@ -1,6 +1,7 @@
 import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Box, Static, Text, useStderr, useStdout } from "@vue-tui/runtime";
+import { Box, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { render, type ScreenSnapshot } from "../src/index.ts";
 
 function screenText(screen: ScreenSnapshot): string {
@@ -10,10 +11,10 @@ function screenText(screen: ScreenSnapshot): string {
 test("content frames and terminal screen are separate observations", async () => {
   let write: ((data: string) => void) | undefined;
   const App = defineComponent(() => {
-    write = useStdout().write;
+    write = (data) => console.log(data);
     return () => <Text>content</Text>;
   });
-  const result = await render(App);
+  const result = await render(App, { host: { patchConsole: true } });
   const frameCount = result.frames.length;
 
   write?.("side channel\n");
@@ -24,16 +25,20 @@ test("content frames and terminal screen are separate observations", async () =>
   expect(screenText(screen)).toContain("side channel");
 });
 
-test.each([["stdout", useStdout] as const, ["stderr", useStderr] as const])(
-  "unterminated coordinated %s output becomes immutable history",
-  async (_name, useStream) => {
+test.each(["stdout", "stderr"] as const)(
+  "unterminated patched-console %s output becomes immutable history",
+  async (name) => {
     const dynamic = shallowRef("LIVE");
     let write: ((data: string) => void) | undefined;
     const App = defineComponent(() => {
-      write = useStream().write;
+      write = (data) => (name === "stdout" ? console.log(data) : console.error(data));
       return () => <Text>{dynamic.value}</Text>;
     });
-    const result = await render(App, { columns: 12, rows: 4 });
+    const result = await render(App, {
+      columns: 12,
+      rows: 4,
+      host: { patchConsole: true },
+    });
 
     try {
       write?.("COMMITTED");
@@ -58,9 +63,11 @@ test("final-stream host writes Static immediately and only the latest dynamic fr
   const dynamic = shallowRef("first");
   const App = defineComponent(() => () => (
     <Box>
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item}>
+          <Text>{item}</Text>
+        </Static>
+      ))}
       <Text>{dynamic.value}</Text>
     </Box>
   ));
@@ -112,9 +119,11 @@ test("Static delta is structured separately from the dynamic region", async () =
   const result = await render(
     defineComponent(() => () => (
       <Box>
-        <Static items={items.value}>
-          {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
-        </Static>
+        {items.value.map((item) => (
+          <Static key={item}>
+            <Text>{item}</Text>
+          </Static>
+        ))}
         <Text>live</Text>
       </Box>
     )),
@@ -130,8 +139,7 @@ test("Static delta is structured separately from the dynamic region", async () =
 test("content frames retain renderer styling but exclude writer and lifecycle controls", async () => {
   const result = await render(
     defineComponent(() => {
-      const { write } = useStdout();
-      onMounted(() => write("external\n"));
+      onMounted(() => console.log("external"));
       return () => <Text>{"\x1b[31mframe\x1b[39m"}</Text>;
     }),
     { host: { mode: "fullscreen" } },

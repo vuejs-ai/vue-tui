@@ -5,6 +5,16 @@ import type { TuiBox, TuiNode, TuiRoot, TuiStatic, TuiText, TuiTransform } from 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;
 type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic | TuiTransform;
 
+// calculateLayoutWithContentGuards temporarily changes Yoga display state while
+// the resulting layout is painted. Keep that renderer-owned state separate from
+// the private raw-host display:none channel so paint-derived services do not
+// report a zero-content guard as author-requested hidden state.
+const activeContentGuards = new WeakSet<YogaNode>();
+
+export function isContentLayoutGuarded(node: TuiNode): boolean {
+  return hasYoga(node) && activeContentGuards.has(node.yoga);
+}
+
 function hasYoga(node: TuiNode): node is YogaCarrier {
   return (
     node.type === "root" ||
@@ -52,6 +62,7 @@ function hideYogaChild(child: TuiNode, guarded: Map<YogaNode, number>): boolean 
   if (display === Yoga.DISPLAY_NONE) return false;
 
   guarded.set(child.yoga, display);
+  activeContentGuards.add(child.yoga);
   child.yoga.setDisplay(Yoga.DISPLAY_NONE);
   return true;
 }
@@ -96,6 +107,7 @@ export function calculateLayoutWithContentGuards(
   const restore = () => {
     for (const [node, display] of [...guarded].reverse()) {
       node.setDisplay(display);
+      activeContentGuards.delete(node);
     }
   };
 

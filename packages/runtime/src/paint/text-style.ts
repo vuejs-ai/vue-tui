@@ -10,6 +10,21 @@ import type { TextProps } from "../host/nodes.ts";
 // must fall through to bare text.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
+export function isForegroundResetColor(color: unknown): boolean {
+  return color === "default";
+}
+
+export function isBackgroundResetColor(color: unknown): boolean {
+  return color === "default";
+}
+
+function resetForeground(text: string): string {
+  return chalk.level > 0 ? `\x1b[39m${text}\x1b[39m` : text;
+}
+
+function resetBackground(text: string): string {
+  return chalk.level > 0 ? `\x1b[49m${text}\x1b[49m` : text;
+}
 
 export function applyColor(c: ChalkInstance, color: unknown, bg: boolean): ChalkInstance {
   if (typeof color !== "string") return c;
@@ -51,9 +66,9 @@ function bgKey(name: string): string {
  *
  * vue-tui mirrors that throw, but VALIDATES here at component-render time (not in
  * paint): a raw throw in the post-flush paint pass unwinds through Vue's
- * flushPostFlushCbs and wedges the scheduler, where onErrorCaptured can't catch it
- * (cf. the borderStyle fix #124). Returning a flag lets the component throw during
- * render so vue-tui's error boundary (onErrorCaptured → ErrorOverview) handles it.
+ * flushPostFlushCbs outside Vue's component error propagation (cf. the borderStyle
+ * fix #124). Returning a flag lets the component throw during render so user
+ * capture hooks and the app error handler receive it through Vue normally.
  *
  * Only the in-chalk-but-no-bg-method case is rejected; valid colors, hex,
  * ansi256, rgb strings, and unknown non-chalk strings all return false.
@@ -117,8 +132,16 @@ export function applyChalk(text: string, props: TextProps): string {
   // different, non-Ink byte sequence for any multi-style Text (G68).
   let s = text;
   if (props.dimColor) s = chalk.dim(s);
-  if (props.color) s = applyColor(chalk, props.color, false)(s);
-  if (props.backgroundColor) s = applyColor(chalk, props.backgroundColor, true)(s);
+  if (props.color) {
+    s = isForegroundResetColor(props.color)
+      ? resetForeground(s)
+      : applyColor(chalk, props.color, false)(s);
+  }
+  if (props.backgroundColor) {
+    s = isBackgroundResetColor(props.backgroundColor)
+      ? resetBackground(s)
+      : applyColor(chalk, props.backgroundColor, true)(s);
+  }
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);
   if (props.underline) s = chalk.underline(s);

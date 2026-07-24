@@ -7,7 +7,7 @@ import { defineComponent, nextTick } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Box, Text } from "@vue-tui/runtime";
 import stripAnsi from "strip-ansi";
-import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
+import { nextLineEscape } from "../../../runtime/dist/internal.mjs";
 import {
   makeFakeWritable,
   makeFakeStdin,
@@ -36,9 +36,9 @@ async function mountInteractive(columns: number, rows: number) {
   });
 
   const app = createApp(App);
-  // liveUpdates: true forces the resize handler even in CI where isTTY alone
-  // would disable it. exitOnCtrlC: false so the app stays alive.
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  // A TTY output owns live resize behavior. No managed input subscription is active,
+  // so the operating system owns Ctrl+C.
+  app.mount({ stdout, stdin, stderr });
 
   // Flush initial render.
   await nextTick();
@@ -126,7 +126,7 @@ test("narrowing a tall Inline frame never clears terminal history", async () => 
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
 
   // Flush initial render.
   await nextTick();
@@ -167,7 +167,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   ));
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, liveUpdates: true, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
   await nextTick();
 
@@ -216,37 +216,6 @@ test("consecutive dimension changes each establish exactly one fresh region", as
   await nextTick();
   await nextTick();
   expectFreshRegion(writes.slice(before).join(""), 24);
-
-  app.unmount();
-});
-
-test("screen-reader resize uses a physical-bottom clamp when terminal rows are unknown", async () => {
-  const stdout = makeFakeWritable({ columns: 80, rows: 80 });
-  delete (stdout as { rows?: number }).rows;
-  const stderr = makeFakeWritable({ columns: 80, rows: 80 });
-  const { stream: stdin } = makeFakeStdin();
-  const writes = captureWrites(stdout);
-  const app = createApp(() => <Text>transcript</Text>);
-
-  app.mount({
-    stdout,
-    stdin,
-    stderr,
-    liveUpdates: true,
-    isScreenReaderEnabled: true,
-    exitOnCtrlC: false,
-    maxFps: 0,
-  });
-  await nextTick();
-  const beforeResize = writes.length;
-
-  stdout.emit("resize");
-  await nextTick();
-
-  const resizeOutput = writes.slice(beforeResize).join("");
-  expect(resizeOutput).toContain(ansiEscapes.cursorDown(9999) + nextLineEscape);
-  for (const reset of FORBIDDEN_MAIN_SCREEN_RESETS) expect(resizeOutput).not.toContain(reset);
-  expect(resizeOutput).not.toContain(ERASE_LINE);
 
   app.unmount();
 });

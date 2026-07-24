@@ -1,9 +1,9 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
+import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
 
 /** The terminal screen model requested when an application mounts. */
 export type RenderMode = "inline" | "fullscreen";
-export type RenderPresentation = "visual" | "screen-reader";
 
 /** A terminal or deliberately modeled terminal's character-cell dimensions. */
 export interface RenderSize {
@@ -37,11 +37,6 @@ export type RenderModeResolution =
       readonly fallback: null;
     }
   | {
-      readonly requested: "fullscreen";
-      readonly effective: "inline";
-      readonly fallback: "screen-reader-transcript";
-    }
-  | {
       readonly requested: RenderMode;
       readonly effective: null;
       readonly fallback: "live-updates-disabled" | "stdout-not-tty" | "terminal-size-unavailable";
@@ -51,35 +46,25 @@ export type LiveRenderOutput =
   | {
       readonly destination: "terminal";
       readonly dynamicUpdates: "live";
-      readonly presentation: RenderPresentation;
     }
   | {
       readonly destination: "stream";
       readonly dynamicUpdates: "live" | "at-teardown";
-      readonly presentation: RenderPresentation;
     };
 
 export interface StringRenderOutput {
   readonly destination: "document";
   readonly dynamicUpdates: "none";
-  readonly presentation: RenderPresentation;
 }
 
-/** Where output goes, when dynamic frames are emitted, and how they are presented. */
+/** Where output goes and when dynamic frames are emitted. */
 export type RenderOutput = LiveRenderOutput | StringRenderOutput;
-
-export interface RenderCapabilities {
-  readonly stableOrigin: boolean;
-  readonly elementHitTesting: boolean;
-  readonly suspension: boolean;
-}
 
 export interface LiveRenderSession {
   readonly host: "live";
   readonly mode: RenderModeResolution;
   readonly output: LiveRenderOutput;
   readonly dimensions: RenderDimensions;
-  readonly capabilities: RenderCapabilities;
 }
 
 export interface StringRenderSession {
@@ -88,15 +73,7 @@ export interface StringRenderSession {
   readonly output: StringRenderOutput;
   readonly dimensions: {
     readonly terminal: null;
-    readonly layout: {
-      readonly columns: number;
-      readonly rows: null;
-    };
-  };
-  readonly capabilities: {
-    readonly stableOrigin: false;
-    readonly elementHitTesting: false;
-    readonly suspension: false;
+    readonly layout: RenderLayoutSize;
   };
 }
 
@@ -110,10 +87,6 @@ export type InternalRenderSessionSnapshot = RenderSession;
 export interface LiveHostInput {
   readonly requestedMode: RenderMode;
   readonly liveUpdatesOverride: boolean | undefined;
-  readonly isCI: boolean;
-  readonly presentation: RenderPresentation;
-  /** Whether this live host can coordinate restore-before-stop and resume. */
-  readonly suspensionSupported: boolean;
   readonly stdout: {
     readonly isTTY: boolean;
     readonly columns: unknown;
@@ -131,7 +104,7 @@ interface ResolvedLiveSurfaceBase {
 export type ResolvedLiveSurface =
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "final-stream";
-      readonly reason: "live-updates-disabled" | "terminal-size-unavailable";
+      readonly reason: "live-updates-disabled" | "terminal-size-unavailable" | "stdout-not-tty";
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "live-stream";
@@ -139,35 +112,13 @@ export type ResolvedLiveSurface =
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "inline-terminal";
-      readonly fallback: null | "screen-reader-transcript";
     })
   | (ResolvedLiveSurfaceBase & {
       readonly kind: "fullscreen-terminal";
     });
 
-const hasOwn = (value: object, key: PropertyKey): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
 /** Validate the accepted mount-mode contract without reading any stream option. */
 export function normalizeRequestedMode(options: object): RenderMode {
-  for (const removedKey of ["fullscreen", "alternateScreen"] as const) {
-    if (hasOwn(options, removedKey)) {
-      throw new TypeError(
-        `Mount option "${removedKey}" was removed; choose mode: "inline" or mode: "fullscreen".`,
-      );
-    }
-  }
-  if (hasOwn(options, "interactive")) {
-    throw new TypeError(
-      'Mount option "interactive" was removed; use "liveUpdates" only to override output cadence.',
-    );
-  }
-  if (hasOwn(options, "debug")) {
-    throw new TypeError(
-      'Mount option "debug" was removed; use "liveUpdates" for output cadence and @vue-tui/testing for deterministic content frames.',
-    );
-  }
-
   const mode = (options as { readonly mode?: unknown }).mode;
   if (mode === undefined) return "inline";
   if (mode === "inline" || mode === "fullscreen") return mode;
@@ -180,18 +131,44 @@ export function validateLiveUpdates(value: unknown): boolean | undefined {
   throw new TypeError('Mount option "liveUpdates" must be a boolean or undefined.');
 }
 
+export function validateExitOnCtrlC(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value === "boolean") return value;
+  throw new TypeError('Mount option "exitOnCtrlC" must be a boolean or undefined.');
+}
+
 function positiveCellCount(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+  return typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAX_LAYOUT_VALUE
+    ? value
+    : null;
 }
 
 export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean {
   return positiveCellCount(stdout.columns) === null || positiveCellCount(stdout.rows) === null;
 }
 
+/** Fixed modeled document layout shared by default `renderToString()` and non-TTY mounts. */
+export const MODELED_DOCUMENT_LAYOUT = Object.freeze({
+  columns: 80,
+  rows: 24,
+} satisfies RenderLayoutSize);
+
 export function resolveLiveDimensions(
   stdout: LiveHostInput["stdout"],
   probe: TerminalSizeProbeResult,
 ): ResolvedLiveDimensions {
+  // Non-TTY mounts use the supported secondary document host with a fixed
+  // modeled 80×24 root. Stream-reported columns/rows are not live layout facts.
+  if (!stdout.isTTY) {
+    return {
+      terminal: null,
+      layout: { columns: MODELED_DOCUMENT_LAYOUT.columns, rows: MODELED_DOCUMENT_LAYOUT.rows },
+    };
+  }
+
   const stdoutColumns = positiveCellCount(stdout.columns);
   const stdoutRows = positiveCellCount(stdout.rows);
   const probeColumns = probe.kind === "detected" ? positiveCellCount(probe.size.columns) : null;
@@ -205,12 +182,19 @@ export function resolveLiveDimensions(
   // A physical terminal size is one coherent observation. Never splice a
   // column from one source together with a row from another source and then
   // claim the result as an addressable viewport.
-  const terminal = stdout.isTTY ? (stdoutSize ?? probeSize) : null;
+  const terminal = stdoutSize ?? probeSize;
   const layoutColumns = terminal?.columns ?? stdoutColumns ?? probeColumns ?? 80;
 
   return {
     terminal,
-    layout: { columns: layoutColumns, rows: null },
+    // Every mounted host exposes a finite root-layout height. A live terminal
+    // uses its coherent detected height; an unavailable size falls back to the
+    // same conventional modeled height as the document host. Only an explicit
+    // renderToString({ height: Infinity }) selects the private null sentinel.
+    layout: {
+      columns: layoutColumns,
+      rows: terminal?.rows ?? MODELED_DOCUMENT_LAYOUT.rows,
+    },
   };
 }
 
@@ -218,7 +202,6 @@ function sessionSnapshot(options: {
   mode: RenderModeResolution;
   output: LiveRenderOutput;
   dimensions: RenderDimensions;
-  capabilities: RenderCapabilities;
 }): InternalLiveRenderSessionSnapshot {
   return {
     host: "live",
@@ -228,21 +211,60 @@ function sessionSnapshot(options: {
       terminal: options.dimensions.terminal,
       layout: options.dimensions.layout,
     },
-    capabilities: options.capabilities,
-  };
-}
-
-function unavailableCapabilities(suspension: boolean): RenderCapabilities {
-  return {
-    stableOrigin: false,
-    elementHitTesting: false,
-    suspension,
   };
 }
 
 export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
   const dimensions = resolveLiveDimensions(input.stdout, input.terminalProbe);
-  const liveUpdates = input.liveUpdatesOverride ?? (!input.isCI && input.stdout.isTTY);
+  // Fullscreen on a live TTY always uses live updates; the internal liveUpdates
+  // override cannot demote it. On non-TTY stdout the supported document host is
+  // selected instead and never owns a screen.
+  const liveUpdates =
+    input.stdout.isTTY && input.requestedMode === "fullscreen"
+      ? true
+      : (input.liveUpdatesOverride ?? input.stdout.isTTY);
+
+  // Non-TTY stdout is the supported secondary document host for both Inline and
+  // Fullscreen requests: fixed modeled 80×24, no terminal mode, no intermediate
+  // dynamic frames unless an internal liveUpdates override forces live stream tests.
+  if (!input.stdout.isTTY) {
+    const documentDimensions: ResolvedLiveDimensions = {
+      terminal: null,
+      layout: { columns: MODELED_DOCUMENT_LAYOUT.columns, rows: MODELED_DOCUMENT_LAYOUT.rows },
+    };
+    if (liveUpdates && input.liveUpdatesOverride === true) {
+      const reason = "stdout-not-tty" as const;
+      return {
+        kind: "live-stream",
+        reason,
+        liveUpdatesRequested: true,
+        dimensions: documentDimensions,
+        session: sessionSnapshot({
+          mode: { requested: input.requestedMode, effective: null, fallback: reason },
+          output: {
+            destination: "stream",
+            dynamicUpdates: "live",
+          },
+          dimensions: documentDimensions,
+        }),
+      };
+    }
+    const reason = "stdout-not-tty" as const;
+    return {
+      kind: "final-stream",
+      reason,
+      liveUpdatesRequested: false,
+      dimensions: documentDimensions,
+      session: sessionSnapshot({
+        mode: { requested: input.requestedMode, effective: null, fallback: reason },
+        output: {
+          destination: "stream",
+          dynamicUpdates: "at-teardown",
+        },
+        dimensions: documentDimensions,
+      }),
+    };
+  }
 
   if (!liveUpdates) {
     const reason = "live-updates-disabled" as const;
@@ -256,54 +278,8 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "stream",
           dynamicUpdates: "at-teardown",
-          presentation: input.presentation,
         },
         dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
-      }),
-    };
-  }
-
-  if (!input.stdout.isTTY) {
-    const reason = "stdout-not-tty" as const;
-    return {
-      kind: "live-stream",
-      reason,
-      liveUpdatesRequested: liveUpdates,
-      dimensions,
-      session: sessionSnapshot({
-        mode: { requested: input.requestedMode, effective: null, fallback: reason },
-        output: {
-          destination: "stream",
-          dynamicUpdates: "live",
-          presentation: input.presentation,
-        },
-        dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
-      }),
-    };
-  }
-
-  if (input.presentation === "screen-reader") {
-    const isFullscreenRequest = input.requestedMode === "fullscreen";
-    const fallback = isFullscreenRequest ? "screen-reader-transcript" : null;
-    const mode: RenderModeResolution = isFullscreenRequest
-      ? { requested: "fullscreen", effective: "inline", fallback: "screen-reader-transcript" }
-      : { requested: "inline", effective: "inline", fallback: null };
-    return {
-      kind: "inline-terminal",
-      fallback,
-      liveUpdatesRequested: liveUpdates,
-      dimensions,
-      session: sessionSnapshot({
-        mode,
-        output: {
-          destination: "terminal",
-          dynamicUpdates: "live",
-          presentation: "screen-reader",
-        },
-        dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -320,10 +296,8 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "stream",
           dynamicUpdates: "at-teardown",
-          presentation: "visual",
         },
         dimensions,
-        capabilities: unavailableCapabilities(input.suspensionSupported),
       }),
     };
   }
@@ -343,21 +317,14 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
         output: {
           destination: "terminal",
           dynamicUpdates: "live",
-          presentation: "visual",
         },
         dimensions: terminalBoundedDimensions,
-        capabilities: {
-          stableOrigin: true,
-          elementHitTesting: true,
-          suspension: input.suspensionSupported,
-        },
       }),
     };
   }
 
   return {
     kind: "inline-terminal",
-    fallback: null,
     liveUpdatesRequested: liveUpdates,
     dimensions: terminalBoundedDimensions,
     session: sessionSnapshot({
@@ -365,10 +332,8 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
       output: {
         destination: "terminal",
         dynamicUpdates: "live",
-        presentation: "visual",
       },
       dimensions: terminalBoundedDimensions,
-      capabilities: unavailableCapabilities(input.suspensionSupported),
     }),
   };
 }
@@ -411,7 +376,6 @@ export function createLiveRenderSessionService(
     mode: Object.freeze({ ...initial.mode }) as RenderModeResolution,
     output: Object.freeze({ ...initial.output }) as LiveRenderOutput,
     dimensions: frozenDimensions(initial.dimensions),
-    capabilities: Object.freeze({ ...initial.capabilities }),
   });
   let disposed = false;
 
@@ -429,7 +393,8 @@ export function createLiveRenderSessionService(
 
 export function createStringRenderSessionService(options: {
   readonly columns: number;
-  readonly presentation: RenderPresentation;
+  /** `null` is Runtime's private unbounded vertical layout representation. */
+  readonly rows: number | null;
 }): InternalStringRenderSessionService {
   const state = shallowReactive<InternalStringRenderSessionSnapshot>({
     host: "string",
@@ -437,16 +402,10 @@ export function createStringRenderSessionService(options: {
     output: Object.freeze({
       destination: "document",
       dynamicUpdates: "none",
-      presentation: options.presentation,
     }),
     dimensions: Object.freeze({
       terminal: null,
-      layout: Object.freeze({ columns: options.columns, rows: null }),
-    }),
-    capabilities: Object.freeze({
-      stableOrigin: false,
-      elementHitTesting: false,
-      suspension: false,
+      layout: Object.freeze({ columns: options.columns, rows: options.rows }),
     }),
   });
   return {

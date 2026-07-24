@@ -1,74 +1,68 @@
 # Autonomous iteration
 
-> **Status:** unstamped proposed operating contract and live plan. This file does not itself authorize a run, merge, release, or publication. Once a run begins, overwrite the live sections as truth changes; do not turn this into an append-only worklog.
+> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The completed minimum Runtime public foundation is recorded in the [current re-audit](./runtime-public-foundation-reaudit.md) and [decision ledger](./runtime-public-api-decisions.md); F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
 
 ## Objective
 
-Autonomous work should advance the [product goal](./goal.md) through observable user behavior, not maximize commits or internal changes. The loop is successful when it exposes and closes a framework-owned gap in an [active application scenario](./product-scenarios.md#active-application-scenarios) while keeping the terminal, Vue contract, public API, records, and verification gates trustworthy.
+Autonomous work should advance the [product intent](./intent.md) through observable user behavior, not maximize commits or internal changes. The loop is successful when it exposes and closes a framework-owned gap in an [active application scenario](./product-scenarios.md#active-application-scenarios) while keeping the terminal, Vue contract, public API, records, and verification gates trustworthy.
 
-Coding agent is the current pilot journey, not the definition of all future work. Inline and full-screen semantics are settled in the product goal, but their product hierarchy is not; an unattended run may collect comparative evidence and may not choose a primary or degraded mode.
+The coding agent was the pilot journey, not the definition of all future work. Inline and Fullscreen remain peers; an autonomous run may collect comparative evidence and may not choose a primary or degraded mode.
 
 ## Current live objective
 
-Advance F3, normalized input and routing, the sole [current checkpoint](./api-foundation-roadmap.md#current-checkpoint). F3.1 has one serialized structural ingress per physical stdin, F3.2 has one shared immutable semantic fact per structural event, and F3.3 has non-reusable app-route leases captured per framed fact with parser-distinct route selection independent of Node chunk grouping. The private F3.4 pure model makes the candidate route policy executable through coding-agent and workbench journeys. The current unit must extend fact-start capture to boundary, focus-path, default and external activation leases, connect the private policy behind compatibility adapters, and prove actual live behavior without publishing a new event API.
+The Runtime-foundation review has no remaining public-contract item. Other new work starts from a selected application scenario, real consumer, or reproducible framework failure; adding or changing a public primitive still requires the minimum Runtime-owned task, public-only higher-layer composition, host semantics, relevant peer evidence, and Yunfei's judgment where the choice depends on product intent.
 
-1. **Completed in the private model:** script a coding-agent composer/approval journey and a terminal-workbench journey that require global interrupt, local editing, paste boundaries, modal ownership, unhandled-key continuation, and external fallthrough without manual `isActive` booleans;
-2. **Completed for the concrete questions:** compare pinned Ink and the recorded peers, then keep semantic action, semantic continuation, delayed-default permission, and external permission independent while requiring semantic completion for external fallthrough;
-3. **Completed in the private model:** capture explicit application-global, selected active-boundary, supplied focus-path, delayed-default, and optional-external layers; prove modal isolation, FIFO re-entry snapshots, delayed defaults after semantic stop, and normalized text, control-key, paste and uninterpreted fallthrough under both mode labels;
-4. extend F3.3 leases to boundary, focus, default, and external activation, then connect the private planner to the actual controller without letting registration time become priority or pulling F4 focus selection forward;
-5. preserve exact post-protocol source spans or explicitly retain the narrower normalized UTF-8 external contract; prove direct stdin cannot duplicate routed delivery, protocol replies cannot escape, and key, text, paste and uninterpreted facts retain order in a real PTY;
-6. give current `useInput`, `usePaste`, and direct stdin access an explicit retain, replace, or remove disposition only after live integration shows one coherent model; then cover template/TSX types, both modes, non-TTY and string hosts where callable, teardown, HMR, and real PTY input/fallthrough;
-7. run focused gates, full `vp run ready`, fresh `CI=true vp run ci`, clean package consumers, and independent review; update the F3 contract, commit coherent review boundaries, and open draft stacked PRs without adding a VOUCHED stamp.
+The [Runtime foundation closure](./runtime-foundation-closure.md#final-closure-evidence) records useful evidence from the earlier local candidate, including packed consumers, terminal journeys, repository gates, and review. Its closure judgment and exact public contracts are superseded by the later item-by-item review; the current re-audit and decision ledger record the narrower completed foundation.
 
-F1 and F2 are Done. The public readonly render session supplies truthful host facts, and the private rendered-target controller supplies one proven attachment lifetime without exposing renderer nodes. F3 may consume both but must not reopen the two screen models, treat the Inline default as product hierarchy, or publish focus, geometry, pointer, scroll-composition, or selection contracts early.
+No code change follows automatically from a future proposal. Implementation begins only after it has a justified target; higher-layer editor, finder, viewer, collection, overlay, command, and keymap work still requires representative application evidence.
 
-## Baseline for the current foundation
+## Baseline for future work
 
-- PR [#254](https://github.com/vuejs-ai/vue-tui/pull/254) merged as `f1ce02b`; normal visual full-screen already owns the fixed surface recorded in [fullscreen-output.md](./fullscreen-output.md). F3 must treat that renderer behavior, F1's public session facts, F2's [rendered-target lifetime](./rendered-target-lifetime.md), F3.1's serialized ingress, F3.2's semantic fact boundary, F3.3's route-lifetime control, and F3.4's private executable policy evidence as established inputs.
-- Reconcile records, README claims, package descriptions, and open trackers with the latest default branch before implementation; an agent cannot choose a sound target API from stale inputs.
-- Keep later foundations free of new public APIs while F3 is active. A useful internal prototype may supply evidence, but it does not authorize publishing F4–F8 early or turning F2's private controller into a generic public target API.
+- PR [#264](https://github.com/vuejs-ai/vue-tui/pull/264) merged the lower baseline as `25df36d`.
+- F1 through F8 and Runtime R1 through R12 are historical implementation and verification evidence. Preserve sound internal mechanisms while reviewing their public names, package paths, and contracts through the decision ledger.
+- PR [#265](https://github.com/vuejs-ai/vue-tui/pull/265) remains the development vehicle. Its body, readiness, and remote checks are operational evidence rather than authority for the Runtime contract.
+- Do not broaden one top-level Text into a global selection document, merge clipboard into selection state, add an automatic clipboard fallback chain, expose private controllers or topology, or publish final-paint provenance without new accepted evidence. `/inline` is the supported history subpath; `/fullscreen` is absent because mode selection belongs to `mount()`.
+
+## Pull-request policy
+
+Coherent work may be committed locally in small Conventional Commits. A local checkpoint, record synchronization, test pass, review result, or finished turn is not a reason to push, mutate PR #265, or trigger GitHub Actions. Push, PR-body or ready-state changes, remote CI, review-state changes, merge, release, publication, and external issue or PR comments remain maintainer-directed actions.
 
 ## Where work comes from
 
-For planned API work, the one **Active** item in [api-foundation-roadmap.md](./api-foundation-roadmap.md) is the only selectable foundation. The general evidence order below still governs bugs, external contributions, packaging failures, and work inside that active foundation; it does not promote a queued foundation merely because it looks smaller.
-
-Choose one independently shippable unit, in this order:
+A future unit is selectable in this order:
 
 1. a user-visible failure in a deterministic journey from an active product scenario;
 2. a reproducible user bug or external contribution that affects framework correctness or an active scenario;
 3. repeated difficult behavior in representative applications or real consumers that can become a generic framework capability;
-4. a failure in a clean tarball consumer using published APIs and shipped documentation;
+4. a failure in a clean tarball consumer using public APIs and shipped documentation;
 5. a regression in an existing objective gate;
-6. a bounded comparison with prior art prompted by one of the failures above.
+6. a bounded prior-art comparison prompted by one of the failures above.
 
-Searching for TODOs, mining another framework for differences, speculative performance work without a benchmark, and building a component only because another project has it are not work sources. The historical open-ended Ink parity sweep found many bugs and then reached diminishing returns; do not restart it.
+Searching for TODOs, mining another framework for differences, speculative performance work without a failing workload, and building a component only because another project has it are not work sources. A future foundation requires a representative journey or consumer failure, a reproducible shared lower-layer gap, and an explicit update to [the foundation ledger](./api-foundation-roadmap.md#current-checkpoint). A completed checkpoint cannot create or reopen foundation work by itself.
 
-When several units qualify, prefer the one with clearer user harm, stronger evidence, broader reuse across the active scenarios, and a smaller verifiable change. Coding-agent work has no automatic priority merely because it is the current pilot.
-
-The foundation roadmap is the single ordered backlog for this program. This live plan names only its current Active item; GitHub issues and PRs remain the public tracker and should not be duplicated here.
+When several units qualify, prefer clearer user harm, stronger reproducible evidence, broader reuse across active scenarios, and a smaller verifiable change. The coding agent has no automatic priority merely because it was the pilot.
 
 ## Operating loop
 
-1. Fetch the latest remote default branch and create a clean task-specific worktree.
-2. Read the records map, [goal.md](./goal.md), [product-scenarios.md](./product-scenarios.md), this live plan, and the exact records for the affected area.
-3. Recheck open issues and PRs so the unit is not stale, already assigned, or overlapping an external contributor.
-4. State the affected application scenario, the user-visible failure, and the objective before/after criterion: a failing test, type error, active-screen predicate, process result, or packaging failure.
-5. For a bug, demonstrate the red state before implementing when practical. Use the strongest fitting layer: unit logic, component rendering, real PTY screen, or clean packaged consumer.
-6. Implement the smallest coherent change. Update affected examples, public documentation, and unstamped records in the same change.
-7. Run the focused test, then `vp run ready`. For changes sensitive to CI environment or task ordering, also run `CI=true vp run ci` from a fresh build.
-8. Follow the shipped visual development guide for terminal-visible changes and use the repository controller for this repository. If both modes are affected, inspect both; if one mode is affected, inspect it plus a no-regression journey for the other when practical.
-9. Commit one independently reviewable unit and publish it only as a draft PR under the run's granted authority. Do not merge, release, publish packages, close external work, or send issue or PR comments without the applicable human gate.
-10. Overwrite the live objective, candidates, evidence, and blockers. After at most three small units or one public-API proposal, stop and draft the distillation for the maintainer.
+1. Resolve the latest local branch, default branch, relevant external state, and Git identity without resetting newer work.
+2. Read the records map, [intent.md](./intent.md), [product-scenarios.md](./product-scenarios.md), this operating contract, and the exact records for the affected area.
+3. State the affected application scenario, user-visible failure, and objective before/after criterion: a failing test, type error, active-screen predicate, process result, package failure, or measured reopen trigger.
+4. Demonstrate the red state before implementing when practical, using the strongest fitting layer: unit logic, component rendering, real PTY screen, clean packed consumer, or committed capacity workload.
+5. Implement the smallest coherent change and update affected examples, public documentation, and unstamped records in the same change.
+6. Run focused checks during development and `vp run ready` for a coherent final batch. A broad local CI suite is proportional only at a genuinely environment-sensitive boundary; GitHub Actions is never triggered merely to confirm a local checkpoint.
+7. For terminal-visible changes, use the repository visual controller one observed action at a time and inspect the important PNGs. Check every affected mode and exact terminal restoration.
+8. Commit coherent units locally. Do not push, merge, release, publish, close external work, or send issue or PR comments without the applicable human gate.
+9. Update the current objective and evidence as truth changes. A checkpoint is a reporting boundary, not proof that a new foundation should start.
 
 ## Verification rules
 
 - Behavior claims are demonstrated, not inferred from source.
-- Public API additions, replacements, moves, and removals include the applicable SFC/template and TSX type checks, public-surface guards, user documentation, repository consumers, and a clean tarball consumer.
-- Input, paste, focus, layout, paint, streaming, scroll, cursor, resize, external output, and teardown changes include real-PTY evidence. Raw output bytes alone are insufficient when the claim concerns what is visible on screen.
+- Public API additions, replacements, moves, and removals include applicable SFC/template and TSX type checks, exact public-surface guards, user documentation, repository consumers, and a clean tarball consumer.
+- Input, paste, focus, layout, paint, streaming, scroll, cursor, resize, external output, and teardown changes include real-PTY evidence. Raw bytes alone are insufficient for visible-screen claims.
 - The PTY path declares one terminal profile. Start with `xterm-256color`; do not generalize one Unicode-width, keyboard, or color result to every terminal.
-- The visual loop feeds terminal query replies back to the PTY and exposes the active viewport, style runs, cursor, named key/text/resize actions, an explicit wait condition, raw transcript, and exit status.
-- Silence is not a settled state. Success is an expected screen predicate, a process exit, or another explicit event before a deadline.
-- Preserve durable evidence as tests, fixtures, commands, committed artifacts, stable URLs, or commit hashes. Do not cite a temporary screenshot or `/tmp` result as final evidence.
+- The visual loop exposes the active viewport, structured cells and styles, cursor, terminal modes, named actions, explicit waits, raw transcript, exit result, termios restoration, and post-exit shell input.
+- Silence is not a settled state. Success is an expected screen predicate, process exit, or other explicit event before a deadline.
+- Preserve durable evidence as tests, fixtures, commands, committed harnesses, stable URLs, commit hashes, or checksum-identified local artifacts. State the scope and portability limits of local artifacts.
 - A gate may be strengthened autonomously. Weakening or deleting a correctness, lifecycle, type-safety, or terminal-restoration check, or changing a test merely to accept new output, requires explicit review.
 
 ## Authority after this contract is approved
@@ -76,63 +70,53 @@ The foundation roadmap is the single ordered backlog for this program. This live
 Autonomous work may:
 
 - fix reproducible renderer, Vue-contract, and terminal-lifecycle bugs without changing intended public behavior;
-- address input, paste, focus, streaming, scrolling, cursor, mouse, resize, error, and cleanup gaps exposed by an active scenario journey or real consumer;
+- address input, paste, focus, streaming, scrolling, cursor, mouse, resize, error, and cleanup gaps exposed by an active scenario or real consumer;
 - improve `@vue-tui/testing`, examples, starter material, and shipped documentation when the gap is objectively verifiable;
 - implement a component or composable whose public shape is already accepted and whose need passes the vouched [inclusion bar](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed);
 - correct unstamped records and keep them current with the code;
-- create local commits and draft PRs for review.
+- create local commits.
 
 ## Stop and return to the maintainer
 
 Stop before:
 
-- deciding whether inline or full-screen is primary, or making a change that intentionally reduces one mode to a fallback;
-- choosing a new public API when multiple honest shapes remain, including input ownership, focus routing, mode-capability APIs, or a generic styled-cell-grid view;
+- deciding whether Inline or Fullscreen is primary, or intentionally reducing one mode to a fallback;
+- choosing a new public API when multiple honest shapes remain;
 - moving a package boundary, changing the supported Node or terminal range, adding a native runtime requirement, or choosing release or version policy;
 - conflicting with a vouched record;
 - duplicating or superseding an active external contribution without coordination;
-- weakening an objective gate or accepting a result that cannot be reproduced on the untouched base;
+- weakening an objective gate or accepting a result that cannot be reproduced;
 - making a broad visual-language decision that active-screen evidence cannot settle;
 - continuing after the same underlying approach has failed three times;
-- merging, releasing, publishing, or performing another irreversible external action not explicitly granted for the run.
+- pushing, mutating external state, merging, releasing, publishing, or performing another irreversible external action not explicitly granted for the run.
 
 Ordinary implementation choices inside an accepted API and objective do not require a stop. Choose the smallest reversible option, record durable rationale where it will matter again, and keep moving.
 
-## Representative journey for later interaction foundations
+## Reference regression journey for interaction-foundation candidates
 
-When F3–F8 need an end-to-end interaction journey, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover at least:
-
-- entering and editing a prompt;
-- bracketed paste or an explicit current limitation;
-- token-by-token assistant output;
-- a tool call that requires approval;
-- an accepted tool result and a rejected tool request;
-- long output that exercises native scrollback inline and a bounded viewport full-screen;
-- resize from a small declared viewport to a larger one;
-- Ctrl+C or normal exit with cursor, raw mode, mouse, and alternate-screen restoration;
-- an error state visible to the user.
+When a change could regress the current interaction foundation, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover prompt editing, bracketed paste, token streaming, approval accept and reject, long Inline and Fullscreen output, resize, logical focus ownership, Ctrl+C or normal exit, and exact raw mode, bracketed-paste mode, Kitty keyboard mode, generic cursor visibility, alternate-screen, termios, and shell restoration. A future mouse or semantic-caret feature must define and add its own journey rather than inheriting the removed F6-F8 acceptance list.
 
 Run the same state machine with two view adapters:
 
-- **Inline:** completed transcript through the current `Static` mechanism or its accepted replacement, current streaming output and composer in the managed region, native scrollback retained.
-- **Full-screen:** persistent layout in the alternate screen, transcript through `ScrollBox` or its successor, explicit internal navigation, and restoration on exit.
+- **Inline:** completed transcript through `Static` from `@vue-tui/runtime/inline`, current streaming output and composer in the managed region, and native scrollback retained.
+- **Fullscreen:** persistent alternate-screen layout, app-owned transcript navigation through `ScrollBox` or a later component, and exact restoration on exit.
 
-The comparison should record where behavior can share one public abstraction and where the terminal model forces a mode-specific capability. It should not hide differences behind a lowest-common-denominator API or choose a product hierarchy.
+The comparison should record which behavior shares one public abstraction and where the terminal model requires a mode-specific capability. It must not hide differences behind a lowest-common-denominator API or choose a product hierarchy.
 
-## Work after the current foundation
+## Work after the foundation review
 
-The [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is the only ordered continuation. When F3 satisfies its definition of done, mark it Done and F4 Active in the same change; do not copy the remaining queue into this file. Independent bugs and external contributions continue to use the evidence rules above without changing foundation order.
+The earlier [API foundation roadmap](./api-foundation-roadmap.md#priority-order) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) records only Yunfei's expressed judgments, while the [current re-audit](./runtime-public-foundation-reaudit.md) records implementation results and evidence. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently reopen or settle a public contract.
 
 ## Distillation returned after each run
 
 Return a concise review that contains:
 
 - the affected application scenario and user capability;
-- the tests, screen predicates, package trial, or other durable evidence;
+- the tests, screen predicates, package trial, measurements, or other durable evidence;
 - what was attempted and discarded;
 - any record or vouch whose scope may be affected;
-- inline and full-screen findings without choosing the hierarchy;
-- the remaining blocker, current foundation state, and next queued foundation;
-- the exact commits and draft PRs produced.
+- Inline and Fullscreen findings without choosing the hierarchy;
+- the current work status, any new evidence trigger, and whether it justifies reopening foundation work;
+- the exact local commits and any PR actually updated.
 
-No amount of passing autonomous work vouches this plan, the product goal, or any new direction. The maintainer reviews the distillation, decides what to keep, and explicitly vouches only the direction that should continue to hold.
+No amount of passing autonomous work vouches this plan, the product goal, or any new direction. The maintainer decides what to keep and explicitly vouches only the direction that should continue to hold.

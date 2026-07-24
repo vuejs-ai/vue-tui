@@ -24,7 +24,7 @@ afterEach(async () => {
 // bindCLIShortcuts only acts with an httpServer + (isTTY && !CI); under that gate it creates
 // server._shortcutsState (the readline). Assert vueTui leaves no _shortcutsState.
 test("vueTui disables Vite's CLI keyboard shortcuts so they can't hijack the TUI's stdin", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

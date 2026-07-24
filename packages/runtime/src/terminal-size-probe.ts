@@ -23,7 +23,9 @@ export type TerminalSizeProbeResult =
   | { readonly kind: "unavailable" };
 
 /** Test-only mount seam for deterministic live-host resolution. */
-export const INTERNAL_TERMINAL_SIZE_PROBE = Symbol("vue-tui:terminal-size-probe");
+export const INTERNAL_TERMINAL_SIZE_PROBE: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-terminal-size-probe",
+);
 export type TerminalSizeProbe = () => TerminalSizeProbeResult;
 
 interface TerminalSizeCandidate {

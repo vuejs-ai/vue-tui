@@ -1,34 +1,35 @@
 # Fullscreen output contract
 
-The runtime selects this behavior with optional `mode: "inline" | "fullscreen"`; omission requests Inline. Own `fullscreen`, `alternateScreen`, `interactive`, and `debug` mount fields are removed programming errors and fail before terminal inspection or mutation. `liveUpdates` separately controls output cadence and does not grant a screen model. Fullscreen becomes effective only on a visual TTY with usable terminal dimensions; an explicit live-update override on a non-TTY stream cannot acquire the alternate screen, fixed viewport, or hit map. A screen-reader request for Fullscreen instead resolves to an Inline linear transcript on the main screen.
+Runtime selects this behavior with `mode?: "inline" | "fullscreen"`; omission requests Inline. An explicit Fullscreen request requires a TTY stdout and positive terminal dimensions. Runtime throws synchronously before user setup or terminal mutation when either requirement is unavailable; it never silently changes the request to Inline. The removed `fullscreen`, `alternateScreen`, `interactive`, `debug`, and screen-reader presentation options have no hidden compatibility path.
 
 ## The surface vue-tui owns
 
-For normal visual rendering, fullscreen owns one fixed viewport with the terminal's current `columns × rows` dimensions. Yoga receives both dimensions, paint starts at viewport coordinate `(0, 0)`, and paint plus mouse hit testing are clipped to those bounds. Content outside the viewport cannot make the alternate screen scroll and cannot create an off-screen mouse target.
+Fullscreen owns one fixed viewport with the terminal's current `columns × rows` dimensions. Yoga receives both dimensions, paint starts at viewport coordinate `(0, 0)`, and every painted cell is clipped to those bounds. Content outside the viewport cannot scroll the alternate buffer.
 
-Every fullscreen commit hides the caret, clears and homes the viewport, writes the complete frame, and then restores a declared `useCursor()` position. This is intentionally a correctness-first full repaint, including when `incrementalRendering: true`; a future optimization may replace it with absolute cell diffs, but it must preserve the same visible result and coordinate contract.
+After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, uncertain physical output state, and coordinated patched-console output repaint the complete viewport when necessary. Runtime hides the physical cursor while it owns the frame and restores generic cursor visibility when it releases the terminal; it has no semantic caret-placement contract or controller.
 
-This fixed origin is what makes targeted mouse events reliable: Yoga layout coordinates, the visible cell coordinates, `useCursor()` coordinates, and SGR mouse coordinates all refer to the same viewport.
+The fixed origin is required by current behavior even without pointer or caret APIs: Yoga layout, paint clipping, absolute row replacement, resize, and coordinated console output must agree on which terminal rows Runtime owns. The private row-diff optimization may change without altering that surface contract.
 
 ## Output outside the component tree
 
-`useStdout().write()`, `useStderr().write()`, and the default patched `console.*` remain observable on their configured streams. On TTY destinations these coordinated helpers accept geometry-safe styled lines; redirected/non-TTY output remains byte-exact. After such a write, vue-tui immediately clears and repaints the owned viewport, so the write cannot move the live surface away from its layout, cursor, or hit map.
+With the default `patchConsole: true`, `console.*` output passes through Runtime's ordered output gate. Runtime temporarily releases or repaints the owned viewport so logs do not corrupt the next frame. `patchConsole: false` is the escape hatch and leaves the global console untouched.
 
-Direct calls to `process.stdout.write()` or `process.stderr.write()`, including writes through the raw streams returned by the composables, bypass vue-tui's output coordinator. The runtime cannot guarantee a fixed surface after bytes it does not receive; applications that need coordinated output must use the composable `write()` functions or leave console patching enabled.
+Direct calls to `process.stdout.write()`, `process.stderr.write()`, or a mounted custom stream bypass Runtime's output gate. Runtime cannot repair terminal position after bytes it never received. There is no public `useStdout()`, `useStderr()`, coordinated-write result, or arbitrary protocol-write API.
 
-## `<Static>` is an inline history primitive
+## `<Static>` is an Inline history primitive
 
-`<Static>` means append-only terminal scrollback. Fullscreen has no separate scrollback region in which a line can remain permanently visible without changing the application's viewport coordinates. In fullscreen, vue-tui therefore emits new Static bytes to stream observers, warns once, and immediately repaints them away; it does not accumulate or retain them on the alternate-screen surface.
+`Static` is exported from `@vue-tui/runtime/inline` because it means irreversible terminal history rather than common layout. It has no collection API: one mounted instance remains open until its first non-empty eligible slot output, then commits once, releases its slot subtree through ordinary Vue lifecycle, and never rewrites accepted history. Vue iteration and stable keys own collections, while remounting begins another history block.
 
-Persistent fullscreen history belongs in ordinary reactive application state rendered inside the layout, usually through a bounded `ScrollBox`. Use `<Static>` for inline transcripts and logs whose history should belong to the terminal.
+An effective Fullscreen surface rejects the presence of `Static`, including an output-free instance, before Static bytes, dynamic output, or a new viewport frame can be committed. If setup already acquired terminal resources, ordinary fatal teardown restores them before reporting the error. Non-TTY streams and string rendering remain supported because they do not acquire a Fullscreen surface.
 
-## Boundaries
+Persistent Fullscreen history belongs in reactive application state rendered inside the viewport, usually through a bounded `ScrollBox`. Use `Static` for records whose completed history should belong to an Inline terminal or serialized document.
 
-- Inline rendering uses the F1.6 bounded relative-writer contract: terminal-owned history remains immutable, while only the current managed region is replaceable.
-- Screen-reader rendering remains a linear transcript on the main screen and resolves a Fullscreen request to effective Inline.
-- Deterministic tests observe structured content commits through an internal render observer and inspect terminal-visible state through a separate xterm screen. Observation does not alter Fullscreen repaint behavior; `maxFps: 0` changes scheduling only.
-- Resize recomputes the terminal-sized Yoga layout and repaints the fixed viewport synchronously.
-- External suspension releases owned input modes, leaves the alternate screen, and restores the cursor before the process stops. Continuation uses fresh dimensions when available and otherwise retains the last coherent size, re-enters and repaints the fixed viewport, and only then reacquires still-requested input modes; a failed re-entry, cursor hide, or repaint rolls back to the suspended main-screen state. Unmount, clean exit, termination signals, and mount rollback use the same exact-ownership cleanup path. Ordinary re-entrant teardown waits for a repaint to complete, while a non-returning process or signal exit restores synchronously and skips final user rendering and Vue lifecycle hooks.
-- A clean exit restores the original screen without replaying the final viewport. A fatal error restores the main screen first, writes a durable stack or message to stderr, and settles only after the restore and error writes complete.
+## Lifecycle boundaries
 
-The real-PTY regression fixtures are `packages/runtime-tests/integration/pty/fullscreen-origin.test.ts` and `packages/runtime-tests/integration/pty/suspension.test.ts`. They feed the byte stream through a terminal emulator and check Static, stdout, stderr, patched console, ordinary reactive rerenders, vertical and horizontal overflow clipping, cursor placement, physical-row mouse targeting, restore-before-stop, resize while stopped, re-entry, repaint, and final restoration.
+- Resize recomputes the terminal-sized Yoga layout and repaints the fixed viewport.
+- Job-control suspension releases owned input modes, cursor visibility, and the alternate screen before the process stops. Continuation refreshes coherent dimensions when available, re-enters and repaints Fullscreen, and then reacquires still-requested input modes.
+- Mount rollback, ordinary unmount, clean exit, HMR teardown, process exit, and terminating signals share exact resource ownership. Non-returning process and signal exits use synchronous best-effort restoration.
+- Clean exit restores the original main screen without replaying the final viewport. Fatal exit restores the main screen before writing the durable stderr report.
+- Deterministic observation is a repository testing mechanism and does not alter physical repaint behavior.
+
+The current real-PTY evidence lives in `packages/runtime-tests/integration/pty/fullscreen-origin.test.ts` and `packages/runtime-tests/integration/pty/suspension.test.ts`. It covers alternate-screen ownership, row replacement, clipping, console coordination, resize, restore-before-stop, continuation, repaint, error reporting, and final terminal restoration. Historical pointer and semantic-caret assertions are not part of the current contract.

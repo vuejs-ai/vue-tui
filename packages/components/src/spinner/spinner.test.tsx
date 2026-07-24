@@ -8,7 +8,7 @@ const dots = PRESETS.dots.frames;
 
 describe("Spinner", () => {
   test("renders a dots glyph by default", async () => {
-    const r = await render(Spinner, { host: { updates: "at-teardown" } });
+    const r = await render(Spinner);
     await delay(50);
     const out = r.lastFrame() ?? "";
     expect(out.length).toBeGreaterThan(0);
@@ -24,8 +24,8 @@ describe("Spinner", () => {
     r.unmount();
   });
 
-  test("renders a visible glyph when dynamic output is deferred", async () => {
-    const r = await render(Spinner, { host: { updates: "at-teardown" } });
+  test("renders a visible glyph", async () => {
+    const r = await render(Spinner);
     await delay(50);
     expect((r.lastFrame() ?? "").trim().length).toBeGreaterThan(0);
     r.unmount();
@@ -33,7 +33,6 @@ describe("Spinner", () => {
 
   test("type='line' renders a line glyph", async () => {
     const r = await render(Spinner, {
-      host: { updates: "at-teardown" },
       props: { type: "line" },
     });
     await delay(50);
@@ -44,7 +43,6 @@ describe("Spinner", () => {
 
   test("custom frames override the preset", async () => {
     const r = await render(Spinner, {
-      host: { updates: "at-teardown" },
       props: { frames: ["@"] },
     });
     await delay(50);
@@ -55,7 +53,6 @@ describe("Spinner", () => {
   test("color tints the glyph but not the label", async () => {
     const chalk = (await import("chalk")).default;
     const r = await render(Spinner, {
-      host: { updates: "at-teardown" },
       props: { frames: ["⠋"], color: "green", label: "Loading" },
     });
     await delay(20);
@@ -68,7 +65,6 @@ describe("Spinner", () => {
 
   test("label renders after the glyph with a separating space", async () => {
     const r = await render(Spinner, {
-      host: { updates: "at-teardown" },
       props: { frames: ["⠋"], label: "Done" },
     });
     await delay(20);
@@ -78,7 +74,6 @@ describe("Spinner", () => {
 
   test("no label renders the glyph only", async () => {
     const r = await render(Spinner, {
-      host: { updates: "at-teardown" },
       props: { frames: ["⠋"] },
     });
     await delay(20);

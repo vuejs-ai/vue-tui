@@ -10,10 +10,11 @@ export const fullscreenOriginScenarios = [
   "rerender",
   "overflow",
   "horizontal-overflow",
+  "horizontal-left-wide",
   "horizontal-wide",
   "horizontal-transform",
-  "target-lifetime",
-  "screen-reader",
+  "foreground-reset",
+  "box-text-contract",
 ] as const;
 
 export type FullscreenOriginScenario = (typeof fullscreenOriginScenarios)[number];

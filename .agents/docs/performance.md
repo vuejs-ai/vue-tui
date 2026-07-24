@@ -1,14 +1,16 @@
 # Renderer performance
 
-> **Status:** parked architecture research, not a current optimization plan. The implementation observations and proposed mechanisms below are unstamped and must be rechecked against the code and representative workloads before they drive a change.
+> **Status:** parked architecture research after completed Runtime capacity closure. R7 accepted the current rendering architecture for the frozen J1-J6 workloads; R17 remains Non-blocking and reopens only on a recorded representative failure. The mechanisms below are hypotheses for that future failure, not a current optimization plan. Final measurements are centralized in [Runtime foundation closure](./runtime-foundation-closure.md#capacity-and-release).
 
 ## Current decision
 
-Performance optimization is not a current product priority. [VOUCHED @hyf0 2026-07-10]
+Performance optimization is not a current product priority. [VOUCHED @hyfdev 2026-07-10]
 
-Do not start a renderer rewrite, replace the layout engine, add a native runtime requirement, or schedule speculative optimization from this record alone. Current product work should first establish representative journeys, public APIs, components, composables, and correctness across the [active application scenarios](./product-scenarios.md#active-application-scenarios).
+Do not start a renderer rewrite, replace the layout engine, add a native runtime requirement, or schedule speculative optimization from this record alone. The Runtime foundations and representative workloads now exist; future product work should continue above them unless a current journey crosses a reopen trigger.
 
-Revisit performance when a representative journey exposes a measurable limit. At that point this record supplies hypotheses, candidate mechanisms, and a benchmark plan; it does not predetermine the implementation.
+Revisit performance when a representative journey exposes a measurable limit. The completed closure measurements did not trigger an architecture rewrite. At that point this record supplies hypotheses, candidate mechanisms, and a benchmark plan; it does not predetermine the implementation.
+
+[Runtime foundation closure](./runtime-foundation-closure.md#capacity-and-release) ran the frozen J1-J6 workload set and closed R7. Those measurements accepted the current architecture only for the declared workloads, host, and bounds; they are not a general performance SLA. R17 remains Non-blocking.
 
 ## First-principles cost model
 
@@ -34,42 +36,41 @@ This is a mechanism goal, not a promise that every update can be proportional to
 
 ## Current vue-tui pipeline
 
-The current runtime already has a retained Vue host tree and a scheduler that coalesces host mutations before calling the [render commit](../../packages/runtime/src/render.ts). Within each commit it then:
+The current runtime has a retained Vue host tree and a scheduler that coalesces host mutations before calling the [render commit](../../packages/runtime/src/render.ts). Within each commit it then:
 
 1. searches the host tree for pending `Static` output;
 2. asks Yoga to calculate layout through the content guard;
-3. emits layout listeners;
-4. walks the dynamic host tree to generate paint operations;
-5. creates a new object-based cell grid for the full output dimensions, applies the operations, and converts every row back into an ANSI string;
-6. compares or rewrites that frame through the selected terminal writer.
+3. walks the dynamic host tree while skipping vertically clipped Text and reusing prepared Text when its semantic inputs match; the optional accepted-frame collector records only observed Box sizes;
+4. creates a viewport-sized row and cell-slot grid using one shared immutable blank cell, applies paint operations with bounded per-root width and ANSI-to-styled-grapheme caches, and converts every row into an ANSI string;
+5. compares or rewrites that frame through the selected terminal writer.
 
 The main implementation consequences are:
 
-- [`paint()` and `Output.get()`](../../packages/runtime/src/paint/paint.ts) still perform full-tree paint and full-grid allocation and stringification for each dynamic frame. The tokenization and width caches belong to that newly created `Output`, so they do not survive across frames.
-- [`incrementalRendering`](../../packages/runtime/src/render.ts) defaults to `false`. When enabled, the [incremental frame writer](../../packages/runtime/src/io/log-update.ts) reduces terminal output through line comparison, but it receives the already completed frame string and therefore does not reduce layout or paint work.
+- [`paint()` and `Output.get()`](../../packages/runtime/src/paint/paint.ts) still walk the retained dynamic tree and allocate and stringify a viewport-sized row and cell-slot grid for each dynamic frame. They reuse a per-root width LRU capped at 4,096 entries and 262,144 units, an ANSI-to-styled-grapheme LRU capped at 2,048 entries and 65,536 units, per-Text prepared content and wrapping, and one immutable blank cell. The root caches are cleared at teardown. These changes reduce repeated work without persistent packed cell buffers or general damage tracking.
+- [`incrementalRendering`](../../packages/runtime/src/render.ts) defaults to `false` and controls the relative Inline writer. Fullscreen compares rows only after a successful, same-sized, trusted baseline and rewrites changed rows by absolute addressing. First paint, resize, clear, continuation, uncertain physical state, and coordinated side output still repaint the complete viewport. Both writers receive an already completed frame string, so row diff does not reduce layout, host-tree paint, grid construction, or row stringification and is not damage rendering.
 - [`paintDirty`](../../packages/runtime/src/host/nodes.ts) exists on box nodes but is not consumed by the painter. The Yoga binding writes `measuredCache` in [`bindTextMeasure`](../../packages/runtime/src/host/yoga.ts), but current code does not read it as a cross-frame text measurement cache.
 - The [zero-content guard](../../packages/runtime/src/host/layout-guards.ts) and [`Static` discovery](../../packages/runtime/src/paint/static-channel.ts) traverse the host tree on every commit.
 - [`ScrollBox`](../../packages/components/src/scroll-box/scroll-box.vue) mounts its complete content and scrolls by applying a negative top margin. It clips paint but does not virtualize layout or mounted nodes.
-- Normal frame writes do not coordinate future rendering with Node `Writable` backpressure. Slow PTYs, SSH sessions, or large frames can therefore queue obsolete intermediate output.
+- Runtime-owned output now uses one ordered transaction gate. After Node `Writable.write()` returns `false`, no later segment is handed before `drain`; future render work keeps only the latest desired replaceable frame, while an internal coordinated write made during the blocked epoch reports non-acceptance instead of entering a byte queue. Full layout and paint can still run before the gate rejects a frame attempt, so sustained slow-output CPU remains measurable even though output memory is bounded.
 - `onRender.renderTime` is sampled before interactive frame diff and output. It is useful for part of the pipeline, but it is not an end-to-end frame or input-latency metric.
 
-Yoga may still skip internal layout work through its own dirty and cache mechanisms even though `calculateLayout()` is called. The present architecture concern is that vue-tui performs the later tree walk, grid construction, and string generation regardless of how little geometry or visible output changed.
+Yoga may still skip internal layout work through its own dirty and cache mechanisms even though `calculateLayout()` is called. Even with bounded cache reuse, prepared Text reuse, and clipped-Text skipping, vue-tui still performs a retained-tree walk and viewport-grid allocation and stringification for each committed frame. R7 found that cost acceptable for the frozen workloads; scaling with a larger mounted surface remains a future reopen trigger rather than a current failure.
 
 ## Research evidence boundary
 
-A one-time local probe informed the hypotheses in this record, but its harness was not committed and `onRender.renderTime` excludes interactive frame diff and output. Its exact values are intentionally omitted because they are not durable benchmark evidence and cannot support an implementation decision.
+The earlier one-time local probe remains non-durable historical input; its exact values stay omitted. The committed capacity harness and final closure artifacts are now the durable evidence for the frozen J1-J6 workloads.
 
-The source establishes that line diff can reduce emitted output only after the full frame has been built, while full paint and cell allocation still happen for an unchanged visible result. It does not establish which phase dominates on supported machines or real applications. Recreate the measurements through the committed scenario benchmarks below before comparing costs or setting a budget.
+Source and focused tests establish that row diff reduces emitted output only after a complete frame exists, while bounded caches and prepared Text reuse reduce repeated preparation inside that frame. The final capacity evidence establishes acceptance only for the declared workloads and bounds; it does not prove which phase dominates every supported application or machine.
 
 ## Implications by product scenario
 
-| Scenario                               | Current shape                                                                                                    | Limit worth watching                                                                                                                                                               |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Inline conversational application      | `Static` can move completed transcript items out of the changing region, keeping the live tail relatively small. | Long changing Markdown, code, tool output, or an application that retains its whole transcript in the dynamic tree.                                                                |
-| Full-screen conversational application | A fixed viewport makes cell diff useful.                                                                         | Long transcripts remain fully mounted in `ScrollBox`; search, selection, reflow, and streaming can still layout and paint far more than is visible.                                |
-| Real-time monitor                      | Ordinary dashboards with tens of rows can be inexpensive enough, and line diff avoids much output.               | A sparse metric update still produces a full paint; high update rates, large tables, or slow output streams amplify the cost.                                                      |
-| Multi-region workbench                 | Vue and Yoga are a good fit for independently composed panes.                                                    | Several large or frequently changing panes compound full-tree paint and allocation. Long lists require virtualization.                                                             |
-| Terminal workspace pane                | vue-tui can own pane bounds, focus, input routing, and surrounding UI.                                           | An externally emulated terminal must enter as a coarse styled-cell surface with dirty rows; representing every terminal cell as a Vue/Yoga node would create the wrong cost model. |
+| Scenario                               | Current shape                                                                                                                                | Limit worth watching                                                                                                                                                               |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inline conversational application      | `Static` can move completed transcript items out of the changing region, keeping the live tail relatively small.                             | Long changing Markdown, code, tool output, or an application that retains its whole transcript in the dynamic tree.                                                                |
+| Full-screen conversational application | A fixed viewport makes row diff useful, while clipped Text skipping and prepared Text reuse reduce repeated paint preparation.               | Long transcripts remain fully mounted in `ScrollBox`, and layout still sees mounted content.                                                                                       |
+| Real-time monitor                      | Ordinary dashboards with tens of rows can be inexpensive enough; prepared Text/cache reuse and row diff reduce repeated encoding and output. | A sparse update still produces a complete committed frame and viewport grid; high update rates, large tables, or slow output streams can expose the remaining cost.                |
+| Multi-region workbench                 | Vue and Yoga are a good fit for independently composed panes.                                                                                | Several large or frequently changing panes compound full-tree paint and allocation. Measured failures may require application/component windowing.                                 |
+| Terminal workspace pane                | vue-tui can own pane bounds, one logical focus owner, broadcast input, and surrounding UI; routing policy belongs to the application.        | An externally emulated terminal must enter as a coarse styled-cell surface with dirty rows; representing every terminal cell as a Vue/Yoga node would create the wrong cost model. |
 
 These implications do not choose inline or full-screen as the primary rendering mode. They expose different terminal constraints that should share a core renderer where honest and use different rendering-mode behavior where necessary.
 
@@ -139,7 +140,7 @@ The candidate mechanisms are:
 4. Reuse packed front and next cell buffers. A cell needs a grapheme identifier, foreground and background identifiers, attributes, hyperlink identifier, width or continuation state, and any compositor metadata required by real features.
 5. Represent damage as one or more `[x1, x2)` spans per terminal row. Repaint old and new bounds; when overlap, transparency, or clipping makes reconstruction uncertain, recompose every intersecting layer or fall back to a larger safe region.
 6. Compare front and next cells inside damage even when a node is dirty, then group adjacent changed cells into output runs. Choose between printing cells and moving the cursor based on actual encoded cost while tracking current cursor, colors, attributes, and hyperlink state.
-7. Generate at most one frame per Vue flush or frame interval. If stdout is backpressured, preserve the ordered committed baseline and coalesce not-yet-rendered state into the latest desired frame rather than queueing every obsolete frame.
+7. Keep the existing ordered transaction gate and latest-replaceable-frame coalescing as the baseline. Change upstream frame generation while backpressured only if a measured workload still spends excessive CPU before the gate can accept the frame.
 8. Virtualize long lists, tables, logs, and transcript views so layout and paint see the visible range plus a small bounded buffer of nearby items instead of every item.
 9. Add a coarse styled-cell surface only when a real consumer establishes the API. An external terminal emulator should submit changed rows or rectangles in batches; it should never cross the Vue or native boundary once per cell.
 
@@ -148,7 +149,7 @@ The candidate mechanisms are:
 Both modes can share host nodes, incremental layout, primitives, cell buffers, damage tracking, and ANSI encoding, but they cannot share every output assumption:
 
 - **Inline:** treat completed transcript output as append-only main-screen content and manage only the live region that remains addressable. When resize makes the old physical row mapping untrustworthy, leave that snapshot untouched, establish a fresh bounded region at the terminal bottom, and only erase rows owned by the new region.
-- **Full-screen:** treat the alternate screen as a fixed addressable viewport. Damage can use absolute rows, and a later implementation may use terminal scrolling regions for large vertical shifts when capability detection and correctness evidence justify it.
+- **Full-screen:** treat the alternate screen as a fixed addressable viewport. Ordinary consecutive frames currently replace changed absolute rows, while lifecycle and uncertain-output boundaries repaint the complete viewport. A later implementation may use terminal scrolling regions for large vertical shifts when capability detection and correctness evidence justify it.
 
 The mode-specific writer is an internal architecture boundary, not evidence that either mode should become the product default.
 
@@ -169,19 +170,14 @@ Reopen the performance architecture when at least one of these is true:
 - a small visible update scales with total mounted nodes or viewport area enough to block a real application;
 - a required scenario cannot be made correct with the current full-paint or non-virtualized model.
 
-Before changing architecture, commit deterministic benchmarks for four representative workloads:
+Preserve and rerun the committed J1 through J6 harnesses in [Runtime foundation closure](./runtime-foundation-closure.md#fixed-journeys-and-workloads) before changing architecture. They cover an Inline conversational transcript and finder, a Fullscreen long document, a sparse monitor, a multi-pane workbench, and deliberately slow Inline and Fullscreen writers. Those workloads supersede the earlier speculative requirement for a pre-virtualized collection or public styled-cell surface; neither mechanism is a prerequisite to accepting the current architecture.
 
-1. an inline coding-agent transcript with `Static`, a streaming live tail, approval, and resize;
-2. a full-screen long transcript or Markdown viewer with search, selection, streaming, and scroll;
-3. a fixed-layout monitor with sparse metric changes at controlled update rates;
-4. a multi-pane workbench with a large virtualized collection and a batched external styled-cell surface.
-
-Each benchmark should record layout nodes visited, measured text nodes, painted cells or row spans, diff-scanned cells, emitted cells and bytes, write count, coalesced or dropped frames, frame time, end-to-end input latency, event-loop delay, allocation, garbage collection, and backpressure. The acceptance question is whether a small update's work follows its affected area instead of the whole component tree or terminal.
+The completed closure result is recorded in [Capacity and release](./runtime-foundation-closure.md#capacity-and-release): the declared latency, heartbeat, resource, flow-control, final-visibility, retention, Yoga-release, and restoration bounds passed, so R7 accepted the current architecture and R17 remained Non-blocking. Future work must record the same journey metrics, host, repetitions, estimator, raw artifact, and ownership-release evidence rather than copying a summary number.
 
 If the benchmarks establish a problem, implement in this order and measure after each step:
 
 1. add phase instrumentation and preserve the scenario benchmarks;
-2. improve output line diff defaults, write aggregation, and backpressure handling where evidence supports it;
+2. remeasure the existing Fullscreen row diff, write aggregation, ordered backpressure gate, and latest-frame coalescing, then change only the measured remaining output gap;
 3. introduce reusable packed cell buffers, full cell diff, and changed-run ANSI encoding;
 4. add dirty row spans, old/new-bounds damage, and stable-subtree paint reuse;
 5. add virtualization, a coarse cell-surface primitive, and safe hardware-scroll paths as required by scenarios;
@@ -198,4 +194,4 @@ This research does not decide to:
 - add a native runtime dependency;
 - publish a terminal-cell-surface API;
 - choose inline or full-screen as the primary product mode;
-- promise a benchmark threshold or performance roadmap before representative journeys exist.
+- promise a general performance SLA from the closure-only thresholds; those bounds apply only to the frozen J1-J6 workloads and declared host evidence.

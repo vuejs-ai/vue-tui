@@ -2,16 +2,15 @@ import { test as it, expect } from "vite-plus/test";
 import { run } from "./helpers/run.ts";
 import stripAnsi from "strip-ansi";
 
-it("render only last frame in CI", async () => {
+it("keeps TTY live updates when CI=true", async () => {
   const output = await run("ci", { env: { CI: "true" }, columns: 0 });
   const clean = stripAnsi(output).replaceAll("\r", "");
-  for (let i = 0; i <= 4; i++) {
-    expect(clean).not.toContain(`Counter: ${i}`);
-  }
+  expect(clean).toContain("Counter: 0");
   expect(clean).toContain("Counter: 5");
+  expect(clean).toContain("#1");
 });
 
-it("render all frames if CI=false", async () => {
+it("keeps TTY live updates when CI=false", async () => {
   const output = await run("ci", { env: { CI: "false" }, columns: 0 });
   const clean = stripAnsi(output).replaceAll("\r", "");
   expect(clean).toContain("Counter:");

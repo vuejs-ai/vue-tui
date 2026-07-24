@@ -10,11 +10,15 @@
     "check:type": "vp run -r check:type",
     "test": "vp run -r test",
     "build": "vp run -r build",
+    "verify:package-consumer": "node packages/runtime-tests/scripts/verify-clean-consumer.mjs",
     "visual:basic-template": "vp run @vue-tui/runtime#build && vp run @vue-tui/example-basic-template#build && vp run @vue-tui/tui-visual-review#start",
-    "visual:fullscreen-origin": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#fullscreen-origin",
-    "visual:input-routing": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#input-routing",
+    "visual:fullscreen-origin": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/tui-visual-review#fullscreen-origin",
+    "visual:scroll-box": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/example-scroll-box#build && vp run @vue-tui/tui-visual-review#scroll-box",
+    "visual:spinner": "vp run @vue-tui/runtime#build && vp run @vue-tui/components#build && vp run @vue-tui/tui-visual-review#spinner",
+    "visual:inline-history": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#inline-history",
+    "visual:v-show": "vp run @vue-tui/runtime#build && vp run @vue-tui/tui-visual-review#v-show",
     "visual:basic-template:smoke": "vp run @vue-tui/runtime#build && vp run @vue-tui/example-basic-template#build && vp run @vue-tui/tui-visual-review#smoke",
-    "ready": "vp run check:fmt && vp run build && vp run check:lint && vp run check:type && vp run test",
+    "ready": "vp run check:fmt && vp run build && vp run check:lint && vp run check:type && vp run verify:package-consumer && vp run test",
     "prepare": "vp config"
   },
   "devDependencies": {

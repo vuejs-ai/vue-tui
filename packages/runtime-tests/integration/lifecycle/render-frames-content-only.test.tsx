@@ -1,6 +1,6 @@
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Text, usePaste } from "@vue-tui/runtime";
+import { Text, useInput } from "@vue-tui/runtime";
 import { render } from "@vue-tui/testing";
 
 // The deterministic host's `frames[]` / `lastFrame()` observations contain
@@ -8,13 +8,13 @@ import { render } from "@vue-tui/testing";
 // runtime reports those commits independently from stdout, so bracketed-paste
 // lifecycle escapes must not leak into `frames[]`.
 //
-// usePaste() enables bracketed-paste mode, which writes the OSC `\x1b[?2004h`
+// Active semantic input enables bracketed-paste mode, which writes the `\x1b[?2004h`
 // enable sequence to stdout (gated on stdout.isTTY, which the testing helper's
 // modeled stdout is — render.ts setBracketedPasteMode). The control sequence
 // belongs only to terminal output; `frames[]` contains rendered content.
 test("render() frames exclude bracketed-paste lifecycle escapes", async () => {
   const App = defineComponent(() => {
-    usePaste(() => {});
+    useInput(() => undefined);
     return () => <Text>content</Text>;
   });
 

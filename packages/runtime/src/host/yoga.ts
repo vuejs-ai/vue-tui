@@ -8,6 +8,7 @@ import type {
   TuiStatic,
   TuiText,
   TuiTransform,
+  TextProps,
 } from "./nodes.ts";
 import {
   flattenLeaves,
@@ -186,12 +187,10 @@ export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
 // --- prop application ----------------------------------------------------
 
 const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
-  // Mirror Ink's applyDimensionStyles width/height branch exactly (styles.ts:664-682):
+  // Apply the public width contract while preserving the private raw-host fallback:
   //   number → setWidth (absolute cells)
-  //   string → setWidthPercent(Number.parseInt(v, 10)) — ANY string is a PERCENT,
-  //     so a bare-numeric string like "50" is 50%, NOT 50 absolute cells, and
-  //     parseInt TRUNCATES fractions ("55.9%" → 55%). parseInt("") → NaN, which
-  //     yoga's percent setter accepts without throwing.
+  //   a `%` string → setWidthPercent with its complete decimal value
+  //   any other private raw-host string → retain the older parseInt fallback
   //   else   → setWidthAuto() — this is the load-bearing fallback (like flexBasis's
   //     setFlexBasisAuto): Vue's [Number, String] prop validation only WARNS on a
   //     bad runtime value (e.g. width={false}/{}/[]) and still forwards it, so
@@ -203,7 +202,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
     if (typeof v === "number") {
       n.setWidth(v);
     } else if (typeof v === "string") {
-      n.setWidthPercent(Number.parseInt(v, 10));
+      const percentage = v.endsWith("%") ? Number(v.slice(0, -1)) : Number.parseInt(v, 10);
+      n.setWidthPercent(percentage);
     } else {
       n.setWidthAuto();
     }
@@ -242,9 +242,9 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Ink default: flexBasis=auto (yoga default), reset via the else branch on removal. (G19)
   // Mirror Ink's flexBasis branch exactly (styles.ts:547-555):
   //   number → setFlexBasis (absolute cells)
-  //   string → setFlexBasisPercent(Number.parseInt(v, 10))  — ANY string is a
-  //     PERCENT, including a bare numeric string like "3" → 3% (NOT 3 cells)
-  //     and "50%" → 50%; yoga would otherwise read "3" as 3 absolute cells.
+  //   string → setFlexBasisPercent(Number(v without "%")) — the public
+  //     validator admits only canonical percentages and preserves decimals.
+  //     Private raw hosts still treat a bare numeric string as a percentage.
   //   else   → setFlexBasisAuto()  — this is the load-bearing fallback: Vue's
   //     [Number, String] prop validation only WARNS on a bad runtime value
   //     (e.g. flexBasis={false}/{}/[]) and still forwards it, so without this
@@ -254,7 +254,7 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
     if (typeof v === "number") {
       n.setFlexBasis(v);
     } else if (typeof v === "string") {
-      n.setFlexBasisPercent(Number.parseInt(v, 10));
+      n.setFlexBasisPercent(Number(v.endsWith("%") ? v.slice(0, -1) : v));
     } else {
       n.setFlexBasisAuto();
     }
@@ -271,12 +271,12 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // Ink default: justifyContent=flex-start (yoga default). Reset to FLEX_START on removal. (G19)
   justifyContent: (n, v) =>
     n.setJustifyContent(v == null ? Yoga.JUSTIFY_FLEX_START : toJustify(v as string)),
-  // Ink default: gap=0 (yoga default). Reset to 0 on removal. (G19)
-  gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v == null ? 0 : (v as number)),
-  // Ink default: columnGap=0 (yoga default). Reset to 0 on removal. (G19)
-  columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v == null ? 0 : (v as number)),
-  // Ink default: rowGap=0 (yoga default). Reset to 0 on removal. (G19)
-  rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v == null ? 0 : (v as number)),
+  // Each physical gutter depends on its axis-specific value and the broad gap.
+  // patchProp reconciles the family from current props so withdrawing rowGap or
+  // columnGap falls back to a surviving gap instead of leaving a stale zero.
+  gap: () => {},
+  columnGap: () => {},
+  rowGap: () => {},
 
   // margin/padding families do NOT compute their own edge widths here. Each
   // PHYSICAL edge depends on up to three props together (the specific edge, the
@@ -320,16 +320,9 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   borderLeft: () => {},
   borderRight: () => {},
 
-  // Ink styles.ts applyDisplayStyles: `display === 'flex' ? DISPLAY_FLEX : DISPLAY_NONE`,
-  // so ANY present value that isn't 'flex' (incl. off-spec strings reachable via a TS
-  // bypass — the public prop type is 'flex' | 'none') hides (A21). A19 carve-out: a
-  // removed/undefined `display` (value is null/undefined) must reset to the visible
-  // default DISPLAY_FLEX — Vue can't tell `display={undefined}` from an omitted prop, so
-  // it falls under the declarative render = f(current props) reset, NOT Ink's hide-on-
-  // present-undefined. Hence the `v != null` guard: ANY present (non-null) value except
-  // 'flex' hides — matching Ink, which hides non-string present junk too (`display={5}`,
-  // a deep TS-bypass: `5 === 'flex'` is false → DISPLAY_NONE) — while null/undefined
-  // (removed) → DISPLAY_FLEX (A19).
+  // Private raw-host compatibility channel used by Vue's v-show bridge. Any
+  // present value other than "flex" hides; removal/nullish input restores the
+  // visible default. Public BoxProps intentionally do not expose `display`.
   display: (n, v) =>
     n.setDisplay(v != null && v !== "flex" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
   // Ink does NOT call setOverflow on yoga — it only clips visually in paint.
@@ -495,6 +488,9 @@ export const PADDING_PROPS = new Set([
   "paddingRight",
 ]);
 
+/** Props whose change requires recomputing both physical Yoga gutters. */
+export const GUTTER_PROPS = new Set(["gap", "rowGap", "columnGap"]);
+
 // A prop counts as "present" only when its el.props value coerces to a FINITE
 // number. Spacing props are typed `number` (box-props.ts), matching Ink, whose
 // margin/padding are number-only; numeric STRINGS are still accepted because Vue
@@ -580,6 +576,21 @@ export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, u
   y.setPadding(Yoga.EDGE_ALL, 0);
   y.setPadding(Yoga.EDGE_HORIZONTAL, 0);
   y.setPadding(Yoga.EDGE_VERTICAL, 0);
+}
+
+/**
+ * Resolve physical row/column gutters with axis-specific-over-broad
+ * precedence. Writing the two resolved gutters directly makes reactive
+ * withdrawal declarative: removing rowGap reveals gap again.
+ */
+export function reconcileGutters(node: YogaCarrier, props: Record<string, unknown>): void {
+  const y = node.yoga as YogaNode;
+  const broad = present(props, "gap") ? Number(props["gap"]) : 0;
+  const row = present(props, "rowGap") ? Number(props["rowGap"]) : broad;
+  const column = present(props, "columnGap") ? Number(props["columnGap"]) : broad;
+  y.setGap(Yoga.GUTTER_ALL, 0);
+  y.setGap(Yoga.GUTTER_ROW, row);
+  y.setGap(Yoga.GUTTER_COLUMN, column);
 }
 
 const RESETTABLE_PROPS = new Set([
@@ -670,8 +681,8 @@ export function applyYogaProp(
   // existed in the old vnode and were dropped from the new one.
   //
   // Blocker 2: Vue's HOST renderer passes next=null (not undefined) when a key
-  // disappears from a spread props object (e.g. Static spreads `style` into host
-  // props, Box forwards). So `value == null` (null OR undefined) is treated as
+  // disappears from a reactive `v-bind` object. So `value == null` (null OR
+  // undefined) is treated as
   // removal — forwarding raw null to a yoga dimension setter would write NaN/0
   // and corrupt state instead of resetting to the documented default.
   if (value == null) {
@@ -689,33 +700,60 @@ export function applyYogaProp(
 // --- text measure binding ------------------------------------------------
 
 export function bindTextMeasure(text: TuiText): void {
+  let cache:
+    | {
+        readonly revision: number;
+        readonly availableWidth: number;
+        readonly wrap: TextProps["wrap"];
+        readonly result: { readonly width: number; readonly height: number };
+      }
+    | undefined;
   text.yoga.setMeasureFunc((availableWidth) => {
+    const wrap = text.props.wrap;
+    if (
+      cache?.revision === text.textRevision &&
+      cache.availableWidth === availableWidth &&
+      cache.wrap === wrap
+    ) {
+      return cache.result;
+    }
     const raw = flattenLeaves(text);
     text.measuredCache = raw;
 
     // Empty text (no children or all-null children) — return zero dimensions
     // so yoga doesn't crash trying to measure an empty string.
-    if (raw === "") return { width: 0, height: 0 };
+    if (raw === "") {
+      const result = { width: 0, height: 0 };
+      cache = { revision: text.textRevision, availableWidth, wrap, result };
+      return result;
+    }
 
     const natural = measureTextNatural(raw);
 
     // Text fits into container, no need to wrap.
-    if (natural.width <= availableWidth) return natural;
+    if (natural.width <= availableWidth) {
+      cache = { revision: text.textRevision, availableWidth, wrap, result: natural };
+      return natural;
+    }
 
     // When <Box> is shrinking child nodes, yoga asks if we can fit this text
     // node in a sub-1px space. Return the natural size to tell yoga "no, I
     // need my full width". This matches Ink's behavior and prevents text from
     // wrapping to infinite height when given fractional widths.
     if (natural.width >= 1 && availableWidth > 0 && availableWidth < 1) {
+      cache = { revision: text.textRevision, availableWidth, wrap, result: natural };
       return natural;
     }
 
-    const wrapped = wrapText(raw, availableWidth, text.props.wrap ?? "wrap");
-    return measureTextNatural(wrapped.join("\n"));
+    const wrapped = wrapText(raw, availableWidth, wrap ?? "wrap");
+    const result = measureTextNatural(wrapped.join("\n"));
+    cache = { revision: text.textRevision, availableWidth, wrap, result };
+    return result;
   });
 }
 
 export function markTextDirty(text: TuiText): void {
+  text.textRevision++;
   text.yoga.markDirty();
 }
 

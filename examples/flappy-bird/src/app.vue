@@ -144,16 +144,20 @@ function restart(): void {
   Object.assign(world, makeWorld(best));
 }
 
-useInput((input, key) => {
-  if ((key.ctrl && input === "c") || input === "q") {
+useInput((event) => {
+  if (event.type === "text" && event.text === "q") {
     exit();
     return;
   }
   if (world.dead) {
-    if (input === "r") restart();
+    if (event.type === "text" && event.text === "r") {
+      restart();
+    }
     return;
   }
-  if (input === " " || input === "w" || key.upArrow) {
+  const isFlapText = event.type === "text" && (event.text === " " || event.text === "w");
+  const isUpArrow = event.type === "key" && event.key.name === "up";
+  if (isFlapText || isUpArrow) {
     flap();
   }
 });
@@ -181,7 +185,13 @@ const playfieldWidth = W + 2;
     <Box borderStyle="round" borderColor="cyan" flexDirection="column" :width="playfieldWidth">
       <Text v-for="(line, i) in lines" :key="i" wrap="truncate">{{ line }}</Text>
     </Box>
-    <Box flexDirection="row" justifyContent="space-between" :width="playfieldWidth" :paddingX="1">
+    <Box
+      flexDirection="row"
+      justifyContent="space-between"
+      :width="playfieldWidth"
+      :paddingLeft="1"
+      :paddingRight="1"
+    >
       <Text color="yellow" bold>score {{ world.score }} best {{ world.best }}</Text>
       <Text color="gray">{{ hint }}</Text>
     </Box>

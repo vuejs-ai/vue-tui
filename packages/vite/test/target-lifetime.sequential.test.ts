@@ -1,18 +1,20 @@
-// SEQUENTIAL: mutates a shared fixture and process-global capture seams. The
-// package test config runs files serially in separate workers, which also gives
-// this HMR lifetime test a fresh Vue HMR registry. Reusing the same process after
-// another server has registered identical SFC ids would make two independent
-// HMR lifetimes share Vue's process-global component records.
+// SEQUENTIAL: mutates process-global capture seams and its dedicated fixture.
+// The separate fixture avoids file races with overlay tests, while the separate
+// worker gives this HMR lifetime test a fresh Vue HMR registry. Reusing the same
+// process after another server has registered identical SFC ids would make two
+// independent HMR lifetimes share Vue's process-global component records.
 import { afterEach, expect, test } from "vite-plus/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import { createServer, type ViteDevServer } from "vite";
 import { vueTui } from "../src/index.ts";
-import { capture, waitFor } from "./helpers.ts";
+import { capture, waitFor, waitUntil } from "./helpers.ts";
 
-const root = fileURLToPath(new URL("./fixtures/overlay", import.meta.url));
-const targetVue = fileURLToPath(new URL("./fixtures/overlay/src/target.vue", import.meta.url));
+const root = fileURLToPath(new URL("./fixtures/target-lifetime", import.meta.url));
+const targetVue = fileURLToPath(
+  new URL("./fixtures/target-lifetime/src/target.vue", import.meta.url),
+);
 const origTargetVue = readFileSync(targetVue, "utf8");
 let server: ViteDevServer | undefined;
 
@@ -24,14 +26,14 @@ afterEach(async () => {
   server = undefined;
   writeFileSync(targetVue, origTargetVue);
   delete testGlobal.__VT_TEST_STDOUT__;
-  delete testGlobal.__VT_RENDER_SESSION__;
   delete testGlobal.__VT_TARGET_INSTANCE__;
   delete testGlobal.__VT_TARGET_CURRENT__;
+  delete testGlobal.__VT_TARGET_FOCUSED__;
   delete testGlobal.__VT_TEST_APP__;
 });
 
-test("HMR follows a component's rendered target across rerender and reload", async () => {
-  const read = capture();
+test("HMR keeps component identity while targeted focus follows replacement and reload", async () => {
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",
@@ -39,20 +41,21 @@ test("HMR follows a component's rendered target across rerender and reload", asy
     plugins: [vue(), vueTui()],
   });
   await server.listen();
-  await waitFor(read, "target=7x2:true");
+  await waitFor(read, "box=7x2");
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__ === true);
   const targetInstance = (globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__;
   expect(targetInstance).toBeDefined();
 
   writeFileSync(
     targetVue,
     origTargetVue.replace(
-      '<Box :width="7" :height="2">\n    <Text>TARGET-A</Text>\n  </Box>',
+      '<Box ref="targetBox" :width="7" :height="2">\n    <Text>TARGET-A</Text>\n  </Box>',
       "<Text>TARGET-B-HOT</Text>",
     ),
   );
-  // Text participates in the parent's stretch layout, so its measured width is
-  // the 16-column content width rather than the 12 glyphs in its label.
-  await waitFor(read, "target=16x1:true");
+  await waitFor(read, "TARGET-B-HOT");
+  await waitFor(read, "box=7x2");
+  await waitUntil(() => (globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__ === false);
 
   expect((globalThis as Record<string, unknown>).__VT_TARGET_INSTANCE__).toBe(targetInstance);
   expect((globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__).toBe(targetInstance);
@@ -69,6 +72,5 @@ test("HMR follows a component's rendered target across rerender and reload", asy
   const reloadedTarget = (globalThis as Record<string, unknown>).__VT_TARGET_CURRENT__;
   expect(reloadedTarget).toBeDefined();
   expect(reloadedTarget).not.toBe(targetInstance);
-  const reloadedOutput = read().slice(read().lastIndexOf("TARGET-C-RELOAD"));
-  expect(reloadedOutput).toMatch(/target=\d+x1:true/);
+  expect((globalThis as Record<string, unknown>).__VT_TARGET_FOCUSED__).toBe(false);
 });

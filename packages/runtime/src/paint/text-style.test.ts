@@ -48,6 +48,28 @@ test("unknown color name falls back to no color", () => {
   }
 });
 
+test("default colors emit explicit terminal-default spans independently", () => {
+  const prev = chalk.level;
+  chalk.level = 1;
+  try {
+    expect(applyChalk("x", { color: "default" })).toBe("\x1b[39mx\x1b[39m");
+    expect(applyChalk("x", { backgroundColor: "default" })).toBe("\x1b[49mx\x1b[49m");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
+test("terminal-default colors emit no ANSI when color output is disabled", () => {
+  const prev = chalk.level;
+  chalk.level = 0;
+  try {
+    expect(applyChalk("x", { color: "default" })).toBe("x");
+    expect(applyChalk("x", { backgroundColor: "default" })).toBe("x");
+  } finally {
+    chalk.level = prev;
+  }
+});
+
 test("ansi256 foreground color applies chalk.ansi256", () => {
   expect(applyChalk("x", { color: "ansi256(194)" })).toBe(chalk.ansi256(194)("x"));
 });
@@ -166,7 +188,8 @@ test("level 0 emits no ANSI codes regardless of styles", () => {
 
 // A12: a chalk-MODIFIER name as a BACKGROUND is what Ink colorize.ts throws on
 // (`'bold' in chalk` true, but `chalk.bgBold` is not a function). vue-tui detects
-// it at render so the error boundary catches it. Every other Ink-compatible form is valid.
+// it during component render so Vue's normal error propagation applies. Every
+// other Ink-compatible form is valid.
 test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
   for (const m of [
     "bold",

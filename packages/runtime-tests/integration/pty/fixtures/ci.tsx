@@ -1,4 +1,5 @@
-import { createApp, Static, Text } from "@vue-tui/runtime";
+import { createApp, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { defineComponent, onMounted, onScopeDispose, shallowRef } from "vue";
 
 const App = defineComponent(() => {
@@ -29,13 +30,15 @@ const App = defineComponent(() => {
 
   return () => (
     <>
-      <Static items={items.value}>
-        {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-      </Static>
+      {items.value.map((item) => (
+        <Static key={item}>
+          <Text>{item}</Text>
+        </Static>
+      ))}
       <Text>Counter: {counter.value}</Text>
     </>
   );
 });
 
 const app = createApp(App);
-app.mount({ rawMode: "auto" }); // relies on auto-exit (default "always" holds raw & never exits)
+app.mount();

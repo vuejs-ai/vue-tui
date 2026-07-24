@@ -88,6 +88,8 @@ test("vite:error clears a pending update→ok reset so the error status persists
     // ...but an error supersedes it. The pending reset must be cleared so it can't
     // later overwrite the error status with "ok".
     onError!({ err: { message: "boom" } });
+    // vite:error applies on a microtask so a same-turn beforeUpdate cannot clobber it.
+    await Promise.resolve();
     expect(devState.value).toEqual({ type: "error", error: { message: "boom" } });
 
     vi.advanceTimersByTime(2000);

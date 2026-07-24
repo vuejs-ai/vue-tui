@@ -1,8 +1,9 @@
 import { defineComponent, shallowRef, nextTick } from "vue";
 import { test as it, expect } from "vite-plus/test";
 import ansiEscapes from "ansi-escapes";
-import { nextLineEscape } from "../../../runtime/src/io/cursor-helpers.ts";
+import { nextLineEscape } from "../../../runtime/dist/internal.mjs";
 import { createApp, Text } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable, makeFakeStdin, captureWrites } from "../lifecycle/test-streams.ts";
 
 function makeFakeNonTtyWritable(rows = 6): NodeJS.WriteStream {
@@ -21,7 +22,7 @@ it("#450: non-TTY full-height rerenders should never clear terminal", async () =
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true }));
   await nextTick();
   await nextTick();
 
@@ -44,7 +45,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: true });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, liveUpdates: true }));
   await nextTick();
   await nextTick();
 
@@ -67,7 +68,7 @@ it("#450: viewport shrink commits the old snapshot and paints a fresh bounded re
   const App = defineComponent(() => () => <Text>{msg.value}</Text>);
   const app = createApp(App);
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   await nextTick();
   await nextTick();
   const writeCountBeforeResize = writes.length;

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { describe, expect, test } from "vite-plus/test";
 
 // Mirror of Ink's test/build-output.ts: walk each published package's
@@ -51,6 +52,7 @@ type PackageCase = {
 
 const cases: PackageCase[] = [
   { dir: "runtime", typed: true },
+  { dir: "components", typed: true },
   { dir: "vite", typed: false },
   { dir: "testing", typed: true },
 ];
@@ -88,6 +90,27 @@ describe("build output: package.json exports resolve to built files", () => {
         }
       });
     }
+
+    test(`${pkg.name}: the actual package contains its exports without workspace sources`, () => {
+      const packed = JSON.parse(
+        execFileSync("pnpm", ["pack", "--dry-run", "--json"], {
+          cwd: pkgDir,
+          encoding: "utf8",
+        }),
+      ) as { files: Array<{ path: string }> };
+      const files = new Set(packed.files.map((file) => file.path));
+
+      for (const target of collectTargets(pkg.exports)) {
+        expect(files.has(target.replace(/^\.\//, "")), `${pkg.name} omits ${target}`).toBe(true);
+      }
+      if (typed) {
+        for (const target of collectTargets(pkg.exports).filter((file) => file.endsWith(".mjs"))) {
+          const declaration = declarationSibling(target).replace(/^\.\//, "");
+          expect(files.has(declaration), `${pkg.name} omits ${declaration}`).toBe(true);
+        }
+      }
+      expect([...files].filter((file) => /^(?:src|test|tests)\//.test(file))).toEqual([]);
+    });
   }
 
   test("runtime delegates renderer state and types to the consumer's single Vue peer", () => {

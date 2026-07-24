@@ -24,8 +24,8 @@ const App = defineComponent(() => {
     });
   });
 
-  useInput((_input, key) => {
-    if (key.return) {
+  useInput((event) => {
+    if (event.type === "key" && event.key.name === "enter") {
       if (done) {
         return;
       }
@@ -38,7 +38,7 @@ const App = defineComponent(() => {
       return;
     }
 
-    if (key.backspace || key.delete) {
+    if (event.type === "key" && (event.key.name === "backspace" || event.key.name === "delete")) {
       query.value = query.value.slice(0, -1);
     }
   });

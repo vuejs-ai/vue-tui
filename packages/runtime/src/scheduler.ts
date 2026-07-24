@@ -1,4 +1,5 @@
 import { queuePostFlushCb } from "vue";
+import { acquireRuntimeResource } from "./resource-tracker.ts";
 
 export interface CommitScheduler {
   schedule: () => void;
@@ -21,6 +22,8 @@ export interface CommitSchedulerOptions {
    */
   throttleMs: number;
   now?: () => number;
+  /** Report a commit failure without letting it escape the async scheduler boundary. */
+  onError: (error: unknown) => void;
 }
 
 export function createCommitScheduler(
@@ -54,10 +57,18 @@ export function createCommitScheduler(
   //     (`pendingAt`), it commits synchronously — sustained updates hold a
   //     ~wait cadence instead of debounce-starving forever.
   let trailingTimer: ReturnType<typeof setTimeout> | null = null;
+  let releaseTrailingTimer: (() => void) | null = null;
   let hasPendingFlag = false;
   // Time of the first call since the last leading/trailing commit
   // (es-toolkit compat-debounce `pendingAt`); drives the maxWait edge.
   let pendingAt: number | null = null;
+
+  function clearTrailingTimer(): void {
+    if (trailingTimer !== null) clearTimeout(trailingTimer);
+    trailingTimer = null;
+    releaseTrailingTimer?.();
+    releaseTrailingTimer = null;
+  }
 
   function doCommit() {
     scheduled = false;
@@ -65,6 +76,12 @@ export function createCommitScheduler(
     pendingAt = null;
     try {
       commit();
+    } catch (error) {
+      // Vue's post-flush queue and the native trailing timer are both shared
+      // async boundaries. An exception escaping either callback can strand
+      // later work (including commits from unrelated apps), so the owning app
+      // must receive the failure through its lifecycle instead.
+      options.onError(error);
     } finally {
       drainFlushResolvers();
     }
@@ -75,11 +92,14 @@ export function createCommitScheduler(
   // a leading/maxWait commit): an "empty" expiry is a no-op, but while armed
   // it marks the window as active so calls inside it defer.
   function armTrailingWindow() {
-    if (trailingTimer) clearTimeout(trailingTimer);
+    clearTrailingTimer();
     trailingTimer = setTimeout(() => {
       trailingTimer = null;
+      releaseTrailingTimer?.();
+      releaseTrailingTimer = null;
       if (hasPendingFlag) doCommit();
     }, throttleMs);
+    releaseTrailingTimer = acquireRuntimeResource("schedulerTimers");
   }
 
   function schedule() {
@@ -139,10 +159,7 @@ export function createCommitScheduler(
   }
 
   function cancel() {
-    if (trailingTimer) {
-      clearTimeout(trailingTimer);
-      trailingTimer = null;
-    }
+    clearTrailingTimer();
     hasPendingFlag = false;
     scheduled = false;
     // Clean slate: the next schedule() after a cancel commits on the leading

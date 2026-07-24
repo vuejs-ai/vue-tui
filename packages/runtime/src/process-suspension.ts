@@ -42,7 +42,9 @@ export interface ManualSuspensionHost extends SuspensionHost {
 }
 
 /** Internal mount-option key used by deterministic hosts to replace OS signals. */
-export const INTERNAL_SUSPENSION_HOST: unique symbol = Symbol("vue-tui:suspension-host");
+export const INTERNAL_SUSPENSION_HOST: unique symbol = Symbol.for(
+  "@vue-tui/runtime:internal-suspension-host",
+);
 
 interface Registration {
   readonly hooks: SuspensionHooks;
@@ -75,7 +77,7 @@ function runBestEffort(callback: () => void): void {
     callback();
   } catch {
     // Signal handling must continue through every registered session. A failed session cleanup
-    // must not leave later sessions holding raw mode, mouse reporting, or the alternate screen.
+    // must not leave later sessions holding raw mode or the alternate screen.
   }
 }
 

@@ -9,8 +9,8 @@ import { defineComponent, onMounted } from "vue";
 // the only mount-time hide lives in setAlternateScreen). vue-tui must match:
 // a no-content interactive app must NOT hide the terminal cursor.
 //
-// rawMode "auto" so the no-input app does not depend on the lifetime raw-mode
-// hold; we exit explicitly after signalling readiness so the PTY run resolves.
+// The no-input app owns no terminal-input state; it exits explicitly after
+// signalling readiness so the PTY run resolves.
 const App = defineComponent(() => {
   const { exit } = useApp();
   onMounted(() => {
@@ -21,6 +21,6 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({ rawMode: "auto", exitOnCtrlC: false });
+app.mount();
 await app.waitUntilExit();
 console.log("exited");

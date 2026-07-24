@@ -1,0 +1,388 @@
+diff --git a/src/App.vue b/src/App.vue
+index 755dcd2..d6682b2 100644
+--- a/src/App.vue
++++ b/src/App.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+ import { computed, ref, watchEffect } from "vue";
+-import { Box, Text, useWindowSize, useInput, useApp } from "@vue-tui/runtime";
++import { Box, Text, useLayoutWidth, useViewportHeight, useInput, useApp } from "@vue-tui/runtime";
+ import { useMetrics } from "./composables/useMetrics";
+ import { emptyMetrics } from "./lib/empty";
+ import { theme, setThemeMode, nextThemeMode, type ThemeOverride } from "./theme";
+@@ -19,4 +19,4 @@ import NarrowView from "./components/NarrowView.vue";
+ // `snapshot`, `columns`, `rows` are supplied only by the one-shot `--once` render. `columns`/`rows`
+ // let the verify gate drive the responsive width AND the framed-layout height (the --once path has no
+-// TTY size); live, the poller + useWindowSize (reactive) drive everything.
++// TTY size); live, the poller + Runtime's reactive layout facts drive everything.
+ const props = defineProps<{ snapshot?: Metrics; columns?: number; rows?: number }>();
+@@ -23,6 +23,7 @@
+
+ const { metrics, history, now } = useMetrics();
+-const { columns, rows } = useWindowSize();
++const layoutWidth = useLayoutWidth();
++const viewportHeight = useViewportHeight();
+
+ const m = computed<Metrics>(() => props.snapshot ?? metrics.value ?? emptyMetrics());
+ const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now() : now.value));
+@@ -29,5 +30,5 @@ const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now()
+ // Responsive width seam (D4/RD5): prefer the explicit prop (gate / --once), else the live terminal
+ // width. The v-if below branches on THIS, so a breakpoint asserted at COLUMNS=40/120 is the width the
+ // code actually branches on.
+-const width = computed(() => props.columns || columns.value || 120);
++const width = computed(() => props.columns || layoutWidth.value);
+
+@@ -44,10 +45,10 @@ const WIDE_CONTENT_ROWS = 36;
+ const NARROW_CONTENT_ROWS = 10;
+ const isLive = computed(() => !props.snapshot);
+ const contentWidth = computed(() => Math.min(width.value, MAX_CONTENT_WIDTH));
+-// Viewport height. Live: the reactive useWindowSize reading. --once: ONLY the threaded `rows` prop
+-// (the gate drives it via LINES) — never useWindowSize's fallback, so a piped snapshot with unknown
++// Viewport height. Live: Runtime's bounded visual viewport. --once: ONLY the threaded `rows` prop
++// (the gate drives it via LINES), so a piped snapshot with unknown
+ // height (rows=0) stays top-anchored rather than centring against a made-up 24.
+-const vh = computed(() => (isLive.value ? rows.value || 24 : props.rows || 0));
++const vh = computed(() => (isLive.value ? (viewportHeight?.value ?? 0) : props.rows || 0));
+ const contentRows = computed(() => (width.value >= 100 ? WIDE_CONTENT_ROWS : NARROW_CONTENT_ROWS));
+ // Centre vertically only when the viewport is genuinely taller than the content — a short terminal
+ // keeps today's top-anchored layout and never clips.
+@@ -92,24 +93,20 @@ const effectiveMode = computed(() =>
+ );
+ watchEffect(() => setThemeMode(effectiveMode.value));
+
+-// Exit cleanly via the app lifecycle so the alternate screen is restored on quit.
+-// Ctrl+C is handled by mount's exitOnCtrlC. Both useApp/useInput are unavailable
+-// in the one-shot render path, so guard them.
+-let quit = () => process.exit(0);
+-try {
+-  const app = useApp();
+-  quit = () => app.exit();
+-} catch {
+-  // not in an interactive app context (one-shot render); keep the fallback.
+-}
+-try {
+-  useInput((input) => {
+-    if (input === "q") quit();
+-    else if (input === "t") themeOverride.value = nextThemeMode(themeOverride.value);
+-  });
+-} catch {
+-  // useInput is unavailable in one-shot render mode; ignore.
+-}
++// Exit cleanly via the app lifecycle so the full-screen surface is restored on quit.
++// String rendering provides inert app and input services, so this same setup also works for --once.
++// The interactive mount opts into Runtime's Ctrl+C exit policy below.
++const { exit } = useApp();
++useInput((event) => {
++  if (event.type !== "text") return;
++  if (event.text === "q") {
++    exit();
++    return;
++  }
++  if (event.text === "t") {
++    themeOverride.value = nextThemeMode(themeOverride.value);
++  }
++});
+ </script>
+
+ <template>
+@@ -119,7 +116,7 @@ useInput((event) => {
+   <Box
+     flexDirection="column"
+-    :width="isLive ? columns : contentWidth"
++    :width="isLive ? layoutWidth : contentWidth"
+     :height="framed ? vh : undefined"
+     :alignItems="isLive ? 'center' : undefined"
+     :justifyContent="framed ? 'center' : undefined"
+   >
+@@ -148,7 +145,7 @@ useInput((event) => {
+
+       <NarrowView v-else :m="m" />
+
+-      <Box :paddingX="1">
++      <Box :paddingLeft="1" :paddingRight="1">
+         <Text :color="theme.dim">{{ width >= 100 ? "q quit · t theme · refresh 1s" : "q quit · t theme" }}</Text>
+       </Box>
+     </Box>
+diff --git a/src/components/Bar.vue b/src/components/Bar.vue
+index 91d31f8..74c6884 100644
+--- a/src/components/Bar.vue
++++ b/src/components/Bar.vue
+@@ -1,12 +1,12 @@
+ <script setup lang="ts">
+ import { computed } from "vue";
+-import { Text } from "@vue-tui/runtime";
++import { Text, type Color } from "@vue-tui/runtime";
+ import { theme, levelColor } from "../theme";
+ import { barCells } from "../lib/sparkline";
+ import { ramp, supportsTruecolor } from "../lib/color";
+
+ const props = withDefaults(
+-  defineProps<{ value: number; max?: number; width?: number; color?: string }>(),
++  defineProps<{ value: number; max?: number; width?: number; color?: Color }>(),
+   { max: 100, width: 12 },
+ );
+
+diff --git a/src/components/BigNumber.vue b/src/components/BigNumber.vue
+index c505988..a877333 100644
+--- a/src/components/BigNumber.vue
++++ b/src/components/BigNumber.vue
+@@ -1,11 +1,11 @@
+ <script setup lang="ts">
+ import { computed } from "vue";
+-import { Box, Text } from "@vue-tui/runtime";
++import { Box, Text, type Color } from "@vue-tui/runtime";
+ import { bigDigits } from "../lib/bignum";
+ import { ramp, supportsTruecolor } from "../lib/color";
+ import { theme } from "../theme";
+
+-const props = withDefaults(defineProps<{ value: number; suffix?: string; color?: string }>(), {
++const props = withDefaults(defineProps<{ value: number; suffix?: string; color?: Color }>(), {
+   suffix: "",
+   color: theme.accent,
+ });
+diff --git a/src/components/Graph.vue b/src/components/Graph.vue
+index 288b1fe..0b4ef6c 100644
+--- a/src/components/Graph.vue
++++ b/src/components/Graph.vue
+@@ -1,20 +1,21 @@
+ <script setup lang="ts">
+-import { ref, computed } from "vue";
+-import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
++import { computed, shallowRef } from "vue";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
+ import { brailleArea } from "../lib/sparkline";
+ import { ramp, supportsTruecolor } from "../lib/color";
+ import { theme } from "../theme";
+
+ const props = withDefaults(
+-  defineProps<{ values: number[]; height?: number; max?: number; color?: string }>(),
++  defineProps<{ values: number[]; height?: number; max?: number; color?: Color }>(),
+   { height: 3, color: theme.accent },
+ );
+
+ // Measure our own width so the graph always fills the panel, however flex sized it.
+-const box = ref();
+-const bm = useBoxMetrics(box);
++const box = shallowRef<InstanceType<typeof Box> | null>(null);
++const size = useBoxSize(box);
++const width = computed(() => size.value?.width || 24);
+ const rows = computed(() =>
+-  brailleArea(props.values, Math.max(1, bm.width.value || 24), props.height, props.max),
++  brailleArea(props.values, Math.max(1, width.value), props.height, props.max),
+ );
+
+ // Vertical gradient: top row brightest (the moving line), bottom dimmest (the filled base).
+diff --git a/src/components/NarrowView.vue b/src/components/NarrowView.vue
+index 974f959..5b53cee 100644
+--- a/src/components/NarrowView.vue
++++ b/src/components/NarrowView.vue
+@@ -24,7 +24,7 @@ const batteryColor = (m: Metrics) => {
+ </script>
+
+ <template>
+-  <Box flexDirection="column" :paddingX="1">
++  <Box flexDirection="column" :paddingLeft="1" :paddingRight="1">
+     <Box justifyContent="space-between">
+       <Text :color="theme.cpu">CPU {{ pct(m.cpu.usage) }}</Text>
+       <Box><Bar :value="m.cpu.usage" :width="10" :color="theme.cpu" /></Box>
+diff --git a/src/components/Panel.vue b/src/components/Panel.vue
+index fb990a5..812e6ef 100644
+--- a/src/components/Panel.vue
++++ b/src/components/Panel.vue
+@@ -1,16 +1,16 @@
+ <script setup lang="ts">
+-import { Box, Text } from "@vue-tui/runtime";
++import { Box, Text, type BoxProps, type Color } from "@vue-tui/runtime";
+ import { theme } from "../theme";
+
+ withDefaults(
+   defineProps<{
+     title: string;
+-    accent?: string;
+-    titleColor?: string;
++    accent?: Color;
++    titleColor?: Color;
+     flexGrow?: number;
+     flexBasis?: number;
+     minWidth?: number;
+-    width?: number | string;
++    width?: BoxProps["width"];
+   }>(),
+   // flexBasis 0: a content-heavy panel (e.g. DISK) won't bloat its column past its flexGrow share,
+   // so the vertical seams between panels stay where the ratios put them (and align across rows).
+@@ -27,7 +27,8 @@ withDefaults(
+     :width="width"
+     borderStyle="round"
+     :borderColor="accent"
+-    :paddingX="1"
++    :paddingLeft="1"
++    :paddingRight="1"
+   >
+     <Box justifyContent="space-between">
+       <Text :color="titleColor ?? accent" bold>{{ title }}</Text>
+diff --git a/src/components/Sparkline.vue b/src/components/Sparkline.vue
+index 4a3bbf5..d6d9e36 100644
+--- a/src/components/Sparkline.vue
++++ b/src/components/Sparkline.vue
+@@ -1,19 +1,20 @@
+ <script setup lang="ts">
+-import { ref, computed } from "vue";
+-import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
++import { computed, shallowRef } from "vue";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
+ import { sparkline } from "../lib/sparkline";
+ import { theme } from "../theme";
+
+ const props = withDefaults(
+-  defineProps<{ values: number[]; max?: number; color?: string }>(),
++  defineProps<{ values: number[]; max?: number; color?: Color }>(),
+   { color: theme.accent },
+ );
+
+ // Measure our own width so the graph always fills the panel, however the flex
+ // layout sized it. Falls back to 24 cells until the first layout pass lands.
+-const box = ref();
+-const bm = useBoxMetrics(box);
+-const line = computed(() => sparkline(props.values, Math.max(1, bm.width.value || 24), props.max));
++const box = shallowRef<InstanceType<typeof Box> | null>(null);
++const size = useBoxSize(box);
++const width = computed(() => size.value?.width || 24);
++const line = computed(() => sparkline(props.values, Math.max(1, width.value), props.max));
+ </script>
+
+ <template>
+diff --git a/src/components/panels/HeaderBar.vue b/src/components/panels/HeaderBar.vue
+index fd1155d..c4146c3 100644
+--- a/src/components/panels/HeaderBar.vue
++++ b/src/components/panels/HeaderBar.vue
+@@ -27,7 +27,7 @@ const batteryColor = computed(() => {
+ </script>
+
+ <template>
+-  <Box :paddingX="1" justifyContent="space-between">
++  <Box :paddingLeft="1" :paddingRight="1" justifyContent="space-between">
+     <Box>
+       <Text :color="theme.silver" bold>mac</Text><Text :color="theme.accent" bold>hud</Text>
+       <Text v-if="wide" :color="theme.dim"> · macOS system monitor</Text>
+diff --git a/src/lib/color.ts b/src/lib/color.ts
+index 4cf4504..569bb23 100644
+--- a/src/lib/color.ts
++++ b/src/lib/color.ts
+@@ -1,5 +1,6 @@
+ // Small colour helpers for the gradient meters/graphs, plus the D11 colour-tier gate.
+ import chalk from "chalk";
++import type { Color } from "@vue-tui/runtime";
+
+ export function hexToRgb(hex: string): [number, number, number] {
+   const h = hex.replace("#", "");
+@@ -10,16 +11,17 @@ export function hexToRgb(hex: string): [number, number, number] {
+   return [ch(0, 2), ch(2, 4), ch(4, 6)];
+ }
+
+-function toHex([r, g, b]: [number, number, number]): string {
++function toHex([r, g, b]: [number, number, number]): Color {
+   const c = (n: number) =>
+     Math.max(0, Math.min(255, Math.round(n)))
+       .toString(16)
+       .padStart(2, "0");
+-  return `#${c(r)}${c(g)}${c(b)}`;
++  // Each channel is clamped, rounded, and padded to exactly two hexadecimal digits.
++  return `#${c(r)}${c(g)}${c(b)}` as Color;
+ }
+
+ // Linear interpolation between two hex colours (t in 0..1).
+-export function mix(a: string, b: string, t: number): string {
++export function mix(a: string, b: string, t: number): Color {
+   const x = hexToRgb(a);
+   const y = hexToRgb(b);
+   return toHex([x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t]);
+@@ -29,7 +31,7 @@ export function mix(a: string, b: string, t: number): string {
+ // clash; DESIGN.md "same-hue luminance ramp"). `floor` is the brightness of the DIMMEST step (0..1):
+ // 0.5 is the gentle meter/graph look; a LOWER floor widens the range for stronger step-to-step
+ // contrast — the hero BigNumber uses this.
+-export function ramp(hex: string, n: number, floor = 0.5): string[] {
++export function ramp(hex: string, n: number, floor = 0.5): Color[] {
+   const dim = mix("#000000", hex, floor);
+   return Array.from({ length: n }, (_, i) => mix(dim, hex, n > 1 ? i / (n - 1) : 1));
+ }
+diff --git a/src/main.ts b/src/main.ts
+index 215b2b3..6b4d224 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -36,8 +36,8 @@ if (args.includes("--json")) {
+   process.stdout.write(renderToString(Snapshot, { columns }) + "\n");
+   process.exit(0);
+ } else {
+-  // alternateScreen: take over the terminal on a clean buffer (like btop/htop)
++  // Full-screen mode takes over the terminal on a clean buffer (like btop/htop)
+-  // and restore the user's shell + scrollback on exit. Auto-ignored when not a
+-  // TTY, so piping still works.
++  // and restores the user's shell + scrollback on exit. It requires a TTY; use
++  // --once or --json when piping a snapshot.
+-  createApp(App).mount({ alternateScreen: true });
++  createApp(App).mount({ mode: "fullscreen", exitOnCtrlC: true });
+ }
+diff --git a/src/theme.ts b/src/theme.ts
+index edb529a..55f9fca 100644
+--- a/src/theme.ts
++++ b/src/theme.ts
+@@ -1,4 +1,5 @@
+ import { reactive } from "vue";
++import type { Color } from "@vue-tui/runtime";
+ import type { AppearanceMode } from "./types";
+
+ // Vivid Curated — an Everforest NEUTRAL ground with a bold, validated identity layer on top
+@@ -9,25 +10,25 @@ import type { AppearanceMode } from "./types";
+ // is the source of truth for these hex; verify.mjs pins them so theme and doc can't silently desync.
+ // machud follows the macOS system appearance (D8); dark is the hero, light a faithful daylight mode.
+ type ThemePalette = {
+-  bg: string;
+-  bgLift: string;
+-  frame: string;
+-  title: string;
+-  text: string;
+-  dim: string;
+-  accent: string; // primary brand `hud` — the original Everforest green #a7c080 (D15)
+-  silver: string; // Apple aluminium — the "mac" half of the mac|hud wordmark
+-  cpu: string; // CPU identity — Everforest green
+-  mem: string; // Memory module identity — electric violet
+-  gpu: string; // GPU identity — hot magenta
+-  disk: string; // Disk is neutral until near-full — token kept neutral (panel escalates via warn/bad)
+-  net: string; // Network ▼ download identity — emerald
+-  netUp: string; // Network ▲ upload identity — azure
+-  battery: string; // Power identity — electric cyan (电); escalates to warn/bad when low
+-  sensor: string; // Status is neutral until thermal — token kept neutral (panel escalates via warn/bad)
+-  good: string;
+-  warn: string;
+-  bad: string;
++  bg: Color;
++  bgLift: Color;
++  frame: Color;
++  title: Color;
++  text: Color;
++  dim: Color;
++  accent: Color; // primary brand `hud` — the original Everforest green #a7c080 (D15)
++  silver: Color; // Apple aluminium — the "mac" half of the mac|hud wordmark
++  cpu: Color; // CPU identity — Everforest green
++  mem: Color; // Memory module identity — electric violet
++  gpu: Color; // GPU identity — hot magenta
++  disk: Color; // Disk is neutral until near-full — token kept neutral (panel escalates via warn/bad)
++  net: Color; // Network ▼ download identity — emerald
++  netUp: Color; // Network ▲ upload identity — azure
++  battery: Color; // Power identity — electric cyan (电); escalates to warn/bad when low
++  sensor: Color; // Status is neutral until thermal — token kept neutral (panel escalates via warn/bad)
++  good: Color;
++  warn: Color;
++  bad: Color;
+ };
+
+ const palettes: Record<AppearanceMode, ThemePalette> = {
+@@ -99,7 +100,7 @@ export function nextThemeMode(cur: ThemeOverride): ThemeOverride {
+ }
+
+ // Green → amber → red as a percentage climbs. Used for load bars.
+-export function levelColor(pct: number): string {
++export function levelColor(pct: number): Color {
+   if (pct >= 85) return theme.bad;
+   if (pct >= 60) return theme.warn;
+   return theme.good;

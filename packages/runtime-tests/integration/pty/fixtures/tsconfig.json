@@ -5,7 +5,10 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "esnext",
+    "lib": ["es2023"],
     "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "types": ["node"]
   },

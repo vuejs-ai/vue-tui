@@ -1,1083 +1,583 @@
-import { defineComponent, nextTick, ref, shallowRef, watchEffect, watchPostEffect } from "vue";
-import { describe, expect, test } from "vite-plus/test";
+import { PassThrough } from "node:stream";
+import {
+  defineComponent,
+  isReadonly,
+  nextTick,
+  shallowRef,
+  vShow,
+  watchSyncEffect,
+  withDirectives,
+} from "vue";
+import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
-import { Box, Text, useBoxMetrics, measureElement, createApp } from "@vue-tui/runtime";
-// Internal host primitives — build a node + attach yoga WITHOUT a layout pass so
-// the pre-layout read below is deterministic (no render/commit timing involved).
-import { createBox, attachYoga } from "@vue-tui/runtime/internal";
-import { makeFakeStdin, makeFakeWritable } from "../lifecycle/test-streams.ts";
+import { Box, createApp, Text, useBoxMetrics } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
-describe("useBoxMetrics", () => {
-  test("returns inert zero metrics outside a render tree", () => {
-    const metrics = useBoxMetrics(ref(null));
+function makeTtyOutput(columns = 20, rows = 4): NodeJS.WriteStream {
+  const stream = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stream, { isTTY: true, columns, rows });
+  return stream;
+}
 
+function makeTtyInput(): NodeJS.ReadStream {
+  const stream = new PassThrough() as unknown as NodeJS.ReadStream;
+  Object.assign(stream, {
+    isTTY: true,
+    setRawMode() {
+      return stream;
+    },
+    setEncoding() {
+      return stream;
+    },
+    ref() {},
+    unref() {},
+  });
+  return stream;
+}
+
+test.each(["inline", "fullscreen"] as const)(
+  "publishes the frozen accepted Box size in %s mode",
+  async (mode) => {
+    let metrics!: ReturnType<typeof useBoxMetrics>;
+    const stable = shallowRef("one");
+    const App = defineComponent(() => {
+      const target = shallowRef<InstanceType<typeof Box> | null>(null);
+      metrics = useBoxMetrics(target);
+      return () => (
+        <Box>
+          <Box ref={target} width={4} height={2}>
+            <Text>{stable.value}</Text>
+          </Box>
+        </Box>
+      );
+    });
+
+    const result = await render(App, { columns: 20, rows: 6, host: { mode } });
+    try {
+      expect({
+        width: metrics.width.value,
+        height: metrics.height.value,
+        hasMeasured: metrics.hasMeasured.value,
+      }).toEqual({ width: 4, height: 2, hasMeasured: true });
+      expect(isReadonly(metrics.width)).toBe(true);
+      expect(isReadonly(metrics.height)).toBe(true);
+      expect(isReadonly(metrics.left)).toBe(true);
+      expect(isReadonly(metrics.top)).toBe(true);
+      expect(isReadonly(metrics.hasMeasured)).toBe(true);
+      expect(metrics.hasMeasured.value).toBe(true);
+
+      const accepted = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+      };
+      stable.value = "two";
+      await nextTick();
+      await result.waitUntilRenderFlush();
+      expect({
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+      }).toEqual(accepted);
+    } finally {
+      result.dispose();
+    }
+  },
+);
+
+test("updates after sibling-driven reflow and terminal resize without rerendering the Box", async () => {
+  const sibling = shallowRef("one");
+  let targetRenders = 0;
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const StableTarget = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => {
+      targetRenders++;
+      return (
+        <Box ref={target} width="100%" height={2}>
+          <Text>target</Text>
+        </Box>
+      );
+    };
+  });
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Text>{sibling.value}</Text>
+      <StableTarget />
+    </Box>
+  ));
+
+  const result = await render(App, { columns: 100, rows: 10 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 100, height: 2, hasMeasured: true });
+    expect(targetRenders).toBe(1);
+
+    sibling.value = "one\ntwo\nthree";
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 100, height: 2, hasMeasured: true });
+    expect(targetRenders).toBe(1);
+
+    await result.terminal.resize(60, 10);
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 60, height: 2, hasMeasured: true });
+    expect(targetRenders).toBe(1);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("distinguishes zero size, clipping, hidden state, and detachment", async () => {
+  const visible = shallowRef(true);
+  const hidden = shallowRef(false);
+  const clipped = shallowRef(false);
+  const zero = shallowRef(true);
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () =>
+      visible.value ? (
+        <Box width={5} height={1} overflowY="hidden">
+          {withDirectives(
+            <Box
+              ref={target}
+              position={clipped.value ? "absolute" : undefined}
+              top={clipped.value ? 2 : undefined}
+              width={zero.value ? 0 : 3}
+              height={zero.value ? 0 : 1}
+            />,
+            [[vShow, !hidden.value]],
+          )}
+        </Box>
+      ) : null;
+  });
+
+  const result = await render(App, { columns: 10, rows: 3 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 0, height: 0, hasMeasured: true });
+
+    zero.value = false;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
+
+    clipped.value = true;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
+
+    hidden.value = true;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
+
+    hidden.value = false;
+    clipped.value = false;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
+
+    visible.value = false;
+    await nextTick();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("clears a previous size while a replacement Box awaits accepted paint", async () => {
+  const replacement = shallowRef(false);
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () =>
+      replacement.value ? (
+        <Box key="second" ref={target} width={7} height={2} />
+      ) : (
+        <Box key="first" ref={target} width={3} height={1} />
+      );
+  });
+
+  const result = await render(App, { columns: 10, rows: 3 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 1, hasMeasured: true });
+    replacement.value = true;
+    await nextTick();
+    await result.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 7, height: 2, hasMeasured: true });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("a retained size becomes null when its setup scope is disposed", async () => {
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => <Box ref={target} width={3} height={1} />;
+  });
+
+  const result = await render(App, { columns: 10, rows: 3 });
+  expect({
+    width: metrics.width.value,
+    height: metrics.height.value,
+    hasMeasured: metrics.hasMeasured.value,
+  }).toEqual({ width: 3, height: 1, hasMeasured: true });
+  result.dispose();
+  expect(metrics.hasMeasured.value).toBe(false);
+  expect(metrics.width.value).toBe(0);
+  expect(metrics.height.value).toBe(0);
+});
+
+test("publishes accepted Box size for a visual non-TTY document host", async () => {
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => <Box ref={target} width={6} height={2} />;
+  });
+
+  const result = await render(App, {
+    columns: 30,
+    rows: 8,
+    host: { stdout: "stream" },
+  });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 6, height: 2, hasMeasured: true });
+  } finally {
+    result.dispose();
+  }
+});
+
+test("retains accepted size while suspended and settles queued changes on resume", async () => {
+  const width = shallowRef(4);
+  const visible = shallowRef(true);
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => (visible.value ? <Box ref={target} width={width.value} height={1} /> : null);
+  });
+
+  const result = await render(App, { columns: 20, rows: 4 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 4, height: 1, hasMeasured: true });
+    const snapshot = () => ({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    });
+    const accepted = snapshot();
+
+    await result.terminal.suspend();
+    width.value = 7;
+    await nextTick();
+    // Pending suspension retains the last accepted metrics.
+    expect(snapshot()).toEqual(accepted);
+
+    await result.terminal.resume();
+    expect(snapshot()).toEqual({
+      width: 7,
+      height: 1,
+      left: accepted.left,
+      top: accepted.top,
+      hasMeasured: true,
+    });
+
+    await result.terminal.suspend();
+    const resized = snapshot();
+    visible.value = false;
+    await nextTick();
+    expect(snapshot()).toEqual(resized);
+
+    await result.terminal.resume();
+    expect(metrics.hasMeasured.value).toBe(false);
+    expect(metrics.width.value).toBe(0);
+    expect(metrics.height.value).toBe(0);
+  } finally {
+    result.dispose();
+  }
+});
+
+test("does not publish a candidate Box size before a failed output write is accepted", async () => {
+  const width = shallowRef(4);
+  const marker = shallowRef("ready");
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => (
+      <Box ref={target} width={width.value} height={1}>
+        <Text>{marker.value}</Text>
+      </Box>
+    );
+  });
+
+  const stdout = makeTtyOutput();
+  const stderr = makeTtyOutput();
+  const stdin = makeTtyInput();
+  const originalWrite = stdout.write.bind(stdout);
+  const injected = new Error("injected Box-metrics frame failure");
+  let sizeDuringFailure: { width: number; height: number; hasMeasured: boolean } | undefined;
+  let failNextFrameWrite = false;
+  stdout.write = ((...args: unknown[]) => {
+    if (failNextFrameWrite) {
+      failNextFrameWrite = false;
+      sizeDuringFailure = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        hasMeasured: metrics.hasMeasured.value,
+      };
+      throw injected;
+    }
+    return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
+  }) as NodeJS.WriteStream["write"];
+
+  const app = createApp(App);
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
+    await app.waitUntilRenderFlush();
+    const accepted = {
+      width: metrics.width.value,
+      height: metrics.height.value,
+      hasMeasured: metrics.hasMeasured.value,
+    };
+    expect(accepted).toEqual({ width: 4, height: 1, hasMeasured: true });
+
+    const exited = app.waitUntilExit();
+    width.value = 7;
+    marker.value = "FAILED_SIZE_FRAME";
+    failNextFrameWrite = true;
+    stdout.columns = 19;
+    stdout.emit("resize");
+
+    await expect(exited).rejects.toBe(injected);
+    expect(sizeDuringFailure).toEqual(accepted);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
+test("publishes parent-relative left and top for a sibling-positioned Box", async () => {
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => (
+      <Box flexDirection="row">
+        <Box width={5} height={1}>
+          <Text>left</Text>
+        </Box>
+        <Box ref={target} width={3} height={2}>
+          <Text>box</Text>
+        </Box>
+      </Box>
+    );
+  });
+
+  const stdout = makeTtyOutput(40, 8);
+  const stderr = makeTtyOutput(40, 8);
+  const stdin = makeTtyInput();
+  const app = createApp(App);
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
+    await app.waitUntilRenderFlush();
     expect({
       width: metrics.width.value,
       height: metrics.height.value,
       left: metrics.left.value,
       top: metrics.top.value,
       hasMeasured: metrics.hasMeasured.value,
-    }).toEqual({ width: 0, height: 0, left: 0, top: 0, hasMeasured: false });
-  });
-
-  test("returns layout dimensions after render", async () => {
-    const dims = shallowRef({ w: 0, h: 0 });
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const metrics = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        dims.value = { w: metrics.width.value, h: metrics.height.value };
-      });
-      return () => (
-        <Box ref={boxRef} width={20} height={5}>
-          <Text>test</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    // useBoxMetrics defers measurement to nextTick after the commit
-    await nextTick();
-    expect(dims.value.w).toBe(20);
-    expect(dims.value.h).toBe(5);
-  });
-
-  test("returns left and top positions", async () => {
-    const pos = shallowRef({ l: -1, t: -1 });
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const metrics = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        pos.value = { l: metrics.left.value, t: metrics.top.value };
-      });
-      return () => (
-        <Box width={40} height={10}>
-          <Box ref={boxRef} width={20} height={5}>
-            <Text>inner</Text>
-          </Box>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-    expect(pos.value.l).toBe(0);
-    expect(pos.value.t).toBe(0);
-  });
-
-  // Ink use-box-metrics.tsx:37-61 ("returns correct position"): a tracked box on
-  // the SECOND row of a column with marginLeft=5 must report left=5 (the margin)
-  // and top=1 (the row below the first line).
-  test("returns non-zero left/top for an offset box on the second row", async () => {
-    const pos = shallowRef({ l: -1, t: -1 });
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const metrics = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        pos.value = { l: metrics.left.value, t: metrics.top.value };
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Text>first line</Text>
-          <Box ref={boxRef} marginLeft={5}>
-            <Text>tracked</Text>
-          </Box>
-        </Box>
-      );
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    // marginLeft=5 → left=5; second row → top=1.
-    expect(pos.value.l).toBe(5);
-    expect(pos.value.t).toBe(1);
-  });
-
-  test("hasMeasured starts false", async () => {
-    let measured = false;
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const metrics = useBoxMetrics(boxRef);
-      // During setup, hasMeasured is false (layout not computed yet)
-      measured = metrics.hasMeasured.value;
-      return () => (
-        <Box ref={boxRef} width={10} height={3}>
-          <Text>x</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    // During setup, hasMeasured was false
-    expect(measured).toBe(false);
-  });
-
-  test("hasMeasured becomes true after layout", async () => {
-    const hasMeasuredRef = shallowRef(false);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const metrics = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        hasMeasuredRef.value = metrics.hasMeasured.value;
-      });
-      return () => (
-        <Box ref={boxRef} width={10} height={3}>
-          <Text>x</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-    expect(hasMeasuredRef.value).toBe(true);
-  });
+    }).toEqual({ width: 3, height: 2, left: 5, top: 0, hasMeasured: true });
+  } finally {
+    app.unmount();
+    await Promise.allSettled([app.waitUntilExit()]);
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
 });
 
-describe("measureElement", () => {
-  test("measure element (integration)", async () => {
-    const measuredWidth = shallowRef(0);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredWidth.value = m.width;
-        });
-      });
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Width: {measuredWidth.value}</Text>
-        </Box>
-      );
-    });
-    // Default columns = 100, box fills terminal width
-    await render(App);
-    await nextTick();
-    expect(measuredWidth.value).toBe(100);
-  });
-
-  test("calculate layout while rendering is throttled (rerender pattern)", async () => {
-    // Mirrors Ink's test: initial render is null, then rerender with the
-    // real component to simulate throttled rendering. The measurement should
-    // still resolve correctly after the deferred render.
-    const measuredWidth = shallowRef(0);
-    const show = shallowRef(false);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      // Track both show (to know when to measure) and boxRef (for the element).
-      // watchPostEffect only re-runs when its tracked dependencies change.
-      // We need to explicitly read show.value so the effect re-runs when the
-      // component toggles from null to the real Box tree.
-      watchPostEffect(() => {
-        const _show = show.value;
-        void _show;
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredWidth.value = m.width;
-        });
-      });
-      return () =>
-        show.value ? (
-          <Box ref={boxRef}>
-            <Text>Width: {measuredWidth.value}</Text>
-          </Box>
-        ) : null;
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    // Nothing rendered yet
-    expect(measuredWidth.value).toBe(0);
-
-    // "Rerender" by toggling the show flag — the effect re-runs because
-    // show.value changed, then the nextTick reads yoga after layout.
-    show.value = true;
-    await nextTick();
-    await nextTick();
-    await nextTick();
-    expect(measuredWidth.value).toBe(100);
-  });
-
-  test("returns { width: 0, height: 0 } for null", () => {
-    expect(measureElement(null)).toEqual({ width: 0, height: 0 });
-  });
-
-  test("returns { width: 0, height: 0 } for undefined", () => {
-    expect(measureElement(undefined)).toEqual({ width: 0, height: 0 });
-  });
-
-  test("returns { width: 0, height: 0 } for object without yoga", () => {
-    expect(measureElement({})).toEqual({ width: 0, height: 0 });
-  });
-
-  test("returns dimensions from a node with yoga property", () => {
-    const fakeYoga = {
-      getComputedWidth: () => 42,
-      getComputedHeight: () => 17,
-    };
-    expect(measureElement({ yoga: fakeYoga })).toEqual({ width: 42, height: 17 });
-  });
-
-  // A node whose yoga node exists but has NOT been through a layout pass:
-  // yoga.getComputedWidth()/Height() return NaN, and the old `?? 0` did NOT
-  // catch NaN (NaN ?? 0 === NaN). The pre-layout / mis-timed read must degrade
-  // to a finite {0,0} (a safe sentinel) instead of leaking NaN into user layout
-  // math (e.g. terminalWidth - measured.width → NaN → a NaN width prop).
-  test("returns finite { width: 0, height: 0 } for a node not yet laid out (no NaN leak)", () => {
-    const box = createBox();
-    attachYoga(box); // attaches a yoga node but does NOT calculateLayout
-    // Guard the premise: pre-layout yoga genuinely reports NaN (not 0), so this
-    // test exercises the real coercion, not a no-op.
-    expect(Number.isNaN(box.yoga.getComputedWidth())).toBe(true);
-
-    const result = measureElement(box);
-    expect(Number.isFinite(result.width)).toBe(true);
-    expect(Number.isFinite(result.height)).toBe(true);
-    expect(result).toEqual({ width: 0, height: 0 });
-  });
-
-  test("resolves through $el for component instances", () => {
-    const fakeYoga = {
-      getComputedWidth: () => 30,
-      getComputedHeight: () => 10,
-    };
-    const fakeInstance = { $el: { yoga: fakeYoga } };
-    expect(measureElement(fakeInstance)).toEqual({ width: 30, height: 10 });
-  });
-
-  test("measureElement returns dimensions after state update", async () => {
-    const measuredHeight = shallowRef(0);
-    const items = shallowRef<string[]>([]);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        // Access items to track as dependency
-        const _len = items.value.length;
-        void _len;
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredHeight.value = m.height;
-        });
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={boxRef} flexDirection="column">
-            {items.value.map((item) => (
-              <Text key={item}>{item}</Text>
-            ))}
-          </Box>
-          <Text>Height: {measuredHeight.value}</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-    expect(measuredHeight.value).toBe(0);
-
-    items.value = ["line 1", "line 2", "line 3"];
-    await nextTick();
-    await nextTick();
-    expect(measuredHeight.value).toBe(3);
-  });
-
-  test("measureElement returns dimensions after multiple state updates", async () => {
-    const measuredHeight = shallowRef(0);
-    const items = shallowRef<string[]>([]);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        const _len = items.value.length;
-        void _len;
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredHeight.value = m.height;
-        });
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={boxRef} flexDirection="column">
-            {items.value.map((item) => (
-              <Text key={item}>{item}</Text>
-            ))}
-          </Box>
-          <Text>Height: {measuredHeight.value}</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-
-    items.value = ["line 1", "line 2", "line 3"];
-    await nextTick();
-    await nextTick();
-    expect(measuredHeight.value).toBe(3);
-
-    items.value = ["line 1"];
-    await nextTick();
-    await nextTick();
-    expect(measuredHeight.value).toBe(1);
-  });
-
-  test("measureElement in watchPostEffect after state update", async () => {
-    const measuredHeight = shallowRef(0);
-    const items = shallowRef<string[]>([]);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      // Vue's watchPostEffect is the closest equivalent to React's useLayoutEffect
-      // in terms of running after DOM mutations but before paint.
-      watchPostEffect(() => {
-        const _len = items.value.length;
-        void _len;
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredHeight.value = m.height;
-        });
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={boxRef} flexDirection="column">
-            {items.value.map((item) => (
-              <Text key={item}>{item}</Text>
-            ))}
-          </Box>
-          <Text>Height: {measuredHeight.value}</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-
-    items.value = ["line 1", "line 2", "line 3"];
-    await nextTick();
-    await nextTick();
-    expect(measuredHeight.value).toBe(3);
-  });
-
-  // Characterization test locking the JSDoc guidance: a BARE measureElement()
-  // call inside watchPostEffect reads layout BEFORE the commit scheduler's
-  // queuePostFlushCb has run calculateLayout, so it does NOT return the real
-  // width (yoga reports an uncomputed value). The same read deferred with
-  // nextTick — the pattern useBoxMetrics itself uses — returns the real width.
-  // This guards the corrected guidance against a regression to the old
-  // "call it directly from watchPostEffect" advice.
-  test("bare watchPostEffect reads stale layout; nextTick reads the real width", async () => {
-    const bareWidth = shallowRef<number>(-1);
-    const deferredWidth = shallowRef(0);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        // Bare read: runs before calculateLayout in the same flush → unusable.
-        bareWidth.value = measureElement(boxRef.value).width;
-        // Deferred read: runs after the commit's layout pass → correct.
-        void nextTick(() => {
-          deferredWidth.value = measureElement(boxRef.value).width;
-        });
-      });
-      // Box with no explicit width fills the 80-column terminal.
-      return () => (
-        <Box ref={boxRef}>
-          <Text>fill</Text>
-        </Box>
-      );
-    });
-    await render(App, { columns: 80 });
-    await nextTick();
-    await nextTick();
-    // The deferred (documented-correct) read returns the real terminal width.
-    expect(deferredWidth.value).toBe(80);
-    // The bare read is the uncomputed pre-layout value. On this first-render path
-    // yoga's getComputedWidth() is NaN; measureElement coerces non-finite dims to
-    // the safe sentinel 0, so the bare read is a FINITE 0 — not NaN and not the
-    // real 80. Pin all three facts: it ran (not the -1 seed), it is finite (the
-    // NaN-leak fix), and it is stale (0 ≠ 80, proving the bare path is pre-layout).
-    expect(bareWidth.value).not.toBe(-1);
-    expect(Number.isFinite(bareWidth.value)).toBe(true);
-    expect(bareWidth.value).toBe(0);
-  });
-
-  test("measureElement works when render is throttled", async () => {
-    const measuredWidth = shallowRef(0);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        void nextTick(() => {
-          const m = measureElement(boxRef.value);
-          measuredWidth.value = m.width;
-        });
-      });
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Width: {measuredWidth.value}</Text>
-        </Box>
-      );
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    expect(measuredWidth.value).toBe(100);
-  });
-});
-
-describe("useBoxMetrics - resize and dynamic layout", () => {
-  test("updates when terminal is resized", async () => {
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { width } = useBoxMetrics(boxRef);
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Width: {width.value}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame, terminal } = await render(App, { columns: 100 });
-    await nextTick();
-    expect(lastFrame()).toContain("Width: 100");
-
-    await terminal.resize(60, 100);
-    await nextTick();
-    expect(lastFrame()).toContain("Width: 60");
-  });
-
-  test("uses latest tracked ref when terminal is resized", async () => {
-    const trackSecond = shallowRef(false);
-    const App = defineComponent(() => {
-      const firstRef = ref(null);
-      const secondRef = ref(null);
-      const trackedRef = ref<unknown>(null);
-
-      watchEffect(() => {
-        trackedRef.value = trackSecond.value ? secondRef.value : firstRef.value;
-      });
-
-      const { height } = useBoxMetrics(trackedRef);
-
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={firstRef}>
-            <Text>short</Text>
-          </Box>
-          <Box ref={secondRef}>
-            <Text>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789</Text>
-          </Box>
-          <Text>Tracked height: {height.value}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame, terminal } = await render(App, { columns: 100 });
-    await nextTick();
-    expect(lastFrame()).toContain("Tracked height: 1");
-
-    // Switch to tracking secondRef
-    trackSecond.value = true;
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Tracked height: 1");
-
-    // Resize to 20 columns — the 62-char text wraps to 4 lines
-    await terminal.resize(20, 100);
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Tracked height: 4");
-  });
-
-  // In vue-tui, useBoxMetrics uses watchPostEffect (auto-disposed on scope
-  // teardown) instead of manually subscribing to resize. This test verifies
-  // the effect stops running after unmount — the vue-tui equivalent of Ink's
-  // "removes resize listener on unmount" test.
-  test("removes reactive effect on unmount", async () => {
-    let measureCount = 0;
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { width } = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        // Track width reads to count how often measurement triggers re-renders
-        void width.value;
-        measureCount++;
-      });
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Hello</Text>
-        </Box>
-      );
-    });
-    const { unmount } = await render(App);
-    await nextTick();
-    await nextTick();
-
-    const countAfterMount = measureCount;
-    expect(countAfterMount).toBeGreaterThan(0);
-
-    unmount();
-    await nextTick();
-    await nextTick();
-
-    // After unmount, no further measurement effects should fire
-    const countAfterUnmount = measureCount;
-    await nextTick();
-    await nextTick();
-    expect(measureCount).toBe(countAfterUnmount);
-  });
-
-  test("uses latest tracked ref after switching", async () => {
-    // Verify that when the tracked ref switches from one element to another,
-    // the new element's metrics are measured.
-    const trackSecond = shallowRef(false);
-    const App = defineComponent(() => {
-      const firstRef = ref(null);
-      const secondRef = ref(null);
-      const trackedRef = ref<unknown>(null);
-
-      watchEffect(() => {
-        trackedRef.value = trackSecond.value ? secondRef.value : firstRef.value;
-      });
-
-      const { width } = useBoxMetrics(trackedRef);
-
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={firstRef} width={20}>
-            <Text>short</Text>
-          </Box>
-          <Box ref={secondRef} width={40}>
-            <Text>longer box</Text>
-          </Box>
-          <Text>Tracked width: {width.value}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Tracked width: 20");
-
-    trackSecond.value = true;
-    await nextTick();
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Tracked width: 40");
-  });
-
-  test("follows a stable component ref as its inner rendered root changes", async () => {
-    const phase = shallowRef<"empty" | "a" | "b">("empty");
-    const StableTarget = defineComponent(() => {
-      return () => {
-        if (phase.value === "empty") return null;
-        if (phase.value === "a") {
-          return (
-            <Box key="a" width={7} height={2}>
-              <Text>A</Text>
-            </Box>
-          );
-        }
-        return (
-          <Box key="b" width={11} height={3}>
-            <Text>B</Text>
-          </Box>
-        );
+test("publishes each accepted rectangle as one coherent reactive snapshot", async () => {
+  const rectangle = shallowRef({ width: 2, height: 1, left: 1, top: 1 });
+  const observed: Array<{
+    width: number;
+    height: number;
+    left: number;
+    top: number;
+    hasMeasured: boolean;
+  }> = [];
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    watchSyncEffect(() => {
+      const snapshot = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+        hasMeasured: metrics.hasMeasured.value,
       };
+      if (snapshot.hasMeasured) observed.push(snapshot);
     });
-    const target = shallowRef<InstanceType<typeof StableTarget> | null>(null);
-    let metrics: ReturnType<typeof useBoxMetrics> | undefined;
-    const App = defineComponent(() => {
-      metrics = useBoxMetrics(target);
-      return () => (
-        <Box flexDirection="column">
-          <StableTarget ref={target} />
-        </Box>
-      );
-    });
-    const result = await render(App, { columns: 40 });
-    const readMetrics = () => ({
-      width: metrics!.width.value,
-      height: metrics!.height.value,
-      hasMeasured: metrics!.hasMeasured.value,
-    });
-    const settleTarget = async () => {
-      await nextTick();
-      await nextTick();
-      await result.waitUntilRenderFlush();
-      await nextTick();
-    };
-
-    const stableInstance = target.value;
-    expect(stableInstance).not.toBeNull();
-    expect(readMetrics()).toEqual({ width: 0, height: 0, hasMeasured: false });
-
-    phase.value = "a";
-    await settleTarget();
-    expect(target.value).toBe(stableInstance);
-    expect(readMetrics()).toEqual({ width: 7, height: 2, hasMeasured: true });
-
-    phase.value = "b";
-    await settleTarget();
-    expect(target.value).toBe(stableInstance);
-    expect(readMetrics()).toEqual({ width: 11, height: 3, hasMeasured: true });
-
-    phase.value = "empty";
-    await settleTarget();
-    expect(target.value).toBe(stableInstance);
-    expect(readMetrics()).toEqual({ width: 0, height: 0, hasMeasured: false });
-
-    phase.value = "b";
-    await settleTarget();
-    expect(target.value).toBe(stableInstance);
-    expect(readMetrics()).toEqual({ width: 11, height: 3, hasMeasured: true });
-    result.dispose();
+    return () => (
+      <Box width={20} height={6}>
+        <Box
+          ref={target}
+          position="absolute"
+          width={rectangle.value.width}
+          height={rectangle.value.height}
+          left={rectangle.value.left}
+          top={rectangle.value.top}
+        />
+      </Box>
+    );
   });
 
-  test("updates when sibling content changes", async () => {
-    const siblingText = shallowRef("short");
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { height } = useBoxMetrics(boxRef);
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={boxRef} flexDirection="column">
-            <Text>{siblingText.value}</Text>
-          </Box>
-          <Text>Height: {height.value}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Height: 1");
+  const result = await render(App, { columns: 20, rows: 6 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 2, height: 1, left: 1, top: 1, hasMeasured: true });
 
-    siblingText.value = "line 1\nline 2\nline 3";
+    observed.length = 0;
+    rectangle.value = { width: 4, height: 2, left: 3, top: 2 };
     await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Height: 3");
-  });
+    await result.waitUntilRenderFlush();
 
-  test("updates when sibling content changes but tracked component does not re-render", async () => {
-    const siblingText = shallowRef("line 1");
-
-    const TrackedBox = defineComponent(() => {
-      const boxRef = ref(null);
-      const { top } = useBoxMetrics(boxRef);
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Top: {top.value}</Text>
-        </Box>
-      );
-    });
-
-    const App = defineComponent(() => {
-      return () => (
-        <Box flexDirection="column">
-          <Text>{siblingText.value}</Text>
-          <TrackedBox />
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Top: 1");
-
-    siblingText.value = "line 1\nline 2\nline 3";
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Top: 3");
-  });
-
-  test("updates when tracked ref attaches after initial render", async () => {
-    const isTrackedElementMounted = shallowRef(false);
-
-    const TrackedBox = defineComponent({
-      props: { isMounted: { type: Boolean, required: true } },
-      setup(props) {
-        const boxRef = ref(null);
-        const { top } = useBoxMetrics(boxRef);
-        return () =>
-          props.isMounted ? (
-            <Box ref={boxRef}>
-              <Text>Top: {top.value}</Text>
-            </Box>
-          ) : (
-            <Text>Top: {top.value}</Text>
-          );
-      },
-    });
-
-    const App = defineComponent(() => {
-      return () => (
-        <Box flexDirection="column">
-          <Text>line 1</Text>
-          <TrackedBox isMounted={isTrackedElementMounted.value} />
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    // Ref not attached yet, so top should be 0
-    expect(lastFrame()).toContain("Top: 0");
-
-    isTrackedElementMounted.value = true;
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Top: 1");
-  });
-
-  test("does not trigger extra re-renders when layout is unchanged", async () => {
-    let renderCount = 0;
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      useBoxMetrics(boxRef);
-      return () => {
-        renderCount++;
-        return (
-          <Box ref={boxRef}>
-            <Text>Hello</Text>
-          </Box>
-        );
-      };
-    });
-    await render(App);
-    await nextTick();
-    // Allow all post-effects and next-tick measurement to settle
-    await nextTick();
-    const settledCount = renderCount;
-    // After settling, no more renders should fire
-    await nextTick();
-    await nextTick();
-    expect(renderCount).toBe(settledCount);
-  });
-
-  test("does not crash when resize fires after unmount", async () => {
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      useBoxMetrics(boxRef);
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Hello</Text>
-        </Box>
-      );
-    });
-    const { unmount, terminal } = await render(App, { columns: 100 });
-    unmount();
-
-    // Resize after unmount should not throw
-    await terminal.resize(60, 100);
-    await nextTick();
-    // If we reach here without throwing, the test passes
-  });
-
-  test("returns zeros when ref is not attached to any element", async () => {
-    const dims = shallowRef({ w: 0, h: 0, l: 0, t: 0, m: false });
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      // Never attach boxRef to any element
-      const { width, height, left, top, hasMeasured } = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        dims.value = {
-          w: width.value,
-          h: height.value,
-          l: left.value,
-          t: top.value,
-          m: hasMeasured.value,
-        };
+    expect(observed.length).toBeGreaterThan(0);
+    for (const snapshot of observed) {
+      expect(snapshot).toEqual({
+        width: 4,
+        height: 2,
+        left: 3,
+        top: 2,
+        hasMeasured: true,
       });
-      return () => (
-        <Box>
-          <Text>no ref attached</Text>
-        </Box>
-      );
-    });
-    await render(App);
-    await nextTick();
-    expect(dims.value).toEqual({ w: 0, h: 0, l: 0, t: 0, m: false });
-  });
-
-  test("hasMeasured becomes true when tracked element is mounted on initial render", async () => {
-    const hasMeasuredRef = shallowRef(false);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { hasMeasured } = useBoxMetrics(boxRef);
-      watchEffect(() => {
-        hasMeasuredRef.value = hasMeasured.value;
-      });
-      return () => (
-        <Box ref={boxRef}>
-          <Text>Has measured: {String(hasMeasured.value)}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(hasMeasuredRef.value).toBe(true);
-    expect(lastFrame()).toContain("Has measured: true");
-  });
-
-  test("hasMeasured becomes true after the tracked element is mounted later", async () => {
-    const isMounted = shallowRef(false);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { hasMeasured } = useBoxMetrics(boxRef);
-      return () => (
-        <Box flexDirection="column">
-          {isMounted.value ? (
-            <Box ref={boxRef}>
-              <Text>Tracked</Text>
-            </Box>
-          ) : undefined}
-          <Text>Has measured: {String(hasMeasured.value)}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Has measured: false");
-
-    isMounted.value = true;
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Has measured: true");
-  });
-
-  test("hasMeasured resets when tracked ref switches to a detached element", async () => {
-    const trackSecond = shallowRef(false);
-    const mountSecond = shallowRef(false);
-    const App = defineComponent(() => {
-      const firstRef = ref(null);
-      const secondRef = ref(null);
-      const trackedRef = ref<unknown>(null);
-
-      watchEffect(() => {
-        trackedRef.value = trackSecond.value ? secondRef.value : firstRef.value;
-      });
-
-      const { hasMeasured } = useBoxMetrics(trackedRef);
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={firstRef}>
-            <Text>First</Text>
-          </Box>
-          {mountSecond.value ? (
-            <Box ref={secondRef}>
-              <Text>Second</Text>
-            </Box>
-          ) : undefined}
-          <Text>Has measured: {String(hasMeasured.value)}</Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Has measured: true");
-
-    // Switch to tracking secondRef which is not mounted yet
-    trackSecond.value = true;
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Has measured: false");
-
-    // Now mount the second element. When secondRef gets set by Vue, the
-    // watchEffect re-computes trackedRef, which triggers useBoxMetrics'
-    // watchPostEffect to re-run and schedule measurement via nextTick.
-    mountSecond.value = true;
-    await nextTick();
-    await nextTick();
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Has measured: true");
-  });
-
-  test("resets metrics when tracked element unmounts", async () => {
-    const isMounted = shallowRef(true);
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      const { width, height, left, top, hasMeasured } = useBoxMetrics(boxRef);
-      return () => (
-        <Box flexDirection="column">
-          {isMounted.value ? (
-            <Box ref={boxRef} width={10}>
-              <Text>1234567890</Text>
-            </Box>
-          ) : undefined}
-          <Text>
-            Metrics: {width.value},{height.value},{left.value},{top.value},
-            {String(hasMeasured.value)}
-          </Text>
-        </Box>
-      );
-    });
-    const { lastFrame } = await render(App);
-    await nextTick();
-    expect(lastFrame()).toContain("Metrics: 10,1,0,0,true");
-
-    isMounted.value = false;
-    await nextTick();
-    await nextTick();
-    expect(lastFrame()).toContain("Metrics: 0,0,0,0,false");
-  });
-});
-
-// The template-authored `<Box>` SFC has a root `v-if`, so it renders as a Vue
-// Fragment whose `$el` is the fragment's BOUNDARY anchor (an empty `text-leaf`
-// with no `.yoga`), NOT the real `tui-box` host node. Resolving a ref to that anchor
-// would collapse metrics to 0 — or, worse, drill the wrong node. The subTree
-// drill in useBoxMetrics (commit 801739d) walks the component's vnode subTree to
-// the first genuine host node. These tests guard the tricky drill cases the
-// basic single-Box tests above do NOT cover: each is a genuine RED if the drill
-// is reverted to the old `$el`-only resolver.
-describe("useBoxMetrics - subtree drill (fragment-rooted Box resolution)", () => {
-  // Sibling isolation: two ref'd <Box>es with DIFFERENT explicit sizes must each
-  // resolve to their OWN box, not the first box found by a naive tree walk.
-  // A "first host node in the tree" resolver would silently pass both refs to
-  // box A's node and report 10x2 twice.
-  test("two sibling ref'd Boxes each resolve to their own dimensions", async () => {
-    const a = shallowRef({ width: -1, height: -1 });
-    const b = shallowRef({ width: -1, height: -1 });
-    const App = defineComponent(() => {
-      const aRef = ref(null);
-      const bRef = ref(null);
-      watchPostEffect(() => {
-        void nextTick(() => {
-          a.value = measureElement(aRef.value);
-          b.value = measureElement(bRef.value);
-        });
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={aRef} width={10} height={2}>
-            <Text>A</Text>
-          </Box>
-          <Box ref={bRef} width={30} height={6}>
-            <Text>B</Text>
-          </Box>
-        </Box>
-      );
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    await nextTick();
-    // Each ref resolves to ITS OWN box, not the first box in the tree.
-    expect(a.value).toEqual({ width: 10, height: 2 });
-    expect(b.value).toEqual({ width: 30, height: 6 });
-  });
-
-  // Same isolation via the reactive useBoxMetrics path (not just imperative
-  // measureElement), so both code paths through resolveYogaNode are guarded.
-  test("two sibling ref'd Boxes report distinct useBoxMetrics dimensions", async () => {
-    const a = shallowRef({ w: -1, h: -1 });
-    const b = shallowRef({ w: -1, h: -1 });
-    const App = defineComponent(() => {
-      const aRef = ref(null);
-      const bRef = ref(null);
-      const ma = useBoxMetrics(aRef);
-      const mb = useBoxMetrics(bRef);
-      watchEffect(() => {
-        a.value = { w: ma.width.value, h: ma.height.value };
-        b.value = { w: mb.width.value, h: mb.height.value };
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={aRef} width={10} height={2}>
-            <Text>A</Text>
-          </Box>
-          <Box ref={bRef} width={30} height={6}>
-            <Text>B</Text>
-          </Box>
-        </Box>
-      );
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    await nextTick();
-    expect(a.value).toEqual({ w: 10, h: 2 });
-    expect(b.value).toEqual({ w: 30, h: 6 });
-  });
-
-  // Deep nesting: a ref'd <Box> wrapped a couple of component levels deep still
-  // resolves. The drill must descend through nested component subTrees, not just
-  // the immediate one.
-  test("a Box nested two component levels deep still resolves", async () => {
-    const dims = shallowRef({ width: -1, height: -1 });
-
-    const Inner = defineComponent({
-      props: { boxRef: { type: Object, default: null } },
-      setup(props) {
-        return () => (
-          <Box ref={props.boxRef as never} width={13} height={7}>
-            <Text>deep</Text>
-          </Box>
-        );
-      },
-    });
-
-    const Middle = defineComponent({
-      props: { boxRef: { type: Object, default: null } },
-      setup(props) {
-        return () => (
-          <Box>
-            <Inner boxRef={props.boxRef} />
-          </Box>
-        );
-      },
-    });
-
-    const App = defineComponent(() => {
-      const boxRef = ref(null);
-      watchPostEffect(() => {
-        void nextTick(() => {
-          dims.value = measureElement(boxRef.value);
-        });
-      });
-      return () => <Middle boxRef={boxRef} />;
-    });
-    await render(App, { columns: 100 });
-    await nextTick();
-    await nextTick();
-    expect(dims.value).toEqual({ width: 13, height: 7 });
-  });
-
-  // SR-hidden returns clean zeros: a ref'd <Box ariaHidden> under screen-reader
-  // mode renders NOTHING (the root `v-if="!srHidden && ..."` is false), so its
-  // subTree has no host `box` node. measureElement must return {width:0,height:0}
-  // WITHOUT crashing and WITHOUT drilling to a visible sibling's node.
-  //
-  // Uses the createApp + app.mount({ isScreenReaderEnabled: true }) pattern
-  // (the repo's working SR-enable path for a live, ref-measurable mount; the
-  // testing `render()` helper does not expose isScreenReaderEnabled).
-  test("SR-hidden Box returns clean zero metrics without crashing", async () => {
-    const hidden = shallowRef({ width: -1, height: -1 });
-    const visible = shallowRef({ width: -1, height: -1 });
-    const App = defineComponent(() => {
-      const hiddenRef = ref(null);
-      const visibleRef = ref(null);
-      watchPostEffect(() => {
-        void nextTick(() => {
-          hidden.value = measureElement(hiddenRef.value);
-          visible.value = measureElement(visibleRef.value);
-        });
-      });
-      return () => (
-        <Box flexDirection="column">
-          <Box ref={hiddenRef} ariaHidden width={25} height={9}>
-            <Text>secret</Text>
-          </Box>
-          <Box ref={visibleRef} width={12} height={4}>
-            <Text>shown</Text>
-          </Box>
-        </Box>
-      );
-    });
-
-    const app = createApp(App);
-    const stdout = makeFakeWritable({ columns: 100 });
-    const stderr = makeFakeWritable({ columns: 100 });
-    const { stream: stdin } = makeFakeStdin();
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      exitOnCtrlC: false,
-      isScreenReaderEnabled: true,
-    });
-    try {
-      await nextTick();
-      await nextTick();
-      await nextTick();
-      // The aria-hidden Box rendered nothing under SR → no host node → clean zeros,
-      // NOT the hidden Box's 25x9 and NOT the visible sibling's dimensions.
-      expect(hidden.value).toEqual({ width: 0, height: 0 });
-      // Sanity: the visible sibling still resolves to its own node (proves the
-      // hidden ref returning 0 isn't because measurement was globally broken).
-      expect(visible.value).toEqual({ width: 12, height: 4 });
-    } finally {
-      app.unmount();
     }
+  } finally {
+    result.dispose();
+  }
+});
+
+test("rejects non-Box targets and use outside a vue-tui tree", async () => {
+  expect(() => useBoxMetrics(shallowRef<InstanceType<typeof Box> | null>(null))).toThrow(
+    "render session is unavailable outside a vue-tui render tree",
+  );
+
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    useBoxMetrics(target);
+    return () => <Text ref={target}>wrong target</Text>;
   });
+  const stdout = makeTtyOutput();
+  const stderr = makeTtyOutput();
+  const stdin = makeTtyInput();
+  const app = createApp(App);
+  app.config.warnHandler = () => {};
+  try {
+    const exited = app.waitUntilExit();
+    expect(() =>
+      app.mount(
+        createInternalMountOptions({
+          stdout,
+          stderr,
+          stdin,
+          liveUpdates: true,
+          maxFps: 0,
+          patchConsole: false,
+        }),
+      ),
+    ).toThrow("useBoxMetrics() target must be a ref bound directly to <Box>");
+    await expect(exited).rejects.toThrow(
+      "useBoxMetrics() target must be a ref bound directly to <Box>",
+    );
+  } finally {
+    app.unmount();
+    await Promise.allSettled([app.waitUntilExit()]);
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
 });

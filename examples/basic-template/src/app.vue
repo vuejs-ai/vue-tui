@@ -6,14 +6,20 @@ import Clock from "./clock.vue";
 
 const showClock = shallowRef(true);
 
-useInput((input) => {
-  if (input === "c") showClock.value = !showClock.value;
-  if (input === "q") process.exit(0);
+useInput((event) => {
+  if (event.type !== "text") return;
+  if (event.text === "c") {
+    showClock.value = !showClock.value;
+    return;
+  }
+  if (event.text === "q") {
+    process.exit(0);
+  }
 });
 </script>
 
 <template>
-  <Box flexDirection="column" backgroundColor="blue" borderStyle="round" width="20">
+  <Box flexDirection="column" backgroundColor="blue" borderStyle="round" :width="20">
     <Text bold color="cyan">vue-tui basic (template)</Text>
     <Text dimColor>Try editing counter.vue or app.vue</Text>
     <Text dimColor>Press c=toggle clock, q=quit</Text>

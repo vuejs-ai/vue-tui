@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 test("#214: dev-mode <Text color> emits real ANSI color", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
     logLevel: "silent",

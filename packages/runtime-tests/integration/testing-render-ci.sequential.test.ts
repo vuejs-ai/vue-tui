@@ -53,17 +53,14 @@ function runFixture(ci: "true" | "false"): Promise<FixtureResult> {
   });
 }
 
-// render() must pin interactive ON so its advertised resize()/rawMode APIs work
-// for consumers regardless of ambient CI/TTY detection. Before the fix, a CI=true
-// consumer silently lost both: resize() was ignored (no re-layout) and the
-// lifetime raw-mode hold never engaged.
+// render() must model the same live host regardless of ambient CI/TTY detection.
+// Before the fix, a CI=true consumer silently lost resize and route-owned raw input.
 test("@vue-tui/testing render() honors resize() under CI=true (interactive pinned)", async () => {
   const result = await runFixture("true");
   // The bordered box fills the terminal: 40 cols → 12 cols after resize.
   expect(result.before).toBe(40);
   expect(result.after).toBe(12); // pre-fix this was 40 — resize ignored.
-  // The lifetime raw-mode hold must engage too (advertised in the README).
-  expect(result.rawMode).toBe(true); // pre-fix this was false.
+  expect(result.rawMode).toBe(true);
 });
 
 test("@vue-tui/testing render() behaves identically under CI=false", async () => {

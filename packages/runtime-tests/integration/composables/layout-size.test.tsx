@@ -5,9 +5,10 @@ import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useLayoutSize } from "@vue-tui/runtime";
 import {
   INTERNAL_RENDER_OBSERVER,
-  INTERNAL_TERMINAL_SIZE_PROBE,
   type InternalRenderObserver,
-} from "@vue-tui/runtime/internal";
+} from "../../../runtime/dist/internal.mjs";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 
 // A TTY-like writable that we control directly (columns/rows + resize listeners)
 // — the @vue-tui/testing render() helper hides the underlying stdout, but the
@@ -36,29 +37,36 @@ function makeFakeStdin(): NodeJS.ReadStream {
   return s;
 }
 
-test("useLayoutSize reacts to resize event", async () => {
+test.each(["inline", "fullscreen"] as const)(
+  "layout size reacts to a bounded %s resize from one coherent snapshot",
+  async (mode) => {
+    const App = defineComponent(() => {
+      const { width, height } = useLayoutSize();
+      return () => (
+        <Text>
+          {width.value}x{height.value}
+        </Text>
+      );
+    });
+
+    const { lastFrame, terminal } = await render(App, {
+      columns: 80,
+      rows: 24,
+      host: { mode },
+    });
+    expect(lastFrame()).toContain("80x24");
+
+    await terminal.resize(120, 40);
+    expect(lastFrame()).toContain("120x40");
+  },
+);
+
+test("layout size returns the initial bounded dimensions", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
+    const { width, height } = useLayoutSize();
     return () => (
       <Text>
-        {columns.value}x{rows.value}
-      </Text>
-    );
-  });
-
-  const { lastFrame, terminal } = await render(App, { columns: 80, rows: 24 });
-  expect(lastFrame()).toContain("80x24");
-
-  await terminal.resize(120, 40);
-  expect(lastFrame()).toContain("120x40");
-});
-
-test("useLayoutSize returns initial terminal dimensions", async () => {
-  const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => (
-      <Text>
-        {columns.value}x{rows.value}
+        {width.value}x{height.value}
       </Text>
     );
   });
@@ -67,14 +75,13 @@ test("useLayoutSize returns initial terminal dimensions", async () => {
   expect(lastFrame()).toContain("100x40");
 });
 
-test("useLayoutSize stops updating after unmount", async () => {
+test("layout size refs retain their final values after unmount", async () => {
   let layout: ReturnType<typeof useLayoutSize> | undefined;
   const App = defineComponent(() => {
-    const currentLayout = useLayoutSize();
-    layout = currentLayout;
+    layout = useLayoutSize();
     return () => (
       <Text>
-        {currentLayout.columns.value}x{currentLayout.rows.value}
+        {layout!.width.value}x{layout!.height.value}
       </Text>
     );
   });
@@ -84,8 +91,26 @@ test("useLayoutSize stops updating after unmount", async () => {
 
   unmount();
   await expect(terminal.resize(60, 20)).resolves.toBeUndefined();
-  expect(layout!.columns.value).toBe(80);
-  expect(layout!.rows.value).toBe(24);
+  expect(layout!.width.value).toBe(80);
+  expect(layout!.height.value).toBe(24);
+});
+
+test("mounted non-TTY document host exposes fixed modeled 80x24 layout", async () => {
+  const App = defineComponent(() => {
+    const { width, height } = useLayoutSize();
+    return () => <Text>{`${width.value}x${height.value}`}</Text>;
+  });
+
+  const result = await render(App, {
+    columns: 40,
+    rows: 10,
+    host: { stdout: "stream" },
+  });
+  try {
+    expect(result.lastFrame()).toContain("80x24");
+  } finally {
+    result.dispose();
+  }
 });
 
 test("layout responds to terminal width change", async () => {
@@ -110,10 +135,10 @@ test("layout responds to terminal width change", async () => {
 
 test("multiple consecutive resizes all take effect", async () => {
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
+    const { width, height } = useLayoutSize();
     return () => (
       <Text>
-        {columns.value}x{rows.value}
+        {width.value}x{height.value}
       </Text>
     );
   });
@@ -133,8 +158,8 @@ test("multiple consecutive resizes all take effect", async () => {
 
 test("terminal width decrease triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useLayoutSize();
-    return () => <Text>{columns.value}</Text>;
+    const { width } = useLayoutSize();
+    return () => <Text>{width.value}</Text>;
   });
 
   const { lastFrame, terminal } = await render(App, { columns: 100, rows: 24 });
@@ -146,8 +171,8 @@ test("terminal width decrease triggers rerender", async () => {
 
 test("terminal width increase triggers rerender", async () => {
   const App = defineComponent(() => {
-    const { columns } = useLayoutSize();
-    return () => <Text>{columns.value}</Text>;
+    const { width } = useLayoutSize();
+    return () => <Text>{width.value}</Text>;
   });
 
   const { lastFrame, terminal } = await render(App, { columns: 50, rows: 24 });
@@ -160,20 +185,20 @@ test("terminal width increase triggers rerender", async () => {
 // Mirrors Ink terminal-resize.tsx:91-108 ("falls back to a positive column
 // count when stdout.columns is 0"). When the mount stdout reports columns 0,
 // the session must still choose a positive layout fallback (never 0).
-test("useLayoutSize falls back to a positive column count when stdout.columns is 0", async () => {
+test("useLayoutSize falls back to a positive width when stdout.columns is 0", async () => {
   const stdout = makeTtyStream(0, 24);
   const stderr = makeTtyStream(0, 24);
   const stdin = makeFakeStdin();
 
   let capturedColumns = -1;
   const App = defineComponent(() => {
-    const { columns } = useLayoutSize();
-    capturedColumns = columns.value;
-    return () => <Text>{String(columns.value)}</Text>;
+    const { width } = useLayoutSize();
+    capturedColumns = width.value;
+    return () => <Text>{String(width.value)}</Text>;
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await new Promise<void>((r) => setTimeout(r, 60));
 
   try {
@@ -184,9 +209,9 @@ test("useLayoutSize falls back to a positive column count when stdout.columns is
 });
 
 // Mirrors Ink terminal-resize.tsx:43-64 ("removes resize listener on unmount").
-// One render session owns one resize listener. Calling useLayoutSize repeatedly
-// must not register another environment resolver per consumer.
-test("multiple useLayoutSize consumers share one app resize listener", async () => {
+// One render session owns one resize listener. Calling the layout primitives
+// repeatedly must not register another environment resolver per consumer.
+test("multiple layout size consumers share one app resize listener", async () => {
   const stdout = makeTtyStream(80, 24);
   const stderr = makeTtyStream(80, 24);
   const stdin = makeFakeStdin();
@@ -198,13 +223,13 @@ test("multiple useLayoutSize consumers share one app resize listener", async () 
     const second = useLayoutSize();
     return () => (
       <Text>
-        {first.columns.value}x{first.rows.value}:{second.columns.value}x{second.rows.value}
+        {first.width.value}x{first.height.value}:{second.width.value}x{second.height.value}
       </Text>
     );
   });
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await new Promise<void>((r) => setTimeout(r, 60));
 
   expect(stdout.listenerCount("resize")).toBe(baseline + 1);
@@ -213,32 +238,33 @@ test("multiple useLayoutSize consumers share one app resize listener", async () 
   expect(stdout.listenerCount("resize")).toBe(baseline);
 });
 
-test("useLayoutSize derives a bounded layout from an explicitly modeled terminal pair", async () => {
+test("useLayoutSize derives a bounded height from an explicitly modeled terminal pair", async () => {
   const stdout = makeTtyStream(0);
   const stderr = makeTtyStream(0);
   const stdin = makeFakeStdin();
 
   let capturedRows: number | null = null;
   const App = defineComponent(() => {
-    const { rows } = useLayoutSize();
-    capturedRows = rows.value;
-    return () => <Text>{String(rows.value)}</Text>;
+    const { height } = useLayoutSize();
+    capturedRows = height.value;
+    return () => <Text>{String(height.value)}</Text>;
   });
 
   const app = createApp(App);
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      maxFps: 0,
-      exitOnCtrlC: false,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
-        kind: "detected",
-        source: "environment",
-        size: { columns: 123, rows: 45 },
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        maxFps: 0,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({
+          kind: "detected",
+          source: "environment",
+          size: { columns: 123, rows: 45 },
+        }),
       }),
-    } as Parameters<typeof app.mount>[0]);
+    );
     await new Promise<void>((resolve) => setTimeout(resolve, 60));
 
     expect(capturedRows).toBe(45);
@@ -258,23 +284,23 @@ test("rapid resize events commit only the newest layout and participate in the r
     },
   };
   const App = defineComponent(() => {
-    const { columns, rows } = useLayoutSize();
-    return () => <Text>{`${columns.value}x${rows.value ?? "unbounded"}`}</Text>;
+    const { width, height } = useLayoutSize();
+    return () => <Text>{`${width.value}x${height.value}`}</Text>;
   });
   const app = createApp(App);
 
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      liveUpdates: true,
-      rawMode: "auto",
-      maxFps: 0,
-      patchConsole: false,
-      exitOnCtrlC: false,
-      [INTERNAL_RENDER_OBSERVER]: observer,
-    } as Parameters<typeof app.mount>[0]);
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_RENDER_OBSERVER]: observer,
+      }),
+    );
     await app.waitUntilRenderFlush();
     frames.length = 0;
 

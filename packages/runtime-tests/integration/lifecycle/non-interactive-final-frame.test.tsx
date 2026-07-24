@@ -1,4 +1,4 @@
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
@@ -37,7 +37,7 @@ test("non-interactive teardown flushes a deferred trailing commit into the final
   const app = createApp(App);
   // Keep the default maxFps so the real throttle remains active; maxFps: 0
   // would erase the very throttle this bug needs.
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false, liveUpdates: false });
+  app.mount({ stdout, stdin, stderr });
 
   await nextTick();
   await nextTick();
@@ -62,4 +62,47 @@ test("non-interactive teardown flushes a deferred trailing commit into the final
   // stale last-committed frame. Ink v7.0.4 emits exactly "C\n" in this scenario
   // (verified against the real package), so assert byte parity.
   expect(output).toBe("C\n");
+});
+
+test("non-interactive teardown preserves an existing final line ending", async () => {
+  const stdout = makeFakeWritable({ columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  (stdout as unknown as { isTTY: boolean }).isTTY = false;
+  const chunks: string[] = [];
+  (stdout as unknown as PassThrough).on("data", (chunk: Buffer) => {
+    chunks.push(chunk.toString());
+  });
+  const app = createApp(defineComponent(() => () => <Text>{"already-ended\n"}</Text>));
+
+  app.mount({ stdin, stdout, stderr, patchConsole: false });
+  app.unmount();
+  await app.waitUntilExit();
+
+  expect(chunks.join("")).toBe("already-ended\n");
+});
+
+test("non-interactive final output accepts an ordinary file-like Writable", async () => {
+  const chunks: string[] = [];
+  const stdout = new Writable({
+    write(chunk, _encoding, callback) {
+      chunks.push(chunk.toString());
+      callback();
+    },
+  });
+  Object.assign(stdout, { isTTY: false, columns: 80 });
+  const stderr = makeFakeWritable({ columns: 80 });
+  const { stream: stdin } = makeFakeStdin();
+  const app = createApp(defineComponent(() => () => <Text>file document</Text>));
+
+  app.mount({ stdin, stdout, stderr, patchConsole: false });
+  app.unmount();
+  await app.waitUntilExit();
+
+  expect(chunks.join("")).toBe("file document\n");
+  expect(stdout.destroyed).toBe(false);
+  expect(stdout.writableEnded).toBe(false);
+  stdout.destroy();
+  stderr.destroy();
+  stdin.destroy();
 });

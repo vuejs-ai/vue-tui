@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useAnimation, Text } from "@vue-tui/runtime";
+import { computed, onScopeDispose, shallowRef, watch } from "vue";
+import { Text } from "@vue-tui/runtime";
 import { spinnerProps } from "./spinner-props.ts";
 import { resolveSpinner } from "./spinners.ts";
 
@@ -8,7 +8,30 @@ defineOptions({ name: "Spinner" });
 const props = defineProps(spinnerProps);
 
 const set = computed(() => resolveSpinner(props));
-const { frame } = useAnimation({ interval: () => set.value.interval });
+const frame = shallowRef(0);
+let timer: ReturnType<typeof setInterval> | undefined;
+
+function stopTimer(): void {
+  if (timer === undefined) return;
+  clearInterval(timer);
+  timer = undefined;
+}
+
+watch(
+  () => set.value.interval,
+  (interval) => {
+    stopTimer();
+    frame.value = 0;
+    const delay = Number.isFinite(interval) ? Math.min(Math.max(1, interval), 2_147_483_647) : 100;
+    timer = setInterval(() => {
+      frame.value += 1;
+    }, delay);
+  },
+  { immediate: true },
+);
+
+onScopeDispose(stopTimer);
+
 const glyph = computed(() => set.value.frames[frame.value % set.value.frames.length]);
 </script>
 
