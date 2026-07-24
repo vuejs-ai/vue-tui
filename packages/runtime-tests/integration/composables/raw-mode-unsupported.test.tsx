@@ -34,9 +34,8 @@ function captureData(stream: NodeJS.WriteStream): string[] {
   return data;
 }
 
-// Mounts a component against a non-TTY stdin and resolves with any error that
-// surfaces through the app's exit promise (the error-boundary → exit path the
-// testing render() helper relies on), or undefined if it mounts cleanly.
+// Mounts a component against a non-TTY stdin and captures either a synchronous
+// mount failure or the Runtime exit result, or undefined if it mounts cleanly.
 async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp>[0]): Promise<{
   error: Error | undefined;
   unmount: () => void;
@@ -57,7 +56,7 @@ async function mountNonTtyAndCaptureError(component: Parameters<typeof createApp
     error = e as Error;
   }
 
-  // Flush the Vue queue so the error boundary → nextTick → exit → reject chain runs.
+  // Flush any remaining Vue and Runtime settlement work.
   await nextTick();
   await nextTick();
   await Promise.resolve();
@@ -115,7 +114,7 @@ test("useInput on a non-TTY stdin explains the managed-input boundary", async ()
 });
 
 test.each(["inline", "fullscreen"] as const)(
-  "active semantic input on a non-TTY mutates neither the %s terminal nor its output streams",
+  "active semantic input on a non-TTY acquires no input or %s terminal resources",
   async (mode) => {
     const setRawModeCalls: boolean[] = [];
     const refCalls: string[] = [];
@@ -145,9 +144,13 @@ test.each(["inline", "fullscreen"] as const)(
       );
     });
     const app = createApp(App);
+    app.config.warnHandler = () => {};
 
-    app.mount({ mode, stdout, stderr, stdin });
-    await expect(app.waitUntilExit()).rejects.toThrow(
+    const exited = app.waitUntilExit();
+    expect(() => app.mount({ mode, stdout, stderr, stdin, patchConsole: false })).toThrow(
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY",
+    );
+    await expect(exited).rejects.toThrow(
       "Managed input is unavailable because the mounted stdin is not a controllable TTY",
     );
 

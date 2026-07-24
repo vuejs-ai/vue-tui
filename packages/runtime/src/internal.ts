@@ -60,9 +60,8 @@ export {
   type InternalTestMouseEvent,
   type InternalTestMouseModifiers,
 } from "./io/test-input-host.ts";
-// Exposed for unit testing: error-overview.ts imports .vue SFCs, which the
-// runtime-tests vitest config does not compile (no @vitejs/plugin-vue), so a
-// pure-function test of this helper must reach it through the built dist.
+// Exposed for focused non-Error normalization tests used by Runtime-owned
+// failures and the synchronous string renderer.
 export { messageForNonError } from "./error-value.ts";
 export { useStdout, type UseStdoutReturn } from "./composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "./composables/useStderr.ts";

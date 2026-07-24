@@ -278,15 +278,19 @@ describe("handler and activation contract", () => {
         return () => <Text>unreachable</Text>;
       });
       const app = createApp(App);
+      app.config.warnHandler = () => {};
 
       try {
-        app.mount({
-          stdin: streams.stdin,
-          stdout: streams.stdout,
-          stderr: streams.stderr,
-          patchConsole: false,
-        });
-        await expect(app.waitUntilExit()).rejects.toThrow("useInput() handler must be a function");
+        const exited = app.waitUntilExit();
+        expect(() =>
+          app.mount({
+            stdin: streams.stdin,
+            stdout: streams.stdout,
+            stderr: streams.stderr,
+            patchConsole: false,
+          }),
+        ).toThrow("useInput() handler must be a function");
+        await expect(exited).rejects.toThrow("useInput() handler must be a function");
         expect(streams.rawModeCalls).toEqual([]);
         expect(streams.stdin.listenerCount("data")).toBe(0);
         expect(streams.stdoutWrites).not.toContain(PASTE_ON);
@@ -310,15 +314,19 @@ describe("handler and activation contract", () => {
       return () => <Text>unreachable</Text>;
     });
     const app = createApp(App);
+    app.config.warnHandler = () => {};
 
     try {
-      app.mount({
-        stdin: streams.stdin,
-        stdout: streams.stdout,
-        stderr: streams.stderr,
-        patchConsole: false,
-      });
-      await expect(app.waitUntilExit()).rejects.toThrow(/useInput\(\) options/);
+      const exited = app.waitUntilExit();
+      expect(() =>
+        app.mount({
+          stdin: streams.stdin,
+          stdout: streams.stdout,
+          stderr: streams.stderr,
+          patchConsole: false,
+        }),
+      ).toThrow(/useInput\(\) options/);
+      await expect(exited).rejects.toThrow(/useInput\(\) options/);
       expect(streams.rawModeCalls).toEqual([]);
       expect(streams.stdin.listenerCount("data")).toBe(0);
       expect(streams.stdoutWrites).not.toContain(PASTE_ON);
@@ -332,7 +340,6 @@ describe("handler and activation contract", () => {
     ["string", "yes"],
     ["number", 1],
     ["null", null],
-    ["ref resolving to undefined", shallowRef<unknown>(undefined)],
   ])(
     "rejects an initially non-boolean isActive value (%s) before acquiring input",
     async (_label, isActive) => {
@@ -342,17 +349,19 @@ describe("handler and activation contract", () => {
         return () => <Text>unreachable</Text>;
       });
       const app = createApp(App);
+      app.config.warnHandler = () => {};
 
       try {
-        app.mount({
-          stdin: streams.stdin,
-          stdout: streams.stdout,
-          stderr: streams.stderr,
-          patchConsole: false,
-        });
-        await expect(app.waitUntilExit()).rejects.toThrow(
-          "useInput() isActive must resolve to a boolean",
-        );
+        const exited = app.waitUntilExit();
+        expect(() =>
+          app.mount({
+            stdin: streams.stdin,
+            stdout: streams.stdout,
+            stderr: streams.stderr,
+            patchConsole: false,
+          }),
+        ).toThrow("useInput() isActive must resolve to a boolean");
+        await expect(exited).rejects.toThrow("useInput() isActive must resolve to a boolean");
         expect(streams.rawModeCalls).toEqual([]);
         expect(streams.stdin.listenerCount("data")).toBe(0);
         expect(streams.stdoutWrites).not.toContain(PASTE_ON);
@@ -362,6 +371,36 @@ describe("handler and activation contract", () => {
       }
     },
   );
+
+  test("an initially invalid reactive isActive source exits before acquiring input", async () => {
+    const streams = makeTrackedStreams();
+    const isActive = shallowRef<unknown>(undefined);
+    const App = defineComponent(() => {
+      useInput(() => undefined, { isActive: isActive as never });
+      return () => <Text>unreachable</Text>;
+    });
+    const app = createApp(App);
+
+    try {
+      expect(() =>
+        app.mount({
+          stdin: streams.stdin,
+          stdout: streams.stdout,
+          stderr: streams.stderr,
+          patchConsole: false,
+        }),
+      ).not.toThrow();
+      await expect(app.waitUntilExit()).rejects.toThrow(
+        "useInput() isActive must resolve to a boolean",
+      );
+      expect(streams.rawModeCalls).toEqual([]);
+      expect(streams.stdin.listenerCount("data")).toBe(0);
+      expect(streams.stdoutWrites).not.toContain(PASTE_ON);
+    } finally {
+      app.unmount();
+      streams.destroy();
+    }
+  });
 
   test("a later invalid activation enters fatal cleanup without publishing a partial state", async () => {
     const streams = makeTrackedStreams();

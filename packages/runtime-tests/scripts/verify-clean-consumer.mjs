@@ -1092,7 +1092,7 @@ import * as runtimeTesting from "@vue-tui/runtime/testing";
 import * as inline from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
 import { render } from "@vue-tui/testing";
-import { defineComponent, h, isReadonly, nextTick, onMounted, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
+import { defineComponent, h, isReadonly, nextTick, onMounted, onScopeDispose, onUnmounted, ref, shallowRef, vShow, watch, withDirectives } from "vue";
 
 const { Box, createApp, Text, useBoxSize, useFocus, useInput, useLayoutWidth, useStdin, useViewportHeight } = runtime;
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
@@ -1582,6 +1582,101 @@ const liveExit = live.waitUntilExit();
 live.unmount();
 await liveExit;
 await live.waitUntilRenderFlush();
+
+const initialFailure = new Error("packed partial mount failed");
+const secondaryCleanupFailure = new Error("packed cleanup failed");
+const disposedScopes = [];
+const AllocatedBeforeFailure = defineComponent(() => {
+  onScopeDispose(() => {
+    disposedScopes.push("allocated");
+  });
+  return () => h(Text, null, () => "allocated");
+});
+const ThrowingDuringSetup = defineComponent(() => {
+  onScopeDispose(() => {
+    disposedScopes.push("throwing");
+  });
+  throw initialFailure;
+});
+const PartialFailureTree = defineComponent(() => {
+  onScopeDispose(() => {
+    disposedScopes.push("root");
+    throw secondaryCleanupFailure;
+  });
+  return () =>
+    h(Box, null, () => [h(AllocatedBeforeFailure), h(ThrowingDuringSetup)]);
+});
+const PartialFailureRoot = () => h(PartialFailureTree);
+const partialFailure = createApp(PartialFailureRoot);
+partialFailure.config.warnHandler = () => {};
+const originalConsoleError = console.error;
+let partialThrown;
+console.error = () => {};
+try {
+  partialFailure.mount({
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    patchConsole: false,
+  });
+} catch (error) {
+  partialThrown = error;
+} finally {
+  console.error = originalConsoleError;
+}
+if (partialThrown === undefined) partialFailure.unmount();
+assert.equal(partialThrown, initialFailure);
+await assert.rejects(partialFailure.waitUntilExit(), (error) => error === initialFailure);
+assert.deepEqual(disposedScopes.sort(), ["allocated", "root", "throwing"]);
+
+let functionalRootScope;
+let functionalRootHookCalls = 0;
+const FunctionalHostFailure = () => h("unsupported-vue-tui-host");
+const functionalHostFailure = createApp(FunctionalHostFailure, {
+  onVnodeBeforeMount(vnode) {
+    functionalRootHookCalls += 1;
+    functionalRootScope = vnode.component?.scope;
+  },
+});
+let functionalThrown;
+console.error = () => {};
+try {
+  functionalHostFailure.mount({
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    patchConsole: false,
+  });
+} catch (error) {
+  functionalThrown = error;
+} finally {
+  console.error = originalConsoleError;
+}
+if (functionalThrown === undefined) functionalHostFailure.unmount();
+assert.equal(functionalThrown?.message, "Unknown vue-tui element type: unsupported-vue-tui-host");
+await assert.rejects(functionalHostFailure.waitUntilExit(), (error) => error === functionalThrown);
+assert.equal(functionalRootHookCalls, 1);
+assert.equal(functionalRootScope?.active, false);
+
+let repeatedCleanupCalls = 0;
+const repeatedCleanup = () => {
+  repeatedCleanupCalls += 1;
+};
+const RepeatedCleanupRoot = defineComponent(() => {
+  onScopeDispose(repeatedCleanup);
+  onScopeDispose(repeatedCleanup);
+  return () => h(Text, null, () => "repeated cleanup");
+});
+const repeatedCleanupApp = createApp(RepeatedCleanupRoot);
+repeatedCleanupApp.mount({
+  stdin: new PassThrough(),
+  stdout: new PassThrough(),
+  stderr: new PassThrough(),
+  patchConsole: false,
+});
+repeatedCleanupApp.unmount();
+await repeatedCleanupApp.waitUntilExit();
+assert.equal(repeatedCleanupCalls, 2);
 
 function assertRemovedMountOption(name, value, message) {
   let stdoutRead = false;

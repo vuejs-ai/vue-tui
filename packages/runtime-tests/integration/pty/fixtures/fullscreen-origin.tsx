@@ -226,18 +226,36 @@ const App = defineComponent(() => {
 });
 
 const app = createApp(App);
-app.mount({
-  mode: "fullscreen",
-});
+app.config.warnHandler = () => {};
+const exited = app.waitUntilExit();
+let mountThrew = false;
+let mountError: unknown;
+try {
+  app.mount({
+    mode: "fullscreen",
+  });
+} catch (error) {
+  mountThrew = true;
+  mountError = error;
+}
 
-void app.waitUntilExit().then(
-  () => {
+if (scenario === "static") {
+  if (!mountThrew) throw new Error("Expected Fullscreen Static mount to throw");
+  let exitError: unknown;
+  try {
+    await exited;
+    throw new Error("Expected Fullscreen Static exit to reject");
+  } catch (error) {
+    exitError = error;
+  }
+  if (exitError !== mountError) {
+    throw new Error("Fullscreen Static mount and exit did not preserve the same failure");
+  }
+  const message = exitError instanceof Error ? exitError.message : String(exitError);
+  process.stdout.write(`__STATIC_REJECTED__:${message}\n`);
+} else {
+  if (mountThrew) throw mountError;
+  void exited.then(() => {
     process.stdout.write(`__EXITED__:${scenario}\n`);
-  },
-  (error: unknown) => {
-    if (scenario === "static") {
-      const message = error instanceof Error ? error.message : String(error);
-      process.stdout.write(`__STATIC_REJECTED__:${message}\n`);
-    }
-  },
-);
+  });
+}

@@ -66,9 +66,9 @@ function bgKey(name: string): string {
  *
  * vue-tui mirrors that throw, but VALIDATES here at component-render time (not in
  * paint): a raw throw in the post-flush paint pass unwinds through Vue's
- * flushPostFlushCbs and wedges the scheduler, where onErrorCaptured can't catch it
- * (cf. the borderStyle fix #124). Returning a flag lets the component throw during
- * render so vue-tui's error boundary (onErrorCaptured → ErrorOverview) handles it.
+ * flushPostFlushCbs outside Vue's component error propagation (cf. the borderStyle
+ * fix #124). Returning a flag lets the component throw during render so user
+ * capture hooks and the app error handler receive it through Vue normally.
  *
  * Only the in-chalk-but-no-bg-method case is rejected; valid colors, hex,
  * ansi256, rgb strings, and unknown non-chalk strings all return false.

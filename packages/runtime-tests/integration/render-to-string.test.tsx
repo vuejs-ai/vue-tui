@@ -144,13 +144,28 @@ describe("renderToString", () => {
   });
 
   test("useApp exit is inert in a string render", () => {
+    let inspected = 0;
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          inspected++;
+          throw new Error("string-host exit must not inspect its argument");
+        },
+      },
+    );
     const App = defineComponent(() => {
-      useApp().exit();
-      useApp().exit(new Error("ignored"));
+      const exit = useApp().exit as (value?: unknown) => void;
+      exit();
+      exit(new Error("ignored"));
+      exit("invalid but ignored");
+      exit(null);
+      exit(hostile);
       return () => <Text>still rendered</Text>;
     });
 
     expect(renderToString(App)).toBe("still rendered");
+    expect(inspected).toBe(0);
   });
 
   test("useStdin does not throw in renderToString", () => {

@@ -86,6 +86,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
   const observerStdin = makeTtyInput();
   const owner = createApp(Owner);
   const observer = createApp(Observer);
+  observer.config.warnHandler = () => {};
 
   try {
     owner.mount({
@@ -98,6 +99,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
     } as InternalMountOptions);
     await owner.waitUntilRenderFlush();
 
+    const observerExited = within(observer.waitUntilExit(), "foreign target exit");
     expect(() =>
       observer.mount({
         stdout: observerStdout,
@@ -107,8 +109,8 @@ test("rejects a foreign Box without contaminating later apps", async () => {
         maxFps: 0,
         patchConsole: false,
       } as InternalMountOptions),
-    ).not.toThrow();
-    await expect(within(observer.waitUntilExit(), "foreign target exit")).rejects.toThrow(
+    ).toThrow("useBoxSize() target belongs to a different vue-tui app");
+    await expect(observerExited).rejects.toThrow(
       "useBoxSize() target belongs to a different vue-tui app",
     );
   } finally {
@@ -126,43 +128,7 @@ test("rejects a foreign Box without contaminating later apps", async () => {
   await mountPlainApp("after foreign target");
 });
 
-test("rejects a mounted-time non-Box target without contaminating later apps", async () => {
-  const target = shallowRef<InstanceType<typeof Box> | null>(null);
-  const Invalid = defineComponent(() => {
-    useBoxSize(target);
-    return () => <Text ref={target}>wrong target</Text>;
-  });
-  const stdout = makeTtyOutput();
-  const stderr = makeTtyOutput();
-  const stdin = makeTtyInput();
-  const app = createApp(Invalid);
-
-  try {
-    expect(() =>
-      app.mount({
-        stdout,
-        stderr,
-        stdin,
-        liveUpdates: true,
-        maxFps: 0,
-        patchConsole: false,
-      } as InternalMountOptions),
-    ).not.toThrow();
-    await expect(within(app.waitUntilExit(), "non-Box target exit")).rejects.toThrow(
-      "useBoxSize() target must be a ref bound directly to <Box>",
-    );
-  } finally {
-    app.unmount();
-    await Promise.allSettled([app.waitUntilExit()]);
-    stdin.destroy();
-    stdout.destroy();
-    stderr.destroy();
-  }
-
-  await mountPlainApp("after non-Box target");
-});
-
-test("rejects a dynamic non-Box retarget without contaminating later apps", async () => {
+test("rejects a dynamic non-Box retarget through Vue's update", async () => {
   const target = shallowRef<InstanceType<typeof Box> | null>(null);
   const renderBox = shallowRef(true);
   const Invalid = defineComponent(() => {
@@ -180,6 +146,7 @@ test("rejects a dynamic non-Box retarget without contaminating later apps", asyn
   const stderr = makeTtyOutput();
   const stdin = makeTtyInput();
   const app = createApp(Invalid);
+  app.config.warnHandler = () => {};
 
   try {
     app.mount({
@@ -192,9 +159,12 @@ test("rejects a dynamic non-Box retarget without contaminating later apps", asyn
     } as InternalMountOptions);
     await app.waitUntilRenderFlush();
     renderBox.value = false;
-    await nextTick();
-    await expect(within(app.waitUntilExit(), "dynamic non-Box target exit")).rejects.toThrow(
+    await expect(nextTick()).rejects.toThrow(
       "useBoxSize() target must be a ref bound directly to <Box>",
+    );
+    app.unmount();
+    await expect(within(app.waitUntilExit(), "dynamic non-Box target clean exit")).resolves.toBe(
+      undefined,
     );
   } finally {
     app.unmount();
@@ -203,6 +173,4 @@ test("rejects a dynamic non-Box retarget without contaminating later apps", asyn
     stdout.destroy();
     stderr.destroy();
   }
-
-  await mountPlainApp("after dynamic non-Box target");
 });

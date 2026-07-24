@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
-import { defineComponent, nextTick, shallowRef } from "vue";
+import { defineComponent, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { useStderr, useStdout } from "../../../runtime/dist/internal.mjs";
@@ -335,6 +335,7 @@ test("managed input rechecks an stdin that ended while no input was active", asy
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
   const rawModeCalls: boolean[] = [];
+  const handled: unknown[] = [];
   stdin.setRawMode = (mode: boolean) => {
     rawModeCalls.push(mode);
     return stdin;
@@ -345,19 +346,34 @@ test("managed input rechecks an stdin that ended while no input was active", asy
       return () => <Text>late input</Text>;
     }),
   );
+  app.config.warnHandler = () => {};
+  app.config.errorHandler = (error) => {
+    handled.push(error);
+  };
 
-  app.mount({ stdin, stdout, stderr, patchConsole: false });
-  stdin.destroy();
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    app.mount({ stdin, stdout, stderr, patchConsole: false });
+    stdin.destroy();
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
-  enabled.value = true;
-  await nextTick();
-  await expect(app.waitUntilExit()).rejects.toThrow(
-    "Managed input is unavailable because the mounted stdin is not a controllable TTY.",
-  );
-  expect(rawModeCalls).toEqual([]);
-  stdout.destroy();
-  stderr.destroy();
+    expect(() => {
+      enabled.value = true;
+    }).not.toThrow();
+    const activationError = handled[0];
+    expect(activationError).toBeInstanceOf(Error);
+    expect((activationError as Error).message).toBe(
+      "Managed input is unavailable because the mounted stdin is not a controllable TTY.\n" +
+        "Read raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
+    );
+    expect(handled).toEqual([activationError]);
+    await expect(app.waitUntilExit()).rejects.toBe(activationError);
+    expect(rawModeCalls).toEqual([]);
+  } finally {
+    app.unmount();
+    stdout.destroy();
+    stderr.destroy();
+    stdin.destroy();
+  }
 });
 
 test("an idle stderr error is not an application failure", async () => {

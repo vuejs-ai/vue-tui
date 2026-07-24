@@ -1,5 +1,5 @@
 import { Console as NodeConsole } from "node:console";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, inject, onScopeDispose } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text } from "@vue-tui/runtime";
 import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
@@ -14,16 +14,12 @@ import { captureWrites, makeFakeStdin, makeFakeWritable } from "./test-streams.t
 // lifetime: vitest isolates workers per test file).
 (console as { Console?: typeof NodeConsole }).Console ??= NodeConsole;
 
-// The console patch must be installed BEFORE the first Vue mount (Ink patches
-// in its constructor, ink.tsx:435-436, before the first React render). A root
-// whose setup() throws makes Vue emit its dev-only "[Vue warn]: Component is
-// missing template or render function." DURING the initial mount — with the
-// patch installed only after mount, that warn escaped to the real console even
-// with patchConsole on. (Defined inline, not in a fixture module: see the
-// SSR register-helper note in error-overview.test.tsx.)
-test("a [Vue warn] from the initial mount is filtered (patch installed before mount)", async () => {
-  const SetupThrower = defineComponent(() => {
-    throw new Error("setup boom");
+// The console patch is installed before the first user setup and forwards
+// content without special-casing Vue's own warning prefix.
+test("a Vue warning from initial setup is fully forwarded to stderr", async () => {
+  const WarnDuringSetup = defineComponent(() => {
+    inject("intentionally-missing-injection");
+    return () => <Text>mounted after warning</Text>;
   });
 
   const stdout = makeFakeWritable();
@@ -40,25 +36,85 @@ test("a [Vue warn] from the initial mount is filtered (patch installed before mo
   };
 
   try {
-    const app = createApp(SetupThrower);
+    const app = createApp(WarnDuringSetup);
     app.mount({ stdout, stderr, stdin, maxFps: 0 } as InternalMountOptions);
-    await expect(app.waitUntilExit()).rejects.toThrow("setup boom");
+    await app.waitUntilRenderFlush();
+    app.unmount();
+    await app.waitUntilExit();
   } finally {
     console.warn = realWarn;
   }
 
   expect(escapedWarns.filter((w) => w.startsWith("[Vue warn]"))).toEqual([]);
-  // The filter DROPS the warn rather than routing it to the app's stderr.
-  expect(stderrWrites.filter((w) => w.startsWith("[Vue warn]"))).toEqual([]);
+  expect(stderrWrites.join("")).toContain("[Vue warn]");
+  expect(stderrWrites.join("")).toContain('injection "intentionally-missing-injection" not found');
+});
+
+test("patchConsole false leaves the process console and app streams untouched", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const stdoutWrites = captureWrites(stdout);
+  const stderrWrites = captureWrites(stderr);
+  const { stream: stdin } = makeFakeStdin();
+  const original = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+  };
+  const calls: string[] = [];
+  const local = {
+    log: (...args: unknown[]) => {
+      calls.push(`log:${args.map(String).join(" ")}`);
+    },
+    warn: (...args: unknown[]) => {
+      calls.push(`warn:${args.map(String).join(" ")}`);
+    },
+    error: (...args: unknown[]) => {
+      calls.push(`error:${args.map(String).join(" ")}`);
+    },
+  };
+  console.log = local.log;
+  console.warn = local.warn;
+  console.error = local.error;
+
+  try {
+    const app = createApp(defineComponent(() => () => <Text>frame</Text>));
+    app.mount({
+      stdout,
+      stderr,
+      stdin,
+      patchConsole: false,
+      maxFps: 0,
+    } as InternalMountOptions);
+    expect(console.log).toBe(local.log);
+    expect(console.warn).toBe(local.warn);
+    expect(console.error).toBe(local.error);
+
+    console.log("native log");
+    console.warn("native warn");
+    console.error("native error");
+
+    app.unmount();
+    await app.waitUntilExit();
+    expect(console.log).toBe(local.log);
+    expect(console.warn).toBe(local.warn);
+    expect(console.error).toBe(local.error);
+    expect(calls).toEqual(["log:native log", "warn:native warn", "error:native error"]);
+    expect(stdoutWrites.join("")).not.toContain("native log");
+    expect(stderrWrites.join("")).not.toContain("native warn");
+    expect(stderrWrites.join("")).not.toContain("native error");
+  } finally {
+    console.log = original.log;
+    console.warn = original.warn;
+    console.error = original.error;
+  }
 });
 
 test("console is restored when mount throws synchronously", () => {
   // A vnode whose `type` getter throws during the renderer's patch phase
-  // bypasses onErrorCaptured, so originalMount throws SYNCHRONOUSLY (same
-  // repro as cursor-commit-path's DEFECT 2). With the patch now installed
-  // before mount, the throw path must still restore the console via the
-  // mount-catch teardown() — otherwise the [Vue warn] filter would keep
-  // swallowing console output for the rest of the process.
+  // bypasses Vue's component error propagation, so originalMount throws
+  // synchronously. With the patch installed before mount, the throw path must
+  // still restore the console via the mount-catch teardown().
   const ThrowOnPatchApp = defineComponent(() => {
     return () => {
       const vnode = h("div");
@@ -176,4 +232,83 @@ test.sequential("unmounting one app does not remove another app's console sink",
   appB.unmount();
   await appB.waitUntilExit();
   expect(console.log).toBe(originalLog);
+});
+
+test.sequential("the newest console owner is removed only after its Vue cleanup", async () => {
+  const stdoutA = makeFakeWritable();
+  const stdoutB = makeFakeWritable();
+  Object.assign(stdoutA, { isTTY: false });
+  Object.assign(stdoutB, { isTTY: false });
+  const stderrA = makeFakeWritable();
+  const stderrB = makeFakeWritable();
+  Object.assign(stderrA, { isTTY: false });
+  Object.assign(stderrB, { isTTY: false });
+  const { stream: stdinA } = makeFakeStdin();
+  const { stream: stdinB } = makeFakeStdin();
+  const writesA = captureWrites(stdoutA);
+  const writesB = captureWrites(stdoutB);
+  const nativeMethods = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+  };
+
+  const AppA = defineComponent(() => {
+    onScopeDispose(() => {
+      console.log("A-CLEANUP");
+    });
+    return () => <Text>A</Text>;
+  });
+  const AppB = defineComponent(() => {
+    onScopeDispose(() => {
+      console.log("B-CLEANUP");
+    });
+    return () => <Text>B</Text>;
+  });
+  const appA = createApp(AppA);
+  const appB = createApp(AppB);
+
+  appA.mount({
+    stdout: stdoutA,
+    stderr: stderrA,
+    stdin: stdinA,
+    maxFps: 0,
+  } as InternalMountOptions);
+  const patchedMethods = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+  };
+  expect(patchedMethods.log).not.toBe(nativeMethods.log);
+
+  appB.mount({
+    stdout: stdoutB,
+    stderr: stderrB,
+    stdin: stdinB,
+    maxFps: 0,
+  } as InternalMountOptions);
+  expect(console.log).toBe(patchedMethods.log);
+  expect(console.warn).toBe(patchedMethods.warn);
+  expect(console.error).toBe(patchedMethods.error);
+
+  console.log("LATEST-B");
+  await appB.waitUntilRenderFlush();
+  expect(writesB.join("")).toContain("LATEST-B");
+  expect(writesA.join("")).not.toContain("LATEST-B");
+
+  appB.unmount();
+  await appB.waitUntilExit();
+  expect(writesB.join("")).toContain("B-CLEANUP");
+  expect(writesA.join("")).not.toContain("B-CLEANUP");
+
+  console.log("REVEALED-A");
+  await appA.waitUntilRenderFlush();
+  expect(writesA.join("")).toContain("REVEALED-A");
+
+  appA.unmount();
+  await appA.waitUntilExit();
+  expect(writesA.join("")).toContain("A-CLEANUP");
+  expect(console.log).toBe(nativeMethods.log);
+  expect(console.warn).toBe(nativeMethods.warn);
+  expect(console.error).toBe(nativeMethods.error);
 });

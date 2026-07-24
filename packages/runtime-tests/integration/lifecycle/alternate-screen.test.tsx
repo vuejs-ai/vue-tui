@@ -5,7 +5,10 @@ import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp, useInput } from "@vue-tui/runtime";
 import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
+import { Console as NodeConsole } from "node:console";
 import { PassThrough } from "node:stream";
+
+(console as { Console?: typeof NodeConsole }).Console ??= NodeConsole;
 
 function makeTtyStream(options?: { isTTY?: boolean }) {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream & { chunks: string[] };
@@ -297,39 +300,6 @@ test("alternate screen - cursor restored after exit", async () => {
   expect(showCursorIndex).toBeGreaterThan(exitIndex);
 });
 
-test("alternate screen - restores the primary screen before writing a thrown error to stderr", async () => {
-  const terminal = makeTtyStream();
-  const stdin = makeFakeStdin();
-
-  const ErrorApp = defineComponent(() => {
-    throw new Error("Done");
-  });
-
-  const app = createApp(ErrorApp);
-  app.mount({
-    stdout: terminal,
-    stdin,
-    stderr: terminal,
-    mode: "fullscreen",
-  });
-  const exited = app.waitUntilExit();
-  await nextTick();
-  await nextTick();
-  await new Promise<void>((r) => setImmediate(r));
-  await nextTick();
-
-  await expect(exited).rejects.toThrow("Done");
-
-  const chunks = terminal.chunks;
-  const exitIndex = chunks.findLastIndex((w) => w.includes(ansiEscapes.exitAlternativeScreen));
-  expect(exitIndex).not.toBe(-1);
-
-  // The error is intentionally not a replay of the last fullscreen frame. It is
-  // a durable stderr report emitted only after the alternate screen is gone.
-  const afterExit = stripAnsi(chunks.slice(exitIndex + 1).join(""));
-  expect(afterExit).toContain("Error: Done");
-});
-
 test("alternate screen - restores before reporting useApp().exit(error)", async () => {
   const terminal = makeTtyStream();
   const stdin = makeFakeStdin();
@@ -386,7 +356,7 @@ test("alternate screen - does not replay teardown output on primary screen", asy
   expect(afterExit).not.toContain("fullscreen content");
 });
 
-test("alternate screen - cleanup console output does not leak into managed stream", async () => {
+test("alternate screen - cleanup console output is forwarded before console restoration", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();
 
@@ -416,7 +386,7 @@ test("alternate screen - cleanup console output does not leak into managed strea
   expect(disposed).toBe(true);
 
   const output = stdout.chunks.join("");
-  expect(output).not.toContain("cleanup log");
+  expect(output).toContain("cleanup log");
 });
 
 test("alternate screen - still activates with unthrottled commits", async () => {

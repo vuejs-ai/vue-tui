@@ -188,7 +188,8 @@ test("level 0 emits no ANSI codes regardless of styles", () => {
 
 // A12: a chalk-MODIFIER name as a BACKGROUND is what Ink colorize.ts throws on
 // (`'bold' in chalk` true, but `chalk.bgBold` is not a function). vue-tui detects
-// it at render so the error boundary catches it. Every other Ink-compatible form is valid.
+// it during component render so Vue's normal error propagation applies. Every
+// other Ink-compatible form is valid.
 test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
   for (const m of [
     "bold",

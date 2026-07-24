@@ -16,6 +16,7 @@ interface ConsoleSinkEntry {
 export interface ConsoleSinkRegistration {
   readonly release: () => void;
   readonly waitForIdle: () => Promise<void>;
+  readonly isIdle: () => boolean;
 }
 
 const entries: ConsoleSinkEntry[] = [];
@@ -95,6 +96,10 @@ export function registerConsoleSink(sink: ConsoleSink): ConsoleSinkRegistration 
       if (released) return;
       released = true;
       entry.active = false;
+      // A synchronous/emergency teardown can release after Vue cleanup without
+      // waiting for an output gate that will be abandoned. Do not let an
+      // intercepted record retry through a released sink forever.
+      entry.queue.length = 0;
       const index = entries.indexOf(entry);
       if (index >= 0) entries.splice(index, 1);
       if (entries.length === 0 && restorePatch) {
@@ -105,6 +110,9 @@ export function registerConsoleSink(sink: ConsoleSink): ConsoleSinkRegistration 
     },
     waitForIdle() {
       return entry.idlePromise;
+    },
+    isIdle() {
+      return entry.queue.length === 0 && !entry.flushing && entry.resolveIdle === null;
     },
   };
 }

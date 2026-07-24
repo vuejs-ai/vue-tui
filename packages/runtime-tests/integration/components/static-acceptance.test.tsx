@@ -245,21 +245,27 @@ test("effective visual Fullscreen rejects empty Static before terminal ownership
   const exited = app.waitUntilExit();
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-    } as InternalMountOptions);
-    await nextTick();
-    await app.waitUntilRenderFlush();
+    let mountError: unknown;
+    try {
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+      } as InternalMountOptions);
+    } catch (error) {
+      mountError = error;
+    }
+    expect(mountError).toMatchObject({
+      message: expect.stringContaining(
+        "<Static> cannot render on an effective visual Fullscreen surface",
+      ),
+    });
 
-    await expect(exited).rejects.toThrow(
-      "<Static> cannot render on an effective visual Fullscreen surface",
-    );
+    await expect(exited).rejects.toBe(mountError);
     expect(stdoutChunks).toEqual([]);
     expect(stripAnsi(stderrChunks.join(""))).toContain(
       "<Static> cannot render on an effective visual Fullscreen surface",
@@ -294,20 +300,28 @@ test("visual Fullscreen rolls back setup-owned input before reporting Static rej
   const exited = app.waitUntilExit();
 
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      mode: "fullscreen",
-      liveUpdates: true,
-      patchConsole: false,
-      maxFps: 0,
-      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-    } as InternalMountOptions);
+    let mountError: unknown;
+    try {
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        mode: "fullscreen",
+        liveUpdates: true,
+        patchConsole: false,
+        maxFps: 0,
+        [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+      } as InternalMountOptions);
+    } catch (error) {
+      mountError = error;
+    }
+    expect(mountError).toMatchObject({
+      message: expect.stringContaining(
+        "<Static> cannot render on an effective visual Fullscreen surface",
+      ),
+    });
 
-    await expect(exited).rejects.toThrow(
-      "<Static> cannot render on an effective visual Fullscreen surface",
-    );
+    await expect(exited).rejects.toBe(mountError);
 
     const output = events
       .filter((event) => event.stream === "stdout")

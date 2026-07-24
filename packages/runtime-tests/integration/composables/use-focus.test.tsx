@@ -477,9 +477,14 @@ test("clears retained focus handles when initial live output fails", async () =>
 
   const app = createApp(App);
   try {
-    app.mount({ stdout, stdin, stderr, patchConsole: false });
-    expect(retained.isFocused.value).toBe(true);
+    let mountError: unknown;
+    try {
+      app.mount({ stdout, stdin, stderr, patchConsole: false });
+    } catch (error) {
+      mountError = error;
+    }
 
+    expect(mountError).toBe(outputError);
     await expect(app.waitUntilExit()).rejects.toBe(outputError);
     expect(failedOutput).toBe(true);
     expect(retained.isFocused.value).toBe(false);

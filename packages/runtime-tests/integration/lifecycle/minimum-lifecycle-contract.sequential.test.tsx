@@ -6,32 +6,6 @@ import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 const App = defineComponent(() => () => <Text>Hello</Text>);
 
-test.sequential("a user error handler is composed with Runtime's fatal lifecycle", async () => {
-  const stdout = makeFakeWritable();
-  const stderr = makeFakeWritable();
-  const { stream: stdin } = makeFakeStdin();
-  const originalError = new Error("application failure");
-  const seen: unknown[] = [];
-  const app = createApp(App);
-
-  app.config.errorHandler = (error) => {
-    seen.push(error);
-    throw new Error("user handler failure");
-  };
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
-
-  app.config.errorHandler?.(originalError, null, "test callback");
-
-  await expect(app.waitUntilExit()).rejects.toBe(originalError);
-  expect(seen).toEqual([originalError]);
-});
-
 test.sequential("waiting for a render flush before mount resolves without touching stdout", async () => {
   const write = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   try {

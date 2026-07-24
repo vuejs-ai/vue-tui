@@ -56,11 +56,15 @@ test.sequential("a setRawMode failure during first semantic demand tears down wi
 
   const { warnings, restore } = spyOnGuardWarnings();
 
-  // The component setup error is captured by vue-tui's boundary and rejects the
-  // app lifetime after every partially acquired input resource is released.
+  // Vue surfaces the setup error synchronously from mount(), while Runtime
+  // rejects the app lifetime after every partially acquired resource is released.
   const app1 = createApp(App);
-  app1.mount({ stdout, stdin, stderr, liveUpdates: true } as InternalMountOptions);
-  await expect(app1.waitUntilExit()).rejects.toThrow("ERR_TTY_INIT_FAILED");
+  app1.config.warnHandler = () => {};
+  const exited = app1.waitUntilExit();
+  expect(() =>
+    app1.mount({ stdout, stdin, stderr, liveUpdates: true } as InternalMountOptions),
+  ).toThrow(ttyError);
+  await expect(exited).rejects.toBe(ttyError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) The stdout is NOT poisoned: a subsequent mount() on the SAME stdout
@@ -105,14 +109,18 @@ test.sequential("a Kitty push failure during first semantic demand tears down wi
   const { warnings, restore } = spyOnGuardWarnings();
 
   const app1 = createApp(App);
-  app1.mount({
-    stdout,
-    stdin,
-    stderr,
-    liveUpdates: true,
-    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
-  } as InternalMountOptions);
-  await expect(app1.waitUntilExit()).rejects.toThrow("BROKEN_STREAM_ON_KITTY_ENABLE");
+  app1.config.warnHandler = () => {};
+  const exited = app1.waitUntilExit();
+  expect(() =>
+    app1.mount({
+      stdout,
+      stdin,
+      stderr,
+      liveUpdates: true,
+      [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+    } as InternalMountOptions),
+  ).toThrow(enableError);
+  await expect(exited).rejects.toBe(enableError);
   expect(warnings.join("")).not.toContain("Cannot unmount an app that is not mounted");
 
   // (2) Not poisoned: a fresh mount on the same stdout must NOT warn (the

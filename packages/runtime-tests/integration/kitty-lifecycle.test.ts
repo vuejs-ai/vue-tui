@@ -79,12 +79,14 @@ function inputText(event: TuiInputEvent): string | null {
 function mountInputApp({
   stdin,
   stdout,
+  stderr,
   active,
   kittyMode,
   suspensionHost,
 }: {
   readonly stdin: NodeJS.ReadStream;
   readonly stdout: NodeJS.WriteStream;
+  readonly stderr?: NodeJS.WriteStream;
   readonly active?: ShallowRef<boolean>;
   readonly kittyMode?: "auto" | "enabled" | "disabled";
   readonly suspensionHost?: ReturnType<typeof createManualSuspensionHost>;
@@ -103,6 +105,7 @@ function mountInputApp({
   const app = createApp(App);
   app.mount({
     stdout,
+    ...(stderr ? { stderr } : {}),
     stdin,
     patchConsole: false,
     liveUpdates: true,
@@ -280,31 +283,40 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
 
   test("a rejected query write rolls back managed input acquisition", async () => {
     const { stdin, rawModeCalls, refBalance } = makeTrackedStdin();
+    const queryError = new Error("query write rejected");
     const { stdout } = makeTrackedStdout({
       fail(data) {
-        if (data === "\x1b[?u") throw new Error("query write rejected");
+        if (data === "\x1b[?u") throw queryError;
       },
     });
+    const { stdout: stderr } = makeTrackedStdout({ isTTY: false });
     const App = defineComponent(() => {
       useInput(() => {});
       return () => h("tui-text", null, "ready");
     });
     const app = createApp(App);
+    app.config.warnHandler = () => {};
+    app.config.errorHandler = () => {};
 
-    app.mount({
-      stdout,
-      stdin,
-      patchConsole: false,
-      liveUpdates: true,
-      maxFps: 0,
-    } as InternalMountOptions);
-    await expect(app.waitUntilExit()).rejects.toThrow("query write rejected");
+    const exited = app.waitUntilExit();
+    expect(() =>
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        patchConsole: false,
+        liveUpdates: true,
+        maxFps: 0,
+      } as InternalMountOptions),
+    ).toThrow(queryError);
+    await expect(exited).rejects.toBe(queryError);
     await settleLifecycle();
     expect(rawModeCalls).toEqual([true, false]);
     expectReleased(stdin, refBalance);
     app.unmount();
     stdin.destroy();
     stdout.destroy();
+    stderr.destroy();
   });
 
   test("a rejected enable write preserves surrounding input and teardown cleanup", async () => {
@@ -315,7 +327,8 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
         if (rejectPush && data === "\x1b[>1u") throw new Error("enable write rejected");
       },
     });
-    const { app, inputs } = mountInputApp({ stdin, stdout });
+    const { stdout: stderr } = makeTrackedStdout({ isTTY: false });
+    const { app, inputs } = mountInputApp({ stdin, stdout, stderr });
 
     try {
       rejectPush = true;
@@ -327,6 +340,7 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
       expectReleased(stdin, refBalance);
       stdin.destroy();
       stdout.destroy();
+      stderr.destroy();
     }
   });
 

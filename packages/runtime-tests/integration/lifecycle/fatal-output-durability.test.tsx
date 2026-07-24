@@ -5,7 +5,7 @@ import ansiEscapes from "ansi-escapes";
 import stripAnsi from "strip-ansi";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text } from "@vue-tui/runtime";
+import { createApp, Text, useApp } from "@vue-tui/runtime";
 import type { InternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin } from "./test-streams.ts";
 
@@ -39,53 +39,21 @@ async function waitFor(predicate: () => boolean, description: string): Promise<v
   throw new Error(`Timed out waiting for ${description}.`);
 }
 
-test("one-row Inline leaves the first component error visible", async () => {
-  const marker = "ONE_ROW_FATAL";
-  const stdout = makeWritable({ isTTY: true, columns: 80, rows: 1 });
-  const stderr = makeWritable({ isTTY: true, columns: 80, rows: 1 });
-  const stdoutCapture = captureStream(stdout);
-  const { stream: stdin } = makeFakeStdin();
-  const Fatal = defineComponent(() => () => {
-    throw new Error(marker);
-  });
-
-  const app = createApp(Fatal);
-  app.mount({
-    stdout,
-    stderr,
-    stdin,
-    mode: "inline",
-    liveUpdates: true,
-    patchConsole: false,
-    maxFps: 0,
-  } as InternalMountOptions);
-
-  try {
-    await expect(app.waitUntilExit()).rejects.toThrow(marker);
-
-    const retainedOutput = stripAnsi(stdoutCapture.chunks.join(""));
-    expect(retainedOutput).toContain("ERROR");
-    expect(retainedOutput).toContain(marker);
-  } finally {
-    stdin.destroy();
-    stdout.destroy();
-    stderr.destroy();
-  }
-});
-
 test.each([1, 4])(
-  "a %i-column one-row Inline viewport falls back to a durable stderr error",
+  "a %i-column one-row Inline error exit writes a durable stderr error",
   async (columns) => {
     const marker = `NARROW_FATAL_${columns}`;
+    const fatal = new Error(marker);
     const stdout = makeWritable({ isTTY: true, columns, rows: 1 });
     const stderr = makeWritable({ isTTY: true, columns, rows: 1 });
-    const stdoutCapture = captureStream(stdout);
     const stderrCapture = captureStream(stderr);
     const { stream: stdin } = makeFakeStdin();
-    const Fatal = defineComponent(() => () => {
-      throw new Error(marker);
+    let exit!: (error?: Error) => void;
+    const App = defineComponent(() => {
+      exit = useApp().exit;
+      return () => h(Text, null, { default: () => "running" });
     });
-    const app = createApp(Fatal);
+    const app = createApp(App);
 
     app.mount({
       stdout,
@@ -98,11 +66,11 @@ test.each([1, 4])(
     } as InternalMountOptions);
 
     try {
-      await expect(app.waitUntilExit()).rejects.toThrow(marker);
-      expect(stripAnsi(stderrCapture.chunks.join(""))).toContain(marker);
-      expect(
-        `${stripAnsi(stdoutCapture.chunks.join(""))}${stripAnsi(stderrCapture.chunks.join(""))}`,
-      ).toContain(marker);
+      exit(fatal);
+      await expect(app.waitUntilExit()).rejects.toBe(fatal);
+      const durableError = stripAnsi(stderrCapture.chunks.join(""));
+      expect(durableError).toContain(marker);
+      expect(durableError.split(marker)).toHaveLength(2);
     } finally {
       stdin.destroy();
       stdout.destroy();
@@ -111,13 +79,13 @@ test.each([1, 4])(
   },
 );
 
-test("a throttled Inline boundary error falls back to stderr when stdout is lost before paint", async () => {
+test("a throttled Inline error exit remains durable when stdout is lost before teardown", async () => {
   const marker = "THROTTLED_INLINE_STDOUT_LOST";
-  const trigger = shallowRef(false);
   const fatal = new Error(marker);
-  const App = defineComponent(() => () => {
-    if (trigger.value) throw fatal;
-    return h(Text, null, { default: () => "initial" });
+  let exit!: (error?: Error) => void;
+  const App = defineComponent(() => {
+    exit = useApp().exit;
+    return () => h(Text, null, { default: () => "initial" });
   });
   const stdout = makeWritable({ isTTY: true, columns: 80, rows: 24 });
   const stderr = makeWritable({ isTTY: true, columns: 80, rows: 24 });
@@ -140,8 +108,7 @@ test("a throttled Inline boundary error falls back to stderr when stdout is lost
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
-    trigger.value = true;
-    await nextTick();
+    exit(fatal);
     stdout.destroy();
     app.unmount();
 
@@ -157,24 +124,21 @@ test("a throttled Inline boundary error falls back to stderr when stdout is lost
   }
 });
 
-test("an Inline boundary error falls back to stderr when its first frame write throws", async () => {
-  const marker = "INLINE_ERROR_FRAME_WRITE_FAILED";
-  const trigger = shallowRef(false);
-  const fatal = new Error(marker);
-  const App = defineComponent(() => () => {
-    if (trigger.value) throw fatal;
-    return h(Text, null, { default: () => "initial" });
-  });
+test("an Inline frame-write failure is reported durably to stderr", async () => {
+  const marker = "INLINE_FRAME_WRITE_FAILED";
+  const value = shallowRef("initial");
+  const writeFailure = new Error(marker);
+  const App = defineComponent(() => () => h(Text, null, { default: () => value.value }));
   const stdout = makeWritable({ isTTY: true, columns: 80, rows: 24 });
   const stderr = makeWritable({ isTTY: true, columns: 80, rows: 24 });
   const stderrCapture = captureStream(stderr);
   const originalWrite = stdout.write.bind(stdout);
-  let failErrorFrame = false;
+  let failNextFrame = false;
   stdout.write = ((...args: unknown[]) => {
     const chunk = String(args[0]);
-    if (failErrorFrame && stripAnsi(chunk).includes(marker)) {
-      failErrorFrame = false;
-      throw new Error("injected error-frame write failure");
+    if (failNextFrame && stripAnsi(chunk).includes("updated")) {
+      failNextFrame = false;
+      throw writeFailure;
     }
     return (originalWrite as (...writeArgs: unknown[]) => boolean)(...args);
   }) as NodeJS.WriteStream["write"];
@@ -187,8 +151,6 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     mode: "inline",
     liveUpdates: true,
     patchConsole: false,
-    // Keep the normal error repaint pending so the resize render barrier below
-    // owns the first physical attempt after Vue produces the overview.
     maxFps: 1,
   } as InternalMountOptions);
 
@@ -196,11 +158,11 @@ test("an Inline boundary error falls back to stderr when its first frame write t
     await app.waitUntilRenderFlush();
     const exited = app.waitUntilExit();
 
-    failErrorFrame = true;
-    trigger.value = true;
+    failNextFrame = true;
+    value.value = "updated";
     stdout.emit("resize");
 
-    await expect(exited).rejects.toBe(fatal);
+    await expect(exited).rejects.toBe(writeFailure);
     const durableError = stripAnsi(stderrCapture.chunks.join(""));
     expect(durableError).toContain(marker);
     expect(durableError.split(marker)).toHaveLength(2);
@@ -221,11 +183,11 @@ interface FinalStreamFatalResult {
 
 async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
   const marker = "FINAL_STREAM_FATAL";
-  const trigger = shallowRef(false);
   const fatal = new Error(marker);
-  const App = defineComponent(() => () => {
-    if (trigger.value) throw fatal;
-    return h(Text, null, { default: () => "STALE_SUCCESS_FRAME" });
+  let exit!: (error?: Error) => void;
+  const App = defineComponent(() => {
+    exit = useApp().exit;
+    return () => h(Text, null, { default: () => "STALE_SUCCESS_FRAME" });
   });
   const stdout = makeWritable({ isTTY: false, columns: 80 });
   const stderr = makeWritable({ isTTY: false, columns: 80 });
@@ -240,9 +202,6 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     stdin,
     liveUpdates: false,
     patchConsole: false,
-    // Keep a long throttle window active after the successful leading commit.
-    // The error update is then pending when teardown cancels the scheduler, so
-    // this exercises whether fatal final-output can replay that prior success.
     maxFps: 1,
   } as InternalMountOptions);
 
@@ -253,8 +212,7 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     () => ({ kind: "resolved" as const, error: undefined }),
     (error: unknown) => ({ kind: "rejected" as const, error }),
   );
-  trigger.value = true;
-  await nextTick();
+  exit(fatal);
   const outcome = await exited;
 
   expect(outcome.kind).toBe("rejected");
@@ -331,10 +289,12 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
   Object.assign(stderr, { isTTY: true, columns: 80, rows: 24 });
 
   const { stream: stdin } = makeFakeStdin();
-  const Fatal = defineComponent(() => () => {
-    throw fatal;
+  let exit!: (error?: Error) => void;
+  const App = defineComponent(() => {
+    exit = useApp().exit;
+    return () => h(Text, null, { default: () => "running" });
   });
-  const app = createApp(Fatal);
+  const app = createApp(App);
   app.mount({
     stdout,
     stderr,
@@ -344,6 +304,7 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
     patchConsole: false,
     maxFps: 0,
   } as InternalMountOptions);
+  await app.waitUntilRenderFlush();
 
   let settlement: "pending" | "resolved" | "rejected" = "pending";
   const exited = app.waitUntilExit().then(
@@ -356,6 +317,7 @@ test("Fullscreen waits for stdout restoration and the durable stderr callback be
       return { kind: "rejected" as const, error };
     },
   );
+  exit(fatal);
 
   try {
     await waitFor(() => releaseRestoreWrite !== undefined, "the alternate-screen restore write");

@@ -333,16 +333,20 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
   const stderr = makeTtyOutput();
   const stdin = makeTtyInput();
   const app = createApp(App);
+  app.config.warnHandler = () => {};
   try {
-    app.mount({
-      stdout,
-      stderr,
-      stdin,
-      liveUpdates: true,
-      maxFps: 0,
-      patchConsole: false,
-    } as InternalMountOptions);
-    await expect(app.waitUntilExit()).rejects.toThrow(
+    const exited = app.waitUntilExit();
+    expect(() =>
+      app.mount({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      } as InternalMountOptions),
+    ).toThrow("useBoxSize() target must be a ref bound directly to <Box>");
+    await expect(exited).rejects.toThrow(
       "useBoxSize() target must be a ref bound directly to <Box>",
     );
   } finally {

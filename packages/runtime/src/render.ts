@@ -6,12 +6,14 @@ import {
   type Directive,
   type InjectionKey,
   type Plugin,
+  type VNode,
   type App as VueApp,
-  defineComponent,
-  h,
+  createVNode,
+  effectScope,
+  getCurrentInstance,
+  isVNode,
+  mergeProps,
   nextTick,
-  onErrorCaptured,
-  shallowRef,
 } from "vue";
 import { createRenderer } from "vue";
 import { writeSync as fsWriteSync } from "node:fs";
@@ -49,6 +51,10 @@ import { createRoot, type TuiRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
+import {
+  createHostYogaAllocationLedger,
+  type HostYogaAllocationLedger,
+} from "./host/yoga-allocation-ledger.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { acquireRuntimeResource, changeRuntimeResource } from "./resource-tracker.ts";
 import { paint, releasePaintCaches } from "./paint/paint.ts";
@@ -138,7 +144,6 @@ import {
   type InternalPreparedCaretFrame,
 } from "./caret/caret-controller.ts";
 import { InternalCaretControllerKey } from "./caret/caret-context.ts";
-import { ErrorOverview } from "./components/error-overview.ts";
 import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
 import {
   INTERNAL_SUSPENSION_HOST,
@@ -279,6 +284,97 @@ export interface TuiApp extends ConsumerVuePublicAppSurface {
 
 type RootProps = Record<string, unknown>;
 
+interface VueTeardownEffect {
+  cleanup?: () => unknown;
+  onStop?: () => unknown;
+}
+
+interface VueTeardownScope {
+  effects?: VueTeardownEffect[];
+  cleanups?: Array<() => unknown>;
+  scopes?: VueTeardownScope[];
+  on?(): void;
+  stop(fromParent?: boolean): void;
+}
+
+interface VueTeardownComponentInstance {
+  appContext?: { readonly app?: unknown };
+  parent?: VueTeardownComponentInstance | null;
+  scope?: VueTeardownScope;
+  subTree?: VNode;
+  vnode?: VNode;
+}
+
+type VueTeardownVNode = VNode & {
+  component?: VueTeardownComponentInstance | null;
+  ssContent?: VNode;
+  ssFallback?: VNode;
+  suspense?: {
+    activeBranch?: VNode;
+    pendingBranch?: VNode;
+  };
+};
+
+type VueScopeCapture = (
+  scope: VueTeardownScope,
+  instance: ReturnType<typeof getCurrentInstance>,
+) => void;
+
+interface VueScopeCaptureRegistration {
+  readonly capture: VueScopeCapture;
+}
+
+interface VueScopePrototype {
+  on(this: VueTeardownScope): void;
+}
+
+const activeVueScopeCaptures: VueScopeCaptureRegistration[] = [];
+let installedVueScopeCapture:
+  | {
+      readonly prototype: VueScopePrototype;
+      readonly originalOn: VueScopePrototype["on"];
+      readonly patchedOn: VueScopePrototype["on"];
+    }
+  | undefined;
+
+function acquireVueScopeCapture(capture: VueScopeCapture): () => void {
+  const registration = { capture };
+  if (activeVueScopeCaptures.length === 0) {
+    const probe = effectScope(true) as unknown as VueTeardownScope;
+    const prototype = Object.getPrototypeOf(probe) as Partial<VueScopePrototype> | null;
+    probe.stop();
+    if (typeof prototype?.on === "function") {
+      const originalOn = prototype.on;
+      const patchedOn = function captureVueScope(this: VueTeardownScope): void {
+        const active = activeVueScopeCaptures.at(-1);
+        active?.capture(this, getCurrentInstance());
+        originalOn.call(this);
+      };
+      prototype.on = patchedOn;
+      installedVueScopeCapture = {
+        prototype: prototype as VueScopePrototype,
+        originalOn,
+        patchedOn,
+      };
+    }
+  }
+  activeVueScopeCaptures.push(registration);
+
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    const index = activeVueScopeCaptures.lastIndexOf(registration);
+    if (index !== -1) activeVueScopeCaptures.splice(index, 1);
+    if (activeVueScopeCaptures.length !== 0) return;
+    const installed = installedVueScopeCapture;
+    installedVueScopeCapture = undefined;
+    if (installed && installed.prototype.on === installed.patchedOn) {
+      installed.prototype.on = installed.originalOn;
+    }
+  };
+}
+
 const FULLSCREEN_STATIC_ERROR =
   "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
 
@@ -406,24 +502,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
   let exitResolve!: () => void;
-  let exitReject!: (e: Error) => void;
+  let exitReject!: (reason?: unknown) => void;
   const exitPromise = new Promise<void>((res, rej) => {
     exitResolve = res;
     exitReject = rej;
   });
   exitPromise.catch(() => {});
-
-  // Exit-with-error function, wired after mount sets up appContext.
-  // Used by the error boundary to route errors through exit().
-  let exitWithError: (e: Error) => void = () => {};
-
-  // Record-exit-error bridge, wired alongside exitWithError after mount. The
-  // error boundary calls this SYNCHRONOUSLY (before the deferred exitWithError)
-  // to set pendingExitError up front, so a racing unmount() that runs
-  // resolveExit() before the deferred exit rejects with the thrown error instead
-  // of resolving clean (BUG #2). Mirrors exitWithError's after-mount indirection
-  // because pendingExitError/exitInitiated/teardownStarted are all in this scope.
-  let recordExitError: (e: Error, silent?: boolean) => void = () => {};
 
   // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
   // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
@@ -460,7 +544,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedCaretController: InternalCaretController | null = null;
   let mountedClipboard: InternalClipboardService | null = null;
   let mountedTextSelection: InternalTextSelectionController | null = null;
-  let mountedBoundaryErrorsAreDurable = false;
   // Dev-only: the teardown registered with the HMR bridge so a full reload
   // (entry edit Vite can't hot-accept) unmounts THIS app before the runner
   // re-imports the entry. Held per-app so teardown() can unregister exactly its
@@ -469,6 +552,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedGetLastOutput: (() => string) | null = null;
   let mountedNeedsTerminalLineAdvance: (() => boolean) | null = null;
   let mountedConsoleSink: ConsoleSinkRegistration | null = null;
+  let mountedHostYogaLedger: HostYogaAllocationLedger | null = null;
+  let mountedOwnedVNode: VNode | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
   let mountedOutputCoordinator: OutputCoordinator | null = null;
   let mountedStreamLifecycle: MountedStreamLifecycle | null = null;
@@ -489,6 +574,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // still need our teardown, but calling Vue unmount before mount begins emits
   // an internal "app is not mounted" warning to the user's stderr.
   let vueMountStarted = false;
+  let vueCleanupCompleted = false;
+  let consoleTeardownWritesAllowed = false;
   // Tracks whether this app currently owns the liveInstances entry for its
   // stdout — set when a mount() actually wires a renderer, cleared when
   // teardown() evicts the entry. A mount() that hits the instance-reuse guard
@@ -552,17 +639,114 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // Pending exit state — stored so resolveExit() can flush stdout before
   // settling the exit promise.
   let pendingExitError: unknown = undefined;
+  let pendingExitFailure = false;
   let pendingExitErrorIsSilent = false;
-  let pendingExitErrorWasRendered = false;
-  let pendingBoundaryError: Error | undefined;
-  let pendingBoundaryFrameReady: Error | undefined;
-  let pendingBoundaryFrameWriteFailed = false;
+  let pendingExitErrorShouldReport = false;
   let pendingFatalReport: string | null = null;
   let settlementStarted = false;
   let abandonExitSettlement = false;
+  let consumedMountInProgress = false;
+  let pendingMountRuntimeFailure: Error | undefined;
+  let mountFailurePending = false;
 
-  function recordTeardownError(error: unknown): void {
-    pendingExitError ??= isErrorInput(error) ? error : new Error(messageForNonError(error));
+  function recordTeardownError(error: unknown, options?: { readonly report?: boolean }): void {
+    if (pendingExitFailure) return;
+    pendingExitError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+    pendingExitFailure = true;
+    pendingExitErrorShouldReport = options?.report !== false;
+  }
+
+  function recordVueMountFailure(error: unknown): void {
+    if (pendingExitFailure) return;
+    // An unhandled initial component throw escaped through Vue itself. Preserve
+    // that exact JavaScript value at the consumed mount boundary; Runtime does
+    // not install a hidden component boundary or turn it into a durable report.
+    pendingExitError = error;
+    pendingExitFailure = true;
+    pendingExitErrorShouldReport = false;
+  }
+
+  const guardedVueCleanupCallbacks = new WeakSet<() => unknown>();
+  const guardedVueScopes = new WeakSet<object>();
+
+  function guardVueCleanupCallback(callback: () => unknown): () => unknown {
+    if (guardedVueCleanupCallbacks.has(callback)) return callback;
+    const guarded = () => {
+      try {
+        return callback();
+      } catch (error) {
+        // Vue's EffectScope.stop() calls effect and scope cleanups directly.
+        // One throw would otherwise abort the component-unmount traversal after
+        // marking the scope inactive, so retrying cannot reach descendant
+        // scopes. Record the failure while allowing every remaining cleanup to
+        // receive its one turn.
+        recordTeardownError(error);
+      }
+    };
+    guardedVueCleanupCallbacks.add(guarded);
+    return guarded;
+  }
+
+  function guardVueScopeOperations(scope: VueTeardownScope): void {
+    for (const effect of scope.effects ?? []) {
+      if (effect.cleanup) effect.cleanup = guardVueCleanupCallback(effect.cleanup);
+      if (effect.onStop) effect.onStop = guardVueCleanupCallback(effect.onStop);
+    }
+    const cleanups = scope.cleanups ?? [];
+    for (let index = 0; index < cleanups.length; index++) {
+      cleanups[index] = guardVueCleanupCallback(cleanups[index]!);
+    }
+    for (const childScope of scope.scopes ?? []) guardVueScope(childScope);
+  }
+
+  function guardVueScope(scope: VueTeardownScope): void {
+    if (guardedVueScopes.has(scope)) return;
+    guardedVueScopes.add(scope);
+    const originalStop = scope.stop.bind(scope);
+    scope.stop = function stopGuardedVueScope(fromParent?: boolean): void {
+      // Run immediately before Vue stops the scope so a before-unmount hook
+      // that registered another cleanup is included too.
+      guardVueScopeOperations(scope);
+      originalStop(fromParent);
+    };
+    for (const childScope of scope.scopes ?? []) guardVueScope(childScope);
+  }
+
+  function guardMountedVueScopes(rootVNode: VNode): void {
+    const visitedVNodes = new Set<VNode>();
+    const visitedInstances = new Set<VueTeardownComponentInstance>();
+
+    const visitValue = (value: unknown): void => {
+      if (isVNode(value)) {
+        visitVNode(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const child of value) visitValue(child);
+      }
+    };
+    const visitVNode = (vnode: VNode): void => {
+      if (visitedVNodes.has(vnode)) return;
+      visitedVNodes.add(vnode);
+      const teardownVNode = vnode as VueTeardownVNode;
+      const instance = teardownVNode.component;
+      if (instance && !visitedInstances.has(instance)) {
+        visitedInstances.add(instance);
+        if (instance.scope) guardVueScope(instance.scope);
+        if (instance.subTree) visitVNode(instance.subTree);
+      }
+      visitValue(vnode.children);
+      if (teardownVNode.ssContent) visitVNode(teardownVNode.ssContent);
+      if (teardownVNode.ssFallback) visitVNode(teardownVNode.ssFallback);
+      if (teardownVNode.suspense?.activeBranch) {
+        visitVNode(teardownVNode.suspense.activeBranch);
+      }
+      if (teardownVNode.suspense?.pendingBranch) {
+        visitVNode(teardownVNode.suspense.pendingBranch);
+      }
+    };
+
+    visitVNode(rootVNode);
   }
 
   function disposeMountedStreamLifecycle(): void {
@@ -577,8 +761,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   }
 
   let runtimeFailureTeardownQueued = false;
-  function requestRuntimeFailure(error: unknown): void {
-    recordTeardownError(error);
+  let runtimeFailurePending = false;
+  function requestRuntimeFailure(error: unknown, options?: { readonly silent?: boolean }): void {
+    const normalizedError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+    runtimeFailurePending = true;
+    if (!pendingExitFailure) {
+      pendingExitError = normalizedError;
+      pendingExitFailure = true;
+      pendingExitErrorIsSilent = options?.silent === true;
+      pendingExitErrorShouldReport = true;
+    }
+    if (consumedMountInProgress) {
+      pendingMountRuntimeFailure ??= normalizedError;
+      return;
+    }
     if (abandonExitSettlement && teardownStarted) return;
     if (teardownStarted) {
       resolveExit();
@@ -613,7 +809,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // Nothing wired: this app never reached stream reservation.
     if (!mountedAppContext) {
       disposeMountedStreamLifecycle();
-      if (isErrorInput(pendingExitError)) {
+      if (pendingExitFailure) {
         exitReject(pendingExitError);
       } else {
         exitResolve();
@@ -626,7 +822,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     const finish = () => {
       disposeMountedStreamLifecycle();
-      if (isErrorInput(pendingExitError)) {
+      if (pendingExitFailure) {
         exitReject(pendingExitError);
       } else {
         exitResolve();
@@ -765,6 +961,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let flushingDeferredLifecycle = false;
   let emergencyTerminalRestoreStarted = false;
   let teardownOutputWaitStarted = false;
+  let teardownConsoleWaitStarted = false;
   let teardownFinalCommitCompleted = false;
 
   function performEmergencyTerminalRestore(): void {
@@ -957,6 +1154,26 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       );
     };
 
+    const waitForConsoleSink = (): void => {
+      const consoleSink = mountedConsoleSink;
+      if (!consoleSink || teardownConsoleWaitStarted) return;
+      teardownConsoleWaitStarted = true;
+      void consoleSink.waitForIdle().then(
+        () => {
+          teardownConsoleWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) {
+            const effectiveSync = pendingTeardownSync;
+            pendingTeardownSync = false;
+            performTeardown(effectiveSync, false);
+          }
+        },
+        () => {
+          teardownConsoleWaitStarted = false;
+          if (!teardownCompleted && !teardownExecutionStarted) performTeardown(false, false);
+        },
+      );
+    };
+
     // Freeze new work before waiting for an accepted transaction. The component
     // tree remains mounted so one final commit can still read the newest state.
     scheduledCommit = () => {};
@@ -972,10 +1189,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       !sync &&
       !immediateTermination &&
       !teardownFinalCommitCompleted &&
+      !mountFailurePending &&
       !pendingExitErrorIsSilent &&
       mountedCommit &&
       stdoutWritable &&
-      (mountedDynamicUpdatesLive || !isErrorInput(pendingExitError))
+      (mountedDynamicUpdatesLive || !pendingExitFailure)
     ) {
       teardownFinalCommitCompleted = true;
       try {
@@ -994,6 +1212,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
     } else {
       teardownFinalCommitCompleted = true;
+    }
+
+    // Vue cleanup is synchronous once the final component-backed frame has
+    // either been accepted or deliberately skipped. Keep this app's console
+    // registration active throughout cleanup, then wait for every intercepted
+    // record to enter and drain through the output coordinator before restoring
+    // the previous console owner.
+    if (!immediateTermination && !vueCleanupCompleted) {
+      runMountedVueCleanup();
+    }
+    if (!sync && !immediateTermination && mountedConsoleSink?.isIdle() === false) {
+      waitForConsoleSink();
+      return;
+    }
+    if ((sync || immediateTermination) && mountedConsoleSink?.isIdle() === false) {
+      coordinator?.abort(
+        new Error("Console output was abandoned by synchronous terminal teardown."),
+      );
     }
 
     const completeTeardown = (): void => {
@@ -1103,12 +1339,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const stdoutWritable = stdout
         ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
         : false;
-      // Restore console BEFORE Vue cleanup (matching Ink ink.tsx:779)
-      if (mountedConsoleSink) {
-        const consoleSink = mountedConsoleSink;
-        mountedConsoleSink = null;
-        runBestEffort(consoleSink.release);
-      }
       if (mountedMouseController) {
         runBestEffort(() => mountedMouseController?.beginSilentTeardown());
       }
@@ -1117,14 +1347,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedTestInputHostDetach = null;
         runBestEffort(detachTestInputHost);
       }
-      if (vueMountStarted) {
-        vueMountStarted = false;
-        // A non-returning process/signal exit must not invoke application
-        // lifecycle hooks: mount may still be on the stack, and user cleanup can
-        // re-enter process.exit() before terminal restoration completes. Runtime
-        // resources below are released directly instead.
-        if (!immediateTermination) runBestEffort(originalUnmount);
+      if (mountedConsoleSink) {
+        const consoleSink = mountedConsoleSink;
+        mountedConsoleSink = null;
+        runBestEffort(consoleSink.release);
       }
+      consoleTeardownWritesAllowed = false;
       if (mountedRenderedTargets) {
         const renderedTargets = mountedRenderedTargets;
         mountedRenderedTargets = null;
@@ -1171,7 +1399,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedKittyController = null;
         runBestEffort(() => kittyController.dispose(sync));
       }
-      if (!mountedDynamicUpdatesLive && mountedAppContext && !isErrorInput(pendingExitError)) {
+      if (!mountedDynamicUpdatesLive && mountedAppContext && !pendingExitFailure) {
         // The dynamic frame was deferred during rendering. The final commit()
         // above refreshed lastOutput to the current tree, so write that latest
         // frame once, adding a line ending only when it needs one.
@@ -1220,9 +1448,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       if (mountedRoot) {
         runBestEffort(() => releasePaintCaches(mountedRoot!));
+      }
+      runBestEffort(() => mountedHostYogaLedger?.rollback());
+      if (mountedRoot) {
         runBestEffort(() => detachYoga(mountedRoot!));
       }
       mountedRoot = null;
+      mountedHostYogaLedger = null;
+      mountedOwnedVNode = null;
       if (mountedResizeHandler && mountedAppContext) {
         const resizeHandler = mountedResizeHandler;
         runBestEffort(() => {
@@ -1277,9 +1510,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       if (
+        pendingExitErrorShouldReport &&
         !pendingExitErrorIsSilent &&
-        isErrorInput(pendingExitError) &&
-        (!pendingExitErrorWasRendered || !mountedBoundaryErrorsAreDurable)
+        isErrorInput(pendingExitError)
       ) {
         const report = sanitizeAnsiMultiline(formatErrorForStderr(pendingExitError));
         const output = `${appContext.stderr.isTTY ? nextLineEscape : ""}${report}`;
@@ -1300,25 +1533,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   }
 
+  const hostYogaLedger = createHostYogaAllocationLedger();
+  mountedHostYogaLedger = hostYogaLedger;
   const renderer = createRenderer<TuiNode, TuiNode>(
-    buildNodeOps({ onCommit: () => scheduledCommit() }),
+    buildNodeOps({
+      onCommit: () => scheduledCommit(),
+      hostYogaLifetime: hostYogaLedger.lifetime,
+    }),
   );
-
-  const captureComponentError = (error: Error): boolean => {
-    const silent = isExpectedManagedInputUnavailableError(error);
-    recordExitError(error, silent);
-    if (silent) mountedScheduler?.cancel();
-    void nextTick(() => {
-      exitWithError(error);
-    });
-    return silent;
-  };
 
   let mountedUserRoot: ComponentPublicInstance | null = null;
   const captureUserRoot = (instance: ComponentPublicInstance | null): void => {
     mountedUserRoot = instance;
   };
-  let devOverlayCapturesUserRoot = false;
   if (isDevConnected()) {
     // initHmrBridge already ran inside connectDevtools() with a live hot.
     // Clear any dev status left in the module-global `devState` by a previous
@@ -1327,95 +1554,63 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     resetDevState();
     root = createDevOverlayWrapper(root, rootProps ?? undefined, captureUserRoot);
     rootProps = undefined;
-    devOverlayCapturesUserRoot = true;
   }
 
-  // Internal error boundary wrapper: catches all descendant errors (setup,
-  // render, lifecycle) via onErrorCaptured, renders an ErrorOverview frame,
-  // then routes the error through exit(). This prevents yoga WASM corruption
-  // that would occur if errors propagated uncaught during Vue's render phase.
-  const userRoot = root;
-  const userRootProps = rootProps;
-  const ErrorBoundaryRoot = defineComponent({
-    name: "InternalErrorBoundary",
-    setup() {
-      // Two refs by design: `caught` is the ORIGINAL thrown value, passed to
-      // ErrorOverview for a faithful display (Ink stores the raw value —
-      // ErrorBoundary.tsx:18 — and ErrorOverview only renders a stack when the
-      // value has one). `errored` marks that an error occurred (the value may be
-      // a falsy primitive, so we can't test `caught` for truthiness). The
-      // exit/reject machinery still receives a wrapped Error — semantics
-      // unchanged.
-      const caught = shallowRef<unknown>(null);
-      const errored = shallowRef(false);
-      const silentErrored = shallowRef(false);
-
-      onErrorCaptured((err) => {
-        // First-wins: only the FIRST captured error is recorded and routed to
-        // exit(). If two descendants throw in the SAME synchronous flush, the
-        // displayed `caught` and the rejected exit error must stay the SAME
-        // error — `caught` is last-wins by assignment, while exit() is
-        // first-wins, so without this guard the overview would show error #2
-        // while waitUntilExit() rejects with error #1 (e17 display/reject
-        // mismatch). Guarding on `errored` keeps both on the first thrown value.
-        if (!errored.value && !silentErrored.value) {
-          // Preserve a genuine Error — including a cross-realm one (fails
-          // `instanceof Error`, passes the `[object Error]` brand check) — so the
-          // ORIGINAL thrown error reaches exit()/waitUntilExit() unchanged,
-          // matching Ink's ErrorBoundary (rejects with the thrown value itself).
-          // A true non-Error throw (`throw "x"`, `throw 0`, `throw {message:'x'}`)
-          // is wrapped with the SAME message ErrorOverview displays
-          // (messageForNonError), so the shown and rejected messages agree (e17).
-          const e = isErrorInput(err) ? err : new Error(messageForNonError(err));
-          const silent = captureComponentError(e);
-          if (silent) {
-            silentErrored.value = true;
-          } else {
-            caught.value = err;
-            errored.value = true;
-          }
-          // Record the exit error SYNCHRONOUSLY, but keep the teardown DEFERRED.
-          // Two distinct concerns, decoupled:
-          //   1. recordExitError(e) sets pendingExitError NOW (first-wins). A host
-          //      that throws during a flush and then synchronously unmounts in the
-          //      SAME task would otherwise have its racing unmount() run
-          //      resolveExit() while pendingExitError is still undefined —
-          //      resolving CLEAN and swallowing the error (the deferred-exit race,
-          //      BUG #2). Recording it up front makes that resolveExit() reject
-          //      with the thrown error.
-          //   2. exitWithError(e) stays on nextTick so teardown is DEFERRED until
-          //      AFTER the current flush. teardown() runs the final mountedCommit()
-          //      that paints the ErrorOverview frame on live-output mounts,
-          //      and the boundary's errored→true re-render must commit BEFORE that
-          //      final commit. A synchronous exit here would let teardown's
-          //      microtask run before the re-render, dropping the overview frame.
-          //      Deferring keeps frame/paint timing byte-identical to main. (In the
-          //      racing-unmount case the unmount sets teardownStarted, so this
-          //      later exit() no-ops via the exitInitiated||teardownStarted guard;
-          //      with no race it proceeds normally.)
-        }
-        return false; // stop propagation
-      });
-
-      return () => {
-        if (silentErrored.value) return null;
-        if (errored.value) {
-          // Rendering this vnode only means the error frame is ready to paint.
-          // Durability is recorded later, after the terminal write succeeds.
-          pendingBoundaryFrameReady = pendingBoundaryError;
-          return h(ErrorOverview, { error: caught.value });
-        }
-        return h(userRoot, {
-          ...(userRootProps ?? undefined),
-          ref: devOverlayCapturesUserRoot ? undefined : captureUserRoot,
-        });
-      };
+  const rootPropsWithCapture = mergeProps(
+    {
+      onVnodeBeforeMount(vnode: VNode) {
+        // This hook runs for stateful and functional roots after Vue has
+        // created the actual app-owned VNode but before the first host patch.
+        // It complements the setup-time scope capture below for Vue 3.4,
+        // whose app.mount() ignores app._ceVNode.
+        mountedOwnedVNode = vnode;
+      },
     },
-  });
-
-  const baseApp = renderer.createApp(ErrorBoundaryRoot);
+    rootProps ?? {},
+  );
+  const baseApp = renderer.createApp(root, rootPropsWithCapture);
+  const ownedVNode = createVNode(root, rootPropsWithCapture);
+  (
+    baseApp as typeof baseApp & {
+      _ceVNode?: VNode;
+    }
+  )._ceVNode = ownedVNode;
+  mountedOwnedVNode = ownedVNode;
   const originalMount = baseApp.mount.bind(baseApp);
   const originalUnmount = baseApp.unmount.bind(baseApp);
+
+  function runMountedVueCleanup(): void {
+    if (vueCleanupCompleted) return;
+    vueCleanupCompleted = true;
+    if (!vueMountStarted) return;
+    vueMountStarted = false;
+    consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    if (mountedOwnedVNode) guardMountedVueScopes(mountedOwnedVNode);
+    try {
+      originalUnmount();
+    } catch (error) {
+      recordTeardownError(error);
+    }
+  }
+
+  function rollbackPartialVueMount(): void {
+    if (vueCleanupCompleted) return;
+    vueCleanupCompleted = true;
+    vueMountStarted = false;
+    consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    const rootNode = mountedRoot as (TuiRoot & { _vnode?: VNode | null }) | null;
+    const vnode = mountedOwnedVNode;
+    if (rootNode && vnode?.component) {
+      guardMountedVueScopes(vnode);
+      if (rootNode._vnode == null) rootNode._vnode = vnode;
+      try {
+        renderer.render(null, rootNode);
+      } catch (error) {
+        recordTeardownError(error);
+      }
+    }
+    hostYogaLedger.rollback();
+  }
 
   const app = baseApp as unknown as TuiApp;
   let mountAttemptConsumed = false;
@@ -1523,6 +1718,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // by the rollback catch below.
     let leaveMountLifecycleTransaction: (() => void) | null = null;
     mountAttemptConsumed = true;
+    consumedMountInProgress = true;
     try {
       const renderSession = createLiveRenderSessionService(surface);
 
@@ -1559,7 +1755,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       mountedDynamicUpdatesLive = dynamicUpdatesLive;
-      mountedBoundaryErrorsAreDurable = dynamicUpdatesLive && !fixedFullscreenSurface;
 
       let failureOutputCoordinator: OutputCoordinator | null = null;
       const streamLifecycle = createMountedStreamLifecycle({
@@ -1748,7 +1943,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // fatal teardown before its durable stderr report is written.
           rejectedFullscreenStatic = true;
           mountedScheduler?.cancel();
-          captureComponentError(new Error(FULLSCREEN_STATIC_ERROR));
+          requestRuntimeFailure(new Error(FULLSCREEN_STATIC_ERROR));
         }
         return true;
       }
@@ -1855,6 +2050,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             applyPreparedSurface = repaint;
           }
         };
+        const awaitVueUpdate = async (): Promise<boolean> => {
+          try {
+            await nextTick();
+            return true;
+          } catch {
+            // Vue owns component update errors. A failed render invalidates the
+            // prepared host paint, but it is not a Runtime resume failure and
+            // must not trigger terminal reacquisition or application teardown.
+            applyPreparedSurface = null;
+            return false;
+          }
+        };
         try {
           runLifecycleTransaction(() => {
             terminalResumeInProgress = true;
@@ -1871,7 +2078,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // component that consumed them before the host tree can be repainted
           // accurately. Keep input and terminal ownership suspended across this
           // microtask boundary.
-          if (applyPreparedSurface) await nextTick();
+          if (applyPreparedSurface && !(await awaitVueUpdate())) return;
           while (
             applyPreparedSurface &&
             !teardownStarted &&
@@ -1879,7 +2086,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             resumeCoveredResizeGeneration !== resizeEventGeneration
           ) {
             runLifecycleTransaction(prepareContinuedSurface);
-            await nextTick();
+            if (!(await awaitVueUpdate())) return;
           }
 
           let retryForNewerResize = false;
@@ -1896,14 +2103,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           do {
             if (retryForNewerResize) {
               runLifecycleTransaction(prepareContinuedSurface);
-              await nextTick();
+              if (!(await awaitVueUpdate())) return;
               while (
                 !teardownStarted &&
                 terminalSuspended &&
                 resumeCoveredResizeGeneration !== resizeEventGeneration
               ) {
                 runLifecycleTransaction(prepareContinuedSurface);
-                await nextTick();
+                if (!(await awaitVueUpdate())) return;
               }
             }
             retryForNewerResize = false;
@@ -2053,7 +2260,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // A late or suspended write is not retained. Its ready promise covers
         // only the current output gate; lifecycle availability must still be
         // re-checked by a caller that chooses to retry.
-        if (teardownStarted || terminalSuspended) return blockedCoordinatedWrite();
+        if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
+          return blockedCoordinatedWrite();
+        }
         const rollback = createOutputStateRollback();
         return runOutputTransaction(
           () => {
@@ -2085,7 +2294,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function writeToStderr(data: string): CoordinatedWriteResult {
-        if (teardownStarted || terminalSuspended) return blockedCoordinatedWrite();
+        if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
+          return blockedCoordinatedWrite();
+        }
         const rollback = createOutputStateRollback();
         return runOutputTransaction(
           () => {
@@ -2134,25 +2345,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           // teardown is in progress. At the FIRST exit() both flags are false, so
           // a normal exit-from-Vue-cycle still proceeds.
           if (exitInitiated || teardownStarted) return;
+          if (error !== undefined && !isErrorInput(error)) {
+            throw new TypeError("useApp().exit() accepts only an Error or no argument");
+          }
           exitInitiated = true;
           // Record the FIRST value/error synchronously (before the deferred
           // teardown microtask) so a re-entrant exit() — which is blocked above
           // anyway — and the eventual resolveExit() always settle on this value.
           if (error !== undefined) {
-            const exitError = isErrorInput(error)
-              ? error
-              : new TypeError("useApp().exit() accepts only an Error or no argument");
-            // Don't clobber an error already recorded synchronously by
-            // recordExitError() (the boundary captured first): first-wins keeps the
-            // displayed and rejected error the SAME. pendingExitError is undefined on
-            // a normal first exit(), so `??=` is identical to `=` in every other case.
-            // (The race: a descendant throws Error1 → onErrorCaptured shows Error1 and
-            // recordExitError sets pendingExitError=Error1 WITHOUT setting exitInitiated,
-            // then app code calls exit(Error2) before the deferred exitWithError(Error1)
-            // microtask runs — exitInitiated is still false so we reach here. `=` would
-            // overwrite to Error2, making the overview show Error1 while waitUntilExit()
-            // rejects Error2.)
-            pendingExitError ??= exitError;
+            if (!pendingExitFailure) {
+              pendingExitError = error;
+              pendingExitFailure = true;
+              pendingExitErrorShouldReport = true;
+            }
           }
           // Defer teardown to a microtask: exit() is frequently called from
           // inside the Vue update cycle (useInput handler, setup(), errorHandler)
@@ -2206,6 +2411,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       changeRuntimeResource("streamReservations", 1);
       mountedRenderSession = renderSession;
       streamLifecycle.activate();
+      if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
       // From stream reservation through Vue's first render and final listener
       // wiring, a synchronous host callback may request teardown but may not run
       // it in the middle of terminal acquisition or before Vue finishes mount.
@@ -2265,6 +2471,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         isKittyKeyboardReady: () => kittyController?.isReady ?? true,
         writeTerminalOutput,
         requestTerminalReconcile,
+        reportManagedInputFailure(error) {
+          requestRuntimeFailure(error, {
+            silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
+          });
+        },
         onSgrMouseModeChange: testInputHost
           ? (level) => testInputHost.onMouseReportingChange(level === "hover" ? "drag" : level)
           : undefined,
@@ -2310,7 +2521,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             stdinController.reconcileTerminalState();
           } catch (error) {
             if (!teardownStarted) {
-              appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
+              requestRuntimeFailure(error, {
+                silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
+              });
             }
           }
         };
@@ -2742,26 +2955,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         frameState.outputHeight = outputHeight;
       }
 
-      function markBoundaryErrorFrameRendered(frame: string): void {
-        const errorMessage =
-          pendingBoundaryError === undefined ? "" : messageForNonError(pendingBoundaryError);
-        // A successful write is not enough when the bounded viewport clipped the
-        // entire error message. In that case the rich overview is not durable and
-        // teardown must still emit the complete plain-text report to stderr.
-        const messageIsVisible =
-          errorMessage === "" ? frame.trim().length > 0 : frame.includes(errorMessage);
-        if (
-          messageIsVisible &&
-          !pendingBoundaryFrameWriteFailed &&
-          mountedBoundaryErrorsAreDurable &&
-          pendingBoundaryError !== undefined &&
-          pendingBoundaryFrameReady === pendingBoundaryError &&
-          pendingExitError === pendingBoundaryError
-        ) {
-          pendingExitErrorWasRendered = true;
-        }
-      }
-
       // Produce the visual dynamic frame for a given terminal width. Static
       // output is handled separately by commit().
       function renderFrame(
@@ -2822,7 +3015,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(blocked.ready);
           return blocked;
         }
-        if (pendingExitErrorIsSilent) return acceptedCoordinatedWrite;
+        if (runtimeFailurePending || mountFailurePending) return acceptedCoordinatedWrite;
         if (rejectedFullscreenStatic) return acceptedCoordinatedWrite;
         if (terminalSuspended && !terminalResumePainting) {
           // Suspension pauses physical terminal ownership, not Vue or accepted
@@ -2852,7 +3045,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             });
           } catch (error) {
             if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
-              captureComponentError(error);
+              mountedScheduler?.cancel();
+              requestRuntimeFailure(error, { silent: true });
               return acceptedCoordinatedWrite;
             }
             throw error;
@@ -2912,7 +3106,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           );
         } catch (error) {
           if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
-            captureComponentError(error);
+            mountedScheduler?.cancel();
+            requestRuntimeFailure(error, { silent: true });
             return acceptedCoordinatedWrite;
           }
           throw error;
@@ -2924,7 +3119,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function commitFrame(hooks: CommitSettlementHooks) {
-        if (pendingExitErrorIsSilent) return;
+        if (runtimeFailurePending || mountFailurePending) return;
         if (rejectedFullscreenStatic) return;
         if (terminalSuspended && !terminalResumePainting) return;
         const staticNodes = findStatics(tuiRoot);
@@ -2936,7 +3131,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         let caretFrame: InternalPreparedCaretFrame | undefined;
         let mouseFrame: PreparedMouseFrame | undefined;
         let preparedStatic: PreparedStaticOutput | undefined;
-        let boundaryFrame: string | undefined;
         let settled = false;
 
         const releasePreparedState = (): void => {
@@ -2959,7 +3153,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             mouseFrame?.accept();
             caretFrame?.accept();
             preparedStatic?.accept();
-            if (boundaryFrame !== undefined) markBoundaryErrorFrameRendered(boundaryFrame);
           } finally {
             releasePreparedState();
           }
@@ -2972,13 +3165,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             if (physicalFailure) {
               preparedStatic?.abandon();
               mouseFrame?.abandon();
-            }
-            if (
-              pendingBoundaryError !== undefined &&
-              pendingBoundaryFrameReady === pendingBoundaryError &&
-              pendingExitError === pendingBoundaryError
-            ) {
-              pendingBoundaryFrameWriteFailed = true;
             }
           } finally {
             releasePreparedState();
@@ -3116,7 +3302,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             onHandoff: hooks.markStaticHanded,
             onPrepared: hooks.capturePostStaticRollback,
           });
-          boundaryFrame = frame;
         } finally {
           restoreLayoutGuards();
         }
@@ -3133,16 +3318,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         immediate: unthrottled,
         throttleMs: renderThrottleMs,
         onError(error) {
-          if (!teardownStarted) {
-            appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
-          }
+          if (!teardownStarted) requestRuntimeFailure(error);
         },
       });
       mountedScheduler = scheduler;
       mountedCommit = commit;
       prepareResumeSurface = () => commit;
       scheduledCommit = () => {
-        if (!pendingExitErrorIsSilent && !resizePaintPending) scheduler.schedule();
+        if (!runtimeFailurePending && !mountFailurePending && !resizePaintPending) {
+          scheduler.schedule();
+        }
       };
 
       // Internal provides — set before the actual mount so components can inject
@@ -3182,44 +3367,24 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         void exitPromise.finally(() => notifyDevExit()).catch(() => {});
       }
 
-      // Wire exit-with-error for the error boundary (must be set before mount).
-      exitWithError = (e: Error) => appContext.exit(e);
-      recordExitError = (e: Error, silent = false) => {
-        // First-wins: don't overwrite an exit already decided (a clean exit() or a
-        // prior error). Records the error so a racing unmount()'s resolveExit()
-        // rejects with it instead of resolving clean (BUG #2). Mirrors the
-        // synchronous record in appContext.exit() — pendingExitError is set here,
-        // then the deferred exitWithError() drives teardown/resolveExit().
-        if (!exitInitiated && !teardownStarted && pendingExitError === undefined) {
-          pendingExitError = e;
-          pendingExitErrorIsSilent = silent;
-          if (!silent) {
-            pendingBoundaryError = e;
-            pendingExitErrorWasRendered = false;
-            pendingBoundaryFrameWriteFailed = false;
-          }
-        }
-      };
-
       // Patch console.log/warn/error etc. to route through writeToStdout /
       // writeToStderr so console output doesn't corrupt the rendered frame.
-      // Installed BEFORE originalMount (matching Ink, which patches in its
-      // constructor before the first render — ink.tsx:435-436): a dev-only
-      // [Vue warn] emitted DURING the initial mount (e.g. the missing-render-
-      // function warn when the root's setup() throws) must hit the filter too.
+      // Installed before originalMount so setup-time user and dependency output
+      // is coordinated from the first component turn.
       // The mount-throw catch below runs teardown(), which restores the console,
       // so a synchronous mount failure cannot leak a patched console.
       if (patchConsole) {
         try {
           mountedConsoleSink = registerConsoleSink((stream, data) => {
-            if (stream === "stdout") {
-              return appContext.writeToStdout(data);
-            }
-            if (stream === "stderr") {
-              // Filter Vue internal warnings
-              if (!data.startsWith("[Vue warn]")) {
+            try {
+              if (stream === "stdout") {
+                return appContext.writeToStdout(data);
+              }
+              if (stream === "stderr") {
                 return appContext.writeToStderr(data);
               }
+            } catch (error) {
+              requestRuntimeFailure(error);
             }
             return undefined;
           });
@@ -3251,46 +3416,53 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       // Process-exit, termination, and suspension handlers are already wired
       // before terminal acquisition. This catch still routes renderer/patch-level
-      // vnode failures that bypass onErrorCaptured through the same idempotent
-      // rollback before preserving the original mount error.
+      // and Vue-propagated initial failures through partial-tree cleanup and the
+      // same idempotent terminal rollback before preserving the original error.
       let proxy: ComponentPublicInstance;
       vueMountStarted = true;
       try {
-        proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+        const releaseVueScopeCapture = acquireVueScopeCapture((scope, instance) => {
+          const teardownInstance = instance as unknown as VueTeardownComponentInstance | null;
+          if (teardownInstance?.scope === scope && teardownInstance.appContext?.app === baseApp) {
+            let rootInstance = teardownInstance;
+            while (rootInstance.parent) rootInstance = rootInstance.parent;
+            // Vue 3.4 creates its root VNode inside app.mount() and does not
+            // honor app._ceVNode. Capture that exact VNode as the component
+            // tree's first scope becomes current, before setup/default factories
+            // can throw, so partial rollback can unmount the real tree on every
+            // supported Vue minor. Walking parents also covers a functional root
+            // whose own scope never becomes current.
+            if (rootInstance.vnode) mountedOwnedVNode = rootInstance.vnode;
+          }
+        });
+        try {
+          proxy = originalMount(tuiRoot) as unknown as ComponentPublicInstance;
+          mountedOwnedVNode =
+            (tuiRoot as TuiRoot & { _vnode?: VNode | null })._vnode ?? mountedOwnedVNode;
+        } finally {
+          releaseVueScopeCapture();
+        }
         // A semantic route created during Vue setup can begin Kitty detection,
         // but its shared stdin ingress already exists. Ordinary input beside a
         // synchronous reply is retained until setup has installed the complete
         // initial route set, then delivered in its original order here.
         stdinController.activateInputDelivery();
+        if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
       } catch (err) {
-        recordTeardownError(err);
+        mountFailurePending = true;
+        recordVueMountFailure(err);
+        const mountError = pendingExitError;
+        rollbackPartialVueMount();
         try {
           teardown(); // best-effort cursor/alt-screen restore
         } catch {
           // teardown's restore write (mountedWriter.done() -> log-update
           // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
-          // stdout.write fails. A failing best-effort restore must NOT replace
-          // `err` — the ORIGINAL mount error must always survive and be rethrown.
+          // stdout.write fails. A failing best-effort restore must not replace
+          // the first Runtime failure or Vue error selected for this mount.
         }
-        throw err;
+        throw mountError;
       }
-
-      // Compose the user's pre-mount Vue error handler with Runtime's fatal
-      // lifecycle fallback. A failure in the observer is secondary: it must not
-      // replace the application error or prevent terminal restoration.
-      const userErrorHandler = baseApp.config.errorHandler;
-      baseApp.config.errorHandler = (err, instance, info) => {
-        try {
-          userErrorHandler?.(err, instance, info);
-        } catch {
-          // Runtime still owns restoration and the authoritative application
-          // error, even when the user's diagnostic callback itself fails.
-        }
-        // Preserve a genuine (incl. cross-realm) Error so the original survives to
-        // exit(); only wrap a true non-Error — with the SAME message ErrorOverview
-        // displays (messageForNonError, e17). See isErrorInput / onErrorCaptured.
-        appContext.exit(isErrorInput(err) ? err : new Error(messageForNonError(err)));
-      };
 
       // Only listen for resize when dynamic output is live (matching Ink).
       // A resize is a discrete event that changes the viewport, so it bypasses
@@ -3397,7 +3569,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               const nextPaint = runLifecycleTransaction(() => prepareDimensionUpdate(false, false));
               if (nextPaint) {
                 preparedPaint = nextPaint;
-                await nextTick();
+                try {
+                  await nextTick();
+                } catch {
+                  // A reactive component update shares this flush, but remains
+                  // governed by Vue's error propagation. Discard only the host
+                  // paint prepared for the failed generation and keep Runtime
+                  // mounted; a newer resize generation will still be processed.
+                  preparedPaint = null;
+                  resizeHandledGeneration = observedGeneration;
+                  continue;
+                }
               }
 
               if (teardownStarted || terminalSuspended) break;
@@ -3416,9 +3598,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             }
           } catch (error) {
             resizeHandledGeneration = resizeEventGeneration;
-            if (!teardownStarted) {
-              appContext.exit(isErrorInput(error) ? error : new Error(messageForNonError(error)));
-            }
+            if (!teardownStarted) requestRuntimeFailure(error);
           } finally {
             resizePaintPending = false;
             resizeRefreshRunning = false;
@@ -3461,12 +3641,17 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         pendingMountSuspension = false;
         suspendSession();
       }
+      if (pendingMountRuntimeFailure) throw pendingMountRuntimeFailure;
+      consumedMountInProgress = false;
       return mountedUserRoot ?? proxy;
     } catch (error) {
+      mountFailurePending = true;
+      consumedMountInProgress = false;
+      recordTeardownError(error);
+      const mountError = pendingExitError;
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
       leaveMountLifecycleTransaction = null;
       leaveLifecycleTransaction?.();
-      recordTeardownError(error);
       try {
         teardown();
       } catch (teardownError) {
@@ -3474,7 +3659,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       } finally {
         resolveExit();
       }
-      throw error;
+      throw mountError;
     }
   };
 
@@ -3629,6 +3814,7 @@ interface CreateStdinControllerOptions {
   /** Route async terminal-control bytes through the application's output gate. */
   writeTerminalOutput: (data: string, onHandoff?: () => void) => boolean;
   requestTerminalReconcile: () => void;
+  reportManagedInputFailure: (error: unknown) => void;
   onSgrMouseModeChange?: (level: SgrMouseMode | undefined) => void;
 }
 
@@ -4750,41 +4936,51 @@ function createStdinController(
       return acquireLogicalRawMode(true);
     },
     acquireSemanticInput() {
-      assertManagedInputAvailable();
-      const demand: SemanticInputDemand = {
-        activationRequested: false,
-        physicalAcquired: false,
-        published: false,
-        released: false,
-      };
-      semanticInputDemands.add(demand);
       try {
-        reconcileSemanticInputDemands();
+        assertManagedInputAvailable();
+        const demand: SemanticInputDemand = {
+          activationRequested: false,
+          physicalAcquired: false,
+          published: false,
+          released: false,
+        };
+        semanticInputDemands.add(demand);
+        try {
+          reconcileSemanticInputDemands();
+        } catch (error) {
+          demand.released = true;
+          runTerminalCleanup(reconcileSemanticInputDemands);
+          throw error;
+        }
+        return Object.freeze({
+          activate() {
+            if (demand.released || demand.activationRequested) return;
+            demand.activationRequested = true;
+            try {
+              reconcileSemanticInputDemands();
+            } catch (error) {
+              opts.reportManagedInputFailure(error);
+              throw error;
+            }
+          },
+          release() {
+            if (demand.released) return;
+            demand.activationRequested = false;
+            setSemanticDemandPublished(demand, false);
+            // Vue removes an old branch before mounting its same-tick replacement.
+            // Keep the physical lease until the microtask boundary so a
+            // replacement can acquire without a listener/raw-mode gap.
+            queueMicrotask(() => {
+              if (demand.released) return;
+              demand.released = true;
+              runTerminalCleanup(reconcileSemanticInputDemands);
+            });
+          },
+        });
       } catch (error) {
-        demand.released = true;
-        runTerminalCleanup(reconcileSemanticInputDemands);
+        opts.reportManagedInputFailure(error);
         throw error;
       }
-      return Object.freeze({
-        activate() {
-          if (demand.released || demand.activationRequested) return;
-          demand.activationRequested = true;
-          reconcileSemanticInputDemands();
-        },
-        release() {
-          if (demand.released) return;
-          demand.activationRequested = false;
-          setSemanticDemandPublished(demand, false);
-          // Vue removes an old branch before mounting its same-tick replacement.
-          // Keep the physical lease until the microtask boundary so a
-          // replacement can acquire without a listener/raw-mode gap.
-          queueMicrotask(() => {
-            if (demand.released) return;
-            demand.released = true;
-            runTerminalCleanup(reconcileSemanticInputDemands);
-          });
-        },
-      });
     },
     hasManagedInputDemand() {
       return !disposed && managedRawRefs > 0;

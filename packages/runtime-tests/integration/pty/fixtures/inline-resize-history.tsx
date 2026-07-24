@@ -40,7 +40,7 @@ const App = defineComponent(() => {
     process.stdout.off("resize", onResize);
   });
 
-  return () => <Text>{frame.value}</Text>;
+  return () => <Text>{{ default: () => frame.value }}</Text>;
 });
 
 app = createApp(App);

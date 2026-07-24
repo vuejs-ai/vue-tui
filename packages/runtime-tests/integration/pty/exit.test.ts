@@ -48,8 +48,9 @@ it("exit on unmount() with raw mode", async () => {
 });
 
 it("exit with thrown error", async () => {
-  // run() rejects on a non-zero exit code; the fixture catches the rejected
-  // waitUntilExit, logs "errored", and exits 0 deterministically (Ink exit.tsx:71-74).
+  // An unhandled initial Vue error escapes mount synchronously. The fixture
+  // verifies that the consumed exit barrier rejects with that same object,
+  // logs "errored", and exits 0 deterministically.
   const output = await run("exit-with-thrown-error");
   expect(output).toContain("errored");
 });

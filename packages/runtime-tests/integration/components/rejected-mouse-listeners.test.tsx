@@ -52,7 +52,7 @@ test("childless Text still rejects a removed listener", () => {
   expect(() => renderToString(App)).toThrow(rejection("Text", "onMousedown"));
 });
 
-test("a removed listener introduced by a later render exits the application", async () => {
+test("a removed listener introduced by a later render rejects Vue's update", async () => {
   const rejected = shallowRef(false);
   const App = defineComponent(
     () => () =>
@@ -61,12 +61,15 @@ test("a removed listener introduced by a later render exits the application", as
       ),
   );
   const result = await render(App);
-  const exited = result.waitUntilExit();
 
-  rejected.value = true;
-  await nextTick();
-
-  await expect(exited).rejects.toThrow(rejection("Box", "onClick"));
+  try {
+    rejected.value = true;
+    await expect(nextTick()).rejects.toThrow(rejection("Box", "onClick"));
+    result.unmount();
+    await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  } finally {
+    result.dispose();
+  }
 });
 
 test.each([

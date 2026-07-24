@@ -1,5 +1,5 @@
 import { Writable } from "node:stream";
-import { defineComponent, onMounted, onScopeDispose } from "vue";
+import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
@@ -57,6 +57,86 @@ test("the first exit(error) wins", async () => {
   exit(first);
   exit(new Error("second"));
   await expect(result.waitUntilExit()).rejects.toBe(first);
+});
+
+test("invalid exit inputs throw synchronously without consuming the first valid exit", async () => {
+  let exit!: (value?: unknown) => void;
+  const value = shallowRef("running");
+  const App = defineComponent(() => {
+    exit = useApp().exit as (value?: unknown) => void;
+    return () => <Text>{value.value}</Text>;
+  });
+  const result = await render(App);
+
+  const invalidValues = ["bad", null, 0, false, {}, Symbol("bad")];
+  for (const invalid of invalidValues) {
+    expect(() => exit(invalid)).toThrow(
+      new TypeError("useApp().exit() accepts only an Error or no argument"),
+    );
+  }
+
+  value.value = "still running";
+  await nextTick();
+  await result.waitUntilRenderFlush();
+  expect(result.lastFrame()).toContain("still running");
+
+  const selected = new Error("selected after invalid calls");
+  exit(selected);
+  await expect(result.waitUntilExit()).rejects.toBe(selected);
+});
+
+test("later exit calls are no-ops and do not inspect hostile values", async () => {
+  let exit!: (value?: unknown) => void;
+  const App = defineComponent(() => {
+    exit = useApp().exit as (value?: unknown) => void;
+    return () => <Text>x</Text>;
+  });
+  const result = await render(App);
+  let inspected = 0;
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        inspected++;
+        throw new Error("must not inspect a late exit value");
+      },
+    },
+  );
+
+  exit();
+  expect(() => exit(hostile)).not.toThrow();
+  await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  expect(() => exit(hostile)).not.toThrow();
+  expect(inspected).toBe(0);
+});
+
+test("an invalid retained exit is inert once unmount cleanup has started", async () => {
+  let exit!: (value?: unknown) => void;
+  let cleanupError: unknown;
+  const hostile = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("must not inspect during teardown");
+      },
+    },
+  );
+  const App = defineComponent(() => {
+    exit = useApp().exit as (value?: unknown) => void;
+    onScopeDispose(() => {
+      try {
+        exit(hostile);
+      } catch (error) {
+        cleanupError = error;
+      }
+    });
+    return () => <Text>x</Text>;
+  });
+  const result = await render(App);
+
+  result.unmount();
+  await expect(result.waitUntilExit()).resolves.toBeUndefined();
+  expect(cleanupError).toBeUndefined();
 });
 
 test("onScopeDispose runs for an error exit", async () => {

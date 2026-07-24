@@ -5,6 +5,7 @@ import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
+import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts";
 import { paint } from "./paint/paint.ts";
 import { prepareStaticOutput } from "./paint/static-channel.ts";
 import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
@@ -73,44 +74,6 @@ function renderToStringInternal(
     renderSession.dispose();
     contexts.dispose();
   }
-}
-
-function createHostYogaAllocationLedger(): {
-  readonly lifetime: NonNullable<Parameters<typeof buildNodeOps>[0]["hostYogaLifetime"]>;
-  rollback(): void;
-} {
-  const allocationOrder: TuiNode[] = [];
-  const pending = new Map<TuiNode, () => void>();
-  const lifetime = {
-    allocated(node: TuiNode, dispose: () => void): void {
-      allocationOrder.push(node);
-      pending.set(node, dispose);
-    },
-    released(node: TuiNode): void {
-      pending.delete(node);
-    },
-  };
-
-  return {
-    lifetime,
-    rollback(): void {
-      for (let index = allocationOrder.length - 1; index >= 0; index--) {
-        const node = allocationOrder[index]!;
-        const dispose = pending.get(node);
-        if (!dispose) continue;
-        // Remove before disposal so a throwing cleanup is attempted once and a
-        // disposer calling lifetime.released() remains harmless.
-        pending.delete(node);
-        try {
-          dispose();
-        } catch {
-          // Continue through every independently allocated host. Cleanup must
-          // not replace the render or component failure already in flight.
-        }
-      }
-      allocationOrder.length = 0;
-    },
-  };
 }
 
 function renderStringDocument(
@@ -182,7 +145,8 @@ function renderStringDocument(
     // `onMounted(() => { throw undefined })`); a sentinel can't tell that apart from
     // "no error", so it would SWALLOW the error and return the normal frame,
     // violating the documented "errors propagate to the caller" contract. First-wins
-    // (guarded by `errored`) matches the live renderer's onErrorCaptured.
+    // (guarded by `errored`) preserves the first Vue error observed by this
+    // synchronous utility.
     let errored = false;
     let caught: unknown;
     app.config.errorHandler = (err) => {

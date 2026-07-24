@@ -1,11 +1,9 @@
 import { expect, test } from "vite-plus/test";
 import { messageForNonError } from "../../../runtime/dist/internal.mjs";
 
-// messageForNonError feeds the error-display / reject path: render.ts's
-// onErrorCaptured wraps `new Error(messageForNonError(err))` with NO surrounding
-// try/catch (render.ts ~523, and the errorHandler exit path ~1276). Its docstring
-// promises it "must not itself throw on a pathological thrown object", so every
-// coercion inside it has to be throw-safe.
+// Runtime-owned failures sometimes need to turn a non-Error value from a host
+// callback into a stable rejection and report. That normalization must not throw
+// while inspecting a pathological value, so every coercion here is guarded.
 //
 // Import the pure helper directly so this internal contract test does not need
 // a public Runtime-internal package path or Vue SFC transformation.
@@ -33,11 +31,10 @@ test("a throwing .message getter falls back without throwing", () => {
 });
 
 test("a value whose primitive coercion throws does not throw (the confirmed bug)", () => {
-  // HIGH-severity bug: `.message` is a non-string (so the typeof check selects
-  // the String(value) branch), and String(value) itself throws because
-  // Symbol.toPrimitive throws. Before the fix, messageForNonError re-throws here,
-  // wedging render.ts's onErrorCaptured hook (the app hangs, waitUntilExit()
-  // never settles).
+  // `.message` is a non-string (so the typeof check selects the String(value)
+  // branch), and String(value) itself throws because Symbol.toPrimitive throws.
+  // Before the fix, normalization could replace the host failure and prevent
+  // Runtime's lifecycle promise from settling.
   const pathological = {
     get message(): number {
       return 42;
