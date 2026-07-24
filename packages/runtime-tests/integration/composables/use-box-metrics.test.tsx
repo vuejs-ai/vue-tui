@@ -417,6 +417,55 @@ test("does not publish a candidate Box size before a failed output write is acce
   }
 });
 
+test("publishes parent-relative left and top for a sibling-positioned Box", async () => {
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    return () => (
+      <Box flexDirection="row">
+        <Box width={5} height={1}>
+          <Text>left</Text>
+        </Box>
+        <Box ref={target} width={3} height={2}>
+          <Text>box</Text>
+        </Box>
+      </Box>
+    );
+  });
+
+  const stdout = makeTtyOutput(40, 8);
+  const stderr = makeTtyOutput(40, 8);
+  const stdin = makeTtyInput();
+  const app = createApp(App);
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        liveUpdates: true,
+        maxFps: 0,
+        patchConsole: false,
+      }),
+    );
+    await app.waitUntilRenderFlush();
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 3, height: 2, left: 5, top: 0, hasMeasured: true });
+  } finally {
+    app.unmount();
+    await Promise.allSettled([app.waitUntilExit()]);
+    stdin.destroy();
+    stdout.destroy();
+    stderr.destroy();
+  }
+});
+
 test("rejects non-Box targets and use outside a vue-tui tree", async () => {
   expect(() => useBoxMetrics(shallowRef<InstanceType<typeof Box> | null>(null))).toThrow(
     "render session is unavailable outside a vue-tui render tree",
@@ -455,35 +504,5 @@ test("rejects non-Box targets and use outside a vue-tui tree", async () => {
     stdin.destroy();
     stdout.destroy();
     stderr.destroy();
-  }
-});
-
-test("publishes parent-relative left and top for a sibling-positioned Box", async () => {
-  let metrics!: ReturnType<typeof useBoxMetrics>;
-  const App = defineComponent(() => {
-    const target = shallowRef<InstanceType<typeof Box> | null>(null);
-    metrics = useBoxMetrics(target);
-    return () => (
-      <Box flexDirection="row" width={20} height={3}>
-        <Box width={5} height={1}>
-          <Text>left</Text>
-        </Box>
-        <Box ref={target} width={3} height={2}>
-          <Text>box</Text>
-        </Box>
-      </Box>
-    );
-  });
-
-  const result = await render(App, { columns: 40, rows: 8 });
-  try {
-    await result.waitUntilRenderFlush();
-    expect(metrics.hasMeasured.value).toBe(true);
-    expect(metrics.width.value).toBe(3);
-    expect(metrics.height.value).toBe(2);
-    expect(metrics.left.value).toBe(5);
-    expect(metrics.top.value).toBe(0);
-  } finally {
-    result.dispose();
   }
 });
