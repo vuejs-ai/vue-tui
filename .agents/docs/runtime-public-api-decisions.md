@@ -30,6 +30,8 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 ### Unsupported usage does not require dedicated validation
 
+[VOUCHED @hyfdev 2026-07-24]
+
 - **Ruling:** An unsupported Runtime usage does not by itself require proactive detection or a dedicated error. Prefer the simplest sound implementation, and decide whether to add a guard only after weighing implementation complexity, Runtime-owned state and resource safety, diagnostic value for users, and future freedom for that specific case.
 - **Limits:** This does not ban explicit errors or require Runtime to accept malformed usage silently. A case may justify validation when it protects an invariant or materially improves user experience at reasonable cost. Conversely, an incidental current error, recovery path, or test for unsupported usage does not become a public contract merely because it exists.
 - **Why:** Yunfei expects implementation simplicity and explicit user-facing diagnostics to conflict in some cases. He rejected a blanket rule that unsupported behavior should receive defensive validation and instead chose a case-by-case trade-off.
@@ -136,6 +138,8 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 ### Inline non-TTY output is one final dynamic document
 
+[VOUCHED @hyfdev 2026-07-24]
+
 - **Ruling:** Inline output to a pipe, file, or other non-TTY destination does not emit terminal screen-management controls and does not write every reactive dynamic frame. Accepted `Static` history is appended when committed, coordinated console output remains immediate, and clean teardown writes the current final dynamic document once. Empty final dynamic output writes no bytes; non-empty output receives a line ending only when it does not already have one. Error teardown does not replay a stale successful dynamic frame.
 - **Limits:** This decides the default non-TTY output policy; ordering among simultaneously eligible `Static` blocks follows the Static contract below. It does not add a public cadence override. A custom Writable that happens to emulate TTY capabilities is governed by the capabilities it truthfully exposes.
 - **Why:** Redirected output should be a useful final document rather than a recording of intermediate UI frames or terminal cursor operations. Yunfei accepted this policy after comparison with Ink, including the deliberate difference that an empty final document writes nothing instead of a lone newline.
@@ -234,6 +238,8 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 ### `Static` is one Vue-native Inline history block
 
+[VOUCHED @hyfdev 2026-07-24]
+
 - **Ruling:** Runtime retains `Static` as the only public value on `@vue-tui/runtime/inline`. It has no public props, events, methods, collection-specific types, or scoped-slot payload; its ordinary default slot describes one irreversible history block. A mounted instance remains open while it produces no output. Its first non-empty eligible output is committed once above the replaceable live region, after which the slot subtree is released through normal Vue unmount lifecycle and later reactive changes cannot rewrite the committed bytes. Applications use ordinary Vue `v-for` and stable `key` values for collections, `Box` and `Text` for layout and styling, and a new mount or remount for a new history block.
 - **Ruling:** Vue conditional rendering keeps its ordinary lifecycle meaning rather than becoming reversible history control. Removing an instance before its first accepted output produces no block; removing it after acceptance cannot erase terminal history; mounting it again creates a new instance that may commit the same content again. A true Fullscreen surface that encounters `Static` throws explicitly and restores Runtime-owned terminal resources rather than silently ignoring it or treating it as mutable viewport content.
 - **Ruling:** Presence in the current Runtime render tree makes a mounted Static instance immediately eligible regardless of ancestor or direct `v-show`; `v-if` and ordinary mount lifecycle decide whether the instance exists. Several blocks accepted together use current rendered host-tree preorder, while blocks that become eligible later append without moving accepted history.
@@ -251,6 +257,8 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Source:** Yunfei, 2026-07-23, current Runtime public API review after comparison with the run-verified pinned Ink v7.0.4 baseline; no durable session URL is available, so this entry is the durable record.
 
 ### `renderToString` is one synchronous initial terminal document
+
+[VOUCHED @hyfdev 2026-07-24]
 
 - **Ruling:** Runtime retains `renderToString(component: Component, options?: RenderToStringOptions): string` and the named `RenderToStringOptions` with only `readonly columns?: number`. It synchronously returns one initial terminal document, defaults to 80 columns, has unbounded height, and acquires no terminal, stream, input, or live-application resources. Runtime validates `columns` as a positive bounded integer before component setup or paint allocation. It does not accept `rows`, `mode`, streams, lifecycle barriers, or other live-host options, and it does not preserve special runtime recognition of removed options or reject unrelated extra object keys.
 - **Ruling:** Runtime creates a temporary normal Vue renderer tree. Synchronous setup and mount hooks run, and setup-time synchronous state changes are reflected, but the returned document is the first synchronous commit: updates queued by `onMounted`, timers, promises, async setup, or other later work are not awaited. Both success and failure unmount the tree, run component cleanup, and release Yoga and Runtime-owned resources before returning or throwing. An unhandled component error is synchronously propagated after cleanup.
