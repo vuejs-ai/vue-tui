@@ -151,7 +151,10 @@ export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean
 }
 
 /** Fixed modeled document layout shared by default `renderToString()` and non-TTY mounts. */
-export const MODELED_DOCUMENT_LAYOUT = Object.freeze({ columns: 80, rows: 24 }) as RenderLayoutSize;
+export const MODELED_DOCUMENT_LAYOUT = Object.freeze({
+  columns: 80,
+  rows: 24,
+} satisfies RenderLayoutSize);
 
 export function resolveLiveDimensions(
   stdout: LiveHostInput["stdout"],
@@ -184,7 +187,14 @@ export function resolveLiveDimensions(
 
   return {
     terminal,
-    layout: { columns: layoutColumns, rows: null },
+    // Every mounted host exposes a finite root-layout height. A live terminal
+    // uses its coherent detected height; an unavailable size falls back to the
+    // same conventional modeled height as the document host. Only an explicit
+    // renderToString({ height: Infinity }) selects the private null sentinel.
+    layout: {
+      columns: layoutColumns,
+      rows: terminal?.rows ?? MODELED_DOCUMENT_LAYOUT.rows,
+    },
   };
 }
 

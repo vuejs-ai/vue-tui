@@ -63,7 +63,7 @@ test.each(unboundedLiveCases)(
   },
 );
 
-test("an unavailable terminal size keeps width usable and gates viewport behavior", async () => {
+test("an unavailable live terminal size falls back to a finite modeled layout", async () => {
   const stdout = makePublicTty();
   const stderr = makePublicTty();
   const stdin = makePublicStdin();
@@ -89,7 +89,7 @@ test("an unavailable terminal size keeps width usable and gates viewport behavio
     );
 
     expect(layout!.width.value).toBe(80);
-    expect(layout!.height.value).toBe(Infinity);
+    expect(layout!.height.value).toBe(24);
   } finally {
     app.unmount();
     await app.waitUntilExit();

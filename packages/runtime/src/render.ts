@@ -1402,7 +1402,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         isErrorInput(pendingExitError)
       ) {
         const report = sanitizeAnsiMultiline(formatErrorForStderr(pendingExitError));
-        const output = `${appContext.stderr.isTTY ? nextLineEscape : ""}${report}`;
+        // A TTY stderr alone does not imply that this application owns a live
+        // terminal surface. Redirected/non-TTY stdout selects the document host,
+        // which must never emit cursor controls even when diagnostics still go
+        // to the user's terminal.
+        const output = `${
+          appContext.stdout.isTTY && appContext.stderr.isTTY ? nextLineEscape : ""
+        }${report}`;
         if (sync) {
           writeBestEffort(appContext.stderr, output, true);
         } else {

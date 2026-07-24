@@ -6,7 +6,7 @@ import stripAnsi from "strip-ansi";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useApp } from "@vue-tui/runtime";
-import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
+import { createInternalMountOptions, nextLineEscape } from "../../../runtime/dist/internal.mjs";
 import { captureWrites, makeFakeStdin } from "./test-streams.ts";
 
 function captureStream(stream: NodeJS.WriteStream): { readonly chunks: string[] } {
@@ -187,7 +187,11 @@ interface FinalStreamFatalResult {
   readonly error: unknown;
 }
 
-async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
+async function runFinalStreamUpdateFatal(
+  options: {
+    readonly stderrIsTTY?: boolean;
+  } = {},
+): Promise<FinalStreamFatalResult> {
   const marker = "FINAL_STREAM_FATAL";
   const fatal = new Error(marker);
   let exit!: (error?: Error) => void;
@@ -196,7 +200,11 @@ async function runFinalStreamUpdateFatal(): Promise<FinalStreamFatalResult> {
     return () => h(Text, null, { default: () => "STALE_SUCCESS_FRAME" });
   });
   const stdout = makeWritable({ isTTY: false, columns: 80 });
-  const stderr = makeWritable({ isTTY: false, columns: 80 });
+  const stderr = makeWritable({
+    isTTY: options.stderrIsTTY ?? false,
+    columns: 80,
+    rows: options.stderrIsTTY ? 24 : undefined,
+  });
   const stdoutCapture = captureStream(stdout);
   const stderrCapture = captureStream(stderr);
   const stderrWrites = captureWrites(stderr);
@@ -251,6 +259,13 @@ test("final-output fatal exit writes one durable error to stderr", async () => {
   expect(plainStderr).toContain("FINAL_STREAM_FATAL");
   expect(result.stderrFatalWrites).toBe(1);
   expect(result.stderr.endsWith("\n")).toBe(true);
+});
+
+test("document-host fatal output does not emit terminal line controls to a TTY stderr", async () => {
+  const result = await runFinalStreamUpdateFatal({ stderrIsTTY: true });
+
+  expect(stripAnsi(result.stderr)).toContain("FINAL_STREAM_FATAL");
+  expect(result.stderr).not.toContain(nextLineEscape);
 });
 
 test("Fullscreen waits for stdout restoration and the durable stderr callback before rejecting", async () => {

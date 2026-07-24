@@ -1,4 +1,4 @@
-import { readonly, shallowRef, type Ref } from "vue";
+import { shallowRef, toRef, type Ref } from "vue";
 import type { PublicBoxInstance } from "../components/public-box.ts";
 import { useInternalBoxSize } from "../geometry/internal-use-box-size.ts";
 import type { TuiBox } from "../host/nodes.ts";
@@ -12,6 +12,22 @@ export interface UseBoxMetricsReturn {
   readonly top: Readonly<Ref<number>>;
   readonly hasMeasured: Readonly<Ref<boolean>>;
 }
+
+interface BoxMetricsSnapshot {
+  readonly width: number;
+  readonly height: number;
+  readonly left: number;
+  readonly top: number;
+  readonly hasMeasured: boolean;
+}
+
+const EMPTY_METRICS: BoxMetricsSnapshot = Object.freeze({
+  width: 0,
+  height: 0,
+  left: 0,
+  top: 0,
+  hasMeasured: false,
+});
 
 /**
  * Observe the last accepted layout rectangle of one directly referenced Box.
@@ -27,41 +43,34 @@ export function useBoxMetrics<T extends PublicBoxInstance>(
 ): UseBoxMetricsReturn {
   const { resolve: resolvePublicBox } = useDirectBoxTarget("useBoxMetrics", target);
 
-  const mutableWidth = shallowRef(0);
-  const mutableHeight = shallowRef(0);
-  const mutableLeft = shallowRef(0);
-  const mutableTop = shallowRef(0);
-  const mutableHasMeasured = shallowRef(false);
+  const snapshot = shallowRef<BoxMetricsSnapshot>(EMPTY_METRICS);
   let currentTarget: TuiBox | null = null;
   let hasAcceptedMetrics = false;
 
   const clear = (): void => {
     hasAcceptedMetrics = false;
-    if (mutableWidth.value !== 0) mutableWidth.value = 0;
-    if (mutableHeight.value !== 0) mutableHeight.value = 0;
-    if (mutableLeft.value !== 0) mutableLeft.value = 0;
-    if (mutableTop.value !== 0) mutableTop.value = 0;
-    if (mutableHasMeasured.value) mutableHasMeasured.value = false;
+    if (snapshot.value !== EMPTY_METRICS) snapshot.value = EMPTY_METRICS;
   };
 
   const publish = (width: number, height: number, left: number, top: number): void => {
     hasAcceptedMetrics = true;
+    const current = snapshot.value;
     if (
-      mutableWidth.value === width &&
-      mutableHeight.value === height &&
-      mutableLeft.value === left &&
-      mutableTop.value === top &&
-      mutableHasMeasured.value
+      current.width === width &&
+      current.height === height &&
+      current.left === left &&
+      current.top === top &&
+      current.hasMeasured
     ) {
       return;
     }
-    // Publish all four numeric facts from one coherent snapshot before flipping
-    // hasMeasured, so a reactive observer never sees mixed generations.
-    mutableWidth.value = width;
-    mutableHeight.value = height;
-    mutableLeft.value = left;
-    mutableTop.value = top;
-    mutableHasMeasured.value = true;
+    snapshot.value = Object.freeze({
+      width,
+      height,
+      left,
+      top,
+      hasMeasured: true,
+    });
   };
 
   useInternalBoxSize(resolvePublicBox, (state, resolvedTarget) => {
@@ -88,11 +97,20 @@ export function useBoxMetrics<T extends PublicBoxInstance>(
     publish(state.width, state.height, state.left, state.top);
   });
 
+  // Getter refs always read the one current snapshot and do not own cached
+  // component-scope effects. They therefore remain accurate when disposal
+  // clears the snapshot after Vue has begun stopping the component scope.
+  const width = toRef(() => snapshot.value.width);
+  const height = toRef(() => snapshot.value.height);
+  const left = toRef(() => snapshot.value.left);
+  const top = toRef(() => snapshot.value.top);
+  const hasMeasured = toRef(() => snapshot.value.hasMeasured);
+
   return Object.freeze({
-    width: readonly(mutableWidth) as Readonly<Ref<number>>,
-    height: readonly(mutableHeight) as Readonly<Ref<number>>,
-    left: readonly(mutableLeft) as Readonly<Ref<number>>,
-    top: readonly(mutableTop) as Readonly<Ref<number>>,
-    hasMeasured: readonly(mutableHasMeasured) as Readonly<Ref<boolean>>,
+    width,
+    height,
+    left,
+    top,
+    hasMeasured,
   });
 }

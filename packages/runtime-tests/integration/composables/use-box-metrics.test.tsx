@@ -1,5 +1,13 @@
 import { PassThrough } from "node:stream";
-import { defineComponent, isReadonly, nextTick, shallowRef, vShow, withDirectives } from "vue";
+import {
+  defineComponent,
+  isReadonly,
+  nextTick,
+  shallowRef,
+  vShow,
+  watchSyncEffect,
+  withDirectives,
+} from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useBoxMetrics } from "@vue-tui/runtime";
@@ -463,6 +471,73 @@ test("publishes parent-relative left and top for a sibling-positioned Box", asyn
     stdin.destroy();
     stdout.destroy();
     stderr.destroy();
+  }
+});
+
+test("publishes each accepted rectangle as one coherent reactive snapshot", async () => {
+  const rectangle = shallowRef({ width: 2, height: 1, left: 1, top: 1 });
+  const observed: Array<{
+    width: number;
+    height: number;
+    left: number;
+    top: number;
+    hasMeasured: boolean;
+  }> = [];
+  let metrics!: ReturnType<typeof useBoxMetrics>;
+  const App = defineComponent(() => {
+    const target = shallowRef<InstanceType<typeof Box> | null>(null);
+    metrics = useBoxMetrics(target);
+    watchSyncEffect(() => {
+      const snapshot = {
+        width: metrics.width.value,
+        height: metrics.height.value,
+        left: metrics.left.value,
+        top: metrics.top.value,
+        hasMeasured: metrics.hasMeasured.value,
+      };
+      if (snapshot.hasMeasured) observed.push(snapshot);
+    });
+    return () => (
+      <Box width={20} height={6}>
+        <Box
+          ref={target}
+          position="absolute"
+          width={rectangle.value.width}
+          height={rectangle.value.height}
+          left={rectangle.value.left}
+          top={rectangle.value.top}
+        />
+      </Box>
+    );
+  });
+
+  const result = await render(App, { columns: 20, rows: 6 });
+  try {
+    expect({
+      width: metrics.width.value,
+      height: metrics.height.value,
+      left: metrics.left.value,
+      top: metrics.top.value,
+      hasMeasured: metrics.hasMeasured.value,
+    }).toEqual({ width: 2, height: 1, left: 1, top: 1, hasMeasured: true });
+
+    observed.length = 0;
+    rectangle.value = { width: 4, height: 2, left: 3, top: 2 };
+    await nextTick();
+    await result.waitUntilRenderFlush();
+
+    expect(observed.length).toBeGreaterThan(0);
+    for (const snapshot of observed) {
+      expect(snapshot).toEqual({
+        width: 4,
+        height: 2,
+        left: 3,
+        top: 2,
+        hasMeasured: true,
+      });
+    }
+  } finally {
+    result.dispose();
   }
 });
 
