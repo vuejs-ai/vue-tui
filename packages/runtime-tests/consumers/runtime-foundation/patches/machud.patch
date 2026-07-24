@@ -6,7 +6,7 @@ index 755dcd2..d6682b2 100644
  <script setup lang="ts">
  import { computed, ref, watchEffect } from "vue";
 -import { Box, Text, useWindowSize, useInput, useApp } from "@vue-tui/runtime";
-+import { Box, Text, useLayoutSize, useInput, useApp } from "@vue-tui/runtime";
++import { Box, Text, useLayoutWidth, useViewportHeight, useInput, useApp } from "@vue-tui/runtime";
  import { useMetrics } from "./composables/useMetrics";
  import { emptyMetrics } from "./lib/empty";
  import { theme, setThemeMode, nextThemeMode, type ThemeOverride } from "./theme";
@@ -20,7 +20,8 @@ index 755dcd2..d6682b2 100644
 
  const { metrics, history, now } = useMetrics();
 -const { columns, rows } = useWindowSize();
-+const { width: layoutWidth, height: layoutHeight } = useLayoutSize();
++const layoutWidth = useLayoutWidth();
++const viewportHeight = useViewportHeight();
 
  const m = computed<Metrics>(() => props.snapshot ?? metrics.value ?? emptyMetrics());
  const clockTs = computed(() => (props.snapshot ? props.snapshot.ts || Date.now() : now.value));
@@ -41,7 +42,7 @@ index 755dcd2..d6682b2 100644
 +// (the gate drives it via LINES), so a piped snapshot with unknown
  // height (rows=0) stays top-anchored rather than centring against a made-up 24.
 -const vh = computed(() => (isLive.value ? rows.value || 24 : props.rows || 0));
-+const vh = computed(() => (isLive.value ? layoutHeight.value : props.rows || 0));
++const vh = computed(() => (isLive.value ? (viewportHeight?.value ?? 0) : props.rows || 0));
  const contentRows = computed(() => (width.value >= 100 ? WIDE_CONTENT_ROWS : NARROW_CONTENT_ROWS));
  // Centre vertically only when the viewport is genuinely taller than the content — a short terminal
  // keeps today's top-anchored layout and never clips.
@@ -148,7 +149,7 @@ index 288b1fe..0b4ef6c 100644
 -import { ref, computed } from "vue";
 -import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
 +import { computed, shallowRef } from "vue";
-+import { Box, Text, useBoxMetrics, type Color } from "@vue-tui/runtime";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
  import { brailleArea } from "../lib/sparkline";
  import { ramp, supportsTruecolor } from "../lib/color";
  import { theme } from "../theme";
@@ -163,7 +164,7 @@ index 288b1fe..0b4ef6c 100644
 -const box = ref();
 -const bm = useBoxMetrics(box);
 +const box = shallowRef<InstanceType<typeof Box> | null>(null);
-+const size = useBoxMetrics(box);
++const size = useBoxSize(box);
 +const width = computed(() => size.value?.width || 24);
  const rows = computed(() =>
 -  brailleArea(props.values, Math.max(1, bm.width.value || 24), props.height, props.max),
@@ -228,7 +229,7 @@ index 4a3bbf5..d6d9e36 100644
 -import { ref, computed } from "vue";
 -import { Box, Text, useBoxMetrics } from "@vue-tui/runtime";
 +import { computed, shallowRef } from "vue";
-+import { Box, Text, useBoxMetrics, type Color } from "@vue-tui/runtime";
++import { Box, Text, useBoxSize, type Color } from "@vue-tui/runtime";
  import { sparkline } from "../lib/sparkline";
  import { theme } from "../theme";
 
@@ -244,7 +245,7 @@ index 4a3bbf5..d6d9e36 100644
 -const bm = useBoxMetrics(box);
 -const line = computed(() => sparkline(props.values, Math.max(1, bm.width.value || 24), props.max));
 +const box = shallowRef<InstanceType<typeof Box> | null>(null);
-+const size = useBoxMetrics(box);
++const size = useBoxSize(box);
 +const width = computed(() => size.value?.width || 24);
 +const line = computed(() => sparkline(props.values, Math.max(1, width.value), props.max));
  </script>
@@ -309,7 +310,7 @@ index 215b2b3..6b4d224 100644
 --- a/src/main.ts
 +++ b/src/main.ts
 @@ -36,8 +36,8 @@ if (args.includes("--json")) {
-   process.stdout.write(renderToString(Snapshot, { width: columns, height: Infinity }) + "\n");
+   process.stdout.write(renderToString(Snapshot, { columns }) + "\n");
    process.exit(0);
  } else {
 -  // alternateScreen: take over the terminal on a clean buffer (like btop/htop)
