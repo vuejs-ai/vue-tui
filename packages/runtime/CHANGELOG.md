@@ -12,7 +12,7 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 - Added Box-rooted support for Vue's built-in `v-show`. Hidden subtrees remain mounted and reactive while leaving Yoga layout, paint, targeted focus availability, Box size, and Runtime-private Fullscreen hit testing; showing again restores the Box's current layout and paint properties.
 - Added independent terminal-default Text color selection through `color="default"` and `backgroundColor="default"`. Each channel inherits when omitted, selects the terminal default for its subtree when set to `"default"`, and restores the enclosing resolved value afterward without changing the other channel or independent modifiers.
 - Added the supported `@vue-tui/runtime/inline` entry with the `Static` terminal-history primitive.
-- Added narrow `@vue-tui/runtime/devtools` and `@vue-tui/runtime/testing` integration entries so official and third-party tooling use the same supported Runtime boundaries.
+- Added narrow `@vue-tui/runtime/devtools` and `@vue-tui/runtime/testing` bridges for the official Vite and testing packages. They remain exported on the current branch, but are not selected public Runtime contracts and must move behind version-coupled internal package paths before release; no third-party replacement guarantee is intended.
 
 ### Changed
 

@@ -1,6 +1,6 @@
 # Public API contract & surface
 
-> **Status:** inventory and enforcement record for the public contract currently implemented on the branch. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is authoritative for Yunfei's expressed judgments; the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) records implementation results and evidence. Every current root export and package subpath below has a Runtime-only justification and package-consumer evidence.
+> **Status:** inventory and enforcement record for the public contract currently implemented on the branch. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is authoritative for Yunfei's expressed judgments; the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) records implementation results and evidence. The root and `/inline` contract below match the accepted target. The current `/devtools` and `/testing` package exports remain implemented evidence but were reclassified on 2026-07-24 as privileged internal protocols for the official tooling packages; their internalization is an explicit pending TODO rather than a supported public contract.
 
 What is — and isn't — part of `@vue-tui/runtime`'s public contract, and how the contract is
 tested. The principles and capability work used to choose future APIs live in
@@ -52,15 +52,18 @@ Because it is contract, it is **tested, not merely shipped**:
 
 ## Repository internals are not a package contract
 
-`@vue-tui/runtime/internal` is not a package export. Repository tests may build a private `dist/internal.mjs` bridge so their symbols share identity with the built public bundle, but that file is excluded from the published tarball and cannot be imported through the package export map. Supported integration boundaries are the narrow `/devtools` and `/testing` subpaths; first-party packages use the same supported entries available to third parties.
+There is no broad `@vue-tui/runtime/internal` package export. Repository tests may build a private `dist/internal.mjs` bridge so their symbols share identity with the built public bundle, but that file is excluded from the published tarball and cannot be imported through the package export map.
 
-`@vue-tui/runtime/devtools` exports only `connectDevtools(hot)`, where `hot` structurally supplies the `on` and `send` operations Runtime's private HMR state needs. `@vue-tui/runtime/testing` exports only the one-shot `createTestHostBridge()` and its three named bridge/frame types for accepted commit observation, production-parser input, deterministic suspension, and resume. `@vue-tui/runtime/package.json` is the supported metadata path used to locate the version-matched shipped visual-development guide; metadata resolution is supported without promising every JSON field as an independent API.
+The branch currently exports `@vue-tui/runtime/devtools` with `connectDevtools(hot)` and `@vue-tui/runtime/testing` with `createTestHostBridge()` plus its three bridge/frame types. Their behavior remains necessary because the separately published official Vite and testing packages must coordinate with private Runtime-owned HMR state, accepted commits, production-parser input, deterministic suspension, and resume. Their classification is superseded: they are not public third-party integration contracts. The implementation TODO will move them behind narrowly named internal package entries, update the official packages to use those privileged protocols, and change the package and consumer guards accordingly. Node package exports cannot make an entry importable only by selected packages, so a shipped internal entry remains unsupported by contract even when another consumer can technically resolve it.
+
+`@vue-tui/runtime/package.json` remains a supported metadata path used to locate the version-matched shipped visual-development guide; metadata resolution is supported without promising every JSON field as an independent API.
 
 Placement rule for any export:
 
 - A user-facing contract whose semantics are common across supported rendering surfaces → the **main barrel**.
-- A user-facing contract that intentionally requires one explicit terminal surface or integration boundary → a documented **public subpath**, when that boundary is part of the selected design rather than a directory-organizing convenience.
-- Needed only by repository tests or implementation code → a source-private module, never a supported package path.
+- A user-facing contract that intentionally requires one explicit terminal surface → a documented **public subpath**, when that boundary is part of the selected design rather than a directory-organizing convenience.
+- A version-coupled protocol used only by official Runtime tooling → a narrow **internal package entry** when separate package publication requires one; it is not a supported public API.
+- Needed only inside Runtime or repository white-box tests → a source-private module or unpublished repository test barrel.
 
 Packaging/build internals (the `exports` field shape, `.mjs` paths, `dist` layout) are likewise
 **not** part of the behavioral/type contract and are not aligned to Ink — see the alignment-scope

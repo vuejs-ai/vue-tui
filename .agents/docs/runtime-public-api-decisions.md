@@ -2,7 +2,7 @@
 
 Judgments Yunfei actually expressed about the target public surface of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale. Entries record the judgment, not the full API contract; implementation detail and evidence live in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md) and the [current branch API contract](./api-contract.md). Edit entries in place; git keeps history.
 
-The current goal's three-layer direction is not duplicated here: `runtime ← use ← components`, with independent higher-level behavior in the optional, replaceable `@vue-tui/use` layer. This review also applies Yunfei's stated working constraint that higher layers use only public Runtime APIs and that Runtime expose only primitives requiring Runtime ownership. See [Package Layers & Dependency Direction](./package-layers.md).
+The current goal's three-layer direction is not duplicated here: `runtime ← use ← components`, with independent higher-level behavior in the optional, replaceable `@vue-tui/use` layer. This review also applies Yunfei's stated working constraint that application-facing higher layers use only public Runtime APIs and that Runtime expose only primitives requiring Runtime ownership. See [Package Layers & Dependency Direction](./package-layers.md).
 
 The branch's exact export inventory is guarded in code and tests. Entries below record only Yunfei's expressed judgments; evidence-determined technical conclusions belong in the re-audit and API contract rather than this ledger.
 
@@ -324,6 +324,17 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Limits:** Runtime retains private rendered-target lifecycle and ancestor-visibility mechanisms required by `useFocus(target)` and any separately accepted Runtime-owned behavior. This ruling does not decide `useBoxSize()` or imply that higher layers may import the private mechanism.
 - **Why:** Yunfei explicitly rejected `useBoxPresence()` and chose to review a Runtime-owned focus primitive instead.
 - **Source:** Yunfei, 2026-07-24, current focus review; no durable session URL is available, so this entry is the durable record.
+
+### Official devtools and testing bridges are privileged Runtime internals
+
+[VOUCHED @hyfdev 2026-07-24]
+
+- **Ruling:** `connectDevtools` and `createTestHostBridge`, together with the bridge-specific types used by the latter, are not supported `@vue-tui/runtime` public APIs. They are version-coupled internal protocols for the official `@vue-tui/vite` and `@vue-tui/testing` packages. Those packages may use privileged Runtime internals; Runtime does not promise that a third party can replace either official tool through the same bridge.
+- **Ruling:** The public-only replaceability requirement applies to application-facing higher layers such as a future `@vue-tui/use` and to composed components. It does not apply to official tooling adapters that must coordinate with Runtime-owned HMR state, accepted render commits, production input parsing, deterministic suspension, or other private host controls.
+- **Limits:** Separately published official packages still need a resolvable implementation channel. Node package exports cannot make an entry importable only by selected packages, so the implementation may ship a narrowly named internal entry that any consumer can technically import. Shipping such an entry does not make it a supported public contract. The implementation must avoid publishing a broad internal barrel merely for convenience, keep the official packages version-compatible with the Runtime protocol, and retain package-boundary tests that distinguish supported public entries from unsupported internal ones.
+- **Limits:** This decision does not authorize `@vue-tui/use`, `@vue-tui/components`, ordinary applications, or unrelated third-party packages to depend on Runtime internals. A future public tooling integration requires concrete external demand and a separately reviewed stable contract.
+- **Why:** Yunfei distinguishes replaceable application behavior from first-party tooling that is part of Runtime's own distribution. Treating every separately published official package as an equal-access third-party layer invented an unsupported extensibility requirement and incorrectly enlarged the minimum Runtime public API.
+- **Source:** Yunfei, 2026-07-24, current package-boundary correction after reviewing `/devtools`, `/testing`, and `/internal`; no durable session URL is available, so this entry is the durable record.
 
 ## Open
 
