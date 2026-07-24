@@ -28,6 +28,13 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Why:** Yunfei explicitly pointed out that vue-tui has too few users for missing application usage to be representative.
 - **Source:** Yunfei, 2026-07-23, current `Box` and `Text` review; no durable session URL is available, so this entry is the durable record.
 
+### Unsupported usage does not require dedicated validation
+
+- **Ruling:** An unsupported Runtime usage does not by itself require proactive detection or a dedicated error. Prefer the simplest sound implementation, and decide whether to add a guard only after weighing implementation complexity, Runtime-owned state and resource safety, diagnostic value for users, and future freedom for that specific case.
+- **Limits:** This does not ban explicit errors or require Runtime to accept malformed usage silently. A case may justify validation when it protects an invariant or materially improves user experience at reasonable cost. Conversely, an incidental current error, recovery path, or test for unsupported usage does not become a public contract merely because it exists.
+- **Why:** Yunfei expects implementation simplicity and explicit user-facing diagnostics to conflict in some cases. He rejected a blanket rule that unsupported behavior should receive defensive validation and instead chose a case-by-case trade-off.
+- **Source:** Yunfei, 2026-07-24, current `Static` unsupported-placement review; no durable session URL is available, so this entry is the durable record.
+
 ### Minimum public API is measured in concepts, not repetitive prop spelling
 
 [VOUCHED @hyfdev 2026-07-24]
