@@ -1,6 +1,6 @@
 # Fullscreen targeted pointer
 
-> **Status:** historical unstamped F6 contract. The current foundation removes the `/fullscreen` package entry and public pointer hooks because those APIs exposed routing and capture policy rather than a proven minimum Runtime primitive. Hit testing, capture, reporting, and cleanup remain private implementation evidence. The public-only composition evidence indicates that a future selected pointer journey can add a narrow Runtime-owned operation without redesigning current ownership or data flow; it does not alter the accepted `Static` contract, preselect that future operation's shape, or add a vouch. No VOUCHED stamp changed.
+> **Status:** historical unstamped F6 contract. The current foundation removes the `/fullscreen` package entry, public pointer hooks, and the private hit-testing, capture, reporting, and cleanup implementation because they encoded unselected routing policy. A future selected pointer journey must prove and add a narrow Runtime-owned operation; this record does not preselect that operation's shape or add a vouch. No VOUCHED stamp changed.
 
 ## Product boundary
 
@@ -20,7 +20,7 @@ The representative consumers do not protect the shipped API:
 
 - the first-party mouse example is a capability demo rather than a product journey;
 - the coding-agent example and the pinned mo Inline finder are keyboard-driven;
-- the pinned machud Fullscreen monitor is intentionally pointer-free and must acquire no mouse mode merely because it is Fullscreen;
+- a pointer-free Fullscreen monitor must acquire no mouse mode merely because it is Fullscreen;
 - Herdr supplies real click-to-focus, regional wheel, divider drag, right-click, selection, and terminal-pane forwarding needs, but it uses an application geometry router and cannot choose a Vue API shape;
 - at the F6 audit boundary, no repository production consumer used the then-current terminal-wide `useMouseInput()` hook.
 

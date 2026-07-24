@@ -1,6 +1,6 @@
 # Rendered-target lifetime
 
-> **Status:** unstamped completed F2 implementation contract. The internal mechanism, two original adapters, focused regressions, HMR, Vue 3.4 consumer, package declarations, full repository gates, fresh CI, real-PTY and visual-controller journeys, exact terminal restoration, and independent reviews are complete. F5 reused this mechanism for broad paint-derived geometry; the active Path 1 boundary now projects only direct-Box `useBoxSize()` while retaining the same internal target lifetime and rich geometry service. This record does not publish a generic target API or settle input, focus, caret, or pointer semantics.
+> **Status:** unstamped historical F2 implementation record with a smaller current use. Runtime retains rendered-target reconciliation only for `useFocus(target)` and direct-Box `useBoxSize()`. The broad F5 geometry service and pointer/caret adapters that once reused it were removed. This record does not publish a generic target API or settle future caret or pointer semantics.
 
 ## The problem
 

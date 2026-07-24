@@ -95,8 +95,8 @@ Complete text editors, terminal emulators, multiplexer backends, and game engine
 ## Current reference evidence
 
 - **Conversational:** the first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent).
-- **Inline workflow and finder:** the external vue-tui consumer [mo](https://github.com/liangmiQwQ/mo/tree/6bea467a6995f4912e809b417b5c56a3964cc556).
-- **Full-screen monitoring and control:** the external vue-tui consumer [machud](https://github.com/hyfdev/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36).
+- **Inline workflow and finder:** an application-owned selector for search, filtering, preview, selection, and shell handoff (scenario only; not external-consumer proof).
+- **Full-screen monitoring and control:** a live full-screen dashboard with optional one-shot document output (scenario only; not external-consumer proof).
 - **Terminal workspace:** [Herdr](https://herdr.dev/) and its pinned [source](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6). It is prior-art evidence for the scenario and responsibility boundary, not a vue-tui consumer.
 
 This list is evidence, not a permanent scenario ranking. Add or replace references when a stronger real consumer or deterministic journey gives the framework better product input.

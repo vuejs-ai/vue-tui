@@ -94,7 +94,7 @@ Ordinary implementation choices inside an accepted API and objective do not requ
 
 ## Reference regression journey for interaction-foundation candidates
 
-When a change could regress F3 through F8, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover prompt editing, bracketed paste, token streaming, approval accept and reject, long Inline and Fullscreen output, resize, modal focus restoration, Ctrl+C or normal exit, and exact raw, paste, mouse, cursor, alternate-screen, termios, and shell restoration.
+When a change could regress the current interaction foundation, use a scripted model adapter that emits deterministic events rather than calling a live provider. The reference journey should cover prompt editing, bracketed paste, token streaming, approval accept and reject, long Inline and Fullscreen output, resize, logical focus ownership, Ctrl+C or normal exit, and exact raw mode, bracketed-paste mode, Kitty keyboard mode, generic cursor visibility, alternate-screen, termios, and shell restoration. A future mouse or semantic-caret feature must define and add its own journey rather than inheriting the removed F6-F8 acceptance list.
 
 Run the same state machine with two view adapters:
 

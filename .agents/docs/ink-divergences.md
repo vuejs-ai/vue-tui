@@ -236,7 +236,7 @@ remain compatible; vue-tui only adds accepted inputs, contexts, or capabilities.
   `localRefs` equals the shared `refs`. Test: `raw-mode-lifecycle.test.tsx` ("two apps
   sharing one stdin both receive input..."). KEEP. [VOUCHED @hyfdev]
 - **Completed F3.1–F3.4 plus public migration (unstamped):** one weakly registered framework ingress replaces the per-controller physical listeners without changing the vouched ordered multicast result. It decodes bytes, parses structural control-sequence and paste events, removes owned query replies, normalizes each event once into the same immutable semantic fact for all eligible app controllers, and carries each app's fact-start route and selected-topology activations through split framing. Distinct facts dispatch serially and recapture after the preceding callback even when Node batches them into one chunk; plain text remains one fact when the wire provides no finer boundary. Public `useInput` consumes one cached readonly key, text, paste, or uninterpreted projection, and every captured global handler returns an explicit route result; `usePaste` and public `Key` are removed. The private policy and live topology runtime execute global, selected-boundary, supplied-focus-path, delayed-default, and optional-external layers in the actual controller while keeping action, continuation, defaults, and external permission independent. The bridge does not publish or select focus topology. Product-boundary, prior-art, implementation, and real nested-PTY evidence select semantic facts plus normalized UTF-8; arbitrary original-byte recovery is deliberately not promised. Raw state counts total logical references separately from unsuspended references, so suspending one app cannot release the shared terminal or listener while another remains active. The vouched direct-stdin contract retains the actual mounted stream as a raw escape hatch without framework event or safe routing-composition guarantees. Managed non-TTY exclusion, removal of public raw-mode controls, and semantic-demand ownership of raw/listener/ref/Kitty state are implemented. See [normalized input and routing](./input-routing.md).
-- **Current public supersession (unstamped, 2026-07-24):** the shared ingress, normalization, multi-app ownership, suspension, restoration, and mounted-stream identity remain implementation mechanisms. The old public uninterpreted projection, route result, selected topology, delayed default, and removal of raw controls described above are superseded by the current broadcast `type`/nested-key surface, default-false `exitOnCtrlC`, and complete per-hook `useStdin()` raw hold.
+- **Current implementation supersession (unstamped, 2026-07-24):** the shared ingress, normalization, multi-app ownership, suspension, restoration, and mounted-stream identity remain implementation mechanisms. The selected-boundary/default/external route topology and policy were removed, not merely hidden. One small private registry now captures active broadcast subscribers per parser-defined fact and acquires Runtime-owned semantic input demand. The public surface is the `type`/nested-key event, default-false `exitOnCtrlC`, and complete per-hook `useStdin()` raw hold.
 
 ## Vue API and Mental Model Divergences
 
@@ -259,11 +259,11 @@ current-props model, or API conventions.
   snapshot: it would freeze at setup time. vue-tui returns a **`shallowRef`** whose `.value`
   updates and re-renders the template; read these as `.value`. Every stateful composable
   follows this — `useFocusManager().focusedTarget` is a readonly ref to the exact opaque target, while the
-  current layout primitives return smaller refs directly: `useLayoutWidth()` returns
+  current layout primitives return refs directly: `useLayoutWidth()` returns
   `Readonly<Ref<number>>`, `useViewportHeight()` returns `Readonly<Ref<number>> | null` after a
-  one-time bounded-host check, and `useBoxSize()` returns `Readonly<Ref<BoxSize | null>>`. An empty single-ref state
-  holds `null` (Vue's convention for an empty ref: a template ref is `ref<T | null>(null)`),
-  where Ink's plain value is `undefined`.
+  one-time bounded-host check, and the vouched `useBoxMetrics()` target returns readonly refs for
+  `width`, `height`, parent-relative `left`, parent-relative `top`, and `hasMeasured`. The current
+  implementation still exposes the superseded nullable `useBoxSize()` experiment.
 - **Why:** the two frameworks track a changing value differently. React reads the newest
   value by re-running the hook; Vue wraps it in a ref the template subscribes to. This is
   the general rule, not a per-API choice. The focused-target ref is one instance. This follows Vue's philosophy: changing state is exposed as a reactive source,
@@ -336,13 +336,13 @@ current-props model, or API conventions.
 - **vue-tui:** a Static present in the current Runtime render tree participates immediately regardless of ancestor or direct `v-show`. `v-if` and ordinary mount or unmount determine whether the history producer exists. The same mounted-identity rule applies to live Inline output and `renderToString()`.
 - **Why:** Yunfei chose the minimum Vue contract: `v-show` does not unmount a component, while Static is an irreversible history-output boundary rather than a layout node. Making layout visibility delay permanent output would introduce a separate policy and make a mounted producer's behavior depend on unrelated ancestor styling.
 
-#### Public Box size follows a direct Vue Box ref
+#### Public Box metrics follow a direct Vue Box ref
 
 - **Ink:** `measureElement(node: DOMElement)` and `useBoxMetrics(...)` receive Ink's public host `DOMElement` ref and read its Yoga node.
-- **vue-tui:** `useBoxSize()` receives a Vue ref bound directly to the exported Vue `Box` component in the current app. The private F2 resolver follows that instance's current rendered host through replacement, but the public type does not expose or accept raw component values, getters, vue-tui's internal host-node, or Yoga types. A caller can wrap a derived target in `computed()` without Runtime help. A Text ref, arbitrary component ref, or foreign-app Box is rejected.
-- **Why:** a Vue template ref naturally yields a component instance, while current application evidence needs only Box width and height. Restricting the type to `InstanceType<typeof Box>` avoids promising bounding rules for fragmented nested Text or multi-root components. Accepting renderer nodes would make a private implementation type into a second public target model. This is a Vue-idiomatic replacement, not an additive Ink-compatible superset: raw Ink-style host-node input and Ink's imperative Yoga read are deliberately unsupported.
+- **Vouched vue-tui target:** `useBoxMetrics()` receives a readonly Vue ref bound directly to the exported Vue `Box` component in the current app and returns readonly Vue refs for `width`, `height`, parent-relative `left`, parent-relative `top`, and `hasMeasured`. The private rendered-target resolver follows that instance's current rendered host through replacement, but the public type does not expose or accept raw component values, getters, vue-tui's internal host-node, or Yoga types. A Text ref, arbitrary component ref, or foreign-app Box is rejected.
+- **Why:** a Vue template ref naturally yields a component instance, while one Runtime-owned parent-relative rectangle is a complete and stable Yoga layout fact. Restricting the type to `InstanceType<typeof Box>` avoids promising bounding rules for fragmented nested Text or multi-root components. Accepting renderer nodes would make a private implementation type into a second public target model. vue-tui deliberately discards Ink's imperative `measureElement()` because `useBoxMetrics()` covers the correct application paths without adding a second timing and absence contract.
 
-> **Unstamped lifetime note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. `useBoxSize()`, `useMouseEvent()`, and `useMouseDrag()` use that mechanism; the former `useDraggable()` supplied earlier evidence. See [rendered-target-lifetime.md](./rendered-target-lifetime.md).
+> **Unstamped lifetime note:** component-instance support cannot stop at reading `$el` when the ref changes. The public component instance can remain identical while its rendered root moves through `null`, insertion, keyed replacement, removal, or a template-only HMR rerender; Vue 3.4 can also leave a stale non-null ref to an already detached host. The renderer reconciles internal ref-bound registrations by resolved host identity after every commit and invalidates removed subtrees synchronously. The current `useBoxSize()` experiment, its vouched `useBoxMetrics()` replacement, and `useFocus(target)` require that mechanism; the old pointer and caret adapters were removed. See [rendered-target-lifetime.md](./rendered-target-lifetime.md).
 
 #### Focus has a self handle and an optional Vue rendered target
 
@@ -672,9 +672,11 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** `useStdin()` publicly returns the selected `NodeJS.ReadStream`, `setRawMode(boolean)`, and `isRawModeSupported`. `useInput`, `useFocus`, and `usePaste` share one anonymous raw-mode count. This supplies a complete component-level escape, but an unmatched public `false` can decrement another consumer's hold, and enabling managed input changes the stream encoding.
 - **vue-tui:** the accepted public shape likewise returns the selected stream, raw-mode capability, and a boolean setter, with `stdin` widened to the accepted Node `Readable` protocol. Each Vue hook call owns one idempotent logical hold, scope disposal releases it automatically, and managed `useInput()` owns a separate internal hold. One caller therefore cannot disable another. Physical raw mode and ref state remain Runtime-coordinated across shared streams, suspension, resume, HMR, failure, and teardown. Raw-only use starts no Runtime parser, Kitty negotiation, or bracketed-paste reporting; direct observation remains outside safe composition guarantees with `useInput()`.
 - **Why:** retaining only the stream was an incomplete middle state: it neither supplied Ink's usable low-level input capability nor enforced a managed-only model like Bubble Tea or Textual. The complete escape lets a third-party component implement alternative low-level behavior without Runtime internals, while per-hook ownership preserves Runtime's terminal restoration and prevents the interference that caused the controls to be removed experimentally.
-- **History:** the former mount-wide `rawMode: "always"` policy remains removed because it could keep an input-free process alive. The later stream-only `useStdin()` experiment and removal of its controls are superseded by the vouched target. The internal semantic-demand and raw reconciliation mechanisms remain reusable; public implementation is pending.
+- **History:** the former mount-wide `rawMode: "always"` policy remains removed because it could keep an input-free process alive. The later stream-only `useStdin()` experiment and removal of its controls are superseded by the implemented vouched target. The internal semantic-demand and raw reconciliation mechanisms serve `useInput()` and the independently owned public raw holds.
 
 ### `useCursor()` re-asserts the declared caret every commit (persistent declaration)
+
+> **Current status:** historical vouched comparison whose assumptions were superseded. The public `useCursor()` and later `useCaret()` contracts, semantic caret controller, coordinate declaration, position-aware writer state, and reassertion mechanism are removed. Runtime retains only generic cursor hide/show ownership and restoration. The text below explains an earlier design choice; it is not current implementation guidance.
 
 - **Ink:** `useCursor`'s no-deps `useInsertionEffect` (`use-cursor.ts:27-32`) re-marks the
   cursor dirty only when **the cursor's React component re-renders**, and log-update emits
@@ -719,7 +721,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   real terminal apps showed Ink itself zombies the caret there, so matching Ink was matching
   a defect, not parity.
 
-**Unstamped F5 supersession:** the vouched section above records why the writer must reassert the selected caret after every repaint; that mechanism remains. F5 has now removed the public targetless `useCursor()` setter and `CursorPosition` type rather than preserving the historical `{x,y}` authoring conclusion. `useCaret(target, { focus, position })` accepts an element-local rendered cell, one per-app arbiter selects the effective F4 owner after paint, and the private mode writer reasserts only that validated surface result. Hidden, clipped, detached, unavailable, invalid, and outside requests produce no physical terminal-cursor placement instead of being clamped. This supersession is unstamped and does not alter the historical VOUCHED text.
+**Current unstamped supersession:** F5 first replaced the targetless setter with a focus-bound caret, but the minimum-foundation audit removed that second design as well. No semantic caret declaration or reassertion mechanism remains. This supersession does not rewrite the historical VOUCHED text above; it records that its premises no longer govern the current implementation.
 
 ### Resize unconditionally cancels the pending trailing commit
 
@@ -754,27 +756,24 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   renderer-wide tail slice.
 - **Ownership:** before the first visible managed output, vue-tui emits one NEL on the main
   screen. This leaves a pre-existing partial row untouched and gives the relative writer a row
-  boundary it can own; an empty app emits no initial NEL. Static and coordinated stdout/stderr
-  output clear only the known live region, append bytes once, finish an unterminated TTY payload
-  with NEL, and redraw below it. On TTY destinations the coordinated helpers retain styled lines
-  while stripping cursor/erase and other geometry-changing control bytes. Redirected stderr and
-  non-TTY streams remain byte-exact; returned raw streams and direct process writes stay outside
-  the guarantee. After `app.clear()` erases the live region, vue-tui forgets that physical
-  baseline so a repeated clear cannot walk upward into pre-app history.
+  boundary it can own; an empty app emits no initial NEL. Static and Runtime-coordinated patched
+  console output clear only the known live region, append bytes once, finish an unterminated TTY
+  payload with NEL, and redraw below it. On TTY destinations Runtime retains styled lines while
+  stripping cursor/erase and other geometry-changing control bytes. Redirected stderr and non-TTY
+  streams remain byte-exact; returned raw streams and direct process writes stay outside the
+  guarantee.
 - **Resize and teardown:** after a real Inline dimension change, terminal reflow makes the old
   logical-line count untrustworthy. vue-tui moves to the resized viewport bottom, creates a new
   row, resets writer bookkeeping **without erasing**, and paints a fresh bounded region; the old
-  frame is immutable history. Teardown first returns a declared application caret to the region
-  bottom; a full-height final frame then advances once so subsequent shell output begins below it.
-  Framework-generated Inline controls emit no ED2, ED3, or Home.
+  frame is immutable history. A full-height final frame advances once so subsequent shell output
+  begins below it. Framework-generated Inline controls emit no ED2, ED3, or Home.
 - **Escape hatch:** destructive main-screen control remains session-external: an application may
   clear before mount or after teardown, or choose Fullscreen for arbitrary viewport repaint.
   There is no ordinary `preserveHistory: false` policy or mounted destructive reset.
 - **Evidence:** `inline-overflow-comparison.test.ts`, `inline-resize-history.test.ts`,
-  `inline-clear-history.test.ts`, `resize-clear.test.tsx`, deterministic host screen tests,
-  geometry-safe text/coordinator tests, and frame-writer reset tests cover pre-app scrollback,
-  partial rows, repeated clear, overflow, width/height resize, Static, coordinated output,
-  declared-caret teardown, and the post-app line. This deliberately
+  `resize-clear.test.tsx`, deterministic host screen tests, output-coordinator tests, and
+  frame-writer reset tests cover pre-app scrollback, partial rows, overflow, width/height resize,
+  Static, Runtime-coordinated output, generic cursor restoration, and the post-app line. This deliberately
   replaces Ink's overflow behavior rather than treating its ED3 fallback as compatibility.
 
 ### Fullscreen owns a fixed viewport instead of reusing the inline writer
@@ -785,8 +784,8 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `console.log`, and patched `console.error` writes move the dynamic frame down one more row each.
   With `debug: true`, rerenders append in place (`DYNAMICFRAME-1FRAME-2`) instead of replacing the
   alternate-screen surface.
-- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport. Yoga receives both dimensions, and paint plus hit testing clip to them. After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, `app.clear()`, uncertain physical output state, and coordinated stdout, stderr, or patched-console output clear, home, and repaint the complete viewport. The renderer hides the physical cursor before output and restores the selected focus-bound semantic caret afterward. `Static` from `@vue-tui/runtime/inline` is rejected on presence before history bytes, dynamic output, observation, or a new viewport frame. If setup already acquired terminal leases, the ordinary fatal path restores them before reporting. Deterministic observation does not change physical output.
-- **Why:** targeted mouse events, the resolved caret surface point, and Yoga layout all use viewport coordinates. If output outside the tree can move the visible frame while the hit map remains at row 0, clicking the visible element misses and clicking the log line can trigger it. Treating Fullscreen as an owned fixed surface keeps all four coordinate systems identical and prevents tall content from scrolling the alternate buffer. Absolute row replacement reduces ordinary output without changing that contract and is independent of `incrementalRendering`.
+- **vue-tui:** effective Fullscreen visual rendering owns the current `columns × rows` viewport. Yoga receives both dimensions and paint clips to them. After a valid baseline, ordinary consecutive frames replace only changed rows through absolute cursor addressing. Initial paint, dimension changes, continuation, uncertain physical output state, and coordinated stdout, stderr, or patched-console output repaint the complete viewport as needed. The renderer hides the physical cursor while it owns the frame and restores generic cursor visibility on teardown. `Static` from `@vue-tui/runtime/inline` is rejected on presence before history bytes, dynamic output, observation, or a new viewport frame. If setup already acquired terminal leases, the ordinary fatal path restores them before reporting. Deterministic observation does not change physical output.
+- **Why:** Yoga layout, clipping, row replacement, and coordinated output must agree on one fixed origin. Treating Fullscreen as an owned viewport prevents tall content or external coordinated logs from scrolling the alternate buffer and makes row diffing well-defined. Absolute row replacement reduces ordinary output without changing that contract and is independent of the private `incrementalRendering` test control.
 - **Boundary:** direct `process.stdout.write()` / `process.stderr.write()` calls bypass the runtime
   coordinator and cannot be repaired automatically. Introduced 2026-07-11 and completed for live mounts in F1.4.
   Tests: `fullscreen-origin.test.ts`; full contract:
@@ -849,7 +848,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** when a wide grapheme straddles the left edge of an `overflow:hidden` clip, `slice-ansi` drops that grapheme whole and Ink resets the write origin to the clip edge. Any following text is therefore shifted left over the dropped source cells. For `"中x"` written at `x=-1`, Ink v7.0.4 renders `"x"` at column 0.
 - **vue-tui:** drops the same straddling grapheme whole but advances the write origin to the first retained grapheme's original source column. The same example renders `" x"`: column 0 stays blank and `x` remains at column 1.
-- **Why:** clipping decides which source cells are visible; it must not change the layout coordinates of cells that remain visible. Reflowing retained text makes paint coordinates disagree with layout, geometry, hit testing, and caret placement. Preserving the gap keeps one stable surface coordinate for each painted source cell.
+- **Why:** clipping decides which source cells are visible; it must not change the layout coordinates of cells that remain visible. Reflowing retained text would move surviving cells away from their layout positions. Preserving the gap keeps one stable surface coordinate for each painted source cell.
 - **Boundary:** horizontal clipping still runs before `<Transform>`. A transform receives the clipped substring, but its output begins at that retained substring's original column. Ordinary narrow-character clipping is unchanged, and a wide grapheme that straddles the right edge is still omitted whole.
 - **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers plain wide and ZWJ graphemes at both viewport edges. [`private-transform.test.ts`](../../packages/runtime/src/paint/private-transform.test.ts) proves that the raw private Transform receives the clipped span while the following text keeps its source column. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in [`fullscreen-origin.test.ts`](../../packages/runtime-tests/integration/pty/fullscreen-origin.test.ts) and is available to the visual review controller. The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
 
@@ -857,7 +856,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 
 - **Ink:** Output replay uses only the most recently pushed component clip, then applies `Transform` without clipping the callback result again. A larger inner `overflow:hidden` region or an expanding transform can therefore reopen cells already excluded by a narrower outer overflow ancestor.
 - **vue-tui:** Output replay intersects the complete active overflow stack, then intersects the terminal viewport boundary. `Transform` still receives the pre-clipped source span, but its result is contained by that same intersection. A descendant can narrow its visible region but cannot expand an ancestor-owned region.
-- **Why:** overflow is a containment boundary. Paint, semantic geometry, and later targeted pointer selection must agree on the same ancestor intersection; allowing paint to escape while hit testing remains clipped creates visible cells that no semantic target owns. This is an unstamped F5 implementation decision.
+- **Why:** overflow is a containment boundary. A descendant must not repaint cells an ancestor excluded; otherwise visible output disagrees with layout containment. This retained paint rule no longer depends on the removed semantic-geometry or pointer mechanisms.
 - **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers the retained public vertical ancestor intersection. [`private-transform.test.ts`](../../packages/runtime/src/paint/private-transform.test.ts) uses raw private hosts to cover a width-eight inner clip inside a width-four ancestor, post-transform containment, and constant plus appending Transform results at the ancestor's exclusive right edge. These Transform cases preserve internal paint evidence without making Transform or horizontal-overflow props public again.
 
 ### Historical: `measureElement` coerced a non-finite pre-layout dimension to `0`
@@ -867,7 +866,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   `?? 0` does **not** catch `NaN` (`NaN ?? 0 === NaN`), so a pre-layout / mis-timed read returns
   `{ width: NaN, height: NaN }`.
 - **Historical vue-tui behavior:** the former imperative API coerced a non-finite computed dimension to `0`, so a pre-layout read stayed finite. This was safer than leaking `NaN`, but `0` still overloaded a legitimate zero-size result, a detached target, and a not-yet-painted target.
-- **Current foundation disposition:** `measureElement()` and the later broad `useElementGeometry()` projection are removed. `useBoxSize()` publishes only a direct same-app Box's last accepted full size or `null`; a real zero-size Box remains distinguishable as `{ width: 0, height: 0 }`. The earlier sentinel and geometry-state behavior remains decision history, while the accepted-paint authority stays private.
+- **Current implementation and target:** `measureElement()` and the later broad `useElementGeometry()` projection are removed. The vouched target replaces the experimental nullable `useBoxSize()` with `useBoxMetrics()`, whose `hasMeasured` ref distinguishes unavailable measurement from a true zero-sized Box while also restoring parent-relative `left` and `top`. The imperative API stays removed because the hook covers its correct application paths; the old timing and sentinel behavior is not restored.
 
 ### Historical: out-of-type style values were forwarded instead of defensively coerced
 

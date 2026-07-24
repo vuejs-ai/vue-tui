@@ -1,6 +1,6 @@
 # API foundation roadmap
 
-> **Status:** historical unstamped execution ledger. It records the F1–F8 and R1–R17 classifications made on the earlier candidate, but the [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes its unstamped “Done,” “Closed,” and “complete foundation” conclusions. The earlier mechanisms, tests, and journey results remain evidence; the narrower implemented foundation is documented in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md), and the accepted `Static` contract lives in the decision ledger. This historical record does not define accepted target decisions.
+> **Status:** historical unstamped execution ledger. It records the F1–F8 and R1–R17 classifications made on the earlier candidate, but the [Runtime public API decision ledger](./runtime-public-api-decisions.md) supersedes its unstamped “Done,” “Closed,” and “complete foundation” conclusions. Many described route, geometry, caret, pointer, selection, clipboard, and accessibility implementations were later removed; their tests and journey results are historical evidence, not a claim that the code remains. The narrower implemented foundation is documented in the [Runtime public foundation re-audit](./runtime-public-foundation-reaudit.md), and the accepted `Static` contract lives in the decision ledger.
 
 ## Why this exists
 

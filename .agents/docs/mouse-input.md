@@ -1,6 +1,6 @@
 # Mouse input — design & decision record
 
-> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath. Public-only composition evidence leaves target-bound pointer input as a future additive feature behind a narrow Runtime-owned operation if a selected journey requires it; this conclusion does not alter the accepted `Static` contract, preselect the pointer operation's public shape, or add a vouch.
+> **Current status:** historical mouse design evidence only. The current branch exposes no mouse hook or `/fullscreen` subpath and removes the old decoder, controller, targeting, capture, reporting, and test-host implementations. Unsolicited complete SGR mouse reports are ignored before they can become public key or text input. A future target-bound pointer feature must prove and add a narrow Runtime-owned operation from a real journey; this conclusion does not alter the accepted `Static` contract, preselect the operation's public shape, or add a vouch.
 
 > The public mouse-input API for `@vue-tui/runtime`: the event shape, the author surface, the
 > dispatch model, and how it is gated to full-screen apps. Tracking:

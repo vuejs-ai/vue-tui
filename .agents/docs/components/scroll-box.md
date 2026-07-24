@@ -95,7 +95,7 @@ The result has one exact meaning:
 - the result is synchronous so application code can immediately decide whether to call another scroll owner; it is not a `useInput()` return value;
 - it reports whether the effective top rendered row changed after flooring and clamping, including partial movement toward an edge;
 - `false` covers the top or bottom edge, the same absolute row, zero movement, values whose floored result is the same row, and a non-overflowing viewport;
-- Page Up/Down need no new component method: the application binds `useBoxSize()` directly to the wrapper Box, reads its accepted `height`, and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
+- Page Up/Down need no new component method: the application binds `useBoxMetrics()` directly to the wrapper Box, reads its accepted `height`, and passes that cell count to `scrollByLines()`, receiving the same result as line movement;
 - the result is not an input propagation result: current `useInput()` ignores handler returns, so an application that owns nested keyboard policy explicitly tries the inner ScrollBox and calls the outer owner only when the inner method returns `false`;
 - the component remains the sole offset and sticky-following owner and still acquires no keyboard or mouse input.
 
@@ -116,8 +116,8 @@ The selected boolean is the smallest conventional encoding of the one fact every
 Add these when a real need shows up — shaped to _not_ leak internal state:
 
 - **Page scrolling.** A "page" needs the viewport height (how many lines fit). That is a _size_, so
-  a consumer can bind public `useBoxSize()` directly to the Box that wraps `ScrollBox`, read
-  `size.value?.height`, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
+  a consumer can bind public `useBoxMetrics()` directly to the Box that wraps `ScrollBox`, read
+  `metrics.height.value` when `metrics.hasMeasured.value` is true, then call `scrollByLines(height)`. `ScrollBox` may also offer a convenience method
   (`scrollByPage(pages)`) — that is fine, it's sugar over a public capability, not a leak. Don't
   bake a fixed "page = half / full viewport" policy into the core; let the consumer (or a `pages`
   argument) decide the size.
@@ -133,11 +133,11 @@ Add these when a real need shows up — shaped to _not_ leak internal state:
 
 ## Implementation notes
 
-- The viewport and content refs bind directly to public `Box` instances and read full accepted heights through `useBoxSize()`. A fully clipped Box still reports that full size. ScrollBox caches the last non-null heights so an accepted hidden or detached state does not reset a non-sticky scroll position; Runtime itself retains the last accepted same-target size through suspension and failed output.
+- The viewport and content refs bind directly to public `Box` instances and read full accepted heights through `useBoxMetrics()`. A fully clipped Box still reports that full size. ScrollBox caches the last measured heights so an accepted hidden or detached state does not reset a non-sticky scroll position; Runtime itself retains the last accepted same-target metrics through suspension and failed output.
 - Scrolling is `scrollTop` state applied as a negative `marginTop` on the inner content box, while
   the outer box clips with `overflowY: "hidden"`.
 - Sticky-bottom: while sticky, content growth follows the bottom; after the app scrolls up (via the
   handle) growth preserves the current viewport. Any scroll that lands at `maxScroll` (incl.
   `scrollToBottom`) re-arms sticky.
 - The two accepted size refs are reconciled in one batched watcher, so ScrollBox never clamps against one old and one new height during the same paint commit.
-- Built only from the runtime public barrel (`Box`, `useBoxSize`); no `@vue-tui/runtime/internal`.
+- Built only from the runtime public barrel (`Box`, `useBoxMetrics`); no `@vue-tui/runtime/internal`.

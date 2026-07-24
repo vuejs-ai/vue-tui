@@ -1,6 +1,6 @@
 # Semantic geometry and caret
 
-> **Status:** historical unstamped F5 record. Its accepted-paint geometry generations, grapheme provenance, rendered-target lifetime, clipping data, caret arbitration, writer transaction, and failure recovery remain necessary internal mechanisms. The active Runtime-foundation re-audit supersedes the broad public `useElementGeometry()` contract with Path 1's direct-Box size projection; Path 4 separately re-derives the public text and caret contract. No VOUCHED stamp is implied.
+> **Status:** historical unstamped F5 record. The active Runtime-foundation re-audit supersedes the broad public `useElementGeometry()` contract with Path 1's direct-Box size projection and removes the semantic caret controller. Runtime retains rendered-target lifetime, accepted Box-size publication, generic cursor visibility, frame transactions, and failure recovery because current contracts use them. It removed geometry fragments, Text provenance, clipping projections, caret slots, caret arbitration, and position-aware writer state. Everything below is decision history rather than a description of the current implementation. No VOUCHED stamp is implied.
 
 ## Superseding Path 1 measurement boundary
 
@@ -13,7 +13,7 @@ const size = useBoxSize(box); // Readonly<Ref<BoxSize | null>>
 
 The target must be directly bound to the exported `Box` in the current vue-tui app. A non-Box or foreign-app target throws. The frozen non-null value is only the last accepted full width and height: it does not expose parent or surface coordinates, fragments, clipping provenance, paint order, or caret slots. Before accepted paint, after detach or retarget, and while hidden, the value is `null`; a zero-sized Box is `{ width: 0, height: 0 }`, while a fully clipped Box retains its full size. Failed output and suspension retain the last accepted size for the same target. Screen-reader and string hosts have no visual Box measurement and return `null`.
 
-`useElementGeometry()`, `CellRect`, `ElementGeometryFragment`, `ElementGeometry`, and `UseElementGeometryReturn` are no longer public. Runtime retains the richer private geometry service for caret, mouse, clipping, and text mapping. Everything below records the earlier public experiment and the implementation evidence it produced; its authoring examples, naming selection, and completion claims are historical rather than current guidance.
+`useElementGeometry()`, `CellRect`, `ElementGeometryFragment`, `ElementGeometry`, and `UseElementGeometryReturn` are no longer public. The richer private geometry service was also removed; the current service records only accepted Box width and height for `useBoxSize()`. Everything below records the earlier public experiment and the implementation evidence it produced; its authoring examples, naming selection, and completion claims are historical rather than current guidance.
 
 ## User capability
 

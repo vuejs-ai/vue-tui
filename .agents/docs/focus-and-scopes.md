@@ -1,6 +1,6 @@
 # Logical focus and focus scopes
 
-> **Status:** historical unstamped F4 record. The [vouched minimum `useFocus()` decision](./runtime-public-api-decisions.md#usefocus) supersedes both this document's scope/routing/manager design and the later proposal to remove Focus entirely. Runtime now retains only per-app unique ownership plus optional component-boundary validity; applications compose input activation, traversal, scopes, restoration, and string lookup above that primitive. The current `useInput()` surface is a broadcast subscription with ignored returns, and `exitOnCtrlC` is a default-false mount option rather than the historical preventable delayed default. The renderer and routing results below remain historical implementation evidence, not current authoring guidance.
+> **Status:** historical unstamped F4 record. The [vouched minimum `useFocus()` decision](./runtime-public-api-decisions.md#usefocus) supersedes both this document's scope/routing/manager design and the later proposal to remove Focus entirely. Runtime now retains only per-app unique ownership plus optional component-boundary validity; applications compose input activation, traversal, scopes, restoration, and string lookup above that primitive. The current `useInput()` surface is a broadcast subscription with ignored returns, and `exitOnCtrlC` is a default-false mount option rather than the historical preventable delayed default. The scope, manager, traversal, and focus-selected routing implementation described below was removed and remains only decision history.
 
 ## Product problem
 
@@ -22,7 +22,7 @@ Observable consequences are now reproduced rather than inferred:
 - focused key, text, and paste input still requires a separate global `useInput` plus manual `isFocused` wiring;
 - each active registration owns a legacy raw lease even though F3's selected topology is the correct semantic-input owner.
 
-The correctly configured pre-cutover focus suite passed 48 tests. Those tests proved the shipped Ink-shaped baseline; they were not reasons to preserve it under the experimental API policy. The first-party examples and pinned `mo` and `machud` contained no production use of `useFocus` or `useFocusManager`, so replacing the exact surface did not conflict with a known real consumer.
+The correctly configured pre-cutover focus suite passed 48 tests. Those tests proved the shipped Ink-shaped baseline; they were not reasons to preserve it under the experimental API policy. The first-party examples contained no production use of `useFocus` or `useFocusManager`, so replacing the exact surface did not conflict with a known in-repository consumer.
 
 ## Evidence from the active scenarios
 
@@ -42,7 +42,7 @@ An unknown modal input must not reach the composer or an external terminal owner
 
 ### Finder
 
-Pinned `mo` keeps query editing, enabled-item traversal, active item, scrolling, acceptance, and cancellation in one global handler. Its `cursorIndex` is a collection active item, not logical focus. F4 lets a query editor or nested editor own local input while leaving item identity, filtering, selection, and ensure-visible scrolling in their proper later/component layers; the public finder journey verifies that separation.
+A typical finder keeps query editing, enabled-item traversal, active item, scrolling, acceptance, and cancellation in application handlers. A collection active index is not logical focus. F4 lets a query editor or nested editor own local input while leaving item identity, filtering, selection, and ensure-visible scrolling in their proper later/component layers; the public finder journey verifies that separation.
 
 ### Independent regions and terminal workspace
 
@@ -50,7 +50,7 @@ Two active-region scopes demonstrate that the application still has one effectiv
 
 ### Applications without focus
 
-Pinned `machud` uses only application-global shortcuts. F4 must not require a fake focus target, and a non-interactive or static application without a focus registration must remain valid.
+Fullscreen monitors may use only application-global shortcuts. F4 must not require a fake focus target, and a non-interactive or static application without a focus registration must remain valid.
 
 ## Peer evidence
 

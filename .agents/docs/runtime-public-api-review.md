@@ -4,7 +4,7 @@ Evidence and results for the item-by-item review of `@vue-tui/runtime`. The [dec
 
 ## `createApp` and `TuiApp`
 
-**Status:** the Vue app surface, user-root mount result, complete app barriers, stream protocols and ownership, mount defaults and modes, Inline non-TTY output, transactional preflight, used-stream failures, component-error behavior, console protection, invalid exit input, named app and mount types, and named `UseAppReturn` were vouched by 2026-07-23 and are implemented. The separate `RenderMode` alias is absent because the accepted mode union is derivable as `NonNullable<MountOptions["mode"]>`. Screen-reader presentation, `RenderPresentation`, ARIA props and types, environment selection, internal helpers, and testing selectors have been explicitly removed.
+**Status:** the Vue app surface, user-root mount result, complete app barriers, stream protocols and ownership, mount defaults and modes, transactional preflight, used-stream failures, component-error behavior, console protection, invalid exit input, named app and mount types, and named `UseAppReturn` were vouched by 2026-07-23 and are implemented. On 2026-07-24 Yunfei finalized the host priority: live TTY is the primary interactive mounted host, while explicit `renderToString()` and mounted non-TTY document output are supported secondary paths rather than undefined behavior. That host correction is implemented: Fullscreen no longer throws solely for non-TTY stdout, and both mode requests use the same non-interactive document behavior. The separate `RenderMode` alias is absent because the accepted mode union is derivable as `NonNullable<MountOptions["mode"]>`. Screen-reader presentation, `RenderPresentation`, ARIA props and types, environment selection, internal helpers, and testing selectors have been explicitly removed.
 
 ### User tasks
 
@@ -14,7 +14,7 @@ The ordinary application path creates and mounts one Vue application:
 createApp(App).mount();
 ```
 
-The real `mo` consumer proves that root props, an external owner, a render barrier, and explicit teardown are real needs:
+In-repository application and testing code prove that root props, an external owner, a render barrier, and explicit teardown are real needs:
 
 ```ts
 const app = createApp(Selector, {
@@ -30,7 +30,7 @@ const app = createApp(Selector, {
 app.mount();
 ```
 
-See [`mo.patch`](../../packages/runtime-tests/consumers/runtime-foundation/patches/mo.patch). The first-party testing package also uses `createApp(component, props)`, `mount()`, `unmount()`, and both wait methods.
+The first-party testing package also uses `createApp(component, props)`, `mount()`, `unmount()`, and both wait methods. Integration and clean-consumer tests cover the same surface without relying on external application repositories.
 
 Standard Vue application configuration must continue to work without Runtime internals:
 
@@ -117,18 +117,18 @@ Earlier records accepted full `App<TuiNode>` inheritance, an inert busy-stdout m
 
 ## `renderToString`
 
-**Status:** Runtime placement, retention, and the `renderToString()` minimum contract under **Vouched minimum contract** were vouched on 2026-07-23 after reviewing the real production use, lifecycle behavior, and peer evidence. Ink 7.0.4 is the only reviewed terminal peer with the same production API shape. Vue SSR supplies relevant Vue application precedent but solves a different asynchronous HTML-rendering problem. OpenTUI, Bubble Tea, Textual, and Blessed do not expose a sufficiently similar production string renderer to determine this contract.
+**Status:** Runtime placement, retention, and the synchronous lifecycle contract remain vouched. On 2026-07-24 Yunfei replaced the earlier columns-only unbounded default with the width-and-height target below and classified explicit `renderToString()` and implicit mounted non-TTY document rendering as paired supported secondary paths rather than hosts that define interactive mounted-app parity. The migration is implemented with focused string, host, input, output, lifecycle, and clean-consumer evidence. Ink 7.0.4 remains the closest production peer but no longer determines vue-tui's default layout bounds.
 
 ### User task
 
 Applications need one terminal-formatted document without mounting a live terminal application:
 
 ```ts
-const document = renderToString(Report, { columns: 80 });
+const document = renderToString(Report, { width: 80, height: Infinity });
 await writeFile("report.txt", document);
 ```
 
-The public [machud monitor](https://github.com/hyfdev/machud/blob/a51a6853686eb818471d0027d2549e6e664c9b36/src/main.ts) is a concrete production consumer: its default command mounts the live full-screen dashboard, while `--once` and `--snapshot` collect one real metric sample, render the same Vue TUI at a deterministic width, write the result to stdout, and exit for piping, CI, or a quick non-interactive view. Its [component tests](https://github.com/hyfdev/machud/blob/a51a6853686eb818471d0027d2549e6e664c9b36/tests/panels.test.ts) use the same operation to verify responsive terminal panels without creating an app or TTY; that testing use is supporting evidence rather than the sole product justification.
+One-shot and snapshot document output (pipe, CI, or a quick non-interactive view) is a real reason to retain the secondary renderer, not a reason to make implicit unbounded documents shape the primary live-TTY API. Callers that need complete-document height must select `height: Infinity` explicitly. In-repository `renderToString`, non-TTY mount, and clean-consumer tests are the foundation evidence for this contract.
 
 The operation needs the Runtime renderer because terminal cell width, wrapping, Yoga layout, Text styling, and `Static` extraction cannot be recreated from Vue output outside Runtime.
 
@@ -136,13 +136,16 @@ The operation needs the Runtime renderer because terminal cell width, wrapping, 
 
 ```ts
 export interface RenderToStringOptions {
-  readonly columns?: number;
+  readonly width?: number;
+  readonly height?: number;
 }
 
 export function renderToString(component: Component, options?: RenderToStringOptions): string;
 ```
 
-The function synchronously renders one initial Vue document, defaults `columns` to `80`, and has unbounded height. It neither acquires terminal resources nor accepts `rows`, `mode`, streams, lifecycle barriers, or other live-host options. `columns` is validated as a positive bounded integer before Vue setup or paint allocation. Runtime should validate the option that affects layout safety, but it need not maintain special recognition of removed terminal options or reject unrelated extra object keys; the public TypeScript shape remains exactly `columns?`.
+The function synchronously renders one initial Vue document and defaults its modeled root layout to 80×24 terminal cells. Finite `width` and `height` values are positive bounded integers. `height` additionally accepts positive `Infinity`, which means no vertical Runtime bound and preserves the former complete-document behavior without passing `Infinity` into Yoga. A finite height is the maximum available ordinary root-layout height: shorter output is not padded, while ordinary dynamic layout does not paint beyond the bound. Components observe the same values through `useLayoutSize()`.
+
+This is a supported secondary renderer: failures within its stated contract remain bugs, but it does not acquire terminal resources or promise mounted-app input, streams, lifecycle barriers, or host parity. Its narrower needs must not force nullable dimensions, capability graphs, or session APIs into the primary live-TTY Runtime surface.
 
 Normal synchronous Vue setup and mount hooks run because this is a temporary Vue renderer tree, not Vue HTML SSR. Runtime captures the first synchronous committed document: setup-time synchronous state changes are included, while updates queued by `onMounted`, timers, promises, or other later work are not awaited and do not change the returned string. Runtime should not add an asynchronous variant until a real application requires one.
 
@@ -150,15 +153,15 @@ Success and failure both unmount the temporary Vue tree, run component cleanup, 
 
 `Static` is supported as an Inline-document prefix. Every non-empty block present in the temporary Runtime tree is collected in Vue tree order and placed before the ordinary document output; `v-show` does not suppress a mounted block, and the returned string has no artificial trailing newline. An empty block contributes nothing and then disappears with the temporary tree because string rendering has no future update in which it could become ready. Text layout and styling use the same Runtime renderer as live output rather than a separate string-rendering dialect.
 
-### Live non-TTY and placement behavior
+### Mounted non-TTY is the implicit document path
 
-For a mounted application whose output is redirected to a pipe or file, each accepted `Static` block is appended when committed, while the dynamic document writes only once during clean teardown. This preserves useful progress history without emitting cursor movement or erase sequences. Several blocks accepted in one transaction use current Vue host-tree preorder rather than registration, mount, Yoga visual, or reverse-flex order; later accepted history only appends and cannot erase or move bytes already written.
+Mounting against a pipe, file, CI capture, or other non-TTY stdout selects the supported non-interactive document host regardless of whether mode is Inline or Fullscreen. This is the mounted counterpart of `renderToString()`, not a literal call to it: the Vue application may remain alive for asynchronous state changes, retains its app barriers and borrowed streams, writes accepted Static and coordinated console output when committed, and writes the current dynamic document once on clean teardown. It uses the same modeled 80×24 root layout as default `renderToString()`, emits no terminal screen-management controls or intermediate dynamic frames, writes no bytes for empty dynamic output, adds a line ending to non-empty dynamic output only when absent, and does not replay a stale successful document on error.
 
-A Static present in the Runtime tree participates immediately regardless of ancestor or direct `v-show`; `v-if` and ordinary mount lifecycle decide whether the instance exists. Root, component, Fragment, and ordinary Box placement is the supported path, while ancestor layout does not shape the isolated block. Other placement, nesting, normalization, diagnostic, and recovery behavior is unsupported rather than an expanded public contract. Component errors and output failures follow the existing Vue, stream, mount, and app-lifecycle contracts; the exact validation, batch, cleanup, and rollback timing remains internal evidence recorded in the [implementation re-audit](./runtime-public-foundation-reaudit.md#path-2-inline-history).
+The mounted document path is supported rather than undefined behavior, so failures inside that contract are bugs. It remains secondary: it does not acquire a live screen, resize lifecycle, or managed terminal input, and it does not justify capability graphs or more public Runtime APIs. `useInput()` remains inert. `useStdin()` returns the exact mounted stream for caller-owned direct observation but reports no raw support and Runtime never changes its raw state, even if the supplied stdin independently exposes TTY controls. Callers that need synchronous return, deterministic custom dimensions, or explicit unbounded height use `renderToString({ width, height })`. The accepted Static mounted-identity and placement rules remain authoritative because this path is still a mounted Vue application.
 
 ### Peer evidence and deliberate Vue choices
 
-- [Ink 7.0.4 `renderToString`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/render-to-string.ts) is synchronous, defaults to 80 columns, acquires no terminal resources, prepends Static output, cleans up before propagating component errors, and exports its named options type. A real pinned-version harness produced `"A\nB\nLIVE"` for two Static entries plus a dynamic frame and omitted a Static below `display="none"`.
+- [Ink 7.0.4 `renderToString`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/render-to-string.ts) is synchronous, defaults to width 80, leaves height unbounded, acquires no terminal resources, prepends Static output, cleans up before propagating component errors, and exports its named options type. vue-tui retains the useful synchronous mechanism but deliberately defaults to a modeled 80×24 layout and makes unbounded height explicit.
 - Ink's [original demand](https://github.com/vadimdemedes/ink/issues/459) came from users wanting to write component-rendered terminal output to files and documentation; a small external `ink-render-string` implementation appeared years before Ink added the built-in API in [PR #868](https://github.com/vadimdemedes/ink/pull/868). This proves a recurring task, not broad adoption of one exact contract.
 - Ink's non-interactive renderer writes new Static output immediately and the final dynamic frame on unmount. OpenTUI's nearest history operation is a mode-gated scrollback snapshot, while Bubble Tea's `Println` and `Printf` append strings above the live view; neither supplies a comparable component-to-string contract.
 - [Vue's SSR renderer](https://vuejs.org/api/ssr.html#rendertostring) accepts a Vue app or VNode and returns a Promise because it handles asynchronous server rendering, SSR context, and teleports. Those HTML concerns do not justify making this bounded terminal snapshot asynchronous or adding an SSR context.
@@ -166,7 +169,7 @@ A Static present in the Runtime tree participates immediately regardless of ance
 
 ### Current implementation disposition
 
-The current public signature, synchronous result, 80-column default, bounded column validation, Static prefix, inert input services, and cleanup-after-error mechanisms implement this contract. `useApp().exit()` is inert, unrelated runtime keys are ignored without being read, and initial host-insertion failure now guards and releases every reachable Vue scope as well as every Yoga and Runtime-owned resource before rethrowing the original error.
+The implementation retains the synchronous result, Static prefix, inert input services, and cleanup-after-error mechanisms while replacing the columns-only option and implicit unbounded height with the accepted width-and-height model. Public `useLayoutSize()` reports the same modeled dimensions inside shared components.
 
 ## `Box` and `Text`
 
@@ -180,7 +183,7 @@ The earlier 18-field proposal is withdrawn because it treated silence in vue-tui
 
 A minimum contract therefore minimizes independent concepts, not the number of property names. `padding`, `paddingX`, and `paddingLeft` are one box-model concept with three useful levels of specificity. Deleting the first two saves names but makes every application repeat a mechanical expansion. The same reasoning applies to margin, gap, and overflow.
 
-Current vue-tui consumers establish a lower bound, not an upper bound. They are positive evidence for the fields they use, but vue-tui has few users and the representative machud consumer was already migrated to the narrowed experiment. Re-reading that migrated source as proof that the experiment is sufficient would be circular. Mature peers and real applications establish that a task recurs; vue-tui still needs a Runtime-ownership reason and a coherent local contract before copying an exact field or behavior.
+In-repository examples and tests establish a lower bound, not an upper bound. They are positive evidence for the fields they exercise, but they are not a complete catalog of every possible application. Mature peers and real applications establish that a task recurs; vue-tui still needs a Runtime-ownership reason and a coherent local contract before copying an exact field or behavior. External out-of-repo consumers are not foundation proof.
 
 Being additive later is not by itself a reason to omit an ordinary foundation capability. It is a valid reason to defer a specialized capability only when the accepted set still supports normal panels, responsive rows, constrained panes, clipping, overlays, separators, and styled or width-constrained text without private imports or application-side layout reconstruction.
 
@@ -233,7 +236,7 @@ The gap names are physical rather than relative to flex direction: `rowGap` is v
 </Box>
 ```
 
-`maxWidth` and percentage width let the constraint remain relative to the containing Box's available inner width. Replacing this with `useLayoutWidth()` computes against the root, does not generalize to a nested pane, and introduces a second application-side layout pass. "Available" is deliberately not the same as the containing Box's final shrink-to-fit width: an auto-width parent constrained by 40 available columns may end at 20 columns because its `50%` child resolved to 20 during layout. Applications that need percentage-of-final-width behavior give the containing Box a definite width or leave it stretched. Percentage height is deliberately not accepted: nested auto-height Boxes make Yoga resolve it circularly and shrink content even when every host root is vertically unbounded. Numeric height has one stable cell meaning in every host. Percentage flex basis resolves against a definite main-axis size and otherwise falls back to the item's intrinsic basis.
+`maxWidth` and percentage width let the constraint remain relative to the containing Box's available inner width. Replacing this with `useLayoutSize().width` computes against the root, does not generalize to a nested pane, and introduces a second application-side layout pass. "Available" is deliberately not the same as the containing Box's final shrink-to-fit width: an auto-width parent constrained by 40 available cells may end at 20 cells because its `50%` child resolved to 20 during layout. Applications that need percentage-of-final-width behavior give the containing Box a definite width or leave it stretched. Percentage height is deliberately not accepted: nested auto-height Boxes make it circular or host-bound rather than a stable percentage of the intended parent content. Numeric height has one stable cell meaning in every supported host. Percentage flex basis resolves against a definite main-axis size and otherwise falls back to the item's intrinsic basis.
 
 #### Overlay anchored to a containing Box
 
@@ -419,7 +422,7 @@ Cell quantities are integers from 0 through 65,535. Margins and offsets use the 
 
 Width and flex-basis percentages use canonical decimal text from `0%` through `100%`: `0%`, `0.5%`, `35%`, and `100.0%` are valid; a sign, whitespace, exponent, leading decimal point, unnecessary integer leading zero, arbitrary suffix, or value above 100 is not. Percentage offsets use the same grammar with an optional minus sign and a bounded absolute value; their exact safety envelope is an implementation behavior rather than another exported type. Values above the safe range are not accepted merely to provide speculative proportional overflow; a future additive widening would need a real task and a rule that cannot exceed Runtime's layout and paint resource bounds. Width and height are outer Box dimensions; border and padding consume their inner content area. Unknown component attributes fail before host creation. Raw strings must remain inside Text; Text may nest Text spans but not Box.
 
-All visual hosts use the same accepted layout and paint rules. Fullscreen provides a finite root width and height; Inline may impose a finite height only when its live region must be bounded; string and final non-TTY rendering have a finite width and indefinite root height. Every render root therefore supplies a finite horizontal constraint. Percentage width is resolved during flex layout against the containing Box's available inner-width constraint after border and padding; for an auto shrink-to-fit Box, that constraint may be wider than its final computed box. Percentage height is not accepted, so shared components never acquire a host-dependent vertical percentage meaning. Color escape bytes still depend on the output's color capability; the semantic style contract does not promise ANSI on a color-disabled stream.
+All supported renderers use the same accepted Box layout and paint rules. Live-TTY Fullscreen and Inline provide finite root width and height. Explicit `renderToString()` defaults to a modeled finite 80×24 root and may select an unbounded root height with `height: Infinity`; the mounted non-TTY document host uses the same fixed default 80×24 model. Every supported renderer therefore supplies a finite horizontal constraint. Percentage width is resolved during flex layout against the containing Box's available inner-width constraint after border and padding; for an auto shrink-to-fit Box, that constraint may be wider than its final computed box. Percentage height is not accepted, so shared components never acquire a host-dependent vertical percentage meaning. Color escape bytes still depend on the output's color capability; the semantic style contract does not promise ANSI on a color-disabled stream.
 
 The target does not add `zIndex`, a portal or layer model, opacity, titles, markup, blink, hyperlinks, grid, order, arbitrary Yoga access, raw ANSI spans, or a broad `style` object. Those are outside the pinned Ink baseline or need a separate user task and contract. `Spacer` remains a growing Box and line breaks remain Text content.
 
@@ -438,13 +441,64 @@ The current implementation exposes exactly the reviewed fields and named authori
 
 Text now performs per-logical-line grapheme-safe wrapping or truncation, applies nested three-state modifiers, and resolves foreground and background defaults independently. Type fixtures, clean consumers, representative applications, string and final-stream tests, and terminal-visible clipping and style acceptance cover the result. Percentage height, the old permissive arbitrary-string grammar, private host types, `BoxLayoutStyle`, custom border objects, ARIA, and deleted advanced border decoration remain absent.
 
+## `useLayoutSize`
+
+**Status:** Yunfei vouched this target public shape on 2026-07-24 after revisiting the nullable-height experiment, non-TTY priority, string-render sizing, and Ink's fallback window-size behavior. It is implemented with resize, document-host, string-render, declaration, and clean-consumer evidence.
+
+```ts
+export interface UseLayoutSizeReturn {
+  readonly width: Readonly<Ref<number>>;
+  readonly height: Readonly<Ref<number>>;
+}
+
+export function useLayoutSize(): UseLayoutSizeReturn;
+```
+
+The hook reports the terminal-cell width and height Runtime makes available to root layout. These are layout inputs, not raw physical-terminal properties and not the root component's final measured rectangle. `useBoxMetrics()` remains the separate result API: an Inline 80×24 layout may contain a root Box whose accepted height is only three cells.
+
+Supported live TTY hosts always expose finite values from one accepted resize snapshot. Fullscreen owns the complete width and height. Inline uses the same finite visible bound but may lay out shorter content. `renderToString()` exposes its modeled `width` and `height` options, defaulting to 80×24; explicit `height: Infinity` represents no vertical Runtime bound. The mounted non-TTY document host exposes fixed modeled 80×24 refs and has no resize lifecycle. Runtime maps the `Infinity` sentinel to its private unbounded representation and never passes JavaScript `Infinity` into Yoga.
+
+The public layout vocabulary is consistently `width` and `height`, matching `Box` and `useBoxMetrics()`. Physical or modeled terminal protocols may continue to use private `columns` and `rows`. The experimental `useLayoutWidth()` and nullable `useViewportHeight()`, plus the considered finite-only `useViewportSize()`, are removed without aliases.
+
+Both public refs derive from one private atomic snapshot. An accepted live resize updates them coherently before the corresponding committed layout, so an observer cannot see a new width paired with an old height.
+
+## `useBoxMetrics`
+
+**Status:** Yunfei vouched the target public shape on 2026-07-24 after reviewing the current `useBoxSize()` experiment, the earlier vue-tui implementation, pinned Ink 7.0.4, ordinary anchored-layout code, and a bounded adversarial capability audit. It is implemented with direct-target, lifecycle, coherent-snapshot, parent-relative layout, declaration, and clean-consumer evidence.
+
+```ts
+export interface UseBoxMetricsReturn {
+  readonly width: Readonly<Ref<number>>;
+  readonly height: Readonly<Ref<number>>;
+  readonly left: Readonly<Ref<number>>;
+  readonly top: Readonly<Ref<number>>;
+  readonly hasMeasured: Readonly<Ref<boolean>>;
+}
+
+export function useBoxMetrics(
+  target: Readonly<Ref<InstanceType<typeof Box> | null | undefined>>,
+): UseBoxMetricsReturn;
+```
+
+The hook replaces rather than aliases the experimental `useBoxSize()`. It accepts a readonly Vue ref bound directly to the exported `Box` in the current application. It does not accept renderer nodes, arbitrary objects, Text, another application's Box, getters, or a component whose descendants would need to be searched.
+
+`width` and `height` are the Box's complete outer layout size. `left` and `top` are the Box's outer-layout offsets in its direct layout parent's coordinate system; they are not terminal or root-render-surface coordinates. Together the four numeric refs describe the complete parent-relative layout rectangle that Yoga alone can determine after flex sizing, margins, siblings, and wrapping. A same-parent anchored overlay can therefore use `left`, `top + height`, and `width` without rebuilding Runtime layout.
+
+Before the first accepted measurement and while the target is detached, unmounted, retargeted, or excluded from layout by `v-show`, the four numbers are zero and `hasMeasured` is false. A real zero-sized Box has zero numbers and `hasMeasured` true. A pending repaint or temporary suspension for the same target retains the last accepted values; an accepted resize, sibling-driven layout change, or target layout change publishes all four numeric facts from one coherent internal snapshot. The public refs are readonly even if the implementation derives them from one private atomic state.
+
+This contract does not publish root-render-surface coordinates, terminal coordinates, clipping or visibility rectangles, paint fragments, renderer or Yoga nodes, pointer targeting, caret placement, or a layer and portal model. Those form a separate spatial capability and are explicitly outside this Box-layout measurement contract.
+
+The former imperative `measureElement()` is not retained. Ordinary reactive measurement, reading the current metrics in an event handler, and copying one accepted result for later use all use `useBoxMetrics()`. A dynamic collection can put the hook in each item component and report the accepted metrics to its parent, so third-party higher layers are not blocked. A second API that reads an arbitrary Box on demand would mainly avoid that composition while introducing a separate answer for pre-layout, pending, hidden, detached, failed-output, and stale-layout reads. The minimum foundation keeps one coherent measurement model instead.
+
+Pinned [Ink 7.0.4 `useBoxMetrics`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/hooks/use-box-metrics.ts) independently exposes `width`, `height`, parent-relative `left` and `top`, and `hasMeasured`. vue-tui follows the same complete layout facts while using readonly Vue refs, a direct Vue Box template ref, accepted Runtime commits, and no public host node.
+
 ## Mount host contract
 
-**Status:** the complete contract below was vouched on 2026-07-23 after Node stream review, run-verification of pinned Ink 7.0.4, comparison with Bubble Tea 2.0.6, OpenTUI 0.4.5, and Textual 8.2.8, and a bounded two-reviewer adversarial pass. It is implemented with focused lifecycle, stream, host, package-consumer, PTY, and restoration coverage.
+**Status:** the stream protocols, ownership, live-TTY modes, failure, and lifecycle contract below was vouched on 2026-07-23 after Node stream review, run-verification of pinned Ink 7.0.4, comparison with Bubble Tea 2.0.6, OpenTUI 0.4.5, and Textual 8.2.8, and a bounded two-reviewer adversarial pass. Those mechanisms are implemented with focused lifecycle, stream, host, package-consumer, PTY, and restoration coverage. On 2026-07-24 Yunfei finalized mounted non-TTY as a supported secondary document host paired with `renderToString()` rather than undefined behavior; that shared Inline/Fullscreen fixed-80×24 document behavior is now implemented.
 
 ### User tasks and minimum public shape
 
-The normal application uses process streams and Inline mode without configuration. Tests, file output, embedding, and terminal wrappers may supply ordinary Node streams. Fullscreen is an explicit request rather than a hint:
+The normal live terminal application uses process streams and Inline mode without configuration. Tests, embedding, and terminal wrappers may supply ordinary Node streams. Redirecting either mount mode to a non-TTY stream selects the supported mounted document path; callers use explicit `renderToString()` when they need synchronous return or custom document dimensions. Fullscreen remains an explicit live-TTY screen request rather than a hint:
 
 ```ts
 createApp(App).mount();
@@ -469,15 +523,15 @@ export interface MountOptions {
 
 The three streams default to `process.stdin`, `process.stdout`, and `process.stderr`; mode defaults to Inline; console protection defaults on; and automatic Ctrl+C exit defaults off. `Readable` and `Writable` describe the protocols Runtime uses without falsely requiring every custom destination to be a complete TTY. Terminal-only facts such as raw-mode controls, `isTTY`, `columns`, and `rows` are detected separately. Web streams require explicit outside adaptation rather than adding a second writer and backpressure protocol to Runtime.
 
-### Inline non-TTY output
+### Mounted non-TTY document output
 
-Redirected Inline output is a final document, not a recording of reactive frames. Runtime emits no alternate-screen, cursor, erase, or mouse screen-management sequences. Each accepted `Static` history block appends when accepted, and coordinated console output remains immediate. Dynamic commits replace an internal current document; on clean teardown Runtime writes that current final document once. Empty dynamic output writes no bytes. Non-empty output gets a line ending only if it does not already have one. Error teardown does not replay an earlier successful dynamic document.
+Redirected Inline and Fullscreen mounts use the same supported non-interactive document host. Runtime uses a fixed modeled 80×24 root, avoids terminal screen-management controls and intermediate dynamic frames, writes accepted Static and coordinated console output when committed, and writes the current dynamic document once on clean teardown. Empty dynamic output writes no bytes; non-empty output receives a line ending only when missing; error teardown does not replay a stale successful document.
 
-Ink 7.0.4 provides the closest model: run-verification showed that dynamic `A → B` writes nothing before unmount and then writes `B\n`, while Static output is immediate. The accepted vue-tui behavior deliberately differs for an empty dynamic document: Ink writes a newline, while vue-tui writes nothing. Bubble Tea, OpenTUI, and Textual remain terminal renderers on redirected streams and can emit ANSI or terminal-mode bytes, so their behavior is not appropriate for this final-document contract.
+This is a supported secondary presentation and lifecycle contract. Runtime additionally does not acquire unavailable terminal-only modes, releases every resource it acquires, preserves borrowed-stream ownership, and reports failures of streams it actually uses. It remains narrower than the primary live-TTY host and does not establish interactive-host parity.
 
 ### Fullscreen capability
 
-An explicit Fullscreen mount requires a TTY stdout and resolvable positive columns and rows. Missing capability synchronously throws before user setup, console patching, or terminal mutation; Runtime never silently changes the request to Inline. Ink, Bubble Tea, OpenTUI, and Textual are more permissive and may ignore alternate-screen requests, use fallback dimensions, or continue on non-TTY output. vue-tui deliberately chooses a truthful result because Inline and Fullscreen have different viewport and terminal-ownership semantics.
+On a live TTY, an explicit Fullscreen mount requires resolvable positive columns and rows. Missing dimensions synchronously throw before user setup, console patching, or terminal mutation. On non-TTY stdout there is no live screen to own, so Runtime selects the mounted document host before applying mode; Fullscreen does not throw and does not enter alternate screen. This follows Ink's behavior for `alternateScreen` in a non-interactive environment while retaining vue-tui's explicit live-TTY mode semantics.
 
 ### Borrowed stream ownership
 
@@ -501,12 +555,12 @@ Runtime then rolls back resources and lets accepted output complete or be abando
 
 Mount proceeds in the following observable order:
 
-1. Resolve and validate options, process-stream defaults, mode, stdout and stderr protocol state, stdout ownership, and Fullscreen TTY and dimensions.
+1. Resolve and validate options, process-stream defaults, stdout host class, mode, stdout and stderr protocol state, stdout ownership, and live-TTY Fullscreen dimensions.
 2. Reserve stdout, establish rollback ownership, install stream observers, and install console protection before user component setup.
-3. Run setup. If it creates active managed input demand, validate the mounted stdin before acquiring raw mode or other terminal resources.
+3. Run setup. On a live-TTY host, if setup creates active managed input demand, validate the mounted stdin before acquiring raw mode or other terminal resources. On a mounted document host, managed input remains inert and creates no such demand.
 4. Enter terminal modes and paint only after the required capabilities succeed.
 
-Every acquired resource immediately registers its inverse cleanup, and failure rolls back in reverse order. A later inactive-to-active input transition rechecks stdin capability. A deterministic preflight failure neither mutates state nor consumes the app. Once a real attempt is consumed, `mount()` throws the original failure synchronously and `waitUntilExit()` rejects with that same cause after rollback.
+Every acquired resource immediately registers its inverse cleanup, and failure rolls back in reverse order. On a live-TTY host, a later inactive-to-active input transition rechecks stdin capability; a mounted document host keeps managed input inert instead. A deterministic preflight failure neither mutates state nor consumes the app. Once a real attempt is consumed, `mount()` throws the original failure synchronously and `waitUntilExit()` rejects with that same cause after rollback.
 
 ### Invalid `exit` input
 
@@ -526,13 +580,13 @@ If the `TypeError` escapes, normal surrounding Vue or input error handling may s
 
 ### Implementation result
 
-The implemented public streams use base Node `Readable` and `Writable` protocols, `exitOnCtrlC` defaults to `false`, unavailable explicit Fullscreen fails during non-consuming preflight, empty final non-TTY output writes no bytes, and invalid `exit` input throws without choosing an exit result. Stream leasing, ordered output, reverse rollback, active-use failure detection, and first-cause settlement implement the borrowing and lifecycle rules above.
+The implemented public streams use base Node `Readable` and `Writable` protocols, `exitOnCtrlC` defaults to `false`, empty final non-TTY output writes no bytes, and invalid `exit` input throws without choosing an exit result. Stream leasing, ordered output, reverse rollback, active-use failure detection, and first-cause settlement implement the borrowing and lifecycle rules above. A non-TTY stdout now selects the same fixed-80×24 document host for both mode requests and exposes that model through `useLayoutSize()`.
 
 ### Implementation evidence
 
 - Declaration and clean-consumer checks accept process streams, `PassThrough`, file streams, sockets, and other ordinary Node `Readable` and `Writable` values without casts; Web streams remain rejected without explicit adaptation.
-- Inline non-TTY tests cover current final output, empty output, existing line endings, Static and console exceptions, and clean versus error teardown without screen-control bytes or stale-frame replay.
-- Fullscreen preflight tests cover non-TTY stdout, absent or invalid dimensions, busy stdout, no user setup, no console or terminal mutation, and retry after a non-consuming failure.
+- Inline and Fullscreen non-TTY tests cover the shared fixed-80×24 layout, final output, empty output, existing line endings, Static and console behavior, inert managed input, and clean versus error teardown without screen-control bytes or stale-frame replay.
+- Fullscreen preflight tests retain the missing-live-TTY-dimensions, busy-stdout, no-user-setup, no-console-or-terminal-mutation, and retry-after-non-consuming-failure guarantees while separately proving that non-TTY stdout selects the document host.
 - Borrowing tests prove Runtime never ends or destroys caller streams and restores only listeners and state it changed.
 - Failure tests cover synchronous write throws, callback errors, `EPIPE`, premature close with and without an `Error`, backpressure, active-input stdin loss, input-free EOF, first-cause precedence, failure during clean teardown, and final barrier settlement.
 - Acquisition tests prove reverse rollback at each resource boundary and later inactive-to-active input capability checks.
@@ -588,7 +642,7 @@ Each hook call owns one idempotent logical hold. `setRawMode(true)` acquires tha
 
 Raw-only acquisition does not attach Runtime's normalized parser or enable Kitty or bracketed-paste protocols. The caller owns its direct listener. If raw observation and `useInput()` are active together, both may observe the same physical input; Runtime promises no priority, deduplication, protocol filtering, or byte-exact composition between them. That limitation is explicit rather than presenting the low-level stream as another managed route.
 
-Inline and Fullscreen share the same input contract. A non-TTY mounted stream remains available but reports `isRawModeSupported === false`. String rendering supplies an isolated inert `Readable`, reports no raw support, never touches `process.stdin`, and produces no input. It therefore preserves shared-component setup without claiming that a string document owns terminal input.
+Live-TTY Inline and Fullscreen share the same managed-input contract. A non-TTY stdin on those hosts remains available but reports `isRawModeSupported === false`. The mounted non-TTY document host likewise returns the exact mounted stream for caller-owned direct observation, but reports no raw support, never changes raw state even for a TTY stdin, and keeps `useInput()` inert. String rendering supplies an isolated inert `Readable`, reports no raw support, never touches `process.stdin`, and produces no input. These document paths therefore preserve shared-component setup without claiming terminal input ownership.
 
 ### Peer evidence
 
@@ -601,7 +655,7 @@ Inline and Fullscreen share the same input contract. A non-TTY mounted stream re
 
 The public hook returns the exact base `Readable`, capability flag, and per-hook raw-mode setter. Each call owns one independent idempotent hold while Runtime's private reconciliation composes those holds with managed input, suspension, shared streams, and borrowed-stream baseline restoration.
 
-The string host supplies and cleans up its isolated inert input stream. Internal ingress, parser, routing, Kitty, paste, mouse, and availability fields remain inaccessible to JavaScript as well as TypeScript consumers.
+The string host supplies and cleans up its isolated inert input stream. Internal ingress, parser, Kitty negotiation, and paste framing remain inaccessible to JavaScript as well as TypeScript consumers. The former routing topology, mouse pipeline, and rich availability object were removed rather than hidden.
 
 ### Implementation evidence
 
@@ -757,7 +811,7 @@ A component that wants focus on every Vue mount uses `onMounted(() => focus.focu
 
 ### Host and lifecycle semantics
 
-- Live Inline, Fullscreen, and Inline non-TTY mounted applications use the same focus state model. Output TTY capability does not govern logical focus; Fullscreen non-TTY fails its separate mount preflight before component setup.
+- Supported live-TTY Inline and Fullscreen applications use the same focus state model. The mounted non-TTY document host remains a mounted Vue application and may use the same logical focus controller, but managed `useInput()` is inert there; document-host support does not imply interactive focus parity.
 - `renderToString()` provides an inert shared-component context: `isFocused.value` remains `false`, and `focus()` and `blur()` are no-ops.
 - A targetless identity is usable during setup. A targeted call before its template ref is available is a no-op, so ordinary focus-on-mount uses Vue's `onMounted()`.
 - Suspend and resume preserve current focus because the component scopes and renderer tree remain alive.
@@ -801,4 +855,4 @@ The completed implementation adds the targetless registration path without creat
 - Explicit `onMounted(() => focus.focus())` works for an eligible target without turning a request made while unavailable into pending restoration.
 - Input examples prove `isFocused` composes with `useInput({ isActive })` while unrelated broadcast subscriptions remain unaffected.
 - Public declarations and Vue 3.4 and 3.5 clean-consumer fixtures distinguish the overloads, expose the exact named types, document target's narrow role, accept inferred custom-component template refs, and expose no manager, VNode, or renderer node.
-- Inline TTY, Fullscreen TTY, Inline non-TTY, string rendering, suspend/resume, cleanup, mount rollback, and retained disposed-handle tests prove the accepted host and lifecycle semantics.
+- Inline TTY, Fullscreen TTY, mounted document rendering, string rendering, suspend/resume, cleanup, mount rollback, and retained disposed-handle tests cover the accepted lifecycle contexts. Mounted-document output remains non-interactive even if its logical focus state is exercised by shared component code.

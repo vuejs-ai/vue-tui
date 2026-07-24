@@ -4,7 +4,7 @@
 
 ## Positioning
 
-[VOUCHED @hyfdev 2026-07-10]
+> **Status:** the original section vouch was superseded where later item-by-item Runtime decisions changed its assumptions. The current accessibility boundary is authoritative in the [Runtime public API decision ledger](./runtime-public-api-decisions.md#screen-reader-presentation-and-accessibility-types-are-removed).
 
 vue-tui is a Vue-native application framework for interactive terminal UIs.
 
@@ -96,7 +96,7 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 - A terminal-workspace application may use vue-tui for layout, tabs, panes, focus, mouse, status, and high-frequency rendering. PTY process ownership, ANSI/VT emulation, detach servers, sockets, SSH, session persistence, and coding-agent process detection belong to the application or specialized libraries.
 - A generic view over an externally supplied styled terminal-cell grid may become framework work only after repeated consumer evidence establishes a stable UI abstraction. vue-tui does not need to become a terminal emulator to render such a view.
 - A complete text editor, terminal emulator, multiplexer backend, or game engine is not a core product goal, even though those workloads can expose useful renderer limits.
-- `@vue-tui/components` currently has no blanket accessibility requirement. A component may opt in where appropriate; this does not remove or redefine the runtime's existing accessibility APIs. See [components-design-principles.md](./components-design-principles.md#deliberately-omitted).
+- `@vue-tui/components` currently has no blanket accessibility requirement. Runtime currently exposes no accessibility contract; future support requires a complete semantic and host-lifecycle design rather than restoring the removed experiment. See [components-design-principles.md](./components-design-principles.md#deliberately-omitted).
 - The project does not add a component merely to match another framework or claim that arbitrary browser UI can run unchanged in a terminal.
 
 ## Success looks like
@@ -111,8 +111,6 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 ## Durable evidence
 
 - The first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent) exercises streaming, tool execution, approval, and `@vue-tui/runtime/inline` `Static` output, although much of its higher-level interaction behavior is still application code.
-- [mo](https://github.com/liangmiQwQ/mo/tree/6bea467a6995f4912e809b417b5c56a3964cc556) is a real inline vue-tui consumer whose project selector exercises search, filtering, preview, selection, and shell handoff.
-- [machud](https://github.com/hyfdev/machud/tree/a51a6853686eb818471d0027d2549e6e664c9b36) is a real full-screen vue-tui consumer that exercises layout, resize, input, HMR, and self-contained distribution.
 - [Herdr](https://github.com/ogulcancelik/herdr/tree/66be0b655fe922867f1eed100a41d67038b6ffd6) demonstrates the terminal-workspace subscenario with tabs, panes, real PTYs, persistent sessions, and agent state. Its Ratatui UI, `portable-pty` dependency, and vendored `libghostty-vt` keep the visible application framework and terminal-session engine as distinct responsibilities.
 - Reproducible issues such as [`v-show` #246](https://github.com/vuejs-ai/vue-tui/issues/246) and [`useInput` ownership #250](https://github.com/vuejs-ai/vue-tui/issues/250) are evidence for Vue-contract and interaction gaps; they do not define the product alone.
 

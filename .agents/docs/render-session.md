@@ -1,17 +1,16 @@
 # Readonly render session
 
-> **Status:** historical unstamped F1 record. The internal resolver, coherent dimension updates, host matrix, and lifecycle evidence remain implementation material. The active Runtime-foundation re-audit supersedes this record's public `useRenderSession()` / `useLayoutSize()` conclusion with the smaller Path 1 boundary below. No VOUCHED stamp was added.
+> **Status:** historical unstamped F1 record. The internal resolver, coherent dimension updates, host matrix, and lifecycle evidence remain implementation material. The authoritative decision ledger now selects the smaller `useLayoutSize()` boundary below; the old session graph and the intervening `useLayoutWidth()` / nullable `useViewportHeight()` experiment are not public contracts. No VOUCHED stamp belongs to this historical record.
 
 ## Superseding Path 1 public boundary
 
-The current public Runtime surface does not expose the render-session graph. Applications read only the layout facts they can act on:
+The selected public Runtime surface does not expose the render-session graph. Applications read only the root layout bounds Runtime actually applies:
 
 ```ts
-const width = useLayoutWidth(); // Readonly<Ref<number>> on every host
-const viewportHeight = useViewportHeight(); // Readonly<Ref<number>> | null
+const { width, height } = useLayoutSize();
 ```
 
-`useLayoutWidth()` reports the numeric width Runtime actually gives the root layout. `useViewportHeight()` returns a numeric ref only when the render tree has a finite live visual row bound; an unbounded stream, screen-reader transcript, or string document receives `null` at setup. Boundedness is fixed for the render tree, while both numeric refs react to accepted live resizes. The old `useRenderSession()`, `useLayoutSize()`, `RenderSession`, `RenderModeResolution`, `RenderOutput`, `RenderSize`, `RenderLayoutSize`, and `UseLayoutSizeReturn` are not current public contracts. Runtime retains the broader resolver privately because layout, writers, lifecycle, caret, and mouse still need one coherent internal authority.
+`width` and `height` are readonly numeric refs measured in terminal cells. Finite values are the space Runtime makes available to root layout; `height === Infinity` explicitly represents vertically unbounded layout. They are not raw physical-terminal facts or an element's measured result. Explicit `renderToString()` defaults its modeled layout to 80×24 and accepts `height: Infinity` for the former unbounded document behavior; mounting either mode against non-TTY stdout selects the supported mounted document counterpart with a fixed modeled 80×24 layout and no resize lifecycle. The old `useRenderSession()`, session and capability types, `useLayoutWidth()`, `useViewportHeight()`, and the considered `useViewportSize()` are not current public contracts. Runtime retains only the private surface resolver and coherent dimensions needed by layout, writers, and lifecycle.
 
 Everything below records the earlier experiment and the evidence that made the internal mechanism reliable. Its public examples and completion claims are historical and must not be used as current authoring guidance.
 
