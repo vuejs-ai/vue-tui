@@ -350,6 +350,9 @@ export class VisualTerminalSession {
       ...environment(),
       TERM: profileTemplate.terminal.term,
       COLORTERM: profileTemplate.terminal.colorterm,
+      // Not a vue-tui switch: Runtime reads no CI variable. The vite-overlay
+      // target launches a real Vite dev server, and Vite reads CI to disable the
+      // CLI shortcuts that target exercises.
       CI: "false",
       FORCE_COLOR: "3",
       NODE_NO_WARNINGS: "1",

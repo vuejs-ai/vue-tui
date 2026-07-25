@@ -31,12 +31,8 @@ function normalLogicalLines(
   return logical;
 }
 
-async function runResize(presentation: "visual" | "screen-reader") {
-  const ps = term("inline-resize-history", [
-    String(initialRows),
-    presentation,
-    String(targetColumns),
-  ]);
+async function runResize() {
+  const ps = term("inline-resize-history", [String(initialRows), String(targetColumns)]);
   await ps.waitForOutput((output) => output.includes("__READY__"));
   const resizeOffset = ps.output.length;
 
@@ -64,7 +60,7 @@ async function runResize(presentation: "visual" | "screen-reader") {
 }
 
 test("visual Inline preserves terminal history and starts a fresh bounded region after resize", async () => {
-  const { output, resizeOffset, logicalLines, scrollbackEnd } = await runResize("visual");
+  const { output, resizeOffset, logicalLines, scrollbackEnd } = await runResize();
   const resizeOutput = output.slice(resizeOffset);
 
   for (const reset of forbiddenMainScreenResets) expect(output).not.toContain(reset);
@@ -75,28 +71,6 @@ test("visual Inline preserves terminal history and starts a fresh bounded region
   );
   expect(resizeOutput).toContain("NEW_FRAME");
   expect(logicalLines.some((line) => line.text === "NEW_FRAME")).toBe(true);
-  expect(logicalLines).toContainEqual({ text: "PRE_APP_HISTORY", startRow: 0 });
-  const oldSnapshot = logicalLines.find((line) => line.text === oldLogicalLine);
-  expect(oldSnapshot).toBeDefined();
-  expect(oldSnapshot!.startRow).toBeLessThan(scrollbackEnd);
-});
-
-test("screen-reader Inline preserves terminal history when wrapping changes on resize", async () => {
-  const { output, resizeOffset, logicalLines, scrollbackEnd, activeBuffer } =
-    await runResize("screen-reader");
-  const resizeOutput = output.slice(resizeOffset);
-
-  for (const reset of forbiddenMainScreenResets) expect(output).not.toContain(reset);
-  const boundary = ansiEscapes.cursorDown(9999) + "\x1bE";
-  expect(resizeOutput.split(boundary)).toHaveLength(2);
-  expect(resizeOutput.slice(0, resizeOutput.indexOf(boundary) + boundary.length)).not.toContain(
-    "\x1b[2K",
-  );
-  expect(resizeOutput).toContain("NEW_FRAME");
-  expect(logicalLines.some((line) => line.text === "NEW_FRAME")).toBe(true);
-  expect(activeBuffer).toBe("normal");
-  expect(output).not.toContain("\x1b[?1049h");
-  expect(output).not.toContain("\x1b[?1049l");
   expect(logicalLines).toContainEqual({ text: "PRE_APP_HISTORY", startRow: 0 });
   const oldSnapshot = logicalLines.find((line) => line.text === oldLogicalLine);
   expect(oldSnapshot).toBeDefined();

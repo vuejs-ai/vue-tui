@@ -12,15 +12,35 @@ import type { HotPayload, ViteDevServer } from "vite";
 // error. The module runner's HMR handler dispatches `vite:error` straight from a
 // { type: "error" } payload (passing the whole payload, whose `.err` the runtime reads),
 // so forward it AS-IS rather than re-wrapping it as a custom event.
-export function bridgeHmrEventsToRunner(server: ViteDevServer): void {
+export function bridgeHmrEventsToRunner(
+  server: ViteDevServer,
+  getUpdateTimestamp: () => number | undefined = () => undefined,
+): void {
   const ssr = server.environments.ssr;
   if (!ssr) return;
-  const ws = server.ws as { send: (...a: [HotPayload] | [string, unknown?]) => void };
-  const original = ws.send.bind(ws);
-  ws.send = (...args: [HotPayload] | [string, unknown?]): void => {
+  type SendArgs = [HotPayload] | [string, unknown?];
+  const hot = ssr.hot as { send: (...args: SendArgs) => void };
+  const originalHotSend = hot.send.bind(hot);
+  hot.send = (...args: SendArgs): void => {
     const payload: HotPayload =
       typeof args[0] === "string" ? { type: "custom", event: args[0], data: args[1] } : args[0];
-    if (payload.type === "custom" || payload.type === "error") ssr.hot.send(payload);
-    original(...args);
+    if (payload.type === "error") {
+      const timestamp = getUpdateTimestamp();
+      if (timestamp !== undefined) {
+        originalHotSend("vue-tui:hmr-error-context", { timestamp });
+      }
+    }
+    originalHotSend(...args);
+  };
+
+  const ws = server.ws as { send: (...args: SendArgs) => void };
+  const originalWsSend = ws.send.bind(ws);
+  ws.send = (...args: SendArgs): void => {
+    const payload: HotPayload =
+      typeof args[0] === "string" ? { type: "custom", event: args[0], data: args[1] } : args[0];
+    if (payload.type === "custom" || payload.type === "error") {
+      hot.send(payload);
+    }
+    originalWsSend(...args);
   };
 }

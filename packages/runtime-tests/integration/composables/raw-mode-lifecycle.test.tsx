@@ -58,11 +58,11 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const which = shallowRef<"a" | "b">("a");
 
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -71,7 +71,7 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   // Baseline: mounting the first useInput enables raw mode exactly once.
@@ -107,11 +107,15 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const bKeys: string[] = [];
 
   const A = defineComponent(() => {
-    useInput((input) => aKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") aKeys.push(event.text);
+    });
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") bKeys.push(event.text);
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -120,7 +124,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   const { stream: stdin } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   which.value = "b";
@@ -150,7 +154,7 @@ test("the replacement useInput after a same-tick swap still receives input", asy
 // was [true] at this point and only became [true, false] after a drain.
 test("teardown disables raw mode synchronously so a signal exit can't leave the terminal raw (Ink parity)", async () => {
   const App = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>listening</Text>;
   });
 
@@ -158,7 +162,7 @@ test("teardown disables raw mode synchronously so a signal exit can't leave the 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   expect(setRawModeCalls).toEqual([true]);
@@ -195,11 +199,15 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
   const bKeys: string[] = [];
 
   const AppA = defineComponent(() => {
-    useInput((input) => aKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") aKeys.push(event.text);
+    });
     return () => <Text>a</Text>;
   });
   const AppB = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") bKeys.push(event.text);
+    });
     return () => <Text>b</Text>;
   });
 
@@ -209,8 +217,8 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
 
   const appA = createApp(AppA);
   const appB = createApp(AppB);
-  appA.mount({ stdout: stdout1, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
-  appB.mount({ stdout: stdout2, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  appA.mount({ stdout: stdout1, stdin });
+  appB.mount({ stdout: stdout2, stdin });
   await settle();
 
   // Raw mode enabled exactly once (shared refcount); both apps hold the one ref.
@@ -242,44 +250,15 @@ test("two apps sharing one stdin both receive input; the second keeps receiving 
   expect(refCount()).toBe(0);
 });
 
-// --- rawMode option: 'always' (default) vs 'auto' (Ink lazy) ---
-
-// Default rawMode 'always': the app OWNS raw mode for its whole interactive
-// lifetime — raw is enabled at mount even with NO input composable mounted, and
-// held until unmount. This is the Bubble Tea / Textual / Ratatui norm and keeps
-// keystrokes from echoing into the frame on a no-input screen.
-test("rawMode 'always' (default): a no-input app holds raw mode for its whole lifetime", async () => {
+// An input-free application owns no raw mode, stdin ref, or framework listener.
+test("a no-input app never enables raw mode or holds stdin", async () => {
   const App = defineComponent(() => () => <Text>no input here</Text>);
 
   const stdout = makeFakeWritable();
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  // No rawMode option → default 'always'.
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
-  await settle();
-
-  // Raw mode is on at mount despite no useInput/useFocus/usePaste.
-  expect(setRawModeCalls).toEqual([true]);
-  expect(refCount()).toBe(1);
-
-  app.unmount();
-  await settle();
-  expect(setRawModeCalls).toEqual([true, false]);
-  expect(refCount()).toBe(0);
-});
-
-// rawMode 'auto': raw mode is lazy — a no-input app stays in cooked mode (raw is
-// never enabled), exactly Ink's behavior. Opting into 'auto' is the escape hatch
-// back to the Ink lazy model.
-test("rawMode 'auto': a no-input app never enables raw mode (Ink lazy behavior)", async () => {
-  const App = defineComponent(() => () => <Text>no input here</Text>);
-
-  const stdout = makeFakeWritable();
-  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
-
-  const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   // Cooked: raw mode never acquired without an input composable.
@@ -289,20 +268,14 @@ test("rawMode 'auto': a no-input app never enables raw mode (Ink lazy behavior)"
   app.unmount();
 });
 
-// B11 — under rawMode 'auto' the Ink-parity LAZY path is exercised end-to-end:
-// useInput ACQUIRES raw mode on mount and RELEASES it when its component
-// unmounts. The new 'always' default masks this (its app-lifetime floor ref keeps
-// raw mode pinned for the whole session); 'auto' is the escape hatch that restores
-// Ink's lazy acquire/release, so this pins the behavior the default hides.
-//
 // useInput.ts: attach() → stdin.acquireRawMode() on mount; detach() (onScopeDispose
-// / isActive→false) → stdin.releaseRawMode(). With NO floor ref under 'auto', the
+// / isActive→false) → stdin.releaseRawMode(). With no application-lifetime floor, the
 // last consumer's release drops the refcount to 0 and disables raw mode (back to
 // cooked). The disable is deferred to a microtask (render.ts), which settle() drains.
-test("rawMode 'auto': useInput acquires raw on mount and releases it on unmount (Ink lazy)", async () => {
+test("useInput acquires raw on mount and releases it on unmount", async () => {
   const showInput = shallowRef(true);
   const Child = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>input</Text>;
   });
   const App = defineComponent(() => () => (showInput.value ? <Child /> : <Text>idle</Text>));
@@ -311,15 +284,15 @@ test("rawMode 'auto': useInput acquires raw on mount and releases it on unmount 
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   // Mounting the useInput consumer enables raw mode exactly once (0→1).
   expect(setRawModeCalls).toEqual([true]);
   expect(refCount()).toBe(1);
 
-  // Unmount the ONLY input consumer. Under 'auto' there is no floor ref, so the
-  // release drops the refcount to 0 and disables raw mode — back to cooked.
+  // Unmount the only input consumer. The release drops the refcount to 0 and
+  // disables raw mode — back to cooked.
   showInput.value = false;
   await settle();
   expect(setRawModeCalls).toEqual([true, false]);
@@ -332,14 +305,13 @@ test("rawMode 'auto': useInput acquires raw on mount and releases it on unmount 
   expect(refCount()).toBe(0);
 });
 
-// B11 — the same lazy release is driven by useInput's isActive gate (not just by
+// The same release is driven by useInput's isActive gate (not just by
 // unmount). Setting isActive false detaches (releaseRawMode → cooked); flipping it
-// back true re-attaches (acquireRawMode → raw). This is the per-consumer gating Ink
-// exposes via the `isActive` option (use-input.ts), still live under 'auto'.
-test("rawMode 'auto': useInput isActive=false releases raw mode, true re-acquires (Ink lazy)", async () => {
+// back true re-attaches (acquireRawMode → raw).
+test("useInput isActive=false releases raw mode and true re-acquires it", async () => {
   const active = shallowRef(true);
   const App = defineComponent(() => {
-    useInput(() => {}, { isActive: () => active.value });
+    useInput(() => undefined, { isActive: () => active.value });
     return () => <Text>listening</Text>;
   });
 
@@ -347,7 +319,7 @@ test("rawMode 'auto': useInput isActive=false releases raw mode, true re-acquire
   const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
 
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount({ stdout, stdin });
   await settle();
 
   // Active on mount → raw acquired once.
@@ -372,60 +344,18 @@ test("rawMode 'auto': useInput isActive=false releases raw mode, true re-acquire
   expect(refCount()).toBe(0);
 });
 
-// rawMode 'always': raw mode must NOT drop when an input component unmounts
-// mid-session — the app's lifetime ref holds the floor at 1, so there is no
-// cooked-mode oscillation as the user navigates between input and no-input
-// screens (the exact wart 'auto' has and 'always' fixes).
-test("rawMode 'always': raw mode stays on when the only input component unmounts mid-session", async () => {
-  const showInput = shallowRef(true);
-  const Child = defineComponent(() => {
-    useInput(() => {});
-    return () => <Text>input</Text>;
-  });
-  const App = defineComponent(() => () => (showInput.value ? <Child /> : <Text>idle</Text>));
-
-  const stdout = makeFakeWritable();
-  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
-
-  const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false });
-  await settle();
-
-  // App ref + the child's useInput ref; raw enabled once (one 0→1 transition).
-  expect(setRawModeCalls).toEqual([true]);
-  expect(refCount()).toBe(1);
-
-  // Navigate to the no-input screen: the useInput unmounts, but the app's
-  // lifetime ref keeps raw mode ON — no setRawMode(false) here.
-  showInput.value = false;
-  await settle();
-  expect(setRawModeCalls).toEqual([true]);
-  expect(refCount()).toBe(1);
-
-  // Only unmount drops it.
-  app.unmount();
-  await settle();
-  expect(setRawModeCalls).toEqual([true, false]);
-  expect(refCount()).toBe(0);
-});
-
-// rawMode 'always': a partial escape buffered before a same-tick useInput swap
-// must NOT bleed into the replacement. The App's lifetime hold keeps raw mode and
-// the data listener alive (no oscillation), but the per-consumer input-state
-// cleanup is re-based to that floor, so it still fires when the last input
-// composable unmounts — clearing the pending escape. Without it, the floor ref
-// would suppress the cleanup and the stale escape would flush to the new useInput
-// ~20ms later (e.g. a lone ESC during a screen transition leaking to the next
-// screen). 'auto' is covered separately in raw-mode-teardown.sequential.test.tsx.
-test("rawMode 'always': a pending partial escape does not bleed across a useInput swap", async () => {
+// A partial escape captured by one route must not bleed into its same-tick replacement.
+test("a pending partial escape does not bleed across a useInput swap", async () => {
   const which = shallowRef<"a" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") bKeys.push(event.text);
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(() => () => (which.value === "a" ? <A /> : <B />));
@@ -433,7 +363,7 @@ test("rawMode 'always': a pending partial escape does not bleed across a useInpu
   const stdout = makeFakeWritable();
   const { stream: stdin } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false }); // default 'always'
+  app.mount({ stdout, stdin });
   await settle();
 
   // Buffer a partial CSI escape, then swap A → B in the same tick.
@@ -448,20 +378,19 @@ test("rawMode 'always': a pending partial escape does not bleed across a useInpu
   app.unmount();
 });
 
-// rawMode 'always': an escape typed WHILE ON a no-input screen must not bleed
-// into the next useInput either. The App's lifetime listener keeps parsing on the
-// idle screen, so a lone ESC buffers a pending flush; if an input screen mounts
-// within the ~20ms window, the first-consumer-acquire clear must discard the
-// stale escape so the new useInput never sees it.
-test("rawMode 'always': an escape buffered on a no-input screen does not bleed into the next useInput", async () => {
+// With no semantic route, the framework has no listener and cannot retain bytes
+// for a later input screen.
+test("input emitted on a no-input screen does not bleed into the next useInput", async () => {
   const screen = shallowRef<"a" | "idle" | "b">("a");
   const bKeys: string[] = [];
   const A = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>a</Text>;
   });
   const B = defineComponent(() => {
-    useInput((input) => bKeys.push(input));
+    useInput((event) => {
+      if (event.type === "text") bKeys.push(event.text);
+    });
     return () => <Text>b</Text>;
   });
   const App = defineComponent(
@@ -469,16 +398,24 @@ test("rawMode 'always': an escape buffered on a no-input screen does not bleed i
   );
 
   const stdout = makeFakeWritable();
-  const { stream: stdin } = makeSpyStdin();
+  const { stream: stdin, setRawModeCalls, refCount } = makeSpyStdin();
   const app = createApp(App);
-  app.mount({ stdout, stdin, maxFps: 0, exitOnCtrlC: false }); // default 'always'
+  app.mount({ stdout, stdin });
   await settle();
 
   // Navigate to the idle (no-input) screen; A's useInput unmounts.
   screen.value = "idle";
   await settle();
+  expect(setRawModeCalls).toEqual([true, false]);
+  expect(refCount()).toBe(0);
 
-  // Type a partial escape WHILE idle — the lifetime listener still parses it.
+  // Runtime may briefly retain its shared listener as a finite tombstone for
+  // the already-written Kitty capability query. The tombstone owns no
+  // application route; it only prevents a late, untagged protocol reply from
+  // becoming input for a later screen.
+  expect(stdin.listenerCount("data")).toBe(1);
+
+  // Type a partial escape while idle. No framework listener owns it.
   (stdin as unknown as PassThrough).emit("data", "\x1b[");
   // Transition to the input screen B within the ~20ms flush window.
   screen.value = "b";
@@ -488,4 +425,6 @@ test("rawMode 'always': an escape buffered on a no-input screen does not bleed i
   expect(bKeys).toEqual([]); // the idle-typed escape must not reach B
 
   app.unmount();
+  await app.waitUntilExit();
+  expect(stdin.listenerCount("data")).toBe(0);
 });

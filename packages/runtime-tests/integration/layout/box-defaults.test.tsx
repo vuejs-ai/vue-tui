@@ -39,8 +39,7 @@ test("Box defaults to flexShrink=1", async () => {
   expect(maxLineWidth).toBeLessThanOrEqual(10);
 });
 
-test("Box defaults to flexWrap='nowrap'", async () => {
-  // With nowrap, items stay on one line even if they overflow
+test("Box keeps overflowing siblings on one row by default", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box width={10}>
@@ -50,7 +49,6 @@ test("Box defaults to flexWrap='nowrap'", async () => {
     )),
     { columns: 100 },
   );
-  // Items should be on the same line (row direction, nowrap)
   const frame = lastFrame({ trimLines: true })!;
   expect(frame.split("\n")).toHaveLength(1);
   expect(frame).toBe("HelloWorld");

@@ -25,6 +25,16 @@ async function emulate(output: string): Promise<string[]> {
 async function runScenario(scenario: string): Promise<{ lines: string[]; output: string }> {
   const ps = term("inline-overflow-comparison", [String(rows), scenario]);
   await ps.waitForExit();
+  // node-pty can deliver the child's final bytes AFTER the exit event, so the
+  // capture is not complete just because the process is gone. Every assertion
+  // here reads the whole transcript, so wait for the stream to go quiet first;
+  // without this the teardown frames and the shorter-frame marker intermittently
+  // went missing under parallel load and the indexOf assertions saw -1.
+  let previousLength = -1;
+  while (ps.output.length !== previousLength) {
+    previousLength = ps.output.length;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 
   return { lines: await emulate(ps.output), output: ps.output };
 }
@@ -79,7 +89,9 @@ test("Static commits completed lines once while a small dynamic tail remains rep
   const { lines, output } = await runScenario("static-tail");
 
   expectNoMainScreenReset(output);
+  expect(output).not.toContain("[Vue warn]");
   expect(lines).toContain("PRE_APP_HISTORY");
+  expect(lines.filter((line) => line === "DEFERRED")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 0")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 1")).toHaveLength(1);
   expect(lines.filter((line) => line === "DONE 2")).toHaveLength(1);
@@ -115,32 +127,6 @@ test("Inline never takes ownership of a partially occupied pre-mount row", async
   expect(lines).toContain("TOP 2");
 });
 
-test("screen-reader Inline also preserves a partially occupied pre-mount row", async () => {
-  const { lines, output } = await runScenario("partial-row-screen-reader");
-
-  expectNoMainScreenReset(output);
-  expect(output).not.toContain(ansiEscapes.enterAlternativeScreen);
-  expect(lines).toContain("PRE_APP_PARTIAL");
-  expect(lines).toContain("TOP 2");
-});
-
-test("an empty cursor-only app establishes an owned row after pre-mount content", async () => {
-  const { lines, output } = await runScenario("partial-row-empty-cursor");
-
-  expectNoMainScreenReset(output);
-  expect(output).toContain("\x1bE");
-  expect(lines).toContain("PRE_APP_PARTIAL");
-});
-
-test("coordinated output can be the first managed write after a partial row", async () => {
-  const { lines, output } = await runScenario("partial-row-coordinated");
-
-  expectNoMainScreenReset(output);
-  expect(lines).toContain("PRE_APP_PARTIAL");
-  expect(lines).toContain("COMMITTED");
-  expect(lines).not.toContain("PRE_APP_PARTIALCOMMITTED");
-});
-
 test("Static can be the first managed write after a partial row", async () => {
   const { lines, output } = await runScenario("partial-row-static");
 
@@ -156,18 +142,4 @@ test("full-height Inline teardown leaves the next process output on a fresh row"
   expect(lines).toContain("BOTTOM 2");
   expect(lines).toContain("POST_APP");
   expect(lines).not.toContain("BOTTOM 2POST_APP");
-});
-
-test.each([
-  "post-teardown-cursor",
-  "post-teardown-cursor-incremental",
-  "post-teardown-short-cursor",
-])("Inline teardown returns an application caret to the bottom: %s", async (scenario) => {
-  const { lines, output } = await runScenario(scenario);
-
-  expectNoMainScreenReset(output);
-  expect(lines).toContain("TOP 2");
-  expect(lines).toContain("BOTTOM 2");
-  expect(lines).toContain("POST_APP");
-  expect(lines.indexOf("POST_APP")).toBeGreaterThan(lines.indexOf("BOTTOM 2"));
 });

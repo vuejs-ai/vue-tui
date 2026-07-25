@@ -169,6 +169,18 @@ const parseEscapeSequence = (input: string, escapeIndex: number): ParsedEscapeSe
 };
 
 /**
+ * Only short prefixes remain ambiguous with a standalone Escape or Alt chord.
+ * Once a CSI has received parameter/intermediate bytes, it is a definite
+ * terminal sequence whose final byte may arrive in an arbitrarily later read.
+ */
+const usesFiniteEscapeTimeout = (input: string): boolean => {
+  if (!input.startsWith(escape)) return false;
+  const prefixLength = input[1] === escape ? 2 : 1;
+  const suffix = input.slice(prefixLength);
+  return suffix === "" || suffix === "[" || suffix === "O" || suffix === "[[";
+};
+
+/**
  * Split C0 and DEL control bytes outside bracketed paste into individual
  * events. A Node stdin chunk is not a key boundary and may batch ordinary text
  * with Ctrl+C, Return, Tab, or repeated Backspace. Kitty keyboard text is UTF-8
@@ -265,14 +277,11 @@ export const createInputParser = (): InputParser => {
       return pending;
     },
     hasPendingEscape() {
-      // Don't trigger the escape flush timer while assembling a paste start
-      // marker once `ESC[2` makes that intent distinguishable, or while waiting
-      // for paste end. Bare `ESC` and `ESC[` retain the finite ambiguity timer
-      // so a real Escape key cannot be held forever.
-      const isRecognizablePasteStart = pending.length >= 3 && pasteStart.startsWith(pending);
-      return (
-        pending.startsWith(escape) && !isRecognizablePasteStart && !pending.startsWith(pasteStart)
-      );
+      // Bare Escape, CSI/SS3 introducers, and the legacy CSI introducer retain
+      // the finite ambiguity timer. Definite partial CSI (including SGR mouse),
+      // recognizable paste framing, and paste payload wait for their final
+      // protocol boundary instead of being emitted as keyboard text.
+      return usesFiniteEscapeTimeout(pending);
     },
     flushPendingEscape() {
       if (!pending.startsWith(escape)) {

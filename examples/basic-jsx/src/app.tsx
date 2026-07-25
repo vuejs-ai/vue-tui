@@ -6,13 +6,19 @@ import Clock from "./clock";
 export default defineComponent(() => {
   const showClock = shallowRef(true);
 
-  useInput((input) => {
-    if (input === "c") showClock.value = !showClock.value;
-    if (input === "q") process.exit(0);
+  useInput((event) => {
+    if (event.type !== "text") return;
+    if (event.text === "c") {
+      showClock.value = !showClock.value;
+      return;
+    }
+    if (event.text === "q") {
+      process.exit(0);
+    }
   });
 
   return () => (
-    <Box flexDirection="column" paddingX={1}>
+    <Box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <Text bold color="cyan">
         vue-tui basic (JSX)
       </Text>

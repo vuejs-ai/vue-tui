@@ -5,8 +5,6 @@ export {
   type RenderOptions,
   type RenderResult,
   type Terminal,
-  type TestHost,
-  type TestRenderSession,
 } from "./render.ts";
 export type { ScreenSnapshot } from "./emulator.ts";
 export { type RawModeState } from "./streams.ts";

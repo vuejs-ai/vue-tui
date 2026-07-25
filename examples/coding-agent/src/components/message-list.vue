@@ -23,7 +23,8 @@ function parseCommand(tc: { function: { arguments: string } }): string {
       :key="tc.id"
       borderStyle="round"
       borderColor="yellow"
-      :paddingX="1"
+      :paddingLeft="1"
+      :paddingRight="1"
     >
       <Text color="yellow">{{ parseCommand(tc) }}</Text>
     </Box>

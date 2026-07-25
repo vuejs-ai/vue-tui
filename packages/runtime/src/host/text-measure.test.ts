@@ -2,8 +2,14 @@ import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
-import { createText, createTextLeaf, createTransform, createVirtualText } from "./nodes.ts";
-import { flattenLeaves, measureTextNatural, wrapText } from "./text-measure.ts";
+import { createText, createTextLeaf, createVirtualText } from "./nodes.ts";
+import {
+  flattenLeaves,
+  measureTextNatural,
+  safeSliceEnd,
+  sliceAnsiPreservingIntensity,
+  wrapText,
+} from "./text-measure.ts";
 import { renderToString } from "../render-to-string.ts";
 import Box from "../components/box.vue";
 import Text from "../components/text.vue";
@@ -37,32 +43,12 @@ test("flattenLeaves recurses into virtual-text", () => {
   expect(flattenLeaves(t)).toBe("ab");
 });
 
-// G21 follow-up, finding 1: flattenLeaves must NOT apply a transform to empty
-// inner text — matches paint.ts `innerText.length > 0` guard and Ink
-// squash-text-nodes.ts:34 (`nodeText.length > 0`). Without the guard,
-// a transform that adds chars to an empty string inflates the measured width
-// relative to what paint actually renders, causing layout/wrapping mismatch.
-test("flattenLeaves skips transform on empty nested text (length guard)", () => {
-  // Transform that adds chars to any input (including empty string).
-  const addCharsTransform = (s: string, _i: number) => s + "[X]";
-  const t = createText();
-  const leaf = createTextLeaf("ab");
-  leaf.parent = t;
-  // Empty transform child: no text leaves inside it.
-  const emptyTransform = createTransform(addCharsTransform);
-  emptyTransform.parent = t;
-  t.children = [leaf, emptyTransform];
-  // With the guard: flattenLeaves("ab" + skip-empty-transform) = "ab".
-  // Without the guard: flattenLeaves("ab" + "[X]") = "ab[X]" (inflated width).
-  expect(flattenLeaves(t)).toBe("ab");
-});
-
 test("wrapText splits on width", () => {
   expect(wrapText("hello world", 5, "wrap")).toEqual(["hello", " ", "world"]);
 });
 
-test("wrapText truncate-end cuts with ellipsis", () => {
-  expect(wrapText("abcdefgh", 5, "truncate-end")).toEqual(["abcd…"]);
+test("wrapText truncate cuts with ellipsis", () => {
+  expect(wrapText("abcdefgh", 5, "truncate")).toEqual(["abcd…"]);
 });
 
 test("wrapText at width 0 wraps non-empty text onto its own line (Ink parity)", () => {
@@ -113,6 +99,20 @@ test("wrapText at width 0 keeps a wide (CJK) glyph whole and styled", () => {
   ]);
   // Mixed narrow + wide.
   expect(wrapText("A你", 0, "wrap")).toEqual(["", "A", "你"]);
+});
+
+test("ANSI slicing preserves independent bold and dim intensity at the first retained cell", () => {
+  const styled = "\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mBB\x1b[22m";
+
+  expect(sliceAnsiPreservingIntensity(styled, 0, 3)).toBe(
+    "\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m",
+  );
+  expect(safeSliceEnd(styled, 3)).toBe("\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m");
+  expect(wrapText("\x1b[1m\x1b[2mA\x1b[22m\x1b[2mB\x1b[22m", 0, "wrap")).toEqual([
+    "",
+    "\x1b[1m\x1b[2mA\x1b[22m",
+    "\x1b[2mB\x1b[22m",
+  ]);
 });
 
 test("wrapText at width 0 splits each hard-newline line independently", () => {
@@ -261,13 +261,33 @@ test("truncate preserves newlines (no collapse to one line)", () => {
   expect(lines[1]).toBe("yhello");
 });
 
-test("truncate of multi-line text that overflows collapses to one truncated line (matches Ink)", () => {
-  // Ink's wrapText does cliTruncate(text, maxWidth, {position}) on the whole
-  // string; when truncation happens, trailing lines are dropped. We match that
-  // exactly — do NOT change this to per-line truncation (it would diverge from Ink).
+test("truncate shortens each hard-newline segment independently", () => {
   const lines = wrapText("abcdef\nghijkl", 5, "truncate");
-  expect(lines).toEqual(["abcd…"]);
+  expect(lines).toEqual(["abcd…", "ghij…"]);
 });
+
+test.each([
+  ["truncate", ["AB👩‍💻C…", "ABCDE…", "ábcde…", "中文a…", "fit"]],
+  ["truncate-middle", ["AB…FG", "ABC…Z", "ábc…gh", "中…bc", "fit"]],
+  ["truncate-start", ["…CDEFG", "…EF👩‍💻Z", "…defgh", "…文abc", "fit"]],
+] as const)(
+  "%s truncates every hard line independently without splitting graphemes",
+  (mode, expected) => {
+    const lines = wrapText("AB👩‍💻CDEFG\nABCDEF👩‍💻Z\nábcdefgh\n中文abc\nfit", 6, mode);
+
+    expect(lines).toEqual(expected);
+    expect(lines).toHaveLength(5);
+    for (const line of lines) expect(stringWidth(line)).toBeLessThanOrEqual(6);
+  },
+);
+
+test.each(["truncate", "truncate-middle", "truncate-start"] as const)(
+  "%s keeps one result per hard line at the zero- and ellipsis-width boundaries",
+  (mode) => {
+    expect(wrapText("long\nx", 0, mode)).toEqual(["", ""]);
+    expect(wrapText("long\nx", 1, mode)).toEqual(["…", "x"]);
+  },
+);
 
 // --- Text-width parity tests ported from Ink ---
 
@@ -286,7 +306,7 @@ test("wide characters do not add extra space inside fixed-width Box", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
   expect(lines[0]).toBe("\u{1F354}|");
@@ -302,7 +322,7 @@ test("CJK characters occupy correct width in fixed-width Box", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   expect(output).toBe("你好|");
 });
 
@@ -321,7 +341,7 @@ test("mixed ASCII and wide characters align correctly", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(2);
   expect(lines[0]).toBe("ab\u{1F354}cd|");
@@ -337,7 +357,7 @@ test("ANSI styled text does not affect layout width", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const stripped = stripAnsi(output);
   expect(stripped).toBe("hello|");
 });
@@ -347,7 +367,7 @@ test("empty Text does not affect sibling layout", () => {
     () => () => h(Box, null, () => [h(Text), h(Text, null, () => "hello")]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   expect(output).toBe("hello");
 });
 
@@ -357,33 +377,7 @@ test("truncate CJK text at end", () => {
       h(Box, { width: 20 }, () => h(Text, { wrap: "truncate" }, () => "あいうえおかきくけこ|end")),
   );
 
-  const output = renderToString(App, { columns: 40 });
-  const stripped = stripAnsi(output);
-  expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
-});
-
-test("truncate CJK text in the middle", () => {
-  const App = defineComponent(
-    () => () =>
-      h(Box, { width: 20 }, () =>
-        h(Text, { wrap: "truncate-middle" }, () => "あいうえおかきくけこ|end"),
-      ),
-  );
-
-  const output = renderToString(App, { columns: 40 });
-  const stripped = stripAnsi(output);
-  expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
-});
-
-test("truncate CJK text at start", () => {
-  const App = defineComponent(
-    () => () =>
-      h(Box, { width: 20 }, () =>
-        h(Text, { wrap: "truncate-start" }, () => "あいうえおかきくけこ|end"),
-      ),
-  );
-
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const stripped = stripAnsi(output);
   expect(stringWidth(stripped)).toBeLessThanOrEqual(20);
 });
@@ -399,7 +393,7 @@ test("truncate CJK text does not exceed Box width", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 40 });
+  const output = renderToString(App, { width: 40 });
   const lines = output.split("\n");
   expect(lines.length).toBe(1);
 
@@ -419,7 +413,7 @@ test("overlay on 2nd cell of CJK character clears the full character", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あいうえ XYZきくけこ");
@@ -436,7 +430,7 @@ test("overlay on 1st cell of CJK character clears trailing placeholder", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あいうえおX きくけこ");
@@ -454,7 +448,7 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
       ]),
   );
 
-  const output = renderToString(App, { columns: 20 });
+  const output = renderToString(App, { width: 20 });
   const lines = output.split("\n");
   expect(stringWidth(lines[0]!)).toBe(20);
   expect(stripAnsi(lines[0]!)).toBe("あい 漢字テスト けこ");
@@ -485,18 +479,19 @@ test("measureTextNatural counts an only-newline string as all empty lines", () =
   expect(measureTextNatural("\n\n")).toEqual({ width: 0, height: 3 });
 });
 
-test("clipped empty write does not corrupt existing wide characters", () => {
-  // When a write is clipped to an empty string, the boundary cleanup
-  // must not run, otherwise it would destroy a wide character that
-  // isn't actually being overwritten.
+test("terminal-viewport empty write does not corrupt existing wide characters", () => {
+  // When the terminal viewport clips a write to an empty string, the boundary
+  // cleanup must not run, otherwise it would destroy a wide character that
+  // isn't actually being overwritten. Private component-overflow behavior is
+  // covered through raw host tests rather than an unsupported public Box prop.
   const App = defineComponent(
     () => () =>
-      h(Box, { width: 4, height: 1, overflowX: "hidden" }, () => [
+      h(Box, { width: 4, height: 1 }, () => [
         h(Text, null, () => "あい"),
         h(Box, { position: "absolute", left: -1, width: 1 }, () => h(Text, null, () => "Z")),
       ]),
   );
 
-  const output = renderToString(App, { columns: 4 });
+  const output = renderToString(App, { width: 4 });
   expect(stripAnsi(output)).toBe("あい");
 });

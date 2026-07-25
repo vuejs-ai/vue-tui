@@ -249,29 +249,3 @@ it("#450: full-height rerenders with <Static> should not repeatedly clear termin
   expectNoMainScreenReset(output);
   expect(eraseLineCount).toBeGreaterThan(0);
 });
-
-// ── Animation exit tests ────────────────────────────────────────────
-
-it("useAnimation can drive non-interactive process exit", async () => {
-  const ps = term("use-animation-non-interactive-exit");
-  try {
-    await ps.waitForExit();
-  } catch {
-    // yoga WASM cleanup crash causes non-zero exit after successful operation
-  }
-  const plainOutput = stripAnsi(ps.output);
-
-  expect(plainOutput).toContain("exited");
-});
-
-it("useAnimation can drive explicitly non-interactive process exit", async () => {
-  const ps = term("use-animation-interactive-false-exit");
-  try {
-    await ps.waitForExit();
-  } catch {
-    // yoga WASM cleanup crash causes non-zero exit after successful operation
-  }
-  const plainOutput = stripAnsi(ps.output);
-
-  expect(plainOutput).toContain("exited");
-});

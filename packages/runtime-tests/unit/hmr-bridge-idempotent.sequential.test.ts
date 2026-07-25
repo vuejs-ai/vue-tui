@@ -41,12 +41,12 @@ test("initHmrBridge registers each listener AT MOST ONCE across repeated createA
 
   // Simulate two createApp() calls in one dev process (two apps, or unmount +
   // re-create). Vite appends listeners without dedup, so without an idempotency
-  // guard the second call would re-register all three handlers (6 total).
+  // guard the second call would re-register all five handlers (10 total).
   initHmrBridge(hot);
   initHmrBridge(hot);
 
-  // Exactly 3 = one each for vite:error, vite:beforeUpdate, vite:beforeFullReload.
-  expect(hot.on).toHaveBeenCalledTimes(3);
+  // Error context, error, before/after update, and full reload are each registered once.
+  expect(hot.on).toHaveBeenCalledTimes(5);
 });
 
 test("initHmrBridge RE-ARMS each new hot (a full reload hands the runtime a fresh hot)", async () => {
@@ -62,8 +62,8 @@ test("initHmrBridge RE-ARMS each new hot (a full reload hands the runtime a fres
   initHmrBridge(hotA);
   initHmrBridge(hotB);
 
-  expect(hotA.on).toHaveBeenCalledTimes(3);
-  expect(hotB.on).toHaveBeenCalledTimes(3); // re-armed on the fresh hot
+  expect(hotA.on).toHaveBeenCalledTimes(5);
+  expect(hotB.on).toHaveBeenCalledTimes(5); // re-armed on the fresh hot
 });
 
 test("a registered handler still works after the idempotency refactor", async () => {
@@ -78,11 +78,13 @@ test("a registered handler still works after the idempotency refactor", async ()
   const errHandler = hot.handlers.get("vite:error");
   expect(errHandler).toBeTypeOf("function");
   errHandler!({ err: { message: "boom" } });
+  // Error applies on a microtask so a same-turn beforeUpdate cannot clobber it.
+  await Promise.resolve();
   expect(devState.value).toEqual({ type: "error", error: { message: "boom" } });
 
-  // vite:beforeFullReload must send the reload request through the injected hot.
+  // vite:beforeFullReload tears down without a dead request-reload event.
   const reloadHandler = hot.handlers.get("vite:beforeFullReload");
   expect(reloadHandler).toBeTypeOf("function");
   reloadHandler!(undefined);
-  expect(hot.send).toHaveBeenCalledWith("vue-tui:request-reload");
+  expect(hot.send).not.toHaveBeenCalledWith("vue-tui:request-reload");
 });

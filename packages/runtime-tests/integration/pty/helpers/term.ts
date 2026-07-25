@@ -9,7 +9,7 @@ const { spawn } = require("node-pty") as typeof import("node-pty");
 
 const fixturesDir = url.fileURLToPath(new URL("../fixtures", import.meta.url));
 
-const term = (fixture: string, args: string[] = []) => {
+const term = (fixture: string, args: string[] = [], options: { readonly name?: string } = {}) => {
   let resolve: (value?: unknown) => void;
   let reject: (error?: Error) => void;
 
@@ -42,7 +42,6 @@ const term = (fixture: string, args: string[] = []) => {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     NODE_NO_WARNINGS: "1",
-    CI: "false",
     FORCE_COLOR: "3",
   };
 
@@ -51,7 +50,7 @@ const term = (fixture: string, args: string[] = []) => {
   const rows = Number.isFinite(rowsArg) && rowsArg > 0 ? rowsArg : 24;
 
   const ps = spawn("node", ["--import=tsx", path.join(fixturesDir, `${fixture}.tsx`), ...args], {
-    name: "xterm-color",
+    name: options.name ?? "xterm-color",
     cols: 100,
     rows,
     cwd: fixturesDir,
@@ -67,7 +66,7 @@ const term = (fixture: string, args: string[] = []) => {
     get exited() {
       return exited;
     },
-    write(input: string) {
+    write(input: string | Buffer) {
       void readyPromise.then(() => {
         ps.write(input);
       });

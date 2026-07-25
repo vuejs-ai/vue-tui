@@ -21,6 +21,13 @@ export interface SharedStdinIngress {
     onResult: (supported: boolean) => void,
     owner?: SharedStdinSubscription,
   ): (options?: { readonly discard?: boolean }) => void;
+  /**
+   * Repository testing bridge only. Route one complete physical input write
+   * through the production decoder and parser, then settle after its finite
+   * Escape ambiguity has resolved. Definite incomplete framing is retained for
+   * a later write and reported instead of being manufactured into an event.
+   */
+  writeForTest(data: Uint8Array | string): Promise<void>;
 }
 
 interface Subscriber {
@@ -112,6 +119,32 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   let flowReconcileRequested = false;
   let processing = false;
   let firstProcessingError: unknown;
+  const testInputWaiters = new Set<{
+    readonly resolve: () => void;
+    readonly reject: (error: unknown) => void;
+  }>();
+
+  function settleTestInputWaiters(): void {
+    if (
+      processing ||
+      chunkQueue.length > 0 ||
+      afterCurrentChunk.length > 0 ||
+      pendingFlushTimer !== undefined
+    ) {
+      return;
+    }
+
+    const waiters = [...testInputWaiters];
+    testInputWaiters.clear();
+    if (framingInProgress()) {
+      const error = new Error(
+        "Test input ended with an incomplete terminal protocol frame or UTF-8 sequence; write the remaining bytes in a later call.",
+      );
+      for (const waiter of waiters) waiter.reject(error);
+      return;
+    }
+    for (const waiter of waiters) waiter.resolve();
+  }
 
   function snapshotActiveRecipients(): RecipientSnapshot {
     const recipients: Recipient[] = [];
@@ -161,6 +194,12 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     if (pendingFlushTimer === undefined) return;
     clearTimeout(pendingFlushTimer);
     pendingFlushTimer = undefined;
+  }
+
+  function clearDetectionTimer(detection: KittyQueryDetection, cancel = true): void {
+    if (detection.timer === undefined) return;
+    if (cancel) clearTimeout(detection.timer);
+    detection.timer = undefined;
   }
 
   function currentFramingSnapshot(): RecipientSnapshot | undefined {
@@ -565,7 +604,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       // while a following CSI or paste prefix from the same chunk is already
       // pending; invalidation must be able to retain this exact framing unit.
       // Its recipient contents are refreshed after the earlier complete facts
-      // run, so route selection does not depend on Node's chunk boundaries.
+      // run, so subscriber selection does not depend on Node's chunk boundaries.
       newPendingRecipients = { recipients: segment.recipients.recipients };
       pendingInputRecipients = newPendingRecipients;
     }
@@ -602,8 +641,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       detection.pending = false;
       detections.delete(detection);
       inputDemandEpoch++;
-      if (detection.timer !== undefined) clearTimeout(detection.timer);
-      detection.timer = undefined;
+      clearDetectionTimer(detection);
       if (detection.notify) settledDetections.push(detection);
     }
     for (const detection of settledDetections) {
@@ -721,8 +759,13 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     if (firstProcessingError !== undefined) {
       const error = firstProcessingError;
       firstProcessingError = undefined;
+      const testWriteOwnsError = testInputWaiters.size > 0;
+      for (const waiter of testInputWaiters) waiter.reject(error);
+      testInputWaiters.clear();
+      if (testWriteOwnsError) return;
       throw error;
     }
+    settleTestInputWaiters();
   }
 
   function handleData(chunk: Uint8Array | string): void {
@@ -734,11 +777,11 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function timeoutDetection(detection: KittyQueryDetection): void {
+    clearDetectionTimer(detection, false);
     if (!detection.pending) return;
     detection.pending = false;
     detections.delete(detection);
     inputDemandEpoch++;
-    detection.timer = undefined;
     runInputTransaction(() => {
       releasePendingQueryPrefix();
       if (detection.notify) {
@@ -753,7 +796,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function armDetectionTimeout(detection: KittyQueryDetection): void {
-    if (detection.timer !== undefined) clearTimeout(detection.timer);
+    clearDetectionTimer(detection);
     detection.timer = setTimeout(() => timeoutDetection(detection), KITTY_QUERY_TIMEOUT);
     detection.timer.unref?.();
   }
@@ -777,8 +820,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     detection.notify = false;
     detections.delete(detection);
     inputDemandEpoch++;
-    if (detection.timer !== undefined) clearTimeout(detection.timer);
-    detection.timer = undefined;
+    clearDetectionTimer(detection);
     const release = () => {
       releasePendingQueryPrefix(detection.owner);
       reconcilePendingFlush();
@@ -846,6 +888,13 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
           subscriber.requestedActive = false;
           subscriber.generation++;
           subscribers.delete(subscriber);
+          // Query replies have no request id, so a live application keeps a
+          // cancelled query as a short tombstone. Once that application is
+          // disposed, the tombstone must not retain the shared stdin listener
+          // or its timer beyond the application's resource lifetime.
+          for (const detection of detections) {
+            if (detection.owner === subscriber) abortDetection(detection);
+          }
           releaseSubscriberRetentions(subscriber);
           discardOrphanedPendingFraming();
           reconcilePendingFlush();
@@ -901,6 +950,19 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       }
       return (options) =>
         options?.discard ? abortDetection(detection) : cancelDetection(detection);
+    },
+    writeForTest(data) {
+      const hadRuntimeListener = inputListenerAttached;
+      try {
+        stdin.emit("data", typeof data === "string" ? data : Uint8Array.from(data));
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      if (!hadRuntimeListener) return Promise.resolve();
+      return new Promise<void>((resolve, reject) => {
+        testInputWaiters.add({ resolve, reject });
+        settleTestInputWaiters();
+      });
     },
   };
 

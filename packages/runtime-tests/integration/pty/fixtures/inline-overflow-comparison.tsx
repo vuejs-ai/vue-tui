@@ -1,7 +1,18 @@
 import process from "node:process";
 import ansiEscapes from "ansi-escapes";
-import { Box, Static, Text, createApp, useApp, useCursor, useStdout } from "@vue-tui/runtime";
-import { defineComponent, nextTick, onMounted, onScopeDispose, shallowRef, watch } from "vue";
+import { Box, Text, createApp, useApp, type TuiApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
+import {
+  defineComponent,
+  h,
+  nextTick,
+  onMounted,
+  onScopeDispose,
+  shallowRef,
+  vShow,
+  watch,
+  withDirectives,
+} from "vue";
 
 type Scenario =
   | "current-full"
@@ -12,28 +23,35 @@ type Scenario =
   | "fullscreen"
   | "explicit-preclear"
   | "partial-row"
-  | "partial-row-screen-reader"
-  | "partial-row-empty-cursor"
-  | "partial-row-coordinated"
   | "partial-row-static"
-  | "post-teardown"
-  | "post-teardown-cursor"
-  | "post-teardown-cursor-incremental"
-  | "post-teardown-short-cursor";
+  | "post-teardown";
 
 const rows = Number(process.argv[2]) || 6;
 const scenario = (process.argv[3] ?? "current-full") as Scenario;
 const revision = shallowRef(0);
+let app: TuiApp;
+const DeferredHistory = defineComponent(
+  () => () => h(Text, null, () => (revision.value > 0 ? "DEFERRED" : "")),
+);
 
 process.stdout.rows = rows;
 process.stdout.write(scenario.startsWith("partial-row") ? "PRE_APP_PARTIAL" : "PRE_APP_HISTORY\n");
 if (scenario === "explicit-preclear") process.stdout.write(ansiEscapes.clearTerminal);
 
+// The shorter-frame marker is written only after a render flush, which can
+// outlast the 50 ms tick that advances to the exit step. Ordering exit behind
+// this gate keeps the marker in the captured output instead of leaving the
+// comparison test to lose a race whenever the machine is loaded.
+let markShorterCommitted: () => void = () => {};
+const shorterFrameCommitted =
+  scenario === "current-shrink"
+    ? new Promise<void>((resolve) => {
+        markShorterCommitted = resolve;
+      })
+    : Promise.resolve();
+
 const App = defineComponent(() => {
-  const { exit, waitUntilRenderFlush } = useApp();
-  const cursor =
-    scenario === "partial-row-empty-cursor" || scenario.includes("teardown-") ? useCursor() : null;
-  const coordinated = scenario === "partial-row-coordinated" ? useStdout() : null;
+  const { exit } = useApp();
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   watch(
@@ -41,13 +59,25 @@ const App = defineComponent(() => {
     (value) => {
       clearTimeout(timer);
       timer = setTimeout(async () => {
-        if (value >= 2) exit();
-        else {
+        if (value >= 2) {
+          await shorterFrameCommitted;
+          exit();
+        } else {
+          // Nothing may advance past the shorter frame until its marker is in the
+          // stream: the comparison test reads byte order, so an advance that ran
+          // while the marker was still waiting on a flush would put TOP 2 first.
+          if (value === 1) await shorterFrameCommitted;
           revision.value++;
+          // Capture the revision this tick produced BEFORE awaiting. Reading the
+          // live ref after the flush is a race: under load the next 50 ms tick
+          // has already advanced it, so the marker branch never ran and the
+          // comparison test saw -1 for its index.
+          const committedRevision = revision.value;
           await nextTick();
-          await waitUntilRenderFlush();
-          if (scenario === "current-shrink" && revision.value === 1) {
+          await app.waitUntilRenderFlush();
+          if (scenario === "current-shrink" && committedRevision === 1) {
             process.stdout.write("\x1b]0;INLINE_OVERFLOW_SHORTER_COMMITTED\x07");
+            markShorterCommitted();
           }
         }
       }, 50);
@@ -56,36 +86,34 @@ const App = defineComponent(() => {
   );
 
   onMounted(() => {
-    coordinated?.write("COMMITTED");
     process.stdout.write("\x1b]0;INLINE_OVERFLOW_MOUNTED\x07");
   });
   onScopeDispose(() => clearTimeout(timer));
 
   return () => {
-    if (cursor) cursor.setCursorPosition({ x: 0, y: 0 });
-
-    if (scenario === "partial-row-empty-cursor" || scenario === "partial-row-coordinated") {
-      return null;
-    }
-
     if (scenario === "partial-row-static") {
       return (
-        <Static items={["COMMITTED"]}>
-          {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
+        <Static>
+          <Text>COMMITTED</Text>
         </Static>
       );
     }
 
     if (scenario === "static-tail") {
       const completed = Array.from({ length: revision.value + 1 }, (_, index) => `DONE ${index}`);
-      return (
-        <>
-          <Static items={completed}>
-            {{ default: ({ item }: { item: string }) => <Text key={item}>{item}</Text> }}
-          </Static>
-          <Text>TAIL {revision.value}</Text>
-        </>
-      );
+      return h(Box, { flexDirection: "column" }, () => [
+        withDirectives(
+          h(Box, { key: "deferred" }, () => h(Static, null, () => h(DeferredHistory))),
+          [[vShow, false]],
+        ),
+        ...completed.map((item) =>
+          withDirectives(
+            h(Static, { key: item }, () => h(Text, null, () => item)),
+            [[vShow, false]],
+          ),
+        ),
+        h(Text, null, () => `TAIL ${revision.value}`),
+      ]);
     }
 
     if (scenario === "bounded" || scenario === "bounded-tail" || scenario === "explicit-preclear") {
@@ -110,12 +138,7 @@ const App = defineComponent(() => {
       );
     }
 
-    const targetHeight =
-      scenario === "post-teardown-short-cursor"
-        ? 2
-        : scenario === "current-shrink" && revision.value > 0
-          ? rows - 1
-          : rows + 1;
+    const targetHeight = scenario === "current-shrink" && revision.value > 0 ? rows - 1 : rows + 1;
     const height = scenario === "current-full" ? rows : targetHeight;
 
     return (
@@ -128,13 +151,9 @@ const App = defineComponent(() => {
   };
 });
 
-const app = createApp(App);
+app = createApp(App);
 app.mount({
   mode: scenario === "fullscreen" ? "fullscreen" : "inline",
-  isScreenReaderEnabled: scenario === "partial-row-screen-reader",
-  exitOnCtrlC: false,
-  maxFps: 0,
-  incrementalRendering: scenario === "post-teardown-cursor-incremental",
 });
 
 if (scenario.startsWith("post-teardown")) {

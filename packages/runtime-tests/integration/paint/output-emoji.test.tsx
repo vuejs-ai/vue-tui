@@ -6,7 +6,7 @@ import { Box, Text } from "@vue-tui/runtime";
 describe("Output character model", () => {
   test("variation selector emoji characters align correctly within borders", async () => {
     const App = defineComponent(() => () => (
-      <Box borderStyle="round" alignSelf="flex-start">
+      <Box borderStyle="round" width={8}>
         <Text>🌡️⚠️✅</Text>
       </Box>
     ));
@@ -34,7 +34,7 @@ describe("Output character model", () => {
 
   test("simple emoji characters align within borders", async () => {
     const App = defineComponent(() => () => (
-      <Box borderStyle="round" alignSelf="flex-start">
+      <Box borderStyle="round" width={8}>
         <Text>🦾🌏😋</Text>
       </Box>
     ));

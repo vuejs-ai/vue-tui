@@ -1,6 +1,7 @@
 import process from "node:process";
-import { createApp, Text } from "@vue-tui/runtime";
+import { Box, createApp, Text } from "@vue-tui/runtime";
 import { defineComponent, onMounted } from "vue";
+import { createInternalMountOptions } from "../../../../runtime/dist/internal.mjs";
 
 // Mounts a live interactive app in the alternate screen (cursor hidden), then
 // signals readiness on stderr. It deliberately NEVER unmounts/exits on its own
@@ -22,7 +23,11 @@ const App = defineComponent(() => {
     }, 50);
   });
 
-  return () => <Text>signal teardown fixture</Text>;
+  return () => (
+    <Box>
+      <Text>signal teardown fixture</Text>
+    </Box>
+  );
 });
 
 // The unthrottled variant proves signal restoration is independent of commit
@@ -30,6 +35,11 @@ const App = defineComponent(() => {
 const unthrottled = process.argv.includes("--unthrottled");
 
 const app = createApp(App);
-app.mount({ mode: "fullscreen", maxFps: unthrottled ? 0 : undefined });
+app.mount(
+  createInternalMountOptions({
+    mode: "fullscreen",
+    maxFps: unthrottled ? 0 : undefined,
+  }),
+);
 
 await app.waitUntilExit();

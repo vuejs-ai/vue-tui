@@ -14,9 +14,10 @@ import { exampleDir, launch, tsdownBin, viteBin, type Launched } from "./helpers
 // shim. This suite guards that the shipped examples still launch and paint on both paths, so a
 // regression that reintroduces a module-system crash fails CI on every change.
 //
-// Why a real PTY: a TUI gates live painting on a TTY (`liveUpdates = !isInCi && isTTY` by default),
-// so a piped/non-TTY child renders nothing — a non-PTY smoke test would be a false negative. Each
-// runnable example is launched under a pseudo-terminal and we wait for its title to paint.
+// Why a real PTY: a TUI paints live frames only on a TTY surface (a piped/non-TTY
+// child is the final-stream document host), so a non-PTY smoke test would be a
+// false negative. Each runnable example is launched under a pseudo-terminal and
+// we wait for its title to paint.
 //
 // What each path guards (be precise, don't oversell):
 //   - dev (`vite`): the in-process dev server boots and paints — the dev plugin itself
@@ -50,7 +51,6 @@ function buildSelfContained(dir: string, outName: string): string {
     stdio: "pipe",
     timeout: 60000,
     killSignal: "SIGKILL",
-    env: { ...process.env, CI: "false" },
   });
   const bundle = path.join(dir, "dist", outName);
   expect(readFileSync(bundle, "utf8")).not.toMatch(CJS_REQUIRE_SHIM);

@@ -54,6 +54,42 @@ test("error payloads are forwarded as-is onto the ssr hot channel", () => {
   expect(original).toHaveBeenCalledWith(payload);
 });
 
+test("error forwarding identifies the file-change timestamp for the runner", () => {
+  const ssrSend = vi.fn();
+  const original = vi.fn();
+  const server = {
+    environments: { ssr: { hot: { send: ssrSend } } },
+    ws: { send: original },
+  } as unknown as import("vite").ViteDevServer;
+  bridgeHmrEventsToRunner(server, () => 42);
+  const payload = {
+    type: "error",
+    err: { message: "boom", stack: "boom\n    at x" },
+  } satisfies import("vite").HotPayload;
+
+  server.ws.send(payload);
+
+  expect(ssrSend.mock.calls).toEqual([["vue-tui:hmr-error-context", { timestamp: 42 }], [payload]]);
+  expect(original).toHaveBeenCalledWith(payload);
+});
+
+test("direct SSR errors identify their own file-change timestamp", () => {
+  const ssrSend = vi.fn();
+  const server = {
+    environments: { ssr: { hot: { send: ssrSend } } },
+    ws: { send: vi.fn() },
+  } as unknown as import("vite").ViteDevServer;
+  bridgeHmrEventsToRunner(server, () => 42);
+  const payload = {
+    type: "error",
+    err: { message: "ssr boom", stack: "ssr boom\n    at x" },
+  } satisfies import("vite").HotPayload;
+
+  server.environments.ssr!.hot.send(payload);
+
+  expect(ssrSend.mock.calls).toEqual([["vue-tui:hmr-error-context", { timestamp: 42 }], [payload]]);
+});
+
 test("does not throw when the ssr environment is absent", () => {
   const original = vi.fn();
   const server = {

@@ -6,9 +6,10 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 test("README quickstart code runs to a Count: 0 frame", async () => {
   const Counter = defineComponent(() => {
     const count = shallowRef(0);
-    useInput((input) => {
-      if (input === "+") count.value++;
-      if (input === "-") count.value--;
+    useInput((event) => {
+      if (event.type !== "text") return;
+      if (event.text === "+") count.value++;
+      else if (event.text === "-") count.value--;
     });
     return () => (
       <Box>

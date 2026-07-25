@@ -1,54 +1,22 @@
-import { defineComponent, nextTick, onMounted, shallowRef } from "vue";
-import {
-  Box,
-  Static,
-  Text,
-  Transform,
-  createApp,
-  useApp,
-  useCursor,
-  useBoxMetrics,
-  useDraggable,
-  useInput,
-  useStderr,
-  useStdout,
-} from "@vue-tui/runtime";
+import { defineComponent, nextTick, onMounted, shallowRef, type VNodeChild } from "vue";
+import { Box, Text, createApp, useApp, useInput } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
+import { inputText } from "./input-event.js";
 
 type Scenario =
   | "static"
-  | "stdout"
-  | "stderr"
   | "console"
   | "rerender"
   | "overflow"
   | "horizontal-overflow"
+  | "horizontal-left-wide"
   | "horizontal-wide"
-  | "horizontal-transform"
-  | "target-lifetime"
-  | "screen-reader";
+  | "foreground-reset"
+  | "box-text-contract";
 
 const scenario = (process.argv[3] ?? "static") as Scenario;
-const autoExitTargetLifetime = process.argv[4] === "auto-exit";
 const label = shallowRef("BUTTON");
-const targetPhase = shallowRef<"none" | "first" | "second">("none");
-
-const LifetimeTarget = defineComponent(() => {
-  return () => {
-    if (targetPhase.value === "none") return null;
-    if (targetPhase.value === "first") {
-      return (
-        <Box key="first" width={7} height={2}>
-          <Text>FIRST</Text>
-        </Box>
-      );
-    }
-    return (
-      <Box key="second" marginLeft={5} width={11} height={1}>
-        <Text>TARGET-B</Text>
-      </Box>
-    );
-  };
-});
+const contractExpanded = shallowRef(true);
 
 // term() waits for this marker before sending input. Write it before entering
 // the alternate screen so it cannot move the fullscreen frame.
@@ -60,78 +28,25 @@ function markSettled(): void {
   process.stdout.write(`\x1b]0;__SETTLED__:${scenario}\x07`);
 }
 
-function markTargetPhase(): Promise<void> {
-  return nextTick()
-    .then(() => nextTick())
-    .then(() => {
-      process.stdout.write(`\x1b]0;__TARGET__:${targetPhase.value}\x07`);
-    });
-}
-
 const App = defineComponent(() => {
   const { exit } = useApp();
-  const { setCursorPosition } = useCursor();
-  const { write } = useStdout();
-  const { write: writeError } = useStderr();
-  const target = shallowRef<InstanceType<typeof LifetimeTarget> | null>(null);
-  const targetMetrics = useBoxMetrics(target);
-  let dragStarts = 0;
-  const drag = useDraggable(target, {
-    onStart() {
-      dragStarts += 1;
-    },
-  });
+  const renderSurface = (content: VNodeChild) => <Box flexDirection="column">{content}</Box>;
 
-  if (scenario !== "screen-reader") {
-    setCursorPosition({ x: 3, y: 0 });
-  }
-
-  useInput((input) => {
-    if (scenario === "target-lifetime") {
-      let exitAfterTransition = false;
-      if (input === "1") targetPhase.value = "first";
-      else if (input === "2") targetPhase.value = "second";
-      else if (input === "p") {
-        // PTY synchronization point: report the durable start count only after
-        // all input bytes before this key have been routed and rendered.
-        void nextTick().then(() => {
-          process.stdout.write(`\x1b]0;__DRAG_STARTS__:${dragStarts}\x07`);
-        });
-        return;
-      } else if (input === "x") {
-        targetPhase.value = "none";
-        exitAfterTransition = autoExitTargetLifetime;
-      } else if (input === "q") {
-        exit("target-lifetime");
-        return;
-      } else return;
-      const marked = markTargetPhase();
-      if (exitAfterTransition) {
-        void marked.then(() => {
-          setTimeout(() => exit("target-lifetime"), 20);
-        });
-      }
+  useInput((event) => {
+    const input = inputText(event);
+    if (input === "q") {
+      exit();
       return;
     }
-    if (scenario === "screen-reader" && input === "q") {
-      exit("screen-reader");
+    if (scenario === "box-text-contract" && input === "t") {
+      contractExpanded.value = !contractExpanded.value;
+      void nextTick().then(markSettled);
     }
   });
 
   onMounted(() => {
+    if (scenario === "static") return;
     setTimeout(() => {
-      if (scenario === "stdout") {
-        write("LOG\n");
-        markSettled();
-        return;
-      }
-
-      if (scenario === "stderr") {
-        writeError("ERROR\n");
-        markSettled();
-        return;
-      }
-
       if (scenario === "console") {
         console.log("CONSOLE");
         markSettled();
@@ -149,97 +64,198 @@ const App = defineComponent(() => {
   });
 
   return () => {
-    if (scenario === "target-lifetime") {
-      return (
-        <Box flexDirection="column">
-          <Text>phase={targetPhase.value}</Text>
-          <LifetimeTarget ref={target} />
-          <Text>
-            target={targetMetrics.width.value}x{targetMetrics.height.value}:
-            {String(targetMetrics.hasMeasured.value)} dragging={String(drag.isDragging.value)}
-          </Text>
-        </Box>
-      );
-    }
-
-    if (scenario === "horizontal-transform") {
-      return (
-        <Box width={1} height={1} flexShrink={0} onClick={() => exit("clicked")}>
-          {{
-            default: () => (
-              <Transform transform={() => "Y".repeat(101)}>
-                <Text>X</Text>
-              </Transform>
-            ),
-          }}
-        </Box>
-      );
-    }
-
     if (scenario === "horizontal-wide") {
-      return (
-        <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
+      return renderSurface(
+        <Box width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => `${"X".repeat(99)}你` }}</Text> }}
-        </Box>
+        </Box>,
+      );
+    }
+
+    if (scenario === "horizontal-left-wide") {
+      return renderSurface(
+        <Box width={4} height={1} overflowY="hidden">
+          <Box position="absolute" left={-1} flexShrink={0}>
+            <Text>中x</Text>
+          </Box>
+        </Box>,
       );
     }
 
     if (scenario === "horizontal-overflow") {
-      return (
-        <Box width={101} height={1} flexShrink={0} onClick={() => exit("clicked")}>
+      return renderSurface(
+        <Box width={101} height={1} flexShrink={0}>
           {{ default: () => <Text>{{ default: () => "X".repeat(101) }}</Text> }}
-        </Box>
+        </Box>,
       );
     }
 
     if (scenario === "overflow") {
-      return (
+      return renderSurface(
         <Box flexDirection="column" height={10} flexShrink={0}>
           {{
             default: () =>
               Array.from({ length: 10 }, (_, index) => (
-                <Box
-                  key={index}
-                  height={1}
-                  flexShrink={0}
-                  onClick={index === 0 ? () => exit("clicked") : undefined}
-                >
+                <Box key={index} height={1} flexShrink={0}>
                   {{ default: () => <Text>{{ default: () => `LINE${index}` }}</Text> }}
                 </Box>
               )),
           }}
-        </Box>
+        </Box>,
       );
     }
 
-    return (
+    if (scenario === "foreground-reset") {
+      return renderSurface(
+        <Box flexDirection="column">
+          <Text>Nested foreground reset</Text>
+          <Text color="red" backgroundColor="blue">
+            red:
+            <Text color="default">
+              default:<Text color="green">green</Text>:default
+            </Text>
+            :red
+          </Text>
+          <Box width={4} flexShrink={0}>
+            <Text color="red">
+              AA<Text color="default">BBB</Text>CC
+            </Text>
+          </Box>
+          <Text color="blue">blue sibling</Text>
+          <Text color="red">
+            literal:<Text color="default">reset</Text>:red
+          </Text>
+          <Text>Press q to restore the shell</Text>
+        </Box>,
+      );
+    }
+
+    if (scenario === "box-text-contract") {
+      const expanded = contractExpanded.value;
+      return renderSurface(
+        <Box
+          {...(expanded ? { paddingX: 2 } : {})}
+          flexDirection="column"
+          width="100%"
+          height={18}
+          flexShrink={0}
+          paddingY={1}
+          borderStyle="round"
+          borderColor="cyan"
+          overflow="hidden"
+        >
+          <Text bold underline>
+            Box/Text · state:{expanded ? "explicit" : "withdrawn"} · t toggle · q exit
+          </Text>
+          <Box
+            {...(expanded ? { columnGap: 3 } : {})}
+            flexDirection="row-reverse"
+            flexWrap="wrap"
+            alignItems="stretch"
+            justifyContent="space-between"
+            gap={1}
+            rowGap={1}
+          >
+            <Box
+              {...(expanded ? { borderRight: false } : {})}
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="single"
+              borderColor="yellow"
+            >
+              <Text color="yellow">A · reverse</Text>
+            </Box>
+            <Box
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="round"
+              borderColor="green"
+            >
+              <Text color="green">B · wrap</Text>
+            </Box>
+            <Box
+              width="30%"
+              minWidth={12}
+              maxWidth={24}
+              paddingX={1}
+              borderStyle="single"
+              borderColor="magenta"
+            >
+              <Text color="magenta">C · gap</Text>
+            </Box>
+          </Box>
+          <Text color="red" backgroundColor="blue" bold dimColor underline>
+            styles:A<Text {...(expanded ? { bold: false } : {})}>B</Text>
+            <Text {...(expanded ? { dimColor: false } : {})}>C</Text>
+            <Text color="default" backgroundColor="default" italic strikethrough inverse>
+              D
+            </Text>
+            E
+          </Text>
+          <Box width={18} height={1} overflowX="hidden">
+            <Text>overflow:0123456789ABCDEFGHIJ</Text>
+          </Box>
+          <Text wrap="truncate-middle">
+            truncate-middle:0123456789·中文·👩‍💻·ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          </Text>
+          <Text wrap="hard">hard-wrap:ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789</Text>
+          <Box position="absolute" right="2%" bottom={1}>
+            <Text inverse>ABS</Text>
+          </Box>
+        </Box>,
+      );
+    }
+
+    return renderSurface(
       <>
         {scenario === "static" ? (
-          <Static items={["HISTORY"]}>
-            {{ default: ({ item }: { item: string }) => <Text>{item}</Text> }}
+          <Static>
+            <Text>HISTORY</Text>
           </Static>
         ) : null}
-        <Box
-          width={7}
-          height={1}
-          onClick={() => exit(scenario === "screen-reader" ? "screen-reader-pointer" : "clicked")}
-        >
+        <Box width={7} height={1}>
           {{ default: () => <Text>{{ default: () => label.value }}</Text> }}
         </Box>
-      </>
+      </>,
     );
   };
 });
 
 const app = createApp(App);
-app.mount({
-  mode: "fullscreen",
-  isScreenReaderEnabled: scenario === "screen-reader",
-  incrementalRendering: scenario === "stdout",
-  exitOnCtrlC: false,
-  maxFps: 0,
-});
+app.config.warnHandler = () => {};
+const exited = app.waitUntilExit();
+let mountThrew = false;
+let mountError: unknown;
+try {
+  app.mount({
+    mode: "fullscreen",
+  });
+} catch (error) {
+  mountThrew = true;
+  mountError = error;
+}
 
-void app.waitUntilExit().then((result) => {
-  process.stdout.write(`__CLICKED__:${String(result)}\n`);
-});
+if (scenario === "static") {
+  if (!mountThrew) throw new Error("Expected Fullscreen Static mount to throw");
+  let exitError: unknown;
+  try {
+    await exited;
+    throw new Error("Expected Fullscreen Static exit to reject");
+  } catch (error) {
+    exitError = error;
+  }
+  if (exitError !== mountError) {
+    throw new Error("Fullscreen Static mount and exit did not preserve the same failure");
+  }
+  const message = exitError instanceof Error ? exitError.message : String(exitError);
+  process.stdout.write(`__STATIC_REJECTED__:${message}\n`);
+} else {
+  if (mountThrew) throw mountError;
+  void exited.then(() => {
+    process.stdout.write(`__EXITED__:${scenario}\n`);
+  });
+}

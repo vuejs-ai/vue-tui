@@ -7,10 +7,21 @@ import {
   parseFullscreenOriginScenario,
   startFullscreenOriginSession,
 } from "./fullscreen-origin.ts";
-import { parseInputRoutingScenario, startInputRoutingSession } from "./input-routing.ts";
+import { startScrollBoxSession } from "./scroll-box.ts";
+import { startSpinnerSession } from "./spinner.ts";
 import type { ActionSource, VisualTerminalSession } from "./session.ts";
+import { startInlineHistorySession } from "./inline-history.ts";
+import { startVShowSession } from "./v-show.ts";
+import { startViteOverlaySession } from "./vite-overlay.ts";
 
-type ReviewTarget = "basic-template" | "fullscreen-origin" | "input-routing";
+type ReviewTarget =
+  | "basic-template"
+  | "fullscreen-origin"
+  | "scroll-box"
+  | "spinner"
+  | "inline-history"
+  | "v-show"
+  | "vite-overlay";
 
 interface Request {
   id?: string | number | null;
@@ -39,11 +50,19 @@ function reviewTarget(args: string[]): ReviewTarget {
   const index = args.indexOf("--target");
   if (index === -1) return "basic-template";
   const value = args[index + 1];
-  if (value === "basic-template" || value === "fullscreen-origin" || value === "input-routing") {
+  if (
+    value === "basic-template" ||
+    value === "fullscreen-origin" ||
+    value === "scroll-box" ||
+    value === "spinner" ||
+    value === "inline-history" ||
+    value === "v-show" ||
+    value === "vite-overlay"
+  ) {
     return value;
   }
   throw new Error(
-    `--target must be basic-template, fullscreen-origin, or input-routing, received ${value}`,
+    `--target must be basic-template, fullscreen-origin, scroll-box, spinner, inline-history, v-show, or vite-overlay, received ${value}`,
   );
 }
 
@@ -152,15 +171,21 @@ async function main(): Promise<void> {
   const scenario =
     target === "fullscreen-origin"
       ? parseFullscreenOriginScenario(option(args, "--scenario"))
-      : target === "input-routing"
-        ? parseInputRoutingScenario(option(args, "--scenario"))
-        : undefined;
+      : undefined;
   const { session, mode } =
     target === "fullscreen-origin"
       ? await startFullscreenOriginSession(outputDir, parseFullscreenOriginScenario(scenario))
-      : target === "input-routing"
-        ? await startInputRoutingSession(outputDir, parseInputRoutingScenario(scenario))
-        : await startBasicTemplateSession(outputDir);
+      : target === "scroll-box"
+        ? await startScrollBoxSession(outputDir)
+        : target === "spinner"
+          ? await startSpinnerSession(outputDir)
+          : target === "inline-history"
+            ? await startInlineHistorySession(outputDir)
+            : target === "v-show"
+              ? await startVShowSession(outputDir)
+              : target === "vite-overlay"
+                ? await startViteOverlaySession(outputDir)
+                : await startBasicTemplateSession(outputDir);
   process.stdout.write(
     `${JSON.stringify({
       event: "ready",

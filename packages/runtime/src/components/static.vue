@@ -1,44 +1,28 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from "vue";
-import { staticProps } from "./static-props.ts";
+import { shallowRef } from "vue";
 
 // Renders the `<tui-static>` host primitive. The host tag's `tui-` prefix keeps it out
 // of the component namespace, so the component can take its real name "Static" with no
-// vue-tsc self-recursion on the tag. Public export wired in index.ts.
-defineOptions({ name: "Static" });
-const props = defineProps(staticProps);
-defineSlots<{ default?: (slotProps: { item: unknown; index: number }) => unknown }>();
+// vue-tsc self-recursion on the tag. Public export wired in inline.ts.
+defineOptions({ name: "Static", inheritAttrs: false });
+defineSlots<{ default?: () => unknown }>();
 
-// Mirrors Ink's useState(0): only items at/after `cursor` render; the renderer
-// advances the cursor post-paint via onWritten so written items unmount.
-const cursor = shallowRef(0);
-// GROW/steady-state: advance only AFTER paint. Assigning items.length is a
-// reactivity no-op when unchanged (Object.is), so resync can't loop.
-const onWritten = () => {
-  cursor.value = (props.items as unknown[]).length;
-};
-// SHRINK: lower the cursor immediately so a later append isn't dropped.
-watch(
-  () => (props.items as unknown[]).length,
-  (len) => {
-    if (len < cursor.value) cursor.value = len;
-  },
-);
-// internal_onWritten folded into the v-bind object so the exact prop key reaches
-// the host `static` node (object keys are preserved verbatim).
-const merged = computed(() => ({
+// The component instance is the public write-once identity. Once Runtime has
+// accepted its host subtree, remove that subtree (and its Yoga nodes) while
+// keeping this component instance mounted so later reactive updates cannot
+// replay terminal history. Remounting creates a fresh identity.
+const accepted = shallowRef(false);
+const hostProps = {
   position: "absolute",
   flexDirection: "column",
-  ...props.style,
-  internal_onWritten: onWritten,
-}));
-const itemsToRender = computed(() => (props.items as unknown[]).slice(cursor.value));
+  internal_onAccepted: () => {
+    accepted.value = true;
+  },
+};
 </script>
 
 <template>
-  <tui-static v-bind="merged">
-    <template v-for="(item, i) in itemsToRender" :key="cursor + i">
-      <slot :item="item" :index="cursor + i" />
-    </template>
+  <tui-static v-if="!accepted" v-bind="hostProps">
+    <slot />
   </tui-static>
 </template>

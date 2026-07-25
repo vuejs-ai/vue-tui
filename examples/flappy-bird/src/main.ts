@@ -7,4 +7,4 @@
 import { createApp } from "@vue-tui/runtime";
 import App from "./app.vue";
 
-createApp(App).mount();
+createApp(App).mount({ exitOnCtrlC: true });

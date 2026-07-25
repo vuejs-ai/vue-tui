@@ -3,7 +3,7 @@
 > Decisions specific to `@vue-tui/components`' `Spinner`. Shared conventions live in
 > [components-design-principles.md](../components-design-principles.md). Tracking: #218.
 
-A pure composition of `<Text>` + `useAnimation` — no new runtime export needed.
+A pure composition of `<Text>` plus a component-local timer — no Runtime hook or privileged access needed.
 
 ## Style selection & the escape hatch
 
@@ -21,15 +21,12 @@ A pure composition of `<Text>` + `useAnimation` — no new runtime export needed
 
 ## Behavior
 
-- **Always animates.** It does not gate on live output cadence. F1.4 records that cadence in the
-  internal render session rather than `AppContext`; the readonly public session hooks remain
-  deliberately unexported until F1 closes. Reaching into the internal service would break the
-  pure-composition rule. This mirrors the third-party `ink-spinner`, which likewise just animates
-  (unverified parity — not run-checked); the runtime governs final-stream versus live-update output
-  one layer down. A future static-output affordance would derive from the public session contract,
-  not restore an `interactive` boolean.
-- Switching `type` changes the preset interval; `useAnimation` resets `frame` to 0 on a live
-  interval change — acceptable for a spinner.
+- **Always animates while mounted.** It does not inspect Runtime session internals or terminal
+  capabilities. Its component-local timer changes Vue state; Runtime independently decides how
+  those updates are committed for the current host. A future static-output affordance would need
+  real product evidence and a supported public fact, not privileged access.
+- Switching `type` changes the preset interval; Spinner clears its old timer and resets `frame`
+  to 0 on a live interval change.
 
 ## API shape
 

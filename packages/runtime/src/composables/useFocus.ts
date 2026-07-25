@@ -1,148 +1,114 @@
 import {
   inject,
+  isRef,
+  onMounted,
   onScopeDispose,
-  shallowRef,
-  toValue,
   watch,
-  type MaybeRefOrGetter,
-  type ShallowRef,
+  type ComponentPublicInstance,
+  type Ref,
 } from "vue";
-import { FocusContextKey, StdinContextKey } from "../context.ts";
+import { AppContextKey } from "../context.ts";
+import {
+  resolveFocusComponentBoundary,
+  validateFocusComponentTarget,
+} from "../focus/component-target.ts";
+import { InternalFocusControllerKey } from "../focus/focus-context.ts";
+import {
+  useRenderedTargetRegistrationControl,
+  type RenderedTargetRegistrationControl,
+} from "../rendered-target.ts";
 
-let nextAutoId = 0;
+/**
+ * A Vue ref whose component boundary controls this focus handle's rendered
+ * availability.
+ *
+ * The target is not the focus identity and does not define input routing or
+ * navigation. If the boundary becomes unavailable or its rendered ancestry is
+ * hidden or detached, this handle loses focus. Later availability does not
+ * restore focus.
+ */
+export type FocusTarget = Readonly<Ref<ComponentPublicInstance | null | undefined>>;
 
-export interface UseFocusOptions {
-  autoFocus?: MaybeRefOrGetter<boolean>;
-  isActive?: MaybeRefOrGetter<boolean>;
-  id?: MaybeRefOrGetter<string>;
+export interface UseFocusReturn {
+  readonly isFocused: Readonly<Ref<boolean>>;
+  focus(): void;
+  blur(): void;
 }
 
-export function useFocus(options: UseFocusOptions = {}): {
-  isFocused: ShallowRef<boolean>;
-  focus: (id: string) => void;
-} {
-  const ctx = inject(FocusContextKey);
-  const stdin = inject(StdinContextKey);
-  if (!ctx) throw new Error("useFocus() must be called inside a vue-tui render tree");
-
-  // Stable fallback id used whenever no explicit id is given (mirrors Ink's
-  // useMemo(() => customId ?? random, [customId]) — the random part is stable for
-  // the component's life).
-  const fallbackId = `__auto-${nextAutoId++}`;
-  const isFocused = shallowRef(false);
-
-  const isActive = options.isActive ?? true;
-  let rawModeDesired = false;
-  let rawModeAcquired = false;
-  let reconcilingRawMode = false;
-  let rawModeReconcileRequested = false;
-
-  function reconcileRawMode() {
-    if (reconcilingRawMode) {
-      rawModeReconcileRequested = true;
-      return;
-    }
-    reconcilingRawMode = true;
-    let firstError: unknown;
-    let hasError = false;
-    try {
-      while (true) {
-        rawModeReconcileRequested = false;
-        try {
-          if (rawModeDesired && !rawModeAcquired) {
-            stdin!.acquireRawMode();
-            rawModeAcquired = true;
-          } else if (!rawModeDesired && rawModeAcquired) {
-            rawModeAcquired = false;
-            stdin!.releaseRawMode();
-          }
-        } catch (error) {
-          if (hasError) break;
-          firstError = error;
-          hasError = true;
-          if (!rawModeReconcileRequested) break;
-        }
-        if (!rawModeReconcileRequested && rawModeDesired === rawModeAcquired) break;
-      }
-    } finally {
-      reconcilingRawMode = false;
-    }
-    if (hasError) throw firstError;
+export function useFocus(): UseFocusReturn;
+export function useFocus(target: FocusTarget): UseFocusReturn;
+export function useFocus(target?: FocusTarget): UseFocusReturn {
+  const hasTarget = arguments.length > 0;
+  const controller = inject(InternalFocusControllerKey, null);
+  const app = inject(AppContextKey, null);
+  if (!controller || !app) {
+    throw new Error("useFocus() must be called inside a vue-tui render tree");
+  }
+  if (hasTarget && !isRef(target)) {
+    throw new TypeError("useFocus() target must be a Vue ref to a component instance");
   }
 
-  function setRawModeDesired(desired: boolean) {
-    // Guard on isRawModeSupported before acquiring — mirrors Ink's use-focus.ts
-    // (`if (!isRawModeSupported || !isActive) return;`). acquireRawMode() throws
-    // on an unsupported stdin (see render.ts), so without this guard useFocus
-    // would throw on a non-TTY. Focus should degrade to a no-op there instead.
-    rawModeDesired = desired && Boolean(stdin?.isRawModeSupported);
-    reconcileRawMode();
-  }
-
-  // Track the current registration so an id change can unregister the old id and
-  // re-register under the new one — Ink keys its add/remove effect on [id].
-  let currentId: string | undefined;
-  let unsubscribe: (() => void) | undefined;
-
-  // Arrow functions (not hoisted declarations) so TS keeps the `ctx` non-null
-  // narrowing from the guard above inside these closures.
-  const unregister = () => {
-    if (currentId === undefined) return;
-    unsubscribe?.();
-    unsubscribe = undefined;
-    ctx.remove(currentId);
-    currentId = undefined;
-  };
-
-  const register = (id: string, autoFocus: boolean) => {
-    unsubscribe = ctx.subscribe(id, (v) => {
-      isFocused.value = v;
-    });
-    ctx.add(id, { autoFocus });
-    currentId = id;
-    isFocused.value = ctx.activeId === id;
-    // Apply the current active state to the freshly-registered id.
-    if (toValue(isActive)) {
-      ctx.activate(id);
-      setRawModeDesired(true);
-    } else {
-      ctx.deactivate(id);
-      setRawModeDesired(false);
-    }
-  };
-
-  // Install this watcher before the immediate registration watcher below. Raw
-  // acquisition can call a hostile stream synchronously; an isActive change
-  // during that call must already be observable and reconciled.
-  watch(
-    () => toValue(isActive),
-    (active) => {
-      if (currentId === undefined) return;
-      if (active) {
-        ctx.activate(currentId);
-        setRawModeDesired(true);
-      } else {
-        ctx.deactivate(currentId);
-        setRawModeDesired(false);
-      }
-    },
-    { flush: "sync" },
-  );
-
-  watch(
-    () => [toValue(options.id) ?? fallbackId, toValue(options.autoFocus ?? false)] as const,
-    ([id, autoFocus]) => {
-      unregister();
-      isFocused.value = false;
-      register(id, autoFocus);
-    },
-    { immediate: true, flush: "sync" },
-  );
-
-  onScopeDispose(() => {
-    unregister();
-    setRawModeDesired(false);
+  const internal = controller.createTarget({
+    requiresRenderedTarget: hasTarget,
   });
+  let targetRegistration: RenderedTargetRegistrationControl | undefined;
+  let stopValidation: (() => void) | undefined;
+  let disposed = false;
 
-  return { isFocused, focus: ctx.focus };
+  const validateCurrentTarget = (): void => {
+    if (hasTarget) validateFocusComponentTarget(target!.value, app);
+  };
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    stopValidation?.();
+    targetRegistration?.dispose();
+    controller.removeTarget(internal);
+  };
+
+  try {
+    if (hasTarget) {
+      validateCurrentTarget();
+      stopValidation = watch(target!, validateCurrentTarget, { flush: "post" });
+      onMounted(validateCurrentTarget);
+      targetRegistration = useRenderedTargetRegistrationControl(
+        () => {
+          try {
+            validateFocusComponentTarget(target!.value, app);
+            return resolveFocusComponentBoundary(target!.value);
+          } catch {
+            // The validation watcher or an explicit operation reports the
+            // public TypeError. Renderer reconciliation treats the invalid
+            // value only as an unavailable boundary in the meantime.
+            return null;
+          }
+        },
+        (host) => controller.attachTarget(internal, host),
+      );
+    }
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+
+  onScopeDispose(dispose);
+
+  return Object.freeze({
+    isFocused: internal.isFocused,
+    focus() {
+      if (disposed) return;
+      if (hasTarget) {
+        validateCurrentTarget();
+        // Vue assigns template refs before mounted hooks. Reconcile explicitly
+        // so onMounted(() => focus.focus()) observes that already-attached
+        // boundary without turning an earlier unavailable request into a queue.
+        targetRegistration?.reconcile();
+      }
+      internal.focus();
+    },
+    blur() {
+      if (disposed) return;
+      internal.blur();
+    },
+  });
 }

@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { shallowRef, onMounted, onUnmounted } from "vue";
-import { Box, Text, useApp, useInput, useLayoutSize } from "@vue-tui/runtime";
+import { computed, shallowRef, onMounted, onUnmounted } from "vue";
+import { Box, Text, useApp, useBoxMetrics, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
 
 const { exit } = useApp();
-const { rows } = useLayoutSize();
+const { height: layoutHeight } = useLayoutSize();
+const rootHeight = computed(() => layoutHeight.value);
 
 const box = shallowRef<ScrollBoxExpose>();
+const scrollTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+const scrollTargetMetrics = useBoxMetrics(scrollTarget);
+const lastScroll = shallowRef("ready");
 
 // ScrollBox follows the bottom on its own. It ships no built-in input — this app
-// wires its own keys to the exposed handle: ↑/↓ scroll a line, Home/End jump to
-// the ends, q quits.
+// wires one application-wide input handler to its only scroll target. A nested
+// application can use the boolean result to decide whether its own higher-level
+// router should offer an edge event to an ancestor.
 const lines = shallowRef<string[]>([]);
 let n = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -28,30 +33,54 @@ onUnmounted(() => {
   if (timer) clearInterval(timer);
 });
 
-useInput((input, key) => {
-  if (input === "q") exit();
-  else if (key.upArrow) box.value?.scrollByLines(-1);
-  else if (key.downArrow) box.value?.scrollByLines(1);
-  else if (key.home) box.value?.scrollToTop();
-  else if (key.end) box.value?.scrollToBottom();
+function pageLines(): number {
+  return Math.max(1, scrollTargetMetrics.hasMeasured.value ? scrollTargetMetrics.height.value : 1);
+}
+
+useInput((event) => {
+  if (event.type === "text" && event.text === "q") {
+    exit();
+    return;
+  }
+  if (event.type !== "key") return;
+  const handle = box.value;
+  if (!handle) return;
+  let moved: boolean;
+  if (event.key.name === "up") moved = handle.scrollByLines(-1);
+  else if (event.key.name === "down") moved = handle.scrollByLines(1);
+  else if (event.key.name === "page-up") moved = handle.scrollByLines(-pageLines());
+  else if (event.key.name === "page-down") moved = handle.scrollByLines(pageLines());
+  else if (event.key.name === "home") moved = handle.scrollToTop();
+  else if (event.key.name === "end") moved = handle.scrollToBottom();
+  else return;
+  lastScroll.value = `${event.key.name}:${moved ? "moved" : "edge"}`;
 });
 </script>
 
 <template>
-  <Box flexDirection="column" :height="rows ?? undefined">
-    <Box borderStyle="round" :paddingX="1">
+  <Box flexDirection="column" :height="rootHeight">
+    <Box borderStyle="round" :paddingLeft="1" :paddingRight="1">
       <Text bold color="cyan">ScrollBox demo</Text>
-      <Text dimColor> — ↑/↓ · Home/End · q to quit</Text>
+      <Text dimColor> — ↑/↓ · PageUp/PageDown · Home/End · q</Text>
     </Box>
 
-    <Box :flexGrow="1" :minHeight="0" flexDirection="column" borderStyle="round" :paddingX="1">
-      <ScrollBox ref="box">
-        <Text v-for="line in lines" :key="line">{{ line }}</Text>
-      </ScrollBox>
+    <Box
+      :flexGrow="1"
+      :minHeight="0"
+      flexDirection="column"
+      borderStyle="round"
+      :paddingLeft="1"
+      :paddingRight="1"
+    >
+      <Box ref="scrollTarget" :flexGrow="1" :minHeight="0" flexDirection="column">
+        <ScrollBox ref="box">
+          <Text v-for="line in lines" :key="line">{{ line }}</Text>
+        </ScrollBox>
+      </Box>
     </Box>
 
-    <Box :paddingX="1">
-      <Text dimColor>{{ lines.length }} lines · sticks to bottom until you scroll up</Text>
+    <Box :paddingLeft="1" :paddingRight="1">
+      <Text dimColor>{{ lines.length }} lines · {{ lastScroll }}</Text>
     </Box>
   </Box>
 </template>

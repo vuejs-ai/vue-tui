@@ -72,11 +72,9 @@ export function launch(cmd: string, args: string[], cwd: string): Launched {
     cols: 100,
     rows: 24,
     cwd,
-    // FORCE_COLOR so chalk emits ANSI in the non-TTY-parent test; CI:false so vue-tui's
-    // default live updates stay on under the runner's CI=true (the PTY is a real TTY).
+    // FORCE_COLOR so chalk emits ANSI in the non-TTY-parent test.
     env: {
       ...(process.env as Record<string, string>),
-      CI: "false",
       FORCE_COLOR: "3",
       NODE_NO_WARNINGS: "1",
     },

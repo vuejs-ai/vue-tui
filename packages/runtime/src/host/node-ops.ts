@@ -5,14 +5,16 @@ import {
   createStatic,
   createText,
   createTextLeaf,
-  createTransform,
   createVirtualText,
   isContainer,
+  NESTED_STATIC_ERROR,
+  type TuiBox,
   type TuiContainer,
   type TuiNode,
   type TuiRoot,
+  type TuiStatic,
+  type TuiText,
 } from "./nodes.ts";
-import type { MouseHandlerName, MouseHandlerProps } from "../mouse/events.ts";
 import { getRenderedTargetController } from "../rendered-target.ts";
 import {
   attachYoga,
@@ -23,18 +25,27 @@ import {
   isYogaProp,
   BORDER_PROPS,
   reconcileBorderEdges,
+  GUTTER_PROPS,
   MARGIN_PROPS,
   PADDING_PROPS,
+  reconcileGutters,
   reconcileMarginEdges,
   reconcilePaddingEdges,
   bindTextMeasure,
   markTextDirty,
-  markTransformDirty,
-  transformHasYogaChild,
 } from "./yoga.ts";
 
 export interface TtyRendererOptions {
   onCommit: () => void;
+  /**
+   * Optional render-local ownership ledger for Yoga hosts. The synchronous
+   * string renderer uses this to release nodes an interrupted initial patch
+   * allocated but never attached to the host root.
+   */
+  hostYogaLifetime?: {
+    allocated(node: TuiNode, dispose: () => void): void;
+    released(node: TuiNode): void;
+  };
 }
 
 const STYLE_PROPS = new Set([
@@ -76,6 +87,11 @@ const STYLE_PROPS = new Set([
   "overflow",
   "overflowX",
   "overflowY",
+  // Gap is another shorthand family whose physical axes must reconcile from
+  // the complete current prop set.
+  "gap",
+  "rowGap",
+  "columnGap",
   // Margin/padding families are yoga-only (not visual), but each physical edge
   // depends on up to three of these props together, so reconcileMargin/PaddingEdges
   // must read the full set from el.props. Storing them here is how they get there;
@@ -98,42 +114,6 @@ const STYLE_PROPS = new Set([
   "paddingRight",
 ]);
 
-const MOUSE_HANDLER_PROPS = new Set<MouseHandlerName>([
-  "onMousedown",
-  "onMouseup",
-  "onClick",
-  "onWheel",
-]);
-
-function isMouseHandlerProp(key: string): key is MouseHandlerName {
-  return MOUSE_HANDLER_PROPS.has(key as MouseHandlerName);
-}
-
-function setStoredMouseHandler(node: TuiNode, key: MouseHandlerName, handler: unknown): void {
-  const withHandlers = node as { mouseHandlers?: Partial<MouseHandlerProps> };
-  const handlers = (withHandlers.mouseHandlers ??= {});
-  if (typeof handler === "function") {
-    handlers[key] = handler as never;
-    return;
-  }
-  delete handlers[key];
-}
-
-function registerStoredMouseHandlers(node: TuiNode, root: TuiRoot): void {
-  const controller = root.appContext.internal_mouse;
-  if (!controller) return;
-  const handlers = (node as { mouseHandlers?: Partial<MouseHandlerProps> }).mouseHandlers;
-  if (handlers) {
-    for (const key of MOUSE_HANDLER_PROPS) {
-      const handler = handlers[key];
-      if (handler) controller.setHandler(node, key, handler);
-    }
-  }
-  if (isContainer(node)) {
-    for (const child of node.children) registerStoredMouseHandlers(child, root);
-  }
-}
-
 /** Walk up the DOM tree to find the root node. */
 function findRoot(node: TuiNode): TuiRoot | null {
   let current: TuiNode | null = node;
@@ -145,58 +125,47 @@ function findRoot(node: TuiNode): TuiRoot | null {
 }
 
 /**
- * Walk up the DOM tree to check if we're inside a text context. Treats a
- * <Transform> as a text context too: Ink models <Transform> as an ink-text host
- * (its reconciler sets isInsideText for ink-text), so this is the vue-tui
- * equivalent of Ink's hostContext.isInsideText. It governs BOTH text-context
- * guards, exactly as Ink's single isInsideText flag does:
- *
- *  - a bare-string / <Newline> child directly inside a <Transform> is valid
- *    inline text and must NOT trip the "text must be rendered inside <Text>"
- *    guard (G58); and
- *  - a <Box> directly inside a <Transform> MUST throw the same dev error as a
- *    <Box> inside a <Text> (Ink reconciler.ts:205 throws for any isInsideText
- *    context, ink-text included) (G58 should-fix).
+ * Walk up the DOM tree to check if we're inside a text context. A bare-string
+ * / nested <Text> child is valid inline text only under <Text> / virtual-text;
+ * a <Box> directly inside a <Text> must throw the same dev error Ink throws for
+ * isInsideText contexts.
  */
-function isInsideTextOrTransformContext(node: TuiContainer): boolean {
+function isInsideTextContext(node: TuiContainer): boolean {
   let current: TuiContainer | null = node;
   while (current) {
-    if (
-      current.type === "tui-text" ||
-      current.type === "tui-virtual-text" ||
-      current.type === "tui-transform"
-    )
-      return true;
+    if (current.type === "tui-text" || current.type === "tui-virtual-text") return true;
     current = current.parent;
   }
   return false;
 }
 
+function isInsideStaticContext(node: TuiNode | null): boolean {
+  let current = node;
+  while (current) {
+    if (current.type === "tui-static") return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function hasNestedStatic(node: TuiNode, staticAncestor: boolean): boolean {
+  const nextStaticAncestor = staticAncestor || node.type === "tui-static";
+  if (node.type === "tui-static" && staticAncestor) return true;
+  if (!isContainer(node)) return false;
+  return node.children.some((child) => hasNestedStatic(child, nextStaticAncestor));
+}
+
 /**
  * Find the nearest ancestor (inclusive of `start`) that OWNS the yoga measure
  * func used to size inline text — i.e. the node yoga must re-measure when a
- * descendant text-leaf changes. Mirrors Ink's findClosestYogaNode (dom.ts:248),
- * adapted for the fact that vue-tui attaches a yoga node to every <Transform>:
- *
- * - A <Text> always owns its measure func.
- * - A <Transform> owns the measure func ONLY when it is STANDALONE: it has no
- *   yoga-bearing child (so it still carries bindTransformMeasure) AND it is not
- *   itself nested in a text/transform context (an inline transform is squashed
- *   into the enclosing measure owner, just as Ink's ink-virtual-text — which has
- *   no yoga node — is climbed past). An inline transform is therefore skipped and
- *   the walk continues to the enclosing <Text>/standalone <Transform>. (G58)
+ * descendant text-leaf changes. Mirrors Ink's findClosestYogaNode (dom.ts:248):
+ * a <Text> always owns its measure func; virtual-text is climbed past to the
+ * enclosing <Text>.
  */
 function findMeasureOwner(start: TuiNode | null): TuiNode | null {
   let p: TuiNode | null = start;
   while (p) {
     if (p.type === "tui-text") return p;
-    if (p.type === "tui-transform") {
-      const inlineInTextContext =
-        p.parent != null &&
-        isContainer(p.parent) &&
-        isInsideTextOrTransformContext(p.parent as TuiContainer);
-      if (!transformHasYogaChild(p) && !inlineInTextContext) return p;
-    }
     p = p.parent;
   }
   return null;
@@ -212,16 +181,11 @@ function findMeasureOwner(start: TuiNode | null): TuiNode | null {
  * directly, no measure func to invalidate).
  */
 function dirtyTextMeasureOwner(parent: TuiNode): void {
-  if (
-    parent.type !== "tui-text" &&
-    parent.type !== "tui-virtual-text" &&
-    parent.type !== "tui-transform"
-  ) {
+  if (parent.type !== "tui-text" && parent.type !== "tui-virtual-text") {
     return;
   }
   const owner = findMeasureOwner(parent);
-  if (owner?.type === "tui-transform") markTransformDirty(owner);
-  else if (owner?.type === "tui-text") markTextDirty(owner);
+  if (owner?.type === "tui-text") markTextDirty(owner);
 }
 
 /**
@@ -236,23 +200,108 @@ function rejectsTextLeaf(parent: TuiContainer, value: string): boolean {
   return (
     value !== "" &&
     (parent.type === "tui-box" || parent.type === "root" || parent.type === "tui-static") &&
-    !isInsideTextOrTransformContext(parent)
+    !isInsideTextContext(parent)
   );
 }
 
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
-  const { onCommit } = options;
+  const { onCommit, hostYogaLifetime } = options;
+
+  interface BoxDisplayController {
+    setAuthoredDisplay(value: unknown): void;
+    dispose(): void;
+  }
+
+  const boxDisplayControllers = new WeakMap<TuiBox, BoxDisplayController>();
+  const disposedYogaHosts = new WeakSet<TuiNode>();
+
+  function disposeHostYoga(node: TuiNode): void {
+    if (disposedYogaHosts.has(node)) return;
+    disposedYogaHosts.add(node);
+    hostYogaLifetime?.released(node);
+    if (node.type === "tui-box") {
+      // A retained host ref may outlive Vue's unmount. Make later
+      // style.display writes inert before freeing its Yoga allocation.
+      boxDisplayControllers.get(node)?.dispose();
+    }
+    if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-static") {
+      detachYoga(node);
+    }
+  }
+
+  function attachHostYoga(node: TuiBox | TuiText | TuiStatic): void {
+    attachYoga(node);
+    hostYogaLifetime?.allocated(node, () => disposeHostYoga(node));
+  }
+
+  /**
+   * Install the minimal DOM-style contract Vue's built-in `v-show` directive
+   * requires. Runtime-dom reads and writes `el.style.display`; the custom host
+   * maps that one property onto a private raw-host Yoga display channel.
+   *
+   * Keep the raw-host channel separate from the directive's temporary hidden
+   * state. This matters if the private channel changes while `v-show` remains
+   * false: the subtree must stay hidden, then reveal using the latest value.
+   */
+  function installBoxStyle(node: TuiBox): void {
+    let authoredDisplay: unknown;
+    let directiveHidden = false;
+    let effectiveDisplay: "flex" | "none" = "flex";
+    let disposed = false;
+
+    const normalizeAuthoredDisplay = (): "flex" | "none" =>
+      authoredDisplay != null && authoredDisplay !== "flex" ? "none" : "flex";
+
+    const applyEffectiveDisplay = (): void => {
+      const nextDisplay = directiveHidden ? "none" : normalizeAuthoredDisplay();
+      if (nextDisplay === effectiveDisplay) return;
+      effectiveDisplay = nextDisplay;
+      if (disposed) return;
+      applyYogaProp(node, "display", nextDisplay);
+      onCommit();
+    };
+
+    const style = {} as TuiBox["style"];
+    Object.defineProperty(style, "display", {
+      enumerable: true,
+      get: () => {
+        if (directiveHidden || normalizeAuthoredDisplay() === "none") return "none";
+        return authoredDisplay === "flex" ? "flex" : "";
+      },
+      set: (value: string) => {
+        directiveHidden = value === "none";
+        applyEffectiveDisplay();
+      },
+    });
+    Object.defineProperty(node, "style", {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: style,
+    });
+
+    boxDisplayControllers.set(node, {
+      setAuthoredDisplay(value: unknown): void {
+        authoredDisplay = value;
+        applyEffectiveDisplay();
+      },
+      dispose(): void {
+        disposed = true;
+      },
+    });
+  }
 
   function createElement(type: string): TuiNode {
     switch (type) {
       case "tui-box": {
         const n = createBox();
-        attachYoga(n);
+        attachHostYoga(n);
+        installBoxStyle(n);
         return n;
       }
       case "tui-text": {
         const n = createText();
-        attachYoga(n);
+        attachHostYoga(n);
         bindTextMeasure(n);
         return n;
       }
@@ -260,12 +309,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         return createVirtualText();
       case "tui-static": {
         const n = createStatic();
-        attachYoga(n);
-        return n;
-      }
-      case "tui-transform": {
-        const n = createTransform((line) => line); // overwritten by patchProp
-        attachYoga(n);
+        attachHostYoga(n);
         return n;
       }
       default:
@@ -290,29 +334,19 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // rejectsTextLeaf() check insert()/setElementText() use, so non-empty bare text
     // directly under a <Box>/root/<Static> throws HERE (patch/render phase, consistent
     // with "validate at render, not paint") instead of silently vanishing at paint
-    // (paintNode only renders a text-leaf via a <Text>/<Transform> parent). A leaf
-    // inside a <Text> isn't rejected, a leaf cleared back to "" isn't rejected, and a
+    // (paintNode only renders a text-leaf via a <Text> parent). A leaf inside a
+    // <Text> isn't rejected, a leaf cleared back to "" isn't rejected, and a
     // detached leaf (parent null) is skipped. isContainer narrows parent to the
     // TuiContainer rejectsTextLeaf expects.
     const parent = node.parent;
     if (parent != null && isContainer(parent) && rejectsTextLeaf(parent, node.value)) {
       throw new Error(`Text string "${node.value}" must be rendered inside <Text> component`);
     }
-    // Bubble dirty up to the node that OWNS the yoga measure func so yoga
-    // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248):
-    // climb to the nearest node carrying the MEASURE func and mark it. The catch
-    // is that vue-tui attaches a yoga node to EVERY <Transform> (even inline ones
-    // inside a <Text>), whereas Ink turns an inline transform into ink-virtual-text
-    // with NO yoga node — so in Ink the climb passes THROUGH an inline transform to
-    // the enclosing ink-text. A <Transform> here only owns the measure func when it
-    // is STANDALONE (a text-context root with no yoga-bearing child); an inline
-    // transform (inside a <Text> or another <Transform>) does NOT, so we must keep
-    // climbing to the enclosing <Text>/standalone-transform measure owner. (G58)
+    // Bubble dirty up to the <Text> that owns the yoga measure func so yoga
+    // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248).
     const owner = findMeasureOwner(node.parent as TuiNode | null);
     if (owner?.type === "tui-text") {
       markTextDirty(owner);
-    } else if (owner?.type === "tui-transform") {
-      markTransformDirty(owner);
     }
     onCommit();
   }
@@ -342,15 +376,19 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     }
     const parentC = parent as TuiContainer;
 
-    // <Box> inside a text context is invalid (matches Ink's validation). Ink
-    // models <Transform> as ink-text (hostContext.isInsideText), so its
-    // reconciler throws the SAME error for a <Box> directly inside a <Transform>
-    // as for a <Box> inside a <Text> (reconciler.ts:205,
-    // `hostContext.isInsideText && originalType === 'ink-box'`). A standalone
-    // <Transform> is a text context here (G58), so we use the transform-aware
-    // context check to mirror Ink exactly. (G58 should-fix)
-    if (child.type === "tui-box" && isInsideTextOrTransformContext(parentC)) {
+    // Static owns one indivisible history block. Validate the complete subtree
+    // relation before Yoga insertion so either Vue construction order (parent
+    // first or child first) rejects nested history before any renderer commit.
+    if (hasNestedStatic(child, isInsideStaticContext(parentC))) {
+      throw new Error(NESTED_STATIC_ERROR);
+    }
+
+    // <Box> inside a text context is invalid (matches Ink's validation).
+    if (child.type === "tui-box" && isInsideTextContext(parentC)) {
       throw new Error("<Box> can’t be nested inside <Text> component");
+    }
+    if (child.type === "tui-static" && isInsideTextContext(parentC)) {
+      throw new Error("<Static> cannot be nested inside <Text> component");
     }
 
     // Text-leaf nodes must live inside a <Text> context. The rejection condition
@@ -369,12 +407,11 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       if (oldIdx >= 0) oldParent.children.splice(oldIdx, 1);
       removeYogaChild(oldParent, child);
       // Mirror Ink's removeChildNode dirty-mark: detaching a child from a text
-      // context (text / virtual-text / transform) must re-measure the OLD
-      // parent's measure owner. Ink dirties on remove from the old parent AND on
-      // append to the new (dom.ts:132,165,185). We dirty the old parent here
-      // unconditionally; if it shares a measure owner with the new parent, the
-      // post-insert dirty below just re-marks the same node (markDirty is
-      // idempotent), so no skip is needed.
+      // context (text / virtual-text) must re-measure the OLD parent's measure
+      // owner. Ink dirties on remove from the old parent AND on append to the new
+      // (dom.ts:132,165,185). We dirty the old parent here unconditionally; if it
+      // shares a measure owner with the new parent, the post-insert dirty below
+      // just re-marks the same node (markDirty is idempotent), so no skip is needed.
       dirtyTextMeasureOwner(oldParent);
     }
 
@@ -383,23 +420,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     child.parent = parentC as never;
     insertYogaChild(parentC, child, idx);
 
-    // A text-context parent (text / virtual-text / transform) sizes its inline
-    // text via a measure func; a STRUCTURAL change (adding an inline child:
-    // text-leaf / virtual-text / nested transform) must re-mark the owning
-    // measure node dirty so yoga re-measures. Mirror Ink, which dirties the
-    // parent for ink-text AND ink-virtual-text in append/insert (dom.ts:132,165)
-    // then climbs to the closest yoga node (dom.ts:248). The owner may be an
-    // ANCESTOR of the immediate parent (an inline transform / virtual-text owns
-    // no measure func), so resolve it via findMeasureOwner. (G58)
+    // A text-context parent (text / virtual-text) sizes its inline text via a
+    // measure func; a STRUCTURAL change must re-mark the owning measure node
+    // dirty so yoga re-measures. Mirror Ink, which dirties the parent for
+    // ink-text AND ink-virtual-text in append/insert (dom.ts:132,165) then climbs
+    // to the closest yoga node (dom.ts:248).
     dirtyTextMeasureOwner(parentC);
-
-    // Track static node identity on the root (mirrors Ink's reconciler).
-    if (child.type === "tui-static") {
-      const root = findRoot(child);
-      if (root) root.staticNode = child;
-    }
-    const root = findRoot(child);
-    if (root) registerStoredMouseHandlers(child, root);
 
     onCommit();
   }
@@ -414,22 +440,6 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       // Every target adapter already received its cleanup turn. A failing
       // disposer must not prevent Vue from detaching and freeing the host tree.
     }
-    try {
-      root?.appContext.internal_mouse?.removeNode(child);
-    } catch {
-      // Mouse cleanup is also a host-removal backstop; preserve structural
-      // removal even if a custom stream/controller implementation fails.
-    }
-
-    // Track static node removal: clear root.staticNode only if it still
-    // points at this node. On key-driven remounts, insert() already
-    // registered the new instance before the old one is removed.
-    if (child.type === "tui-static") {
-      if (root && root.staticNode === child) {
-        root.staticNode = undefined;
-      }
-    }
-
     const idx = parent.children.indexOf(child as never);
     if (idx >= 0) parent.children.splice(idx, 1);
     removeYogaChild(parent, child);
@@ -438,12 +448,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     child.parent = null as never;
     // Re-measure the owning measure node when an inline child is removed from a
     // text context (mirror of the insert() dirty-mark; Ink dirties ink-text AND
-    // ink-virtual-text parents on remove, dom.ts:185). removeYogaChild already
-    // re-bound the measure func if the LAST yoga child was removed. The owner may
-    // be an ancestor (nested transform / virtual-text), so resolve it via
+    // ink-virtual-text parents on remove, dom.ts:185). The owner may be an
+    // ancestor virtual-text's enclosing <Text>, so resolve it via
     // findMeasureOwner. `parent` still has its own parent chain (only
-    // `child.parent` was cleared), so the walk starts from the immediate
-    // parent. (G58)
+    // `child.parent` was cleared), so the walk starts from the immediate parent.
     dirtyTextMeasureOwner(parent);
     onCommit();
   }
@@ -455,13 +463,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         freeSubtreeYoga(child);
       }
     }
-    if (
-      node.type === "tui-box" ||
-      node.type === "tui-text" ||
-      node.type === "tui-static" ||
-      node.type === "tui-transform"
-    ) {
-      detachYoga(node);
+    if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-static") {
+      disposeHostYoga(node);
     }
   }
 
@@ -478,30 +481,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   }
 
   function patchProp(el: TuiNode, key: string, prev: unknown, next: unknown): void {
-    if (isMouseHandlerProp(key)) {
-      if (el.type === "tui-box" || el.type === "tui-text" || el.type === "tui-virtual-text") {
-        const root = findRoot(el);
-        if (root?.appContext.internal_mouse) {
-          root.appContext.internal_mouse.setHandler(el, key, next);
-        } else {
-          setStoredMouseHandler(el, key, next);
-        }
-      }
-      onCommit();
-      return;
-    }
-
-    if (el.type === "tui-transform") {
-      if (key === "transform" && typeof next === "function") {
-        el.transform = next as (line: string, idx: number) => string;
-      }
-      onCommit();
-      return;
-    }
-    if (el.type === "tui-static" && key === "internal_onWritten") {
-      // Callback the renderer invokes post-commit to advance the <Static>
-      // component's cursor so written items unmount. Not styling/layout.
-      el.onWritten = typeof next === "function" ? (next as () => void) : undefined;
+    if (el.type === "tui-static" && key === "internal_onAccepted") {
+      // Internal callback used to release the accepted slot subtree while the
+      // public <Static> component instance remains mounted as its identity.
+      el.onAccepted = typeof next === "function" ? (next as () => void) : undefined;
       onCommit();
       return;
     }
@@ -511,6 +494,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       el.type === "tui-static" ||
       el.type === "root"
     ) {
+      if (el.type === "tui-box" && key === "display") {
+        // Compose the private raw-host channel with `v-show`'s temporary hidden
+        // state. Public BoxProps do not expose this key.
+        boxDisplayControllers.get(el)?.setAuthoredDisplay(next);
+        return;
+      }
       if (isYogaProp(key)) {
         applyYogaProp(el, key, next, prev);
         // Some yoga props also need to be stored in el.props for the paint pass.
@@ -543,8 +532,17 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         if (PADDING_PROPS.has(key)) {
           reconcilePaddingEdges(el, (el as { props: Record<string, unknown> }).props);
         }
+        if (GUTTER_PROPS.has(key)) {
+          reconcileGutters(el, (el as { props: Record<string, unknown> }).props);
+        }
       } else if (STYLE_PROPS.has(key)) {
-        (el as { props: Record<string, unknown> }).props[key] = next;
+        // Vue patches a key removed from `v-bind` as `null`. For Text's
+        // tri-state style channels, removal means "unspecified": colors and
+        // modifiers must inherit again, and wrap must return to its default.
+        // Keeping null would make the paint cascade treat the channel as an
+        // explicit override and would send wrap through the truncation branch.
+        const stored = el.type === "tui-text" && next === null ? undefined : next;
+        (el as { props: Record<string, unknown> }).props[key] = stored;
         // `wrap` is the one STYLE_PROP that changes a text node's MEASURED height
         // (the measure func reads el.props.wrap to pick wrap/truncate/hard layout)
         // yet is NOT a yoga prop — so it skips applyYogaProp and never invalidates
@@ -559,26 +557,9 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // (a deliberate, vouched divergence; see ink-divergences.md).
         if (key === "wrap" && el.type === "tui-text") {
           markTextDirty(el);
+        } else if (el.type === "tui-text") {
+          el.textRevision++;
         }
-      } else if (key === "aria-role" || key === "ariaRole") {
-        if (el.type === "tui-box") {
-          el.internal_accessibility ??= {};
-          el.internal_accessibility.role = next as string;
-        }
-      } else if (key === "aria-state" || key === "ariaState") {
-        if (el.type === "tui-box") {
-          el.internal_accessibility ??= {};
-          el.internal_accessibility.state = next as Record<string, boolean>;
-        }
-      } else if (
-        key === "aria-label" ||
-        key === "ariaLabel" ||
-        key === "aria-hidden" ||
-        key === "ariaHidden" ||
-        key === "accessibilityLabel"
-      ) {
-        // Handled at the Vue component level (box.vue / text.vue / transform.ts),
-        // not stored on the DOM node. Silently ignore so we don't warn.
       } else if (key === "key" || key === "ref" || key.startsWith("on")) {
         // Reserved by Vue / event keys, ignore.
       } else if (process.env["NODE_ENV"] !== "production") {
@@ -589,7 +570,10 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       return;
     }
     if (el.type === "tui-virtual-text" && STYLE_PROPS.has(key)) {
-      (el.props as Record<string, unknown>)[key] = next;
+      // Same removed-key normalization as the top-level Text host above.
+      (el.props as Record<string, unknown>)[key] = next === null ? undefined : next;
+      const owner = findMeasureOwner(el);
+      if (owner?.type === "tui-text") owner.textRevision++;
       onCommit();
     }
   }

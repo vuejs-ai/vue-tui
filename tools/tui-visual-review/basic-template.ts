@@ -30,6 +30,7 @@ export interface VisualReviewCommand {
   args?: string[];
   cwd: string;
   label: string;
+  env?: Record<string, string>;
 }
 
 export async function startCommandSession(
@@ -37,22 +38,14 @@ export async function startCommandSession(
   target: VisualReviewCommand,
 ): Promise<BasicTemplateSession> {
   if (process.platform === "win32") {
-    return {
-      session: await VisualTerminalSession.create({
-        file: target.file,
-        args: target.args,
-        cwd: target.cwd,
-        artifactDir,
-      }),
-      mode: "direct-process",
-    };
+    return startDirectCommandSession(artifactDir, target);
   }
 
   const session = await VisualTerminalSession.create({
     file: "/bin/sh",
     cwd: target.cwd,
     artifactDir,
-    env: { ENV: "" },
+    env: { ENV: "", ...target.env },
   });
   const launch = [target.file, ...(target.args ?? [])].map(shellQuote).join(" ");
   const command = [
@@ -65,6 +58,22 @@ export async function startCommandSession(
   ].join("; ");
   session.sendSystem(`${command}\r`, `launch-${target.label}-with-restoration-markers`);
   return { session, mode: "persistent-posix-shell" };
+}
+
+export async function startDirectCommandSession(
+  artifactDir: string,
+  target: VisualReviewCommand,
+): Promise<BasicTemplateSession> {
+  return {
+    session: await VisualTerminalSession.create({
+      file: target.file,
+      args: target.args,
+      cwd: target.cwd,
+      artifactDir,
+      env: target.env,
+    }),
+    mode: "direct-process",
+  };
 }
 
 function shellQuote(value: string): string {

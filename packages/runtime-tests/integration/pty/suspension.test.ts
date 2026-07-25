@@ -11,10 +11,6 @@ const ENABLE_PASTE = "\x1b[?2004h";
 const DISABLE_PASTE = "\x1b[?2004l";
 const ENABLE_KITTY = "\x1b[>1u";
 const DISABLE_KITTY = "\x1b[<u";
-const ENABLE_DRAG_MOUSE = "\x1b[?1002h";
-const DISABLE_DRAG_MOUSE = "\x1b[?1002l";
-const ENABLE_SGR_MOUSE = "\x1b[?1006h";
-const DISABLE_SGR_MOUSE = "\x1b[?1006l";
 
 const delay = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -149,8 +145,6 @@ describePosix("external suspension", () => {
       expect(suspendedOutput).toContain(SHOW_CURSOR);
       expect(suspendedOutput).toContain(DISABLE_PASTE);
       expect(suspendedOutput).toContain(DISABLE_KITTY);
-      expect(suspendedOutput).toContain(DISABLE_DRAG_MOUSE);
-      expect(suspendedOutput).toContain(DISABLE_SGR_MOUSE);
 
       await child.resize(72, 12);
       const continueOffset = child.output.length;
@@ -161,9 +155,7 @@ describePosix("external suspension", () => {
           resumed.includes(ENTER_ALT_SCREEN) &&
           resumed.includes("FULLSCREEN_SNAPSHOT:72x12") &&
           resumed.includes(ENABLE_PASTE) &&
-          resumed.includes(ENABLE_KITTY) &&
-          resumed.includes(ENABLE_DRAG_MOUSE) &&
-          resumed.includes(ENABLE_SGR_MOUSE)
+          resumed.includes(ENABLE_KITTY)
         );
       });
 
@@ -172,8 +164,6 @@ describePosix("external suspension", () => {
       expect(resumedOutput).toContain("FULLSCREEN_SNAPSHOT:72x12");
       expect(resumedOutput).toContain(ENABLE_PASTE);
       expect(resumedOutput).toContain(ENABLE_KITTY);
-      expect(resumedOutput).toContain(ENABLE_DRAG_MOUSE);
-      expect(resumedOutput).toContain(ENABLE_SGR_MOUSE);
 
       await delay(20);
       child.write("q");

@@ -14,7 +14,7 @@
 // writes show-cursor / leave-alt-screen / disable-kitty SYNCHRONOUSLY
 // (`fs.writeSync(fd, …)`). The bracketed-paste-disable escape `\x1b[?2004l`
 // (control sequence: CSI ? 2004 l) was MISSED — it went out via async
-// `stdout.write` on both signal sub-paths (usePaste's onScopeDispose → detach,
+// `stdout.write` on both signal sub-paths (semantic input disposal,
 // and the stdin controller's dispose backstop). When dropped, the user's shell
 // stays in bracketed-paste mode and wraps later pastes in `\x1b[200~…\x1b[201~`.
 import { PassThrough } from "node:stream";
@@ -23,7 +23,7 @@ import os from "node:os";
 import path from "node:path";
 import { defineComponent } from "vue";
 import { describe, test, expect, vi } from "vite-plus/test";
-import { createApp, Text, usePaste } from "@vue-tui/runtime";
+import { createApp, Text, useInput } from "@vue-tui/runtime";
 
 const PASTE_ON = "\x1b[?2004h";
 const PASTE_OFF = "\x1b[?2004l"; // CSI ? 2004 l — bracketed-paste mode OFF
@@ -87,7 +87,7 @@ function makeFdBackedStdout(): {
 }
 
 const PasteApp = defineComponent(() => {
-  usePaste(() => {});
+  useInput(() => undefined);
   return () => <Text>paste</Text>;
 });
 
@@ -97,11 +97,9 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    // Keep the live TTY path explicit; lifecycle cleanup now registers for every
-    // real mount regardless of output cadence.
-    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin });
 
-    // Let usePaste's attach enable bracketed paste (writes \x1b[?2004h, async).
+    // Let semantic input attachment enable bracketed paste (writes \x1b[?2004h, async).
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(PASTE_ON);
 
@@ -133,7 +131,7 @@ describe("bracketed-paste disable on signal exit", () => {
     const stdin = makeFakeStdin();
 
     const app = createApp(PasteApp);
-    app.mount({ stdout, stdin, exitOnCtrlC: false, liveUpdates: true });
+    app.mount({ stdout, stdin });
 
     await new Promise<void>((r) => setTimeout(r, 60));
     expect(asyncWrites.join("")).toContain(PASTE_ON);

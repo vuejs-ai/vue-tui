@@ -42,7 +42,15 @@ test("absolute child positions against the padding box, not the content box", as
   // "padding-box" mistake.
   const { lastFrame } = await render(
     defineComponent(() => () => (
-      <Box width={7} height={5} borderStyle="single" padding={1}>
+      <Box
+        width={7}
+        height={5}
+        borderStyle="single"
+        paddingTop={1}
+        paddingBottom={1}
+        paddingLeft={1}
+        paddingRight={1}
+      >
         <Box position="absolute" top={0} left={0}>
           <Text>X</Text>
         </Box>

@@ -1,14 +1,16 @@
 import { defineComponent } from "vue";
-import { Text, useLayoutSize, useRenderSession } from "@vue-tui/runtime";
+import { Text, useLayoutSize, useStdin } from "@vue-tui/runtime";
 
 export default defineComponent(() => {
-  const session = useRenderSession();
-  const { columns, rows } = useLayoutSize();
+  const { width, height } = useLayoutSize();
+  const { stdin, isRawModeSupported, setRawMode } = useStdin();
+  void stdin;
+  void isRawModeSupported;
+  setRawMode(false);
 
   return () => (
     <Text>
-      {session.host === "live" ? (session.mode.effective ?? "stream") : "document"}:{columns.value}x
-      {rows.value ?? "unbounded"}
+      {width.value}x{height.value === Infinity ? "unbounded" : height.value}
     </Text>
   );
 });

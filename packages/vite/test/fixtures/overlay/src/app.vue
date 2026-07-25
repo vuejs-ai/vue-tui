@@ -1,24 +1,24 @@
 <script setup lang="ts">
-import { shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
-import { Box, Text, useBoxMetrics, useRenderSession } from "@vue-tui/runtime";
+import { computed, shallowRef, watchPostEffect, onMounted, onUnmounted } from "vue";
+import { Box, Text, useApp, useBoxMetrics, useInput, useLayoutSize } from "@vue-tui/runtime";
 import Target from "./target.vue";
-
-const session = useRenderSession();
-const testGlobal = globalThis as { __VT_RENDER_SESSION__?: object };
-const sessionIdentity =
-  testGlobal.__VT_RENDER_SESSION__ === undefined || testGlobal.__VT_RENDER_SESSION__ === session
-    ? "stable"
-    : "changed";
-testGlobal.__VT_RENDER_SESSION__ = session;
 
 const label = "LABEL-A";
 const count = shallowRef(0);
+if (process.env.VUE_TUI_VISUAL_REVIEW === "1") {
+  const app = useApp();
+  useInput((event) => {
+    if (event.type === "text" && event.text === "q") app.exit();
+  });
+}
+const { width: layoutWidth, height: viewportHeight } = useLayoutSize();
+const layoutSize = computed(() => `${layoutWidth.value}x${viewportHeight.value}`);
+const boxTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+const boxMetrics = useBoxMetrics(boxTarget);
+const acceptedBoxSize = computed(() =>
+  boxMetrics.hasMeasured.value ? `${boxMetrics.width.value}x${boxMetrics.height.value}` : "pending",
+);
 const target = shallowRef<InstanceType<typeof Target> | null>(null);
-const {
-  width: targetWidth,
-  height: targetHeight,
-  hasMeasured: targetMeasured,
-} = useBoxMetrics(target);
 const targetGlobal = globalThis as {
   __VT_TARGET_INSTANCE__?: object;
   __VT_TARGET_CURRENT__?: object | null;
@@ -39,8 +39,9 @@ onUnmounted(() => clearInterval(t));
   <Box borderStyle="round" flexDirection="column">
     <Text bold>{{ label }}</Text>
     <Text>count={{ count }}</Text>
-    <Text>session={{ sessionIdentity }}</Text>
+    <Text>layout={{ layoutSize }}</Text>
+    <Box ref="boxTarget" :width="7" :height="2"><Text>BOX</Text></Box>
+    <Text>box={{ acceptedBoxSize }}</Text>
     <Target ref="target" />
-    <Text>target={{ targetWidth }}x{{ targetHeight }}:{{ targetMeasured }}</Text>
   </Box>
 </template>

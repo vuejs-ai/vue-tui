@@ -39,7 +39,7 @@ test.sequential("TTY and stream hosts never read real process streams", async ()
   try {
     const App = defineComponent(() => () => <Text>isolated</Text>);
     tty = await render(App);
-    stream = await render(App, { host: { stdout: "stream" } });
+    stream = await render(App, { stdout: "stream" });
     tty.dispose();
     stream.dispose();
   } finally {

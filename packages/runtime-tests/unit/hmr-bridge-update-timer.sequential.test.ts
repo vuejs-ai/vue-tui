@@ -29,8 +29,11 @@ function makeFakeHot(): FakeHot {
   return { on, send, handlers };
 }
 
-function updatePayload(paths: string[]): { updates: Array<{ path: string }> } {
-  return { updates: paths.map((path) => ({ path })) };
+function updatePayload(
+  paths: string[],
+  timestamp?: number,
+): { updates: Array<{ path: string; timestamp?: number }> } {
+  return { updates: paths.map((path) => ({ path, timestamp })) };
 }
 
 test("a stale update timer does not reset a newer update's status early", async () => {
@@ -42,16 +45,20 @@ test("a stale update timer does not reset a newer update's status early", async 
   try {
     initHmrBridge(hot);
     const beforeUpdate = hot.handlers.get("vite:beforeUpdate");
+    const afterUpdate = hot.handlers.get("vite:afterUpdate");
     expect(beforeUpdate).toBeTypeOf("function");
+    expect(afterUpdate).toBeTypeOf("function");
 
-    // t=0: update #1 schedules a reset for t=2000.
+    // t=0: completed update #1 schedules a reset for t=2000.
     beforeUpdate!(updatePayload(["a"]));
+    afterUpdate!(undefined);
     expect(devState.value).toEqual({ type: "update", paths: ["a"] });
 
     // t=1500: update #2 schedules a reset for t=3500. The bug: update #1's
     // timer is still live and will fire at t=2000.
     vi.advanceTimersByTime(1500);
     beforeUpdate!(updatePayload(["b"]));
+    afterUpdate!(undefined);
     expect(devState.value).toEqual({ type: "update", paths: ["b"] });
 
     // t=2000: update #1's stale timer fires. With the bug it sees type==="update"
@@ -77,21 +84,53 @@ test("vite:error clears a pending update→ok reset so the error status persists
   try {
     initHmrBridge(hot);
     const beforeUpdate = hot.handlers.get("vite:beforeUpdate");
+    const afterUpdate = hot.handlers.get("vite:afterUpdate");
     const onError = hot.handlers.get("vite:error");
     expect(beforeUpdate).toBeTypeOf("function");
+    expect(afterUpdate).toBeTypeOf("function");
     expect(onError).toBeTypeOf("function");
 
-    // An update schedules a reset for t=2000...
+    // A completed update schedules a reset for t=2000...
     beforeUpdate!(updatePayload(["a"]));
+    afterUpdate!(undefined);
     expect(devState.value).toEqual({ type: "update", paths: ["a"] });
 
     // ...but an error supersedes it. The pending reset must be cleared so it can't
     // later overwrite the error status with "ok".
     onError!({ err: { message: "boom" } });
+    // vite:error applies on a microtask so a same-turn beforeUpdate cannot clobber it.
+    await Promise.resolve();
     expect(devState.value).toEqual({ type: "error", error: { message: "boom" } });
 
     vi.advanceTimersByTime(2000);
     expect(devState.value).toEqual({ type: "error", error: { message: "boom" } });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an ignored older success does not cancel the latest update reset", async () => {
+  vi.resetModules();
+  const { initHmrBridge, devState } = await import("../../runtime/src/hmr.ts");
+  const hot = makeFakeHot();
+
+  vi.useFakeTimers();
+  try {
+    initHmrBridge(hot);
+    const beforeUpdate = hot.handlers.get("vite:beforeUpdate")!;
+    const afterUpdate = hot.handlers.get("vite:afterUpdate")!;
+
+    beforeUpdate(updatePayload(["newer"], 202));
+    afterUpdate(undefined);
+    expect(devState.value).toEqual({ type: "update", paths: ["newer"] });
+
+    vi.advanceTimersByTime(1000);
+    beforeUpdate(updatePayload(["older"], 101));
+    afterUpdate(undefined);
+    expect(devState.value).toEqual({ type: "update", paths: ["newer"] });
+
+    vi.advanceTimersByTime(1000);
+    expect(devState.value).toEqual({ type: "ok" });
   } finally {
     vi.useRealTimers();
   }

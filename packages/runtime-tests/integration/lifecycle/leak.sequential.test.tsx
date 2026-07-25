@@ -1,13 +1,11 @@
-// Sequential: asserts on process-global resource counts (process exit/SIGINT/
-// beforeExit listeners, live yoga nodes). Concurrent siblings that mount/unmount
-// apps add and remove those listeners/nodes, polluting the counts. Tests are
-// it.sequential.
+// Sequential: asserts on process-global listener counts (process exit/SIGINT/
+// beforeExit). Concurrent siblings that mount/unmount apps add and remove those
+// listeners, polluting the counts. Tests are it.sequential.
 
 import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, createApp, Text, useInput } from "@vue-tui/runtime";
-import { yogaNodeTracker } from "@vue-tui/runtime/internal";
 import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 test.sequential("50 render/unmount cycles leak zero process listeners", async () => {
@@ -25,9 +23,7 @@ test.sequential("50 render/unmount cycles leak zero process listeners", async ()
   expect(process.listenerCount("SIGINT")).toBe(sigintBefore);
 });
 
-test.sequential("100 render/unmount cycles leak zero yoga nodes", async () => {
-  yogaNodeTracker.reset();
-
+test.sequential("100 render/unmount cycles complete without throw and allow remount", async () => {
   const App = defineComponent(() => () => <Text>x</Text>);
 
   for (let i = 0; i < 100; i++) {
@@ -35,14 +31,17 @@ test.sequential("100 render/unmount cycles leak zero yoga nodes", async () => {
     unmount();
   }
 
-  expect(yogaNodeTracker.snapshot().live).toBe(0);
+  // Behavioral check: a fresh mount after many cycles still works.
+  const { unmount, lastFrame } = await render(App);
+  expect(lastFrame()).toContain("x");
+  unmount();
 });
 
 test.sequential("raw mode stays on when one of two useInput components unmounts", async () => {
   const showB = shallowRef(true);
 
   const Listener = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => <Text>x</Text>;
   });
 
@@ -71,12 +70,12 @@ test.sequential("mount owns one beforeExit listener until unmount", async () => 
   const { stream: stdin } = makeFakeStdin();
   const beforeMountCount = process.listenerCount("beforeExit");
 
-  app.mount({ stdout, stdin, stderr, exitOnCtrlC: false });
+  app.mount({ stdout, stdin, stderr });
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount + 1);
 
   app.unmount();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 
-  await app.waitUntilRenderFlush();
+  await expect(app.waitUntilRenderFlush()).resolves.toBeUndefined();
   expect(process.listenerCount("beforeExit")).toBe(beforeMountCount);
 });

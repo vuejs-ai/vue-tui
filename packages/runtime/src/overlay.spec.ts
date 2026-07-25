@@ -3,6 +3,7 @@ import { defineComponent, h } from "vue";
 import { PassThrough } from "node:stream";
 import { connectDevtools, devState, resetDevState } from "./hmr.ts";
 import { createApp } from "./render.ts";
+import { createInternalMountOptions } from "./render.ts";
 import { Text } from "./index.ts";
 
 // Guards against the Vue "[Vue warn]: Non-function value encountered for default
@@ -26,7 +27,8 @@ afterEach(() => {
 function newOverlayApp() {
   const out: string[] = [];
   const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
-  Object.assign(stdout, { isTTY: false });
+  // Live overlay frames require a TTY surface (non-TTY mounts only write at teardown).
+  Object.assign(stdout, { isTTY: true, columns: 80, rows: 24 });
   stdout.on("data", (chunk) => out.push(String(chunk)));
   connectDevtools({ on: () => {}, send: () => {} });
   app = createApp(defineComponent(() => () => h(Text, null, () => "hi")));
@@ -44,7 +46,7 @@ test("dev overlay ok-state wrapper does not emit a Non-function default-slot war
   const { stdout } = newOverlayApp();
   // devState stays "ok" after createApp's resetDevState() — exercises the
   // EVERY-dev-session wrapper render path in overlay.ts.
-  app!.mount({ stdout, liveUpdates: true, patchConsole: false, maxFps: 0 });
+  app!.mount(createInternalMountOptions({ stdout, patchConsole: false, maxFps: 0 }));
   await Promise.resolve();
 
   expect(slotWarnings(warn)).toEqual([]);
@@ -54,7 +56,7 @@ test("dev overlay error-state (ErrorDisplay) does not emit a Non-function defaul
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const { stdout, out } = newOverlayApp();
   devState.value = { type: "error", error: { message: "BUILD-FAIL-XYZ" } };
-  app!.mount({ stdout, liveUpdates: true, patchConsole: false, maxFps: 0 });
+  app!.mount(createInternalMountOptions({ stdout, patchConsole: false, maxFps: 0 }));
   await Promise.resolve();
 
   // Sanity: the error overlay really rendered (so we know ErrorDisplay's Box was

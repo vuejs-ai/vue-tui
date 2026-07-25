@@ -3,6 +3,6 @@ import { defineComponent } from "vue";
 
 const App = defineComponent(() => () => <Text>Hello World</Text>);
 const app = createApp(App);
-app.mount({ rawMode: "auto" }); // relies on auto-exit (default "always" holds raw & never exits)
+app.mount();
 await app.waitUntilExit();
 console.log("exited");

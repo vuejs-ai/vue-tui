@@ -1,5 +1,6 @@
 import {
   inject,
+  isRef,
   onScopeDispose,
   toValue,
   unref,
@@ -8,61 +9,85 @@ import {
   type MaybeRefOrGetter,
 } from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
-import { getLegacyInputProjection, type NormalizedInputFact } from "../io/normalized-input.ts";
+import { isErrorInput, messageForNonError } from "../error-value.ts";
+import type { NormalizedInputFact } from "../io/normalized-input.ts";
+import { projectPublicInputEvent, type TuiInputEvent } from "../io/public-input.ts";
+import type { InternalInputSubscription } from "../io/input-subscriptions.ts";
 
-export interface Key {
-  upArrow: boolean;
-  downArrow: boolean;
-  leftArrow: boolean;
-  rightArrow: boolean;
-  pageDown: boolean;
-  pageUp: boolean;
-  home: boolean;
-  end: boolean;
-  return: boolean;
-  escape: boolean;
-  ctrl: boolean;
-  shift: boolean;
-  tab: boolean;
-  backspace: boolean;
-  delete: boolean;
-  meta: boolean;
-  super: boolean;
-  hyper: boolean;
-  capsLock: boolean;
-  numLock: boolean;
-  eventType?: "press" | "repeat" | "release";
+type InputHandler = (event: TuiInputEvent) => void;
+
+function validateHandler(handler: unknown): asserts handler is InputHandler {
+  if (typeof handler !== "function") {
+    throw new TypeError("useInput() handler must be a function");
+  }
 }
 
-export interface UseInputOptions {
-  isActive?: MaybeRefOrGetter<boolean>;
+function validateHandlerSource(handler: unknown): asserts handler is MaybeRef<InputHandler> {
+  if (typeof handler === "function") return;
+  if (!isRef(handler)) validateHandler(handler);
 }
 
-type InputHandler = (input: string, key: Key) => void;
+function validateOptions(
+  options: unknown,
+): asserts options is { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined {
+  if (options === undefined) return;
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Object.getPrototypeOf(options) !== Object.prototype
+  ) {
+    throw new TypeError("useInput() options must be a plain object");
+  }
+  const keys = Reflect.ownKeys(options);
+  if (keys.some((key) => key !== "isActive")) {
+    throw new TypeError('useInput() options only supports the "isActive" property');
+  }
+}
 
-export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptions = {}): void {
+function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
+  const value: unknown = toValue(source);
+  if (typeof value !== "boolean") {
+    throw new TypeError("useInput() isActive must resolve to a boolean");
+  }
+  return value;
+}
+
+/**
+ * Subscribe to normalized text, key, and paste input for the current app.
+ *
+ * A handler ref is resolved when each event arrives. Every active subscription
+ * receives the event; return values do not consume it or affect peer delivery.
+ */
+export function useInput(
+  handler: MaybeRef<InputHandler>,
+  options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
+): void {
+  validateHandlerSource(handler);
+  validateOptions(options);
+  const resolveHandler = typeof handler === "function" ? () => handler : () => unref(handler);
   const app = inject(AppContextKey);
   const stdin = inject(StdinContextKey);
   if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
+  const application = app;
 
   let desiredActive = false;
   let attached = false;
-  let detachInputRoute: (() => void) | undefined;
+  let registration: InternalInputSubscription | undefined;
   let reconciling = false;
   let reconcileRequested = false;
 
   function listener(fact: NormalizedInputFact) {
-    const projection = getLegacyInputProjection(fact);
-    if (!projection) return;
-    // Ctrl+C exit (both the legacy \x03 byte and the kitty CSI-u form) is
-    // handled once, upstream in the stdin controller, so when
-    // exitOnCtrlC is on Ctrl+C never reaches here — and useInput forwards every
-    // key it does receive. Keeping the exit in one always-on place is what makes
-    // it fire for useFocus/usePaste-only apps too; don't re-add a copy here.
-    // The normalized fact and cached projection are shared, but the current
-    // public Key type is mutable and historically supplied one object per
-    // listener. Keep that edge isolation until F3 selects the public surface.
-    unref(handler)(projection.input, { ...projection.key });
+    try {
+      const event = projectPublicInputEvent(fact);
+      if (!event) return;
+      const currentHandler = resolveHandler();
+      validateHandler(currentHandler);
+      currentHandler(event);
+    } catch (error) {
+      const fatalError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+      application.exit(fatalError);
+      throw fatalError;
+    }
   }
 
   function reconcileAttachment() {
@@ -78,22 +103,12 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
         reconcileRequested = false;
         try {
           if (desiredActive && !attached) {
-            let rawAcquired = false;
-            try {
-              stdin!.acquireRawMode();
-              rawAcquired = true;
-              detachInputRoute = stdin!.internal_routes.attach("input", listener);
-              attached = true;
-              rawAcquired = false;
-            } catch (error) {
-              if (rawAcquired) stdin!.releaseRawMode();
-              throw error;
-            }
+            registration = stdin!.inputSubscriptions.subscribe(listener);
+            attached = true;
           } else if (!desiredActive && attached) {
             attached = false;
-            detachInputRoute?.();
-            detachInputRoute = undefined;
-            stdin!.releaseRawMode();
+            registration?.end();
+            registration = undefined;
           }
         } catch (error) {
           if (hasError) break;
@@ -109,18 +124,47 @@ export function useInput(handler: MaybeRef<InputHandler>, options: UseInputOptio
     if (hasError) throw firstError;
   }
 
-  const isActive = options.isActive ?? true;
-  watch(
-    () => toValue(isActive),
-    (value) => {
-      desiredActive = value;
-      reconcileAttachment();
-    },
-    { immediate: true, flush: "sync" },
-  );
-
+  const isActive = options?.isActive === undefined ? true : options.isActive;
+  // Register cleanup before the immediate watcher can activate managed input.
+  // Vue clears the current setup scope while handling a synchronous watcher
+  // failure, so registering afterward would itself warn and write to stderr on
+  // an expected unavailable-input exit.
   onScopeDispose(() => {
     desiredActive = false;
     reconcileAttachment();
   });
+
+  if (typeof isActive !== "function" && !isRef(isActive)) {
+    desiredActive = readIsActive(isActive);
+    reconcileAttachment();
+    return;
+  }
+
+  watch(
+    () => {
+      try {
+        return { ok: true, value: readIsActive(isActive) } as const;
+      } catch (error) {
+        return { ok: false, error } as const;
+      }
+    },
+    (resolution) => {
+      if (!resolution.ok) {
+        desiredActive = false;
+        try {
+          reconcileAttachment();
+        } finally {
+          app.exit(
+            isErrorInput(resolution.error)
+              ? resolution.error
+              : new Error(messageForNonError(resolution.error)),
+          );
+        }
+        return;
+      }
+      desiredActive = resolution.value;
+      reconcileAttachment();
+    },
+    { immediate: true, flush: "sync" },
+  );
 }

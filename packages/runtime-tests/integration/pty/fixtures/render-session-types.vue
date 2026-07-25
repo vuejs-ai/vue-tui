@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { Text, useLayoutSize, useRenderSession } from "@vue-tui/runtime";
+import { Text, useLayoutSize, useStdin } from "@vue-tui/runtime";
 
-const session = useRenderSession();
-const { columns, rows } = useLayoutSize();
+const { width, height } = useLayoutSize();
+const { stdin, isRawModeSupported, setRawMode } = useStdin();
+void stdin;
+void isRawModeSupported;
+setRawMode(false);
 </script>
 
 <template>
-  <Text>
-    {{ session.host === "live" ? (session.mode.effective ?? "stream") : "document" }}:{{
-      columns
-    }}x{{ rows ?? "unbounded" }}
-  </Text>
+  <Text>{{ width }}x{{ height === Infinity ? "unbounded" : height }}</Text>
 </template>

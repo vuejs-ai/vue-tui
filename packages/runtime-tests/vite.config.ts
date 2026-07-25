@@ -8,11 +8,7 @@ export default defineConfig({
     // global afterEach when available.
     globals: true,
     // chalk disables color in non-TTY envs; force it on so ANSI style bugs don't hide from tests.
-    // CI:"false" because the runner sets CI=true, which flips vue-tui's default live-update
-    // detection (`!isInCi && isTTY`) off — disabling the resize listener,
-    // cursor, and ANSI erases that these render tests exercise. The PTY child helpers
-    // already force CI=false for the same reason; do it for the in-process suite too.
-    env: { FORCE_COLOR: "3", CI: "false" },
+    env: { FORCE_COLOR: "3" },
     // Files parallelize, but tests within a file run serially: many assert
     // timing-sensitive render/commit/flush counts that destabilize under
     // in-file concurrency on a constrained (4-core) CI runner.

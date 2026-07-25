@@ -1,5 +1,6 @@
 import process from "node:process";
-import { Box, Static, Text, createApp, useApp } from "@vue-tui/runtime";
+import { Box, Text, createApp, useApp } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
 import { Fragment, defineComponent, h, onMounted, onScopeDispose, shallowRef, watch } from "vue";
 
 type RerenderFixtureOptions = {
@@ -54,13 +55,7 @@ const Issue450RerenderFixtureComponent = defineComponent(
 
       return h(Fragment, [
         props.includeStaticLine
-          ? h(
-              Static,
-              { items: ["#450 static line"] },
-              {
-                default: ({ item }: { item: string }) => h(Text, { key: item }, () => item),
-              },
-            )
+          ? h(Static, null, () => h(Text, null, () => "#450 static line"))
           : null,
         h(Box, { height: targetHeight, flexDirection: "column" }, () => [
           h(Text, null, () => "#450 top"),

@@ -6,7 +6,8 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, h, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
-import { createApp, Text, useInput } from "@vue-tui/runtime";
+import { createApp, Text, useInput, type TuiInputEvent } from "@vue-tui/runtime";
+import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import { makeFakeWritable } from "./test-streams.ts";
 
 // A fake stdin that, like a real PTY, reflects the last setRawMode call in `isRaw`
@@ -45,17 +46,17 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // (clearInputState — App.tsx:212-216) and defers only the terminal toggle.
 // Port of Ink test/components.tsx:855-909.
 test.sequential("swapping useInput components clears pending parser state (no leaked partial escape)", async () => {
-  const receivedByB: string[] = [];
+  const receivedByB: TuiInputEvent[] = [];
   const showA = shallowRef(true);
 
   const StepA = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => h(Text, null, () => "A");
   });
 
   const StepB = defineComponent(() => {
-    useInput((input) => {
-      receivedByB.push(input);
+    useInput((event) => {
+      receivedByB.push(event);
     });
     return () => h(Text, null, () => "B");
   });
@@ -69,7 +70,7 @@ test.sequential("swapping useInput components clears pending parser state (no le
   const { stream: stdin } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await nextTick();
 
   // Buffer a partial escape sequence (CSI start, no final byte). The parser
@@ -102,7 +103,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   // Two useInput components: dropping one and adding another in the same tick is
   // a release(false)+acquire(true) cycle while the deferred disable is pending.
   const Listener = defineComponent(() => {
-    useInput(() => {});
+    useInput(() => undefined);
     return () => h(Text, null, () => "x");
   });
 
@@ -115,7 +116,7 @@ test.sequential("final raw-mode teardown restores the terminal (setRawMode(false
   const { stream: stdin, rawMode } = makeRawTrackingStdin();
 
   const app = createApp(Root);
-  app.mount({ stdout, stdin, stderr, maxFps: 0, exitOnCtrlC: false, rawMode: "auto" });
+  app.mount(createInternalMountOptions({ stdout, stdin, stderr, maxFps: 0 }));
   await nextTick();
 
   expect(rawMode.current).toBe(true);

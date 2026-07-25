@@ -3,10 +3,9 @@ import { defineComponent, onMounted } from "vue";
 
 const App = defineComponent(() => {
   const { exit } = useApp();
-  const { setRawMode } = useStdin();
+  useStdin().setRawMode(true);
 
   onMounted(() => {
-    setRawMode(true);
     setTimeout(exit, 500);
   });
 

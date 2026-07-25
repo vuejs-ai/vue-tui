@@ -8,26 +8,40 @@
 //
 // NOTE: configFile:false + inline vueTui() plugins — see dev.sequential.test.ts for why
 // (a rolldown define-vs-transform bug crashes config-file loading on vite-plus-core).
-import { test, expect, afterEach } from "vite-plus/test";
+import { test, expect, afterEach, beforeEach } from "vite-plus/test";
 import { fileURLToPath } from "node:url";
-import { writeFileSync, readFileSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ViteDevServer } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { vueTui } from "../src/index.ts";
 import { capture, waitUntil } from "./helpers.ts";
 
-const root = fileURLToPath(new URL("./fixtures/reload", import.meta.url));
+// Editing files is the point of an HMR suite, but it never edits the committed
+// fixture: the tracked tree is copied into a gitignored scratch dir and the dev
+// server runs from the copy, so a run that dies before cleanup cannot leave a
+// mutated fixture as the next run's starting state. cacheDir stays outside the
+// disposable copy so dep optimization is not cold on every test.
+const trackedFixture = fileURLToPath(new URL("./fixtures/reload", import.meta.url));
+const root = fileURLToPath(new URL("./tmp/reload", import.meta.url));
+const cacheDir = fileURLToPath(new URL("../node_modules/.vite-reload-test", import.meta.url));
+
 const exitRoot = fileURLToPath(new URL("./fixtures/exit", import.meta.url));
-const mainTs = fileURLToPath(new URL("./fixtures/reload/src/main.ts", import.meta.url));
-const origMain = readFileSync(mainTs, "utf8");
+const mainTs = `${root}/src/main.ts`;
+const origMain = readFileSync(`${trackedFixture}/src/main.ts`, "utf8");
 let server: ViteDevServer | undefined;
+
+beforeEach(() => {
+  rmSync(root, { recursive: true, force: true });
+  mkdirSync(root, { recursive: true });
+  cpSync(trackedFixture, root, { recursive: true });
+});
 
 afterEach(async () => {
   // The app-exit test closes the server itself (via the teardown hook); tolerate
   // a double close here.
   await server?.close().catch(() => {});
   server = undefined;
-  writeFileSync(mainTs, origMain);
+  rmSync(root, { recursive: true, force: true });
   delete (globalThis as Record<string, unknown>).__VT_TEST_STDOUT__;
 });
 
@@ -37,9 +51,10 @@ function counts(chunk: string): number[] {
 }
 
 test("an entry-level (non-HMR) change restarts the app in-process with no zombie", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root,
+    cacheDir,
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
@@ -94,7 +109,7 @@ test("an entry-level (non-HMR) change restarts the app in-process with no zombie
 });
 
 test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the published-install path)", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   // A real `npm install` puts @vue-tui/runtime in node_modules, which Vite's SSR runner
   // EXTERNALIZES — so the runtime's module-globals persist across full reloads. The
   // workspace-bundled monorepo path (the test above) re-executes the runtime each reload,
@@ -103,10 +118,11 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
   // writes (cannot race sibling fixtures).
   server = await createServer({
     root,
+    cacheDir,
     logLevel: "silent",
     configFile: false,
     plugins: [vue(), vueTui()],
-    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal"] },
+    ssr: { external: ["@vue-tui/runtime", "@vue-tui/runtime/internal/devtools"] },
     server: { middlewareMode: true },
   });
   const env = server.environments.ssr as unknown as {
@@ -145,7 +161,7 @@ test("survives a SECOND full reload when @vue-tui/runtime is EXTERNALIZED (the p
 });
 
 test("a genuine app exit closes the in-process dev server", async () => {
-  const read = capture();
+  const read = capture({ terminal: true });
   server = await createServer({
     root: exitRoot,
     logLevel: "silent",

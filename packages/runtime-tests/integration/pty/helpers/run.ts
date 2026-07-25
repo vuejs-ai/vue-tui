@@ -14,7 +14,6 @@ type RunProps = { env?: Record<string, string>; columns?: number };
 export const run = async (fixture: string, props?: RunProps): Promise<string> => {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
-    CI: "false",
     NODE_NO_WARNINGS: "1",
     FORCE_COLOR: "3",
     ...props?.env,

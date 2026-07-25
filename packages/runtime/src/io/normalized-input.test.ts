@@ -1,10 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 import { PassThrough } from "node:stream";
-import {
-  getLegacyInputProjection,
-  normalizeInputEvent,
-  type NormalizedInputFact,
-} from "./normalized-input.ts";
+import { normalizeInputEvent, type NormalizedInputFact } from "./normalized-input.ts";
 import { getSharedStdinIngress } from "./stdin-ingress.ts";
 
 function fact(event: string | { readonly paste: string }): NormalizedInputFact {
@@ -17,21 +13,13 @@ describe("normalizeInputEvent", () => {
   test("keeps a plain UTF-8 run as text without inventing physical key facts", () => {
     expect(fact("hello")).toEqual({
       kind: "text",
-      sequence: "hello",
       text: "hello",
-      protocol: "plain",
       phase: undefined,
-      primaryCodepoint: undefined,
-      textOrigin: undefined,
     });
     expect(fact("A")).toEqual({
       kind: "text",
-      sequence: "A",
       text: "A",
-      protocol: "plain",
       phase: undefined,
-      primaryCodepoint: undefined,
-      textOrigin: undefined,
     });
   });
 
@@ -86,18 +74,15 @@ describe("normalizeInputEvent", () => {
       "\x1b[1;9007199254740993A",
       `\x1b[1;${"9".repeat(400)}A`,
     ]) {
-      expect(fact(sequence)).toEqual({ kind: "uninterpreted", sequence });
+      expect(normalizeInputEvent(sequence)).toBeUndefined();
     }
   });
 
-  test("keeps an unknown complete terminal sequence uninterpreted", () => {
-    expect(fact("\x1b[?25h")).toEqual({
-      kind: "uninterpreted",
-      sequence: "\x1b[?25h",
-    });
+  test("drops an unknown complete terminal sequence instead of broadcasting it", () => {
+    expect(normalizeInputEvent("\x1b[?25h")).toBeUndefined();
   });
 
-  test("preserves Kitty alternate keys, independent modifiers, phase, and reported text", () => {
+  test("preserves Kitty primary identity, modifiers, phase, and reported text", () => {
     expect(fact("\x1b[97:65:99;6:2;65u")).toEqual({
       kind: "key",
       sequence: "\x1b[97:65:99;6:2;65u",
@@ -105,8 +90,6 @@ describe("normalizeInputEvent", () => {
         protocol: "kitty",
         name: "a",
         primaryCodepoint: 97,
-        shiftedCodepoint: 65,
-        baseLayoutCodepoint: 99,
         modifiers: {
           shift: true,
           alt: false,
@@ -114,12 +97,10 @@ describe("normalizeInputEvent", () => {
           super: false,
           hyper: false,
           meta: false,
-          capsLock: false,
-          numLock: false,
         },
         phase: "repeat",
         printable: true,
-        text: { value: "A", origin: "reported" },
+        text: "A",
       },
     });
 
@@ -133,42 +114,35 @@ describe("normalizeInputEvent", () => {
     });
   });
 
-  test("preserves a base-layout-only Kitty alternate key", () => {
+  test("keeps Kitty primary identity without re-broadcasting base-layout metadata", () => {
     expect(fact("\x1b[1089::99;5u")).toMatchObject({
       kind: "key",
       key: {
         primaryCodepoint: 1089,
-        shiftedCodepoint: undefined,
-        baseLayoutCodepoint: 99,
         modifiers: { ctrl: true },
       },
     });
+    const inputFact = fact("\x1b[1089::99;5u");
+    if (inputFact.kind !== "key") throw new Error("expected a key fact");
+    expect(inputFact.key).not.toHaveProperty("shiftedCodepoint");
+    expect(inputFact.key).not.toHaveProperty("baseLayoutCodepoint");
+    expect(inputFact.key.modifiers).not.toHaveProperty("capsLock");
+    expect(inputFact.key.modifiers).not.toHaveProperty("numLock");
   });
 
   test("normalizes a Kitty pure-text event without inventing a key", () => {
     expect(fact("\x1b[0;;229u")).toEqual({
       kind: "text",
-      sequence: "\x1b[0;;229u",
       text: "å",
-      protocol: "kitty",
       phase: "press",
-      primaryCodepoint: 0,
-      textOrigin: "reported",
     });
   });
 
-  test("preserves a Kitty pure-text phase in the fact and current projection", () => {
+  test("preserves a Kitty pure-text phase in the fact", () => {
     const inputFact = fact("\x1b[0;1:3;229u");
     expect(inputFact).toMatchObject({
       kind: "text",
-      protocol: "kitty",
       phase: "release",
-      primaryCodepoint: 0,
-      textOrigin: "reported",
-    });
-    expect(getLegacyInputProjection(inputFact)).toMatchObject({
-      input: "å",
-      key: { eventType: "release" },
     });
   });
 
@@ -202,10 +176,8 @@ describe("normalizeInputEvent", () => {
     "\x1b[97;1:1;3u",
     `\x1b[${"9".repeat(400)};1:1~`,
     "\x1b[9007199254740993;1:1~",
-    `\x1b[<${"9".repeat(400)};1;1M`,
-    "\x1b[<0;9007199254740993;1M",
-  ])("keeps invalid protocol input uninterpreted: %j", (sequence) => {
-    expect(fact(sequence)).toEqual({ kind: "uninterpreted", sequence });
+  ])("drops invalid protocol input without a broadcast fact: %j", (sequence) => {
+    expect(normalizeInputEvent(sequence)).toBeUndefined();
   });
 
   test("normalizes large valid Kitty associated text without exceeding the call stack", () => {
@@ -213,10 +185,9 @@ describe("normalizeInputEvent", () => {
     const inputFact = fact(`\x1b[97;1:1;${textCodepoints}u`);
     expect(inputFact).toMatchObject({
       kind: "key",
-      key: { text: { origin: "reported" } },
     });
     if (inputFact.kind !== "key") throw new Error("expected a key fact");
-    expect(inputFact.key.text?.value).toHaveLength(125_000);
+    expect(inputFact.key.text).toHaveLength(125_000);
   });
 
   test("drops a framework-owned Kitty query response", () => {
@@ -227,76 +198,17 @@ describe("normalizeInputEvent", () => {
     const text = "\x03\x1b[A\x1b[<64;2;3M\x1b[?31u";
     expect(fact({ paste: text })).toEqual({
       kind: "paste",
-      sequence: `\x1b[200~${text}\x1b[201~`,
       text,
     });
   });
 
-  test("keeps the complete SGR pointer report even when its action is unsupported", () => {
-    expect(fact("\x1b[<66;4;5M")).toMatchObject({
-      kind: "pointer",
-      sequence: "\x1b[<66;4;5M",
-      pointer: {
-        protocol: "sgr",
-        wireButton: 66,
-        x: 4,
-        y: 5,
-        final: "M",
-        event: { type: "wheel", direction: "left" },
-      },
-    });
-    expect(fact("\x1b[<3;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 3, event: undefined },
-    });
-    expect(fact("\x1b[<4294967296;4;5M")).toMatchObject({
-      kind: "pointer",
-      pointer: { wireButton: 4_294_967_296, event: undefined },
-    });
-  });
-});
-
-describe("getLegacyInputProjection", () => {
-  test("keeps the current Ink-shaped text and key behavior at the old hook edge", () => {
-    expect(getLegacyInputProjection(fact("A"))).toMatchObject({
-      input: "A",
-      key: { shift: true, ctrl: false },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[A"))).toMatchObject({
-      input: "",
-      key: { upArrow: true },
-    });
-    expect(getLegacyInputProjection(fact("\x1bOP"))).toMatchObject({
-      input: "",
-      key: { upArrow: false },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[?25h"))).toMatchObject({
-      input: "[?25h",
-    });
-  });
-
-  test("projects Kitty phase and text while keeping richer identity internal", () => {
-    expect(getLegacyInputProjection(fact("\x1b[97;1:2;65u"))).toMatchObject({
-      input: "A",
-      key: { eventType: "repeat", shift: true },
-    });
-    expect(getLegacyInputProjection(fact("\x1b[57376u"))).toMatchObject({
-      input: "",
-      key: { eventType: "press" },
-    });
-  });
-
-  test("caches one compatibility projection for all current listeners", () => {
-    const inputFact = fact("\x1b[97;1:2;65u");
-    expect(getLegacyInputProjection(inputFact)).toBe(getLegacyInputProjection(inputFact));
-  });
-
-  test("projects paste payload verbatim without manufacturing key or protocol meaning", () => {
-    const text = "\x03\x1b[A\x1b[?31u";
-    expect(getLegacyInputProjection(fact({ paste: text }))).toMatchObject({
-      input: text,
-      key: { ctrl: false, upArrow: false },
-    });
+  test("drops unsolicited complete SGR mouse reports", () => {
+    expect(normalizeInputEvent("\x1b[<66;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;4;5m")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<3;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<4294967296;4;5M")).toBeUndefined();
+    expect(normalizeInputEvent(`\x1b[<${"9".repeat(400)};1;1M`)).toBeUndefined();
+    expect(normalizeInputEvent("\x1b[<0;9007199254740993;1M")).toBeUndefined();
   });
 });
 
@@ -341,6 +253,23 @@ describe("shared stdin normalization", () => {
     stdin.destroy();
   });
 
+  test("disposing an application removes its unresolved Kitty query tombstones", () => {
+    const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
+    const ingress = getSharedStdinIngress(stdin);
+    const subscription = ingress.subscribe(
+      () => undefined,
+      () => {},
+    );
+    const cancel = ingress.startKittyQueryResponseDetection(() => {}, subscription);
+
+    cancel();
+    expect(stdin.listenerCount("data")).toBe(1);
+
+    subscription.dispose();
+    expect(stdin.listenerCount("data")).toBe(0);
+    stdin.destroy();
+  });
+
   test("keeps batched text and C0 controls as separate semantic facts", () => {
     const facts = collect(["a\x03\t\r"]);
     expect(facts.map((inputFact) => inputFact.kind)).toEqual(["text", "key", "key", "key"]);
@@ -350,7 +279,7 @@ describe("shared stdin normalization", () => {
     });
   });
 
-  test("does not claim byte provenance after invalid UTF-8 replacement", () => {
+  test("normalizes invalid UTF-8 to the replacement character as plain text", () => {
     const invalidSource = collect([Uint8Array.from([0x80])]);
     const canonicalReplacement = collect([Uint8Array.from([0xef, 0xbf, 0xbd])]);
 
@@ -358,18 +287,10 @@ describe("shared stdin normalization", () => {
     expect(invalidSource).toEqual([
       {
         kind: "text",
-        sequence: "�",
         text: "�",
-        protocol: "plain",
         phase: undefined,
-        primaryCodepoint: undefined,
-        textOrigin: undefined,
       },
     ]);
-    // An external owner can honestly receive the normalized Unicode sequence,
-    // but the fact alone cannot tell whether its original bytes were 80 or the
-    // valid UTF-8 EF BF BD. Byte-exact forwarding needs ingress provenance.
-    expect(Buffer.from(invalidSource[0]!.sequence)).toEqual(Buffer.from([0xef, 0xbf, 0xbd]));
   });
 
   test.each([
@@ -384,7 +305,7 @@ describe("shared stdin normalization", () => {
       split: ["\x1b[20", "0~a\x03", "\x1b[A\x1b[20", "1~"],
     },
     {
-      title: "SGR pointer",
+      title: "ignored SGR mouse report",
       whole: ["\x1b[<66;4;5M"],
       split: ["\x1b[<", "66;4;", "5M"],
     },

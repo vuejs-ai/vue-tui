@@ -93,6 +93,25 @@ export default defineConfig({
         command: "vp run @vue-tui/components#test",
         dependsOn: ["ci:build"],
       },
+      // The package graph's own Vue version cannot catch declaration bundling
+      // against a different supported Vue patch. Install packed runtime,
+      // testing, and components packages beside Vue 3.4 and TypeScript 6. Pack
+      // only after dist-consuming tests finish because the pack build cleans
+      // those shared worktree outputs before recreating them.
+      "ci:package-consumer": {
+        command: "vp run verify:package-consumer",
+        dependsOn: [
+          "ci:lint",
+          "ci:type",
+          "ci:test:runtime",
+          "ci:test:testing",
+          "ci:test:integration",
+          "ci:test:pty",
+          "ci:test:vite-plugin",
+          "ci:test:examples",
+          "ci:test:components",
+        ],
+      },
       ci: {
         command: "echo ci ok",
         dependsOn: [
@@ -106,6 +125,7 @@ export default defineConfig({
           "ci:test:vite-plugin",
           "ci:test:examples",
           "ci:test:components",
+          "ci:package-consumer",
         ],
       },
     },

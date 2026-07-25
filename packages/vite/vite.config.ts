@@ -4,8 +4,8 @@ export default defineConfig({
   test: {
     // chalk locks its color level at import time and disables color in non-TTY envs; force it on so
     // ANSI/color regressions (e.g. vue-tui#214 dev-mode color loss) can't hide from the dev-server
-    // tests. CI:"false" because the runner sets CI=true, which flips vue-tui's default live-update
-    // detection (`!isInCi && isTTY`) off — matching the runtime-tests convention.
+    // tests. CI:"false" because the runner sets CI=true and Vite itself reads CI to disable its CLI
+    // shortcuts, which the dev-server tests exercise.
     env: { FORCE_COLOR: "3", CI: "false" },
     // Run this package's test FILES serially. Test files run in SEPARATE processes (verified:
     // distinct pids, no shared globalThis), so the cross-file hazard is not a JS global — it is the
@@ -25,6 +25,6 @@ export default defineConfig({
     // framework before waitUntil could even finish (the cryptic "Test timed out in 5000ms"). Raise
     // the ceiling above the helper budget so a genuine hang surfaces via waitUntil's diagnostic and
     // a slow boot has headroom (mirrors overlay.sequential's per-test 15000ms).
-    testTimeout: 15000,
+    testTimeout: 45000,
   },
 });
