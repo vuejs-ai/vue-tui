@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { INTERNAL_KITTY_KEYBOARD } from "../../../runtime/dist/internal.mjs";
 import { createInternalMountOptions } from "../../../runtime/dist/internal.mjs";
 import ansiEscapes from "ansi-escapes";
-import { defineComponent } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, useInput } from "@vue-tui/runtime";
 
@@ -153,4 +153,60 @@ test.sequential("a failed bracketed-paste release is retried and still rejects w
     rawModeCalls: [true, false],
   });
   expect(exitFailure).toBe(restoreFailure);
+});
+
+test.sequential("a managed raw-mode release failure exits after retrying terminal restoration", async () => {
+  const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stdout, { columns: 80, rows: 24, isTTY: true });
+  const stderr = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stderr, { columns: 80, rows: 24, isTTY: true });
+  const { stream: stdin, calls: rawModeCalls } = makeRawTrackingStdin();
+  const originalSetRawMode = stdin.setRawMode!.bind(stdin);
+  const restoreFailure = new Error("managed raw restore failed");
+  let failFirstDisable = true;
+  stdin.setRawMode = ((mode: boolean) => {
+    if (!mode && failFirstDisable) {
+      failFirstDisable = false;
+      rawModeCalls.push(mode);
+      throw restoreFailure;
+    }
+    return originalSetRawMode(mode);
+  }) as NodeJS.ReadStream["setRawMode"];
+  const active = shallowRef(true);
+  const App = defineComponent(() => {
+    useInput(() => undefined, { isActive: active });
+    return () => null;
+  });
+  const app = createApp(App);
+  app.mount(
+    createInternalMountOptions({
+      stdout,
+      stderr,
+      stdin,
+      maxFps: 0,
+      patchConsole: false,
+    }),
+  );
+
+  const exitOutcome = app.waitUntilExit().then(
+    () => ({ status: "resolved" as const, error: undefined }),
+    (error: unknown) => ({ status: "rejected" as const, error }),
+  );
+  active.value = false;
+  await nextTick();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    exitOutcome,
+    new Promise<{ status: "timed-out"; error: undefined }>((resolve) => {
+      timeout = setTimeout(() => resolve({ status: "timed-out", error: undefined }), 100);
+    }),
+  ]);
+  if (timeout) clearTimeout(timeout);
+  app.unmount();
+
+  expect(outcome).toEqual({ status: "rejected", error: restoreFailure });
+  expect({ isRaw: stdin.isRaw, rawModeCalls }).toEqual({
+    isRaw: false,
+    rawModeCalls: [true, false, false],
+  });
 });

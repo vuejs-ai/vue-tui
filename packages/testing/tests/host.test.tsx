@@ -34,7 +34,7 @@ test("stream omission selects production final-output cadence", async () => {
   expect([...afterUnmount.scrollback, ...afterUnmount.lines].join("\n")).toContain("stream");
 });
 
-test("document-host stream keeps TTY stdin observation without managed input ownership", async () => {
+test("document-host stream delivers stdin without raw-mode ownership", async () => {
   const calls: string[] = [];
   let stdin: ReturnType<typeof useStdin> | undefined;
   const App = defineComponent(() => {
@@ -49,12 +49,12 @@ test("document-host stream keeps TTY stdin observation without managed input own
     stdout: "stream",
   });
 
-  // Non-TTY stdout selects the document host: managed input is inert and raw
-  // mode is never claimed, even when the caller supplied a TTY stdin.
+  // Non-TTY stdout selects the document host: available data is still delivered,
+  // but raw mode is never claimed even when the caller supplied a TTY stdin.
   expect(result.terminal.rawMode.current).toBe(false);
   expect(stdin?.isRawModeSupported).toBe(false);
   await result.stdin.write("x");
-  expect(calls).toEqual([]);
+  expect(calls).toEqual(["x"]);
 
   result.dispose();
   expect(result.terminal.rawMode.current).toBe(false);

@@ -60,7 +60,7 @@ An in-place Vue hot update keeps the mounted session and repaints through its ex
 
 ### Input
 
-stdin is independent of the output surface. `useInput()` requests Runtime-managed normalized input and requires a controllable TTY input stream; `useStdin()` returns the selected raw stream and can hold raw mode independently. Inline, Fullscreen, and final-output rendering do not add mouse, hit-testing, selection, or clipboard behavior.
+stdin is independent of the output surface. `useInput()` subscribes Runtime's normalized parser to the selected mounted `Readable` without requiring controllable TTY or raw-mode support; available bytes produce events and a silent or ended source produces none. On live output hosts, an exposed raw-mode API and related input protocols are optional managed enhancements; final-output document hosts do not acquire them. `useStdin()` returns the selected raw stream and can hold supported raw mode independently. Inline, Fullscreen, and final-output rendering do not add mouse, hit-testing, selection, or clipboard behavior.
 
 ## Current deterministic and string hosts
 

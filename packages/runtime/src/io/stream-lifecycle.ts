@@ -232,26 +232,13 @@ export function createMountedStreamLifecycle(options: {
         if (state.isStdout) observeWritableState(state);
       }
 
-      const reportInputLoss = (event: "end" | "close", error?: unknown): void => {
+      const reportInputError = (error: unknown): void => {
         if (!active || disposed || !options.hasManagedInputDemand()) return;
-        options.onFailure(
-          error ??
-            new Error(
-              event === "end"
-                ? "Runtime stdin ended while managed input was active."
-                : "Runtime stdin closed while managed input was active.",
-            ),
-        );
+        options.onFailure(error);
       };
       stopObservingStdin = subscribeToStreamEvents(options.stdin, {
         onError(error) {
-          reportInputLoss("close", error);
-        },
-        onEnd() {
-          reportInputLoss("end");
-        },
-        onClose() {
-          reportInputLoss("close");
+          reportInputError(error);
         },
       });
     } catch (error) {

@@ -60,7 +60,7 @@ function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
  * - Only `type: "key"` guarantees `event.key`; text carries one only when the
  *   terminal supplied it.
  * - `isActive` owns managed-input demand, so an inactive subscription holds no
- *   terminal resources.
+ *   input listener or optional terminal resources.
  * - A handler ref is resolved per event, so handlers swap without resubscribing.
  *
  * @example Handle typed text and a named key

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { Writable } from "node:stream";
-import { defineComponent, shallowRef } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp, Text, useInput } from "@vue-tui/runtime";
 import { useStderr, useStdout } from "../../../runtime/dist/internal.mjs";
@@ -290,10 +290,11 @@ test("a final non-TTY write failure converts clean unmount into rejection", asyn
   stdin.destroy();
 });
 
-test("stdin loss is fatal only while managed input is active", async () => {
+test("stdin errors are fatal only while managed input is active", async () => {
   const activeStdout = makeFakeWritable();
   const activeStderr = makeFakeWritable();
   const { stream: activeStdin } = makeFakeStdin();
+  const failure = new Error("stdin failed");
   const active = createApp(
     defineComponent(() => {
       useInput(() => {});
@@ -306,17 +307,15 @@ test("stdin loss is fatal only while managed input is active", async () => {
     stderr: activeStderr,
     patchConsole: false,
   });
-  activeStdin.emit("end");
-  await expect(active.waitUntilExit()).rejects.toThrow(
-    "Runtime stdin ended while managed input was active.",
-  );
+  activeStdin.emit("error", failure);
+  await expect(active.waitUntilExit()).rejects.toBe(failure);
 
   const idleStdout = makeFakeWritable();
   const idleStderr = makeFakeWritable();
   const { stream: idleStdin } = makeFakeStdin();
   const idle = createApp(defineComponent(() => () => <Text>idle</Text>));
   idle.mount({ stdin: idleStdin, stdout: idleStdout, stderr: idleStderr, patchConsole: false });
-  idleStdin.emit("end");
+  idleStdin.emit("error", new Error("idle stdin failed"));
   await new Promise<void>((resolve) => setImmediate(resolve));
   idle.unmount();
   await expect(idle.waitUntilExit()).resolves.toBeUndefined();
@@ -329,7 +328,29 @@ test("stdin loss is fatal only while managed input is active", async () => {
   idleStdin.destroy();
 });
 
-test("managed input rechecks an stdin that ended while no input was active", async () => {
+test("stdin EOF leaves active managed input subscribed without failing the app", async () => {
+  const stdout = makeFakeWritable();
+  const stderr = makeFakeWritable();
+  const { stream: stdin } = makeFakeStdin();
+  const app = createApp(
+    defineComponent(() => {
+      useInput(() => {});
+      return () => <Text>active</Text>;
+    }),
+  );
+
+  app.mount({ stdin, stdout, stderr, patchConsole: false });
+  stdin.emit("end");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  app.unmount();
+  await expect(app.waitUntilExit()).resolves.toBeUndefined();
+
+  stdout.destroy();
+  stderr.destroy();
+  stdin.destroy();
+});
+
+test("managed input activated after stdin ended stays inert", async () => {
   const enabled = shallowRef(false);
   const stdout = makeFakeWritable();
   const stderr = makeFakeWritable();
@@ -359,15 +380,11 @@ test("managed input rechecks an stdin that ended while no input was active", asy
     expect(() => {
       enabled.value = true;
     }).not.toThrow();
-    const activationError = handled[0];
-    expect(activationError).toBeInstanceOf(Error);
-    expect((activationError as Error).message).toBe(
-      "Managed input is unavailable because the mounted stdin is not a controllable TTY.\n" +
-        "Read raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
-    );
-    expect(handled).toEqual([activationError]);
-    await expect(app.waitUntilExit()).rejects.toBe(activationError);
+    await nextTick();
+    expect(handled).toEqual([]);
     expect(rawModeCalls).toEqual([]);
+    app.unmount();
+    await expect(app.waitUntilExit()).resolves.toBeUndefined();
   } finally {
     app.unmount();
     stdout.destroy();

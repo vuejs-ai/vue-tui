@@ -39,6 +39,7 @@ interface ForkResult {
       readonly stdoutIsTTY: boolean;
       readonly stderrIsTTY: boolean;
     };
+    readonly receivedInput: boolean;
     readonly message?: string;
   };
 }
@@ -67,7 +68,7 @@ test.each([
   ["piped", "input-free"],
   ["piped", "active-input"],
 ] as const)(
-  "a fork with %s stdin keeps %s behavior inside vue-tui's host contract",
+  "#266: a fork with %s stdin keeps %s behavior inside vue-tui's host contract",
   async (topology, kind) => {
     const process = term("fork-stdin", [topology, kind]);
     await process.waitForOutput((output) => FORK_RESULT_PATTERN.test(output));
@@ -86,6 +87,7 @@ test.each([
       },
       childMessage: {
         kind,
+        receivedInput: topology === "piped" && kind === "active-input",
         streams: {
           stdinIsTTY: false,
           stdoutIsTTY: true,
@@ -114,18 +116,9 @@ test.each([
     expectBalancedOwnership(process.output, HIDE_CURSOR, SHOW_CURSOR);
     expectBalancedOwnership(process.output, ENABLE_SYNC_OUTPUT, DISABLE_SYNC_OUTPUT);
 
-    if (kind === "input-free") {
-      expect(result.childMessage.status).toBe("rendered");
-      expect(process.output).toContain("__FORK_OUTPUT_OK__");
-      return;
-    }
-
-    expect(result.childMessage).toMatchObject({
-      status: "rejected",
-      message:
-        "Managed input is unavailable because the current process.stdin is not a controllable TTY.\n" +
-        "Read raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
-    });
-    expect(process.output).not.toContain("__ACTIVE_INPUT__");
+    expect(result.childMessage.status).toBe("rendered");
+    expect(process.output).toContain(
+      kind === "input-free" ? "__FORK_OUTPUT_OK__" : "__ACTIVE_INPUT__",
+    );
   },
 );

@@ -218,10 +218,9 @@ const FULLSCREEN_STATIC_ERROR =
 function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
   const input = stdin as NodeJS.ReadStream & {
     readonly isRaw?: boolean;
-    readonly isTTY?: boolean;
     readonly setRawMode?: (mode: boolean) => unknown;
   };
-  return input.isTTY === true && (input.isRaw === true || typeof input.setRawMode === "function");
+  return input.isRaw === true || typeof input.setRawMode === "function";
 }
 
 function isReadableHostLive(stdin: NodeJS.ReadStream): boolean {
@@ -316,24 +315,6 @@ function assertFullscreenCapability(
   if (dimensions.terminal === null) {
     throw new Error("Fullscreen mode requires positive terminal columns and rows.");
   }
-}
-
-const expectedManagedInputUnavailableError = Symbol("expected-managed-input-unavailable");
-
-function createManagedInputUnavailableError(message: string, expectedAtMount: boolean): Error {
-  const error = new Error(message);
-  if (expectedAtMount) {
-    Object.defineProperty(error, expectedManagedInputUnavailableError, { value: true });
-  }
-  return error;
-}
-
-function isExpectedManagedInputUnavailableError(error: Error): boolean {
-  return (
-    (error as Error & { [expectedManagedInputUnavailableError]?: boolean })[
-      expectedManagedInputUnavailableError
-    ] === true
-  );
 }
 
 /**
@@ -2102,8 +2083,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stdout,
         stderr,
         stdin,
-        // Non-TTY document hosts never own managed terminal input, even when the
-        // caller supplied a TTY stdin for direct observation.
+        // Document hosts may parse mounted stdin bytes but never own its raw mode.
         isRawModeSupported: boundedDocumentSurface ? false : hasRawInputCapability(stdin),
         setRawMode(mode: boolean) {
           if (boundedDocumentSurface) return;
@@ -2181,21 +2161,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writeTerminalOutput,
         requestTerminalReconcile,
         reportManagedInputFailure(error) {
-          requestRuntimeFailure(error, {
-            silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
-          });
+          requestRuntimeFailure(error);
         },
         acquireKittyKeyboardDemand() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
-        inertManagedInput: boundedDocumentSurface,
       });
       mountedStdinController = stdinController;
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
       // terminal: attachYoga() allocates a WASM yoga node, and later Vue setup
-      // may acquire semantic input against a TTY whose raw-mode or protocol
-      // operations fail. liveInstances.set(stdout, app) already ran above, so a
+      // may acquire semantic input whose exposed raw-mode or protocol operations
+      // fail. liveInstances.set(stdout, app) already ran above, so a
       // throw HERE — before the originalMount try/catch — would leak the registry entry
       // (poisoning the stdout: every later mount() hits the reuse guard and
       // no-ops), leak the yoga root, and leave raw mode / kitty on. Wrap these in
@@ -2215,7 +2192,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         );
         // Register before Vue setup. Configuration is inert at mount; the first
         // semantic input demand asks this controller to query or push Kitty only
-        // after raw mode, stdin ref ownership, and the shared listener exist.
+        // when raw mode is available; the shared listener itself needs only data.
         mountedKittyController = kittyController;
         reconcileManagedTerminalOutput = () => {
           try {
@@ -2223,9 +2200,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             stdinController.reconcileTerminalState();
           } catch (error) {
             if (!teardownStarted) {
-              requestRuntimeFailure(error, {
-                silent: isErrorInput(error) && isExpectedManagedInputUnavailableError(error),
-              });
+              requestRuntimeFailure(error);
             }
           }
         };
@@ -2606,24 +2581,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // terminates during the later frame, emergency teardown can restore a
         // surface that the stream has already accepted.
         if (fixedFullscreenSurface && (!mountedAlternateScreen || !mountedFullscreenCursorHidden)) {
-          let surface: CoordinatedWriteResult;
-          try {
-            surface = runOutputTransaction(() => {
-              // A rendered target can establish state only after Vue has
-              // attached its host node. Reconcile it
-              // before the first terminal mutation so a non-controllable stdin
-              // fails without briefly entering and restoring Fullscreen.
-              mountedRenderedTargets?.reconcile();
-              ensureFullscreenSurface();
-            });
-          } catch (error) {
-            if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
-              mountedScheduler?.cancel();
-              requestRuntimeFailure(error, { silent: true });
-              return acceptedCoordinatedWrite;
-            }
-            throw error;
-          }
+          const surface = runOutputTransaction(() => {
+            // A rendered target can establish state only after Vue has
+            // attached its host node. Reconcile it before the first terminal
+            // mutation so input acquisition observes the current tree.
+            mountedRenderedTargets?.reconcile();
+            ensureFullscreenSurface();
+          });
           if (surface.status === "blocked") {
             if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(surface.ready);
             return surface;
@@ -2642,49 +2606,39 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         const initialRollback = createOutputStateRollback();
         let postStaticRollback: (() => void) | undefined;
 
-        let result: CoordinatedWriteResult;
-        try {
-          result = runOutputTransaction(
-            () => {
-              options.beforeFrame?.();
-              commitFrame({
-                register(accept, abandon) {
-                  if (settlementRegistered) {
-                    throw new Error("A render commit registered settlement more than once.");
-                  }
-                  settlementRegistered = true;
-                  acceptCommit = accept;
-                  abandonCommit = abandon;
-                },
-                markStaticHanded() {
-                  staticHanded = true;
-                },
-                capturePostStaticRollback() {
-                  postStaticRollback ??= createOutputStateRollback();
-                },
-              });
-              bodyCompleted = true;
-            },
-            {
-              onFullyHanded() {
-                acceptCommit();
-                options.onAccepted?.();
+        const result = runOutputTransaction(
+          () => {
+            options.beforeFrame?.();
+            commitFrame({
+              register(accept, abandon) {
+                if (settlementRegistered) {
+                  throw new Error("A render commit registered settlement more than once.");
+                }
+                settlementRegistered = true;
+                acceptCommit = accept;
+                abandonCommit = abandon;
               },
-              onUnhandedFailure() {
-                if (staticHanded && postStaticRollback) postStaticRollback();
-                else initialRollback();
-                abandonCommit({ physicalFailure: bodyCompleted });
+              markStaticHanded() {
+                staticHanded = true;
               },
+              capturePostStaticRollback() {
+                postStaticRollback ??= createOutputStateRollback();
+              },
+            });
+            bodyCompleted = true;
+          },
+          {
+            onFullyHanded() {
+              acceptCommit();
+              options.onAccepted?.();
             },
-          );
-        } catch (error) {
-          if (isErrorInput(error) && isExpectedManagedInputUnavailableError(error)) {
-            mountedScheduler?.cancel();
-            requestRuntimeFailure(error, { silent: true });
-            return acceptedCoordinatedWrite;
-          }
-          throw error;
-        }
+            onUnhandedFailure() {
+              if (staticHanded && postStaticRollback) postStaticRollback();
+              else initialRollback();
+              abandonCommit({ physicalFailure: bodyCompleted });
+            },
+          },
+        );
         if (result.status === "blocked" && options.retryWhenBlocked !== false) {
           requestBlockedFrameRetry(result.ready);
         }
@@ -3355,11 +3309,6 @@ interface CreateStdinControllerOptions {
   writeTerminalOutput: (data: string, onHandoff?: () => void) => boolean;
   requestTerminalReconcile: () => void;
   reportManagedInputFailure: (error: unknown) => void;
-  /**
-   * When true, accept `useInput()` registrations without managed terminal demand,
-   * parser delivery, or raw-mode acquisition (mounted document host).
-   */
-  inertManagedInput?: boolean;
 }
 
 function createStdinController(
@@ -3367,18 +3316,12 @@ function createStdinController(
   opts: CreateStdinControllerOptions,
 ): StdinController {
   const { appCtx } = opts;
-  const inertManagedInput = opts.inertManagedInput === true;
-  const managedInputAvailableAtMount = !inertManagedInput && hasRawInputCapability(stdin);
   let controller!: StdinController;
-  // Document hosts keep useInput() setup shared-component-friendly but never
-  // create managed input demand or deliver events.
-  const inputSubscriptions = inertManagedInput
-    ? createInternalInputSubscriptions()
-    : createInternalInputSubscriptions({
-        acquire() {
-          return controller.acquireSemanticInput();
-        },
-      });
+  const inputSubscriptions = createInternalInputSubscriptions({
+    acquire() {
+      return controller.acquireSemanticInput();
+    },
+  });
   const sharedIngress = getSharedStdinIngress(stdin);
   interface ApplicationInputSnapshot {
     readonly kind: "subscribers";
@@ -3420,6 +3363,8 @@ function createStdinController(
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
+  /** Logical managed-input owners, whether or not this stream supports raw mode. */
+  let managedInputRefs = 0;
   /** Raw refs that require Runtime's parser and negotiated input protocols. */
   let managedRawRefs = 0;
   /** Raw refs owned by independent public useStdin() hook calls. */
@@ -3428,6 +3373,7 @@ function createStdinController(
   let publishedSemanticRefs = 0;
   interface SemanticInputDemand {
     activationRequested: boolean;
+    inputAcquired: boolean;
     physicalAcquired: boolean;
     published: boolean;
     released: boolean;
@@ -3490,6 +3436,14 @@ function createStdinController(
       // restored.
       cleanupErrorSink?.(error);
     }
+  }
+
+  function reportTerminalOperationFailure(error: unknown): void {
+    if (cleanupErrorSink) {
+      cleanupErrorSink(error);
+      return;
+    }
+    opts.reportManagedInputFailure(error);
   }
 
   function reconcileBracketedPasteMode(sync = false): void {
@@ -3600,7 +3554,7 @@ function createStdinController(
       resumeAwaitingTerminalModes = false;
     }
     const shouldBeActive =
-      !disposed && !suspended && !resumeAwaitingTerminalModes && managedRawRefs > 0;
+      !disposed && !suspended && !resumeAwaitingTerminalModes && managedInputRefs > 0;
     if (shouldBeActive === sharedSubscriptionActive) return;
     sharedSubscriptionActive = shouldBeActive;
     sharedSubscription.setActive(shouldBeActive);
@@ -3763,33 +3717,13 @@ function createStdinController(
 
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
-  // Managed subscriptions fail transactionally on a host that cannot provide terminal
-  // input. The actual stream remains available through useStdin().stdin.
-  const throwManagedInputUnavailable = (): never => {
-    const expectedAtMount = !managedInputAvailableAtMount;
-    if (stdin === process.stdin) {
-      throw createManagedInputUnavailableError(
-        "Managed input is unavailable because the current process.stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
-        expectedAtMount,
-      );
-    }
-    throw createManagedInputUnavailableError(
-      "Managed input is unavailable because the mounted stdin is not a controllable TTY.\nRead raw bytes through useStdin().stdin, or mount a controllable TTY to use vue-tui input handlers.",
-      expectedAtMount,
-    );
-  };
-
-  function assertManagedInputAvailable(): void {
-    if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin) || !isReadableHostLive(stdin)) {
-      throwManagedInputUnavailable();
-    }
+  function canAcquireManagedRawMode(): boolean {
+    return appCtx.isRawModeSupported && hasRawInputCapability(stdin) && isReadableHostLive(stdin);
   }
 
   function assertPublicRawModeAvailable(): void {
     if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin) || !isReadableHostLive(stdin)) {
-      throw new Error(
-        "Raw mode is unavailable because the mounted stdin is not a controllable TTY.",
-      );
+      throw new Error("Raw mode is unavailable because Runtime cannot control the mounted stdin.");
     }
   }
 
@@ -3950,6 +3884,24 @@ function createStdinController(
     publishedSemanticRefs += published ? 1 : -1;
   }
 
+  function setSemanticDemandInputAcquired(demand: SemanticInputDemand, acquired: boolean): void {
+    if (demand.inputAcquired === acquired) return;
+    demand.inputAcquired = acquired;
+    if (acquired) {
+      if (managedInputRefs === 0 && inputDeliveryActive) {
+        sharedSubscription.invalidate();
+      }
+      managedInputRefs++;
+    } else {
+      managedInputRefs = Math.max(0, managedInputRefs - 1);
+      if (managedInputRefs === 0) {
+        sharedSubscription.invalidate();
+        pendingApplicationInput.length = 0;
+      }
+    }
+    reconcileSharedSubscription();
+  }
+
   function semanticTerminalModesReady(): boolean {
     const pasteReady =
       !canWriteTerminalMode() ||
@@ -3974,13 +3926,18 @@ function createStdinController(
         for (const demand of semanticInputDemands) {
           if (demand.released) {
             setSemanticDemandPublished(demand, false);
+            let releaseError: unknown;
+            try {
+              setSemanticDemandInputAcquired(demand, false);
+            } catch (error) {
+              releaseError = error;
+            }
             if (demand.physicalAcquired) {
               demand.physicalAcquired = false;
-              let releaseError: unknown;
               try {
                 controller.setBracketedPasteMode(false);
               } catch (error) {
-                releaseError = error;
+                releaseError ??= error;
               }
               try {
                 releaseLogicalRawMode(true);
@@ -3992,21 +3949,30 @@ function createStdinController(
               continue;
             }
             semanticInputDemands.delete(demand);
+            if (releaseError !== undefined) throw releaseError;
             continue;
           }
 
-          if (!demand.physicalAcquired && !suspended) {
-            const acquired = acquireLogicalRawMode(true) !== false;
-            if (!acquired) {
-              opts.requestTerminalReconcile();
-              continue;
-            }
-            demand.physicalAcquired = true;
+          if (!demand.inputAcquired && !suspended) {
             try {
-              controller.setBracketedPasteMode(true);
+              setSemanticDemandInputAcquired(demand, true);
+              if (canAcquireManagedRawMode()) {
+                const acquired = acquireLogicalRawMode(true) !== false;
+                if (!acquired) {
+                  setSemanticDemandInputAcquired(demand, false);
+                  opts.requestTerminalReconcile();
+                  continue;
+                }
+                demand.physicalAcquired = true;
+                controller.setBracketedPasteMode(true);
+              }
             } catch (error) {
-              demand.physicalAcquired = false;
-              releaseLogicalRawMode(true);
+              if (demand.physicalAcquired) {
+                demand.physicalAcquired = false;
+                runTerminalCleanup(() => controller.setBracketedPasteMode(false));
+                runTerminalCleanup(() => releaseLogicalRawMode(true));
+              }
+              runTerminalCleanup(() => setSemanticDemandInputAcquired(demand, false));
               throw error;
             }
           }
@@ -4017,7 +3983,10 @@ function createStdinController(
         for (const demand of semanticInputDemands) {
           setSemanticDemandPublished(
             demand,
-            !demand.released && demand.activationRequested && demand.physicalAcquired && ready,
+            !demand.released &&
+              demand.activationRequested &&
+              demand.inputAcquired &&
+              (!demand.physicalAcquired || ready),
           );
         }
       } while (semanticInputReconcileRequested);
@@ -4031,11 +4000,6 @@ function createStdinController(
       throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
     }
     if (managed) {
-      // Managed semantic routes surface this failure transactionally before
-      // publishing their replacement. Rechecking the structural capability
-      // also prevents a setterless host that was pre-raw at mount from silently
-      // attaching after its external owner returns it to cooked mode.
-      assertManagedInputAvailable();
       if (!suspended && !opts.beforeManagedInputAcquire()) return false;
     } else {
       assertPublicRawModeAvailable();
@@ -4057,12 +4021,6 @@ function createStdinController(
       ) {
         state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
         state.changedRawMode = !state.baselineRaw;
-      }
-      if (managed && managedRawRefs === 0 && inputDeliveryActive) {
-        // A newly active managed route starts a fresh application delivery
-        // generation. A public raw-only hold deliberately has no parser
-        // generation and therefore does not affect this boundary.
-        sharedSubscription.invalidate();
       }
       const participatesPhysically = !suspended;
       state.refs++;
@@ -4106,25 +4064,20 @@ function createStdinController(
     if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
     else publicRawRefs = Math.max(0, publicRawRefs - 1);
     let firstError: unknown;
+    let hasError = false;
     try {
       reconcileKittyDemand();
     } catch (error) {
       firstError = error;
-    }
-    if (managed && managedRawRefs === 0) {
-      // End the managed delivery generation even when a public raw-only owner
-      // keeps the physical terminal raw.
-      try {
-        sharedSubscription.invalidate();
-      } catch (error) {
-        firstError = error;
-      }
-      pendingApplicationInput.length = 0;
+      hasError = true;
     }
     try {
       reconcileSharedSubscription();
     } catch (error) {
-      firstError ??= error;
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
     }
     if (
       state.activeRefs === 0 &&
@@ -4139,15 +4092,18 @@ function createStdinController(
       queueMicrotask(() => {
         if (!state.pendingDisable || state.activeRefs > 0) return;
         state.pendingDisable = false;
-        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-        resetRawModeStateIfIdle(state);
+        try {
+          reconcilePhysicalRawMode(state);
+        } catch (error) {
+          reportTerminalOperationFailure(error);
+        } finally {
+          resetRawModeStateIfIdle(state);
+        }
       });
     } else {
       resetRawModeStateIfIdle(state);
     }
-    // Release is cleanup. Preserve progress across a hostile listener removal;
-    // controller disposal retries physical restoration.
-    void firstError;
+    if (hasError) throw firstError;
   }
 
   controller = {
@@ -4168,9 +4124,9 @@ function createStdinController(
     },
     acquireSemanticInput() {
       try {
-        assertManagedInputAvailable();
         const demand: SemanticInputDemand = {
           activationRequested: false,
+          inputAcquired: false,
           physicalAcquired: false,
           published: false,
           released: false,
@@ -4204,7 +4160,11 @@ function createStdinController(
             queueMicrotask(() => {
               if (demand.released) return;
               demand.released = true;
-              runTerminalCleanup(reconcileSemanticInputDemands);
+              try {
+                reconcileSemanticInputDemands();
+              } catch (error) {
+                reportTerminalOperationFailure(error);
+              }
             });
           },
         });
@@ -4214,7 +4174,7 @@ function createStdinController(
       }
     },
     hasManagedInputDemand() {
-      return !disposed && managedRawRefs > 0;
+      return !disposed && managedInputRefs > 0;
     },
     startKittyQueryResponseDetection(onResult) {
       let settled = false;
@@ -4252,7 +4212,7 @@ function createStdinController(
       pendingBootstrapInputSnapshot = undefined;
       inputDeliveryActive = true;
       flushPendingApplicationInput();
-      if (managedRawRefs === 0) {
+      if (managedInputRefs === 0) {
         sharedSubscription.invalidate();
         pendingApplicationInput.length = 0;
         reconcileSharedSubscription();
@@ -4273,7 +4233,9 @@ function createStdinController(
       }
       pendingBracketedPasteMode = undefined;
       for (const demand of semanticInputDemands) {
-        if (!semanticTerminalModesReady()) setSemanticDemandPublished(demand, false);
+        if (demand.physicalAcquired && !semanticTerminalModesReady()) {
+          setSemanticDemandPublished(demand, false);
+        }
       }
       if (options?.physicalStateUncertain) {
         // The coordinator is idle before it reports a physical stream failure.
@@ -4404,9 +4366,11 @@ function createStdinController(
       inputSubscriptions.clear();
       for (const demand of semanticInputDemands) {
         demand.released = true;
+        demand.inputAcquired = false;
         demand.physicalAcquired = false;
         setSemanticDemandPublished(demand, false);
       }
+      managedInputRefs = 0;
       semanticInputDemands.clear();
       // Normal teardown itself owns one unhanded output transaction. Preserve
       // terminal-mode callbacks captured by Vue scope cleanup so the handoff

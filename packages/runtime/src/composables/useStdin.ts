@@ -29,7 +29,8 @@ export interface UseStdinReturn {
  *   Direct listeners and their cleanup are yours.
  * - Each call owns one idempotent hold. `false` releases only this call's, and
  *   scope disposal releases it without disturbing `useInput()`.
- * - A non-TTY stream stays observable with `isRawModeSupported` false.
+ * - A stream without an exposed raw-mode API stays observable with
+ *   `isRawModeSupported` false.
  *
  * @example Inspect raw bytes and clean up with the scope
  * ```ts
